@@ -320,6 +320,15 @@ Describe 'Help guidance' {
 }
 
 Describe 'Admin-only Cinegy state refresh' {
+    It 'shows the health button to every authorized user' {
+        Mock Test-Admin { $false }
+
+        $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $callbackData | Should -Contain 'menu:health'
+    }
+
     It 'shows the refresh button to an admin' {
         Mock Test-Admin { $true }
 
@@ -355,6 +364,69 @@ Describe 'Admin-only Cinegy state refresh' {
 
         Should -Invoke Test-CallbackAdmin -Times 1 -Exactly
         Should -Invoke Invoke-StatusCommand -Times 0 -Exactly
+    }
+}
+
+Describe 'Bridge health command' {
+    BeforeEach {
+        foreach ($service in @('Telegram', 'Cinegy')) {
+            $script:HealthHistory[$service].LastSuccess = $null
+            $script:HealthHistory[$service].LastError = ''
+            $script:HealthHistory[$service].LastErrorAt = $null
+        }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{
+                Success = $true; Healthy = $true; SampleCount = 60
+                OutputCount = 1500; DroppedCount = 0; NoInputSignal = 0
+                MaxReadErrorRate = 0; AverageReadTime = 1.2; MaxHeartbeat = 700
+            }
+        }
+    }
+
+    It 'reports Telegram and Cinegy response times from the health button' {
+        $callback = [pscustomobject]@{
+            id = 'health-1'
+            from = [pscustomobject]@{ id = 200 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
+            data = 'menu:health'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 200 -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms'
+        }
+    }
+
+    It 'shows the last successful check and the latest error after a failure' {
+        $callback = [pscustomobject]@{
+            id = 'health-success'
+            from = [pscustomobject]@{ id = 200 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
+            data = 'menu:health'
+        }
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Mock Invoke-RestMethod { throw 'telegram timeout' }
+        Mock Get-AirTelemetryStatus { [pscustomobject]@{ Success = $false; Healthy = $null } }
+        $callback.id = 'health-failure'
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 200 -and $Text -match 'آخر نجاح' -and $Text -match 'آخر خطأ: telegram timeout'
+        }
+    }
+
+    It 'routes the slash health command to the same health check' {
+        Mock Invoke-HealthCommand { }
+
+        Invoke-BridgeCommand -Text '/health' -ChatId 200 -UserId 200
+
+        Should -Invoke Invoke-HealthCommand -Times 1 -Exactly -ParameterFilter { $ChatId -eq 200 -and $UserId -eq 200 }
     }
 }
 
@@ -913,6 +985,13 @@ Describe 'Hide-all confirmation gate' {
 
         Should -Invoke Invoke-HideAllLayers -Times 1 -Exactly -ParameterFilter { $ChatId -eq 70 -and $UserId -eq 80 }
         Get-PendingState -ChatId 70 | Should -BeNullOrEmpty
+    }
+
+    It 'requires the same confirmation for the slash hideall command' {
+        Invoke-BridgeCommand -Text '/hideall' -ChatId 70 -UserId 80
+
+        Should -Invoke Invoke-HideAllLayers -Times 0 -Exactly
+        (Get-PendingState -ChatId 70).Mode | Should -Be 'hide_all_review'
     }
 }
 

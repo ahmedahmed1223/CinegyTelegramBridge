@@ -525,6 +525,7 @@ $script:BotCommandList = @(
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
+    @{ command = 'health'; description = '💚 فحص صحة Telegram وCinegy' }
     @{ command = 'snapshot'; description = '📸 التقاط صورة من البث' }
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
     @{ command = 'settings'; description = '⚙️ الإعدادات (للمشرفين)' }
@@ -1074,6 +1075,10 @@ $script:LastCinegyStateCheck = [datetime]::MinValue
 $script:LastCinegyHealthCheck = [datetime]::MinValue
 $script:LastCinegyHealthState = 'unknown'
 $script:LastConfigSaveFailed = $false
+$script:HealthHistory = @{
+    Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null }
+    Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null }
+}
 
 # ============================================================================
 #  Inline keyboards
@@ -1092,7 +1097,7 @@ function Get-MainMenuKeyboard {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
-    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "ℹ️ الحالة" "menu:status") )
+    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "ℹ️ الحالة" "menu:status"), (New-Button "💚 الصحة" "menu:health") )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
     }
@@ -1524,6 +1529,7 @@ function Get-HelpText {
         "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
         "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
         "ℹ️ الحالة: فحص كل الطبقات المعرّفة وقياسات صحة Cinegy الفعلية.",
+        "💚 الصحة: قياس زمن Telegram وCinegy وعرض آخر نجاح وآخر خطأ.",
         "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
         ""
     )
@@ -2007,6 +2013,76 @@ function Invoke-StatusCommand {
     }
     if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Request-HideAllConfirmation {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Clear-PendingState -ChatId $ChatId
+    $layers = @(Get-KnownLayers)
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = 'hide_all_review'; UserId = $UserId; Layers = $layers
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء كل الطبقات المعروفة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+}
+
+function Invoke-HealthCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+
+    $telegramWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $telegramOk = $false
+    $telegramError = ''
+    try {
+        $probe = Invoke-RestMethod -Uri "$apiBase/getMe" -Method Get -TimeoutSec 3
+        $telegramOk = [bool](Get-JsonProp $probe 'ok')
+        if (-not $telegramOk) { $telegramError = 'رد غير صالح' }
+    }
+    catch { $telegramError = $_.Exception.Message }
+    $telegramWatch.Stop()
+
+    $cinegyWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $cinegyWatch.Stop()
+
+    $checkedAt = Get-Date
+    if ($telegramOk) { $script:HealthHistory.Telegram.LastSuccess = $checkedAt }
+    else {
+        $script:HealthHistory.Telegram.LastError = Protect-SensitiveText $telegramError
+        $script:HealthHistory.Telegram.LastErrorAt = $checkedAt
+    }
+    if ($telemetry.Success) { $script:HealthHistory.Cinegy.LastSuccess = $checkedAt }
+    else {
+        $script:HealthHistory.Cinegy.LastError = [string](Get-JsonProp $telemetry 'Error')
+        if ([string]::IsNullOrWhiteSpace($script:HealthHistory.Cinegy.LastError)) { $script:HealthHistory.Cinegy.LastError = 'تعذّر الوصول' }
+        $script:HealthHistory.Cinegy.LastErrorAt = $checkedAt
+    }
+
+    $telegramLine = if ($telegramOk) { "✅ Telegram: $($telegramWatch.ElapsedMilliseconds)ms" }
+    else { "❌ Telegram: $($telegramWatch.ElapsedMilliseconds)ms — $(Protect-SensitiveText $telegramError)" }
+    $cinegyLine = if ($telemetry.Success) { "✅ Cinegy: $($cinegyWatch.ElapsedMilliseconds)ms" }
+    else { "❌ Cinegy: $($cinegyWatch.ElapsedMilliseconds)ms — تعذّر الوصول" }
+    $historyLines = foreach ($service in @('Telegram', 'Cinegy')) {
+        $history = $script:HealthHistory[$service]
+        $lastSuccess = if ($history.LastSuccess) { ([datetime]$history.LastSuccess).ToString('yyyy-MM-dd HH:mm:ss') } else { 'لا يوجد' }
+        $lastError = if ($history.LastErrorAt) {
+            "$($history.LastError) — $(([datetime]$history.LastErrorAt).ToString('yyyy-MM-dd HH:mm:ss'))"
+        }
+        else { 'لا يوجد' }
+        "$service — آخر نجاح: $lastSuccess | آخر خطأ: $lastError"
+    }
+    $historyText = $historyLines -join "`n"
+    $text = @(
+        "💚 صحة الخدمات",
+        $telegramLine,
+        $cinegyLine,
+        "",
+        $historyText,
+        "",
+        (Format-CinegyTelemetryStatus -Telemetry $telemetry)
+    ) -join "`n"
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Invoke-AuditCommand {
@@ -2757,10 +2833,11 @@ function Invoke-BridgeCommand {
         { $_ -in @('قوالب', 'templates') } { Invoke-TemplatesCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('عرض', 'show') } { Invoke-ShowCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('اخفاء', 'إخفاء', 'hide') } { Invoke-HideCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
-        { $_ -in @('اخفاءالكل', 'hideall') } { Invoke-HideAllLayers -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('اخفاءالكل', 'hideall') } { Request-HideAllConfirmation -ChatId $ChatId -UserId $UserId }
         { $_ -in @('خروج', 'exit') } { Invoke-ExitCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تحديث', 'set') } { Invoke-SetCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حالة', 'status') } { Invoke-StatusCommand -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('صحة', 'health') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
         { $_ -in @('سجل', 'audit') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Invoke-AuditCommand -ChatId $ChatId -UserId $UserId }
@@ -2898,12 +2975,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:hideall' {
-            Clear-PendingState -ChatId $chatId
-            $layers = @(Get-KnownLayers)
-            Set-PendingState -ChatId $chatId -State @{
-                Mode = 'hide_all_review'; UserId = $userId; Layers = $layers
-            }
-            Send-TelegramMessage -ChatId $chatId -Text "⚠️ سيتم إخفاء كل الطبقات المعروفة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+            Request-HideAllConfirmation -ChatId $chatId -UserId $userId
             break
         }
         'menu:repeat' { Invoke-RepeatLastShow -ChatId $chatId -UserId $userId; break }
@@ -2913,6 +2985,7 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
+        'menu:health' { Invoke-HealthCommand -ChatId $chatId -UserId $userId; break }
         'menu:refreshstatus' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Invoke-StatusCommand -ChatId $chatId -UserId $userId

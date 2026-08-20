@@ -25,6 +25,8 @@ permission model and all 2.x configuration files:
 - Admins receive deduplicated alerts when a bridge-tracked scene is hidden or
   replaced externally, when Cinegy health becomes bad/unreachable, and once
   again when it recovers.
+- `💚 الصحة` or `/health` measures Telegram and Cinegy response time and shows
+  the latest successful check and error for each service.
 - Permissions remain the same two effective levels: regular authorized user
   and administrator. The bot's intended deployment is private chats; no group
   workflow or migration is required for 3.0.

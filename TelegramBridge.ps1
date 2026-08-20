@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '2.7.0'
+$script:BridgeVersion = '2.8.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -836,6 +836,54 @@ function Save-OnAirState {
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
 
+function Update-OnAirStateFromCinegy {
+    <# Reconciles the bridge's persisted record with Cinegy's real GFX layer
+       status. Only layers already tracked by the bridge are queried: Cinegy's
+       status identifies an active item but cannot reliably map an externally
+       triggered item back to a templates.json key. A failed query never
+       removes state, because an unavailable engine is not the same as a
+       hidden graphic. #>
+    param([string]$Reason = 'manual')
+
+    $checked = [System.Collections.Generic.List[int]]::new()
+    $removed = [System.Collections.Generic.List[int]]::new()
+    $failed = [System.Collections.Generic.List[int]]::new()
+
+    foreach ($layer in @($script:OnAir.Keys)) {
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) -TimeoutSec (Get-AirTimeout)
+        if (-not $status.Success) {
+            $failed.Add([int]$layer)
+            Write-BridgeLog "Could not verify GFX layer $layer during $Reason sync: $($status.Error)" "WARN"
+            continue
+        }
+
+        $checked.Add([int]$layer)
+        if (-not $status.IsOnAir) {
+            $script:OnAir.Remove([int]$layer)
+            # A stale timer must not hide a different scene that an external
+            # controller may put on the same layer later.
+            for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
+                if ([int]$script:AutoHideQueue[$i].Layer -eq [int]$layer) {
+                    $script:AutoHideQueue.RemoveAt($i)
+                }
+            }
+            $removed.Add([int]$layer)
+        }
+    }
+
+    if ($removed.Count -gt 0) {
+        Save-OnAirState
+        Write-BridgeLog "Cinegy state sync ($Reason) removed hidden layer(s): $($removed -join ', ')"
+    }
+
+    return [pscustomobject]@{
+        Checked = $checked.ToArray()
+        Removed = $removed.ToArray()
+        Failed  = $failed.ToArray()
+    }
+}
+
 function Get-FavoriteTemplateKeys {
     $count = Get-SettingInt 'FavoritesCount' 0
     if ($count -le 0) { return @() }
@@ -921,6 +969,7 @@ function Get-MainMenuKeyboard {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
     $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "ℹ️ الحالة" "menu:status") )
+    $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
 
     if (Get-Setting 'EnableFavorites') {
         # @() is mandatory, not decoration: a PowerShell function that returns
@@ -1668,8 +1717,9 @@ function Get-AirTimeout {
 }
 
 function Get-OnAirSummary {
-    <# Best-effort "what is live" line. Only reflects pushes made through this
-       bridge - Air Pro offers no way to query the current on-screen state. #>
+    <# Shows the bridge's tracked layers after they have been reconciled with
+       Cinegy. Externally started scenes cannot be named reliably, but a scene
+       hidden outside the bridge is removed by Update-OnAirStateFromCinegy. #>
     if ($script:OnAir.Count -eq 0) { return "على الهواء: لا شيء (حسب علم البوت)" }
     $parts = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         $info = $script:OnAir[$layer]
@@ -1684,6 +1734,7 @@ function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $store = Get-TemplateStore
+    $sync = Update-OnAirStateFromCinegy -Reason 'status'
     $lines = @(
         "الإصدار: $($script:BridgeVersion)",
         "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
@@ -1694,6 +1745,15 @@ function Invoke-StatusCommand {
         "المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم",
         "طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)"
     )
+    if ($sync.Failed.Count -gt 0) {
+        $lines += "⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة."
+    }
+    elseif ($sync.Removed.Count -gt 0) {
+        $lines += "🔄 تم تحديث الحالة وإزالة الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')"
+    }
+    else {
+        $lines += "✅ حالة Cinegy متزامنة."
+    }
     if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
@@ -1826,7 +1886,7 @@ function ConvertTo-ProcessArgumentLine {
        output filename and dies with "Invalid argument" (exit -22). Every
        external process launch therefore goes through this, which applies the
        standard Windows argv quoting rules. #>
-    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Arguments)
     $quoted = foreach ($arg in $Arguments) {
         if ($null -eq $arg -or $arg -eq '') { '""' }
         elseif ($arg -notmatch '[\s"]') { $arg }
@@ -2538,6 +2598,7 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
+        'menu:refreshstatus' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:help' {
             Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
@@ -2818,6 +2879,10 @@ if (-not $AllowMultipleInstances) {
 Initialize-Settings
 Import-UsageCounts
 Import-OnAirState
+$startupSync = Update-OnAirStateFromCinegy -Reason 'startup'
+if ($startupSync.Failed.Count -gt 0) {
+    Write-BridgeLog "Startup state sync could not verify layer(s): $($startupSync.Failed -join ', ')" "WARN"
+}
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 

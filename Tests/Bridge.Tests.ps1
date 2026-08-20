@@ -117,8 +117,11 @@ Describe 'Protect-SensitiveText' {
     }
 
     It 'redacts a bot token' {
-        (Protect-SensitiveText 'token 123456789:TEST_TOKEN_REDACTED here') |
-        Should -Not -Match 'TEST_TOKEN_REDACTED'
+        # Structurally valid but entirely synthetic: 9-digit bot id plus a
+        # 30-character token body. A placeholder such as TEST_TOKEN_REDACTED
+        # does not exercise the real token-redaction pattern.
+        $token = '123456789:' + ('A' * 30)
+        (Protect-SensitiveText "token $token here") | Should -Not -Match 'A{30}'
     }
 
     It 'redacts an SRT passphrase' {
@@ -275,5 +278,82 @@ Describe 'Escape-XmlValue (CinegyAirTitler)' {
 
     It 'leaves Arabic text intact' {
         Escape-XmlValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
+    }
+}
+
+Describe 'Get-TitlerLayerStatus' {
+    It 'reports a layer as on air when Cinegy returns a non-zero Active id' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Status><Active Id="{D0B60C83-9CA7-11F1-96C0-C85EA97266A8}"/></Status>'
+            }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 2 -Layer 4
+
+        $result.Success | Should -BeTrue
+        $result.IsOnAir | Should -BeTrue
+        $result.ActiveId | Should -Be '{D0B60C83-9CA7-11F1-96C0-C85EA97266A8}'
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://air-host:5523/gfx_4/status' -and $Method -eq 'Get' }
+    }
+
+    It 'reports a layer as hidden when Active is absent or has the zero id' -ForEach @(
+        @{ Xml = '<Status></Status>' }
+        @{ Xml = '<Status><Active Id="{00000000-0000-0000-0000-000000000000}"/></Status>' }
+    ) {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{ StatusCode = 200; Content = $Xml }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 6
+
+        $result.Success | Should -BeTrue
+        $result.IsOnAir | Should -BeFalse
+    }
+
+    It 'returns an unknown result instead of claiming hidden when Cinegy is unreachable' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'connection refused' }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'offline-host' -AirChannelNumber 0 -Layer 4
+
+        $result.Success | Should -BeFalse
+        $result.IsOnAir | Should -BeNullOrEmpty
+        $result.Error | Should -Match 'connection refused'
+    }
+}
+
+Describe 'Update-OnAirStateFromCinegy' {
+    BeforeEach {
+        $OnAir.Clear()
+        $OnAir[4] = @{ Key = 'lower-third'; At = Get-Date; UserId = 10 }
+        Mock Save-OnAirState { }
+    }
+
+    AfterEach { $OnAir.Clear() }
+
+    It 'removes a stale local layer when Cinegy says it is hidden' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = '' }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeFalse
+        $result.Removed | Should -Be @(4)
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'preserves the local layer when the status request fails' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $false; IsOnAir = $null; Error = 'timeout' }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $result.Failed | Should -Be @(4)
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 }

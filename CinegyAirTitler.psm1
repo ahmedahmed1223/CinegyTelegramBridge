@@ -209,6 +209,54 @@ function Send-PostboxValues {
     }
 }
 
+function Get-TitlerLayerStatus {
+    <#
+        .SYNOPSIS
+        Reads the actual active state of one Cinegy Title/GFX layer.
+
+        .DESCRIPTION
+        Cinegy exposes each graphics layer as gfx_<n>. GET /status returns an
+        Active element when something is on air. A failed request deliberately
+        returns IsOnAir = $null: callers must preserve their last-known state
+        rather than mistake a network failure for a hidden graphic.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][int]$Layer,
+        [int]$TimeoutSec = 10
+    )
+
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/gfx_$Layer/status"
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+        $xml = [xml]$response.Content
+        $activeNode = $xml.SelectSingleNode('/Status/Active')
+        $activeId = if ($activeNode) { [string]$activeNode.GetAttribute('Id') } else { '' }
+        $normalizedId = $activeId.Trim().Trim('{', '}')
+        $isOnAir = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
+            $normalizedId -ne '00000000-0000-0000-0000-000000000000'
+
+        return [pscustomobject]@{
+            Success    = $true
+            IsOnAir    = $isOnAir
+            ActiveId   = $activeId
+            StatusCode = $response.StatusCode
+            Uri         = $uri
+            Xml         = $response.Content
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Success  = $false
+            IsOnAir  = $null
+            ActiveId = ''
+            Error    = $_.Exception.Message
+            Uri      = $uri
+        }
+    }
+}
+
 # Escape-XmlValue is exported so its empty-string handling can be unit-tested
 # directly; a Mandatory [string] rejecting '' was a live crash once already.
-Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Escape-XmlValue
+Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Escape-XmlValue

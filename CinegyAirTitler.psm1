@@ -273,6 +273,6 @@ function Get-TitlerLayerStatus {
     }
 }
 
-# Escape-XmlValue is exported so its empty-string handling can be unit-tested
-# directly; a Mandatory [string] rejecting '' was a live crash once already.
-Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Escape-XmlValue
+# Escape-XmlValue is an implementation detail. Tests exercise it inside the
+# module scope so importing the module exposes only its supported commands.
+Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus

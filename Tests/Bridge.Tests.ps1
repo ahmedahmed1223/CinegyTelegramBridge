@@ -17,6 +17,11 @@
       or: Invoke-Pester .\Tests   (tests only)
 #>
 
+BeforeDiscovery {
+    $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'CinegyAirTitler.psm1'
+    Import-Module $modulePath -Force
+}
+
 BeforeAll {
     $script:Root = Split-Path -Parent $PSScriptRoot
 
@@ -303,20 +308,29 @@ Describe 'Admin-only Cinegy state refresh' {
     }
 }
 
-Describe 'Escape-XmlValue (CinegyAirTitler)' {
-    It 'accepts an empty string' {
-        # The ⏭ تخطي regression: a Mandatory [string] rejects ''.
-        { Escape-XmlValue -Value '' } | Should -Not -Throw
-        Escape-XmlValue -Value '' | Should -Be ''
+Describe 'CinegyAirTitler public commands' {
+    It 'is not exported as a public module command' {
+        Get-Command -Module CinegyAirTitler -Name Escape-XmlValue -ErrorAction SilentlyContinue |
+            Should -BeNullOrEmpty
     }
+}
 
-    It 'escapes XML metacharacters' {
-        Escape-XmlValue -Value '<b>&"' | Should -Match '&lt;'
-        Escape-XmlValue -Value '<b>&"' | Should -Not -Match '<b>'
-    }
+InModuleScope CinegyAirTitler {
+    Describe 'Escape-XmlValue' {
+        It 'accepts an empty string' {
+            # The ⏭ تخطي regression: a Mandatory [string] rejects ''.
+            { Escape-XmlValue -Value '' } | Should -Not -Throw
+            Escape-XmlValue -Value '' | Should -Be ''
+        }
 
-    It 'leaves Arabic text intact' {
-        Escape-XmlValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
+        It 'escapes XML metacharacters' {
+            Escape-XmlValue -Value '<b>&"' | Should -Match '&lt;'
+            Escape-XmlValue -Value '<b>&"' | Should -Not -Match '<b>'
+        }
+
+        It 'leaves Arabic text intact' {
+            Escape-XmlValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
+        }
     }
 }
 

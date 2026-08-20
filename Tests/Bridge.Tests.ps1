@@ -1195,6 +1195,37 @@ Describe 'Cinegy layer dashboard' {
     }
 }
 
+Describe 'Layer quick panel' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Send-TelegramMessage { }
+        Mock Get-CinegyLayerDashboard {
+            @(
+                [pscustomobject]@{ Layer = 2; Success = $true; IsOnAir = $true; ActiveId = '{A}'; ActiveName = 'External' },
+                [pscustomobject]@{ Layer = 4; Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' }
+            )
+        }
+    }
+
+    It 'shows actual layer states as quick action buttons' {
+        $callback = [pscustomobject]@{
+            id = 'layers-panel-1'
+            from = [pscustomobject]@{ id = 200 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
+            data = 'menu:layers'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Get-CinegyLayerDashboard -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $labels = @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
+            $labels -contains '🔴 طبقة 2' -and $labels -contains '⚪ طبقة 4'
+        }
+    }
+}
+
 Describe 'Cinegy telemetry text' {
     It 'formats healthy unhealthy and unreachable states without ambiguity' {
         $healthy = [pscustomobject]@{ Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500; DroppedCount = 0; NoInputSignal = 0; AverageReadTime = 1.2; MaxReadErrorRate = 0; MaxHeartbeat = 700; Issues = @() }

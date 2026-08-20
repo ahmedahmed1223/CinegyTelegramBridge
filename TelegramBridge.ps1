@@ -1097,7 +1097,8 @@ function Get-MainMenuKeyboard {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
-    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "ℹ️ الحالة" "menu:status"), (New-Button "💚 الصحة" "menu:health") )
+    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers"), (New-Button "💚 الصحة" "menu:health") )
+    $rows += , @( (New-Button "ℹ️ الحالة الكاملة" "menu:status") )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
     }
@@ -1210,6 +1211,29 @@ function Get-LayersKeyboard {
     }
     if ($row.Count -gt 0) { $rows += , $row }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-LayerDashboardKeyboard {
+    param([Parameter(Mandatory)][object[]]$LayerStatuses)
+    $rows = @()
+    $row = @()
+    foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
+        $layer = [int]$status.Layer
+        if (-not $status.Success) {
+            $button = New-Button "⚠️ طبقة $layer" 'menu:layers'
+        }
+        elseif ($status.IsOnAir) {
+            $button = New-Button "🔴 طبقة $layer" "hide:$layer"
+        }
+        else {
+            $button = New-Button "⚪ طبقة $layer" 'menu:layers'
+        }
+        $row += $button
+        if ($row.Count -eq 2) { $rows += , $row; $row = @() }
+    }
+    if ($row.Count -gt 0) { $rows += , $row }
+    $rows += , @( (New-Button "🔄 تحديث" 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2994,6 +3018,11 @@ function Invoke-CallbackQuery {
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:health' { Invoke-HealthCommand -ChatId $chatId -UserId $userId; break }
+        'menu:layers' {
+            $layerStatuses = @(Get-CinegyLayerDashboard)
+            Send-TelegramMessage -ChatId $chatId -Text (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses) -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
+            break
+        }
         'menu:refreshstatus' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Invoke-StatusCommand -ChatId $chatId -UserId $userId

@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '2.8.2'
+$script:BridgeVersion = '2.8.3'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -817,6 +817,7 @@ function Import-OnAirState {
                 Key    = [string](Get-JsonProp $prop.Value 'Key')
                 At     = $at
                 UserId = [long](Get-JsonProp $prop.Value 'UserId')
+                ActiveId = [string](Get-JsonProp $prop.Value 'ActiveId')
             }
         }
         if ($script:OnAir.Count -gt 0) { Write-BridgeLog "Restored on-air record for $($script:OnAir.Count) layer(s) from the previous run" }
@@ -829,7 +830,12 @@ function Save-OnAirState {
         $out = @{}
         foreach ($layer in $script:OnAir.Keys) {
             $info = $script:OnAir[$layer]
-            $out["$layer"] = @{ Key = $info.Key; At = $info.At.ToString('o'); UserId = $info.UserId }
+            $out["$layer"] = @{
+                Key = $info.Key
+                At = $info.At.ToString('o')
+                UserId = $info.UserId
+                ActiveId = [string](Get-JsonProp $info 'ActiveId')
+            }
         }
         $out | ConvertTo-Json -Depth 4 | Set-Content -Path $onAirFile -Encoding utf8 -ErrorAction Stop
     }
@@ -859,7 +865,15 @@ function Update-OnAirStateFromCinegy {
         }
 
         $checked.Add([int]$layer)
-        if (-not $status.IsOnAir) {
+        $trackedId = [string](Get-JsonProp $script:OnAir[$layer] 'ActiveId')
+        $actualId = [string]$status.ActiveId
+        $trackedNormalized = $trackedId.Trim().Trim('{', '}')
+        $actualNormalized = $actualId.Trim().Trim('{', '}')
+        $cannotCorrelate = [string]::IsNullOrWhiteSpace($trackedNormalized)
+        $wasReplaced = -not $cannotCorrelate -and
+            -not $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
+
+        if (-not $status.IsOnAir -or $cannotCorrelate -or $wasReplaced) {
             $script:OnAir.Remove([int]$layer)
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
@@ -874,7 +888,7 @@ function Update-OnAirStateFromCinegy {
 
     if ($removed.Count -gt 0) {
         Save-OnAirState
-        Write-BridgeLog "Cinegy state sync ($Reason) removed hidden layer(s): $($removed -join ', ')"
+        Write-BridgeLog "Cinegy state sync ($Reason) removed stale layer record(s): $($removed -join ', ')"
     }
 
     return [pscustomobject]@{
@@ -1391,7 +1405,9 @@ function Invoke-ShowTemplateResult {
 
     if ($result.Success) {
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
-        $script:OnAir[[int]$template.Layer] = @{ Key = $Key; At = (Get-Date); UserId = $UserId }
+        $script:OnAir[[int]$template.Layer] = @{
+            Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = [string]$result.EventId
+        }
         Save-OnAirState
         Add-UsageCount -Key $Key
         Write-BridgeLog "User $UserId (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"

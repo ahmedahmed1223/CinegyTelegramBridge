@@ -67,6 +67,7 @@ function Send-AirCommand {
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][string]$Device,
         [Parameter(Mandatory)][string]$Cmd,
+        [string]$EventId = "",
         [string]$Op1 = "",
         [string]$Op2 = "",
         [string]$Op3 = "",
@@ -85,6 +86,11 @@ function Send-AirCommand {
 
     $cmdAttr = $xmlDoc.CreateAttribute('Cmd'); $cmdAttr.Value = $Cmd
     $xmlEventElem.Attributes.Append($cmdAttr) | Out-Null
+
+    if (-not [string]::IsNullOrWhiteSpace($EventId)) {
+        $idAttr = $xmlDoc.CreateAttribute('Id'); $idAttr.Value = $EventId
+        $xmlEventElem.Attributes.Append($idAttr) | Out-Null
+    }
 
     foreach ($pair in @(@('Op1', $Op1), @('Op2', $Op2), @('Op3', $Op3))) {
         $opElem = $xmlDoc.CreateElement($pair[0])
@@ -142,8 +148,12 @@ function Show-TitlerTemplate {
     }
     $variableXml += "</Variables>"
 
-    Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
-        -Device "*GFX_$Layer" -Cmd "SHOW" -Op1 $TemplatePath -Op2 $variableXml -TimeoutSec $TimeoutSec
+    $eventId = "{$([guid]::NewGuid().ToString().ToUpperInvariant())}"
+    $result = Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
+        -Device "*GFX_$Layer" -Cmd "SHOW" -EventId $eventId -Op1 $TemplatePath `
+        -Op2 $variableXml -TimeoutSec $TimeoutSec
+    $result | Add-Member -NotePropertyName EventId -NotePropertyValue $eventId -Force
+    return $result
 }
 
 function Hide-TitlerTemplate {

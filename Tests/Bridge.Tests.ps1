@@ -29,6 +29,9 @@ BeforeAll {
     # or the polling loop. config.example.json is used so a real config is
     # never read or rewritten by the tests.
     . (Join-Path $script:Root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json'
+    # Promote the dot-sourced path into this test file's script scope so
+    # persistence tests can redirect it safely to Pester's TestDrive.
+    $script:onAirFile = $onAirFile
 
     function New-TempTemplateFile {
         <# Unique name per call: Get-TemplateStore caches on path + write time,
@@ -332,6 +335,22 @@ InModuleScope CinegyAirTitler {
             Escape-XmlValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
         }
     }
+
+    Describe 'Show-TitlerTemplate identity' {
+        It 'assigns the SHOW event an id that the bridge can correlate with Cinegy status' {
+            Mock Invoke-WebRequest {
+                [pscustomobject]@{ StatusCode = 200; Content = '<Reply Success="y" Status="OK"/>' }
+            }
+
+            $result = Show-TitlerTemplate -AirServerAddress 'air-host' -AirChannelNumber 0 `
+                -Layer 4 -TemplatePath 'D:\CG\urgent.cintitle'
+            $eventIdProperty = $result.PSObject.Properties['EventId']
+
+            $eventIdProperty | Should -Not -BeNullOrEmpty
+            { [guid]::Parse(([string]$eventIdProperty.Value).Trim('{', '}')) } | Should -Not -Throw
+            ([xml]$result.Xml).Request.Event.Id | Should -Be $eventIdProperty.Value
+        }
+    }
 }
 
 Describe 'Get-TitlerLayerStatus' {
@@ -407,6 +426,77 @@ Describe 'Get-TitlerLayerStatus' {
     }
 }
 
+Describe 'SHOW identity tracking' {
+    BeforeEach {
+        $OnAir.Clear()
+        $LastShow.Clear()
+        Mock Get-TemplateStore {
+            [pscustomobject]@{
+                Map = @{
+                    urgent = [pscustomobject]@{
+                        Layer = 4
+                        Path = 'D:\CG\urgent.cintitle'
+                        FieldTypes = @{}
+                    }
+                }
+            }
+        }
+        Mock Show-TitlerTemplate {
+            [pscustomobject]@{
+                Success = $true
+                EventId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+                Xml = '<Request/>'
+            }
+        }
+        Mock Save-OnAirState { }
+        Mock Add-UsageCount { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Get-AfterShowKeyboard { @{ inline_keyboard = @() } }
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach {
+        $OnAir.Clear()
+        $LastShow.Clear()
+    }
+
+    It 'stores the SHOW event id with the local on-air record' {
+        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+    }
+}
+
+Describe 'On-air identity persistence' {
+    BeforeEach {
+        $script:OriginalOnAirFileForTest = $script:onAirFile
+        $script:onAirFile = Join-Path $TestDrive 'onair.json'
+        $OnAir.Clear()
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $OnAir.Clear()
+        $script:onAirFile = $script:OriginalOnAirFileForTest
+    }
+
+    It 'restores the SHOW event id after a bridge restart' {
+        $OnAir[4] = @{
+            Key = 'urgent'
+            At = Get-Date
+            UserId = 20
+            ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        }
+        Save-OnAirState
+        $OnAir.Clear()
+
+        Import-OnAirState
+
+        Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+    }
+}
+
 Describe 'Update-OnAirStateFromCinegy' {
     BeforeEach {
         $OnAir.Clear()
@@ -419,6 +509,39 @@ Describe 'Update-OnAirStateFromCinegy' {
     It 'removes a stale local layer when Cinegy says it is hidden' {
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = '' }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeFalse
+        $result.Removed | Should -Be @(4)
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'removes the local scene when Cinegy has replaced it with another active item' {
+        $OnAir[4].ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success  = $true
+                IsOnAir  = $true
+                ActiveId = '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
+            }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeFalse
+        $result.Removed | Should -Be @(4)
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'removes a legacy on-air record that has no correlatable event id' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success  = $true
+                IsOnAir  = $true
+                ActiveId = '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
+            }
         }
 
         $result = Update-OnAirStateFromCinegy

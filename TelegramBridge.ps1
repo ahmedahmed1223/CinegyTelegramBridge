@@ -107,6 +107,7 @@ $script:DefaultSettings = [ordered]@{
     LogMaxSizeMB               = 10
     LogKeepFiles               = 5
     AuditTrailSize             = 50
+    ConfigBackupKeepFiles      = 10
     # --- notifications ---
     HeartbeatEnabled           = $false
     HeartbeatHour              = 9       # 0-23, local time
@@ -156,10 +157,11 @@ function Save-Config {
        manages, so a manual edit made while the bridge is running is not
        clobbered by the next approval - and the in-memory copy picks that
        manual edit up at the same time. #>
+    param([string]$Path = $ConfigPath)
     $managed = @('AllowedChatIds', 'AdminChatIds', 'AllowedUserIds', 'AdminUserIds', 'Settings', 'LiveStream')
     $target = $null
-    try { $target = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json }
-    catch { Write-Host "Save-Config: could not re-read $ConfigPath, writing in-memory copy." }
+    try { $target = Get-Content -Path $Path -Raw | ConvertFrom-Json }
+    catch { Write-Host "Save-Config: could not re-read $Path, writing in-memory copy." }
 
     if ($target) {
         foreach ($name in $managed) {
@@ -186,19 +188,81 @@ function Save-Config {
     # is interrupted (power loss, crash) leaves a truncated config.json, and
     # since it holds the bot token and the operator whitelist the bridge would
     # then refuse to start at all. A .bak copy is kept as a second net.
-    $tempPath = "$ConfigPath.tmp"
-    $backupPath = "$ConfigPath.bak"
+    $tempPath = "$Path.tmp"
+    $backupPath = "$Path.bak"
     try {
+        if (Test-Path -LiteralPath $Path) {
+            $versionedBackupDirectory = "$Path.backups"
+            New-Item -ItemType Directory -Path $versionedBackupDirectory -Force -ErrorAction Stop | Out-Null
+            $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
+            $versionedBackup = Join-Path $versionedBackupDirectory "config-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+            Copy-Item -LiteralPath $Path -Destination $versionedBackup -ErrorAction Stop
+            $keep = Get-SettingInt 'ConfigBackupKeepFiles' 1
+            $oldBackups = @(Get-ChildItem -LiteralPath $versionedBackupDirectory -Filter '*.json' |
+                    Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -Skip $keep)
+            foreach ($oldBackup in $oldBackups) { Remove-Item -LiteralPath $oldBackup.FullName -Force -ErrorAction SilentlyContinue }
+        }
         $target | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding utf8 -ErrorAction Stop
-        if (Test-Path $ConfigPath) { Copy-Item -Path $ConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue }
-        Move-Item -Path $tempPath -Destination $ConfigPath -Force -ErrorAction Stop
+        if (Test-Path $Path) { Copy-Item -Path $Path -Destination $backupPath -Force -ErrorAction SilentlyContinue }
+        Move-Item -Path $tempPath -Destination $Path -Force -ErrorAction Stop
         $script:LastConfigSaveFailed = $false
     }
     catch {
         $script:LastConfigSaveFailed = $true
         Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
-        Write-BridgeLog "Could not write $ConfigPath : $($_.Exception.Message). Change applies to this session only." "ERROR"
+        Write-BridgeLog "Could not write $Path : $($_.Exception.Message). Change applies to this session only." "ERROR"
     }
+}
+
+function Restore-ConfigBackup {
+    param(
+        [Parameter(Mandatory)][string]$BackupPath,
+        [string]$Path = $ConfigPath
+    )
+    $restoreTempPath = "$Path.restore.tmp"
+    try {
+        if (-not (Test-Path -LiteralPath $BackupPath)) { throw "ملف النسخة غير موجود." }
+        $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $candidate 'BotToken'))) {
+            throw "النسخة لا تحتوي BotToken صالحًا."
+        }
+        $backupDirectory = "$Path.backups"
+        New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
+        if (Test-Path -LiteralPath $Path) {
+            $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
+            $beforeRestore = Join-Path $backupDirectory "pre-restore-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+            Copy-Item -LiteralPath $Path -Destination $beforeRestore -ErrorAction Stop
+        }
+        Copy-Item -LiteralPath $BackupPath -Destination $restoreTempPath -Force -ErrorAction Stop
+        Move-Item -LiteralPath $restoreTempPath -Destination $Path -Force -ErrorAction Stop
+        return [pscustomobject]@{ Success = $true; Error = '' }
+    }
+    catch {
+        Remove-Item -LiteralPath $restoreTempPath -Force -ErrorAction SilentlyContinue
+        return [pscustomobject]@{ Success = $false; Error = Protect-SensitiveText $_.Exception.Message }
+    }
+}
+
+function Get-ConfigDifferenceSummary {
+    param(
+        [Parameter(Mandatory)][string]$CurrentPath,
+        [Parameter(Mandatory)][string]$BackupPath
+    )
+    try {
+        $current = Get-Content -LiteralPath $CurrentPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $backup = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $names = @(@($current.PSObject.Properties.Name) + @($backup.PSObject.Properties.Name) | Sort-Object -Unique)
+        $changed = foreach ($name in $names) {
+            $currentValue = Get-JsonProp $current $name
+            $backupValue = Get-JsonProp $backup $name
+            $currentJson = $currentValue | ConvertTo-Json -Depth 20 -Compress
+            $backupJson = $backupValue | ConvertTo-Json -Depth 20 -Compress
+            if ($currentJson -ne $backupJson) { $name }
+        }
+        if (@($changed).Count -eq 0) { return 'الاختلافات: لا توجد اختلافات ظاهرة.' }
+        return "الاختلافات: $(@($changed) -join '، ')"
+    }
+    catch { return "الاختلافات: تعذّر حسابها ($($_.Exception.Message))." }
 }
 
 function Get-ConfigSaveWarning {
@@ -530,6 +594,7 @@ $script:BotCommandList = @(
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
     @{ command = 'settings'; description = '⚙️ الإعدادات (للمشرفين)' }
     @{ command = 'audit'; description = '📜 سجل آخر العمليات (للمشرفين)' }
+    @{ command = 'diagnostics'; description = '🧪 تقرير التشخيص (للمشرفين)' }
 )
 
 function Register-BotCommands {
@@ -1168,7 +1233,7 @@ function Get-MainMenuKeyboard {
             $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
         }
 
-        $adminRow = @( (New-Button "📜 السجل" "menu:audit") )
+        $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
         if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
         $rows += , $adminRow
     }
@@ -1339,8 +1404,32 @@ function Get-SettingsKeyboard {
             $rows += , @( (New-Button "🔢 $name = $value" "cfg:v:$name") )
         }
     }
-    $rows += , @( (New-Button "♻️ استعادة الافتراضي" "cfg:reset"), (New-Button "⬅️ رجوع" "menu") )
+    $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
+    $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-ConfigBackupsKeyboard {
+    param([string]$Path = $ConfigPath)
+    $backupDirectory = "$Path.backups"
+    $files = if (Test-Path -LiteralPath $backupDirectory) {
+        @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Sort-Object LastWriteTimeUtc, Name -Descending)
+    }
+    else { @() }
+    $rows = @()
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $label = $files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
+        $rows += , @( (New-Button "🗄 $label" "cfg:restore:$i") )
+    }
+    if ($files.Count -eq 0) { $rows += , @( (New-Button "لا توجد نسخ محفوظة" 'menu:settings') ) }
+    $rows += , @( (New-Button "⬅️ رجوع" 'menu:settings') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ConfigRestoreConfirmKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "⚠️ نعم، استعادة النسخة" 'cfg:restoreconfirm'), (New-Button "❌ إلغاء" 'menu:backups') )
+        ) }
 }
 
 function Get-SettingConfirmKeyboard {
@@ -2117,6 +2206,32 @@ function Invoke-HealthCommand {
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
+function Invoke-DiagnosticsCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "هذا الأمر مخصص للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $store = Get-TemplateStore
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $relayState = if ($script:RelayState.ShouldRun) { 'مطلوب التشغيل' } else { 'متوقف' }
+    $text = @(
+        "🧪 تشخيص Cinegy Telegram Bridge",
+        "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
+        "Cinegy: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)",
+        "القوالب: $(@($store.Order).Count) | تحذيرات القوالب: $(@($store.Errors).Count)",
+        "المحادثات المعلقة: $($script:PendingState.Count) | أقفال الطبقات: $($script:LayerLocks.Count)",
+        "طابور postbox: $($script:PostShowQueue.Count) | مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
+        "لقطات قيد التنفيذ: $($script:SnapshotJobs.Count) | relay: $relayState",
+        "حالة Cinegy المحلية: $script:LastCinegyHealthState",
+        "",
+        (Format-CinegyTelemetryStatus -Telemetry $telemetry)
+    ) -join "`n"
+    Send-TelegramMessage -ChatId $ChatId -Text (Protect-SensitiveText $text) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
 function Invoke-AuditCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -2870,6 +2985,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('تحديث', 'set') } { Invoke-SetCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حالة', 'status') } { Invoke-StatusCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صحة', 'health') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
         { $_ -in @('سجل', 'audit') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Invoke-AuditCommand -ChatId $ChatId -UserId $UserId }
@@ -3018,6 +3134,10 @@ function Invoke-CallbackQuery {
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:health' { Invoke-HealthCommand -ChatId $chatId -UserId $userId; break }
+        'menu:diagnostics' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticsCommand -ChatId $chatId -UserId $userId }
+            break
+        }
         'menu:layers' {
             $layerStatuses = @(Get-CinegyLayerDashboard)
             Send-TelegramMessage -ChatId $chatId -Text (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses) -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
@@ -3039,6 +3159,12 @@ function Invoke-CallbackQuery {
         }
         'menu:settings' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'menu:backups' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text "🗄 نسخ الإعدادات المحفوظة:" -ReplyMarkup (Get-ConfigBackupsKeyboard)
+            }
             break
         }
         'menu:rawcmd' {
@@ -3149,6 +3275,48 @@ function Invoke-CallbackQuery {
         'reject:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Deny-UserAccess -TargetChatId ([long]$data.Substring(7)) -RejectedBy $chatId -RejecterUserId $userId
+            }
+            break
+        }
+        'cfg:restoreconfirm' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $state = Get-PendingState -ChatId $chatId
+                if (-not $state -or $state.Mode -ne 'config_restore' -or [long]$state.UserId -ne $userId) {
+                    Send-TelegramMessage -ChatId $chatId -Text "انتهى أو تغيّر طلب الاستعادة. اختر النسخة من جديد." -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                    break
+                }
+                $backupPath = [string]$state.BackupPath
+                Clear-PendingState -ChatId $chatId
+                $restore = Restore-ConfigBackup -BackupPath $backupPath
+                if ($restore.Success) {
+                    Write-BridgeLog "Admin user $userId restored configuration backup '$([System.IO.Path]::GetFileName($backupPath))'" "WARN"
+                    Add-AuditEntry "🗄 استعادة نسخة إعدادات - user $userId"
+                    Send-TelegramMessage -ChatId $chatId -Text "✅ تمت استعادة نسخة الإعدادات. أعد تشغيل البوت لتطبيقها بالكامل." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                }
+                else {
+                    Send-TelegramMessage -ChatId $chatId -Text "❌ فشلت الاستعادة: $($restore.Error)" -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                }
+            }
+            break
+        }
+        'cfg:restore:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $backupDirectory = "$ConfigPath.backups"
+                $files = if (Test-Path -LiteralPath $backupDirectory) {
+                    @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Sort-Object LastWriteTimeUtc, Name -Descending)
+                }
+                else { @() }
+                $index = [int]$data.Substring(12)
+                if ($index -lt 0 -or $index -ge $files.Count) {
+                    Send-TelegramMessage -ChatId $chatId -Text "النسخة المحددة لم تعد موجودة." -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                    break
+                }
+                Clear-PendingState -ChatId $chatId
+                Set-PendingState -ChatId $chatId -State @{
+                    Mode = 'config_restore'; UserId = $userId; BackupPath = $files[$index].FullName
+                }
+                $differenceSummary = Get-ConfigDifferenceSummary -CurrentPath $ConfigPath -BackupPath $files[$index].FullName
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد استعادة النسخة '$($files[$index].Name)'؟`n$differenceSummary`nسيتم حفظ الإعدادات الحالية أولًا، ويجب إعادة تشغيل البوت بعد الاستعادة." -ReplyMarkup (Get-ConfigRestoreConfirmKeyboard)
             }
             break
         }

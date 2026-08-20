@@ -1,6 +1,13 @@
 {
   "BotToken": "123456789:REPLACE_WITH_TOKEN_FROM_BOTFATHER",
   "_comment_ids": "AllowedChatIds/AdminChatIds are chat ids; AllowedUserIds/AdminUserIds are Telegram user ids. In a private chat the two are identical. In a GROUP they differ, and with Settings.RequireUserLevelAuth = true only the user lists grant access there - so adding a group does not authorize every member.",
+  "AirServerAddress": "127.0.0.1",
+  "AirChannelNumber": 0,
+  "TemplateRegistryPath": ".\\templates.json",
+  "LogPath": ".\\logs\\bridge.log",
+  "PollTimeoutSeconds": 30,
+  "_comment_livestream": "SourceType: m3u8 | hls | srt | ndi. RtmpDestination is filled in from the bot's 'stream link' button. CopyCodec true = pass through without re-encoding (much lighter CPU, requires an H.264/AAC source).",
+  "_comment_settings": "Every key below is editable live from the bot's admin Settings screen; missing keys are auto-filled with defaults on first run.",
   "AllowedChatIds": [
     111111111
   ],
@@ -13,20 +20,6 @@
   "AdminUserIds": [
     111111111
   ],
-  "AirServerAddress": "127.0.0.1",
-  "AirChannelNumber": 0,
-  "TemplateRegistryPath": ".\\templates.json",
-  "LogPath": ".\\logs\\bridge.log",
-  "PollTimeoutSeconds": 30,
-  "_comment_livestream": "SourceType: m3u8 | hls | srt | ndi. RtmpDestination is filled in from the bot's 'stream link' button. CopyCodec true = pass through without re-encoding (much lighter CPU, requires an H.264/AAC source).",
-  "LiveStream": {
-    "SourceType": "m3u8",
-    "SourceUrl": "https://your-source/stream.m3u8",
-    "RtmpDestination": "",
-    "VideoBitrateKbps": 2500,
-    "CopyCodec": false
-  },
-  "_comment_settings": "Every key below is editable live from the bot's admin Settings screen; missing keys are auto-filled with defaults on first run.",
   "Settings": {
     "RequireUserLevelAuth": true,
     "EnableSelfServiceRequests": true,
@@ -63,10 +56,18 @@
     "LogMaxSizeMB": 10,
     "LogKeepFiles": 5,
     "AuditTrailSize": 50,
+    "ConfigBackupKeepFiles": 10,
     "HeartbeatEnabled": false,
     "HeartbeatHour": 9,
     "NotifyAdminsOnRelayFailure": true,
     "NotifyAdminsOnExternalChange": true,
     "NotifyAdminsOnCinegyHealth": true
+  },
+  "LiveStream": {
+    "SourceType": "m3u8",
+    "SourceUrl": "https://your-source/stream.m3u8",
+    "RtmpDestination": "",
+    "VideoBitrateKbps": 2500,
+    "CopyCodec": false
   }
 }

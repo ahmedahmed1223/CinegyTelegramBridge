@@ -27,6 +27,9 @@ permission model and all 2.x configuration files:
   again when it recovers.
 - `💚 الصحة` or `/health` measures Telegram and Cinegy response time and shows
   the latest successful check and error for each service.
+- Admin settings changes create timestamped backups automatically. The
+  `🗄 نسخ الإعدادات` screen validates, compares, and restores a selected copy
+  only after explicit confirmation.
 - Permissions remain the same two effective levels: regular authorized user
   and administrator. The bot's intended deployment is private chats; no group
   workflow or migration is required for 3.0.

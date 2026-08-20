@@ -32,6 +32,7 @@ BeforeAll {
     # Promote the dot-sourced path into this test file's script scope so
     # persistence tests can redirect it safely to Pester's TestDrive.
     $script:onAirFile = $onAirFile
+    $script:ConfigPath = $ConfigPath
 
     function New-TempTemplateFile {
         <# Unique name per call: Get-TemplateStore caches on path + write time,
@@ -291,6 +292,89 @@ Describe 'Settings access' {
     }
 }
 
+Describe 'Configuration backups' {
+    BeforeEach {
+        $script:OriginalConfigPathForTest = $script:ConfigPath
+        $script:ConfigPath = Join-Path $TestDrive 'config.json'
+        Remove-Item -LiteralPath "$($script:ConfigPath).backups" -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath (Join-Path $script:Root 'config.example.json') -Destination $script:ConfigPath
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach { $script:ConfigPath = $script:OriginalConfigPathForTest }
+
+    It 'creates a timestamped recoverable copy before saving configuration changes' {
+        Save-Config -Path $script:ConfigPath
+
+        $backupDirectory = "$($script:ConfigPath).backups"
+        Test-Path -LiteralPath $backupDirectory | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json').Count | Should -Be 1
+    }
+
+    It 'prunes old configuration backups beyond the retention limit' {
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'ConfigBackupKeepFiles' }
+
+        1..4 | ForEach-Object { Save-Config -Path $script:ConfigPath }
+
+        $backupDirectory = "$($script:ConfigPath).backups"
+        @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json').Count | Should -Be 2
+    }
+
+    It 'restores a validated backup while preserving the current file as another backup' {
+        Save-Config -Path $script:ConfigPath
+        $backupDirectory = "$($script:ConfigPath).backups"
+        $selectedBackup = Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Select-Object -First 1
+        Set-Content -LiteralPath $script:ConfigPath -Value '{ "marker": "changed" }' -Encoding utf8
+
+        $result = Restore-ConfigBackup -BackupPath $selectedBackup.FullName -Path $script:ConfigPath
+
+        $result.Success | Should -BeTrue
+        $restored = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+        (Get-JsonProp $restored 'BotToken') | Should -Not -BeNullOrEmpty
+        @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json').Count | Should -BeGreaterThan 1
+    }
+
+    It 'lists saved versions as restore buttons for the admin interface' {
+        Save-Config -Path $script:ConfigPath
+        Save-Config -Path $script:ConfigPath
+
+        $keyboard = Get-ConfigBackupsKeyboard -Path $script:ConfigPath
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $callbackData | Should -Contain 'cfg:restore:0'
+        $callbackData | Should -Contain 'cfg:restore:1'
+    }
+
+    It 'summarizes changed top-level settings before restoring a backup' {
+        Save-Config -Path $script:ConfigPath
+        $backupDirectory = "$($script:ConfigPath).backups"
+        $selectedBackup = Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Select-Object -First 1
+        Set-Content -LiteralPath $script:ConfigPath -Value '{ "marker": "changed" }' -Encoding utf8
+        (Get-JsonProp (Get-Content -LiteralPath $selectedBackup.FullName -Raw | ConvertFrom-Json) 'BotToken') | Should -Not -BeNullOrEmpty
+        (Get-JsonProp (Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json) 'marker') | Should -Be 'changed'
+
+        $summary = Get-ConfigDifferenceSummary -CurrentPath $script:ConfigPath -BackupPath $selectedBackup.FullName
+
+        $summary | Should -Match 'BotToken'
+        $summary | Should -Match 'marker'
+    }
+}
+
+Describe 'Configuration migration' {
+    It 'adds new defaults while preserving unknown settings from an older release' {
+        $settings = Get-JsonProp $config 'Settings'
+        $settings | Add-Member -NotePropertyName 'LegacyCustomSetting' -NotePropertyValue 'keep-me' -Force
+        $settings.PSObject.Properties.Remove('ConfigBackupKeepFiles')
+        Mock Save-Config { }
+
+        Initialize-Settings
+
+        (Get-JsonProp $settings 'ConfigBackupKeepFiles') | Should -Be 10
+        (Get-JsonProp $settings 'LegacyCustomSetting') | Should -Be 'keep-me'
+        Should -Invoke Save-Config -Times 1 -Exactly
+    }
+}
+
 Describe 'Help guidance' {
     It 'gives an actionable short path for common on-air operations' {
         $help = Get-HelpText
@@ -427,6 +511,97 @@ Describe 'Bridge health command' {
         Invoke-BridgeCommand -Text '/health' -ChatId 200 -UserId 200
 
         Should -Invoke Invoke-HealthCommand -Times 1 -Exactly -ParameterFilter { $ChatId -eq 200 -and $UserId -eq 200 }
+    }
+}
+
+Describe 'Admin diagnostics command' {
+    BeforeEach {
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+        Mock Send-TelegramMessage { }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ a = 1; b = 2 }; Order = @('a', 'b'); Errors = @() }
+        }
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{
+                Success = $true; Healthy = $true; SampleCount = 60
+                OutputCount = 1500; DroppedCount = 0; NoInputSignal = 0
+                MaxReadErrorRate = 0; AverageReadTime = 1.2; MaxHeartbeat = 700
+            }
+        }
+    }
+
+    It 'reports operational state to an admin without exposing the bot token' {
+        Invoke-BridgeCommand -Text '/diagnostics' -ChatId 100 -UserId 100
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'تشخيص' -and $Text -match 'Bridge' -and $Text -match 'Cinegy' -and $Text -notmatch [regex]::Escape([string]$config.BotToken)
+        }
+    }
+}
+
+Describe 'Admin configuration backup menu' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-CallbackAdmin { $true }
+        Mock Get-ConfigBackupsKeyboard { @{ inline_keyboard = @() } }
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+    }
+
+    It 'opens the saved configuration versions from the admin menu' {
+        $callback = [pscustomobject]@{
+            id = 'backups-menu-1'
+            from = [pscustomobject]@{ id = 100 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100 } }
+            data = 'menu:backups'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Get-ConfigBackupsKeyboard -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'نسخ الإعدادات' }
+    }
+
+    It 'requires confirmation after an admin selects a backup version' {
+        Mock Test-Path { $true }
+        Mock Get-ChildItem {
+            [pscustomobject]@{ FullName = 'C:\safe\config-backup.json'; Name = 'config-backup.json'; LastWriteTimeUtc = Get-Date }
+        }
+        $callback = [pscustomobject]@{
+            id = 'backup-select-1'
+            from = [pscustomobject]@{ id = 100 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100 } }
+            data = 'cfg:restore:0'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        $state = Get-PendingState -ChatId 100
+        $state.Mode | Should -Be 'config_restore'
+        $state.BackupPath | Should -Be 'C:\safe\config-backup.json'
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تأكيد استعادة' }
+    }
+
+    It 'restores the selected backup only after the admin confirms' {
+        Set-PendingState -ChatId 100 -State @{
+            Mode = 'config_restore'; UserId = 100; BackupPath = 'C:\safe\config-backup.json'
+        }
+        Mock Restore-ConfigBackup { [pscustomobject]@{ Success = $true; Error = '' } }
+        $callback = [pscustomobject]@{
+            id = 'backup-confirm-1'
+            from = [pscustomobject]@{ id = 100 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100 } }
+            data = 'cfg:restoreconfirm'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Restore-ConfigBackup -Times 1 -Exactly -ParameterFilter { $BackupPath -eq 'C:\safe\config-backup.json' }
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تمت استعادة' }
     }
 }
 
@@ -660,6 +835,18 @@ Describe 'SHOW identity tracking' {
         Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
 
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+    }
+
+    It 'does not record an on-air scene when Cinegy disconnects during SHOW' {
+        Mock Show-TitlerTemplate {
+            [pscustomobject]@{ Success = $false; EventId = ''; Xml = ''; Error = 'connection refused' }
+        }
+
+        Invoke-ShowTemplateResult -Key 'urgent' -Variables @{ 'Title.Text' = 'test' } -ChatId 10 -UserId 20
+
+        $OnAir.ContainsKey(4) | Should -BeFalse
+        $LastShow.ContainsKey(10) | Should -BeFalse
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 }
 

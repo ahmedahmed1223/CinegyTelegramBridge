@@ -1,0 +1,16 @@
+# Holds the live bot token and the operator whitelist - never commit it.
+config.json
+
+# Runtime output: logs, rotated logs, ffmpeg stderr, snapshots, pid + usage state.
+logs/
+
+# Optional local ffmpeg/nssm binaries dropped next to the scripts.
+ffmpeg.exe
+nssm.exe
+
+# Config safety copies written by Save-Config.
+config.json.bak
+config.json.tmp
+
+# Temporary registries created by the test suite.
+templates.test-*.json

@@ -1,0 +1,32 @@
+{
+  "lower3rd": {
+    "description": "Standard lower-third: headline + supporting line",
+    "path": "C:\\Cinegy\\Titler\\Scenes\\Lower3rd.cintitle",
+    "layer": 5,
+    "order": 10,
+    "_comment_fields": "A field is either a plain variable name, or an object with a friendly label and an optional maxLength. Limit resolution: field maxLength -> template maxLength -> the global Settings.MaxFieldLength.",
+    "maxLength": 120,
+    "fields": [
+      { "name": "TopText.Text", "label": "العنوان الرئيسي", "maxLength": 40 },
+      { "name": "BottomText.Text", "label": "السطر الثاني" }
+    ],
+    "presets": [
+      { "name": "ترحيب", "values": ["أهلاً بكم", "نتابع معكم البث المباشر"] },
+      { "name": "فاصل", "values": ["فاصل قصير", "نعود إليكم بعد قليل"] }
+    ]
+  },
+  "breaking-news": {
+    "description": "Breaking news strap",
+    "path": "C:\\Cinegy\\Titler\\Scenes\\BreakingNews.cintitle",
+    "layer": 6,
+    "order": 20,
+    "fields": ["Headline.Text"]
+  },
+  "sponsor-bug": {
+    "description": "Sponsor bug, no editable text fields",
+    "path": "C:\\Cinegy\\Titler\\Scenes\\SponsorBug.cintitle",
+    "layer": 4,
+    "order": 30,
+    "fields": []
+  }
+}

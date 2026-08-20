@@ -1,0 +1,214 @@
+#requires -Version 7
+<#
+    CinegyAirTitler.psm1
+
+    Reusable functions for talking to Cinegy Air Pro's built-in HTTP control
+    surfaces. Refactored out of the example scripts in
+    https://github.com/Cinegy/Cinegy.Powershell (Titler/*.ps1) so they can be
+    called programmatically instead of being edited-and-run by hand.
+
+    Two HTTP endpoints are used, both served directly by the Air Pro engine
+    instance (port = 5521 + channel/instance number):
+
+      POST http://<host>:<port>/video/command
+        Generic "Event" command channel. Used here to SHOW / HIDE / EXIT a
+        Titler (graphics) layer. XML shape:
+          <Request>
+            <Event Device="*GFX_<layer>" Cmd="SHOW|HIDE|EXIT_SCENE_LOOP">
+              <Op1>path to .cintitle scene (SHOW only)</Op1>
+              <Op2>&lt;Variables&gt;&lt;Var Name="Field.Text" Type="String" Value="..."/&gt;&lt;/Variables&gt;</Op2>
+              <Op3></Op3>
+            </Event>
+          </Request>
+
+      POST http://<host>:<port>/postbox
+        Live-variable update channel. Used to push new values into a scene
+        that is already on air, without re-triggering SHOW. XML shape:
+          <PostRequest>
+            <SetValue Name="Field.Text" Type="Text|String|Bool|Float" Value="..." />
+          </PostRequest>
+
+    Both endpoints are documented only by example in the Cinegy repo above.
+    Playlist transport commands (PLAY/PAUSE/CUE/SKIP) are NOT demonstrated
+    anywhere in that repo, so this module does not claim specific Device/Cmd
+    values for them - see Send-AirCommand for a generic escape hatch and
+    confirm exact values with Cinegy support/documentation before using it
+    for transport control.
+#>
+
+Set-StrictMode -Version Latest
+
+function Escape-XmlValue {
+    <#
+        Minimal XML-attribute/text escaping for values coming from chat input.
+
+        AllowEmptyString is required, not cosmetic: a Mandatory [string]
+        parameter REJECTS '' with "Cannot bind argument to parameter 'Value'
+        because it is an empty string", which used to crash any push that
+        carried a blank field value.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    return [System.Security.SecurityElement]::Escape($Value)
+}
+
+function Send-AirCommand {
+    <#
+        .SYNOPSIS
+        Generic low-level POST to the Air Pro /video/command endpoint.
+
+        .DESCRIPTION
+        Exposed as an escape hatch for Device/Cmd combinations not wrapped by
+        a dedicated function below. Confirm exact values against Cinegy's
+        Air Remote Control documentation - do not guess in production.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][string]$Device,
+        [Parameter(Mandatory)][string]$Cmd,
+        [string]$Op1 = "",
+        [string]$Op2 = "",
+        [string]$Op3 = "",
+        [int]$TimeoutSec = 10
+    )
+
+    $xmlDoc = New-Object System.Xml.XmlDocument
+    $decl = $xmlDoc.CreateXmlDeclaration("1.0", "UTF-8", $null)
+    $xmlRootElem = $xmlDoc.AppendChild($xmlDoc.CreateElement('Request'))
+    $xmlDoc.InsertBefore($decl, $xmlDoc.DocumentElement) | Out-Null
+
+    $xmlEventElem = $xmlRootElem.AppendChild($xmlDoc.CreateElement('Event'))
+
+    $devAttr = $xmlDoc.CreateAttribute('Device'); $devAttr.Value = $Device
+    $xmlEventElem.Attributes.Append($devAttr) | Out-Null
+
+    $cmdAttr = $xmlDoc.CreateAttribute('Cmd'); $cmdAttr.Value = $Cmd
+    $xmlEventElem.Attributes.Append($cmdAttr) | Out-Null
+
+    foreach ($pair in @(@('Op1', $Op1), @('Op2', $Op2), @('Op3', $Op3))) {
+        $opElem = $xmlDoc.CreateElement($pair[0])
+        $opElem.InnerText = $pair[1]
+        $xmlEventElem.AppendChild($opElem) | Out-Null
+    }
+
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/video/command"
+
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Method Post -Body $xmlDoc.OuterXml `
+            -ContentType "text/xml; charset=utf-8" -TimeoutSec $TimeoutSec -UseBasicParsing
+        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Uri = $uri; Xml = $xmlDoc.OuterXml }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
+    }
+}
+
+function Show-TitlerTemplate {
+    <#
+        .SYNOPSIS
+        Pushes a Titler (.cintitle) scene on-air on a given GFX layer, with
+        an optional set of field values.
+
+        .PARAMETER Variables
+        Hashtable of Field Name -> Value, e.g. @{ 'TopText.Text' = 'Breaking News'; 'BottomText.Text' = '...' }
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][string]$TemplatePath,
+        [hashtable]$Variables = @{},
+        # Per-variable type overrides, e.g. @{ 'Score.Value' = 'Float' }.
+        [hashtable]$Types = @{},
+        # Type used when a variable has no explicit override.
+        #
+        # Cinegy's published sample uses Type="String" here, but a scene that
+        # accepts Type="Text" on the /postbox endpoint can silently IGNORE the
+        # same variable sent as "String" on SHOW - Air still answers 200 OK, so
+        # the graphic simply keeps its previous text with no error anywhere.
+        # "Text" matches what the postbox channel proved to accept.
+        [string]$DefaultType = 'Text',
+        [int]$TimeoutSec = 10
+    )
+
+    $variableXml = "<Variables>"
+    foreach ($key in $Variables.Keys) {
+        $safeName = Escape-XmlValue -Value $key
+        $safeValue = Escape-XmlValue -Value ([string]$Variables[$key])
+        $type = if ($Types.ContainsKey($key)) { [string]$Types[$key] } else { $DefaultType }
+        $safeType = Escape-XmlValue -Value $type
+        $variableXml += "<Var Name=""$safeName"" Type=""$safeType"" Value=""$safeValue"" />"
+    }
+    $variableXml += "</Variables>"
+
+    Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
+        -Device "*GFX_$Layer" -Cmd "SHOW" -Op1 $TemplatePath -Op2 $variableXml -TimeoutSec $TimeoutSec
+}
+
+function Hide-TitlerTemplate {
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][int]$Layer,
+        [int]$TimeoutSec = 10
+    )
+    Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
+        -Device "*GFX_$Layer" -Cmd "HIDE" -TimeoutSec $TimeoutSec
+}
+
+function Exit-TitlerScene {
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][int]$Layer,
+        [int]$TimeoutSec = 10
+    )
+    Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
+        -Device "*GFX_$Layer" -Cmd "EXIT_SCENE_LOOP" -TimeoutSec $TimeoutSec
+}
+
+function Send-PostboxValues {
+    <#
+        .SYNOPSIS
+        Pushes one or more live variable updates into whatever Titler scene
+        is currently on air, via the /postbox endpoint (no re-trigger of SHOW).
+
+        .PARAMETER Values
+        Hashtable of Name -> Value. Type is inferred as Bool/Float/String
+        unless overridden per-key via -Types.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [Parameter(Mandatory)][hashtable]$Values,
+        [hashtable]$Types = @{},
+        [int]$TimeoutSec = 10
+    )
+
+    $xmlDoc = New-Object System.Xml.XmlDocument
+    $rootElem = $xmlDoc.AppendChild($xmlDoc.CreateElement('PostRequest'))
+
+    foreach ($name in $Values.Keys) {
+        $type = if ($Types.ContainsKey($name)) { $Types[$name] } else { 'Text' }
+        $setValueElem = $rootElem.AppendChild($xmlDoc.CreateElement('SetValue'))
+        $setValueElem.SetAttribute("Name", $name)
+        $setValueElem.SetAttribute("Type", $type)
+        $setValueElem.SetAttribute("Value", [string]$Values[$name])
+    }
+
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/postbox"
+
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Method Post -Body $xmlDoc.OuterXml `
+            -ContentType "text/xml; charset=utf-8" -TimeoutSec $TimeoutSec -UseBasicParsing
+        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Uri = $uri; Xml = $xmlDoc.OuterXml }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
+    }
+}
+
+# Escape-XmlValue is exported so its empty-string handling can be unit-tested
+# directly; a Mandatory [string] rejecting '' was a live crash once already.
+Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Escape-XmlValue

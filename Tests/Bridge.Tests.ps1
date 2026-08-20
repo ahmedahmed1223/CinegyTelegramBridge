@@ -1125,6 +1125,109 @@ Describe 'SHOW review gate' {
     }
 }
 
+Describe 'Direct SHOW entry review gates' {
+    BeforeEach {
+        $script:LayerLocks.Clear()
+        Clear-PendingState -ChatId 51
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'; Layer = 4
+                Fields = @('Headline.Text')
+                FieldLabels = @('العنوان')
+                FieldLimits = @(80)
+                FieldRequired = @($true)
+                Presets = @([pscustomobject]@{ Name = 'جاهز'; Values = @('خبر جاهز') })
+            }
+        }
+        Mock Get-TemplateIndex { 0 }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{
+                Map = @{
+                    urgent = [pscustomobject]@{
+                        Key = 'urgent'; Layer = 4
+                        Fields = @('Headline.Text')
+                        FieldLabels = @('العنوان')
+                        FieldLimits = @(80)
+                        FieldRequired = @($true)
+                    }
+                }
+            }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-ShowTemplateResult { }
+    }
+
+    AfterEach {
+        Clear-PendingState -ChatId 51
+        $script:LayerLocks.Clear()
+    }
+
+    It 'reviews a preset instead of sending it directly to Cinegy' {
+        Invoke-PresetShow -TemplateIndex 0 -PresetIndex 0 -ChatId 51 -UserId 61
+
+        $state = Get-PendingState -ChatId 51
+        $state.Mode | Should -Be 'show_review'
+        $state.Values['Headline.Text'] | Should -Be 'خبر جاهز'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'reviews a complete typed show command instead of sending it directly' {
+        Invoke-ShowCommand -ArgText 'urgent | خبر مكتوب' -ChatId 51 -UserId 61
+
+        $state = Get-PendingState -ChatId 51
+        $state.Mode | Should -Be 'show_review'
+        $state.Values['Headline.Text'] | Should -Be 'خبر مكتوب'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+}
+
+Describe 'Persistent operator drafts' {
+    BeforeEach {
+        $script:OriginalDraftsFileForTest = $script:draftsFile
+        $script:draftsFile = Join-Path $TestDrive 'drafts.json'
+        $script:PendingState.Clear()
+        $script:LayerLocks.Clear()
+        Mock Get-TemplateIndex { 0 }
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $script:PendingState.Clear()
+        $script:LayerLocks.Clear()
+        $script:draftsFile = $script:OriginalDraftsFileForTest
+    }
+
+    It 'restores an independent show draft and its layer lock after restart' {
+        Set-PendingState -ChatId 71 -State @{
+            Mode = 'show_fields'; Key = 'urgent'; UserId = 81; LockLayer = 4
+            Fields = @('Headline.Text'); Labels = @('العنوان'); Limits = @(80)
+            Required = @($true); Index = 0; Values = @{ 'Headline.Text' = 'مسودة' }
+            AutoHideSeconds = 0
+        }
+        $script:PendingState.Clear()
+        $script:LayerLocks.Clear()
+
+        Import-DraftStates
+
+        $state = Get-PendingState -ChatId 71
+        $state.Values['Headline.Text'] | Should -Be 'مسودة'
+        $script:LayerLocks[4].UserId | Should -Be 81
+    }
+
+    It 'removes a saved draft when the operator cancels it' {
+        Set-PendingState -ChatId 72 -State @{
+            Mode = 'show_review'; Key = 'urgent'; UserId = 82; LockLayer = 5
+            Fields = @(); Labels = @(); Limits = @(); Required = @()
+            Index = 0; Values = @{}; AutoHideSeconds = 0
+        }
+
+        Clear-PendingState -ChatId 72
+        $saved = @(Get-Content -LiteralPath $script:draftsFile -Raw | ConvertFrom-Json)
+
+        $saved.Count | Should -Be 0
+    }
+}
+
 Describe 'Repeat last show with editing' {
     BeforeEach {
         $script:LayerLocks.Clear()

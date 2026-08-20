@@ -338,6 +338,7 @@ New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue 
 $relayPidFile = Join-Path $logDir "relay.pid"
 $usageFile = Join-Path $logDir "usage.json"
 $onAirFile = Join-Path $logDir "onair.json"
+$script:draftsFile = Join-Path $logDir "drafts.json"
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -1094,6 +1095,55 @@ $script:PendingState = @{}
 # same GFX layer.
 $script:LayerLocks = @{}
 
+function Save-DraftStates {
+    <# Only SHOW preparation is recoverable. Short-lived prompts such as raw
+       settings or stream URLs are deliberately never written to disk. #>
+    try {
+        $entries = [System.Collections.Generic.List[object]]::new()
+        foreach ($chatId in $script:PendingState.Keys) {
+            $state = $script:PendingState[$chatId]
+            if ([string]$state.Mode -notin @('show_fields', 'show_review')) { continue }
+            $copy = @{}
+            foreach ($name in $state.Keys) { $copy[$name] = $state[$name] }
+            if ($copy.StartedAt -is [datetime]) { $copy.StartedAt = $copy.StartedAt.ToString('o') }
+            $entries.Add(@{ ChatId = [long]$chatId; State = $copy })
+        }
+        $json = ConvertTo-Json -InputObject @($entries.ToArray()) -Depth 8
+        $temporary = "$script:draftsFile.tmp"
+        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:draftsFile -Force -ErrorAction Stop
+    }
+    catch { Write-BridgeLog "Could not write drafts.json: $($_.Exception.Message)" "WARN" }
+}
+
+function Import-DraftStates {
+    if (-not (Test-Path -LiteralPath $script:draftsFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:draftsFile -Raw | ConvertFrom-Json -AsHashtable
+        $timeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
+        foreach ($entry in @($raw)) {
+            if (-not $entry -or -not $entry.ContainsKey('State')) { continue }
+            $state = $entry.State
+            if ([string]$state.Mode -notin @('show_fields', 'show_review')) { continue }
+            $startedAt = [datetime]::MinValue
+            if (-not [datetime]::TryParse([string]$state.StartedAt, [ref]$startedAt)) { continue }
+            if (((Get-Date) - $startedAt).TotalMinutes -ge $timeout) { continue }
+            if ((Get-TemplateIndex -Key ([string]$state.Key)) -lt 0) { continue }
+            $chatId = [long]$entry.ChatId
+            $layer = [int]$state.LockLayer
+            $lock = Lock-GfxLayer -Layer $layer -ChatId $chatId -UserId ([long]$state.UserId) -Key ([string]$state.Key)
+            if (-not $lock.Success) { continue }
+            $state.StartedAt = $startedAt
+            $script:PendingState[$chatId] = $state
+        }
+        if ($script:PendingState.Count -gt 0) {
+            Write-BridgeLog "Restored $($script:PendingState.Count) operator draft(s) from the previous run"
+        }
+        Save-DraftStates
+    }
+    catch { Write-BridgeLog "Could not read drafts.json: $($_.Exception.Message)" "WARN" }
+}
+
 # ChatId -> @{ Name; ChatId; UserId; RequestedAt } for users awaiting approval.
 $script:PendingApprovals = @{}
 
@@ -1583,6 +1633,7 @@ function Set-PendingState {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
     $State.StartedAt = Get-Date
     $script:PendingState[$ChatId] = $State
+    if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
 }
 
 function Get-PendingState {
@@ -1606,6 +1657,7 @@ function Clear-PendingState {
         $state = $script:PendingState[$ChatId]
         if ($state.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$state.LockLayer) }
         $script:PendingState.Remove($ChatId)
+        if ([string]$state.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
     }
 }
 
@@ -1746,14 +1798,16 @@ function Invoke-ShowTemplateResult {
 }
 
 function Start-ShowFlow {
-    <# Entry point when a template button is pressed. No fields -> straight on
-       air; otherwise a step-by-step prompt tracked in $script:PendingState. #>
+    <# Entry point for every SHOW source. ReviewImmediately is used when values
+       already came from a preset or typed command; required missing fields
+       still force the ordinary field-entry flow. #>
     param(
         [Parameter(Mandatory)][int]$TemplateIndex,
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
         [int]$AutoHideSeconds = 0,
-        [hashtable]$InitialValues = @{}
+        [hashtable]$InitialValues = @{},
+        [switch]$ReviewImmediately
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
@@ -1769,9 +1823,23 @@ function Start-ShowFlow {
     }
     $draftValues = @{}
     foreach ($name in $InitialValues.Keys) { $draftValues[[string]$name] = [string]$InitialValues[$name] }
-    if ($t.Fields.Count -eq 0) {
+    $required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
+    $canReviewImmediately = [bool]$ReviewImmediately
+    if ($canReviewImmediately) {
+        for ($i = 0; $i -lt $t.Fields.Count; $i++) {
+            if ($i -lt $required.Count -and [bool]$required[$i]) {
+                $fieldName = [string]$t.Fields[$i]
+                if (-not $draftValues.ContainsKey($fieldName) -or [string]::IsNullOrWhiteSpace([string]$draftValues[$fieldName])) {
+                    $canReviewImmediately = $false
+                    break
+                }
+            }
+        }
+    }
+    if ($t.Fields.Count -eq 0 -or $canReviewImmediately) {
         $state = @{
-            Mode = 'show_review'; Key = $t.Key; Fields = @(); Labels = @(); Limits = @(); Required = @()
+            Mode = 'show_review'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
+            Limits = @($t.FieldLimits); Required = $required
             Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
             LockLayer = [int]$t.Layer
         }
@@ -1782,7 +1850,7 @@ function Start-ShowFlow {
     $state = @{
         Mode = 'show_fields'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
         Limits = @($t.FieldLimits)
-        Required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
+        Required = $required
         Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
         LockLayer = [int]$t.Layer
     }
@@ -2057,7 +2125,7 @@ function Invoke-PresetShow {
     for ($i = 0; $i -lt $t.Fields.Count -and $i -lt $preset.Values.Count; $i++) {
         $variables[[string]$t.Fields[$i]] = [string]$preset.Values[$i]
     }
-    Invoke-ShowTemplateResult -Key $t.Key -Variables $variables -ChatId $ChatId -UserId $UserId
+    Start-ShowFlow -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId -InitialValues $variables -ReviewImmediately
 }
 
 function Invoke-TemplatesCommand {
@@ -2906,7 +2974,8 @@ function Invoke-ShowCommand {
         if (-not (Test-FieldLength -Value ([string]$fieldValues[$i]) -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId))) { return }
         $variables[[string]$fields[$i]] = $fieldValues[$i]
     }
-    Invoke-ShowTemplateResult -Key $key -Variables $variables -ChatId $ChatId -UserId $UserId
+    $templateIndex = Get-TemplateIndex -Key $key
+    Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $variables -ReviewImmediately
 }
 
 function Invoke-HideCommand {
@@ -3546,6 +3615,7 @@ if (-not $AllowMultipleInstances) {
 Initialize-Settings
 Import-UsageCounts
 Import-OnAirState
+Import-DraftStates
 $startupSync = Update-OnAirStateFromCinegy -Reason 'startup'
 if ($startupSync.Failed.Count -gt 0) {
     Write-BridgeLog "Startup state sync could not verify layer(s): $($startupSync.Failed -join ', ')" "WARN"

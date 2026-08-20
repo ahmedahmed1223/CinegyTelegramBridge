@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '2.8.3'
+$script:BridgeVersion = '2.8.4'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -1329,28 +1329,48 @@ function Clear-PendingState {
 # ============================================================================
 
 function Get-HelpText {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+
     $lines = @(
-        "بوت التحكم بجرافيك Cinegy Air",
+        "📘 دليل استخدام بوت Cinegy Air",
         "",
-        "استخدم الأزرار في القائمة الرئيسية:",
-        "📋 القوالب - إظهار قالب على الهواء (يطلب منك نص كل حقل بالترتيب)",
-        "⭐ المفضّلة - أكثر القوالب استخدامًا، بضغطة واحدة",
-        "🙈 اخفاء طبقة / 🚪 خروج من المشهد - لطبقة محددة",
-        "🚨 إخفاء الكل - زر طوارئ يخفي كل الطبقات دفعة واحدة",
-        "🔁 إعادة الأخير - تكرار آخر إظهار قمت به",
-        "✏️ تحديث نص - تحديث حقل على القالب الظاهر دون إعادة إظهاره",
-        "⏱ عرض مؤقّت - إظهار قالب مع إخفاء تلقائي بعد مدة محددة",
-        "📸 صورة من البث - لقطة فورية من الهواء",
-        "ℹ️ الحالة - حالة الاتصال والبث والقوالب",
+        "🚀 الاستخدام السريع",
+        "",
+        "▶️ نشر قالب على الهواء:",
+        "📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← إرسال",
+        "إذا كان القالب بلا حقول فسيظهر مباشرة بعد اختياره.",
+        "",
+        "✏️ تغيير النص أثناء العرض:",
+        "✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد",
+        "يُحدّث النص دون إعادة تشغيل حركة القالب.",
+        "",
+        "⏱ عرض لمدة محددة:",
+        "⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص",
+        "سيخفي البوت الطبقة تلقائيًا عند انتهاء المدة.",
+        "",
+        "🛑 إنهاء العرض والطوارئ",
+        "🙈 إخفاء طبقة: إخفاء القالب فورًا من طبقة محددة.",
+        "🚪 خروج من المشهد: تشغيل نهاية المشهد أو الخروج من الحلقة.",
+        "🚨 إخفاء الكل: إخفاء جميع الطبقات فورًا عند الطوارئ.",
+        "",
+        "🧰 أدوات مفيدة",
+        "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
+        "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
+        "ℹ️ الحالة: عرض اتصال Cinegy والقوالب وحالة الهواء المسجلة.",
+        "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
         ""
     )
-    $lines += "للمشرفين: ⚙️ الإعدادات للتحكم بكل الخيارات، 👤 طلبات الوصول،"
-    $lines += "▶️/⏹ البث المباشر، 🔗 رابط البث، 📜 السجل، 🛠 أمر خام."
-    $lines += ""
-    $lines += "إذا تهت أو واجهتك مشكلة، أمامك ثلاث طرق للرجوع:"
-    $lines += "• زر 🏠 القائمة الثابت أسفل الشاشة (يعمل حتى في منتصف أي عملية)"
-    $lines += "• زر ☰ بجانب مربع الكتابة يعرض كل الأوامر"
-    $lines += "• أرسل /بدء أو /قائمة، أو /الغاء لإلغاء أي عملية معلّقة"
+    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+        $lines += "🛡️ أدوات المشرف"
+        $lines += "⚙️ الإعدادات، 👤 طلبات الوصول، 🔄 تحديث حالة Cinegy،"
+        $lines += "▶️/⏹ البث المباشر، 🔗 رابط البث، 📜 السجل، 🛠 أمر خام."
+        $lines += ""
+    }
+    $lines += "↩️ الرجوع أو الإلغاء"
+    $lines += "• اضغط 🏠 القائمة للرجوع، حتى أثناء إدخال النص."
+    $lines += "• اضغط ☰ بجانب مربع الكتابة لعرض الأوامر."
+    $lines += "• أرسل /الغاء لإلغاء العملية الحالية، أو /قائمة لفتح القائمة."
     return ($lines -join "`n")
 }
 
@@ -2520,7 +2540,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('بدء', 'start') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "أهلاً! اختر من القائمة:" }
         { $_ -in @('قائمة', 'القائمة', 'menu') } { Show-MainMenu -ChatId $ChatId -UserId $UserId }
         { $_ -in @('الغاء', 'إلغاء', 'cancel') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "❌ تم إلغاء أي عملية معلّقة. اختر من القائمة:" }
-        { $_ -in @('مساعدة', 'help') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-HelpText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+        { $_ -in @('مساعدة', 'help') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-HelpText -ChatId $ChatId -UserId $UserId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         { $_ -in @('قوالب', 'templates') } { Invoke-TemplatesCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('عرض', 'show') } { Invoke-ShowCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('اخفاء', 'إخفاء', 'hide') } { Invoke-HideCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
@@ -2623,7 +2643,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:help' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'menu:audit' {
@@ -2952,7 +2972,7 @@ try {
                         }
                         elseif ($trimmed -eq $script:HelpHotword) {
                             Clear-PendingState -ChatId $chatId
-                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                         }
                         else {
                             Show-MainMenu -ChatId $chatId -UserId $userId

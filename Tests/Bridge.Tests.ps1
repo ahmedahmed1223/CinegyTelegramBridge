@@ -272,6 +272,34 @@ Describe 'Settings access' {
     }
 }
 
+Describe 'Help guidance' {
+    It 'gives an actionable short path for common on-air operations' {
+        $help = Get-HelpText
+
+        $help | Should -Match '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← إرسال'
+        $help | Should -Match '✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد'
+        $help | Should -Match '⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص'
+    }
+
+    It 'hides admin-only guidance from a regular user' {
+        Mock Test-Admin { $false }
+
+        $help = Get-HelpText
+
+        $help | Should -Not -Match '🛡️ أدوات المشرف'
+        $help | Should -Not -Match '🔄 تحديث حالة Cinegy'
+    }
+
+    It 'includes admin tools for an administrator' {
+        Mock Test-Admin { $true }
+
+        $help = Get-HelpText
+
+        $help | Should -Match '🛡️ أدوات المشرف'
+        $help | Should -Match '🔄 تحديث حالة Cinegy'
+    }
+}
+
 Describe 'Admin-only Cinegy state refresh' {
     It 'shows the refresh button to an admin' {
         Mock Test-Admin { $true }

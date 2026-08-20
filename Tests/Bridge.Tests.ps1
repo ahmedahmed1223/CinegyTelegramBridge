@@ -382,6 +382,29 @@ InModuleScope CinegyAirTitler {
 }
 
 Describe 'Get-TitlerLayerStatus' {
+    It 'returns operational metadata and the active Cinegy item name' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '<Item Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}" Name="External Lower Third" IsEmpty="n"/>'
+                }
+            }
+            return [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Status><Active Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}"/><License State="Licensed"/><Output State="Normal"/><Client Connected="y" Identity="Air Client 1"/></Status>'
+            }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 4
+
+        $result.ActiveName | Should -Be 'External Lower Third'
+        $result.LicenseState | Should -Be 'Licensed'
+        $result.OutputState | Should -Be 'Normal'
+        $result.ClientConnected | Should -BeTrue
+        $result.ClientIdentity | Should -Be 'Air Client 1'
+    }
+
     It 'reports hidden when the active playlist item is Cinegy empty filler' {
         Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
             if ($Uri -like '*/status/active') {
@@ -451,6 +474,59 @@ Describe 'Get-TitlerLayerStatus' {
         $result.Success | Should -BeFalse
         $result.IsOnAir | Should -BeNullOrEmpty
         $result.Error | Should -Match 'connection refused'
+    }
+}
+
+Describe 'Get-AirTelemetryStatus' {
+    It 'aggregates a healthy minute of Cinegy metrics' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics StartAt="2026-08-20T10:00:00Z"><At Time="2026-08-20T10:00:01Z" DroppedCount="0" OutputCount="25" NoInputSignal="0" AverageReadTime="1.0" ReadErrorRate="0" Heartbeat="650"/><At Time="2026-08-20T10:00:02Z" DroppedCount="0" OutputCount="25" NoInputSignal="0" AverageReadTime="3.0" ReadErrorRate="0" Heartbeat="700"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 2
+
+        $result.Success | Should -BeTrue
+        $result.Healthy | Should -BeTrue
+        $result.SampleCount | Should -Be 2
+        $result.OutputCount | Should -Be 50
+        $result.DroppedCount | Should -Be 0
+        $result.NoInputSignal | Should -Be 0
+        $result.AverageReadTime | Should -Be 2.0
+        $result.MaxReadErrorRate | Should -Be 0
+        $result.MaxHeartbeat | Should -Be 700
+        @($result.Issues).Count | Should -Be 0
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://air-host:5523/metrics' -and $Method -eq 'Get' }
+    }
+
+    It 'marks dropped frames missing input and read errors as unhealthy' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="1" OutputCount="24" NoInputSignal="2" AverageReadTime="4.5" ReadErrorRate="5" Heartbeat="900"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0
+
+        $result.Healthy | Should -BeFalse
+        $result.DroppedCount | Should -Be 1
+        $result.NoInputSignal | Should -Be 2
+        $result.MaxReadErrorRate | Should -Be 5
+        @($result.Issues).Count | Should -Be 3
+    }
+
+    It 'returns unknown health when the metrics endpoint is unreachable' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'metrics timeout' }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'offline-host' -AirChannelNumber 0
+
+        $result.Success | Should -BeFalse
+        $result.Healthy | Should -BeNullOrEmpty
+        $result.Error | Should -Match 'metrics timeout'
     }
 }
 
@@ -589,5 +665,130 @@ Describe 'Update-OnAirStateFromCinegy' {
         $OnAir.ContainsKey(4) | Should -BeTrue
         $result.Failed | Should -Be @(4)
         Should -Invoke Save-OnAirState -Times 0 -Exactly
+    }
+
+    It 'reuses a supplied dashboard sample instead of querying the layer again' {
+        Mock Get-TitlerLayerStatus { throw 'must not be called' }
+        $sample = [pscustomobject]@{
+            Layer = 4; Success = $true; IsOnAir = $false; ActiveId = ''
+        }
+
+        $result = Update-OnAirStateFromCinegy -LayerStatuses @($sample)
+
+        $result.Removed | Should -Be @(4)
+        Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
+    }
+}
+
+Describe 'Cinegy layer dashboard' {
+    BeforeEach {
+        $OnAir.Clear()
+        $OnAir[4] = @{
+            Key = 'lower-third'; At = Get-Date; UserId = 10
+            ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        }
+        Mock Get-KnownLayers { @(4, 5, 6, 7) }
+        Mock Get-TitlerLayerStatus {
+            switch ($Layer) {
+                4 { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'; ActiveName = 'Bot Item'; OutputState = 'Normal'; LicenseState = 'Licensed'; ClientConnected = $true; ClientIdentity = 'Client 1' } }
+                5 { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'; ActiveName = 'External Item'; OutputState = 'Normal'; LicenseState = 'Licensed'; ClientConnected = $true; ClientIdentity = 'Client 1' } }
+                6 { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = ''; OutputState = 'Normal'; LicenseState = 'Licensed'; ClientConnected = $true; ClientIdentity = 'Client 1' } }
+                7 { [pscustomobject]@{ Success = $false; IsOnAir = $null; ActiveId = ''; Error = 'timeout' } }
+            }
+        }
+    }
+
+    AfterEach { $OnAir.Clear() }
+
+    It 'collects every configured layer exactly once' {
+        $dashboard = @(Get-CinegyLayerDashboard)
+
+        @($dashboard.Layer) | Should -Be @(4, 5, 6, 7)
+        Should -Invoke Get-TitlerLayerStatus -Times 4 -Exactly -ParameterFilter { $TimeoutSec -eq 1 }
+    }
+
+    It 'distinguishes bridge external hidden and unknown layers' {
+        $text = Format-CinegyLayerDashboard -LayerStatuses @(Get-CinegyLayerDashboard)
+
+        $text | Should -Match '🔴 طبقة 4: lower-third'
+        $text | Should -Match '🟠 طبقة 5: External Item \(خارجي\)'
+        $text | Should -Match '⚪ طبقة 6: مخفية'
+        $text | Should -Match '⚠️ طبقة 7: غير معروف'
+        $text | Should -Match 'الخرج Normal'
+        $text | Should -Match 'الترخيص Licensed'
+        $text | Should -Match 'العميل Client 1'
+    }
+}
+
+Describe 'Cinegy telemetry text' {
+    It 'formats healthy unhealthy and unreachable states without ambiguity' {
+        $healthy = [pscustomobject]@{ Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500; DroppedCount = 0; NoInputSignal = 0; AverageReadTime = 1.2; MaxReadErrorRate = 0; MaxHeartbeat = 700; Issues = @() }
+        $unhealthy = [pscustomobject]@{ Success = $true; Healthy = $false; SampleCount = 60; OutputCount = 1490; DroppedCount = 2; NoInputSignal = 3; AverageReadTime = 2.2; MaxReadErrorRate = 4; MaxHeartbeat = 900; Issues = @('Dropped frames: 2') }
+        $unknown = [pscustomobject]@{ Success = $false; Healthy = $null; Error = 'timeout' }
+
+        Format-CinegyTelemetryStatus $healthy | Should -Match '^💚 صحة Cinegy: سليمة'
+        Format-CinegyTelemetryStatus $unhealthy | Should -Match '^🔴 صحة Cinegy: تحذير'
+        Format-CinegyTelemetryStatus $unknown | Should -Match '^⚠️ صحة Cinegy: غير معروفة'
+    }
+}
+
+Describe 'Cinegy monitoring watchdogs' {
+    BeforeEach {
+        $script:LastCinegyStateCheck = [datetime]::MinValue
+        $script:LastCinegyHealthCheck = [datetime]::MinValue
+        $script:LastCinegyHealthState = 'unknown'
+        Mock Get-SettingInt {
+            if ($Name -eq 'CinegyStateCheckSeconds') { return 15 }
+            if ($Name -eq 'CinegyHealthCheckSeconds') { return 60 }
+            return 1
+        }
+        Mock Get-Setting { $true }
+        Mock Send-AdminBroadcast { }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'alerts once when a tracked scene changes outside the bridge' {
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(4); Removed = @(4); Failed = @() }
+        }
+
+        Update-CinegyStateWatchdog
+        Update-CinegyStateWatchdog
+
+        Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly -ParameterFilter { $TimeoutSec -eq 1 }
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'تغيير خارجي' -and $Text -match '4'
+        }
+    }
+
+    It 'deduplicates unhealthy telemetry and sends one recovery notice' {
+        $script:telemetryCall = 0
+        Mock Get-AirTelemetryStatus {
+            $script:telemetryCall++
+            if ($script:telemetryCall -le 2) {
+                return [pscustomobject]@{
+                    Success = $true; Healthy = $false; SampleCount = 60
+                    OutputCount = 1490; DroppedCount = 2; NoInputSignal = 0
+                    AverageReadTime = 2; MaxReadErrorRate = 0; MaxHeartbeat = 800
+                    Issues = @('Dropped frames: 2')
+                }
+            }
+            return [pscustomobject]@{
+                Success = $true; Healthy = $true; SampleCount = 60
+                OutputCount = 1500; DroppedCount = 0; NoInputSignal = 0
+                AverageReadTime = 1; MaxReadErrorRate = 0; MaxHeartbeat = 650
+                Issues = @()
+            }
+        }
+
+        Update-CinegyHealthWatchdog
+        $script:LastCinegyHealthCheck = [datetime]::MinValue
+        Update-CinegyHealthWatchdog
+        $script:LastCinegyHealthCheck = [datetime]::MinValue
+        Update-CinegyHealthWatchdog
+
+        Should -Invoke Get-AirTelemetryStatus -Times 3 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تحذير صحة Cinegy' }
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تعافت صحة Cinegy' }
     }
 }

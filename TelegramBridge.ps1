@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '2.8.4'
+$script:BridgeVersion = '3.0.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -97,6 +97,9 @@ $script:DefaultSettings = [ordered]@{
     RelayAutoRestart           = $true
     RelayMaxRestarts           = 20
     RelayWatchdogSeconds       = 20
+    CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
+    CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
+    CinegyMonitorTimeoutSeconds = 1      # keep background read-only checks bounded
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
     FavoritesCount             = 3
@@ -108,6 +111,8 @@ $script:DefaultSettings = [ordered]@{
     HeartbeatEnabled           = $false
     HeartbeatHour              = 9       # 0-23, local time
     NotifyAdminsOnRelayFailure = $true
+    NotifyAdminsOnExternalChange = $true
+    NotifyAdminsOnCinegyHealth = $true
 }
 
 # ============================================================================
@@ -763,6 +768,88 @@ function Get-KnownLayers {
     return $layers
 }
 
+function Get-CinegyLayerDashboard {
+    <# Takes one read-only snapshot of every GFX layer referenced by the
+       configured templates. Each returned status carries its Layer number so
+       the same sample can be formatted and reused for reconciliation. #>
+    foreach ($layer in (Get-KnownLayers)) {
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) `
+            -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $status | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$layer) -Force
+        Write-Output $status
+    }
+}
+
+function Format-CinegyLayerDashboard {
+    param([Parameter(Mandatory)][object[]]$LayerStatuses)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('🎚 حالة طبقات Cinegy:')
+
+    foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
+        $layer = [int]$status.Layer
+        if (-not $status.Success) {
+            $lines.Add("⚠️ طبقة $layer`: غير معروف")
+            continue
+        }
+        if (-not $status.IsOnAir) {
+            $lines.Add("⚪ طبقة $layer`: مخفية")
+            continue
+        }
+
+        $trackedKey = ''
+        if ($script:OnAir.ContainsKey($layer)) {
+            $trackedId = [string](Get-JsonProp $script:OnAir[$layer] 'ActiveId')
+            $actualId = [string](Get-JsonProp $status 'ActiveId')
+            if (-not [string]::IsNullOrWhiteSpace($trackedId) -and
+                $trackedId.Trim().Trim('{', '}').Equals($actualId.Trim().Trim('{', '}'), [System.StringComparison]::OrdinalIgnoreCase)) {
+                $trackedKey = [string](Get-JsonProp $script:OnAir[$layer] 'Key')
+            }
+        }
+
+        if ($trackedKey) {
+            $lines.Add("🔴 طبقة $layer`: $trackedKey")
+        }
+        else {
+            $activeName = [string](Get-JsonProp $status 'ActiveName')
+            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = 'مشهد غير مسمّى' }
+            $lines.Add("🟠 طبقة $layer`: $activeName (خارجي)")
+        }
+    }
+
+    $metadata = @($LayerStatuses | Where-Object { $_.Success } | Select-Object -First 1)
+    if ($metadata.Count -gt 0) {
+        $meta = $metadata[0]
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $outputState = [string](Get-JsonProp $meta 'OutputState')
+        $licenseState = [string](Get-JsonProp $meta 'LicenseState')
+        $clientIdentity = [string](Get-JsonProp $meta 'ClientIdentity')
+        $clientConnected = [bool](Get-JsonProp $meta 'ClientConnected')
+        if ($outputState) { $parts.Add("الخرج $outputState") }
+        if ($licenseState) { $parts.Add("الترخيص $licenseState") }
+        if ($clientConnected) {
+            if (-not $clientIdentity) { $clientIdentity = 'متصل' }
+            $parts.Add("العميل $clientIdentity")
+        }
+        else { $parts.Add('العميل غير متصل') }
+        if ($parts.Count -gt 0) { $lines.Add('• ' + ($parts -join ' | ')) }
+    }
+    return ($lines -join "`n")
+}
+
+function Format-CinegyTelemetryStatus {
+    param([Parameter(Mandatory)]$Telemetry)
+    if (-not $Telemetry.Success) {
+        return "⚠️ صحة Cinegy: غير معروفة (تعذّر قراءة metrics)"
+    }
+    if ($null -eq $Telemetry.Healthy) {
+        return "⚠️ صحة Cinegy: غير معروفة (لا توجد عينات)"
+    }
+    $summary = "العينات $($Telemetry.SampleCount)، الخرج $($Telemetry.OutputCount)، الساقط $($Telemetry.DroppedCount)، فقد الإدخال $($Telemetry.NoInputSignal)، أخطاء القراءة $($Telemetry.MaxReadErrorRate)%، متوسط القراءة $($Telemetry.AverageReadTime)ms، Heartbeat $($Telemetry.MaxHeartbeat)ms"
+    if ($Telemetry.Healthy) { return "💚 صحة Cinegy: سليمة — $summary" }
+    return "🔴 صحة Cinegy: تحذير — $summary"
+}
+
 # ---- usage counters (drive the ⭐ favourites row) ----
 
 $script:UsageCounts = @{}
@@ -849,15 +936,26 @@ function Update-OnAirStateFromCinegy {
        triggered item back to a templates.json key. A failed query never
        removes state, because an unavailable engine is not the same as a
        hidden graphic. #>
-    param([string]$Reason = 'manual')
+    param([string]$Reason = 'manual', [object[]]$LayerStatuses = @(), [int]$TimeoutSec = 0)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-AirTimeout }
 
     $checked = [System.Collections.Generic.List[int]]::new()
     $removed = [System.Collections.Generic.List[int]]::new()
     $failed = [System.Collections.Generic.List[int]]::new()
+    $statusByLayer = @{}
+    foreach ($item in @($LayerStatuses)) {
+        $itemLayer = 0
+        if ([int]::TryParse([string](Get-JsonProp $item 'Layer'), [ref]$itemLayer)) {
+            $statusByLayer[$itemLayer] = $item
+        }
+    }
 
     foreach ($layer in @($script:OnAir.Keys)) {
-        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
-            -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) -TimeoutSec (Get-AirTimeout)
+        $status = if ($statusByLayer.ContainsKey([int]$layer)) { $statusByLayer[[int]$layer] }
+        else {
+            Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+                -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) -TimeoutSec $TimeoutSec
+        }
         if (-not $status.Success) {
             $failed.Add([int]$layer)
             Write-BridgeLog "Could not verify GFX layer $layer during $Reason sync: $($status.Error)" "WARN"
@@ -963,6 +1061,9 @@ $script:RelayState = @{
 }
 
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
+$script:LastCinegyStateCheck = [datetime]::MinValue
+$script:LastCinegyHealthCheck = [datetime]::MinValue
+$script:LastCinegyHealthState = 'unknown'
 $script:LastConfigSaveFailed = $false
 
 # ============================================================================
@@ -1357,7 +1458,7 @@ function Get-HelpText {
         "🧰 أدوات مفيدة",
         "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
         "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
-        "ℹ️ الحالة: عرض اتصال Cinegy والقوالب وحالة الهواء المسجلة.",
+        "ℹ️ الحالة: فحص كل الطبقات المعرّفة وقياسات صحة Cinegy الفعلية.",
         "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
         ""
     )
@@ -1772,12 +1873,18 @@ function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $store = Get-TemplateStore
-    $sync = Update-OnAirStateFromCinegy -Reason 'status'
+    $layerStatuses = @(Get-CinegyLayerDashboard)
+    $sync = Update-OnAirStateFromCinegy -Reason 'status' -LayerStatuses $layerStatuses `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     $lines = @(
         "الإصدار: $($script:BridgeVersion)",
         "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
         "القوالب المحمّلة: $($store.Order.Count)",
-        (Get-OnAirSummary),
+        (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses),
+        (Format-CinegyTelemetryStatus -Telemetry $telemetry),
         "البث المباشر: $(Get-LiveRelayStatusText)",
         "الصور المعلّقة: $($script:SnapshotJobs.Count)، مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
         "المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم",
@@ -2867,11 +2974,58 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Update-CinegyStateWatchdog {
+    $now = Get-Date
+    $interval = Get-SettingInt 'CinegyStateCheckSeconds' 1
+    if (($now - $script:LastCinegyStateCheck).TotalSeconds -lt $interval) { return }
+    $script:LastCinegyStateCheck = $now
+
+    $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if ($sync.Removed.Count -gt 0 -and (Get-Setting 'NotifyAdminsOnExternalChange')) {
+        $layers = $sync.Removed -join '، '
+        Send-AdminBroadcast -Text "⚠️ تغيير خارجي في Cinegy: المشهد الذي كان يتتبعه البوت على الطبقة/الطبقات $layers أُخفي أو استُبدل. تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط."
+    }
+}
+
+function Update-CinegyHealthWatchdog {
+    $now = Get-Date
+    $interval = Get-SettingInt 'CinegyHealthCheckSeconds' 1
+    if (($now - $script:LastCinegyHealthCheck).TotalSeconds -lt $interval) { return }
+    $script:LastCinegyHealthCheck = $now
+
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $newState = if (-not $telemetry.Success -or $null -eq $telemetry.Healthy) { 'unreachable' }
+    elseif ($telemetry.Healthy) { 'healthy' }
+    else { 'unhealthy' }
+
+    $oldState = $script:LastCinegyHealthState
+    if ($newState -eq $oldState) { return }
+    $script:LastCinegyHealthState = $newState
+    Write-BridgeLog "Cinegy health changed from $oldState to $newState"
+
+    if (-not (Get-Setting 'NotifyAdminsOnCinegyHealth')) { return }
+    switch ($newState) {
+        'unhealthy' {
+            Send-AdminBroadcast -Text "🔴 تحذير صحة Cinegy`n$(Format-CinegyTelemetryStatus -Telemetry $telemetry)"
+        }
+        'unreachable' {
+            Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى قياسات صحة Cinegy. تحقق من Air والاتصال بالشبكة."
+        }
+        'healthy' {
+            if ($oldState -in @('unhealthy', 'unreachable')) {
+                Send-AdminBroadcast -Text "💚 تعافت صحة Cinegy وعادت القياسات إلى الحالة السليمة."
+            }
+        }
+    }
+}
+
 function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Update-Heartbeat')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
         try { & $step }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -2891,7 +3045,8 @@ function Get-EffectivePollTimeout {
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout
     if ($script:RelayState.ShouldRun) { return [Math]::Min($base, (Get-SettingInt 'RelayWatchdogSeconds' 5)) }
-    return $base
+    $base = [Math]::Min($base, (Get-SettingInt 'CinegyStateCheckSeconds' 1))
+    return [Math]::Min($base, (Get-SettingInt 'CinegyHealthCheckSeconds' 1))
 }
 
 # ============================================================================

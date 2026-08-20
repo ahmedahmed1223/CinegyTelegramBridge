@@ -13,6 +13,22 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 3.0
+
+Version 3.0 adds read-only operational monitoring while retaining the existing
+permission model and all 2.x configuration files:
+
+- `ℹ️ الحالة` checks every GFX layer referenced by `templates.json` and labels
+  it on-air, hidden, external, or unknown.
+- Cinegy `/metrics` is summarized for dropped frames, missing input, read
+  errors, read time, output count, and telemetry heartbeat.
+- Admins receive deduplicated alerts when a bridge-tracked scene is hidden or
+  replaced externally, when Cinegy health becomes bad/unreachable, and once
+  again when it recovers.
+- Permissions remain the same two effective levels: regular authorized user
+  and administrator. The bot's intended deployment is private chats; no group
+  workflow or migration is required for 3.0.
+
 ## How it works
 
 ```
@@ -37,7 +53,7 @@ host that can reach the engine's control port.
 
 | File | Purpose |
 |---|---|
-| `CinegyAirTitler.psm1` | Reusable functions: `Show-TitlerTemplate`, `Hide-TitlerTemplate`, `Exit-TitlerScene`, `Send-PostboxValues`, `Send-AirCommand` (generic escape hatch). |
+| `CinegyAirTitler.psm1` | Reusable functions for SHOW/HIDE/EXIT, postbox updates, GFX layer status metadata, and Cinegy telemetry. |
 | `TelegramBridge.ps1` | The bot itself — polling loop, button dispatch, authorization, async ffmpeg jobs, watchdog, logging. |
 | `config.example.json` | Bot token, whitelists, Air server address/channel, `LiveStream` and `Settings` blocks. Copy to `config.json` and edit. |
 | `templates.example.json` | Named title templates (friendly key → `.cintitle` path, GFX layer, field list, optional `order` and `presets`). Copy to `templates.json` and edit. |
@@ -319,9 +335,10 @@ menu:
   has been up) appears in ℹ️ الحالة, and the confirmation you get after
   putting something on air carries its own **🙈 إخفاء هذا (طبقة N)** button —
   so taking a mistake off air is always one tap, never a menu hunt.
-  > This reflects what *this bot* put on air. Cinegy Air offers no way to
-  > query the current on-screen state, so graphics triggered from the Air Pro
-  > UI itself won't be listed.
+  The quick-action row reflects what this bot put on air. The full `ℹ️ الحالة`
+  screen additionally queries Cinegy itself, so an active item started outside
+  the bot appears as **خارجي**; a failed query appears as **غير معروف**, never
+  as hidden.
 - **🔁 إعادة الأخير** → repeats your last show with the same values.
 - **✏️ تحديث نص** → pick a template (used only as a reference for its field
   names), then pick the field, then send the new text — pushed live via
@@ -349,8 +366,10 @@ menu:
   (plus one at startup) removes anything older than
   `SnapshotRetentionMinutes` that a hard kill may have orphaned.
 - **ℹ️ الحالة** → Air host/channel, template count, relay state, outstanding
-  snapshots and auto-hide timers, authorized-user counts, pending access
-  requests, and any template file warnings.
+  snapshots and timers, authorized-user counts, pending requests, and template
+  warnings. It also reads every configured GFX layer and reports Cinegy's
+  output/license/client metadata plus the latest one-minute `/metrics` health
+  summary.
 
 **Admins only**
 
@@ -362,6 +381,12 @@ menu:
 - **👤 طلبات الوصول** → anyone who messaged the bot but isn't authorized yet,
   each with Approve/Reject buttons. The label carries a live count, e.g.
   `👤 طلبات الوصول (2)`.
+- **Automatic Cinegy alerts** → external replacement/hide events and telemetry
+  health transitions are sent only to admins. The defaults are controlled by
+  `CinegyStateCheckSeconds`, `CinegyHealthCheckSeconds`,
+  `CinegyMonitorTimeoutSeconds`, `NotifyAdminsOnExternalChange`, and
+  `NotifyAdminsOnCinegyHealth`. Repeated unhealthy samples are deduplicated;
+  recovery produces one green notice.
 - **▶️/⏹ البث** and **🔗 رابط البث** → live relay controls, see the next
   section.
 - **📜 السجل** → the last 20 on-air actions with who did what and when,

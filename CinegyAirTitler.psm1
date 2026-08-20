@@ -244,12 +244,24 @@ function Get-TitlerLayerStatus {
         $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
         $xml = [xml]$response.Content
         $activeNode = $xml.SelectSingleNode('/Status/Active')
+        $licenseNode = $xml.SelectSingleNode('/Status/License')
+        $outputNode = $xml.SelectSingleNode('/Status/Output')
+        $clientNode = $xml.SelectSingleNode('/Status/Client')
         $activeId = if ($activeNode) { [string]$activeNode.GetAttribute('Id') } else { '' }
+        $licenseState = if ($licenseNode) { [string]$licenseNode.GetAttribute('State') } else { '' }
+        $outputState = if ($outputNode) { [string]$outputNode.GetAttribute('State') } else { '' }
+        $clientConnected = $false
+        $clientIdentity = ''
+        if ($clientNode) {
+            $clientConnected = ([string]$clientNode.GetAttribute('Connected')) -match '^(?i:y|yes|true|1)$'
+            $clientIdentity = [string]$clientNode.GetAttribute('Identity')
+        }
         $normalizedId = $activeId.Trim().Trim('{', '}')
         $hasActiveItem = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
             $normalizedId -ne '00000000-0000-0000-0000-000000000000'
         $isOnAir = $false
         $activeItemXml = ''
+        $activeName = ''
 
         if ($hasActiveItem) {
             $activeUri = "$uri/active"
@@ -260,12 +272,18 @@ function Get-TitlerLayerStatus {
             if (-not $itemNode) { throw "Cinegy active status did not contain an Item element." }
             $isEmpty = [string]$itemNode.GetAttribute('IsEmpty')
             $isOnAir = $isEmpty -notmatch '^(?i:y|yes|true|1)$'
+            $activeName = [string]$itemNode.GetAttribute('Name')
         }
 
         return [pscustomobject]@{
             Success    = $true
             IsOnAir    = $isOnAir
             ActiveId   = $activeId
+            ActiveName = $activeName
+            LicenseState = $licenseState
+            OutputState = $outputState
+            ClientConnected = $clientConnected
+            ClientIdentity = $clientIdentity
             StatusCode = $response.StatusCode
             Uri         = $uri
             Xml         = $response.Content
@@ -277,12 +295,92 @@ function Get-TitlerLayerStatus {
             Success  = $false
             IsOnAir  = $null
             ActiveId = ''
+            ActiveName = ''
+            LicenseState = ''
+            OutputState = ''
+            ClientConnected = $false
+            ClientIdentity = ''
             Error    = $_.Exception.Message
             Uri      = $uri
         }
     }
 }
 
+function Get-AirTelemetryStatus {
+    <# Reads Cinegy Air's one-minute, one-second-interval telemetry history.
+       Counters are aggregated for an operator-friendly summary. A failed or
+       empty response returns Healthy = $null so callers never report an
+       unavailable engine as healthy. #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [int]$TimeoutSec = 10
+    )
+
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/metrics"
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+        $xml = [xml]$response.Content
+        $nodes = @($xml.SelectNodes('/Metrics/At'))
+        if ($nodes.Count -eq 0) {
+            return [pscustomobject]@{
+                Success = $true; Healthy = $null; SampleCount = 0
+                OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
+                AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
+                Issues = @('No telemetry samples'); StatusCode = $response.StatusCode
+                Uri = $uri; Xml = $response.Content
+            }
+        }
+
+        [long]$outputCount = 0
+        [long]$droppedCount = 0
+        [long]$noInputSignal = 0
+        [double]$readTimeTotal = 0
+        [double]$maxReadErrorRate = 0
+        [long]$maxHeartbeat = 0
+        foreach ($node in $nodes) {
+            $outputCount += [long]$node.GetAttribute('OutputCount')
+            $droppedCount += [long]$node.GetAttribute('DroppedCount')
+            $noInputSignal += [long]$node.GetAttribute('NoInputSignal')
+            $readTime = [double]::Parse([string]$node.GetAttribute('AverageReadTime'), [Globalization.CultureInfo]::InvariantCulture)
+            $readErrorRate = [double]::Parse([string]$node.GetAttribute('ReadErrorRate'), [Globalization.CultureInfo]::InvariantCulture)
+            $heartbeat = [long]$node.GetAttribute('Heartbeat')
+            $readTimeTotal += $readTime
+            if ($readErrorRate -gt $maxReadErrorRate) { $maxReadErrorRate = $readErrorRate }
+            if ($heartbeat -gt $maxHeartbeat) { $maxHeartbeat = $heartbeat }
+        }
+
+        $issues = [System.Collections.Generic.List[string]]::new()
+        if ($droppedCount -gt 0) { $issues.Add("Dropped frames: $droppedCount") }
+        if ($noInputSignal -gt 0) { $issues.Add("Missing input frames: $noInputSignal") }
+        if ($maxReadErrorRate -gt 0) { $issues.Add("Read error rate: $maxReadErrorRate%") }
+
+        return [pscustomobject]@{
+            Success = $true
+            Healthy = ($issues.Count -eq 0)
+            SampleCount = $nodes.Count
+            OutputCount = $outputCount
+            DroppedCount = $droppedCount
+            NoInputSignal = $noInputSignal
+            AverageReadTime = [Math]::Round(($readTimeTotal / $nodes.Count), 2)
+            MaxReadErrorRate = $maxReadErrorRate
+            MaxHeartbeat = $maxHeartbeat
+            Issues = $issues.ToArray()
+            StatusCode = $response.StatusCode
+            Uri = $uri
+            Xml = $response.Content
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Success = $false; Healthy = $null; SampleCount = 0
+            OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
+            AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
+            Issues = @(); Error = $_.Exception.Message; Uri = $uri
+        }
+    }
+}
+
 # Escape-XmlValue is an implementation detail. Tests exercise it inside the
 # module scope so importing the module exposes only its supported commands.
-Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus
+Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus

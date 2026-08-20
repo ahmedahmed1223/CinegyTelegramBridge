@@ -54,6 +54,9 @@
     "RelayAutoRestart": true,
     "RelayMaxRestarts": 20,
     "RelayWatchdogSeconds": 20,
+    "CinegyStateCheckSeconds": 15,
+    "CinegyHealthCheckSeconds": 60,
+    "CinegyMonitorTimeoutSeconds": 1,
     "MaxPendingApprovals": 20,
     "PendingApprovalExpiryHours": 24,
     "FavoritesCount": 3,
@@ -62,6 +65,8 @@
     "AuditTrailSize": 50,
     "HeartbeatEnabled": false,
     "HeartbeatHour": 9,
-    "NotifyAdminsOnRelayFailure": true
+    "NotifyAdminsOnRelayFailure": true,
+    "NotifyAdminsOnExternalChange": true,
+    "NotifyAdminsOnCinegyHealth": true
   }
 }

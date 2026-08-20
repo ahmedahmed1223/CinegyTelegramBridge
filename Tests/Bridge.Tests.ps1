@@ -165,6 +165,25 @@ Describe 'Template registry parsing' {
         finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'parses required fields without making legacy string fields mandatory' {
+        $file = New-TempTemplateFile -Json @'
+{
+  "urgent": {
+    "path": "C:\\x.cintitle", "layer": 3,
+    "fields": [
+      { "name": "Headline.Text", "label": "العنوان", "required": true },
+      "Optional.Text"
+    ]
+  }
+}
+'@
+        try {
+            $template = (Get-TemplateStore).Map['urgent']
+            @(Get-JsonProp $template 'FieldRequired') | Should -Be @($true, $false)
+        }
+        finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'skips templates missing path or layer instead of crashing' {
         $file = New-TempTemplateFile -Json @'
 {
@@ -569,6 +588,120 @@ Describe 'SHOW identity tracking' {
         Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
 
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+    }
+}
+
+Describe 'Layer preparation locks' {
+    BeforeEach {
+        $script:LayerLocks.Clear()
+        Clear-PendingState -ChatId 10
+        Clear-PendingState -ChatId 11
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'
+                Layer = 4
+                Fields = @('Title.Text')
+                FieldLabels = @('العنوان')
+                FieldLimits = @(80)
+            }
+        }
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach {
+        Clear-PendingState -ChatId 10
+        Clear-PendingState -ChatId 11
+        $script:LayerLocks.Clear()
+    }
+
+    It 'prevents a second operator from preparing the same layer' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 10 -UserId 20
+        Start-ShowFlow -TemplateIndex 0 -ChatId 11 -UserId 21
+
+        Get-PendingState -ChatId 10 | Should -Not -BeNullOrEmpty
+        Get-PendingState -ChatId 11 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 11 -and $Text -match 'قيد التجهيز'
+        }
+    }
+
+    It 'releases the layer when the first operator cancels the draft' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 10 -UserId 20
+        Clear-PendingState -ChatId 10
+
+        Start-ShowFlow -TemplateIndex 0 -ChatId 11 -UserId 21
+
+        Get-PendingState -ChatId 11 | Should -Not -BeNullOrEmpty
+    }
+
+    It 'releases the layer when the draft expires' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 10 -UserId 20
+        $state = Get-PendingState -ChatId 10
+        $state.StartedAt = (Get-Date).AddMinutes(-10)
+
+        Get-PendingState -ChatId 10 | Should -BeNullOrEmpty
+        Start-ShowFlow -TemplateIndex 0 -ChatId 11 -UserId 21
+
+        Get-PendingState -ChatId 11 | Should -Not -BeNullOrEmpty
+    }
+
+    It 'releases the layer when the periodic expiry sweep removes the draft' {
+        Mock Write-BridgeLog { }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        Start-ShowFlow -TemplateIndex 0 -ChatId 10 -UserId 20
+        $state = Get-PendingState -ChatId 10
+        $state.StartedAt = (Get-Date).AddMinutes(-10)
+
+        Update-PendingExpiry
+        Start-ShowFlow -TemplateIndex 0 -ChatId 11 -UserId 21
+
+        Get-PendingState -ChatId 11 | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Required template fields' {
+    BeforeEach {
+        $script:LayerLocks.Clear()
+        Clear-PendingState -ChatId 30
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'
+                Layer = 4
+                Fields = @('Headline.Text')
+                FieldLabels = @('العنوان')
+                FieldLimits = @(80)
+                FieldRequired = @($true)
+            }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-ShowTemplateResult { }
+    }
+
+    AfterEach {
+        Clear-PendingState -ChatId 30
+        $script:LayerLocks.Clear()
+    }
+
+    It 'keeps the operator on a required field when empty text is submitted' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 30 -UserId 40
+        Resume-ShowFlow -ChatId 30 -Value ''
+
+        $state = Get-PendingState -ChatId 30
+        $state | Should -Not -BeNullOrEmpty
+        $state.Index | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 30 -and $Text -match 'مطلوب'
+        }
+    }
+
+    It 'does not allow the skip button to bypass a required field' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 30 -UserId 40
+        Resume-ShowFlow -ChatId 30 -Skip
+
+        $state = Get-PendingState -ChatId 30
+        $state | Should -Not -BeNullOrEmpty
+        $state.Index | Should -Be 0
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
     }
 }
 

@@ -167,10 +167,11 @@ be able to trigger by name, e.g.:
   `Titler/AutoVariableReader.ps1` from the Cinegy repo as a reference for
   reading them programmatically.
 - A `fields` entry may be a plain variable name, **or** an object carrying a
-  human label and an optional character limit:
+  human label, an optional character limit, and `required: true` when the
+  operator must not leave it empty or use the skip button:
   ```json
   "maxLength": 120,
-  "fields": [ { "name": "Ajel.center", "label": "نص الخبر العاجل", "maxLength": 80 } ]
+  "fields": [ { "name": "Ajel.center", "label": "نص الخبر العاجل", "maxLength": 80, "required": true } ]
   ```
   Both forms can be mixed freely; plain strings keep working unchanged.
 - **Character limits** resolve in this order: the field's own `maxLength` →

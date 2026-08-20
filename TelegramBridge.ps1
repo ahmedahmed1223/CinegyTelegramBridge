@@ -689,6 +689,7 @@ function Get-TemplateStore {
         $fieldNames = @()
         $fieldLabels = @()
         $fieldLimits = @()
+        $fieldRequired = @()
         # Name -> Cinegy variable type override (Text|String|Bool|Float).
         # Empty means "use the AirVariableType setting".
         $fieldTypes = @{}
@@ -697,6 +698,7 @@ function Get-TemplateStore {
                 $fieldNames += $f
                 $fieldLabels += ''
                 $fieldLimits += $templateLimit
+                $fieldRequired += $false
             }
             else {
                 $fname = [string](Get-JsonProp $f 'name')
@@ -706,6 +708,7 @@ function Get-TemplateStore {
                 }
                 $fieldNames += $fname
                 $fieldLabels += [string](Get-JsonProp $f 'label')
+                $fieldRequired += ((Get-JsonProp $f 'required') -eq $true)
                 $fieldTypes[$fname] = [string](Get-JsonProp $f 'type')
                 # Per-field limit wins over the template default, which wins
                 # over the global setting.
@@ -725,6 +728,7 @@ function Get-TemplateStore {
             Fields      = $fieldNames
             FieldLabels = $fieldLabels
             FieldLimits = $fieldLimits
+            FieldRequired = $fieldRequired
             FieldTypes  = $fieldTypes
             MaxLength   = $templateLimit
             Description = [string](Get-JsonProp $entry 'description')
@@ -1018,6 +1022,11 @@ function Get-FavoriteTemplateKeys {
 # abandoned flow can never swallow an unrelated message days later and put it
 # on air.
 $script:PendingState = @{}
+
+# Layer -> @{ ChatId; UserId; Key; StartedAt }. A lock exists only while an
+# operator is preparing a SHOW flow; it prevents two drafts racing toward the
+# same GFX layer.
+$script:LayerLocks = @{}
 
 # ChatId -> @{ Name; ChatId; UserId; RequestedAt } for users awaiting approval.
 $script:PendingApprovals = @{}
@@ -1399,6 +1408,39 @@ function Set-SettingChoice {
 #  Pending conversation state
 # ============================================================================
 
+function Lock-GfxLayer {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][string]$Key
+    )
+    if ($script:LayerLocks.ContainsKey($Layer)) {
+        $existing = $script:LayerLocks[$Layer]
+        if ([long]$existing.ChatId -ne $ChatId -or [long]$existing.UserId -ne $UserId) {
+            return [pscustomobject]@{
+                Success = $false
+                OwnerChatId = [long]$existing.ChatId
+                OwnerUserId = [long]$existing.UserId
+                Key = [string]$existing.Key
+            }
+        }
+    }
+    $script:LayerLocks[$Layer] = @{
+        ChatId = $ChatId; UserId = $UserId; Key = $Key; StartedAt = (Get-Date)
+    }
+    return [pscustomobject]@{ Success = $true; OwnerChatId = $ChatId; OwnerUserId = $UserId; Key = $Key }
+}
+
+function Unlock-GfxLayer {
+    param([Parameter(Mandatory)][long]$ChatId, [int]$Layer = 0)
+    foreach ($candidate in @($script:LayerLocks.Keys)) {
+        if (($Layer -le 0 -or [int]$candidate -eq $Layer) -and [long]$script:LayerLocks[$candidate].ChatId -eq $ChatId) {
+            $script:LayerLocks.Remove($candidate)
+        }
+    }
+}
+
 function Set-PendingState {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
     $State.StartedAt = Get-Date
@@ -1414,7 +1456,7 @@ function Get-PendingState {
     $state = $script:PendingState[$ChatId]
     $timeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
     if (((Get-Date) - $state.StartedAt).TotalMinutes -ge $timeout) {
-        $script:PendingState.Remove($ChatId)
+        Clear-PendingState -ChatId $ChatId
         return $null
     }
     return $state
@@ -1422,7 +1464,11 @@ function Get-PendingState {
 
 function Clear-PendingState {
     param([Parameter(Mandatory)][long]$ChatId)
-    if ($script:PendingState.ContainsKey($ChatId)) { $script:PendingState.Remove($ChatId) }
+    if ($script:PendingState.ContainsKey($ChatId)) {
+        $state = $script:PendingState[$ChatId]
+        if ($state.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$state.LockLayer) }
+        $script:PendingState.Remove($ChatId)
+    }
 }
 
 # ============================================================================
@@ -1570,6 +1616,7 @@ function Start-ShowFlow {
         [int]$AutoHideSeconds = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    Clear-PendingState -ChatId $ChatId
     $t = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $t) {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -1579,10 +1626,17 @@ function Start-ShowFlow {
         Invoke-ShowTemplateResult -Key $t.Key -Variables @{} -ChatId $ChatId -UserId $UserId -AutoHideSeconds $AutoHideSeconds
         return
     }
+    $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
+    if (-not $lock.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
     $state = @{
         Mode = 'show_fields'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
         Limits = @($t.FieldLimits)
+        Required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
         Index = 0; Values = @{}; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+        LockLayer = [int]$t.Layer
     }
     Set-PendingState -ChatId $ChatId -State $state
     Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard)
@@ -1598,6 +1652,12 @@ function Resume-ShowFlow {
     param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "", [switch]$Skip)
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state) { return }
+    $isRequired = $state.Required -and $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
+    if ($isRequired -and ($Skip -or [string]::IsNullOrWhiteSpace($Value))) {
+        $message = if ($Skip) { "❌ هذا الحقل مطلوب ولا يمكن تخطيه." } else { "❌ هذا الحقل مطلوب ولا يمكن تركه فارغًا." }
+        Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-FieldPromptKeyboard)
+        return
+    }
     if (-not $Skip) {
         # Re-prompt rather than push oversized text: a pasted paragraph would
         # otherwise go straight to air and wreck the graphic's layout.
@@ -2916,7 +2976,7 @@ function Update-PendingExpiry {
     foreach ($chatId in @($script:PendingState.Keys)) {
         $state = $script:PendingState[$chatId]
         if (((Get-Date) - $state.StartedAt).TotalMinutes -ge $stateTimeout) {
-            $script:PendingState.Remove($chatId)
+            Clear-PendingState -ChatId ([long]$chatId)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
             Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId ([long]$chatId))
         }

@@ -15,8 +15,23 @@ long-polling loop.
 
 ## Version 3.0
 
-Version 3.0 adds read-only operational monitoring while retaining the existing
-permission model and all 2.x configuration files:
+Version 3.0 strengthens on-air safety, scheduling, content management, and
+operational monitoring while retaining the existing two-level permission
+model and compatibility with 2.x configuration files:
+
+- Every `SHOW` source—including template buttons, presets, and typed commands—
+  passes through a review screen. Required fields, per-layer preparation locks,
+  previous/edit/preview controls, and two-step hide-all confirmation reduce
+  accidental on-air changes.
+- Operator drafts survive a restart for the configured pending-state lifetime.
+  Recent field values are stored per user and field as quick choices; fields
+  marked `sensitive: true` and secret-like field names are never recorded.
+- `📅 الجدولة` supports one-time, daily, and weekly events, verifies the local
+  clock/time zone, stores events atomically, lists/cancels upcoming events, and
+  records execution before contacting Cinegy to avoid replay after a crash.
+- Administrators can create, edit, rename, and delete template presets from
+  Telegram. Every change is reviewed first, written atomically, and preceded
+  by a timestamped `templates.json` backup.
 
 - `ℹ️ الحالة` checks every GFX layer referenced by `templates.json` and labels
   it on-air, hidden, external, or unknown.
@@ -30,6 +45,8 @@ permission model and all 2.x configuration files:
 - Admin settings changes create timestamped backups automatically. The
   `🗄 نسخ الإعدادات` screen validates, compares, and restores a selected copy
   only after explicit confirmation.
+- `🧪 التشخيص` includes queues, locks, schedule state, Cinegy telemetry, and
+  local paths while redacting tokens and stream secrets.
 - Permissions remain the same two effective levels: regular authorized user
   and administrator. The bot's intended deployment is private chats; no group
   workflow or migration is required for 3.0.
@@ -64,8 +81,8 @@ host that can reach the engine's control port.
 | `templates.example.json` | Named title templates (friendly key → `.cintitle` path, GFX layer, field list, optional `order` and `presets`). Copy to `templates.json` and edit. |
 | `Install-BridgeTask.ps1` / `Uninstall-BridgeTask.ps1` | Registers/removes a Windows Scheduled Task so the bridge auto-starts at boot and auto-restarts on crash — see "Make it run like a service" below. |
 | `Install-BridgeService-NSSM.ps1` / `Uninstall-BridgeService-NSSM.ps1` | Alternative to the above: registers/removes a real Windows Service via [NSSM](https://nssm.cc/), with its own stdout/stderr logs. |
-| `Run-Checks.ps1` | Syntax check + PSScriptAnalyzer + Pester in one command. Run it after every change; it touches nothing live. |
-| `Tests\Bridge.Tests.ps1` | Unit tests for the pure logic — message chunking, argument quoting, secret redaction, template parsing. |
+| `Run-Checks.ps1` | Required-file and JSON validation + syntax check + PSScriptAnalyzer + Pester in one command. Run it after every change; it touches nothing live. |
+| `Tests\Bridge.Tests.ps1` | Unit tests for safety gates, Cinegy state/health, persistence, presets, scheduling, configuration recovery, and core helpers. |
 | `REVIEW.md` / `REVIEW-2.md` | Technical reviews: findings, impact, recommended fixes, and an honest critique of what is still weak. |
 | `TASKS.md` | Implementation log — what was built for each review item, and the one item still needing your action (rotating the bot token). |
 
@@ -173,10 +190,12 @@ be able to trigger by name, e.g.:
   reading them programmatically.
 - A `fields` entry may be a plain variable name, **or** an object carrying a
   human label, an optional character limit, and `required: true` when the
-  operator must not leave it empty or use the skip button:
+  operator must not leave it empty or use the skip button. Use
+  `sensitive: true` to prevent a field's values from entering recent-value
+  history:
   ```json
   "maxLength": 120,
-  "fields": [ { "name": "Ajel.center", "label": "نص الخبر العاجل", "maxLength": 80, "required": true } ]
+  "fields": [ { "name": "Ajel.center", "label": "نص الخبر العاجل", "maxLength": 80, "required": true, "sensitive": false } ]
   ```
   Both forms can be mixed freely; plain strings keep working unchanged.
 - **Character limits** resolve in this order: the field's own `maxLength` →
@@ -222,8 +241,9 @@ pwsh -File .\TelegramBridge.ps1 -ConfigPath .\config.json
 ```
 
 > Passing checks are necessary, not sufficient. Always follow with a quick
-> smoke test in Telegram — `/بدء` → a template with fields → ⏭ تخطي →
-> 🚨 إخفاء الكل — before relying on a build during a live programme.
+> smoke test in Telegram — `/بدء` → a template with required fields → review
+> → confirm → hide the layer → 🚨 إخفاء الكل → confirm — before relying on a
+> build during a live programme.
 
 Leave it running — it long-polls Telegram in a loop. Good for a first test;
 for anything beyond that, install it as a persistent background task (next
@@ -312,8 +332,10 @@ menu:
 🙈 اخفاء طبقة          🚪 خروج من المشهد
 🚨 إخفاء الكل          🔁 إعادة الأخير
 ✏️ تحديث نص           ⏱ عرض مؤقّت
+📅 الجدولة
 📸 صورة من البث        ❓ مساعدة
 ⚙️ الإعدادات           👤 طلبات الوصول    ← مشرفون فقط
+⚡ إدارة النصوص الجاهزة                    ← مشرفون فقط
 ▶️ بدء البث            🔗 رابط البث       ← مشرفون فقط
 📜 السجل              🛠 أمر خام         ← مشرفون فقط
 ```
@@ -321,20 +343,18 @@ menu:
 **For every operator**
 
 - **📋 القوالب** → lists every template from `templates.json` as a button.
-  Tap one: if it has no editable fields it goes on air immediately; if it
-  has fields, the bot asks for each field's text one message at a time
-  (with **⏭ تخطي** to leave a field blank and **❌ إلغاء** to abort), then
-  pushes the template with the collected values. Templates that define
-  `presets` also show ⚡ one-tap buttons for those saved phrasings.
+  The bot collects editable fields one message at a time, then always shows a
+  final review before Cinegy receives `SHOW`; templates without fields and
+  preset buttons follow the same review gate. Previous/edit/preview/cancel
+  controls preserve the draft while navigating.
 - **⭐ favourites** → the most-used templates get their own row at the top,
   so the everyday ones are one tap away. Counts live in `logs/usage.json`;
   the row size is `FavoritesCount` and it can be switched off entirely.
 - **🙈 اخفاء طبقة** / **🚪 خروج من المشهد** → shows a button per known GFX
   layer (derived from the layers used in `templates.json`) — tap one to
   hide that layer / exit its scene, no need to type a layer number.
-- **🚨 إخفاء الكل** → emergency button: hides *every* known layer in one
-  press and cancels any pending auto-hide timers. This is the one to reach
-  for when something wrong is on air.
+- **🚨 إخفاء الكل** → emergency button: shows the affected layers and requires
+  a second confirmation before hiding them and cancelling pending timers.
 - **🔴 على الهواء** → a row appears at the top of the menu with one button per
   layer the bridge believes is currently live, labelled with the template
   name; tapping it hides that layer. The same information (with how long it
@@ -345,7 +365,10 @@ menu:
   screen additionally queries Cinegy itself, so an active item started outside
   the bot appears as **خارجي**; a failed query appears as **غير معروف**, never
   as hidden.
-- **🔁 إعادة الأخير** → repeats your last show with the same values.
+- **🔁 تكرار مع تعديل** → opens the last values as a new editable draft.
+- **📅 الجدولة** → creates reviewed one-time/daily/weekly events and lists or
+  cancels upcoming events. Persistent execution keys prevent replay after a
+  restart at the critical moment.
 - **✏️ تحديث نص** → pick a template (used only as a reference for its field
   names), then pick the field, then send the new text — pushed live via
   `/postbox` without re-showing the template.
@@ -404,10 +427,9 @@ menu:
 Every bot reply carries the main menu keyboard again, so operators can keep
 tapping through a full session without ever typing.
 
-If you start filling in a template's fields and then wander off, the flow
-expires after `PendingStateTimeoutMinutes` and the bot tells you so. This
-matters: without it, a stray message sent hours later would be swallowed as
-the next field value and could put unintended text on air.
+Show drafts are written atomically to `logs/drafts.json` and restored after a
+restart, but still expire after `PendingStateTimeoutMinutes`. This prevents a
+stray message sent much later from becoming an unintended on-air value.
 
 ### If you get lost: three ways back
 

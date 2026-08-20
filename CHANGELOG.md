@@ -2,6 +2,19 @@
 
 ## 3.0.0 — 2026-08-20
 
+- Added mandatory review before every interactive, preset, or typed `SHOW`,
+  required fields, layer preparation locks, draft navigation, previews, and
+  two-step confirmation for hide-all.
+- Added persistent per-user drafts, repeat-with-edit, recent field choices that
+  exclude sensitive values, and a live quick-action layer panel.
+- Added administrator preset creation, value editing, rename, and deletion with
+  review, atomic writes, and timestamped template-registry backups.
+- Added reliable one-time, daily, and weekly scheduling with clock/time-zone
+  validation, upcoming-event cancellation, atomic persistence, and crash-safe
+  occurrence keys that prevent automatic replay.
+- Added `/health`, Telegram/Cinegy latency and health history, startup and
+  recovery notifications, and a redacted administrator diagnostics report.
+- Added configuration backup comparison/restoration and migration coverage.
 - Added a real Cinegy dashboard for every GFX layer referenced by the template
   registry, distinguishing bridge-owned, external, hidden, and unknown state.
 - Added layer metadata from Cinegy `/status`: active item name, output state,
@@ -11,8 +24,10 @@
 - Added deduplicated admin alerts for external scene changes, unhealthy or
   unreachable telemetry, and health recovery.
 - Bounded automatic monitoring requests with a dedicated short timeout.
-- Kept the existing regular-user/admin permission model and 2.x configuration
-  schema unchanged.
+- Expanded the release gate to validate required files, JSON, PowerShell
+  syntax, PSScriptAnalyzer, and the complete Pester suite.
+- Kept the existing regular-user/admin permission model and automatic migration
+  of 2.x configuration settings.
 
 ## 2.8.4
 

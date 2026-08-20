@@ -4,7 +4,7 @@
     "path": "C:\\Cinegy\\Titler\\Scenes\\Lower3rd.cintitle",
     "layer": 5,
     "order": 10,
-    "_comment_fields": "A field is either a plain variable name, or an object with a friendly label and an optional maxLength. Limit resolution: field maxLength -> template maxLength -> the global Settings.MaxFieldLength.",
+    "_comment_fields": "A field is either a plain variable name, or an object with label, maxLength, required, and sensitive. sensitive=true prevents recent-value storage. Limit resolution: field maxLength -> template maxLength -> Settings.MaxFieldLength.",
     "maxLength": 120,
     "fields": [
       { "name": "TopText.Text", "label": "العنوان الرئيسي", "maxLength": 40, "required": true },

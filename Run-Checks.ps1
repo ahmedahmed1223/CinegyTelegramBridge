@@ -31,16 +31,50 @@ function Write-Section {
     Write-Host ("=" * 64) -ForegroundColor DarkGray
 }
 
-# ---------------------------------------------------------------- parse check
-Write-Section "1/3  Syntax (PowerShell parser)"
+# ---------------------------------------------------------- files and JSON
+Write-Section "1/4  Required files and JSON"
 $files = @(
+    'TelegramBridge.ps1', 'CinegyAirTitler.psm1',
+    'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
+    'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
+    'config.example.json', 'templates.example.json',
+    'Tests\Bridge.Tests.ps1', 'README.md', 'CHANGELOG.md'
+)
+foreach ($file in $files) {
+    $path = Join-Path $root $file
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $failed = $true
+        Write-Host "  FAIL  missing $file" -ForegroundColor Red
+    }
+    else { Write-Host "  ok    $file" -ForegroundColor Green }
+}
+
+$jsonFiles = @('config.example.json', 'templates.example.json')
+foreach ($optional in @('config.json', 'templates.json')) {
+    if (Test-Path -LiteralPath (Join-Path $root $optional) -PathType Leaf) { $jsonFiles += $optional }
+}
+foreach ($file in $jsonFiles) {
+    $path = Join-Path $root $file
+    try {
+        Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop | Out-Null
+        Write-Host "  json  $file" -ForegroundColor Green
+    }
+    catch {
+        $failed = $true
+        Write-Host "  FAIL  invalid JSON in $file`: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# ---------------------------------------------------------------- parse check
+Write-Section "2/4  Syntax (PowerShell parser)"
+$powerShellFiles = @(
     'TelegramBridge.ps1', 'CinegyAirTitler.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1'
 )
-foreach ($file in $files) {
+foreach ($file in $powerShellFiles) {
     $path = Join-Path $root $file
-    if (-not (Test-Path $path)) { continue }
+    if (-not (Test-Path -LiteralPath $path)) { continue }
     $errors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$errors) | Out-Null
     if ($errors -and $errors.Count -gt 0) {
@@ -54,11 +88,12 @@ foreach ($file in $files) {
 }
 
 # ------------------------------------------------------------------- analyzer
-Write-Section "2/3  PSScriptAnalyzer"
+Write-Section "3/4  PSScriptAnalyzer"
 if ($SkipAnalyzer) {
     Write-Host "  skipped (-SkipAnalyzer)" -ForegroundColor Yellow
 }
 elseif (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+    $failed = $true
     Write-Host "  PSScriptAnalyzer is not installed. To enable this check:" -ForegroundColor Yellow
     Write-Host "      Install-Module PSScriptAnalyzer -Scope CurrentUser" -ForegroundColor Yellow
 }
@@ -82,11 +117,12 @@ else {
 }
 
 # ----------------------------------------------------------------------- tests
-Write-Section "3/3  Pester tests"
+Write-Section "4/4  Pester tests"
 if ($SkipTests) {
     Write-Host "  skipped (-SkipTests)" -ForegroundColor Yellow
 }
 elseif (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version.Major -ge 5 })) {
+    $failed = $true
     Write-Host "  Pester 5+ is not installed. To enable these tests:" -ForegroundColor Yellow
     Write-Host "      Install-Module Pester -MinimumVersion 5.0 -Scope CurrentUser -Force" -ForegroundColor Yellow
 }
@@ -97,7 +133,7 @@ else {
     $cfg.Output.Verbosity = 'Detailed'
     $cfg.Run.PassThru = $true
     $result = Invoke-Pester -Configuration $cfg
-    if ($result.FailedCount -gt 0) { $failed = $true }
+    if ($result.FailedCount -gt 0 -or $result.Errors.Count -gt 0) { $failed = $true }
 }
 
 Write-Section "Result"

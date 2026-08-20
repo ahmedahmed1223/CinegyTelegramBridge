@@ -459,7 +459,8 @@ Describe 'Help guidance' {
     It 'gives an actionable short path for common on-air operations' {
         $help = Get-HelpText
 
-        $help | Should -Match '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← إرسال'
+        $help | Should -Match '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← راجع القيم ← تأكيد الإرسال'
+        $help | Should -Match '📅 الجدولة'
         $help | Should -Match '✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد'
         $help | Should -Match '⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص'
     }

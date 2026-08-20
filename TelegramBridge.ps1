@@ -681,13 +681,82 @@ function Test-Admin {
 
 $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
 
+function Get-TemplateRegistryFilePath {
+    $configured = [string]$config.TemplateRegistryPath
+    if ([System.IO.Path]::IsPathRooted($configured)) { return $configured }
+    return (Join-Path $scriptRoot $configured)
+}
+
+function Save-TemplatePresetChange {
+    <# Mutates only the presets array of one template. A timestamped backup is
+       taken first and the final JSON replaces the original atomically. #>
+    param(
+        [Parameter(Mandatory)][string]$TemplateKey,
+        [Parameter(Mandatory)][ValidateSet('create', 'rename', 'edit', 'delete')][string]$Action,
+        [int]$PresetIndex = -1,
+        [string]$Name = '',
+        [object[]]$Values = @()
+    )
+    $path = Get-TemplateRegistryFilePath
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $template = Get-JsonProp $raw $TemplateKey
+        if (-not $template) { throw "Template '$TemplateKey' was not found." }
+        $presets = @(Get-JsonProp $template 'presets' | Where-Object { $null -ne $_ })
+
+        if ($Action -eq 'create') {
+            if ([string]::IsNullOrWhiteSpace($Name)) { throw 'Preset name is empty.' }
+            if (@($presets | Where-Object { [string](Get-JsonProp $_ 'name') -eq $Name }).Count -gt 0) {
+                throw "Preset '$Name' already exists."
+            }
+            $presets += [pscustomobject]@{ name = $Name.Trim(); values = @($Values | ForEach-Object { [string]$_ }) }
+        }
+        else {
+            if ($PresetIndex -lt 0 -or $PresetIndex -ge $presets.Count) { throw 'Preset index is no longer valid.' }
+            switch ($Action) {
+                'rename' {
+                    if ([string]::IsNullOrWhiteSpace($Name)) { throw 'Preset name is empty.' }
+                    $presets[$PresetIndex] | Add-Member -NotePropertyName name -NotePropertyValue $Name.Trim() -Force
+                }
+                'edit' {
+                    $presets[$PresetIndex] | Add-Member -NotePropertyName values -NotePropertyValue @($Values | ForEach-Object { [string]$_ }) -Force
+                }
+                'delete' {
+                    $presets = @($presets | Where-Object { $_ -ne $presets[$PresetIndex] })
+                }
+            }
+        }
+        $template | Add-Member -NotePropertyName presets -NotePropertyValue @($presets) -Force
+
+        $backupDir = "$path.backups"
+        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+        $backupPath = Join-Path $backupDir "templates-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $keep = Get-SettingInt 'ConfigBackupKeepFiles' 1
+        if ($keep -gt 0) {
+            @(Get-ChildItem -LiteralPath $backupDir -Filter '*.json' -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip $keep) |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+        }
+
+        $temporary = "$path.tmp"
+        $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+        return [pscustomobject]@{ Success = $true; Error = ''; BackupPath = $backupPath }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' }
+    }
+}
+
 function Get-TemplateStore {
     <# Returns @{ Map; Order; Errors }. Cached on the file's LastWriteTimeUtc,
        so editing templates.json takes effect immediately without a restart,
        but a single button press no longer re-parses the file a dozen times.
        Order is sorted by the optional "order" field then by key, so button
        positions stay stable between renders (hashtable order is not). #>
-    $path = Join-Path $scriptRoot $config.TemplateRegistryPath
+    $path = Get-TemplateRegistryFilePath
     if (-not (Test-Path $path)) {
         return @{ Map = @{}; Order = @(); Errors = @("ملف القوالب غير موجود: $path") }
     }
@@ -1341,6 +1410,7 @@ function Get-MainMenuKeyboard {
         $pendingCount = $script:PendingApprovals.Count
         $pendingLabel = if ($pendingCount -gt 0) { "👤 طلبات الوصول ($pendingCount)" } else { "👤 طلبات الوصول" }
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
+        $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
 
         if (Get-Setting 'EnableLiveRelay') {
             $relayRunning = [bool](Get-RunningRelayProcess)
@@ -1393,6 +1463,45 @@ function Get-LayersKeyboard {
     if ($row.Count -gt 0) { $rows += , $row }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-PresetAdminTemplatesKeyboard {
+    $store = Get-TemplateStore
+    $rows = @()
+    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+        $template = $store.Map[$store.Order[$i]]
+        $rows += , @( (New-Button "$($template.Key) ($(@($template.Presets).Count))" "padm:$i") )
+    }
+    $rows += , @( (New-Button "⬅️ القائمة" 'menu') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-PresetAdminKeyboard {
+    param([Parameter(Mandatory)][int]$TemplateIndex)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    $rows = @()
+    if ($template) {
+        for ($i = 0; $i -lt @($template.Presets).Count; $i++) {
+            $rows += , @( (New-Button "⚡ $($template.Presets[$i].Name)" "pa:$TemplateIndex`:$i") )
+        }
+        $rows += , @( (New-Button "➕ إنشاء نص جاهز" "pac:$TemplateIndex") )
+    }
+    $rows += , @( (New-Button "⬅️ القوالب" 'menu:presetsadmin') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-PresetActionKeyboard {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex)
+    return @{ inline_keyboard = @(
+            , @( (New-Button "✏️ تعديل القيم" "pae:$TemplateIndex`:$PresetIndex"), (New-Button "🏷 إعادة تسمية" "par:$TemplateIndex`:$PresetIndex") )
+            , @( (New-Button "🗑 حذف" "pad:$TemplateIndex`:$PresetIndex"), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
+        ) }
+}
+
+function Get-PresetReviewKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "✅ حفظ التغيير" 'presetadmin:confirm'), (New-Button "❌ إلغاء" 'cancel') )
+        ) }
 }
 
 function Get-LayerDashboardKeyboard {
@@ -2217,6 +2326,108 @@ function Invoke-PresetShow {
         $variables[[string]$t.Fields[$i]] = [string]$preset.Values[$i]
     }
     Start-ShowFlow -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId -InitialValues $variables -ReviewImmediately
+}
+
+function Show-PresetAdminTemplate {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب لم يعد موجودًا." -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
+        return
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "⚡ النصوص الجاهزة للقالب '$($template.Key)'`nاختر نصًا لإدارته أو أنشئ نصًا جديدًا:" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $TemplateIndex)
+}
+
+function Show-PresetAdminReview {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
+    $actionLabel = switch ([string]$State.Action) {
+        'create' { 'إنشاء' }; 'edit' { 'تعديل القيم' }; 'rename' { 'إعادة تسمية' }; 'delete' { 'حذف' }
+    }
+    $lines = @("🔎 مراجعة تغيير النص الجاهز", "العملية: $actionLabel", "القالب: $($State.TemplateKey)")
+    if ($State.Name) { $lines += "الاسم: $($State.Name)" }
+    if ($State.Action -in @('create', 'edit')) {
+        for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
+            $value = if ($i -lt @($State.Values).Count) { [string]$State.Values[$i] } else { '' }
+            $lines += "• $($State.Fields[$i]): $value"
+        }
+    }
+    $lines += ''
+    $lines += 'لن يُعدّل ملف القوالب حتى تضغط حفظ التغيير.'
+    $State.Mode = 'preset_admin_review'
+    Set-PendingState -ChatId $ChatId -State $State
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-PresetReviewKeyboard)
+}
+
+function Start-PresetAdminCreate {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) { return }
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = 'preset_admin_name'; Action = 'create'; TemplateIndex = $TemplateIndex
+        TemplateKey = [string]$template.Key; PresetIndex = -1; UserId = $UserId
+        Fields = @($template.Fields); Values = @(); Name = ''; Index = 0
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل اسم النص الجاهز الجديد للقالب '$($template.Key)':" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Start-PresetAdminEditValues {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template -or $PresetIndex -lt 0 -or $PresetIndex -ge @($template.Presets).Count) { return }
+    $state = @{
+        Mode = 'preset_admin_values'; Action = 'edit'; TemplateIndex = $TemplateIndex
+        TemplateKey = [string]$template.Key; PresetIndex = $PresetIndex; UserId = $UserId
+        Fields = @($template.Fields); Values = @(); Name = [string]$template.Presets[$PresetIndex].Name; Index = 0
+    }
+    if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-PresetAdminText {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    if ($state.Mode -eq 'preset_admin_name') {
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            Send-TelegramMessage -ChatId $ChatId -Text "الاسم لا يمكن أن يكون فارغًا." -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $state.Name = $Value.Trim()
+        if ($state.Action -eq 'rename') { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        $state.Mode = 'preset_admin_values'
+        if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    if ($state.Mode -eq 'preset_admin_values') {
+        $state.Values = @($state.Values) + @([string]$Value)
+        $state.Index = [int]$state.Index + 1
+        if ($state.Index -ge $state.Fields.Count) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل ($($state.Index + 1)/$($state.Fields.Count)):`n$($state.Fields[$state.Index])" -ReplyMarkup (Get-CancelKeyboard)
+    }
+}
+
+function Confirm-PresetAdminChange {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'preset_admin_review' -or [long]$state.UserId -ne $UserId) {
+        Send-TelegramMessage -ChatId $ChatId -Text "انتهت مراجعة التغيير. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $templateIndex = [int]$state.TemplateIndex
+    $result = Save-TemplatePresetChange -TemplateKey ([string]$state.TemplateKey) -PresetIndex ([int]$state.PresetIndex) -Action ([string]$state.Action) -Name ([string]$state.Name) -Values @($state.Values)
+    Clear-PendingState -ChatId $ChatId
+    if ($result.Success) {
+        Write-BridgeLog "Admin $UserId applied preset $($state.Action) to template '$($state.TemplateKey)'"
+        Add-AuditEntry "⚡ Preset $($state.Action) / $($state.TemplateKey) - admin $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ تغيير النص الجاهز، وأُنشئت نسخة احتياطية." -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ التغيير: $($result.Error)" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+    }
 }
 
 function Invoke-TemplatesCommand {
@@ -3338,6 +3549,73 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:presetsadmin' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text "⚡ إدارة النصوص الجاهزة`nاختر القالب:" -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
+            }
+            break
+        }
+        'padm:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Show-PresetAdminTemplate -TemplateIndex ([int]$data.Substring(5)) -ChatId $chatId
+            }
+            break
+        }
+        'pa:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $presetParts = $data -split ':'
+            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
+            $template = Get-TemplateByIndex -Index $templateIndex
+            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
+            Send-TelegramMessage -ChatId $chatId -Text "⚡ $($template.Presets[$presetIndex].Name)`nاختر العملية المطلوبة:" -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
+            break
+        }
+        'pac:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Start-PresetAdminCreate -TemplateIndex ([int]$data.Substring(4)) -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'pae:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $presetParts = $data -split ':'
+            Start-PresetAdminEditValues -TemplateIndex ([int]$presetParts[1]) -PresetIndex ([int]$presetParts[2]) -ChatId $chatId -UserId $userId
+            break
+        }
+        'par:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $presetParts = $data -split ':'
+            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
+            $template = Get-TemplateByIndex -Index $templateIndex
+            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
+            Set-PendingState -ChatId $chatId -State @{
+                Mode = 'preset_admin_name'; Action = 'rename'; TemplateIndex = $templateIndex
+                TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
+                Fields = @($template.Fields); Values = @(); Name = [string]$template.Presets[$presetIndex].Name; Index = 0
+            }
+            Send-TelegramMessage -ChatId $chatId -Text "أرسل الاسم الجديد لـ '$($template.Presets[$presetIndex].Name)':" -ReplyMarkup (Get-CancelKeyboard)
+            break
+        }
+        'pad:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $presetParts = $data -split ':'
+            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
+            $template = Get-TemplateByIndex -Index $templateIndex
+            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
+            Show-PresetAdminReview -ChatId $chatId -State @{
+                Mode = 'preset_admin_review'; Action = 'delete'; TemplateIndex = $templateIndex
+                TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
+                Fields = @($template.Fields); Values = @($template.Presets[$presetIndex].Values)
+                Name = [string]$template.Presets[$presetIndex].Name; Index = 0
+            }
+            break
+        }
+        'presetadmin:confirm' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Confirm-PresetAdminChange -ChatId $chatId -UserId $userId
+            }
+            break
+        }
         'menu:backups' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Send-TelegramMessage -ChatId $chatId -Text "🗄 نسخ الإعدادات المحفوظة:" -ReplyMarkup (Get-ConfigBackupsKeyboard)
@@ -3793,6 +4071,7 @@ try {
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text }
+                                { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text }
                                 default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj }
                             }
                         }

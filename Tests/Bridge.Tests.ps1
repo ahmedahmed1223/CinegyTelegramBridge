@@ -375,6 +375,86 @@ Describe 'Configuration migration' {
     }
 }
 
+Describe 'Telegram preset management storage' {
+    BeforeEach {
+        $script:OriginalTemplateRegistryPathForTest = $config.TemplateRegistryPath
+        $script:PresetRegistryPathForTest = Join-Path $TestDrive 'templates.json'
+        @{
+            urgent = @{
+                path = 'D:\CG\urgent.cintitle'; layer = 4
+                fields = @('Headline.Text')
+                presets = @(@{ name = 'قديم'; values = @('قيمة قديمة') })
+            }
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:PresetRegistryPathForTest -Encoding utf8
+        $config.TemplateRegistryPath = $script:PresetRegistryPathForTest
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+        Mock Get-SettingInt { 10 }
+    }
+
+    AfterEach {
+        $config.TemplateRegistryPath = $script:OriginalTemplateRegistryPathForTest
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+    }
+
+    It 'creates a preset atomically and makes a timestamped backup' {
+        $result = Save-TemplatePresetChange -TemplateKey 'urgent' -Action create -Name 'جديد' -Values @('قيمة جديدة')
+        $saved = Get-Content -LiteralPath $script:PresetRegistryPathForTest -Raw | ConvertFrom-Json
+
+        $result.Success | Should -BeTrue
+        @($saved.urgent.presets.name) | Should -Contain 'جديد'
+        @(Get-ChildItem -LiteralPath "$($script:PresetRegistryPathForTest).backups" -Filter '*.json').Count | Should -Be 1
+    }
+
+    It 'renames edits and deletes an existing preset by index' {
+        Save-TemplatePresetChange -TemplateKey 'urgent' -PresetIndex 0 -Action rename -Name 'مُعاد' | Out-Null
+        Save-TemplatePresetChange -TemplateKey 'urgent' -PresetIndex 0 -Action edit -Values @('معدلة') | Out-Null
+        $edited = Get-Content -LiteralPath $script:PresetRegistryPathForTest -Raw | ConvertFrom-Json
+        $edited.urgent.presets[0].name | Should -Be 'مُعاد'
+        $edited.urgent.presets[0].values[0] | Should -Be 'معدلة'
+
+        $result = Save-TemplatePresetChange -TemplateKey 'urgent' -PresetIndex 0 -Action delete
+        $saved = Get-Content -LiteralPath $script:PresetRegistryPathForTest -Raw | ConvertFrom-Json
+
+        $result.Success | Should -BeTrue
+        @($saved.urgent.presets).Count | Should -Be 0
+    }
+}
+
+Describe 'Telegram preset management flow' {
+    BeforeEach {
+        Clear-PendingState -ChatId 91
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'; Layer = 4
+                Fields = @('Headline.Text'); FieldLabels = @('العنوان')
+                Presets = @([pscustomobject]@{ Name = 'قديم'; Values = @('قيمة') })
+            }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Save-TemplatePresetChange { [pscustomobject]@{ Success = $true; Error = ''; BackupPath = 'backup.json' } }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+    }
+
+    AfterEach { Clear-PendingState -ChatId 91 }
+
+    It 'reviews a new preset before saving it and commits only after confirmation' {
+        Start-PresetAdminCreate -TemplateIndex 0 -ChatId 91 -UserId 101
+        Complete-PresetAdminText -ChatId 91 -Value 'عاجل جاهز'
+        Complete-PresetAdminText -ChatId 91 -Value 'النص النهائي'
+
+        (Get-PendingState -ChatId 91).Mode | Should -Be 'preset_admin_review'
+        Should -Invoke Save-TemplatePresetChange -Times 0 -Exactly
+
+        Confirm-PresetAdminChange -ChatId 91 -UserId 101
+
+        Get-PendingState -ChatId 91 | Should -BeNullOrEmpty
+        Should -Invoke Save-TemplatePresetChange -Times 1 -Exactly -ParameterFilter {
+            $TemplateKey -eq 'urgent' -and $Action -eq 'create' -and $Name -eq 'عاجل جاهز' -and $Values[0] -eq 'النص النهائي'
+        }
+    }
+}
+
 Describe 'Help guidance' {
     It 'gives an actionable short path for common on-air operations' {
         $help = Get-HelpText

@@ -1485,3 +1485,26 @@ Describe 'Cinegy monitoring watchdogs' {
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تعافت صحة Cinegy' }
     }
 }
+
+Describe 'Bridge lifecycle notifications' {
+    BeforeEach {
+        $script:TelegramConnectionState = 'unknown'
+        Mock Send-AdminBroadcast { }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'deduplicates Telegram failures and sends one recovery notification' {
+        Set-TelegramConnectionState -Connected:$false -ErrorMessage 'timeout'
+        Set-TelegramConnectionState -Connected:$false -ErrorMessage 'timeout again'
+        Set-TelegramConnectionState -Connected:$true
+
+        Should -Invoke Send-AdminBroadcast -Times 2 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'استعاد.*Telegram' }
+    }
+
+    It 'notifies admins when the bridge starts' {
+        Send-BridgeStartupNotification
+
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'بدأ تشغيل' -and $Text -match $script:BridgeVersion }
+    }
+}

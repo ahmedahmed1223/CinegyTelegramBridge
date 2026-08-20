@@ -1139,6 +1139,7 @@ $script:LastHeartbeatDate = [datetime]::MinValue.Date
 $script:LastCinegyStateCheck = [datetime]::MinValue
 $script:LastCinegyHealthCheck = [datetime]::MinValue
 $script:LastCinegyHealthState = 'unknown'
+$script:TelegramConnectionState = 'unknown'
 $script:LastConfigSaveFailed = $false
 $script:HealthHistory = @{
     Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null }
@@ -3469,6 +3470,26 @@ function Update-CinegyHealthWatchdog {
     }
 }
 
+function Set-TelegramConnectionState {
+    param([Parameter(Mandatory)][bool]$Connected, [string]$ErrorMessage = '')
+    $newState = if ($Connected) { 'connected' } else { 'disconnected' }
+    $oldState = $script:TelegramConnectionState
+    if ($newState -eq $oldState) { return }
+    $script:TelegramConnectionState = $newState
+    Write-BridgeLog "Telegram connection changed from $oldState to $newState"
+    if (-not $Connected) {
+        $safeError = Protect-SensitiveText $ErrorMessage
+        Send-AdminBroadcast -Text "⚠️ فُقد اتصال Telegram: $safeError"
+    }
+    elseif ($oldState -eq 'disconnected') {
+        Send-AdminBroadcast -Text "✅ استعاد البوت اتصال Telegram وعادت دورة التحديث للعمل."
+    }
+}
+
+function Send-BridgeStartupNotification {
+    Send-AdminBroadcast -Text "🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion`nAir: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)"
+}
+
 function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
@@ -3535,6 +3556,7 @@ Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
 foreach ($e in $store.Errors) { Write-BridgeLog "Template warning: $e" "WARN" }
+Send-BridgeStartupNotification
 
 $offset = 0
 if (Get-Setting 'DropPendingUpdatesOnStart') { $offset = Clear-PendingTelegramUpdates }
@@ -3544,6 +3566,7 @@ try {
     while ($true) {
         try {
             $updates = @(Get-TelegramUpdates -Offset $offset -TimeoutSeconds (Get-EffectivePollTimeout))
+            Set-TelegramConnectionState -Connected:$true
             $backoffSeconds = 1
 
             foreach ($update in $updates) {
@@ -3609,6 +3632,7 @@ try {
         }
         catch {
             Write-BridgeLog "Polling error: $($_.Exception.Message)" "ERROR"
+            Set-TelegramConnectionState -Connected:$false -ErrorMessage $_.Exception.Message
             Start-Sleep -Seconds $backoffSeconds
             $backoffSeconds = [Math]::Min($backoffSeconds * 2, 60)
         }

@@ -53,6 +53,7 @@
     "MaxPendingApprovals": 20,
     "PendingApprovalExpiryHours": 24,
     "FavoritesCount": 3,
+    "RecentValuesPerField": 5,
     "LogMaxSizeMB": 10,
     "LogKeepFiles": 5,
     "AuditTrailSize": 50,

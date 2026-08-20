@@ -1228,6 +1228,58 @@ Describe 'Persistent operator drafts' {
     }
 }
 
+Describe 'Recent field values' {
+    BeforeEach {
+        $script:OriginalRecentValuesFileForTest = $script:recentValuesFile
+        $script:recentValuesFile = Join-Path $TestDrive 'recent-values.json'
+        $script:RecentFieldValues.Clear()
+        Mock Get-SettingInt {
+            if ($Name -eq 'RecentValuesPerField') { return 2 }
+            return 1
+        }
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $script:RecentFieldValues.Clear()
+        $script:recentValuesFile = $script:OriginalRecentValuesFileForTest
+    }
+
+    It 'keeps unique newest values per user and field and restores them from disk' {
+        Add-RecentFieldValue -UserId 81 -FieldName 'Headline.Text' -Value 'الأول'
+        Add-RecentFieldValue -UserId 81 -FieldName 'Headline.Text' -Value 'الثاني'
+        Add-RecentFieldValue -UserId 81 -FieldName 'Headline.Text' -Value 'الأول'
+        Add-RecentFieldValue -UserId 81 -FieldName 'Headline.Text' -Value 'الثالث'
+
+        Get-RecentFieldValues -UserId 81 -FieldName 'Headline.Text' | Should -Be @('الثالث', 'الأول')
+        $script:RecentFieldValues.Clear()
+        Import-RecentFieldValues
+        Get-RecentFieldValues -UserId 81 -FieldName 'Headline.Text' | Should -Be @('الثالث', 'الأول')
+    }
+
+    It 'never stores explicitly sensitive values or secret-like field names' {
+        Add-RecentFieldValue -UserId 81 -FieldName 'Caption.Text' -Value 'سر' -Sensitive
+        Add-RecentFieldValue -UserId 81 -FieldName 'BotToken' -Value '123:ABC'
+
+        $script:RecentFieldValues.Count | Should -Be 0
+    }
+
+    It 'shows recent values as indexed quick choices without putting text in callback data' {
+        Add-RecentFieldValue -UserId 81 -FieldName 'Headline.Text' -Value 'خبر سابق'
+        $state = @{
+            UserId = 81; Index = 0; Fields = @('Headline.Text'); Values = @{}
+            Sensitives = @($false)
+        }
+
+        $keyboard = Get-FieldPromptKeyboard -State $state
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_ })
+
+        @($buttons.text) | Should -Contain '🕘 خبر سابق'
+        @($buttons.callback_data) | Should -Contain 'recent:0'
+        (@($buttons.callback_data) -join '|') | Should -Not -Match 'خبر سابق'
+    }
+}
+
 Describe 'Repeat last show with editing' {
     BeforeEach {
         $script:LayerLocks.Clear()

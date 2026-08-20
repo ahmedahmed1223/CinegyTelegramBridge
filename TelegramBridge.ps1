@@ -103,6 +103,7 @@ $script:DefaultSettings = [ordered]@{
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
     FavoritesCount             = 3
+    RecentValuesPerField       = 5       # quick choices remembered per operator and field
     # --- housekeeping ---
     LogMaxSizeMB               = 10
     LogKeepFiles               = 5
@@ -339,6 +340,7 @@ $relayPidFile = Join-Path $logDir "relay.pid"
 $usageFile = Join-Path $logDir "usage.json"
 $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
+$script:recentValuesFile = Join-Path $logDir "recent-values.json"
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -757,6 +759,7 @@ function Get-TemplateStore {
         $fieldLabels = @()
         $fieldLimits = @()
         $fieldRequired = @()
+        $fieldSensitive = @()
         # Name -> Cinegy variable type override (Text|String|Bool|Float).
         # Empty means "use the AirVariableType setting".
         $fieldTypes = @{}
@@ -766,6 +769,7 @@ function Get-TemplateStore {
                 $fieldLabels += ''
                 $fieldLimits += $templateLimit
                 $fieldRequired += $false
+                $fieldSensitive += $false
             }
             else {
                 $fname = [string](Get-JsonProp $f 'name')
@@ -776,6 +780,7 @@ function Get-TemplateStore {
                 $fieldNames += $fname
                 $fieldLabels += [string](Get-JsonProp $f 'label')
                 $fieldRequired += ((Get-JsonProp $f 'required') -eq $true)
+                $fieldSensitive += ((Get-JsonProp $f 'sensitive') -eq $true)
                 $fieldTypes[$fname] = [string](Get-JsonProp $f 'type')
                 # Per-field limit wins over the template default, which wins
                 # over the global setting.
@@ -796,6 +801,7 @@ function Get-TemplateStore {
             FieldLabels = $fieldLabels
             FieldLimits = $fieldLimits
             FieldRequired = $fieldRequired
+            FieldSensitive = $fieldSensitive
             FieldTypes  = $fieldTypes
             MaxLength   = $templateLimit
             Description = [string](Get-JsonProp $entry 'description')
@@ -1095,6 +1101,65 @@ $script:PendingState = @{}
 # same GFX layer.
 $script:LayerLocks = @{}
 
+# UserId|field-name -> newest-first string array. Scoping history by user keeps
+# one operator's editorial text out of another operator's quick choices.
+$script:RecentFieldValues = @{}
+
+function Test-SensitiveFieldName {
+    param([Parameter(Mandatory)][string]$FieldName)
+    return ($FieldName -match '(?i)(password|passphrase|token|secret|stream[._-]?key|كلمة[ _-]?مرور|رمز[ _-]?سري)')
+}
+
+function Get-RecentFieldKey {
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$FieldName)
+    return "$UserId|$FieldName"
+}
+
+function Save-RecentFieldValues {
+    try {
+        $temporary = "$script:recentValuesFile.tmp"
+        $json = ConvertTo-Json -InputObject $script:RecentFieldValues -Depth 4
+        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:recentValuesFile -Force -ErrorAction Stop
+    }
+    catch { Write-BridgeLog "Could not write recent-values.json: $($_.Exception.Message)" "WARN" }
+}
+
+function Import-RecentFieldValues {
+    if (-not (Test-Path -LiteralPath $script:recentValuesFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:recentValuesFile -Raw | ConvertFrom-Json -AsHashtable
+        $script:RecentFieldValues.Clear()
+        foreach ($key in $raw.Keys) {
+            $script:RecentFieldValues[[string]$key] = @($raw[$key] | ForEach-Object { [string]$_ })
+        }
+    }
+    catch { Write-BridgeLog "Could not read recent-values.json: $($_.Exception.Message)" "WARN" }
+}
+
+function Get-RecentFieldValues {
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$FieldName)
+    $key = Get-RecentFieldKey -UserId $UserId -FieldName $FieldName
+    if (-not $script:RecentFieldValues.ContainsKey($key)) { return @() }
+    return @($script:RecentFieldValues[$key])
+}
+
+function Add-RecentFieldValue {
+    param(
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][string]$FieldName,
+        [AllowEmptyString()][string]$Value,
+        [switch]$Sensitive
+    )
+    if ($Sensitive -or (Test-SensitiveFieldName -FieldName $FieldName) -or [string]::IsNullOrWhiteSpace($Value)) { return }
+    $limit = Get-SettingInt 'RecentValuesPerField' 1
+    if ($limit -le 0) { return }
+    $key = Get-RecentFieldKey -UserId $UserId -FieldName $FieldName
+    $values = @($Value) + @(Get-RecentFieldValues -UserId $UserId -FieldName $FieldName | Where-Object { $_ -cne $Value })
+    $script:RecentFieldValues[$key] = @($values | Select-Object -First $limit)
+    Save-RecentFieldValues
+}
+
 function Save-DraftStates {
     <# Only SHOW preparation is recoverable. Short-lived prompts such as raw
        settings or stream URLs are deliberately never written to disk. #>
@@ -1387,12 +1452,30 @@ function Get-CancelKeyboard {
 
 function Get-FieldPromptKeyboard {
     param([hashtable]$State)
+    $rows = @()
+    if ($State -and $State.Fields -and [int]$State.Index -lt @($State.Fields).Count) {
+        $index = [int]$State.Index
+        $fieldName = [string]$State.Fields[$index]
+        $isSensitive = Test-SensitiveFieldName -FieldName $fieldName
+        if ($State.ContainsKey('Sensitives') -and $index -lt @($State.Sensitives).Count) {
+            $isSensitive = $isSensitive -or [bool]$State.Sensitives[$index]
+        }
+        if (-not $isSensitive) {
+            $recent = @(Get-RecentFieldValues -UserId ([long]$State.UserId) -FieldName $fieldName)
+            for ($i = 0; $i -lt $recent.Count; $i++) {
+                $label = [string]$recent[$i]
+                if ($label.Length -gt 32) { $label = $label.Substring(0, 29) + '...' }
+                $rows += , @( (New-Button "🕘 $label" "recent:$i") )
+            }
+        }
+    }
     $row = @()
     if ($State -and [int]$State.Index -gt 0) { $row += (New-Button "⬅️ السابق" "show:back") }
     if ($State -and $State.Values.Count -gt 0) { $row += (New-Button "🔎 معاينة" "show:preview") }
     $row += (New-Button "⏭ تخطي" "skip")
     $row += (New-Button "❌ إلغاء" "cancel")
-    return @{ inline_keyboard = @( , $row ) }
+    $rows += , $row
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-ShowReviewKeyboard {
@@ -1840,6 +1923,7 @@ function Start-ShowFlow {
         $state = @{
             Mode = 'show_review'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
             Limits = @($t.FieldLimits); Required = $required
+            Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
             Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
             LockLayer = [int]$t.Layer
         }
@@ -1851,6 +1935,7 @@ function Start-ShowFlow {
         Mode = 'show_fields'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
         Limits = @($t.FieldLimits)
         Required = $required
+        Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
         Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
         LockLayer = [int]$t.Layer
     }
@@ -1880,7 +1965,13 @@ function Resume-ShowFlow {
         $limit = 0
         if ($state.Limits -and $state.Index -lt @($state.Limits).Count) { $limit = [int]$state.Limits[$state.Index] }
         if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-FieldPromptKeyboard -State $state))) { return }
-        $state.Values[[string]$state.Fields[$state.Index]] = $Value
+        $fieldName = [string]$state.Fields[$state.Index]
+        $state.Values[$fieldName] = $Value
+        $isSensitive = Test-SensitiveFieldName -FieldName $fieldName
+        if ($state.ContainsKey('Sensitives') -and $state.Index -lt @($state.Sensitives).Count) {
+            $isSensitive = $isSensitive -or [bool]$state.Sensitives[$state.Index]
+        }
+        Add-RecentFieldValue -UserId ([long]$state.UserId) -FieldName $fieldName -Value $Value -Sensitive:$isSensitive
     }
     $state.Index++
 
@@ -3176,6 +3267,22 @@ function Invoke-CallbackQuery {
             break
         }
         'skip' { Resume-ShowFlow -ChatId $chatId -Skip; break }
+        'recent:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'show_fields' -or [long]$state.UserId -ne $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text "انتهت مسودة الإدخال. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $recentIndex = [int]($data.Substring(7))
+            $fieldName = [string]$state.Fields[[int]$state.Index]
+            $values = @(Get-RecentFieldValues -UserId $userId -FieldName $fieldName)
+            if ($recentIndex -lt 0 -or $recentIndex -ge $values.Count) {
+                Send-TelegramMessage -ChatId $chatId -Text "القيمة الحديثة لم تعد متاحة." -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+                break
+            }
+            Resume-ShowFlow -ChatId $chatId -Value ([string]$values[$recentIndex])
+            break
+        }
         'menu:templates' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl')
             break
@@ -3616,6 +3723,7 @@ Initialize-Settings
 Import-UsageCounts
 Import-OnAirState
 Import-DraftStates
+Import-RecentFieldValues
 $startupSync = Update-OnAirStateFromCinegy -Reason 'startup'
 if ($startupSync.Failed.Count -gt 0) {
     Write-BridgeLog "Startup state sync could not verify layer(s): $($startupSync.Failed -join ', ')" "WARN"

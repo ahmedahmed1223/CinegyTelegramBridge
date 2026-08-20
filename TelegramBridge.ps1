@@ -1241,7 +1241,26 @@ function Get-CancelKeyboard {
 }
 
 function Get-FieldPromptKeyboard {
-    return @{ inline_keyboard = @( , @( (New-Button "⏭ تخطي" "skip"), (New-Button "❌ إلغاء" "cancel") ) ) }
+    param([hashtable]$State)
+    $row = @()
+    if ($State -and [int]$State.Index -gt 0) { $row += (New-Button "⬅️ السابق" "show:back") }
+    if ($State -and $State.Values.Count -gt 0) { $row += (New-Button "🔎 معاينة" "show:preview") }
+    $row += (New-Button "⏭ تخطي" "skip")
+    $row += (New-Button "❌ إلغاء" "cancel")
+    return @{ inline_keyboard = @( , $row ) }
+}
+
+function Get-ShowReviewKeyboard {
+    param([switch]$HasFields)
+    $row = @( (New-Button "✅ تأكيد الإرسال" "show:confirm") )
+    if ($HasFields) { $row += (New-Button "✏️ تعديل" "show:edit") }
+    return @{ inline_keyboard = @( , $row; , @( (New-Button "❌ إلغاء" "cancel") ) ) }
+}
+
+function Get-HideAllConfirmKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "🚨 نعم، إخفاء الكل" "hideall:confirm"), (New-Button "❌ إلغاء" "cancel") )
+        ) }
 }
 
 function Get-ApprovalKeyboard {
@@ -1622,13 +1641,19 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    if ($t.Fields.Count -eq 0) {
-        Invoke-ShowTemplateResult -Key $t.Key -Variables @{} -ChatId $ChatId -UserId $UserId -AutoHideSeconds $AutoHideSeconds
-        return
-    }
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
     if (-not $lock.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if ($t.Fields.Count -eq 0) {
+        $state = @{
+            Mode = 'show_review'; Key = $t.Key; Fields = @(); Labels = @(); Limits = @(); Required = @()
+            Index = 0; Values = @{}; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+            LockLayer = [int]$t.Layer
+        }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
         return
     }
     $state = @{
@@ -1639,7 +1664,7 @@ function Start-ShowFlow {
         LockLayer = [int]$t.Layer
     }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
 }
 
 function Resume-ShowFlow {
@@ -1655,7 +1680,7 @@ function Resume-ShowFlow {
     $isRequired = $state.Required -and $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
     if ($isRequired -and ($Skip -or [string]::IsNullOrWhiteSpace($Value))) {
         $message = if ($Skip) { "❌ هذا الحقل مطلوب ولا يمكن تخطيه." } else { "❌ هذا الحقل مطلوب ولا يمكن تركه فارغًا." }
-        Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-FieldPromptKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
         return
     }
     if (-not $Skip) {
@@ -1663,18 +1688,39 @@ function Resume-ShowFlow {
         # otherwise go straight to air and wreck the graphic's layout.
         $limit = 0
         if ($state.Limits -and $state.Index -lt @($state.Limits).Count) { $limit = [int]$state.Limits[$state.Index] }
-        if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit)) { return }
+        if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-FieldPromptKeyboard -State $state))) { return }
         $state.Values[[string]$state.Fields[$state.Index]] = $Value
     }
     $state.Index++
 
     if ($state.Index -ge $state.Fields.Count) {
-        Clear-PendingState -ChatId $ChatId
-        Invoke-ShowTemplateResult -Key $state.Key -Variables $state.Values -ChatId $ChatId -UserId $state.UserId -AutoHideSeconds $state.AutoHideSeconds
+        $state.Mode = 'show_review'
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard)
         return
     }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+}
+
+function Format-ShowReviewText {
+    param([Parameter(Mandatory)][hashtable]$State)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("🔎 مراجعة قبل الإرسال")
+    $lines.Add("القالب: $($State.Key)")
+    $lines.Add("الطبقة: $($State.LockLayer)")
+    if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: $($State.AutoHideSeconds) ثانية") }
+    $lines.Add("")
+    for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
+        $name = [string]$State.Fields[$i]
+        $label = $name
+        if ($State.Labels -and $i -lt @($State.Labels).Count -and $State.Labels[$i]) { $label = [string]$State.Labels[$i] }
+        $value = if ($State.Values.ContainsKey($name)) { [string]$State.Values[$name] } else { "(متروك)" }
+        $lines.Add("• $label`: $value")
+    }
+    $lines.Add("")
+    $lines.Add("لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.")
+    return ($lines -join "`n")
 }
 
 function Get-EffectiveFieldLimit {
@@ -2778,6 +2824,62 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text "تم الإلغاء." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
+        'show:confirm' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'show_review' -or [long]$state.UserId -ne $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text "انتهت أو تغيّرت مراجعة الإرسال. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $key = [string]$state.Key
+            $variables = $state.Values
+            $autoHideSeconds = [int]$state.AutoHideSeconds
+            Clear-PendingState -ChatId $chatId
+            Invoke-ShowTemplateResult -Key $key -Variables $variables -ChatId $chatId -UserId $userId -AutoHideSeconds $autoHideSeconds
+            break
+        }
+        'show:edit' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'show_review' -or [long]$state.UserId -ne $userId -or @($state.Fields).Count -eq 0) {
+                Send-TelegramMessage -ChatId $chatId -Text "لا توجد مراجعة قابلة للتعديل. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $state.Mode = 'show_fields'
+            $state.Index = 0
+            Set-PendingState -ChatId $chatId -State $state
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            break
+        }
+        'show:back' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'show_fields' -or [long]$state.UserId -ne $userId -or [int]$state.Index -le 0) {
+                Send-TelegramMessage -ChatId $chatId -Text "لا توجد خطوة سابقة متاحة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $state.Index = [int]$state.Index - 1
+            Set-PendingState -ChatId $chatId -State $state
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            break
+        }
+        'show:preview' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'show_fields' -or [long]$state.UserId -ne $userId -or $state.Values.Count -eq 0) {
+                Send-TelegramMessage -ChatId $chatId -Text "لا توجد قيم مدخلة لمعاينتها بعد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $preview = "🔎 معاينة المسودة الحالية`n`n$(Format-ShowReviewText -State $state)"
+            Send-TelegramMessage -ChatId $chatId -Text $preview -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            break
+        }
+        'hideall:confirm' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'hide_all_review' -or [long]$state.UserId -ne $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text "انتهى أو تغيّر طلب إخفاء الكل. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            Clear-PendingState -ChatId $chatId
+            Invoke-HideAllLayers -ChatId $chatId -UserId $userId
+            break
+        }
         'skip' { Resume-ShowFlow -ChatId $chatId -Skip; break }
         'menu:templates' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl')
@@ -2795,7 +2897,15 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text "اختر الطبقة للخروج من مشهدها:" -ReplyMarkup (Get-LayersKeyboard -Prefix 'exit')
             break
         }
-        'menu:hideall' { Invoke-HideAllLayers -ChatId $chatId -UserId $userId; break }
+        'menu:hideall' {
+            Clear-PendingState -ChatId $chatId
+            $layers = @(Get-KnownLayers)
+            Set-PendingState -ChatId $chatId -State @{
+                Mode = 'hide_all_review'; UserId = $userId; Layers = $layers
+            }
+            Send-TelegramMessage -ChatId $chatId -Text "⚠️ سيتم إخفاء كل الطبقات المعروفة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+            break
+        }
         'menu:repeat' { Invoke-RepeatLastShow -ChatId $chatId -UserId $userId; break }
         'menu:update' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl')

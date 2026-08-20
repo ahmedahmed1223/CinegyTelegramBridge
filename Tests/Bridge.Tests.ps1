@@ -705,6 +705,217 @@ Describe 'Required template fields' {
     }
 }
 
+Describe 'Operator field progress' {
+    It 'shows the current field number and total field count' {
+        $state = @{
+            Key = 'lower-third'
+            Fields = @('First.Text', 'Second.Text', 'Third.Text', 'Fourth.Text')
+            Labels = @('', '', '', '')
+            Limits = @(0, 0, 0, 0)
+            Index = 1
+        }
+
+        Get-FieldPromptText -State $state | Should -Match '\(2/4\)'
+    }
+}
+
+Describe 'SHOW review gate' {
+    BeforeEach {
+        $script:LayerLocks.Clear()
+        Clear-PendingState -ChatId 50
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'
+                Layer = 4
+                Fields = @('Headline.Text')
+                FieldLabels = @('العنوان')
+                FieldLimits = @(80)
+                FieldRequired = @($true)
+            }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-ShowTemplateResult { }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+    }
+
+    AfterEach {
+        Clear-PendingState -ChatId 50
+        $script:LayerLocks.Clear()
+    }
+
+    It 'does not send SHOW when the final field is entered before confirmation' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+
+        $state = Get-PendingState -ChatId 50
+        $state | Should -Not -BeNullOrEmpty
+        $state.Mode | Should -Be 'show_review'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'reviews a template with no fields instead of sending it immediately' {
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'logo'
+                Layer = 2
+                Fields = @()
+                FieldLabels = @()
+                FieldLimits = @()
+                FieldRequired = @()
+            }
+        }
+
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+
+        $state = Get-PendingState -ChatId 50
+        $state | Should -Not -BeNullOrEmpty
+        $state.Mode | Should -Be 'show_review'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'sends the reviewed values only after the operator confirms' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+        $callback = [pscustomobject]@{
+            id = 'confirm-show-1'
+            from = [pscustomobject]@{ id = 60 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 50 } }
+            data = 'show:confirm'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Get-PendingState -ChatId 50 | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+            $Key -eq 'urgent' -and $ChatId -eq 50 -and $UserId -eq 60 -and $Variables['Headline.Text'] -eq 'خبر عاجل'
+        }
+    }
+
+    It 'returns from review to field editing without sending SHOW' {
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+        $callback = [pscustomobject]@{
+            id = 'edit-show-1'
+            from = [pscustomobject]@{ id = 60 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 50 } }
+            data = 'show:edit'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        $state = Get-PendingState -ChatId 50
+        $state.Mode | Should -Be 'show_fields'
+        $state.Index | Should -Be 0
+        $state.Values['Headline.Text'] | Should -Be 'خبر عاجل'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'moves to the previous field without losing entered values' {
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'lower-third'; Layer = 4
+                Fields = @('First.Text', 'Second.Text')
+                FieldLabels = @('الأول', 'الثاني')
+                FieldLimits = @(80, 80)
+                FieldRequired = @($false, $false)
+            }
+        }
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'القيمة الأولى'
+        $callback = [pscustomobject]@{
+            id = 'previous-field-1'
+            from = [pscustomobject]@{ id = 60 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 50 } }
+            data = 'show:back'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        $state = Get-PendingState -ChatId 50
+        $state.Index | Should -Be 0
+        $state.Values['First.Text'] | Should -Be 'القيمة الأولى'
+    }
+
+    It 'previews entered values without advancing or sending SHOW' {
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'lower-third'; Layer = 4
+                Fields = @('First.Text', 'Second.Text')
+                FieldLabels = @('الأول', 'الثاني')
+                FieldLimits = @(80, 80)
+                FieldRequired = @($false, $false)
+            }
+        }
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'القيمة الأولى'
+        $callback = [pscustomobject]@{
+            id = 'preview-draft-1'
+            from = [pscustomobject]@{ id = 60 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 50 } }
+            data = 'show:preview'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        (Get-PendingState -ChatId 50).Index | Should -Be 1
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 50 -and $Text -match 'معاينة المسودة'
+        }
+    }
+}
+
+Describe 'Hide-all confirmation gate' {
+    BeforeEach {
+        Clear-PendingState -ChatId 70
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-HideAllLayers { }
+        Mock Get-KnownLayers { @(2, 4) }
+    }
+
+    AfterEach { Clear-PendingState -ChatId 70 }
+
+    It 'does not hide layers when the emergency button is first pressed' {
+        $callback = [pscustomobject]@{
+            id = 'hide-all-review-1'
+            from = [pscustomobject]@{ id = 80 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 70 } }
+            data = 'menu:hideall'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Invoke-HideAllLayers -Times 0 -Exactly
+        $state = Get-PendingState -ChatId 70
+        $state | Should -Not -BeNullOrEmpty
+        $state.Mode | Should -Be 'hide_all_review'
+    }
+
+    It 'hides all layers only after the operator confirms' {
+        $review = [pscustomobject]@{
+            id = 'hide-all-review-2'
+            from = [pscustomobject]@{ id = 80 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 70 } }
+            data = 'menu:hideall'
+        }
+        Invoke-CallbackQuery -CallbackQuery $review
+        $confirm = [pscustomobject]@{
+            id = 'hide-all-confirm-2'
+            from = [pscustomobject]@{ id = 80 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 70 } }
+            data = 'hideall:confirm'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $confirm
+
+        Should -Invoke Invoke-HideAllLayers -Times 1 -Exactly -ParameterFilter { $ChatId -eq 70 -and $UserId -eq 80 }
+        Get-PendingState -ChatId 70 | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'On-air identity persistence' {
     BeforeEach {
         $script:OriginalOnAirFileForTest = $script:onAirFile

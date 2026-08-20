@@ -282,8 +282,36 @@ Describe 'Escape-XmlValue (CinegyAirTitler)' {
 }
 
 Describe 'Get-TitlerLayerStatus' {
+    It 'reports hidden when the active playlist item is Cinegy empty filler' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '<Item Id="{86078791-9CB3-11F1-96C0-C85EA97266A8}" IsEmpty="y"/>'
+                }
+            }
+            return [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Status><Active Id="{86078791-9CB3-11F1-96C0-C85EA97266A8}"/></Status>'
+            }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 4
+
+        $result.Success | Should -BeTrue
+        $result.IsOnAir | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://air-host:5521/gfx_4/status/active' }
+    }
+
     It 'reports a layer as on air when Cinegy returns a non-zero Active id' {
         Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '<Item Id="{D0B60C83-9CA7-11F1-96C0-C85EA97266A8}" IsEmpty="n"/>'
+                }
+            }
             [pscustomobject]@{
                 StatusCode = 200
                 Content = '<Status><Active Id="{D0B60C83-9CA7-11F1-96C0-C85EA97266A8}"/></Status>'
@@ -297,6 +325,8 @@ Describe 'Get-TitlerLayerStatus' {
         $result.ActiveId | Should -Be '{D0B60C83-9CA7-11F1-96C0-C85EA97266A8}'
         Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly `
             -ParameterFilter { $Uri -eq 'http://air-host:5523/gfx_4/status' -and $Method -eq 'Get' }
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://air-host:5523/gfx_4/status/active' -and $Method -eq 'Get' }
     }
 
     It 'reports a layer as hidden when Active is absent or has the zero id' -ForEach @(

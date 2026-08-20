@@ -215,10 +215,12 @@ function Get-TitlerLayerStatus {
         Reads the actual active state of one Cinegy Title/GFX layer.
 
         .DESCRIPTION
-        Cinegy exposes each graphics layer as gfx_<n>. GET /status returns an
-        Active element when something is on air. A failed request deliberately
-        returns IsOnAir = $null: callers must preserve their last-known state
-        rather than mistake a network failure for a hidden graphic.
+        Cinegy exposes each graphics layer as gfx_<n>. GET /status identifies
+        the active playlist item, but that item remains present after HIDE or
+        EXIT. GET /status/active distinguishes the blank filler by returning
+        IsEmpty="y". A failed request deliberately returns IsOnAir = $null:
+        callers must preserve their last-known state rather than mistake a
+        network failure for a hidden graphic.
     #>
     param(
         [Parameter(Mandatory)][string]$AirServerAddress,
@@ -234,8 +236,21 @@ function Get-TitlerLayerStatus {
         $activeNode = $xml.SelectSingleNode('/Status/Active')
         $activeId = if ($activeNode) { [string]$activeNode.GetAttribute('Id') } else { '' }
         $normalizedId = $activeId.Trim().Trim('{', '}')
-        $isOnAir = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
+        $hasActiveItem = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
             $normalizedId -ne '00000000-0000-0000-0000-000000000000'
+        $isOnAir = $false
+        $activeItemXml = ''
+
+        if ($hasActiveItem) {
+            $activeUri = "$uri/active"
+            $activeResponse = Invoke-WebRequest -Uri $activeUri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+            $activeItemXml = [string]$activeResponse.Content
+            $activeXml = [xml]$activeItemXml
+            $itemNode = $activeXml.SelectSingleNode('/Item')
+            if (-not $itemNode) { throw "Cinegy active status did not contain an Item element." }
+            $isEmpty = [string]$itemNode.GetAttribute('IsEmpty')
+            $isOnAir = $isEmpty -notmatch '^(?i:y|yes|true|1)$'
+        }
 
         return [pscustomobject]@{
             Success    = $true
@@ -244,6 +259,7 @@ function Get-TitlerLayerStatus {
             StatusCode = $response.StatusCode
             Uri         = $uri
             Xml         = $response.Content
+            ActiveXml   = $activeItemXml
         }
     }
     catch {

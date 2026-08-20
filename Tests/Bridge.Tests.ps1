@@ -264,6 +264,45 @@ Describe 'Settings access' {
     }
 }
 
+Describe 'Admin-only Cinegy state refresh' {
+    It 'shows the refresh button to an admin' {
+        Mock Test-Admin { $true }
+
+        $keyboard = Get-MainMenuKeyboard -ChatId 100 -UserId 100
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $callbackData | Should -Contain 'menu:refreshstatus'
+    }
+
+    It 'does not show the refresh button to a regular authorized user' {
+        Mock Test-Admin { $false }
+
+        $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $callbackData | Should -Not -Contain 'menu:refreshstatus'
+        $callbackData | Should -Contain 'menu:status'
+    }
+
+    It 'rejects a forged refresh callback from a non-admin' {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-CallbackAdmin { $false }
+        Mock Invoke-StatusCommand { }
+        $callback = [pscustomobject]@{
+            id      = 'callback-1'
+            from    = [pscustomobject]@{ id = 200 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
+            data    = 'menu:refreshstatus'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Test-CallbackAdmin -Times 1 -Exactly
+        Should -Invoke Invoke-StatusCommand -Times 0 -Exactly
+    }
+}
+
 Describe 'Escape-XmlValue (CinegyAirTitler)' {
     It 'accepts an empty string' {
         # The ⏭ تخطي regression: a Mandatory [string] rejects ''.

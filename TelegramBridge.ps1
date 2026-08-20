@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '2.8.1'
+$script:BridgeVersion = '2.8.2'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -969,7 +969,9 @@ function Get-MainMenuKeyboard {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
     $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "ℹ️ الحالة" "menu:status") )
-    $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
+    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+        $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
+    }
 
     if (Get-Setting 'EnableFavorites') {
         # @() is mandatory, not decoration: a PowerShell function that returns
@@ -2598,7 +2600,12 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
-        'menu:refreshstatus' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
+        'menu:refreshstatus' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Invoke-StatusCommand -ChatId $chatId -UserId $userId
+            }
+            break
+        }
         'menu:help' {
             Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break

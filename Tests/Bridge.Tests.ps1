@@ -1131,6 +1131,23 @@ Describe 'SHOW review gate' {
         }
     }
 
+    It 'releases the preparation lock even when Cinegy fails during confirmed SHOW' {
+        Mock Invoke-ShowTemplateResult { throw 'Cinegy disconnected' }
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+        $callback = [pscustomobject]@{
+            id = 'confirm-show-failure'
+            from = [pscustomobject]@{ id = 60 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 50 } }
+            data = 'show:confirm'
+        }
+
+        { Invoke-CallbackQuery -CallbackQuery $callback } | Should -Throw '*disconnected*'
+
+        Get-PendingState -ChatId 50 | Should -BeNullOrEmpty
+        $script:LayerLocks.ContainsKey(4) | Should -BeFalse
+    }
+
     It 'returns from review to field editing without sending SHOW' {
         Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
         Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
@@ -1644,6 +1661,156 @@ Describe 'Layer quick panel' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $labels = @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
             $labels -contains '🔴 طبقة 2' -and $labels -contains '⚪ طبقة 4'
+        }
+    }
+}
+
+Describe 'Reliable schedule store and executor' {
+    BeforeEach {
+        $script:OriginalScheduleFileForTest = $script:scheduleFile
+        $script:scheduleFile = Join-Path $TestDrive 'schedule.json'
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true; Error = '' } }
+    }
+
+    AfterEach {
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        $script:scheduleFile = $script:OriginalScheduleFileForTest
+    }
+
+    It 'persists and restores a pending event with a stable id and timezone' {
+        $at = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{ 'Headline.Text' = 'مجدول' } -ScheduledAt $at -Recurrence once -ChatId 1 -UserId 2
+        Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry | Should -BeTrue
+        $id = $scheduleEntry.Id
+        $script:ScheduleEvents.Clear()
+
+        Import-ScheduleEvents
+
+        $script:ScheduleEvents.Count | Should -Be 1
+        $script:ScheduleEvents[0].Id | Should -Be $id
+        $script:ScheduleEvents[0].TimeZoneId | Should -Not -BeNullOrEmpty
+    }
+
+    It 'executes a one-time event once and never repeats it on later ticks' {
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+        Update-ScheduleQueue -Now $now.AddMinutes(1)
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $scheduleEntry.Status | Should -Be 'completed'
+        $scheduleEntry.CompletedExecutionKey | Should -Be $scheduleEntry.ExecutionKey
+    }
+
+    It 'advances a daily event only after successful completion' {
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence daily -ChatId 1 -UserId 2
+        $oldAt = $scheduleEntry.ScheduledAt
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $scheduleEntry.Status | Should -Be 'pending'
+        ([datetimeoffset]$scheduleEntry.ScheduledAt) | Should -BeGreaterThan ([datetimeoffset]$oldAt)
+        ([datetimeoffset]$scheduleEntry.ScheduledAt) | Should -BeGreaterThan $now
+    }
+
+    It 'advances a weekly event by seven local calendar days' {
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence weekly -ChatId 1 -UserId 2
+        $oldAt = [datetimeoffset]$scheduleEntry.ScheduledAt
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+
+        ([datetimeoffset]$scheduleEntry.ScheduledAt).Date | Should -Be $oldAt.AddDays(7).Date
+        $scheduleEntry.Status | Should -Be 'pending'
+    }
+
+    It 'does not replay an occurrence left running across a restart' {
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $scheduleEntry.Status = 'running'; $scheduleEntry.ExecutionKey = "$($scheduleEntry.Id)|$($scheduleEntry.ScheduledAt)"
+        $script:ScheduleEvents.Add($scheduleEntry)
+        Save-ScheduleEvents | Should -BeTrue
+        $script:ScheduleEvents.Clear()
+
+        Import-ScheduleEvents
+        Update-ScheduleQueue -Now $now
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        $script:ScheduleEvents[0].Status | Should -Be 'interrupted'
+    }
+
+    It 'parses only a clear future local time and reports the timezone' {
+        $now = [datetimeoffset]'2026-08-20T20:00:00+03:00'
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '2026-08-21 09:30' -Now $now
+        $past = ConvertFrom-OperatorScheduleTime -Text '2026-08-19 09:30' -Now $now
+
+        $parsed.Success | Should -BeTrue
+        $parsed.TimeZoneId | Should -Not -BeNullOrEmpty
+        $past.Success | Should -BeFalse
+    }
+
+    It 'cancels a pending event persistently' {
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt ([datetimeoffset]::Now.AddHours(1)) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Stop-ScheduledShowEvent -Id $scheduleEntry.Id | Should -BeTrue
+
+        $scheduleEntry.Status | Should -Be 'cancelled'
+        @(Get-UpcomingScheduleEvents).Count | Should -Be 0
+    }
+
+    It 'does not approve a schedule mutation when atomic replacement fails' {
+        '[]' | Set-Content -LiteralPath $script:scheduleFile -Encoding utf8
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt ([datetimeoffset]::Now.AddHours(1)) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+        Mock Move-Item { throw 'disk failure' }
+
+        Save-ScheduleEvents | Should -BeFalse
+
+        (Get-Content -LiteralPath $script:scheduleFile -Raw).Trim() | Should -Be '[]'
+    }
+}
+
+Describe 'Telegram schedule review flow' {
+    BeforeEach {
+        Clear-PendingState -ChatId 111
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'; Fields = @('Headline.Text'); FieldLabels = @('العنوان')
+                FieldLimits = @(80); FieldRequired = @($true)
+            }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Add-ScheduledShowEvent { $true }
+        Mock Add-AuditEntry { }
+    }
+
+    AfterEach { Clear-PendingState -ChatId 111 }
+
+    It 'collects values time and recurrence and saves only after confirmation' {
+        Start-ScheduleShowFlow -TemplateIndex 0 -ChatId 111 -UserId 121
+        Complete-ScheduleText -ChatId 111 -Value 'خبر الغد'
+        $futureText = [datetimeoffset]::Now.AddHours(2).ToString('yyyy-MM-dd HH:mm')
+        Complete-ScheduleText -ChatId 111 -Value $futureText
+        $state = Get-PendingState -ChatId 111
+        $state.Mode | Should -Be 'schedule_recurrence'
+        $state.Recurrence = 'once'
+        Show-ScheduleReview -ChatId 111 -State $state
+
+        Should -Invoke Add-ScheduledShowEvent -Times 0 -Exactly
+        Confirm-ScheduledShow -ChatId 111 -UserId 121
+
+        Should -Invoke Add-ScheduledShowEvent -Times 1 -Exactly -ParameterFilter {
+            $ScheduleEntry.TemplateKey -eq 'urgent' -and $ScheduleEntry.Values['Headline.Text'] -eq 'خبر الغد' -and $ScheduleEntry.Recurrence -eq 'once'
         }
     }
 }

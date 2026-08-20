@@ -341,6 +341,7 @@ $usageFile = Join-Path $logDir "usage.json"
 $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
+$script:scheduleFile = Join-Path $logDir "schedule.json"
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -594,6 +595,7 @@ $script:BotCommandList = @(
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
     @{ command = 'health'; description = '💚 فحص صحة Telegram وCinegy' }
     @{ command = 'snapshot'; description = '📸 التقاط صورة من البث' }
+    @{ command = 'schedule'; description = '📅 جدولة عرض ومراجعة الأحداث القادمة' }
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
     @{ command = 'settings'; description = '⚙️ الإعدادات (للمشرفين)' }
     @{ command = 'audit'; description = '📜 سجل آخر العمليات (للمشرفين)' }
@@ -1174,6 +1176,257 @@ $script:LayerLocks = @{}
 # one operator's editorial text out of another operator's quick choices.
 $script:RecentFieldValues = @{}
 
+$script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+
+function Get-SystemClockStatus {
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    $zone = [System.TimeZoneInfo]::Local
+    $reasonable = $Now.Year -ge 2024 -and $Now.Year -le 2100 -and -not [string]::IsNullOrWhiteSpace($zone.Id)
+    return [pscustomobject]@{
+        Success = $reasonable; Now = $Now; TimeZoneId = $zone.Id
+        Offset = $Now.Offset; Error = if ($reasonable) { '' } else { 'System clock or timezone is not reasonable.' }
+    }
+}
+
+function ConvertFrom-OperatorScheduleTime {
+    param([Parameter(Mandatory)][string]$Text, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    $clock = Get-SystemClockStatus -Now $Now
+    if (-not $clock.Success) { return $clock }
+    $localTime = [datetime]::MinValue
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    if (-not [datetime]::TryParseExact($Text.Trim(), 'yyyy-MM-dd HH:mm', $culture, [System.Globalization.DateTimeStyles]::None, [ref]$localTime)) {
+        return [pscustomobject]@{ Success = $false; Error = 'استخدم الصيغة YYYY-MM-DD HH:mm'; TimeZoneId = $clock.TimeZoneId }
+    }
+    $localTime = [datetime]::SpecifyKind($localTime, [System.DateTimeKind]::Unspecified)
+    $zone = [System.TimeZoneInfo]::Local
+    if ($zone.IsInvalidTime($localTime) -or $zone.IsAmbiguousTime($localTime)) {
+        return [pscustomobject]@{ Success = $false; Error = 'الوقت غير واضح بسبب تغيير التوقيت المحلي؛ اختر وقتًا آخر.'; TimeZoneId = $zone.Id }
+    }
+    $scheduledAt = [datetimeoffset]::new($localTime, $zone.GetUtcOffset($localTime))
+    if ($scheduledAt -le $Now) {
+        return [pscustomobject]@{ Success = $false; Error = 'يجب أن يكون الموعد في المستقبل.'; TimeZoneId = $zone.Id }
+    }
+    return [pscustomobject]@{ Success = $true; ScheduledAt = $scheduledAt; TimeZoneId = $zone.Id; Error = '' }
+}
+
+function New-ScheduledShowEvent {
+    param(
+        [Parameter(Mandatory)][string]$TemplateKey,
+        [hashtable]$Values = @{},
+        [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
+        [Parameter(Mandatory)][ValidateSet('once', 'daily', 'weekly')][string]$Recurrence,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$UserId
+    )
+    return @{
+        Id = [guid]::NewGuid().ToString(); TemplateKey = $TemplateKey; Values = $Values
+        ScheduledAt = $ScheduledAt.ToString('o'); TimeZoneId = [System.TimeZoneInfo]::Local.Id
+        Recurrence = $Recurrence; Status = 'pending'; ChatId = $ChatId; UserId = $UserId
+        CreatedAt = [datetimeoffset]::Now.ToString('o'); ExecutionKey = ''
+        CompletedExecutionKey = ''; StartedAt = ''; CompletedAt = ''; LastResult = ''
+    }
+}
+
+function Save-ScheduleEvents {
+    try {
+        $temporary = "$script:scheduleFile.tmp"
+        $json = ConvertTo-Json -InputObject @($script:ScheduleEvents.ToArray()) -Depth 8
+        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:scheduleFile -Force -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Could not write schedule.json: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+function Import-ScheduleEvents {
+    if (-not (Test-Path -LiteralPath $script:scheduleFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json -AsHashtable
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        $recovered = $false
+        foreach ($scheduleEntry in @($raw)) {
+            if (-not $scheduleEntry -or -not $scheduleEntry.ContainsKey('Id')) { continue }
+            if ([string]$scheduleEntry.Status -eq 'running') {
+                # The command may already have reached Cinegy before the crash.
+                # Never replay that occurrence automatically.
+                $scheduleEntry.Status = 'interrupted'
+                $scheduleEntry.LastResult = 'Bridge restarted while occurrence was running; not replayed.'
+                $recovered = $true
+            }
+            $script:ScheduleEvents.Add($scheduleEntry)
+        }
+        if ($recovered) { Save-ScheduleEvents | Out-Null }
+    }
+    catch { Write-BridgeLog "Could not read schedule.json: $($_.Exception.Message)" "ERROR" }
+}
+
+function Add-ScheduledShowEvent {
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
+    $script:ScheduleEvents.Add($ScheduleEntry)
+    if (Save-ScheduleEvents) { return $true }
+    $script:ScheduleEvents.Remove($ScheduleEntry) | Out-Null
+    return $false
+}
+
+function Update-ScheduleQueue {
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    foreach ($scheduleEntry in @($script:ScheduleEvents)) {
+        if ([string]$scheduleEntry.Status -ne 'pending') { continue }
+        $scheduledAt = [datetimeoffset]$scheduleEntry.ScheduledAt
+        if ($scheduledAt -gt $Now) { continue }
+        $executionKey = "$($scheduleEntry.Id)|$($scheduledAt.ToString('o'))"
+        if ([string]$scheduleEntry.CompletedExecutionKey -eq $executionKey) { continue }
+
+        $scheduleEntry.Status = 'running'; $scheduleEntry.ExecutionKey = $executionKey
+        $scheduleEntry.StartedAt = $Now.ToString('o')
+        if (-not (Save-ScheduleEvents)) { $scheduleEntry.Status = 'pending'; continue }
+
+        $result = Invoke-ShowTemplateResult -Key ([string]$scheduleEntry.TemplateKey) -Variables $scheduleEntry.Values -ChatId ([long]$scheduleEntry.ChatId) -UserId ([long]$scheduleEntry.UserId)
+        if ($result -and $result.Success) {
+            $scheduleEntry.CompletedExecutionKey = $executionKey
+            $scheduleEntry.CompletedAt = [datetimeoffset]::Now.ToString('o')
+            $scheduleEntry.LastResult = 'success'
+            if ([string]$scheduleEntry.Recurrence -eq 'once') {
+                $scheduleEntry.Status = 'completed'
+            }
+            else {
+                $days = if ([string]$scheduleEntry.Recurrence -eq 'daily') { 1 } else { 7 }
+                do { $scheduledAt = Get-NextLocalOccurrence -Occurrence $scheduledAt -Days $days -TimeZoneId ([string]$scheduleEntry.TimeZoneId) } while ($scheduledAt -le $Now)
+                $scheduleEntry.ScheduledAt = $scheduledAt.ToString('o')
+                $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''
+            }
+        }
+        else {
+            $scheduleEntry.Status = 'failed'
+            $scheduleEntry.LastResult = if ($result) { [string]$result.Error } else { 'SHOW returned no result.' }
+        }
+        Save-ScheduleEvents | Out-Null
+    }
+}
+
+function Get-NextLocalOccurrence {
+    param([Parameter(Mandatory)][datetimeoffset]$Occurrence, [Parameter(Mandatory)][int]$Days, [Parameter(Mandatory)][string]$TimeZoneId)
+    try { $zone = [System.TimeZoneInfo]::FindSystemTimeZoneById($TimeZoneId) }
+    catch { $zone = [System.TimeZoneInfo]::Local }
+    $local = [System.TimeZoneInfo]::ConvertTime($Occurrence, $zone).DateTime.AddDays($Days)
+    $local = [datetime]::SpecifyKind($local, [System.DateTimeKind]::Unspecified)
+    # A recurring wall-clock time inside a spring-forward gap is moved to the
+    # first valid minute. For a repeated autumn hour choose the standard-time
+    # offset so the occurrence is deterministic and never fires twice.
+    while ($zone.IsInvalidTime($local)) { $local = $local.AddMinutes(1) }
+    $offset = if ($zone.IsAmbiguousTime($local)) {
+        @($zone.GetAmbiguousTimeOffsets($local) | Sort-Object TotalMinutes | Select-Object -First 1)[0]
+    }
+    else { $zone.GetUtcOffset($local) }
+    return [datetimeoffset]::new($local, $offset)
+}
+
+function Get-UpcomingScheduleEvents {
+    return @($script:ScheduleEvents | Where-Object { [string]$_.Status -eq 'pending' } | Sort-Object { [datetimeoffset]$_.ScheduledAt })
+}
+
+function Stop-ScheduledShowEvent {
+    param([Parameter(Mandatory)][string]$Id)
+    $scheduleEntry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq $Id }) | Select-Object -First 1
+    if (-not $scheduleEntry -or [string]$scheduleEntry.Status -ne 'pending') { return $false }
+    $scheduleEntry.Status = 'cancelled'; $scheduleEntry.LastResult = 'cancelled by operator'
+    return (Save-ScheduleEvents)
+}
+
+function Format-ScheduleEvent {
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
+    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
+    return "$($ScheduleEntry.TemplateKey) — $($at.ToString('yyyy-MM-dd HH:mm zzz')) — $recurrence"
+}
+
+function Start-ScheduleShowFlow {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    Clear-PendingState -ChatId $ChatId
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) { return }
+    $state = @{
+        Mode = 'schedule_fields'; TemplateIndex = $TemplateIndex; TemplateKey = [string]$template.Key
+        Fields = @($template.Fields); Labels = @($template.FieldLabels); Limits = @($template.FieldLimits)
+        Required = @(Get-JsonProp $template 'FieldRequired' | Where-Object { $null -ne $_ })
+        Values = @{}; Index = 0; UserId = $UserId
+    }
+    if ($state.Fields.Count -eq 0) {
+        $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل موعد العرض بصيغة YYYY-MM-DD HH:mm`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text "📅 قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-ScheduleText {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    if ($state.Mode -eq 'schedule_fields') {
+        $required = $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
+        if ($required -and [string]::IsNullOrWhiteSpace($Value)) {
+            Send-TelegramMessage -ChatId $ChatId -Text "هذا الحقل إلزامي ولا يمكن تركه فارغًا." -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $limit = if ($state.Index -lt @($state.Limits).Count) { [int]$state.Limits[$state.Index] } else { 0 }
+        if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-CancelKeyboard))) { return }
+        $state.Values[[string]$state.Fields[$state.Index]] = $Value
+        $state.Index = [int]$state.Index + 1
+        if ($state.Index -lt $state.Fields.Count) {
+            Set-PendingState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text "📅 قيمة الحقل ($($state.Index + 1)/$($state.Fields.Count)):`n$($state.Fields[$state.Index])" -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل موعد العرض بصيغة YYYY-MM-DD HH:mm`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    if ($state.Mode -eq 'schedule_time') {
+        $parsed = ConvertFrom-OperatorScheduleTime -Text $Value
+        if (-not $parsed.Success) {
+            Send-TelegramMessage -ChatId $ChatId -Text "❌ $($parsed.Error)`nأرسل الموعد بصيغة YYYY-MM-DD HH:mm" -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $state.ScheduledAt = $parsed.ScheduledAt.ToString('o'); $state.TimeZoneId = $parsed.TimeZoneId
+        $state.Mode = 'schedule_recurrence'; Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "فُهم الموعد: $($parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($parsed.TimeZoneId)`nاختر التكرار:" -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
+    }
+}
+
+function Show-ScheduleReview {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
+    $recurrence = switch ([string]$State.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $lines = @(
+        '🔎 مراجعة الجدولة', "القالب: $($State.TemplateKey)",
+        "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
+    )
+    foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
+    $lines += ''; $lines += 'لن يُحفظ الحدث حتى تضغط تأكيد الجدولة.'
+    $State.Mode = 'schedule_review'; Set-PendingState -ChatId $ChatId -State $State
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard)
+}
+
+function Confirm-ScheduledShow {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $UserId) { return }
+    $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
+    $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
+    Clear-PendingState -ChatId $ChatId
+    if ($saved) {
+        Add-AuditEntry "📅 scheduled $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - user $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ الجدولة.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup (Get-ScheduleMenuKeyboard)
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ ملف الجدولة، لذلك لم يُعتمد الحدث." -ReplyMarkup (Get-ScheduleMenuKeyboard)
+    }
+}
+
 function Test-SensitiveFieldName {
     param([Parameter(Mandatory)][string]$FieldName)
     return ($FieldName -match '(?i)(password|passphrase|token|secret|stream[._-]?key|كلمة[ _-]?مرور|رمز[ _-]?سري)')
@@ -1398,6 +1651,7 @@ function Get-MainMenuKeyboard {
     $fourthRow = @( (New-Button "✏️ تحديث نص" "menu:update") )
     if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button "⏱ عرض مؤقّت" "menu:timed") }
     $rows += , $fourthRow
+    $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )
@@ -1502,6 +1756,36 @@ function Get-PresetReviewKeyboard {
     return @{ inline_keyboard = @(
             , @( (New-Button "✅ حفظ التغيير" 'presetadmin:confirm'), (New-Button "❌ إلغاء" 'cancel') )
         ) }
+}
+
+function Get-ScheduleMenuKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "➕ جدولة عرض" 'schedule:new'), (New-Button "📋 الأحداث القادمة" 'schedule:list') )
+            , @( (New-Button "⬅️ القائمة" 'menu') )
+        ) }
+}
+
+function Get-ScheduleRecurrenceKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "مرة واحدة" 'schrec:once'), (New-Button "يومي" 'schrec:daily'), (New-Button "أسبوعي" 'schrec:weekly') )
+            , @( (New-Button "❌ إلغاء" 'cancel') )
+        ) }
+}
+
+function Get-ScheduleReviewKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button "✅ تأكيد الجدولة" 'schedule:confirm'), (New-Button "❌ إلغاء" 'cancel') )
+        ) }
+}
+
+function Get-UpcomingScheduleKeyboard {
+    $rows = @()
+    foreach ($scheduleEntry in @(Get-UpcomingScheduleEvents)) {
+        $at = [datetimeoffset]$scheduleEntry.ScheduledAt
+        $rows += , @( (New-Button "🗑 $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schcancel:$($scheduleEntry.Id)") )
+    }
+    $rows += , @( (New-Button "⬅️ الجدولة" 'menu:schedule') )
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-LayerDashboardKeyboard {
@@ -1987,6 +2271,7 @@ function Invoke-ShowTemplateResult {
         Write-BridgeLog "User $UserId failed to push template '$Key': $($result.Error)" "ERROR"
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
+    return $result
 }
 
 function Start-ShowFlow {
@@ -2595,6 +2880,7 @@ function Invoke-DiagnosticsCommand {
         "القوالب: $(@($store.Order).Count) | تحذيرات القوالب: $(@($store.Errors).Count)",
         "المحادثات المعلقة: $($script:PendingState.Count) | أقفال الطبقات: $($script:LayerLocks.Count)",
         "طابور postbox: $($script:PostShowQueue.Count) | مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
+        "الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count) | ملف الجدولة: $script:scheduleFile",
         "لقطات قيد التنفيذ: $($script:SnapshotJobs.Count) | relay: $relayState",
         "حالة Cinegy المحلية: $script:LastCinegyHealthState",
         "",
@@ -3359,6 +3645,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('صحة', 'health') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text "📅 الجدولة:" -ReplyMarkup (Get-ScheduleMenuKeyboard) }
         { $_ -in @('سجل', 'audit') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Invoke-AuditCommand -ChatId $ChatId -UserId $UserId }
             else { Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
@@ -3547,6 +3834,57 @@ function Invoke-CallbackQuery {
         }
         'menu:settings' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'menu:schedule' {
+            Send-TelegramMessage -ChatId $chatId -Text "📅 جدولة العروض وإدارة الأحداث القادمة:" -ReplyMarkup (Get-ScheduleMenuKeyboard)
+            break
+        }
+        'schedule:new' {
+            $clock = Get-SystemClockStatus
+            if (-not $clock.Success) {
+                Send-TelegramMessage -ChatId $chatId -Text "❌ ساعة الجهاز أو المنطقة الزمنية غير صالحة للجدولة." -ReplyMarkup (Get-ScheduleMenuKeyboard)
+                break
+            }
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب المراد جدولته:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'schtpl')
+            break
+        }
+        'schedule:list' {
+            $events = @(Get-UpcomingScheduleEvents)
+            $text = if ($events.Count -eq 0) { 'لا توجد أحداث قادمة.' } else { "📋 الأحداث القادمة:`n" + (@($events | ForEach-Object { "• $(Format-ScheduleEvent -ScheduleEntry $_)" }) -join "`n") }
+            Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-UpcomingScheduleKeyboard)
+            break
+        }
+        'schtpl:*' {
+            Start-ScheduleShowFlow -TemplateIndex ([int]$data.Substring(7)) -ChatId $chatId -UserId $userId
+            break
+        }
+        'schrec:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_recurrence' -or [long]$state.UserId -ne $userId) { break }
+            $state.Recurrence = $data.Substring(7)
+            Show-ScheduleReview -ChatId $chatId -State $state
+            break
+        }
+        'schedule:confirm' {
+            Confirm-ScheduledShow -ChatId $chatId -UserId $userId
+            break
+        }
+        'schcancel:*' {
+            $eventId = $data.Substring(10)
+            $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
+            if (-not $scheduleEntry) { break }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
+            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "✅ نعم، إلغاء" 'schedule:cancelconfirm'), (New-Button "❌ رجوع" 'schedule:list'))) }
+            break
+        }
+        'schedule:cancelconfirm' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_cancel' -or [long]$state.UserId -ne $userId) { break }
+            $cancelled = Stop-ScheduledShowEvent -Id ([string]$state.EventId)
+            Clear-PendingState -ChatId $chatId
+            $text = if ($cancelled) { '✅ تم إلغاء الحدث.' } else { 'تعذر إلغاء الحدث؛ ربما نُفّذ أو أُلغي مسبقًا.' }
+            Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-ScheduleMenuKeyboard)
             break
         }
         'menu:presetsadmin' {
@@ -3948,7 +4286,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
         try { & $step }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -3967,6 +4305,11 @@ function Get-EffectivePollTimeout {
     if ($script:PostShowQueue.Count -gt 0) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout
+    $upcoming = @(Get-UpcomingScheduleEvents)
+    if ($upcoming.Count -gt 0) {
+        $secondsToEvent = [int][Math]::Ceiling((([datetimeoffset]$upcoming[0].ScheduledAt) - [datetimeoffset]::Now).TotalSeconds)
+        $base = [Math]::Min($base, [Math]::Max(1, $secondsToEvent))
+    }
     if ($script:RelayState.ShouldRun) { return [Math]::Min($base, (Get-SettingInt 'RelayWatchdogSeconds' 5)) }
     $base = [Math]::Min($base, (Get-SettingInt 'CinegyStateCheckSeconds' 1))
     return [Math]::Min($base, (Get-SettingInt 'CinegyHealthCheckSeconds' 1))
@@ -4002,6 +4345,7 @@ Import-UsageCounts
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues
+Import-ScheduleEvents
 $startupSync = Update-OnAirStateFromCinegy -Reason 'startup'
 if ($startupSync.Failed.Count -gt 0) {
     Write-BridgeLog "Startup state sync could not verify layer(s): $($startupSync.Failed -join ', ')" "WARN"
@@ -4072,6 +4416,7 @@ try {
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text }
+                                { $_ -in @('schedule_fields', 'schedule_time') } { Complete-ScheduleText -ChatId $chatId -Value $text }
                                 default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj }
                             }
                         }

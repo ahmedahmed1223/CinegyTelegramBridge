@@ -1141,7 +1141,7 @@ function Get-MainMenuKeyboard {
 
     $thirdRow = @()
     if (Get-Setting 'EnableHideAll') { $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall") }
-    if ($script:LastShow.ContainsKey($ChatId)) { $thirdRow += (New-Button "🔁 إعادة الأخير" "menu:repeat") }
+    if ($script:LastShow.ContainsKey($ChatId)) { $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat") }
     if ($thirdRow.Count -gt 0) { $rows += , $thirdRow }
 
     $fourthRow = @( (New-Button "✏️ تحديث نص" "menu:update") )
@@ -1638,7 +1638,8 @@ function Start-ShowFlow {
         [Parameter(Mandatory)][int]$TemplateIndex,
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [int]$AutoHideSeconds = 0
+        [int]$AutoHideSeconds = 0,
+        [hashtable]$InitialValues = @{}
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
@@ -1652,10 +1653,12 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
+    $draftValues = @{}
+    foreach ($name in $InitialValues.Keys) { $draftValues[[string]$name] = [string]$InitialValues[$name] }
     if ($t.Fields.Count -eq 0) {
         $state = @{
             Mode = 'show_review'; Key = $t.Key; Fields = @(); Labels = @(); Limits = @(); Required = @()
-            Index = 0; Values = @{}; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+            Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
             LockLayer = [int]$t.Layer
         }
         Set-PendingState -ChatId $ChatId -State $state
@@ -1666,7 +1669,7 @@ function Start-ShowFlow {
         Mode = 'show_fields'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
         Limits = @($t.FieldLimits)
         Required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
-        Index = 0; Values = @{}; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+        Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
         LockLayer = [int]$t.Layer
     }
     Set-PendingState -ChatId $ChatId -State $state
@@ -1919,7 +1922,12 @@ function Invoke-RepeatLastShow {
         return
     }
     $last = $script:LastShow[$ChatId]
-    Invoke-ShowTemplateResult -Key $last.Key -Variables $last.Variables -ChatId $ChatId -UserId $UserId
+    $templateIndex = Get-TemplateIndex -Key ([string]$last.Key)
+    if ($templateIndex -lt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب السابق لم يعد موجودًا في ملف القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $last.Variables
 }
 
 function Invoke-PresetShow {

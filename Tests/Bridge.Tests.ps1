@@ -938,6 +938,58 @@ Describe 'SHOW review gate' {
     }
 }
 
+Describe 'Repeat last show with editing' {
+    BeforeEach {
+        $script:LayerLocks.Clear()
+        Clear-PendingState -ChatId 90
+        Mock Get-TemplateStore {
+            [pscustomobject]@{
+                Map = @{ urgent = [pscustomobject]@{ Layer = 4; Path = 'D:\CG\urgent.cintitle'; FieldTypes = @{} } }
+            }
+        }
+        Mock Show-TitlerTemplate {
+            [pscustomobject]@{ Success = $true; EventId = '{CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC}'; Xml = '<Request/>' }
+        }
+        Mock Save-OnAirState { }
+        Mock Add-UsageCount { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Get-AfterShowKeyboard { @{ inline_keyboard = @() } }
+        Mock Send-TelegramMessage { }
+        Invoke-ShowTemplateResult -Key 'urgent' -Variables @{ 'Headline.Text' = 'الخبر السابق' } -ChatId 90 -UserId 90
+        $PostShowQueue.Clear()
+        $OnAir.Clear()
+        Mock Get-TemplateIndex { 0 }
+        Mock Get-TemplateByIndex {
+            [pscustomobject]@{
+                Key = 'urgent'; Layer = 4
+                Fields = @('Headline.Text')
+                FieldLabels = @('العنوان')
+                FieldLimits = @(80)
+                FieldRequired = @($true)
+            }
+        }
+        Mock Invoke-ShowTemplateResult { }
+    }
+
+    AfterEach {
+        Clear-PendingState -ChatId 90
+        $script:LayerLocks.Clear()
+    }
+
+    It 'opens the previous values for editing instead of immediately resending them' {
+        Invoke-RepeatLastShow -ChatId 90 -UserId 90
+
+        Should -Invoke Get-TemplateIndex -Times 1 -Exactly
+        Should -Invoke Get-TemplateByIndex -Times 1 -Exactly
+        $state = Get-PendingState -ChatId 90
+        $state | Should -Not -BeNullOrEmpty
+        $state.Mode | Should -Be 'show_fields'
+        $state.Values['Headline.Text'] | Should -Be 'الخبر السابق'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+}
+
 Describe 'Hide-all confirmation gate' {
     BeforeEach {
         Clear-PendingState -ChatId 70

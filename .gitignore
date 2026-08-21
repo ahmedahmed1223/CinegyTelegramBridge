@@ -11,6 +11,7 @@ nssm.exe
 # Config safety copies written by Save-Config.
 config.json.bak
 config.json.tmp
+config.json.backups/
 
 # Temporary registries created by the test suite.
 templates.test-*.json

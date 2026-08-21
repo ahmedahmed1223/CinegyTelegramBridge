@@ -675,7 +675,7 @@ Describe 'Simple and full status reports' {
 
         Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 200 -and $Text -match 'خادم Air' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and $Text -notmatch 'صحة الخدمات'
+            $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and $Text -notmatch 'صحة الخدمات'
         }
     }
 

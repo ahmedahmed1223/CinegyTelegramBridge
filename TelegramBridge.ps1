@@ -3082,23 +3082,40 @@ function Invoke-StatusCommand {
     $store = Get-TemplateStore
     $sync = Update-OnAirStateFromCinegy -Reason 'status' `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-    $lines = @(
-        "ℹ️ الحالة",
-        "الإصدار: $($script:BridgeVersion)",
-        "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
-        "القوالب المحمّلة: $($store.Order.Count)",
-        (Get-OnAirSummary)
-    )
+
+    # Quick overall line so a non-admin glance shows whether anything is off.
     if ($sync.Failed.Count -gt 0) {
-        $lines += "⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة."
+        $overall = "🟠 تعذّر فحص بعض الطبقات"
     }
-    elseif ($sync.Removed.Count -gt 0) {
-        $lines += "🔄 تم تحديث الحالة وإزالة الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')"
+    elseif ($script:OnAir.Count -gt 0) {
+        $overall = "🟠 طبقات على الهواء"
     }
     else {
-        $lines += "✅ الحالة متزامنة مع Cinegy."
+        $overall = "🟢 كل شيء سليم"
     }
-    if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
+
+    $sep = '━━━━━━━━━━━━━━━━━'
+    $now = Get-Date
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("ℹ️ الحالة — v$($script:BridgeVersion)")
+    $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
+    $lines.Add($overall)
+    $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lines.Add((Get-OnAirSummary))
+    $lines.Add('')
+    $lines.Add($sep)
+    if ($sync.Failed.Count -gt 0) {
+        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
+    }
+    elseif ($sync.Removed.Count -gt 0) {
+        $lines.Add("🔄 تم تحديث الحالة وأُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
+    }
+    else {
+        $lines.Add("✅ الحالة متزامنة مع Cinegy.")
+    }
+    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
@@ -3255,26 +3272,52 @@ function Invoke-FullStatusCommand {
     $sync = Update-OnAirStateFromCinegy -Reason 'full-status' -LayerStatuses $layerStatuses `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     $health = Get-HealthStatusReport
-    $lines = @(
-        "📊 الحالة الكاملة",
-        "الإصدار: $($script:BridgeVersion)",
-        "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
-        "القوالب المحمّلة: $($store.Order.Count)",
-        (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses),
-        $health.Text,
-        "البث المباشر: $(Get-LiveRelayStatusText)",
-        "الصور المعلّقة: $($script:SnapshotJobs.Count)، مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
-        "المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم",
-        "طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)"
-    )
+    # Overall status line derived from the live signals so a quick glance at
+    # the top of the message tells the operator whether anything needs attention.
     if ($sync.Failed.Count -gt 0) {
-        $lines += "⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة."
+        $overall = "🔴 لا يمكن فحص بعض الطبقات"
+    }
+    elseif (-not $health.Telemetry.Success) {
+        $overall = "🟠 Cinegy غير متاح"
+    }
+    elseif ($script:OnAir.Count -gt 0) {
+        $overall = "🟠 طبقات على الهواء"
+    }
+    else {
+        $overall = "🟢 كل شيء سليم"
+    }
+
+    $sep = '━━━━━━━━━━━━━━━━━'
+    $now = Get-Date
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("📊 الحالة الكاملة — v$($script:BridgeVersion)")
+    $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
+    $lines.Add($overall)
+    $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lines.Add((Format-CinegyLayerDashboard -LayerStatuses $layerStatuses))
+    $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add($health.Text)
+    $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add("📡 البث المباشر: $(Get-LiveRelayStatusText)")
+    $lines.Add("🖼 الصور المعلّقة: $($script:SnapshotJobs.Count) · مؤقتات الإخفاء: $($script:AutoHideQueue.Count)")
+    $lines.Add("🗓 الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count)")
+    $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add("🔐 المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم")
+    $lines.Add("🔔 طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)")
+    $lines.Add('')
+    if ($sync.Failed.Count -gt 0) {
+        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
     }
     elseif ($sync.Removed.Count -gt 0) {
-        $lines += "🔄 أزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')"
+        $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
     }
-    else { $lines += "✅ حالة Cinegy متزامنة." }
-    if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
+    else { $lines.Add("✅ حالة Cinegy متزامنة.") }
+    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

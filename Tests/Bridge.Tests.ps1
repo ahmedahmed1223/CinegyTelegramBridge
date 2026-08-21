@@ -329,6 +329,7 @@ Describe 'Settings access' {
 
     It 'stores one selected layer name without requiring a compound settings string' {
         $original = Get-Setting 'LayerNames'
+        $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue '' -Force
         Mock Save-Config { }
         Mock Write-BridgeLog { }
         Mock Add-AuditEntry { }
@@ -1809,6 +1810,19 @@ Describe 'Update-OnAirStateFromCinegy' {
         Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 
+    It 'preserves the local layer when Cinegy says it is on air but returns an empty active id' {
+        $OnAir[4].ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '' }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        @($result.Removed).Count | Should -Be 0
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
+    }
+
     It 'reuses a supplied dashboard sample instead of querying the layer again' {
         Mock Get-TitlerLayerStatus { throw 'must not be called' }
         $sample = [pscustomobject]@{
@@ -1855,7 +1869,7 @@ Describe 'Cinegy layer dashboard' {
         $text | Should -Match '🔴 طبقة 4: lower-third'
         $text | Should -Match '🟠 طبقة 5: External Item \(خارجي\)'
         $text | Should -Match '⚪ طبقة 6: مخفية'
-        $text | Should -Match '⚠️ طبقة 7: غير معروف'
+        $text | Should -Match '⚠️.*طبقة 7: غير معروف'
         $text | Should -Match '🙈 إخفاء.*فورًا'
         $text | Should -Match '🔄 تحديث.*فحص كل الطبقات'
         $text | Should -Match 'الخرج Normal'

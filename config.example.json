@@ -30,7 +30,6 @@
     "EnableTimedShow": true,
     "EnableHideAll": true,
     "HideAllLayers": "all",
-    "LayerNames": "",
     "EnableFavorites": true,
     "EnablePersistentMenuButton": true,
     "DropPendingUpdatesOnStart": true,
@@ -65,7 +64,8 @@
     "HeartbeatHour": 9,
     "NotifyAdminsOnRelayFailure": true,
     "NotifyAdminsOnExternalChange": true,
-    "NotifyAdminsOnCinegyHealth": true
+    "NotifyAdminsOnCinegyHealth": true,
+    "LayerNames": "7=عاجل;8=أخبار;9=شريط الأخبار"
   },
   "LiveStream": {
     "SourceType": "m3u8",

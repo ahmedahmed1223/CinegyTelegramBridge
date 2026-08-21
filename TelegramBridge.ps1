@@ -1195,13 +1195,19 @@ function Import-OnAirState {
 function Save-OnAirState {
     try {
         Write-BridgeLog "Save-OnAirState invoked (in-memory layers: $($script:OnAir.Keys.Count))" "DEBUG"
+        $parentDir = Split-Path $onAirFile -Parent
+        if (-not (Test-Path -LiteralPath $parentDir)) {
+            New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction SilentlyContinue | Out-Null
+        }
         $out = @{}
         foreach ($layer in $script:OnAir.Keys) {
             $info = $script:OnAir[$layer]
+            $atVal = Get-JsonProp $info 'At'
+            $atStr = if ($atVal -is [datetime]) { $atVal.ToString('o') } elseif ($atVal) { [string]$atVal } else { (Get-Date).ToString('o') }
             $out["$layer"] = @{
-                Key = $info.Key
-                At = $info.At.ToString('o')
-                UserId = $info.UserId
+                Key = [string](Get-JsonProp $info 'Key')
+                At = $atStr
+                UserId = [long](Get-JsonProp $info 'UserId')
                 ActiveId = [string](Get-JsonProp $info 'ActiveId')
             }
         }
@@ -1251,12 +1257,18 @@ function Update-OnAirStateFromCinegy {
         }
 
         $checked.Add([int]$layer)
-        $trackedId = [string](Get-JsonProp $script:OnAir[$layer] 'ActiveId')
+        $record = $script:OnAir[$layer]
+        $trackedId = [string](Get-JsonProp $record 'ActiveId')
         $actualId = [string]$status.ActiveId
         $trackedNormalized = $trackedId.Trim().Trim('{', '}')
         $actualNormalized = $actualId.Trim().Trim('{', '}')
-        $cannotCorrelate = [string]::IsNullOrWhiteSpace($trackedNormalized)
-        $wasReplaced = -not $cannotCorrelate -and
+
+        $hasTrackedId = -not [string]::IsNullOrWhiteSpace($trackedNormalized)
+        $hasActualId = -not [string]::IsNullOrWhiteSpace($actualNormalized) -and
+            $actualNormalized -ne '00000000-0000-0000-0000-000000000000'
+
+        $cannotCorrelate = -not $hasTrackedId -and $hasActualId
+        $wasReplaced = $hasTrackedId -and $hasActualId -and
             -not $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
 
         if (-not $status.IsOnAir -or $cannotCorrelate -or $wasReplaced) {

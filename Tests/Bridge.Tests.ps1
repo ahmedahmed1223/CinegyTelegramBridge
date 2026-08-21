@@ -1823,6 +1823,24 @@ Describe 'Update-OnAirStateFromCinegy' {
         Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 
+    It 'adopts Cinegy active id and preserves layer when template name matches' {
+        $OnAir[4] = @{ Key = 'lower-third'; At = Get-Date; UserId = 10; ActiveId = '{COMMAND-GUID}' }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success    = $true
+                IsOnAir    = $true
+                ActiveId   = '{CINEGY-ENGINE-GUID}'
+                ActiveName = 'lower-third.cintitle'
+            }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $OnAir[4].ActiveId | Should -Be '{CINEGY-ENGINE-GUID}'
+        @($result.Removed).Count | Should -Be 0
+    }
+
     It 'reuses a supplied dashboard sample instead of querying the layer again' {
         Mock Get-TitlerLayerStatus { throw 'must not be called' }
         $sample = [pscustomobject]@{

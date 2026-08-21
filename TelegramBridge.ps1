@@ -1222,6 +1222,45 @@ function Save-OnAirState {
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
 
+function Test-OnAirTemplateMatch {
+    param(
+        [string]$TemplateKey,
+        [string]$ActiveName,
+        [bool]$HasTrackedId = $false
+    )
+    if ([string]::IsNullOrWhiteSpace($ActiveName)) {
+        return $HasTrackedId
+    }
+    if ([string]::IsNullOrWhiteSpace($TemplateKey)) { return $false }
+
+    $cleanActive = $ActiveName.Trim()
+    $cleanKey = $TemplateKey.Trim()
+
+    if ($cleanActive -ieq $cleanKey -or
+        $cleanActive -like "*$cleanKey*" -or
+        $cleanKey -like "*$cleanActive*") {
+        return $true
+    }
+
+    $store = Get-TemplateStore
+    $tpl = Get-JsonProp $store.Map $TemplateKey
+
+    if ($tpl) {
+        $tplPath = [string](Get-JsonProp $tpl 'path')
+        if (-not [string]::IsNullOrWhiteSpace($tplPath)) {
+            $fileName = [System.IO.Path]::GetFileName($tplPath)
+            $fileNameNoExt = [System.IO.Path]::GetFileNameWithoutExtension($tplPath)
+            if ($cleanActive -ieq $fileName -or
+                $cleanActive -ieq $fileNameNoExt -or
+                $cleanActive -like "*$fileNameNoExt*" -or
+                $fileNameNoExt -like "*$cleanActive*") {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Update-OnAirStateFromCinegy {
     <# Reconciles the bridge's persisted record with Cinegy's real GFX layer
        status. Only layers already tracked by the bridge are queried: Cinegy's
@@ -1260,6 +1299,9 @@ function Update-OnAirStateFromCinegy {
         $record = $script:OnAir[$layer]
         $trackedId = [string](Get-JsonProp $record 'ActiveId')
         $actualId = [string]$status.ActiveId
+        $actualName = [string](Get-JsonProp $status 'ActiveName')
+        $templateKey = [string](Get-JsonProp $record 'Key')
+
         $trackedNormalized = $trackedId.Trim().Trim('{', '}')
         $actualNormalized = $actualId.Trim().Trim('{', '}')
 
@@ -1267,9 +1309,24 @@ function Update-OnAirStateFromCinegy {
         $hasActualId = -not [string]::IsNullOrWhiteSpace($actualNormalized) -and
             $actualNormalized -ne '00000000-0000-0000-0000-000000000000'
 
+        $idsMatch = $hasTrackedId -and $hasActualId -and
+            $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
+        $nameMatches = Test-OnAirTemplateMatch -TemplateKey $templateKey -ActiveName $actualName -HasTrackedId $hasTrackedId
+
+        if ($status.IsOnAir) {
+            if (-not $idsMatch -and $nameMatches) {
+                if ($hasActualId) {
+                    $record.ActiveId = $actualId
+                    $trackedId = $actualId
+                    $trackedNormalized = $actualNormalized
+                    $hasTrackedId = $true
+                    $idsMatch = $true
+                }
+            }
+        }
+
         $cannotCorrelate = -not $hasTrackedId -and $hasActualId
-        $wasReplaced = $hasTrackedId -and $hasActualId -and
-            -not $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
+        $wasReplaced = $hasTrackedId -and $hasActualId -and -not $idsMatch -and -not $nameMatches
 
         if (-not $status.IsOnAir -or $cannotCorrelate -or $wasReplaced) {
             $record = $script:OnAir[$layer]

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.1
+
+- Replaced free-text `LayerNames` editing with an administrator-only layer
+  picker: select a layer, enter one label, or use a dedicated clear button.
+- Layer labels are validated before saving to prevent malformed configuration.
+
 ## 3.0.0 — 2026-08-20
 
 - Added mandatory review before every interactive, preset, or typed `SHOW`,

@@ -310,6 +310,22 @@ Describe 'Settings access' {
         }
         finally { $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue $original -Force }
     }
+
+    It 'stores one selected layer name without requiring a compound settings string' {
+        $original = Get-Setting 'LayerNames'
+        Mock Save-Config { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+
+        try {
+            Set-LayerName -Layer 7 -Name 'عاجل' -ChatId 42 -UserId 42
+
+            Get-Setting 'LayerNames' | Should -Be '7=عاجل'
+            Get-LayerDisplayName -Layer 7 | Should -Be 'عاجل · طبقة 7'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue $original -Force }
+    }
 }
 
 Describe 'Configuration backups' {

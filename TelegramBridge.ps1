@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '3.1.0'
+$script:BridgeVersion = '3.1.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -320,17 +320,21 @@ function Get-SettingInt {
     return $value
 }
 
-function Get-LayerDisplayName {
+function Get-LayerName {
     param([Parameter(Mandatory)][int]$Layer)
-    $name = ''
     foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
         $parts = $pair -split '=', 2
         $number = 0
         if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$number) -and $number -eq $Layer) {
-            $name = $parts[1].Trim()
-            break
+            return $parts[1].Trim()
         }
     }
+    return ''
+}
+
+function Get-LayerDisplayName {
+    param([Parameter(Mandatory)][int]$Layer)
+    $name = Get-LayerName -Layer $Layer
     if ([string]::IsNullOrWhiteSpace($name)) { return "طبقة $Layer" }
     return "$name · طبقة $Layer"
 }
@@ -2083,7 +2087,7 @@ function Get-SettingsKeyboard {
        they stay well inside the 64-byte callback_data budget. #>
     $rows = @()
     foreach ($name in $script:DefaultSettings.Keys) {
-        if ($name -eq 'HideAllLayers') { continue }
+        if ($name -in @('HideAllLayers', 'LayerNames')) { continue }
         $value = Get-Setting $name
         if ($script:DefaultSettings[$name] -is [bool]) {
             $mark = if ($value) { "✅" } else { "❌" }
@@ -2100,6 +2104,7 @@ function Get-SettingsKeyboard {
     $scope = [string](Get-Setting 'HideAllLayers')
     $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
     $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
+    $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
@@ -2145,6 +2150,24 @@ function Get-HideAllLayerSettingsKeyboard {
     $rows += , @( (New-Button "☑️ اختيار كل الطبقات" 'hideallcfg:all'), (New-Button "🚫 إلغاء اختيار الكل" 'hideallcfg:none') )
     $rows += , @( (New-Button "⬅️ الإعدادات" 'menu:settings') )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-LayerNamesKeyboard {
+    $rows = @()
+    foreach ($layer in @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique)) {
+        $rows += , @( (New-Button "🏷️ $(Get-LayerDisplayName -Layer $layer)" "layername:$layer") )
+    }
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد طبقات معرفة' 'menu:settings') ) }
+    $rows += , @( (New-Button '⬅️ الإعدادات' 'menu:settings') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-LayerNameEditKeyboard {
+    param([Parameter(Mandatory)][int]$Layer)
+    return @{ inline_keyboard = @(
+            , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer") )
+            , @( (New-Button '⬅️ أسماء الطبقات' 'menu:layernames'), (New-Button '❌ إلغاء' 'menu:settings') )
+        ) }
 }
 
 function Get-ConfigBackupsKeyboard {
@@ -2245,7 +2268,7 @@ function Show-SettingChoices {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_text'; Name = $Name; UserId = $UserId }
-    $prompt = if ($Name -eq 'LayerNames') { "أرسل أسماء الطبقات بهذه الصيغة:`n7=عاجل;8=شريط الأخبار`nاترك الرسالة فارغة لمسح الأسماء." } else { "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" }
+    $prompt = "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):"
     Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -2254,7 +2277,7 @@ function Complete-SettingText {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state) { return }
     $trimmed = $Value.Trim()
-    if ([string]::IsNullOrWhiteSpace($trimmed) -and $state.Name -ne 'LayerNames') {
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return
@@ -3758,6 +3781,68 @@ function Show-HideAllLayerSettings {
     Send-TelegramMessage -ChatId $ChatId -Text "🚨 طبقات إخفاء الكل الحالية: $scopeText`nاضغط طبقة لتضمينها أو استبعادها. هذا التحديد هو فقط ما سيخفيه زر الطوارئ." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
 }
 
+function Show-LayerNamesScreen {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -Text "🏷️ أسماء الطبقات`nاختر طبقة، ثم أرسل اسمًا واحدًا واضحًا لها. لا تحتاج إلى كتابة رموز أو أرقام بصيغة خاصة." -ReplyMarkup (Get-LayerNamesKeyboard)
+}
+
+function Set-LayerName {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [AllowEmptyString()][string]$Name = '',
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $trimmed = $Name.Trim()
+    if ($trimmed.Length -gt 60 -or $trimmed.IndexOfAny([char[]]';=') -ge 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم يجب أن يكون حتى 60 حرفًا، ولا يحتوي على ; أو =. لم يتغيّر شيء.' -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
+        return $false
+    }
+
+    $names = [ordered]@{}
+    foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
+        $parts = $pair -split '=', 2
+        $number = 0
+        if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$number) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
+            $names[$number] = $parts[1].Trim()
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { $names.Remove($Layer) | Out-Null }
+    else { $names[$Layer] = $trimmed }
+
+    $stored = @($names.Keys | Sort-Object | ForEach-Object { "$_=$($names[$_])" }) -join ';'
+    Set-Setting -Name 'LayerNames' -Value $stored
+    $action = if ([string]::IsNullOrWhiteSpace($trimmed)) { 'cleared' } else { "set to '$trimmed'" }
+    Write-BridgeLog "User $UserId $action layer $Layer name"
+    Add-AuditEntry "🏷️ اسم طبقة $Layer $action - user $UserId"
+    $message = if ([string]::IsNullOrWhiteSpace($trimmed)) { "✅ تم مسح اسم طبقة $Layer." } else { "✅ تم حفظ الاسم: $(Get-LayerDisplayName -Layer $Layer)" }
+    Send-TelegramMessage -ChatId $ChatId -Text "$message$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-LayerNamesKeyboard)
+    return $true
+}
+
+function Start-LayerNamePrompt {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'layer_name'; Layer = $Layer; UserId = $UserId }
+    $current = Get-LayerName -Layer $Layer
+    $currentText = if ($current) { "الاسم الحالي: $current" } else { 'لا يوجد اسم حاليًا.' }
+    Send-TelegramMessage -ChatId $ChatId -Text "🏷️ طبقة $Layer`n$currentText`nأرسل الاسم الجديد فقط." -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
+}
+
+function Complete-LayerName {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'layer_name') { return }
+    Clear-PendingState -ChatId $ChatId
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم فارغ. استخدم زر «مسح الاسم» إن أردت حذفه.' -ReplyMarkup (Get-LayerNameEditKeyboard -Layer ([int]$state.Layer))
+        return
+    }
+    Set-LayerName -Layer ([int]$state.Layer) -Name $Value -ChatId $ChatId -UserId ([long]$state.UserId) | Out-Null
+}
+
 function Set-HideAllLayerSelection {
     param(
         [int]$Layer = 0,
@@ -4201,6 +4286,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:layernames' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-LayerNamesScreen -ChatId $chatId -UserId $userId }
+            break
+        }
         'menu:hideallsettings' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-HideAllLayerSettings -ChatId $chatId -UserId $userId }
             break
@@ -4514,6 +4603,21 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -Layer ([int]$data.Substring(18)) -ChatId $chatId -UserId $userId }
             break
         }
+        'layername:clear:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $layer = [int]$data.Substring(16)
+                Clear-PendingState -ChatId $chatId
+                Set-LayerName -Layer $layer -Name '' -ChatId $chatId -UserId $userId | Out-Null
+            }
+            break
+        }
+        'layername:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $layer = [int]$data.Substring(10)
+                if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $layer) { Start-LayerNamePrompt -Layer $layer -ChatId $chatId -UserId $userId }
+            }
+            break
+        }
         'cfg:t:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-SettingToggle -Name $data.Substring(6) -ChatId $chatId -UserId $userId }
             break
@@ -4529,7 +4633,11 @@ function Invoke-CallbackQuery {
             break
         }
         'cfg:s:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingChoices -Name $data.Substring(6) -ChatId $chatId -UserId $userId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $settingName = $data.Substring(6)
+                if ($settingName -eq 'LayerNames') { Show-LayerNamesScreen -ChatId $chatId -UserId $userId }
+                else { Show-SettingChoices -Name $settingName -ChatId $chatId -UserId $userId }
+            }
             break
         }
         'cfgs:*' {
@@ -4809,6 +4917,7 @@ try {
                                 'stream_url' { Complete-StreamUrl -ChatId $chatId -Value $text }
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text }
+                                'layer_name' { Complete-LayerName -ChatId $chatId -Value $text }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text }

@@ -415,9 +415,11 @@ menu:
 - Settings now show their real units and Arabic purpose, for example seconds,
   minutes, files, characters, and megabytes, while retaining the technical
   key for support.
-- `LayerNames` lets an administrator give each Cinegy layer an operational
-  label, for example `7=عاجل;8=شريط الأخبار`. The label and layer number are
-  shown together in status, layer actions, emergency confirmation, and alerts.
+- **🏷️ أسماء الطبقات** lets an administrator choose a layer and enter one
+  operational label at a time. The bot stores the format internally, so the
+  administrator never has to type a compound value such as `7=عاجل`. The label
+  and layer number are shown together in status, layer actions, emergency
+  confirmation, and alerts.
 - **📚 القوالب والإعدادات** → administrators can always read every parsed
   template definition. `EnableFullTemplateManagement` is off by default and
   protected; once deliberately enabled, it permits reviewed creation, editing,

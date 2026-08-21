@@ -1,18 +1,21 @@
 {
-  "urgent": {
+  "بنر عاجل": {
     "description": "عاجل متحرك",
     "path": "D:\\cingy cg\\Urgent-Mov.cintitle",
-    "layer": 4,
+    "layer": 7,
     "order": 10,
     "maxLength": 500,
     "fields": [
-      { "name": "Ajel.center", "label": "نص الخبر العاجل" }
+      {
+        "name": "Ajel.center",
+        "label": "نص الخبر العاجل"
+      }
     ]
   },
   "logo": {
     "description": "شعار متحرك (بدون نص)",
     "path": "D:\\cingy cg\\logo_mov.cintitle",
-    "layer": 1,
+    "layer": 8,
     "order": 20,
     "maxLength": 500,
     "fields": []

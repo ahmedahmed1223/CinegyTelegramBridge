@@ -1204,7 +1204,10 @@ function Save-OnAirState {
                 ActiveId = [string](Get-JsonProp $info 'ActiveId')
             }
         }
-        $out | ConvertTo-Json -Depth 4 | Set-Content -Path $onAirFile -Encoding utf8 -ErrorAction Stop
+        $tempPath = "$onAirFile.tmp"
+        $json = $out | ConvertTo-Json -Depth 4
+        Set-Content -LiteralPath $tempPath -Value $json -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $tempPath -Destination $onAirFile -Force -ErrorAction Stop
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
@@ -2994,7 +2997,8 @@ function Get-OnAirSummary {
         $info = $script:OnAir[$layer]
         $age = [int]((Get-Date) - $info.At).TotalSeconds
         $ageText = if ($age -ge 60) { "$([int]($age / 60)) دقيقة" } else { "$age ثانية" }
-        "طبقة $layer : $($info.Key) (منذ $ageText)"
+        $userText = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { " | المستخدم: $($info.UserId)" } else { "" }
+        "طبقة $layer : $($info.Key)${userText} (منذ $ageText)"
     }
     return "🔴 على الهواء: " + ($parts -join "، ")
 }

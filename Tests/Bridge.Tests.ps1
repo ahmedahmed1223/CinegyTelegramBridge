@@ -678,6 +678,16 @@ Describe 'Simple and full status reports' {
         }
     }
 
+    It 'includes the operator identity in the on-air summary so multiple users are visible' {
+        $script:OnAir[4] = @{ Key = 'urgent'; At = (Get-Date).AddMinutes(-2); UserId = 777; ActiveId = '{A}' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-5); UserId = 888; ActiveId = '{B}' }
+
+        $summary = Get-OnAirSummary
+
+        $summary | Should -Match 'طبقة 4.*urgent.*المستخدم: 777'
+        $summary | Should -Match 'طبقة 8.*ticker.*المستخدم: 888'
+    }
+
     It 'merges layer details and health timings into the administrator full status' {
         Mock Test-Admin { $true }
         $callback = [pscustomobject]@{

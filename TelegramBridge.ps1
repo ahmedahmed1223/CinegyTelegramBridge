@@ -3812,13 +3812,15 @@ function Set-LayerName {
         if ($parts.Count -lt 2) { continue }
         $number = 0
         if ([int]::TryParse($parts[0].Trim(), [ref]$number) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
-            $names[$number] = $parts[1].Trim()
+            $key = [string]$number
+            $names[$key] = $parts[1].Trim()
         }
     }
-    if ([string]::IsNullOrWhiteSpace($trimmed)) { $names.Remove($Layer) | Out-Null }
-    else { $names[$Layer] = $trimmed }
+    $layerKey = [string]$Layer
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { $names.Remove($layerKey) | Out-Null }
+    else { $names[$layerKey] = $trimmed }
 
-    $stored = @($names.Keys | Sort-Object | ForEach-Object { "$_=$($names[$_])" }) -join ';'
+    $stored = @($names.Keys | Sort-Object { [int]$_ } | ForEach-Object { "$_=$($names[$_])" }) -join ';'
     Set-Setting -Name 'LayerNames' -Value $stored
     $action = if ([string]::IsNullOrWhiteSpace($trimmed)) { 'cleared' } else { "set to '$trimmed'" }
     Write-BridgeLog "User $UserId $action layer $Layer name"

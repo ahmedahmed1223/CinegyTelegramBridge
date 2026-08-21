@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '3.1.1'
+$script:BridgeVersion = '4.0.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -102,7 +102,7 @@ $script:DefaultSettings = [ordered]@{
     RelayWatchdogSeconds       = 20
     CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
-    CinegyMonitorTimeoutSeconds = 1      # keep background read-only checks bounded
+    CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
     FavoritesCount             = 3
@@ -1312,11 +1312,26 @@ function Update-OnAirStateFromCinegy {
         # two IDs almost never match. A mismatch alone must NOT drop a layer that
         # is genuinely on air - adopt Cinegy's real id and keep the record.
         if ($status.IsOnAir) {
-            if ($hasActualId) { $record.ActiveId = $actualId }
+            if ($hasActualId) {
+                $record.ActiveId = $actualId
+                $script:OnAirDirty = $true
+            }
         }
         else {
             # Genuinely hidden (IsEmpty) or replaced off air: drop from the
             # on-air record so onair.json reflects what is live now.
+            $changes.Add([pscustomobject]@{
+                Layer           = [int]$layer
+                TemplateKey     = [string](Get-JsonProp $record 'Key')
+                ShowUserId      = [long](Get-JsonProp $record 'UserId')
+                ShownAt         = Get-JsonProp $record 'At'
+                ExpectedActiveId = $trackedId
+                ActualActiveId  = $actualId
+                ActualActiveName = [string](Get-JsonProp $status 'ActiveName')
+                OutputState     = [string](Get-JsonProp $status 'OutputState')
+                ClientConnected = [bool](Get-JsonProp $status 'ClientConnected')
+                ClientIdentity  = [string](Get-JsonProp $status 'ClientIdentity')
+            })
             $script:OnAir.Remove([int]$layer)
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
@@ -1329,9 +1344,12 @@ function Update-OnAirStateFromCinegy {
         }
     }
 
-    if ($removed.Count -gt 0) {
+    if ($removed.Count -gt 0 -or $script:OnAirDirty) {
         Save-OnAirState
-        Write-BridgeLog "Cinegy state sync ($Reason) removed stale layer record(s): $($removed -join ', ')"
+        $script:OnAirDirty = $false
+        if ($removed.Count -gt 0) {
+            Write-BridgeLog "Cinegy state sync ($Reason) removed stale layer record(s): $($removed -join ', ')"
+        }
     }
 
     return [pscustomobject]@{
@@ -1765,6 +1783,7 @@ $script:LastShow = @{}
 # this is a best-effort record of the bot's own actions - graphics triggered
 # from the Air Pro UI itself will not appear here.
 $script:OnAir = @{}
+$script:OnAirDirty = $false   # set when the in-memory record changes so a sync flushes it
 
 # Async ffmpeg snapshot jobs, polled by Invoke-BridgeTick.
 $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()

@@ -1763,7 +1763,7 @@ Describe 'Update-OnAirStateFromCinegy' {
         $OnAir.ContainsKey(4) | Should -BeTrue
         $OnAir[4].ActiveId | Should -Be '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
         $result.Removed | Should -Be @()
-        Should -Invoke Save-OnAirState -Times 0 -Exactly
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
     }
 
     It 'formats an actionable external change alert without inventing a source IP' {
@@ -1794,7 +1794,7 @@ Describe 'Update-OnAirStateFromCinegy' {
 
         $OnAir.ContainsKey(4) | Should -BeTrue
         $result.Removed | Should -Be @()
-        Should -Invoke Save-OnAirState -Times 0 -Exactly
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
     }
 
     It 'preserves the local layer when the status request fails' {

@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.0.0
+
+- Fixed onair.json losing live templates: a layer that is genuinely on air is
+  no longer dropped just because Cinegy reports a different ActiveId (Cinegy
+  generates its own id and ignores the bot's EventId). The record is kept and
+  Cinegy's real id is adopted.
+- Restored the external-change alert (regression in 3.1.1 on-air fix): a layer
+  removed because Cinegy reports it hidden/off-air now produces a `Changes`
+  entry, so admins are notified again.
+- Added on-air dirty tracking so an updated ActiveId is persisted on the next
+  sync instead of only on removal.
+- Raised `CinegyMonitorTimeoutSeconds` default from 1 to 3 seconds so Air Pro
+  status reads stop timing out and dropping tracked layers.
+- Restructured the simple and full status reports with sections, an overall
+  status line, and a local timestamp.
+- Added `Tests/Smoke-OnAir.Pester.ps1` — a no-server, no-disk smoke test for
+  on-air persistence (runs as part of Run-Checks.ps1).
+
 ## 3.1.1
 
 - Replaced free-text `LayerNames` editing with an administrator-only layer

@@ -1208,6 +1208,8 @@ function Save-OnAirState {
         $json = $out | ConvertTo-Json -Depth 4
         Set-Content -LiteralPath $tempPath -Value $json -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $tempPath -Destination $onAirFile -Force -ErrorAction Stop
+        # Log a successful write so operators can see when the onair.json was updated
+        try { Write-BridgeLog "Wrote onair.json ($($out.Keys.Count) layer(s)) to $onAirFile" "INFO" } catch {}
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }

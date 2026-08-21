@@ -146,6 +146,22 @@ Describe 'Protect-SensitiveText' {
     }
 }
 
+Describe 'Layer naming' {
+    It 'ignores malformed layer-name entries instead of crashing on indexes' {
+        $original = Get-Setting 'LayerNames'
+        try {
+            $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue 'bad;7=عاجل;9=شريط الأخبار;=oops;10=' -Force
+            Get-LayerName -Layer 7 | Should -Be 'عاجل'
+            Set-LayerName -Layer 8 -Name 'أخبار' -ChatId 42 -UserId 42 | Should -BeTrue
+            Get-Setting 'LayerNames' | Should -Be '7=عاجل;8=أخبار;9=شريط الأخبار'
+            Get-LayerDisplayName -Layer 8 | Should -Be 'أخبار · طبقة 8'
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue $original -Force
+        }
+    }
+}
+
 Describe 'Template registry parsing' {
     It 'accepts both plain-string and labelled field definitions' {
         $file = New-TempTemplateFile -Json @'

@@ -322,11 +322,15 @@ function Get-SettingInt {
 
 function Get-LayerName {
     param([Parameter(Mandatory)][int]$Layer)
-    foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
+    foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($pair)) { continue }
         $parts = $pair -split '=', 2
+        if ($parts.Count -lt 2) { continue }
         $number = 0
-        if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$number) -and $number -eq $Layer) {
-            return $parts[1].Trim()
+        if ([int]::TryParse($parts[0].Trim(), [ref]$number) -and $number -eq $Layer) {
+            $name = $parts[1].Trim()
+            if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
+            return ''
         }
     }
     return ''
@@ -3802,10 +3806,12 @@ function Set-LayerName {
     }
 
     $names = [ordered]@{}
-    foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
+    foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($pair)) { continue }
         $parts = $pair -split '=', 2
+        if ($parts.Count -lt 2) { continue }
         $number = 0
-        if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$number) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
+        if ([int]::TryParse($parts[0].Trim(), [ref]$number) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
             $names[$number] = $parts[1].Trim()
         }
     }
@@ -4605,7 +4611,10 @@ function Invoke-CallbackQuery {
         }
         'layername:clear:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $layer = [int]$data.Substring(16)
+                $layerText = $data -replace '^layername:clear:', ''
+                if ([string]::IsNullOrWhiteSpace($layerText)) { break }
+                $layer = 0
+                if (-not [int]::TryParse($layerText, [ref]$layer)) { break }
                 Clear-PendingState -ChatId $chatId
                 Set-LayerName -Layer $layer -Name '' -ChatId $chatId -UserId $userId | Out-Null
             }
@@ -4613,7 +4622,10 @@ function Invoke-CallbackQuery {
         }
         'layername:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $layer = [int]$data.Substring(10)
+                $layerText = $data -replace '^layername:', ''
+                if ([string]::IsNullOrWhiteSpace($layerText)) { break }
+                $layer = 0
+                if (-not [int]::TryParse($layerText, [ref]$layer)) { break }
                 if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $layer) { Start-LayerNamePrompt -Layer $layer -ChatId $chatId -UserId $userId }
             }
             break

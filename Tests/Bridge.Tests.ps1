@@ -1744,7 +1744,7 @@ Describe 'Update-OnAirStateFromCinegy' {
         Should -Invoke Save-OnAirState -Times 1 -Exactly
     }
 
-    It 'removes the local scene when Cinegy has replaced it with another active item' {
+    It 'keeps the tracked template when Cinegy reports a different active id but is still on air' {
         $OnAir[4].ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{
@@ -1760,11 +1760,10 @@ Describe 'Update-OnAirStateFromCinegy' {
 
         $result = Update-OnAirStateFromCinegy
 
-        $OnAir.ContainsKey(4) | Should -BeFalse
-        $result.Changes[0].TemplateKey | Should -Be 'lower-third'
-        $result.Changes[0].ActualActiveName | Should -Be 'External Item'
-        $result.Removed | Should -Be @(4)
-        Should -Invoke Save-OnAirState -Times 1 -Exactly
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $OnAir[4].ActiveId | Should -Be '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
+        $result.Removed | Should -Be @()
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 
     It 'formats an actionable external change alert without inventing a source IP' {
@@ -1782,7 +1781,7 @@ Describe 'Update-OnAirStateFromCinegy' {
         $text | Should -Not -Match 'عنوان IP'
     }
 
-    It 'removes a legacy on-air record that has no correlatable event id' {
+    It 'keeps a tracked layer that has no correlatable event id but is on air' {
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{
                 Success  = $true
@@ -1793,9 +1792,9 @@ Describe 'Update-OnAirStateFromCinegy' {
 
         $result = Update-OnAirStateFromCinegy
 
-        $OnAir.ContainsKey(4) | Should -BeFalse
-        $result.Removed | Should -Be @(4)
-        Should -Invoke Save-OnAirState -Times 1 -Exactly
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $result.Removed | Should -Be @()
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 
     It 'preserves the local layer when the status request fails' {

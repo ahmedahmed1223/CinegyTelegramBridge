@@ -1292,6 +1292,7 @@ function Update-OnAirStateFromCinegy {
         if (-not $status.Success) {
             $failed.Add([int]$layer)
             Write-BridgeLog "Could not verify GFX layer $layer during $Reason sync: $($status.Error)" "WARN"
+            # Keep the record: an unavailable engine is not the same as a hidden graphic.
             continue
         }
 
@@ -1299,8 +1300,6 @@ function Update-OnAirStateFromCinegy {
         $record = $script:OnAir[$layer]
         $trackedId = [string](Get-JsonProp $record 'ActiveId')
         $actualId = [string]$status.ActiveId
-        $actualName = [string](Get-JsonProp $status 'ActiveName')
-        $templateKey = [string](Get-JsonProp $record 'Key')
 
         $trackedNormalized = $trackedId.Trim().Trim('{', '}')
         $actualNormalized = $actualId.Trim().Trim('{', '}')
@@ -1309,39 +1308,15 @@ function Update-OnAirStateFromCinegy {
         $hasActualId = -not [string]::IsNullOrWhiteSpace($actualNormalized) -and
             $actualNormalized -ne '00000000-0000-0000-0000-000000000000'
 
-        $idsMatch = $hasTrackedId -and $hasActualId -and
-            $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
-        $nameMatches = Test-OnAirTemplateMatch -TemplateKey $templateKey -ActiveName $actualName -HasTrackedId $hasTrackedId
-
+        # Cinegy generates its own ActiveId and ignores the bot's EventId, so the
+        # two IDs almost never match. A mismatch alone must NOT drop a layer that
+        # is genuinely on air - adopt Cinegy's real id and keep the record.
         if ($status.IsOnAir) {
-            if (-not $idsMatch -and $nameMatches) {
-                if ($hasActualId) {
-                    $record.ActiveId = $actualId
-                    $trackedId = $actualId
-                    $trackedNormalized = $actualNormalized
-                    $hasTrackedId = $true
-                    $idsMatch = $true
-                }
-            }
+            if ($hasActualId) { $record.ActiveId = $actualId }
         }
-
-        $cannotCorrelate = -not $hasTrackedId -and $hasActualId
-        $wasReplaced = $hasTrackedId -and $hasActualId -and -not $idsMatch -and -not $nameMatches
-
-        if (-not $status.IsOnAir -or $cannotCorrelate -or $wasReplaced) {
-            $record = $script:OnAir[$layer]
-            $changes.Add([pscustomobject]@{
-                Layer           = [int]$layer
-                TemplateKey     = [string](Get-JsonProp $record 'Key')
-                ShowUserId      = [long](Get-JsonProp $record 'UserId')
-                ShownAt         = Get-JsonProp $record 'At'
-                ExpectedActiveId = $trackedId
-                ActualActiveId  = $actualId
-                ActualActiveName = [string](Get-JsonProp $status 'ActiveName')
-                OutputState     = [string](Get-JsonProp $status 'OutputState')
-                ClientConnected = [bool](Get-JsonProp $status 'ClientConnected')
-                ClientIdentity  = [string](Get-JsonProp $status 'ClientIdentity')
-            })
+        else {
+            # Genuinely hidden (IsEmpty) or replaced off air: drop from the
+            # on-air record so onair.json reflects what is live now.
             $script:OnAir.Remove([int]$layer)
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.

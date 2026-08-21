@@ -1194,6 +1194,7 @@ function Import-OnAirState {
 
 function Save-OnAirState {
     try {
+        Write-BridgeLog "Save-OnAirState invoked (in-memory layers: $($script:OnAir.Keys.Count))" "DEBUG"
         $out = @{}
         foreach ($layer in $script:OnAir.Keys) {
             $info = $script:OnAir[$layer]
@@ -1206,6 +1207,7 @@ function Save-OnAirState {
         }
         $tempPath = "$onAirFile.tmp"
         $json = $out | ConvertTo-Json -Depth 4
+        Write-BridgeLog "Writing temporary onair payload to $tempPath (size: $($json.Length) chars)" "DEBUG"
         Set-Content -LiteralPath $tempPath -Value $json -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $tempPath -Destination $onAirFile -Force -ErrorAction Stop
         # Log a successful write so operators can see when the onair.json was updated

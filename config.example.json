@@ -28,6 +28,7 @@
     "EnableLiveRelay": true,
     "EnableTimedShow": true,
     "EnableHideAll": true,
+    "HideAllLayers": "all",
     "EnableFavorites": true,
     "EnablePersistentMenuButton": true,
     "DropPendingUpdatesOnStart": true,

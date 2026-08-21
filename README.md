@@ -33,15 +33,20 @@ model and compatibility with 2.x configuration files:
   Telegram. Every change is reviewed first, written atomically, and preceded
   by a timestamped `templates.json` backup.
 
-- `ℹ️ الحالة` checks every GFX layer referenced by `templates.json` and labels
-  it on-air, hidden, external, or unknown.
+- `ℹ️ الحالة` is a lightweight report available to every authorized user. It
+  shows the Air server/channel, template count, and the bridge-tracked on-air
+  summary without administrator telemetry.
+- `🎚 الطبقات` checks every GFX layer referenced by `templates.json` directly
+  against Cinegy and labels it on-air, hidden, external, or unknown. Pressing
+  an on-air layer provides the quick hide action; other layers refresh the panel.
 - Cinegy `/metrics` is summarized for dropped frames, missing input, read
   errors, read time, output count, and telemetry heartbeat.
 - Admins receive deduplicated alerts when a bridge-tracked scene is hidden or
   replaced externally, when Cinegy health becomes bad/unreachable, and once
   again when it recovers.
-- `💚 الصحة` or `/health` measures Telegram and Cinegy response time and shows
-  the latest successful check and error for each service.
+- `📊 الحالة الكاملة` is administrator-only and combines the real
+  layer dashboard with Telegram/Cinegy latency, health history, telemetry, and
+  operational details. `/health` remains an administrator-only compatibility alias.
 - Admin settings changes create timestamped backups automatically. The
   `🗄 نسخ الإعدادات` screen validates, compares, and restores a selected copy
   only after explicit confirmation.
@@ -353,8 +358,9 @@ menu:
 - **🙈 اخفاء طبقة** / **🚪 خروج من المشهد** → shows a button per known GFX
   layer (derived from the layers used in `templates.json`) — tap one to
   hide that layer / exit its scene, no need to type a layer number.
-- **🚨 إخفاء الكل** → emergency button: shows the affected layers and requires
-  a second confirmation before hiding them and cancelling pending timers.
+- **🚨 إخفاء الكل** → emergency button: shows the administrator-selected
+  layers and requires a second confirmation before hiding only those layers
+  and cancelling pending timers.
 - **🔴 على الهواء** → a row appears at the top of the menu with one button per
   layer the bridge believes is currently live, labelled with the template
   name; tapping it hides that layer. The same information (with how long it
@@ -394,11 +400,8 @@ menu:
   timed-out captures delete their own output, and a sweep every few minutes
   (plus one at startup) removes anything older than
   `SnapshotRetentionMinutes` that a hard kill may have orphaned.
-- **ℹ️ الحالة** → Air host/channel, template count, relay state, outstanding
-  snapshots and timers, authorized-user counts, pending requests, and template
-  warnings. It also reads every configured GFX layer and reports Cinegy's
-  output/license/client metadata plus the latest one-minute `/metrics` health
-  summary.
+- **ℹ️ الحالة** → a lightweight report for every authorized user: Air
+  host/channel, template count, and the bridge-tracked on-air summary.
 
 **Admins only**
 
@@ -406,7 +409,11 @@ menu:
   ✅/❌; numbers open a "send me the new value" prompt. Every change is saved
   to `config.json` immediately and recorded in the audit trail, and
   **♻️ استعادة الافتراضي** resets everything. Full option table in
-  `TASKS.md`.
+  `TASKS.md`. **🚨 طبقات إخفاء الكل** opens a checkbox panel: select exactly
+  the layers the emergency action may hide, or restore the default of all
+  configured layers.
+- **📊 الحالة الكاملة** → administrator-only layer dashboard, service health,
+  telemetry, and operational details.
 - **👤 طلبات الوصول** → anyone who messaged the bot but isn't authorized yet,
   each with Approve/Reject buttons. The label carries a live count, e.g.
   `👤 طلبات الوصول (2)`.

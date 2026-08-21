@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '3.0.0'
+$script:BridgeVersion = '3.0.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -76,6 +76,7 @@ $script:DefaultSettings = [ordered]@{
     EnableLiveRelay            = $true
     EnableTimedShow            = $true
     EnableHideAll              = $true
+    HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
     EnableFavorites            = $true
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     # --- safety ---
@@ -593,7 +594,6 @@ $script:BotCommandList = @(
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
-    @{ command = 'health'; description = '💚 فحص صحة Telegram وCinegy' }
     @{ command = 'snapshot'; description = '📸 التقاط صورة من البث' }
     @{ command = 'schedule'; description = '📅 جدولة عرض ومراجعة الأحداث القادمة' }
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
@@ -916,6 +916,21 @@ function Get-KnownLayers {
     return $layers
 }
 
+function Get-HideAllTargetLayers {
+    <# "all" preserves the established default. An empty or invalid selection
+       deliberately hides nothing, so a bad configuration cannot widen scope. #>
+    $known = @((Get-KnownLayers | ForEach-Object { [int]$_ }) | Sort-Object -Unique)
+    $raw = [string](Get-Setting 'HideAllLayers')
+    if ($raw.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { return $known }
+
+    $selected = @()
+    foreach ($part in ($raw -split '[,;\s]+')) {
+        $layer = 0
+        if ([int]::TryParse($part.Trim(), [ref]$layer) -and $known -contains $layer) { $selected += $layer }
+    }
+    return @($selected | Sort-Object -Unique)
+}
+
 function Get-CinegyLayerDashboard {
     <# Takes one read-only snapshot of every GFX layer referenced by the
        configured templates. Each returned status carries its Layer number so
@@ -933,6 +948,8 @@ function Format-CinegyLayerDashboard {
     param([Parameter(Mandatory)][object[]]$LayerStatuses)
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('🎚 حالة طبقات Cinegy:')
+    $lines.Add('الإجراءات: 🙈 إخفاء = يخفي الطبقة فورًا | 🔄 تحديث = يعيد فحص كل الطبقات')
+    $lines.Add('')
 
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
@@ -1600,10 +1617,10 @@ function Get-MainMenuKeyboard {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
-    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers"), (New-Button "💚 الصحة" "menu:health") )
-    $rows += , @( (New-Button "ℹ️ الحالة الكاملة" "menu:status") )
+    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers") )
+    $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
-        $rows += , @( (New-Button "🔄 تحديث حالة Cinegy" "menu:refreshstatus") )
+        $rows += , @( (New-Button "📊 الحالة الكاملة" "menu:fullstatus") )
     }
 
     if (Get-Setting 'EnableFavorites') {
@@ -1795,13 +1812,13 @@ function Get-LayerDashboardKeyboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $button = New-Button "⚠️ طبقة $layer" 'menu:layers'
+            $button = New-Button "🔄 إعادة فحص · طبقة $layer" 'menu:layers'
         }
         elseif ($status.IsOnAir) {
-            $button = New-Button "🔴 طبقة $layer" "hide:$layer"
+            $button = New-Button "🙈 إخفاء طبقة $layer" "hide:$layer"
         }
         else {
-            $button = New-Button "⚪ طبقة $layer" 'menu:layers'
+            $button = New-Button "🔄 تحديث · طبقة $layer مخفية" 'menu:layers'
         }
         $row += $button
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
@@ -1918,6 +1935,7 @@ function Get-SettingsKeyboard {
        they stay well inside the 64-byte callback_data budget. #>
     $rows = @()
     foreach ($name in $script:DefaultSettings.Keys) {
+        if ($name -eq 'HideAllLayers') { continue }
         $value = Get-Setting $name
         if ($script:DefaultSettings[$name] -is [bool]) {
             $mark = if ($value) { "✅" } else { "❌" }
@@ -1931,8 +1949,24 @@ function Get-SettingsKeyboard {
             $rows += , @( (New-Button "🔢 $name = $value" "cfg:v:$name") )
         }
     }
+    $scope = [string](Get-Setting 'HideAllLayers')
+    $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
+    $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-HideAllLayerSettingsKeyboard {
+    $selected = @(Get-HideAllTargetLayers)
+    $allMode = ([string](Get-Setting 'HideAllLayers')).Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)
+    $rows = @()
+    foreach ($layer in @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique)) {
+        $mark = if ($allMode -or $selected -contains $layer) { '✅' } else { '⬜' }
+        $rows += , @( (New-Button "$mark طبقة $layer" "hideallcfg:toggle:$layer") )
+    }
+    $rows += , @( (New-Button "☑️ اختيار كل الطبقات" 'hideallcfg:all'), (New-Button "🚫 إلغاء اختيار الكل" 'hideallcfg:none') )
+    $rows += , @( (New-Button "⬅️ الإعدادات" 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2170,15 +2204,16 @@ function Get-HelpText {
         "🧰 أدوات مفيدة",
         "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
         "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
-        "ℹ️ الحالة: فحص كل الطبقات المعرّفة وقياسات صحة Cinegy الفعلية.",
-        "💚 الصحة: قياس زمن Telegram وCinegy وعرض آخر نجاح وآخر خطأ.",
+        "🎚 الطبقات: تفحص Cinegy مباشرة وتعرض كل طبقة كـ ظاهر، خارجي، مخفي أو غير معروف.",
+        "اضغط على طبقة ظاهرة لإخفائها سريعًا؛ والضغط على طبقة غير ظاهرة يحدّث لوحة الطبقات.",
+        "ℹ️ الحالة: ملخص سريع للجميع يعرض خادم Air والقناة والقوالب المتابعة.",
         "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
         "📅 الجدولة: اختر القالب والقيم والموعد ثم مرة واحدة/يومي/أسبوعي وراجع الحدث قبل حفظه.",
         ""
     )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $lines += "🛡️ أدوات المشرف"
-        $lines += "⚙️ الإعدادات، 👤 طلبات الوصول، 🔄 تحديث حالة Cinegy،"
+        $lines += "⚙️ الإعدادات، 👤 طلبات الوصول، 📊 الحالة الكاملة وصحة الخدمات،"
         $lines += "⚡ إدارة النصوص الجاهزة، ▶️/⏹ البث المباشر، 🔗 رابط البث، 📜 السجل، 🛠 أمر خام."
         $lines += ""
     }
@@ -2476,15 +2511,15 @@ function Invoke-ExitLayer {
 }
 
 function Invoke-HideAllLayers {
-    <# Emergency "get it off air" button - hides every layer referenced by
-       templates.json in one press. #>
+    <# Emergency "get it off air" button - hides only the layers selected by
+       the administrator. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $layers = @(Get-KnownLayers)
-    # Anything the bridge believes is live but whose layer is not in the
-    # template list must still be swept - that is the whole point of the
-    # emergency button.
-    foreach ($l in @($script:OnAir.Keys)) { if ($layers -notcontains $l) { $layers += $l } }
+    $layers = @(Get-HideAllTargetLayers)
+    if ($layers.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
     $ok = @(); $failed = @()
     foreach ($l in $layers) {
         if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet) { $ok += $l } else { $failed += $l }
@@ -2763,22 +2798,14 @@ function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $store = Get-TemplateStore
-    $layerStatuses = @(Get-CinegyLayerDashboard)
-    $sync = Update-OnAirStateFromCinegy -Reason 'status' -LayerStatuses $layerStatuses `
-        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
-        -AirChannelNumber $config.AirChannelNumber `
+    $sync = Update-OnAirStateFromCinegy -Reason 'status' `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     $lines = @(
+        "ℹ️ الحالة",
         "الإصدار: $($script:BridgeVersion)",
         "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
         "القوالب المحمّلة: $($store.Order.Count)",
-        (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses),
-        (Format-CinegyTelemetryStatus -Telemetry $telemetry),
-        "البث المباشر: $(Get-LiveRelayStatusText)",
-        "الصور المعلّقة: $($script:SnapshotJobs.Count)، مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
-        "المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم",
-        "طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)"
+        (Get-OnAirSummary)
     )
     if ($sync.Failed.Count -gt 0) {
         $lines += "⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة."
@@ -2787,7 +2814,7 @@ function Invoke-StatusCommand {
         $lines += "🔄 تم تحديث الحالة وإزالة الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')"
     }
     else {
-        $lines += "✅ حالة Cinegy متزامنة."
+        $lines += "✅ الحالة متزامنة مع Cinegy."
     }
     if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -2797,17 +2824,18 @@ function Request-HideAllConfirmation {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
-    $layers = @(Get-KnownLayers)
+    $layers = @(Get-HideAllTargetLayers)
+    if ($layers.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
     Set-PendingState -ChatId $ChatId -State @{
         Mode = 'hide_all_review'; UserId = $UserId; Layers = $layers
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء كل الطبقات المعروفة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
 }
 
-function Invoke-HealthCommand {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    if ($UserId -eq 0) { $UserId = $ChatId }
-
+function Get-HealthStatusReport {
     $telegramWatch = [System.Diagnostics.Stopwatch]::StartNew()
     $telegramOk = $false
     $telegramError = ''
@@ -2860,7 +2888,51 @@ function Invoke-HealthCommand {
         "",
         (Format-CinegyTelemetryStatus -Telemetry $telemetry)
     ) -join "`n"
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return [pscustomobject]@{ Text = $text; Telemetry = $telemetry }
+}
+
+function Invoke-FullStatusCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "هذا الأمر مخصص للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+
+    $store = Get-TemplateStore
+    $layerStatuses = @(Get-CinegyLayerDashboard)
+    $sync = Update-OnAirStateFromCinegy -Reason 'full-status' -LayerStatuses $layerStatuses `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $health = Get-HealthStatusReport
+    $lines = @(
+        "📊 الحالة الكاملة",
+        "الإصدار: $($script:BridgeVersion)",
+        "خادم Air: $($config.AirServerAddress)، القناة: $($config.AirChannelNumber)",
+        "القوالب المحمّلة: $($store.Order.Count)",
+        (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses),
+        $health.Text,
+        "البث المباشر: $(Get-LiveRelayStatusText)",
+        "الصور المعلّقة: $($script:SnapshotJobs.Count)، مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
+        "المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم",
+        "طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)"
+    )
+    if ($sync.Failed.Count -gt 0) {
+        $lines += "⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة."
+    }
+    elseif ($sync.Removed.Count -gt 0) {
+        $lines += "🔄 أزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')"
+    }
+    else { $lines += "✅ حالة Cinegy متزامنة." }
+    if ($store.Errors.Count -gt 0) { $lines += "⚠️ " + ($store.Errors -join "`n⚠️ ") }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Invoke-HealthCommand {
+    <# Backward-compatible typed alias. Health is no longer a separate public
+       screen; administrators receive it inside the full status report. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Invoke-FullStatusCommand -ChatId $ChatId -UserId $UserId
 }
 
 function Invoke-DiagnosticsCommand {
@@ -3431,6 +3503,43 @@ function Show-SettingsScreen {
     Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات - اضغط على أي خيار لتبديله أو تغيير قيمته:" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
+function Show-HideAllLayerSettings {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $layers = @(Get-HideAllTargetLayers)
+    $scopeText = if ($layers.Count -gt 0) { $layers -join '، ' } else { 'لا توجد طبقات محددة' }
+    Send-TelegramMessage -ChatId $ChatId -Text "🚨 طبقات إخفاء الكل الحالية: $scopeText`nاضغط طبقة لتضمينها أو استبعادها. هذا التحديد هو فقط ما سيخفيه زر الطوارئ." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
+}
+
+function Set-HideAllLayerSelection {
+    param(
+        [int]$Layer = 0,
+        [switch]$SelectAll,
+        [switch]$ClearAll,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $known = @((Get-KnownLayers | ForEach-Object { [int]$_ }) | Sort-Object -Unique)
+    if ($SelectAll) { $value = 'all' }
+    elseif ($ClearAll) { $value = '' }
+    else {
+        if ($known -notcontains $Layer) {
+            Send-TelegramMessage -ChatId $ChatId -Text "هذه الطبقة لم تعد ضمن القوالب المعرّفة." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
+            return
+        }
+        $selected = @(Get-HideAllTargetLayers)
+        if (([string](Get-Setting 'HideAllLayers')).Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { $selected = $known }
+        if ($selected -contains $Layer) { $selected = @($selected | Where-Object { $_ -ne $Layer }) }
+        else { $selected += $Layer }
+        $value = (@($selected | Sort-Object -Unique) -join ',')
+    }
+    Set-Setting -Name 'HideAllLayers' -Value $value
+    Write-BridgeLog "User $UserId changed HideAllLayers to '$value'" "WARN"
+    Add-AuditEntry "🚨 طبقات إخفاء الكل = $value - user $UserId"
+    Show-HideAllLayerSettings -ChatId $ChatId -UserId $UserId
+}
+
 function Invoke-SettingToggle {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Confirmed)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -3643,7 +3752,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('خروج', 'exit') } { Invoke-ExitCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تحديث', 'set') } { Invoke-SetCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حالة', 'status') } { Invoke-StatusCommand -ChatId $ChatId -UserId $UserId }
-        { $_ -in @('صحة', 'health') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('صحة', 'health', 'fullstatus') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
         { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text "📅 الجدولة:" -ReplyMarkup (Get-ScheduleMenuKeyboard) }
@@ -3809,7 +3918,15 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
-        'menu:health' { Invoke-HealthCommand -ChatId $chatId -UserId $userId; break }
+        'menu:fullstatus' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
+            break
+        }
+        'menu:health' {
+            # Backward-compatible callback for messages created before 3.0.
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
+            break
+        }
         'menu:diagnostics' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticsCommand -ChatId $chatId -UserId $userId }
             break
@@ -3821,7 +3938,7 @@ function Invoke-CallbackQuery {
         }
         'menu:refreshstatus' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Invoke-StatusCommand -ChatId $chatId -UserId $userId
+                Invoke-FullStatusCommand -ChatId $chatId -UserId $userId
             }
             break
         }
@@ -3835,6 +3952,10 @@ function Invoke-CallbackQuery {
         }
         'menu:settings' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'menu:hideallsettings' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-HideAllLayerSettings -ChatId $chatId -UserId $userId }
             break
         }
         'menu:schedule' {
@@ -4116,6 +4237,18 @@ function Invoke-CallbackQuery {
         }
         'cfg:reset' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Reset-SettingsToDefault -ChatId $chatId -UserId $userId }
+            break
+        }
+        'hideallcfg:all' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -SelectAll -ChatId $chatId -UserId $userId }
+            break
+        }
+        'hideallcfg:none' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -ClearAll -ChatId $chatId -UserId $userId }
+            break
+        }
+        'hideallcfg:toggle:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -Layer ([int]$data.Substring(18)) -ChatId $chatId -UserId $userId }
             break
         }
         'cfg:t:*' {

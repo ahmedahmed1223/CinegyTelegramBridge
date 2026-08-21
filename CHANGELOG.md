@@ -14,6 +14,11 @@
   occurrence keys that prevent automatic replay.
 - Added `/health`, Telegram/Cinegy latency and health history, startup and
   recovery notifications, and a redacted administrator diagnostics report.
+- Split status by role: every authorized user gets a lightweight Air summary,
+  while administrators get a combined full layer and service-health report.
+- Clarified the layer panel states and its quick-hide behavior in the Arabic help.
+- Added an administrator-selected `HideAllLayers` scope, so the emergency
+  hide-all action affects only the layers selected from Settings.
 - Added configuration backup comparison/restoration and migration coverage.
 - Added a real Cinegy dashboard for every GFX layer referenced by the template
   registry, distinguishing bridge-owned, external, hidden, and unknown state.

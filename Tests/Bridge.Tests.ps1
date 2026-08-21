@@ -461,6 +461,7 @@ Describe 'Help guidance' {
 
         $help | Should -Match '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← راجع القيم ← تأكيد الإرسال'
         $help | Should -Match '📅 الجدولة'
+        $help | Should -Match '🎚 الطبقات.*ظاهر.*خارجي.*مخفي.*غير معروف'
         $help | Should -Match '✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد'
         $help | Should -Match '⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص'
     }
@@ -480,60 +481,58 @@ Describe 'Help guidance' {
         $help = Get-HelpText
 
         $help | Should -Match '🛡️ أدوات المشرف'
-        $help | Should -Match '🔄 تحديث حالة Cinegy'
+        $help | Should -Match '📊 الحالة الكاملة وصحة الخدمات'
     }
 }
 
-Describe 'Admin-only Cinegy state refresh' {
-    It 'shows the health button to every authorized user' {
+Describe 'Role-aware status menus' {
+    It 'shows only the simple status button to a regular authorized user' {
         Mock Test-Admin { $false }
 
         $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
         $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
 
-        $callbackData | Should -Contain 'menu:health'
+        $callbackData | Should -Contain 'menu:status'
+        $callbackData | Should -Not -Contain 'menu:fullstatus'
+        $callbackData | Should -Not -Contain 'menu:health'
+        $callbackData | Should -Not -Contain 'menu:refreshstatus'
     }
 
-    It 'shows the refresh button to an admin' {
+    It 'adds the full status button for an administrator without separate health or refresh buttons' {
         Mock Test-Admin { $true }
 
         $keyboard = Get-MainMenuKeyboard -ChatId 100 -UserId 100
         $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
 
-        $callbackData | Should -Contain 'menu:refreshstatus'
-    }
-
-    It 'does not show the refresh button to a regular authorized user' {
-        Mock Test-Admin { $false }
-
-        $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
-        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
-
-        $callbackData | Should -Not -Contain 'menu:refreshstatus'
         $callbackData | Should -Contain 'menu:status'
+        $callbackData | Should -Contain 'menu:fullstatus'
+        $callbackData | Should -Not -Contain 'menu:health'
+        $callbackData | Should -Not -Contain 'menu:refreshstatus'
     }
 
-    It 'rejects a forged refresh callback from a non-admin' {
+    It 'rejects a forged full-status callback from a non-admin' {
         Mock Confirm-TelegramCallback { }
         Mock Test-Authorized { $true }
-        Mock Test-CallbackAdmin { $false }
-        Mock Invoke-StatusCommand { }
+        Mock Test-Admin { $false }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-FullStatusCommand { }
         $callback = [pscustomobject]@{
             id      = 'callback-1'
             from    = [pscustomobject]@{ id = 200 }
             message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
-            data    = 'menu:refreshstatus'
+            data    = 'menu:fullstatus'
         }
 
         Invoke-CallbackQuery -CallbackQuery $callback
 
-        Should -Invoke Test-CallbackAdmin -Times 1 -Exactly
-        Should -Invoke Invoke-StatusCommand -Times 0 -Exactly
+        Should -Invoke Invoke-FullStatusCommand -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 }
 
-Describe 'Bridge health command' {
+Describe 'Simple and full status reports' {
     BeforeEach {
+        $script:OnAir.Clear()
         foreach ($service in @('Telegram', 'Cinegy')) {
             $script:HealthHistory[$service].LastSuccess = $null
             $script:HealthHistory[$service].LastError = ''
@@ -542,6 +541,16 @@ Describe 'Bridge health command' {
         Mock Confirm-TelegramCallback { }
         Mock Test-Authorized { $true }
         Mock Send-TelegramMessage { }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ urgent = 1 }; Order = @('urgent'); Errors = @() }
+        }
+        Mock Get-CinegyLayerDashboard {
+            @([pscustomobject]@{
+                Layer = 4; Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = ''
+                OutputState = 'Normal'; LicenseState = 'Licensed'; ClientConnected = $true; ClientIdentity = 'Client 1'
+            })
+        }
+        Mock Update-OnAirStateFromCinegy { [pscustomobject]@{ Checked = @(4); Removed = @(); Failed = @() } }
         Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
         Mock Get-AirTelemetryStatus {
             [pscustomobject]@{
@@ -550,48 +559,68 @@ Describe 'Bridge health command' {
                 MaxReadErrorRate = 0; AverageReadTime = 1.2; MaxHeartbeat = 700
             }
         }
+        Mock Get-LiveRelayStatusText { 'متوقف' }
     }
 
-    It 'reports Telegram and Cinegy response times from the health button' {
+    AfterEach { $script:OnAir.Clear() }
+
+    It 'keeps the public status lightweight while showing the Air server address' {
+        Mock Test-Admin { $false }
+
+        Invoke-StatusCommand -ChatId 200 -UserId 200
+
+        Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 200 -and $Text -match 'خادم Air' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and $Text -notmatch 'صحة الخدمات'
+        }
+    }
+
+    It 'merges layer details and health timings into the administrator full status' {
+        Mock Test-Admin { $true }
         $callback = [pscustomobject]@{
-            id = 'health-1'
-            from = [pscustomobject]@{ id = 200 }
-            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
-            data = 'menu:health'
+            id = 'full-status-1'
+            from = [pscustomobject]@{ id = 100 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100 } }
+            data = 'menu:fullstatus'
         }
 
         Invoke-CallbackQuery -CallbackQuery $callback
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 200 -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms'
+            $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4'
         }
     }
 
-    It 'shows the last successful check and the latest error after a failure' {
-        $callback = [pscustomobject]@{
-            id = 'health-success'
-            from = [pscustomobject]@{ id = 200 }
-            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 200 } }
-            data = 'menu:health'
-        }
-        Invoke-CallbackQuery -CallbackQuery $callback
-
-        Mock Invoke-RestMethod { throw 'telegram timeout' }
-        Mock Get-AirTelemetryStatus { [pscustomobject]@{ Success = $false; Healthy = $null } }
-        $callback.id = 'health-failure'
-        Invoke-CallbackQuery -CallbackQuery $callback
-
-        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 200 -and $Text -match 'آخر نجاح' -and $Text -match 'آخر خطأ: telegram timeout'
-        }
-    }
-
-    It 'routes the slash health command to the same health check' {
-        Mock Invoke-HealthCommand { }
+    It 'rejects the legacy health command for a regular user' {
+        Mock Test-Admin { $false }
 
         Invoke-BridgeCommand -Text '/health' -ChatId 200 -UserId 200
 
-        Should -Invoke Invoke-HealthCommand -Times 1 -Exactly -ParameterFilter { $ChatId -eq 200 -and $UserId -eq 200 }
+        Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'keeps the legacy health command as an administrator alias for full status' {
+        Mock Test-Admin { $true }
+
+        Invoke-BridgeCommand -Text '/health' -ChatId 100 -UserId 100
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'صحة الخدمات'
+        }
+    }
+
+    It 'keeps last success and error history inside full status' {
+        Mock Test-Admin { $true }
+        Invoke-HealthCommand -ChatId 100 -UserId 100
+
+        Mock Invoke-RestMethod { throw 'telegram timeout' }
+        Mock Get-AirTelemetryStatus { [pscustomobject]@{ Success = $false; Healthy = $null } }
+        Invoke-HealthCommand -ChatId 100 -UserId 100
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 100 -and $Text -match 'آخر نجاح' -and $Text -match 'آخر خطأ: telegram timeout'
+        }
     }
 }
 
@@ -1487,6 +1516,70 @@ Describe 'Hide-all confirmation gate' {
     }
 }
 
+Describe 'Configurable hide-all layers' {
+    BeforeEach {
+        $script:OriginalHideAllLayersForTest = Get-Setting 'HideAllLayers'
+        $config.Settings | Add-Member -NotePropertyName 'HideAllLayers' -NotePropertyValue '2,4' -Force
+        $script:OnAir.Clear()
+        Mock Get-KnownLayers { @(2, 4, 6) }
+        Mock Invoke-HideLayer { $true }
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Save-Config { }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'HideAllLayers' -NotePropertyValue $script:OriginalHideAllLayersForTest -Force
+        $script:OnAir.Clear()
+    }
+
+    It 'uses only the layers selected by the administrator for hide-all' {
+        $script:OnAir[8] = @{ Key = 'outside-scope'; At = Get-Date; UserId = 10 }
+
+        Invoke-HideAllLayers -ChatId 70 -UserId 80
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 2 }
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 4 }
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly -ParameterFilter { $Layer -in @(6, 8) }
+    }
+
+    It 'uses every known layer when the setting is all' {
+        $config.Settings | Add-Member -NotePropertyName 'HideAllLayers' -NotePropertyValue 'all' -Force
+
+        $targets = @(Get-HideAllTargetLayers)
+
+        $targets | Should -Be @(2, 4, 6)
+    }
+
+    It 'shows the selected layers as toggles in the administrator settings panel' {
+        $keyboard = Get-HideAllLayerSettingsKeyboard
+        $labels = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $labels | Should -Contain '✅ طبقة 2'
+        $labels | Should -Contain '✅ طبقة 4'
+        $labels | Should -Contain '⬜ طبقة 6'
+        $callbacks | Should -Contain 'hideallcfg:toggle:6'
+    }
+
+    It 'adds a layer selected from the settings panel to the emergency scope' {
+        $callback = [pscustomobject]@{
+            id = 'hide-all-scope-1'
+            from = [pscustomobject]@{ id = 80 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 70 } }
+            data = 'hideallcfg:toggle:6'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        (Get-Setting 'HideAllLayers') | Should -Be '2,4,6'
+    }
+}
+
 Describe 'On-air identity persistence' {
     BeforeEach {
         $script:OriginalOnAirFileForTest = $script:onAirFile
@@ -1629,6 +1722,8 @@ Describe 'Cinegy layer dashboard' {
         $text | Should -Match '🟠 طبقة 5: External Item \(خارجي\)'
         $text | Should -Match '⚪ طبقة 6: مخفية'
         $text | Should -Match '⚠️ طبقة 7: غير معروف'
+        $text | Should -Match '🙈 إخفاء.*فورًا'
+        $text | Should -Match '🔄 تحديث.*فحص كل الطبقات'
         $text | Should -Match 'الخرج Normal'
         $text | Should -Match 'الترخيص Licensed'
         $text | Should -Match 'العميل Client 1'
@@ -1661,7 +1756,8 @@ Describe 'Layer quick panel' {
         Should -Invoke Get-CinegyLayerDashboard -Times 1 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $labels = @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
-            $labels -contains '🔴 طبقة 2' -and $labels -contains '⚪ طبقة 4'
+            $labels -contains '🙈 إخفاء طبقة 2' -and
+                $labels -contains '🔄 تحديث · طبقة 4 مخفية'
         }
     }
 }

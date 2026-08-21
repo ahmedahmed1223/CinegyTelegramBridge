@@ -412,6 +412,18 @@ menu:
   `TASKS.md`. **🚨 طبقات إخفاء الكل** opens a checkbox panel: select exactly
   the layers the emergency action may hide, or restore the default of all
   configured layers.
+- Settings now show their real units and Arabic purpose, for example seconds,
+  minutes, files, characters, and megabytes, while retaining the technical
+  key for support.
+- `LayerNames` lets an administrator give each Cinegy layer an operational
+  label, for example `7=عاجل;8=شريط الأخبار`. The label and layer number are
+  shown together in status, layer actions, emergency confirmation, and alerts.
+- **📚 القوالب والإعدادات** → administrators can always read every parsed
+  template definition. `EnableFullTemplateManagement` is off by default and
+  protected; once deliberately enabled, it permits reviewed creation, editing,
+  and deletion of template definitions. Every successful change is validated,
+  atomically saved, and backed up. Template keys cannot be renamed, and an
+  on-air or scheduled template cannot be deleted.
 - **📊 الحالة الكاملة** → administrator-only layer dashboard, service health,
   telemetry, and operational details.
 - **👤 طلبات الوصول** → anyone who messaged the bot but isn't authorized yet,
@@ -423,6 +435,10 @@ menu:
   `CinegyMonitorTimeoutSeconds`, `NotifyAdminsOnExternalChange`, and
   `NotifyAdminsOnCinegyHealth`. Repeated unhealthy samples are deduplicated;
   recovery produces one green notice.
+  External-change alerts include the bridge template, layer, original show
+  details, current Cinegy item, Air server/channel, and Cinegy client identity
+  when the API supplies one. The API does not provide an external program or
+  source IP, so the alert explicitly marks that source as unknown when absent.
 - **▶️/⏹ البث** and **🔗 رابط البث** → live relay controls, see the next
   section.
 - **📜 السجل** → the last 20 on-air actions with who did what and when,

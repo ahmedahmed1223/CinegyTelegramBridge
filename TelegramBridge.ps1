@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '3.0.1'
+$script:BridgeVersion = '3.1.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -71,12 +71,14 @@ $script:DefaultSettings = [ordered]@{
     RequireUserLevelAuth       = $true   # authorize the user id, not just the chat id
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
     EnableRawCommand           = $true   # allow the admin /أمر Device Cmd escape hatch
+    EnableFullTemplateManagement = $false # permits structural template edits from Telegram
     # --- features ---
     EnableSnapshot             = $true
     EnableLiveRelay            = $true
     EnableTimedShow            = $true
     EnableHideAll              = $true
     HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
+    LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     # --- safety ---
@@ -116,6 +118,31 @@ $script:DefaultSettings = [ordered]@{
     NotifyAdminsOnRelayFailure = $true
     NotifyAdminsOnExternalChange = $true
     NotifyAdminsOnCinegyHealth = $true
+}
+
+$script:SettingDisplayMetadata = @{
+    AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
+    MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }
+    PostShowDelayMs = @{ Unit = 'مللي ثانية'; Description = 'تأخير إعادة إرسال النص بعد العرض' }
+    PendingStateTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مدة صلاحية عملية الإدخال غير المكتملة' }
+    SnapshotCooldownSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل قبل التقاط صورة بث جديدة' }
+    SnapshotTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة التقاط صورة البث' }
+    SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
+    AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
+    RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
+    RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
+    CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
+    CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
+    CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
+    MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
+    PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
+    FavoritesCount = @{ Unit = 'قوالب'; Description = 'عدد القوالب المفضلة المعروضة' }
+    RecentValuesPerField = @{ Unit = 'قيم'; Description = 'عدد القيم الحديثة لكل حقل' }
+    LogMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'الحجم الأقصى لملف السجل' }
+    LogKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد ملفات السجل المحتفَظ بها' }
+    AuditTrailSize = @{ Unit = 'سجل'; Description = 'عدد عناصر سجل العمليات المحتفَظ بها' }
+    ConfigBackupKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد نسخ الإعدادات المحتفَظ بها' }
+    HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
 }
 
 # ============================================================================
@@ -291,6 +318,37 @@ function Get-SettingInt {
     if (-not [int]::TryParse([string](Get-Setting $Name), [ref]$value)) { $value = 0 }
     if ($value -lt $Minimum) { $value = $Minimum }
     return $value
+}
+
+function Get-LayerDisplayName {
+    param([Parameter(Mandatory)][int]$Layer)
+    $name = ''
+    foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
+        $parts = $pair -split '=', 2
+        $number = 0
+        if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$number) -and $number -eq $Layer) {
+            $name = $parts[1].Trim()
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($name)) { return "طبقة $Layer" }
+    return "$name · طبقة $Layer"
+}
+
+function Format-SettingDisplay {
+    param([Parameter(Mandatory)][string]$Name, $Value)
+    $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name
+    if ($metadata -and (Get-JsonProp $metadata 'Unit')) { return "$Value $((Get-JsonProp $metadata 'Unit'))" }
+    return [string]$Value
+}
+
+function Get-SettingPromptText {
+    param([Parameter(Mandatory)][string]$Name)
+    $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name
+    $description = if ($metadata) { [string](Get-JsonProp $metadata 'Description') } else { 'قيمة الإعداد' }
+    $current = Format-SettingDisplay -Name $Name -Value (Get-Setting $Name)
+    $default = Format-SettingDisplay -Name $Name -Value $script:DefaultSettings[$Name]
+    return "$description.`nالقيمة الحالية: $current`nالقيمة الافتراضية: $default`nأرسل رقمًا صحيحًا غير سالب:"
 }
 
 function Set-Setting {
@@ -916,6 +974,55 @@ function Get-KnownLayers {
     return $layers
 }
 
+function Save-TemplateDefinitionChange {
+    param(
+        [Parameter(Mandatory)][string]$TemplateKey,
+        [Parameter(Mandatory)][ValidateSet('edit', 'create', 'delete')][string]$Action,
+        [hashtable]$Definition = @{}
+    )
+    $path = Get-TemplateRegistryFilePath
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $existing = Get-JsonProp $raw $TemplateKey
+        if ($Action -eq 'create' -and $existing) { throw "يوجد قالب بالمفتاح '$TemplateKey' بالفعل." }
+        if ($Action -ne 'create' -and -not $existing) { throw "القالب '$TemplateKey' غير موجود." }
+        if ($Action -eq 'delete') {
+            if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -eq $TemplateKey }).Count -gt 0) { throw 'لا يمكن حذف قالب على الهواء.' }
+            if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0) { throw 'لا يمكن حذف قالب مرتبط بجدولة قادمة.' }
+            $raw.PSObject.Properties.Remove($TemplateKey)
+        }
+        else {
+            $templatePath = [string](Get-JsonProp $Definition 'path')
+            $layer = 0
+            if ([string]::IsNullOrWhiteSpace($templatePath)) { throw 'مسار القالب فارغ.' }
+            if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw 'رقم الطبقة يجب أن يكون موجبًا.' }
+            $root = [IO.Path]::GetFullPath($scriptRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+            $resolved = [IO.Path]::GetFullPath((Join-Path $scriptRoot $templatePath))
+            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw 'مسار القالب يجب أن يكون داخل مجلد المشروع.' }
+            $fields = @(Get-JsonProp $Definition 'fields')
+            foreach ($field in $fields) {
+                $fieldName = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }
+                if ([string]::IsNullOrWhiteSpace([string]$fieldName)) { throw 'يوجد حقل بلا اسم صالح.' }
+            }
+            if ($Action -eq 'create') { $target = [pscustomobject]@{}; $raw | Add-Member -NotePropertyName $TemplateKey -NotePropertyValue $target }
+            else { $target = $existing }
+            foreach ($name in @('path', 'layer', 'order', 'description', 'fields')) {
+                if ($Definition.ContainsKey($name)) { $target | Add-Member -NotePropertyName $name -NotePropertyValue $Definition[$name] -Force }
+            }
+        }
+        $backupDir = "$path.backups"
+        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
+        $backupPath = Join-Path $backupDir "templates-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $temporary = "$path.tmp"
+        $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+        return [pscustomobject]@{ Success = $true; Error = ''; BackupPath = $backupPath }
+    }
+    catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' } }
+}
+
 function Get-HideAllTargetLayers {
     <# "all" preserves the established default. An empty or invalid selection
        deliberately hides nothing, so a bad configuration cannot widen scope. #>
@@ -954,11 +1061,11 @@ function Format-CinegyLayerDashboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $lines.Add("⚠️ طبقة $layer`: غير معروف")
+            $lines.Add("⚠️ $(Get-LayerDisplayName -Layer $layer): غير معروف")
             continue
         }
         if (-not $status.IsOnAir) {
-            $lines.Add("⚪ طبقة $layer`: مخفية")
+            $lines.Add("⚪ $(Get-LayerDisplayName -Layer $layer): مخفية")
             continue
         }
 
@@ -973,12 +1080,12 @@ function Format-CinegyLayerDashboard {
         }
 
         if ($trackedKey) {
-            $lines.Add("🔴 طبقة $layer`: $trackedKey")
+            $lines.Add("🔴 $(Get-LayerDisplayName -Layer $layer): $trackedKey")
         }
         else {
             $activeName = [string](Get-JsonProp $status 'ActiveName')
             if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = 'مشهد غير مسمّى' }
-            $lines.Add("🟠 طبقة $layer`: $activeName (خارجي)")
+            $lines.Add("🟠 $(Get-LayerDisplayName -Layer $layer): $activeName (خارجي)")
         }
     }
 
@@ -1107,6 +1214,7 @@ function Update-OnAirStateFromCinegy {
     $checked = [System.Collections.Generic.List[int]]::new()
     $removed = [System.Collections.Generic.List[int]]::new()
     $failed = [System.Collections.Generic.List[int]]::new()
+    $changes = [System.Collections.Generic.List[object]]::new()
     $statusByLayer = @{}
     foreach ($item in @($LayerStatuses)) {
         $itemLayer = 0
@@ -1137,6 +1245,19 @@ function Update-OnAirStateFromCinegy {
             -not $trackedNormalized.Equals($actualNormalized, [System.StringComparison]::OrdinalIgnoreCase)
 
         if (-not $status.IsOnAir -or $cannotCorrelate -or $wasReplaced) {
+            $record = $script:OnAir[$layer]
+            $changes.Add([pscustomobject]@{
+                Layer           = [int]$layer
+                TemplateKey     = [string](Get-JsonProp $record 'Key')
+                ShowUserId      = [long](Get-JsonProp $record 'UserId')
+                ShownAt         = Get-JsonProp $record 'At'
+                ExpectedActiveId = $trackedId
+                ActualActiveId  = $actualId
+                ActualActiveName = [string](Get-JsonProp $status 'ActiveName')
+                OutputState     = [string](Get-JsonProp $status 'OutputState')
+                ClientConnected = [bool](Get-JsonProp $status 'ClientConnected')
+                ClientIdentity  = [string](Get-JsonProp $status 'ClientIdentity')
+            })
             $script:OnAir.Remove([int]$layer)
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
@@ -1158,7 +1279,33 @@ function Update-OnAirStateFromCinegy {
         Checked = $checked.ToArray()
         Removed = $removed.ToArray()
         Failed  = $failed.ToArray()
+        Changes = $changes.ToArray()
     }
+}
+
+function Format-ExternalCinegyChangeAlert {
+    param([Parameter(Mandatory)][object[]]$Changes)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('⚠️ تغيير خارجي في Cinegy')
+    $lines.Add("خادم Air: $($config.AirServerAddress) | القناة: $($config.AirChannelNumber)")
+    foreach ($change in @($Changes)) {
+        $replaced = -not [string]::IsNullOrWhiteSpace([string]$change.ActualActiveId)
+        $state = if ($replaced) { 'استُبدل خارجيًا' } else { 'أُخفي' }
+        $lines.Add('')
+        $lines.Add("$(Get-LayerDisplayName -Layer ([int]$change.Layer)): $state")
+        $lines.Add("القالب الذي كان يعرضه البوت: $($change.TemplateKey)")
+        $lines.Add("المشغّل: $($change.ShowUserId) | بدأ: $($change.ShownAt)")
+        $lines.Add("المعرّف السابق: $($change.ExpectedActiveId)")
+        if ($replaced) {
+            $name = if ([string]::IsNullOrWhiteSpace([string]$change.ActualActiveName)) { 'عنصر غير مسمّى' } else { $change.ActualActiveName }
+            $lines.Add("العنصر الحالي: $name | المعرّف: $($change.ActualActiveId)")
+        }
+        if ($change.OutputState) { $lines.Add("حالة الخرج: $($change.OutputState)") }
+        $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { 'مصدر خارجي غير معرّف' }
+        $lines.Add("المصدر: $source")
+    }
+    $lines.Add('تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط.')
+    return ($lines -join "`n")
 }
 
 function Get-FavoriteTemplateKeys {
@@ -1682,6 +1829,7 @@ function Get-MainMenuKeyboard {
         $pendingLabel = if ($pendingCount -gt 0) { "👤 طلبات الوصول ($pendingCount)" } else { "👤 طلبات الوصول" }
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
         $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
+        $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
 
         if (Get-Setting 'EnableLiveRelay') {
             $relayRunning = [bool](Get-RunningRelayProcess)
@@ -1728,7 +1876,7 @@ function Get-LayersKeyboard {
     $rows = @()
     $row = @()
     foreach ($l in (Get-KnownLayers)) {
-        $row += (New-Button "طبقة $l" "$Prefix`:$l")
+        $row += (New-Button (Get-LayerDisplayName -Layer $l) "$Prefix`:$l")
         if ($row.Count -eq 4) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
@@ -1812,13 +1960,13 @@ function Get-LayerDashboardKeyboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $button = New-Button "🔄 إعادة فحص · طبقة $layer" 'menu:layers'
+            $button = New-Button "🔄 إعادة فحص · $(Get-LayerDisplayName -Layer $layer)" 'menu:layers'
         }
         elseif ($status.IsOnAir) {
-            $button = New-Button "🙈 إخفاء طبقة $layer" "hide:$layer"
+            $button = New-Button "🙈 إخفاء $(Get-LayerDisplayName -Layer $layer)" "hide:$layer"
         }
         else {
-            $button = New-Button "🔄 تحديث · طبقة $layer مخفية" 'menu:layers'
+            $button = New-Button "🔄 تحديث · $(Get-LayerDisplayName -Layer $layer) مخفية" 'menu:layers'
         }
         $row += $button
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
@@ -1921,7 +2069,7 @@ function Get-PendingKeyboard {
 # Settings whose whole purpose is to restrict access. Turning one off from a
 # chat button - by accident or by someone who got hold of an admin's phone -
 # silently weakens the security model, so they require an explicit confirm.
-$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand')
+$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement')
 
 # Allowed values for string settings. A typo here would silently stop graphics
 # updating, so the choice is constrained rather than free text.
@@ -1946,7 +2094,7 @@ function Get-SettingsKeyboard {
             $rows += , @( (New-Button "🔤 $name = $value" "cfg:s:$name") )
         }
         else {
-            $rows += , @( (New-Button "🔢 $name = $value" "cfg:v:$name") )
+            $rows += , @( (New-Button "🔢 $name = $(Format-SettingDisplay -Name $name -Value $value)" "cfg:v:$name") )
         }
     }
     $scope = [string](Get-Setting 'HideAllLayers')
@@ -1955,6 +2103,35 @@ function Get-SettingsKeyboard {
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateAdminCatalogueKeyboard {
+    $store = Get-TemplateStore
+    $rows = @()
+    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+        $template = $store.Map[$store.Order[$i]]
+        $rows += , @( (New-Button "$($template.Key) (طبقة $($template.Layer))" "tadm:$i") )
+    }
+    if (Get-Setting 'EnableFullTemplateManagement') { $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') ) }
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد قوالب صالحة' 'menu') ) }
+    $rows += , @( (New-Button '⬅️ القائمة' 'menu') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateAdminDetailKeyboard {
+    param([Parameter(Mandatory)][int]$TemplateIndex)
+    $rows = @()
+    if (Get-Setting 'EnableFullTemplateManagement') {
+        $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex") )
+    }
+    $rows += , @( (New-Button '⬅️ القوالب' 'menu:templatesadmin') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateDefinitionReviewKeyboard {
+    return @{ inline_keyboard = @(
+        , @( (New-Button '✅ حفظ التغيير' 'tadm:confirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
+    ) }
 }
 
 function Get-HideAllLayerSettingsKeyboard {
@@ -2068,7 +2245,8 @@ function Show-SettingChoices {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_text'; Name = $Name; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" -ReplyMarkup (Get-CancelKeyboard)
+    $prompt = if ($Name -eq 'LayerNames') { "أرسل أسماء الطبقات بهذه الصيغة:`n7=عاجل;8=شريط الأخبار`nاترك الرسالة فارغة لمسح الأسماء." } else { "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" }
+    Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-SettingText {
@@ -2076,7 +2254,7 @@ function Complete-SettingText {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state) { return }
     $trimmed = $Value.Trim()
-    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+    if ([string]::IsNullOrWhiteSpace($trimmed) -and $state.Name -ne 'LayerNames') {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return
@@ -2832,7 +3010,8 @@ function Request-HideAllConfirmation {
     Set-PendingState -ChatId $ChatId -State @{
         Mode = 'hide_all_review'; UserId = $UserId; Layers = $layers
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($layers -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+    $labels = @($layers | ForEach-Object { Get-LayerDisplayName -Layer ([int]$_) })
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($labels -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
 }
 
 function Get-HealthStatusReport {
@@ -2889,6 +3068,74 @@ function Get-HealthStatusReport {
         (Format-CinegyTelemetryStatus -Telemetry $telemetry)
     ) -join "`n"
     return [pscustomobject]@{ Text = $text; Telemetry = $telemetry }
+}
+
+function Show-TemplateAdminDetail {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $lines = @(
+        "📚 تفاصيل القالب: $($template.Key)",
+        "المسار: $($template.Path)",
+        "الطبقة: $($template.Layer)",
+        "الترتيب: $($template.Order)",
+        "الوصف: $($template.Description)",
+        "الحقول: $(if (@($template.Fields).Count -gt 0) { $template.Fields -join '، ' } else { 'لا توجد' })",
+        "النصوص الجاهزة: $(@($template.Presets).Count)"
+    )
+    if (Get-Setting 'EnableFullTemplateManagement') {
+        $lines += '✅ التحكم الكامل بالقوالب مفعّل. اختر عملية التعديل من الأزرار.'
+    }
+    else {
+        $lines += '🔒 التحكم الكامل معطّل. يمكنك القراءة وإدارة النصوص الجاهزة فقط.'
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
+}
+
+function Start-TemplateDefinitionPrompt {
+    param([Parameter(Mandatory)][ValidateSet('create', 'edit', 'delete')][string]$Action, [int]$TemplateIndex = -1, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Get-Setting 'EnableFullTemplateManagement')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🔒 التحكم الكامل بالقوالب معطّل من الإعدادات.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $template = if ($TemplateIndex -ge 0) { Get-TemplateByIndex -Index $TemplateIndex } else { $null }
+    if ($Action -ne 'create' -and -not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
+    if ($Action -eq 'delete') {
+        Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_review'; Action='delete'; TemplateKey=$template.Key; Definition=@{}; UserId=$UserId }
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ مراجعة حذف القالب '$($template.Key)'. لن يُحذف إذا كان على الهواء أو ضمن جدولة قادمة." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+        return
+    }
+    $example = if ($Action -eq 'create') { '{"key":"new-template","path":"titles/new.cintitle","layer":4,"fields":["Headline.Text"]}' } else { "{`"path`":`"$($template.Path)`",`"layer`":$($template.Layer),`"fields`":[]}" }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_json'; Action=$Action; TemplateKey=if ($template) { $template.Key } else { '' }; UserId=$UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل تعريف القالب بصيغة JSON في رسالة واحدة.`nمثال:`n$example" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-TemplateDefinitionJson {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'template_definition_json') { return }
+    try { $definition = $Value | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { Send-TelegramMessage -ChatId $ChatId -Text '❌ JSON غير صالح. أرسل تعريفًا صحيحًا أو ألغِ العملية.' -ReplyMarkup (Get-CancelKeyboard); return }
+    $key = [string]$state.TemplateKey
+    if ($state.Action -eq 'create') { $key = [string](Get-JsonProp $definition 'key'); $definition.Remove('key') }
+    if ([string]::IsNullOrWhiteSpace($key)) { Send-TelegramMessage -ChatId $ChatId -Text '❌ يتطلب القالب الجديد مفتاح key.' -ReplyMarkup (Get-CancelKeyboard); return }
+    $state.Mode = 'template_definition_review'; $state.TemplateKey = $key; $state.Definition = $definition
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة $($state.Action) للقالب '$key'`nالمسار: $($definition.path)`nالطبقة: $($definition.layer)`nلن يُحفظ شيء قبل التأكيد." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+}
+
+function Confirm-TemplateDefinitionChange {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'template_definition_review' -or [long]$state.UserId -ne $UserId) { return }
+    Clear-PendingState -ChatId $ChatId
+    $result = Save-TemplateDefinitionChange -TemplateKey ([string]$state.TemplateKey) -Action ([string]$state.Action) -Definition ([hashtable]$state.Definition)
+    if ($result.Success) { Add-AuditEntry "📚 $($state.Action) قالب $($state.TemplateKey) - user $UserId"; Send-TelegramMessage -ChatId $ChatId -Text '✅ تم حفظ تعريف القالب مع نسخة احتياطية.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
+    else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }
 
 function Invoke-FullStatusCommand {
@@ -3569,7 +3816,7 @@ function Start-SettingValuePrompt {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_value'; Name = $Name; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل القيمة الجديدة لـ $Name (القيمة الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPromptText -Name $Name) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-SettingValue {
@@ -4015,6 +4262,22 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'menu:templatesadmin' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+            }
+            break
+        }
+        'tadm:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $token = $data.Substring(5)
+                if ($token -eq 'create') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
+                elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
+                elseif ($token -match '^(edit|delete):(\d+)$') { Start-TemplateDefinitionPrompt -Action $Matches[1] -TemplateIndex ([int]$Matches[2]) -ChatId $chatId -UserId $userId }
+                else { Show-TemplateAdminDetail -TemplateIndex ([int]$token) -ChatId $chatId -UserId $userId }
+            }
+            break
+        }
         'padm:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Show-PresetAdminTemplate -TemplateIndex ([int]$data.Substring(5)) -ChatId $chatId
@@ -4358,8 +4621,7 @@ function Update-CinegyStateWatchdog {
     $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if ($sync.Removed.Count -gt 0 -and (Get-Setting 'NotifyAdminsOnExternalChange')) {
-        $layers = $sync.Removed -join '، '
-        Send-AdminBroadcast -Text "⚠️ تغيير خارجي في Cinegy: المشهد الذي كان يتتبعه البوت على الطبقة/الطبقات $layers أُخفي أو استُبدل. تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط."
+        Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
     }
 }
 
@@ -4549,6 +4811,7 @@ try {
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text }
+                                'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text }
                                 { $_ -in @('schedule_fields', 'schedule_time') } { Complete-ScheduleText -ChatId $chatId -Value $text }
                                 default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj }

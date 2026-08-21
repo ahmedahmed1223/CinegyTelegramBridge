@@ -19,6 +19,13 @@
 - Clarified the layer panel states and its quick-hide behavior in the Arabic help.
 - Added an administrator-selected `HideAllLayers` scope, so the emergency
   hide-all action affects only the layers selected from Settings.
+- Enriched external Cinegy-change alerts with the tracked template, old/new
+  item details, Air endpoint, and available Cinegy client identity.
+- Added Arabic unit/description labels to administrator numeric settings.
+- Added administrator-configurable operational layer names throughout layer
+  status, actions, emergency confirmation, and external-change alerts.
+- Added a read-only administrator template catalogue and protected, disabled-
+  by-default full template definition management with atomic backups.
 - Added configuration backup comparison/restoration and migration coverage.
 - Added a real Cinegy dashboard for every GFX layer referenced by the template
   registry, distinguishing bridge-owned, external, hidden, and unknown state.

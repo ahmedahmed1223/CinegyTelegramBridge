@@ -290,6 +290,26 @@ Describe 'Settings access' {
             { Get-Setting $name } | Should -Not -Throw
         }
     }
+
+    It 'renders units and Arabic purpose for numeric administrator settings' {
+        Format-SettingDisplay -Name 'CinegyStateCheckSeconds' -Value 15 | Should -Be '15 ثانية'
+        Format-SettingDisplay -Name 'ConfigBackupKeepFiles' -Value 10 | Should -Be '10 ملفات'
+        $prompt = Get-SettingPromptText -Name 'SnapshotRetentionMinutes'
+        $prompt | Should -Match 'مدة الاحتفاظ'
+        $prompt | Should -Match '30 دقيقة'
+    }
+
+    It 'formats an operator-friendly configured layer name while retaining its number' {
+        $original = Get-Setting 'LayerNames'
+        $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue '7=عاجل;8=شريط الأخبار' -Force
+
+        try {
+            Get-LayerDisplayName -Layer 7 | Should -Be 'عاجل · طبقة 7'
+            Get-LayerDisplayName -Layer 8 | Should -Be 'شريط الأخبار · طبقة 8'
+            Get-LayerDisplayName -Layer 4 | Should -Be 'طبقة 4'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'LayerNames' -NotePropertyValue $original -Force }
+    }
 }
 
 Describe 'Configuration backups' {
@@ -420,6 +440,40 @@ Describe 'Telegram preset management storage' {
     }
 }
 
+Describe 'Template definition storage' {
+    BeforeEach {
+        $script:OriginalTemplateRegistryPathForDefinitionTest = $config.TemplateRegistryPath
+        $script:DefinitionRegistryPathForTest = New-TempTemplateFile -Json '{ "urgent": { "path": "titles/urgent.cintitle", "layer": 4, "fields": ["Headline.Text"] } }'
+        $script:OnAir.Clear()
+        Mock Get-UpcomingScheduleEvents { @() }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:DefinitionRegistryPathForTest -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$($script:DefinitionRegistryPathForTest).backups" -Recurse -Force -ErrorAction SilentlyContinue
+        $config.TemplateRegistryPath = $script:OriginalTemplateRegistryPathForDefinitionTest
+        $script:OnAir.Clear()
+    }
+
+    It 'writes a validated definition edit atomically with a backup' {
+        $result = Save-TemplateDefinitionChange -TemplateKey 'urgent' -Action edit -Definition @{ path = 'titles/urgent.cintitle'; layer = 5; fields = @('Headline.Text') }
+        $saved = Get-Content -LiteralPath $script:DefinitionRegistryPathForTest -Raw | ConvertFrom-Json
+
+        $result.Success | Should -BeTrue
+        $saved.urgent.layer | Should -Be 5
+        Test-Path -LiteralPath $result.BackupPath | Should -BeTrue
+    }
+
+    It 'rejects deleting an on-air template' {
+        $script:OnAir[4] = @{ Key = 'urgent'; At = Get-Date; UserId = 10; ActiveId = '{A}' }
+
+        $result = Save-TemplateDefinitionChange -TemplateKey 'urgent' -Action delete
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'على الهواء'
+    }
+}
+
 Describe 'Telegram preset management flow' {
     BeforeEach {
         Clear-PendingState -ChatId 91
@@ -451,6 +505,22 @@ Describe 'Telegram preset management flow' {
         Get-PendingState -ChatId 91 | Should -BeNullOrEmpty
         Should -Invoke Save-TemplatePresetChange -Times 1 -Exactly -ParameterFilter {
             $TemplateKey -eq 'urgent' -and $Action -eq 'create' -and $Name -eq 'عاجل جاهز' -and $Values[0] -eq 'النص النهائي'
+        }
+    }
+}
+
+Describe 'Template catalogue administration' {
+    BeforeEach {
+        Mock Send-TelegramMessage { }
+        Mock Test-Admin { $true }
+    }
+
+    It 'shows read-only template details while full management is disabled' {
+        $config.Settings | Add-Member -NotePropertyName 'EnableFullTemplateManagement' -NotePropertyValue $false -Force
+        Show-TemplateAdminDetail -TemplateIndex 0 -ChatId 100 -UserId 100
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'المسار' -and $Text -match 'الطبقة' -and $Text -match 'التحكم الكامل معطّل'
         }
     }
 }
@@ -528,6 +598,7 @@ Describe 'Role-aware status menus' {
         Should -Invoke Invoke-FullStatusCommand -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
+
 }
 
 Describe 'Simple and full status reports' {
@@ -1637,14 +1708,35 @@ Describe 'Update-OnAirStateFromCinegy' {
                 Success  = $true
                 IsOnAir  = $true
                 ActiveId = '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
+                ActiveName = 'External Item'
+                OutputState = 'Normal'
+                ClientConnected = $true
+                ClientIdentity = 'Air UI'
             }
         }
 
         $result = Update-OnAirStateFromCinegy
 
         $OnAir.ContainsKey(4) | Should -BeFalse
+        $result.Changes[0].TemplateKey | Should -Be 'lower-third'
+        $result.Changes[0].ActualActiveName | Should -Be 'External Item'
         $result.Removed | Should -Be @(4)
         Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'formats an actionable external change alert without inventing a source IP' {
+        $change = [pscustomobject]@{
+            Layer = 4; TemplateKey = 'lower-third'; ShowUserId = 10; ShownAt = [datetime]'2026-08-21T10:00:00'
+            ExpectedActiveId = '{OLD}'; ActualActiveId = '{NEW}'; ActualActiveName = 'External Item'
+            OutputState = 'Normal'; ClientConnected = $true; ClientIdentity = 'Air UI'
+        }
+
+        $text = Format-ExternalCinegyChangeAlert -Changes @($change)
+
+        $text | Should -Match 'lower-third'
+        $text | Should -Match 'External Item'
+        $text | Should -Match 'Air UI'
+        $text | Should -Not -Match 'عنوان IP'
     }
 
     It 'removes a legacy on-air record that has no correlatable event id' {
@@ -1941,7 +2033,14 @@ Describe 'Cinegy monitoring watchdogs' {
 
     It 'alerts once when a tracked scene changes outside the bridge' {
         Mock Update-OnAirStateFromCinegy {
-            [pscustomobject]@{ Checked = @(4); Removed = @(4); Failed = @() }
+            [pscustomobject]@{
+                Checked = @(4); Removed = @(4); Failed = @()
+                Changes = @([pscustomobject]@{
+                    Layer = 4; TemplateKey = 'lower-third'; ShowUserId = 10; ShownAt = Get-Date
+                    ExpectedActiveId = '{OLD}'; ActualActiveId = '{NEW}'; ActualActiveName = 'External Item'
+                    OutputState = 'Normal'; ClientConnected = $true; ClientIdentity = 'Air UI'
+                })
+            }
         }
 
         Update-CinegyStateWatchdog
@@ -1949,7 +2048,7 @@ Describe 'Cinegy monitoring watchdogs' {
 
         Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly -ParameterFilter { $TimeoutSec -eq 1 }
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
-            $Text -match 'تغيير خارجي' -and $Text -match '4'
+            $Text -match 'تغيير خارجي' -and $Text -match 'lower-third' -and $Text -match 'External Item' -and $Text -match 'Air UI'
         }
     }
 

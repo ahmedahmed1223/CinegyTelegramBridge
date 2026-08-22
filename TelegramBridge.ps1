@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.7'
+$script:BridgeVersion = '4.2.8'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -2846,6 +2846,33 @@ function Get-HelpText {
 #  Core on-air actions
 # ============================================================================
 
+function New-AirOperationContext {
+    return [pscustomobject]@{
+        Id        = "air-$([guid]::NewGuid().ToString('N'))"
+        Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+}
+
+function Write-AirOperationResult {
+    param(
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('success', 'failed', 'blocked')][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][long]$ChatId,
+        [int]$Layer = 0,
+        [string]$Target = '',
+        [string]$ErrorText = ''
+    )
+    $cleanTarget = ($Target -replace '[\r\n]+', ' ').Replace('"', "'")
+    $cleanError = ($ErrorText -replace '[\r\n]+', ' ').Replace('"', "'")
+    $message = "AIR_OP id=$OperationId action=$Action result=$Result durationMs=$DurationMs user=$UserId chat=$ChatId layer=$Layer target=`"$cleanTarget`""
+    if (-not [string]::IsNullOrWhiteSpace($cleanError)) { $message += " error=`"$cleanError`"" }
+    $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
+    Write-BridgeLog $message $level
+}
+
 function Test-MaintenanceControl {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
     if (-not (Get-Setting 'MaintenanceMode')) { return $true }
@@ -2863,12 +2890,15 @@ function Invoke-ShowTemplateResult {
         [int]$AutoHideSeconds = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    $operation = New-AirOperationContext
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
         return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
     }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'unknown template'
         return
     }
     $template = $store.Map[$Key]
@@ -2883,6 +2913,7 @@ function Invoke-ShowTemplateResult {
         $errorText = [string](Get-JsonProp $layerStatus 'Error')
         Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText $errorText
         return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
@@ -2947,9 +2978,11 @@ function Invoke-ShowTemplateResult {
         # something back off air meant going 🙈 -> pick layer, which is several
         # taps too many when a wrong graphic is live.
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إظهار '$Key' على الهواء (طبقة $($template.Layer)).$suffix" -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key
     }
     else {
         Write-BridgeLog "User $UserId failed to push template '$Key': $($result.Error)" "ERROR"
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$result.Error)
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     return $result
@@ -3168,16 +3201,24 @@ function Invoke-HideLayer {
         [switch]$MaintenanceOverride
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) { return $false }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        return $false
+    }
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         Write-BridgeLog "User $UserId hid layer $Layer"
         Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $UserId"
         if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
     elseif (-not $Quiet) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إخفاء الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    if (-not $result.Success) {
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
     }
     return $result.Success
 }
@@ -3185,17 +3226,24 @@ function Invoke-HideLayer {
 function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        return $false
+    }
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
         Write-BridgeLog "User $UserId exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الخروج من المشهد على الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
     }
+    return $result.Success
 }
 
 function Invoke-HideAllLayers {
@@ -3224,17 +3272,24 @@ function Invoke-HideAllLayers {
 function Invoke-SetValues {
     param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText 'maintenance mode'
+        return $false
+    }
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
     if ($result.Success) {
         Write-BridgeLog "User $UserId set values: $($Values.Keys -join ', ')"
         Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - user $UserId"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم التحديث: $($Values.Keys -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',')
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل التحديث: $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText ([string]$result.Error)
     }
+    return $result.Success
 }
 
 function Start-UpdateFieldPrompt {

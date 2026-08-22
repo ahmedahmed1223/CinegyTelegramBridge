@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.8 — 2026-08-22
+
+- Added a unique `air-*` correlation id to every SHOW, HIDE, EXIT, and live
+  UPDATE attempt.
+- Added a single structured `AIR_OP` bridge-log result containing action,
+  result, duration, operator, chat, layer, target, and sanitized failure reason.
+- Recorded blocked maintenance and uncertain-Cinegy attempts as well as
+  successful and failed commands.
+- Kept historical operation records in `bridge.log`; `onair.json` remains live
+  state only.
+- Added regression coverage for successful and blocked operation records.
+
 ## 4.2.7 — 2026-08-22
 
 - Added a direct target-layer verification immediately before every SHOW.

@@ -192,6 +192,30 @@ Describe 'Test runtime isolation' {
     }
 }
 
+Describe 'Air operation result logging' {
+    BeforeEach { Mock Write-BridgeLog { } }
+
+    It 'writes a correlatable successful operation with duration and target' {
+        Write-AirOperationResult -OperationId 'op-123' -Action SHOW -Result success -DurationMs 27 -UserId 20 -ChatId 10 -Layer 4 -Target urgent
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+            $Message -match 'AIR_OP' -and $Message -match 'id=op-123' -and
+                $Message -match 'action=SHOW' -and $Message -match 'result=success' -and
+                $Message -match 'durationMs=27' -and $Message -match 'layer=4' -and
+                $Message -match 'target="urgent"'
+        }
+    }
+
+    It 'writes failures at warning level without losing the error reason' {
+        Write-AirOperationResult -OperationId 'op-456' -Action HIDE -Result blocked -DurationMs 3 -UserId 20 -ChatId 10 -Layer 4 -ErrorText 'cinegy timeout'
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+            $Level -eq 'WARN' -and $Message -match 'id=op-456' -and
+                $Message -match 'result=blocked' -and $Message -match 'cinegy timeout'
+        }
+    }
+}
+
 Describe 'Maintenance mode control gate' {
     BeforeEach {
         $script:OriginalMaintenanceMode = Get-Setting 'MaintenanceMode'

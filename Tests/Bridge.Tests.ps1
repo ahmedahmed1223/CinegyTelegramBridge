@@ -197,6 +197,8 @@ Describe 'Air operation result logging' {
         Mock Write-BridgeLog { }
         $script:auditFile = Join-Path $TestDrive 'audit.jsonl'
         Remove-Item -LiteralPath $script:auditFile -Force -ErrorAction SilentlyContinue
+        $script:UserOperationHistory = @{}
+        $script:LastShowAttempts = @{}
     }
 
     It 'writes a correlatable successful operation with duration and target' {
@@ -238,6 +240,58 @@ Describe 'Air operation result logging' {
         $lines.Count | Should -Be 1
         $lines[0] | Should -Not -Match '123456:ABC'
         ($lines[0] | ConvertFrom-Json).message | Should -Match '\*\*\*BOT_TOKEN\*\*\*'
+    }
+}
+
+Describe 'Per-user operation history and safe retry' {
+    BeforeEach {
+        $script:UserOperationHistory = @{}
+        $script:LastShowAttempts = @{}
+        $script:auditFile = Join-Path $TestDrive 'audit.jsonl'
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'keeps operation history isolated by Telegram user id without editorial values' {
+        Write-AirOperationResult -OperationId one -Action SHOW -Result failed -DurationMs 10 -UserId 101 -ChatId 101 -Layer 4 -Target urgent -ErrorText timeout
+        Write-AirOperationResult -OperationId two -Action HIDE -Result success -DurationMs 5 -UserId 202 -ChatId 202 -Layer 7 -Target ticker
+
+        $first = @(Get-UserOperationHistory -UserId 101)
+        $second = @(Get-UserOperationHistory -UserId 202)
+        $first.Count | Should -Be 1
+        $first[0].OperationId | Should -Be 'one'
+        $first[0].Target | Should -Be 'urgent'
+        $first[0].PSObject.Properties.Name | Should -Not -Contain 'Variables'
+        $second.Count | Should -Be 1
+        $second[0].OperationId | Should -Be 'two'
+    }
+
+    It 'reopens review for the same users last SHOW attempt instead of sending directly' {
+        $script:LastShowAttempts['101'] = @{ Key = 'urgent'; Variables = @{ Headline = 'review me' }; AutoHideSeconds = 20 }
+        Mock Get-TemplateIndex { 3 }
+        Mock Start-ShowFlow { }
+        Mock Show-TitlerTemplate { throw 'must not send during retry request' }
+
+        Invoke-RetryLastShowAttempt -ChatId 101 -UserId 101
+
+        Should -Invoke Start-ShowFlow -Times 1 -Exactly -ParameterFilter {
+            $TemplateIndex -eq 3 -and $ChatId -eq 101 -and $UserId -eq 101 -and
+                $InitialValues.Headline -eq 'review me' -and $ReviewImmediately
+        }
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'shows only the requesting users recent operations with a retry button' {
+        Add-UserOperationHistory -OperationId one -Action SHOW -Result failed -DurationMs 10 -UserId 101 -Layer 4 -Target urgent
+        Add-UserOperationHistory -OperationId two -Action SHOW -Result success -DurationMs 10 -UserId 202 -Layer 7 -Target private
+        $script:LastShowAttempts['101'] = @{ Key = 'urgent'; Variables = @{}; AutoHideSeconds = 0 }
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'urgent' -and $Text -notmatch 'private' -and
+                @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text }) -contains '🔁 إعادة محاولة آمنة'
+        }
     }
 }
 

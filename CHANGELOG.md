@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.20 — 2026-08-22
+
+- Added a private, in-memory recent operation history keyed by Telegram user
+  id and capped at 20 records per user.
+- Excluded editorial field values from operation history.
+- Added the `🧾 عملياتي` screen and `/myoperations` (`/myops`) command with
+  success, blocked, and failure guidance.
+- Added a safe retry button that restores the same user's last SHOW values
+  into the confirmation screen without sending directly to Cinegy.
+- Added user-isolation, content-minimization, and no-direct-send retry tests.
+
 ## 4.2.19 — 2026-08-22
 
 - Added shared validated JSON state read/write helpers with atomic temporary

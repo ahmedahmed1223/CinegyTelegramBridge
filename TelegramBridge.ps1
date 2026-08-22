@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.19'
+$script:BridgeVersion = '4.2.20'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -564,6 +564,38 @@ function Read-ValidatedJsonState {
 
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
+$script:UserOperationHistory = @{}
+$script:LastShowAttempts = @{}
+
+function Add-UserOperationHistory {
+    param(
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][string]$Action,
+        [Parameter(Mandatory)][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [Parameter(Mandatory)][long]$UserId,
+        [int]$Layer = 0,
+        [string]$Target = ''
+    )
+    $key = [string]$UserId
+    $history = [System.Collections.Generic.List[object]]::new()
+    if ($script:UserOperationHistory.ContainsKey($key)) {
+        foreach ($existing in @($script:UserOperationHistory[$key])) { $history.Add($existing) }
+    }
+    $history.Add([pscustomobject]@{
+        At = Get-Date; OperationId = $OperationId; Action = $Action; Result = $Result
+        DurationMs = $DurationMs; Layer = $Layer; Target = $Target
+    })
+    while ($history.Count -gt 20) { $history.RemoveAt(0) }
+    $script:UserOperationHistory[$key] = $history.ToArray()
+}
+
+function Get-UserOperationHistory {
+    param([Parameter(Mandatory)][long]$UserId)
+    $key = [string]$UserId
+    if (-not $script:UserOperationHistory.ContainsKey($key)) { return @() }
+    return @($script:UserOperationHistory[$key])
+}
 
 function Write-AuditRecord {
     <# Permanent machine-readable security and control audit trail. This is
@@ -801,6 +833,7 @@ $script:BotCommandList = @(
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
+    @{ command = 'myoperations'; description = '🧾 آخر عملياتي وإعادة المحاولة' }
     @{ command = 'snapshot'; description = '📸 التقاط صورة من البث' }
     @{ command = 'schedule'; description = '📅 جدولة عرض ومراجعة الأحداث القادمة' }
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
@@ -2417,6 +2450,7 @@ function Get-MainMenuKeyboard {
     if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button "⏱ عرض مؤقّت" "menu:timed") }
     $rows += , $fourthRow
     $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
+    $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops') )
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )
@@ -3118,6 +3152,7 @@ function Write-AirOperationResult {
     $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
+    Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
     Write-AuditRecord -OperationId $OperationId -Event air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level
 }
@@ -3183,6 +3218,11 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+    $attemptVariables = @{}
+    foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
+    $script:LastShowAttempts[[string]$UserId] = @{
+        Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
+    }
     $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer)
     if (-not $policy.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -3672,6 +3712,53 @@ function Invoke-RepeatLastShow {
         return
     }
     Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $last.Variables
+}
+
+function Get-MyOperationsKeyboard {
+    param([Parameter(Mandatory)][long]$UserId)
+    $rows = @()
+    if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
+        $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
+    }
+    $rows += , @((New-Button '🔄 تحديث' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Invoke-MyOperationsCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
+    if ($history.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد عمليات تحكم مسجلة لك منذ آخر تشغيل.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('🧾 آخر عملياتك:')
+    foreach ($item in $history) {
+        $icon = switch ([string]$item.Result) { 'success' { '✅' }; 'blocked' { '⛔' }; default { '❌' } }
+        $target = if ([string]::IsNullOrWhiteSpace([string]$item.Target)) { '-' } else { [string]$item.Target }
+        $advice = if ([string]$item.Result -eq 'failed') { ' — افحص الاتصال ثم أعد المحاولة' } elseif ([string]$item.Result -eq 'blocked') { ' — راجع السياسة أو حالة Cinegy' } else { '' }
+        $lines.Add("$icon $(([datetime]$item.At).ToString('HH:mm:ss')) $($item.Action) · $target · طبقة $($item.Layer) · $($item.DurationMs)ms$advice")
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+}
+
+function Invoke-RetryLastShowAttempt {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $key = [string]$UserId
+    if (-not $script:LastShowAttempts.ContainsKey($key)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد محاولة عرض قابلة للمراجعة.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    $attempt = $script:LastShowAttempts[$key]
+    $templateIndex = Get-TemplateIndex -Key ([string]$attempt.Key)
+    if ($templateIndex -lt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'القالب المستخدم في المحاولة لم يعد موجودًا.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId `
+        -InitialValues $attempt.Variables -AutoHideSeconds ([int]$attempt.AutoHideSeconds) -ReviewImmediately
 }
 
 function Invoke-PresetShow {
@@ -5213,6 +5300,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('خروج', 'exit') } { Invoke-ExitCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تحديث', 'set') } { Invoke-SetCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حالة', 'status') } { Invoke-StatusCommand -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('عملياتي', 'myoperations', 'myops') } { Invoke-MyOperationsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صحة', 'health', 'fullstatus') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حزمةتشخيص', 'diagbundle') } { Invoke-DiagnosticBundleCommand -ChatId $ChatId -UserId $UserId }
@@ -5395,6 +5483,8 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:repeat' { Invoke-RepeatLastShow -ChatId $chatId -UserId $userId; break }
+        'menu:myops' { Invoke-MyOperationsCommand -ChatId $chatId -UserId $userId; break }
+        'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
         'menu:update' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl')
             break

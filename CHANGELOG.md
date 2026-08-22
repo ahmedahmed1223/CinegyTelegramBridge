@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.26 — 2026-08-22
+
+- Added Windows/PowerShell 7 GitHub Actions for parser, PSScriptAnalyzer, and
+  Pester verification on pushes and pull requests.
+- Persisted NUnit-format Pester results and uploaded verification artifacts.
+- Added an allow-listed release builder that excludes live configuration,
+  templates, logs, backups, snapshots, audit history, and on-air state.
+- Added a release manifest, ZIP SHA-256 sidecar, and optional Authenticode
+  signing using a Windows certificate thumbprint.
+- Documented checksum/signature verification, side-by-side upgrade, and safe
+  rollback preserving validated runtime state.
+- Added automated package allow-list, manifest, and checksum tests.
+
 ## 4.2.25 — 2026-08-22
 
 - Added `TelegramRequestTimeoutSeconds` with a 15-second default for

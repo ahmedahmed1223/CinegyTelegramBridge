@@ -1,0 +1,29 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install analysis and test modules
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module Pester -MinimumVersion 5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+      - name: Run parser, analyzer, and tests
+        shell: pwsh
+        run: .\Run-Checks.ps1 -TestResultPath .\artifacts\pester-results.xml
+      - name: Build allow-listed release package
+        shell: pwsh
+        run: .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-verification
+          path: artifacts/

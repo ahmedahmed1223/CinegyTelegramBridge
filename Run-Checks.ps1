@@ -16,7 +16,8 @@
 
 param(
     [switch]$SkipAnalyzer,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$TestResultPath = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -38,8 +39,9 @@ $files = @(
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
     'config.example.json', 'templates.example.json',
-    'Tests\Bridge.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1',
+    'Tests\Bridge.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md'
+    'Build-Release.ps1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
 )
 foreach ($file in $files) {
     $path = Join-Path $root $file
@@ -72,6 +74,7 @@ $powerShellFiles = @(
     'TelegramBridge.ps1', 'CinegyAirTitler.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1'
+    'Build-Release.ps1', 'Run-Checks.ps1'
 )
 foreach ($file in $powerShellFiles) {
     $path = Join-Path $root $file
@@ -133,6 +136,13 @@ else {
     $cfg.Run.Path = Join-Path $root 'Tests'
     $cfg.Output.Verbosity = 'Detailed'
     $cfg.Run.PassThru = $true
+    if (-not [string]::IsNullOrWhiteSpace($TestResultPath)) {
+        $resultDirectory = Split-Path $TestResultPath -Parent
+        if ($resultDirectory -and -not (Test-Path -LiteralPath $resultDirectory)) { New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null }
+        $cfg.TestResult.Enabled = $true
+        $cfg.TestResult.OutputPath = $TestResultPath
+        $cfg.TestResult.OutputFormat = 'NUnitXml'
+    }
     $result = Invoke-Pester -Configuration $cfg
     if ($result.FailedCount -gt 0 -or $result.Errors.Count -gt 0) { $failed = $true }
 }

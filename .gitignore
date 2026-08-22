@@ -18,3 +18,5 @@ templates.test-*.json
 
 # Isolated Codex feature worktrees.
 .worktrees/
+dist/
+artifacts/

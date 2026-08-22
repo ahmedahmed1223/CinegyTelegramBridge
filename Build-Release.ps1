@@ -1,0 +1,80 @@
+#requires -Version 7
+[CmdletBinding()]
+param(
+    [string]$Version = '',
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'),
+    [string]$CodeSigningThumbprint = '',
+    [switch]$SkipChecks
+)
+
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $versionLine = Select-String -LiteralPath (Join-Path $root 'TelegramBridge.ps1') -Pattern "BridgeVersion = '([^']+)'" | Select-Object -First 1
+    if (-not $versionLine) { throw 'Could not determine BridgeVersion.' }
+    $Version = $versionLine.Matches[0].Groups[1].Value
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version '$Version'." }
+
+if (-not $SkipChecks) {
+    & (Join-Path $root 'Run-Checks.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Release checks failed.' }
+}
+
+$allowList = @(
+    'TelegramBridge.ps1', 'CinegyAirTitler.psm1',
+    'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
+    'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
+    'Run-Checks.ps1', 'Build-Release.ps1',
+    'config.example.json', 'templates.example.json',
+    'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md'
+)
+$forbiddenNames = @('config.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json')
+$releaseRoot = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version"
+$zipPath = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version.zip"
+$checksumPath = "$zipPath.sha256"
+
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+if (Test-Path -LiteralPath $releaseRoot) { Remove-Item -LiteralPath $releaseRoot -Recurse -Force }
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+
+foreach ($relativePath in $allowList) {
+    $source = Join-Path $root $relativePath
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required release file missing: $relativePath" }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $releaseRoot $relativePath) -Force
+}
+
+$signed = $false
+if (-not [string]::IsNullOrWhiteSpace($CodeSigningThumbprint)) {
+    $certificate = Get-ChildItem -LiteralPath Cert:\CurrentUser\My | Where-Object Thumbprint -eq $CodeSigningThumbprint | Select-Object -First 1
+    if (-not $certificate) { throw "Code-signing certificate '$CodeSigningThumbprint' was not found in Cert:\CurrentUser\My." }
+    foreach ($file in @(Get-ChildItem -LiteralPath $releaseRoot -File | Where-Object Extension -in @('.ps1', '.psm1'))) {
+        $signature = Set-AuthenticodeSignature -LiteralPath $file.FullName -Certificate $certificate -HashAlgorithm SHA256
+        if ($signature.Status -ne 'Valid') { throw "Signing failed for $($file.Name): $($signature.StatusMessage)" }
+    }
+    $signed = $true
+}
+
+$packagedFiles = @(Get-ChildItem -LiteralPath $releaseRoot -File)
+foreach ($file in $packagedFiles) {
+    if ($forbiddenNames -contains $file.Name -or $file.Name -match '\.(bak|tmp|log|jsonl)$') {
+        throw "Forbidden runtime or secret-bearing file entered the package: $($file.Name)"
+    }
+}
+$manifestFiles = @($packagedFiles | Sort-Object Name | ForEach-Object {
+    [ordered]@{ Name = $_.Name; Length = $_.Length; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+})
+$manifest = [ordered]@{
+    Product = 'CinegyTelegramBridge'; Version = $Version
+    BuiltAtUtc = [DateTime]::UtcNow.ToString('o'); AuthenticodeSigned = $signed
+    Files = $manifestFiles
+}
+$manifestPath = Join-Path $releaseRoot 'release-manifest.json'
+[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+Compress-Archive -Path (Join-Path $releaseRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+$zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+[IO.File]::WriteAllText($checksumPath, "$zipHash  $([IO.Path]::GetFileName($zipPath))`n", [Text.UTF8Encoding]::new($false))
+
+[pscustomobject]@{ Version = $Version; ZipPath = $zipPath; ChecksumPath = $checksumPath; Signed = $signed }

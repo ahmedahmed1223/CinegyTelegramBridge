@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.21 — 2026-08-22
+
+- Required template paths to be absolute and use the `.cintitle` extension;
+  existence is intentionally not checked because the path may belong to the
+  remote Cinegy server.
+- Excluded invalid template definitions from SHOW controls and exposed their
+  keys and reasons through existing health warnings.
+- Reported layers shared by multiple templates as allowed informational data,
+  preserving the operational rule that one layer may host many templates.
+- Retained scheduled-event proximity warnings as the actual layer conflict
+  detector.
+- Added invalid-path and shared-layer regression tests.
+
 ## 4.2.20 — 2026-08-22
 
 - Added a private, in-memory recent operation history keyed by Telegram user

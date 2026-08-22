@@ -562,6 +562,39 @@ Describe 'Template registry parsing' {
         }
         finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
     }
+
+    It 'accepts multiple templates on one layer and reports the shared layer as information' {
+        $file = New-TempTemplateFile -Json @'
+{
+  "headline": { "path": "C:\\headline.cintitle", "layer": 4 },
+  "breaking": { "path": "C:\\breaking.cintitle", "layer": 4 }
+}
+'@
+        try {
+            $store = Get-TemplateStore
+            $store.Order.Count | Should -Be 2
+            @($store.SharedLayers['4']) | Sort-Object | Should -Be @('breaking', 'headline')
+            $store.Errors.Count | Should -Be 0
+        }
+        finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'excludes invalid template path formats and exposes their keys to health reporting' {
+        $file = New-TempTemplateFile -Json @'
+{
+  "good": { "path": "C:\\valid.cintitle", "layer": 3 },
+  "relative": { "path": "titles\\relative.cintitle", "layer": 4 },
+  "wrongext": { "path": "C:\\wrong.txt", "layer": 5 }
+}
+'@
+        try {
+            $store = Get-TemplateStore
+            $store.Order | Should -Be @('good')
+            @($store.InvalidKeys) | Sort-Object | Should -Be @('relative', 'wrongext')
+            $store.Errors -join ' ' | Should -Match 'relative.*مسار|wrongext.*cintitle'
+        }
+        finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 Describe 'Array-returning helpers' {

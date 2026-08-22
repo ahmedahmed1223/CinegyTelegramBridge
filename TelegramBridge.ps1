@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.20'
+$script:BridgeVersion = '4.2.21'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -1163,7 +1163,7 @@ function Get-TemplateStore {
        positions stay stable between renders (hashtable order is not). #>
     $path = Get-TemplateRegistryFilePath
     if (-not (Test-Path $path)) {
-        return @{ Map = @{}; Order = @(); Errors = @("ملف القوالب غير موجود: $path") }
+        return @{ Map = @{}; Order = @(); Errors = @("ملف القوالب غير موجود: $path"); InvalidKeys = @(); SharedLayers = @{} }
     }
     $writeTime = (Get-Item $path).LastWriteTimeUtc
     if ($script:TemplateCache.Path -eq $path -and $script:TemplateCache.WriteTime -eq $writeTime) {
@@ -1172,6 +1172,8 @@ function Get-TemplateStore {
 
     $map = @{}
     $errors = [System.Collections.Generic.List[string]]::new()
+    $invalidKeys = [System.Collections.Generic.List[string]]::new()
+    $layerTemplates = @{}
     try {
         $raw = Get-Content -Path $path -Raw | ConvertFrom-Json
     }
@@ -1182,6 +1184,7 @@ function Get-TemplateStore {
         $script:TemplateCache = @{
             WriteTime = $writeTime; Path = $path; Map = @{}; Order = @()
             Errors    = @("تعذّر قراءة templates.json: $($_.Exception.Message)")
+            InvalidKeys = @(); SharedLayers = @{}
         }
         Write-BridgeLog "Template registry unreadable: $($_.Exception.Message)" "ERROR"
         return $script:TemplateCache
@@ -1195,10 +1198,22 @@ function Get-TemplateStore {
         $layer = 0
         if ([string]::IsNullOrWhiteSpace([string]$tplPath)) {
             $errors.Add("القالب '$key' بلا حقل path - تم تخطيه.")
+            $invalidKeys.Add($key)
+            continue
+        }
+        if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
+            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - تم تخطيه.")
+            $invalidKeys.Add($key)
+            continue
+        }
+        if (-not [IO.Path]::GetExtension([string]$tplPath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
+            $errors.Add("القالب '$key' يجب أن يشير إلى ملف .cintitle - تم تخطيه.")
+            $invalidKeys.Add($key)
             continue
         }
         if (-not [int]::TryParse([string]$layerRaw, [ref]$layer)) {
             $errors.Add("القالب '$key' بلا حقل layer صالح - تم تخطيه.")
+            $invalidKeys.Add($key)
             continue
         }
         $order = 1000
@@ -1282,11 +1297,18 @@ function Get-TemplateStore {
             Order       = $order
             Presets     = $presets
         }
+        $layerKey = [string]$layer
+        if (-not $layerTemplates.ContainsKey($layerKey)) { $layerTemplates[$layerKey] = @() }
+        $layerTemplates[$layerKey] = @($layerTemplates[$layerKey]) + $key
     }
 
     # Script-block sort expressions: -Property 'Name' resolves ambiguously
     # against a [hashtable]'s own members, so address the entries explicitly.
     $ordered = @($map.Values | Sort-Object -Property @{ Expression = { $_.Order } }, @{ Expression = { $_.Key } } | ForEach-Object { $_.Key })
+    $sharedLayers = @{}
+    foreach ($layerKey in $layerTemplates.Keys) {
+        if (@($layerTemplates[$layerKey]).Count -gt 1) { $sharedLayers[$layerKey] = @($layerTemplates[$layerKey] | Sort-Object) }
+    }
 
     $script:TemplateCache = @{
         WriteTime = $writeTime
@@ -1294,6 +1316,8 @@ function Get-TemplateStore {
         Map       = $map
         Order     = $ordered
         Errors    = @($errors)
+        InvalidKeys = $invalidKeys.ToArray()
+        SharedLayers = $sharedLayers
     }
     foreach ($e in $errors) { Write-BridgeLog "Template registry: $e" "WARN" }
     return $script:TemplateCache
@@ -3956,6 +3980,11 @@ function Invoke-StatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $sharedLayers = Get-JsonProp $store 'SharedLayers'
+    if ($sharedLayers -and $sharedLayers.Count -gt 0) {
+        $sharedText = @($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | '
+        $lines.Add("ℹ️ طبقات مشتركة بين عدة قوالب (مسموح): $sharedText")
+    }
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)

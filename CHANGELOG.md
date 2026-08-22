@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.7 — 2026-08-22
+
+- Added a direct target-layer verification immediately before every SHOW.
+- Blocked SHOW when Cinegy cannot confirm the target layer instead of assuming
+  an unreachable layer is safe.
+- Reconciled the verified layer with `onair.json` before any replacement or
+  pre-show hide action.
+- Added regression coverage proving that an uncertain layer sends no SHOW
+  command and does not run reconciliation on an invalid response.
+
 ## 4.2.6 — 2026-08-22
 
 - Added the currently tracked scene to SHOW review before a layer replacement.

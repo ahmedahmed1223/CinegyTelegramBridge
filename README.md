@@ -13,9 +13,11 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.6
+## Version 4.2.7
 
-Version 4.2.6 shows the currently tracked scene, its source or operator, and a
+Version 4.2.7 performs a direct read-only check of the target Cinegy layer
+immediately before every SHOW and blocks the command when the layer cannot be
+verified. Version 4.2.6 shows the currently tracked scene, its source or operator, and a
 freshness warning in the SHOW review before replacing a layer. Version 4.2.5 classifies the current Cinegy state sample as connected, stale,
 unavailable, or unknown in both status views, using the configurable
 `CinegyStateStaleSeconds` threshold. Version 4.2.4 adds an administrator-controlled maintenance mode that blocks

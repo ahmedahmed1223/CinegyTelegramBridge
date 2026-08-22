@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.6'
+$script:BridgeVersion = '4.2.7'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -2872,6 +2872,22 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+
+    # SHOW is the only operation that can replace visible content. Verify the
+    # target layer immediately before mutating it; an unreachable Cinegy must
+    # never be interpreted as an empty or safe layer.
+    $layerStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer ([int]$template.Layer) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $layerStatus.Success) {
+        $errorText = [string](Get-JsonProp $layerStatus 'Error')
+        Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
+    }
+    $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
+    Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
 
     # A scene that is already loaded on the layer keeps running with the values
     # it was started with, so a second SHOW can leave the PREVIOUS text on air.

@@ -1293,6 +1293,12 @@ Describe 'SHOW identity tracking' {
                 Xml = '<Request/>'
             }
         }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = ''; Error = '' }
+        }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(4); Added = @(); Removed = @(); Failed = @(); LastSuccessfulAt = Get-Date }
+        }
         Mock Save-OnAirState { }
         Mock Add-UsageCount { }
         Mock Write-BridgeLog { }
@@ -1322,6 +1328,19 @@ Describe 'SHOW identity tracking' {
         $OnAir.ContainsKey(4) | Should -BeFalse
         $LastShow.ContainsKey(10) | Should -BeFalse
         Should -Invoke Save-OnAirState -Times 0 -Exactly
+    }
+
+    It 'blocks SHOW when the target Cinegy layer cannot be verified' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $false; IsOnAir = $false; ActiveId = ''; ActiveName = ''; Error = 'timeout' }
+        }
+
+        $result = Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'التحقق'
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+        Should -Invoke Update-OnAirStateFromCinegy -Times 0 -Exactly
     }
 }
 
@@ -1809,6 +1828,12 @@ Describe 'Repeat last show with editing' {
         Mock Show-TitlerTemplate {
             [pscustomobject]@{ Success = $true; EventId = '{CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC}'; Xml = '<Request/>' }
         }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = ''; Error = '' }
+        }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(4); Added = @(); Removed = @(); Failed = @(); LastSuccessfulAt = Get-Date }
+        }
         Mock Save-OnAirState { }
         Mock Add-UsageCount { }
         Mock Write-BridgeLog { }
@@ -2036,6 +2061,7 @@ Describe 'Exit scene on-air record cleanup' {
         $OnAir.ContainsKey(7) | Should -BeTrue
         Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
+
 }
 
 Describe 'Update-OnAirStateFromCinegy' {

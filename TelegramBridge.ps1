@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.9'
+$script:BridgeVersion = '4.2.10'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -109,6 +109,7 @@ $script:DefaultSettings = [ordered]@{
     CinegyStateStaleSeconds    = 45      # age after which the last successful state sample is stale
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
+    ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
     HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
@@ -1761,6 +1762,7 @@ function ConvertFrom-OperatorScheduleTime {
 function New-ScheduledShowEvent {
     param(
         [Parameter(Mandatory)][string]$TemplateKey,
+        [int]$Layer = 0,
         [hashtable]$Values = @{},
         [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
         [Parameter(Mandatory)][ValidateSet('once', 'daily', 'weekly')][string]$Recurrence,
@@ -1768,7 +1770,7 @@ function New-ScheduledShowEvent {
         [Parameter(Mandatory)][long]$UserId
     )
     return @{
-        Id = [guid]::NewGuid().ToString(); TemplateKey = $TemplateKey; Values = $Values
+        Id = [guid]::NewGuid().ToString(); TemplateKey = $TemplateKey; Layer = $Layer; Values = $Values
         ScheduledAt = $ScheduledAt.ToString('o'); TimeZoneId = [System.TimeZoneInfo]::Local.Id
         Recurrence = $Recurrence; Status = 'pending'; ChatId = $ChatId; UserId = $UserId
         CreatedAt = [datetimeoffset]::Now.ToString('o'); ExecutionKey = ''
@@ -1900,7 +1902,7 @@ function Start-ScheduleShowFlow {
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) { return }
     $state = @{
-        Mode = 'schedule_fields'; TemplateIndex = $TemplateIndex; TemplateKey = [string]$template.Key
+        Mode = 'schedule_fields'; TemplateIndex = $TemplateIndex; TemplateKey = [string]$template.Key; Layer = [int]$template.Layer
         Fields = @($template.Fields); Labels = @($template.FieldLabels); Limits = @($template.FieldLimits)
         Required = @(Get-JsonProp $template 'FieldRequired' | Where-Object { $null -ne $_ })
         Values = @{}; Index = 0; UserId = $UserId
@@ -1957,6 +1959,13 @@ function Show-ScheduleReview {
         "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
     )
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
+    $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt ([datetimeoffset]$State.ScheduledAt) `
+        -WindowMinutes (Get-SettingInt 'ScheduleConflictWindowMinutes' 2))
+    if ($conflicts.Count -gt 0) {
+        $lines += ''
+        $lines += "⚠️ تعارض محتمل على الطبقة $($State.Layer):"
+        foreach ($conflict in $conflicts) { $lines += "• $(Format-ScheduleEvent -ScheduleEntry $conflict)" }
+    }
     $lines += ''; $lines += 'لن يُحفظ الحدث حتى تضغط تأكيد الجدولة.'
     $State.Mode = 'schedule_review'; Set-PendingState -ChatId $ChatId -State $State
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard)
@@ -1967,7 +1976,7 @@ function Confirm-ScheduledShow {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $UserId) { return }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
-    $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
+    $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
     $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
     Clear-PendingState -ChatId $ChatId
     if ($saved) {
@@ -2261,6 +2270,30 @@ function Get-TemplatesKeyboard {
     }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-ScheduleLayerConflicts {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
+        [int]$WindowMinutes = 2,
+        [string]$ExcludeId = ''
+    )
+    if ($Layer -le 0) { return @() }
+    $window = [math]::Max(0, $WindowMinutes)
+    foreach ($entry in @($script:ScheduleEvents)) {
+        if ([string]$entry.Status -ne 'pending' -or ([string]$entry.Id -eq $ExcludeId -and $ExcludeId)) { continue }
+        $entryLayer = 0
+        [int]::TryParse([string](Get-JsonProp $entry 'Layer'), [ref]$entryLayer) | Out-Null
+        if ($entryLayer -le 0) {
+            $store = Get-TemplateStore
+            $entryKey = [string]$entry.TemplateKey
+            if ($store.Map.ContainsKey($entryKey)) { $entryLayer = [int]$store.Map[$entryKey].Layer }
+        }
+        if ($entryLayer -ne $Layer) { continue }
+        $distance = [math]::Abs((([datetimeoffset]$entry.ScheduledAt) - $ScheduledAt).TotalMinutes)
+        if ($distance -le $window) { Write-Output $entry }
+    }
 }
 
 function Get-UsersAdminKeyboard {

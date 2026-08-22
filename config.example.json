@@ -68,6 +68,7 @@
     "NotifyAdminsOnExternalChange": true,
     "NotifyAdminsOnCinegyHealth": true,
     "CinegyStateStaleSeconds": 45,
+    "ScheduleConflictWindowMinutes": 2,
     "ReservedLayers": "",
     "DisabledTemplateKeys": "",
     "MaintenanceMode": false,

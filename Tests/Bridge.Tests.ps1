@@ -2494,12 +2494,36 @@ Describe 'Reliable schedule store and executor' {
     }
 }
 
+Describe 'Schedule layer conflict detection' {
+    BeforeEach { $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new() }
+    AfterEach { $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new() }
+
+    It 'detects a pending event on the same layer inside the conflict window' {
+        $at = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $existing = New-ScheduledShowEvent -TemplateKey 'ticker' -Layer 4 -Values @{} -ScheduledAt $at -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($existing)
+
+        $conflicts = @(Get-ScheduleLayerConflicts -Layer 4 -ScheduledAt $at.AddMinutes(1) -WindowMinutes 2)
+
+        $conflicts.Count | Should -Be 1
+        $conflicts[0].Id | Should -Be $existing.Id
+    }
+
+    It 'does not treat another layer at the same time as a conflict' {
+        $at = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $script:ScheduleEvents.Add((New-ScheduledShowEvent -TemplateKey 'logo' -Layer 8 -Values @{} -ScheduledAt $at -Recurrence once -ChatId 1 -UserId 2))
+
+        @(Get-ScheduleLayerConflicts -Layer 4 -ScheduledAt $at -WindowMinutes 2).Count | Should -Be 0
+    }
+}
+
 Describe 'Telegram schedule review flow' {
     BeforeEach {
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         Clear-PendingState -ChatId 111
         Mock Get-TemplateByIndex {
             [pscustomobject]@{
-                Key = 'urgent'; Fields = @('Headline.Text'); FieldLabels = @('العنوان')
+                Key = 'urgent'; Layer = 4; Fields = @('Headline.Text'); FieldLabels = @('العنوان')
                 FieldLimits = @(80); FieldRequired = @($true)
             }
         }
@@ -2508,7 +2532,25 @@ Describe 'Telegram schedule review flow' {
         Mock Add-AuditEntry { }
     }
 
-    AfterEach { Clear-PendingState -ChatId 111 }
+    AfterEach {
+        Clear-PendingState -ChatId 111
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+    }
+
+    It 'shows same-layer timing conflicts before schedule confirmation' {
+        $at = [datetimeoffset]::Now.AddHours(3)
+        $script:ScheduleEvents.Add((New-ScheduledShowEvent -TemplateKey 'ticker' -Layer 4 -Values @{} -ScheduledAt $at -Recurrence once -ChatId 1 -UserId 2))
+        $state = @{
+            TemplateKey = 'urgent'; Layer = 4; Fields = @(); Values = @{}; ScheduledAt = $at.AddMinutes(1).ToString('o')
+            TimeZoneId = [System.TimeZoneInfo]::Local.Id; Recurrence = 'once'; UserId = 121
+        }
+
+        Show-ScheduleReview -ChatId 111 -State $state
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'تعارض محتمل.*الطبقة 4' -and $Text -match 'ticker'
+        }
+    }
 
     It 'collects values time and recurrence and saves only after confirmation' {
         Start-ScheduleShowFlow -TemplateIndex 0 -ChatId 111 -UserId 121
@@ -2614,6 +2656,7 @@ Describe 'Cinegy monitoring watchdogs' {
         $script:HealthHistory.Cinegy.FailureCount | Should -Be 0
         $script:HealthHistory.Cinegy.OutageStartedAt | Should -BeNullOrEmpty
     }
+
 }
 
 Describe 'Bridge lifecycle notifications' {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.10 — 2026-08-22
+
+- Added same-layer scheduled-event conflict detection.
+- Added configurable `ScheduleConflictWindowMinutes`, defaulting to two
+  minutes.
+- Stored the resolved layer with new schedule events while retaining fallback
+  lookup compatibility for older persisted events.
+- Displayed each conflicting template and time in schedule review before the
+  operator confirms the event.
+- Added coverage for same-layer conflicts, different-layer non-conflicts, and
+  the Telegram review warning.
+
 ## 4.2.9 — 2026-08-22
 
 - Added administrator-editable `ReservedLayers` and `DisabledTemplateKeys`

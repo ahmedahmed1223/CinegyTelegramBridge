@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.39 — 2026-08-22
+
+- Extracts per-layer Cinegy reconciliation decisions into `Modules/BridgeCinegyState.psm1` while retaining network polling, logging, persistence, notifications, and timer cleanup in the bridge orchestrator.
+- Preserves tracked scenes on unavailable status, adopts Cinegy's actual id while on air, removes only after confirmed hidden state, and discovers untracked scenes as `cinegy` source only during explicit full comparison.
+- Avoids mutating caller-owned tracked records inside the policy module.
+- Adds direct policy tests plus existing reconciliation, startup, external-scene, identity persistence, and on-air smoke coverage.
+
 ## 4.2.38 — 2026-08-22
 
 - Extracts interactive pending-flow storage, timeout evaluation, and removal into `Modules/BridgeFlowState.psm1`.

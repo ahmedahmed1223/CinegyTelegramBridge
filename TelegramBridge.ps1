@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.38'
+$script:BridgeVersion = '4.2.39'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -60,6 +60,7 @@ Import-Module (Join-Path $moduleRoot "BridgeStorage.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeTelegram.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeAuthorization.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeFlowState.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeCinegyState.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -1684,7 +1685,9 @@ function Update-OnAirStateFromCinegy {
             Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
                 -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) -TimeoutSec $TimeoutSec
         }
-        if (-not $status.Success) {
+        $record = $script:OnAir[$layer]
+        $decision = Resolve-BridgeCinegyLayerState -Layer ([int]$layer) -TrackedRecord $record -Status $status
+        if ($decision.Action -eq 'failed') {
             $failed.Add([int]$layer)
             Write-BridgeLog "Could not verify GFX layer $layer during $Reason sync: $($status.Error)" "WARN"
             # Keep the record: an unavailable engine is not the same as a hidden graphic.
@@ -1692,41 +1695,14 @@ function Update-OnAirStateFromCinegy {
         }
 
         $checked.Add([int]$layer)
-        $record = $script:OnAir[$layer]
-        $trackedId = [string](Get-JsonProp $record 'ActiveId')
-        $actualId = [string]$status.ActiveId
-
-        $actualNormalized = $actualId.Trim().Trim('{', '}')
-
-        $hasActualId = -not [string]::IsNullOrWhiteSpace($actualNormalized) -and
-            $actualNormalized -ne '00000000-0000-0000-0000-000000000000'
-
-        # Cinegy generates its own ActiveId and ignores the bot's EventId, so the
-        # two IDs almost never match. A mismatch alone must NOT drop a layer that
-        # is genuinely on air - adopt Cinegy's real id and keep the record.
-        if ($status.IsOnAir) {
-            if ($hasActualId -and $actualId -ne [string](Get-JsonProp $record 'ActiveId')) {
-                # Only mark dirty when the id genuinely changed, so a layer
-                # sitting on air does not rewrite onair.json every sync tick.
-                $record.ActiveId = $actualId
-                $script:OnAirDirty = $true
-            }
+        if ($decision.Action -eq 'update') {
+            $script:OnAir[$layer] = $decision.Record
+            $script:OnAirDirty = $true
         }
-        else {
+        elseif ($decision.Action -eq 'remove') {
             # Genuinely hidden (IsEmpty) or replaced off air: drop from the
             # on-air record so onair.json reflects what is live now.
-            $changes.Add([pscustomobject]@{
-                Layer           = [int]$layer
-                TemplateKey     = [string](Get-JsonProp $record 'Key')
-                ShowUserId      = [long](Get-JsonProp $record 'UserId')
-                ShownAt         = Get-JsonProp $record 'At'
-                ExpectedActiveId = $trackedId
-                ActualActiveId  = $actualId
-                ActualActiveName = [string](Get-JsonProp $status 'ActiveName')
-                OutputState     = [string](Get-JsonProp $status 'OutputState')
-                ClientConnected = [bool](Get-JsonProp $status 'ClientConnected')
-                ClientIdentity  = [string](Get-JsonProp $status 'ClientIdentity')
-            })
+            $changes.Add($decision.Change)
             $script:OnAir.Remove([int]$layer)
             $recordSource = [string](Get-JsonProp $record 'Source')
             if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
@@ -1747,23 +1723,17 @@ function Update-OnAirStateFromCinegy {
             $layer = 0
             if (-not [int]::TryParse([string](Get-JsonProp $item 'Layer'), [ref]$layer)) { continue }
             if ($script:OnAir.ContainsKey($layer)) { continue }
-            if (-not [bool](Get-JsonProp $item 'Success')) {
+            $decision = Resolve-BridgeCinegyLayerState -Layer $layer -Status $item -DiscoverExternal
+            if ($decision.Action -eq 'failed') {
                 if (-not $failed.Contains($layer)) { $failed.Add($layer) }
                 Write-BridgeLog "Could not discover GFX layer $layer during $Reason comparison: $([string](Get-JsonProp $item 'Error'))" "WARN"
                 continue
             }
-            if (-not [bool](Get-JsonProp $item 'IsOnAir')) { continue }
-
-            $activeId = [string](Get-JsonProp $item 'ActiveId')
-            $activeName = [string](Get-JsonProp $item 'ActiveName')
-            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = "مشهد خارجي · طبقة $layer" }
-            $script:OnAir[$layer] = @{
-                Key = $activeName; At = Get-Date; UserId = 0L
-                ActiveId = $activeId; Source = 'cinegy'
-            }
+            if ($decision.Action -ne 'add') { continue }
+            $script:OnAir[$layer] = $decision.Record
             $added.Add($layer)
             $script:OnAirDirty = $true
-            Write-BridgeLog "Cinegy state comparison ($Reason) discovered external on-air scene '$activeName' on layer $layer; added to onair.json for operator hide/exit" "INFO"
+            Write-BridgeLog "Cinegy state comparison ($Reason) discovered external on-air scene '$([string]$decision.Record.Key)' on layer $layer; added to onair.json for operator hide/exit" "INFO"
         }
     }
 

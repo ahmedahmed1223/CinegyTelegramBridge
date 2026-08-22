@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.22 — 2026-08-22
+
+- Added copy and edit-time buttons for each pending schedule event.
+- Required a new local time followed by the existing schedule review before
+  either mutation is saved.
+- Kept the original event unchanged when copying and generated a fresh event
+  id for the copy.
+- Preserved the stable event id when editing time and reset stale execution or
+  retry state only after an atomic save succeeds.
+- Added full timezone ids to event summaries in addition to numeric offsets.
+- Restricted copy/edit to the event owner or an administrator.
+- Added copy isolation, edit identity, and timezone summary tests.
+
 ## 4.2.21 — 2026-08-22
 
 - Required template paths to be absolute and use the `.cintitle` extension;

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.21'
+$script:BridgeVersion = '4.2.22'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -2150,7 +2150,38 @@ function Format-ScheduleEvent {
     param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
     $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
     $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
-    return "$($ScheduleEntry.TemplateKey) — $($at.ToString('yyyy-MM-dd HH:mm zzz')) — $recurrence"
+    $zone = [string](Get-JsonProp $ScheduleEntry 'TimeZoneId')
+    if ([string]::IsNullOrWhiteSpace($zone)) { $zone = [System.TimeZoneInfo]::Local.Id }
+    return "$($ScheduleEntry.TemplateKey) — $($at.ToString('yyyy-MM-dd HH:mm zzz')) — $zone — $recurrence"
+}
+
+function Start-ScheduleMutationFlow {
+    param(
+        [Parameter(Mandatory)][ValidateSet('copy', 'edit')][string]$Action,
+        [Parameter(Mandatory)][string]$EventId,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$UserId
+    )
+    $entry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq $EventId -and [string]$_.Status -eq 'pending' }) | Select-Object -First 1
+    if (-not $entry) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الحدث لم يعد متاحًا للنسخ أو التعديل.' -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        return
+    }
+    if ([long]$entry.UserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'يمكنك تعديل أحداثك فقط.' -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        return
+    }
+    $values = @{}
+    foreach ($name in $entry.Values.Keys) { $values[[string]$name] = [string]$entry.Values[$name] }
+    $state = @{
+        Mode = 'schedule_time'; MutationAction = $Action; OriginalEventId = $EventId
+        TemplateKey = [string]$entry.TemplateKey; Layer = [int](Get-JsonProp $entry 'Layer')
+        Fields = @($values.Keys); Values = $values; Recurrence = [string]$entry.Recurrence
+        TimeZoneId = [string]$entry.TimeZoneId; UserId = $UserId
+    }
+    Set-PendingState -ChatId $ChatId -State $state
+    $verb = if ($Action -eq 'copy') { 'نسخ الحدث إلى موعد جديد' } else { 'تعديل موعد الحدث' }
+    Send-TelegramMessage -ChatId $ChatId -Text "📅 $verb`nالموعد الحالي: $(([datetimeoffset]$entry.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($entry.TimeZoneId)`nأرسل الموعد الجديد بصيغة YYYY-MM-DD HH:mm" -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-ScheduleShowFlow {
@@ -2204,6 +2235,10 @@ function Complete-ScheduleText {
             return
         }
         $state.ScheduledAt = $parsed.ScheduledAt.ToString('o'); $state.TimeZoneId = $parsed.TimeZoneId
+        if ($state.ContainsKey('MutationAction')) {
+            Show-ScheduleReview -ChatId $ChatId -State $state
+            return
+        }
         $state.Mode = 'schedule_recurrence'; Set-PendingState -ChatId $ChatId -State $state
         Send-TelegramMessage -ChatId $ChatId -Text "فُهم الموعد: $($parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($parsed.TimeZoneId)`nاختر التكرار:" -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
     }
@@ -2212,8 +2247,11 @@ function Complete-ScheduleText {
 function Show-ScheduleReview {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
     $recurrence = switch ([string]$State.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $reviewTitle = if ($State.ContainsKey('MutationAction')) {
+        if ([string]$State.MutationAction -eq 'copy') { '🔎 مراجعة نسخة الحدث' } else { '🔎 مراجعة تعديل موعد الحدث' }
+    } else { '🔎 مراجعة الجدولة' }
     $lines = @(
-        '🔎 مراجعة الجدولة', "القالب: $($State.TemplateKey)",
+        $reviewTitle, "القالب: $($State.TemplateKey)",
         "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
     )
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
@@ -2234,11 +2272,32 @@ function Confirm-ScheduledShow {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $UserId) { return }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
-    $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
-    $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
+    $scheduleEntry = $null
+    $saved = $false
+    if ($state.ContainsKey('MutationAction') -and [string]$state.MutationAction -eq 'edit') {
+        $scheduleEntry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq [string]$state.OriginalEventId -and [string]$_.Status -eq 'pending' }) | Select-Object -First 1
+        if ($scheduleEntry) {
+            $previous = @{
+                ScheduledAt = [string]$scheduleEntry.ScheduledAt; TimeZoneId = [string]$scheduleEntry.TimeZoneId
+                ExecutionKey = [string]$scheduleEntry.ExecutionKey; CompletedExecutionKey = [string]$scheduleEntry.CompletedExecutionKey
+                NextAttemptAt = [string]$scheduleEntry.NextAttemptAt; AttemptCount = [int]$scheduleEntry.AttemptCount
+            }
+            $scheduleEntry.ScheduledAt = [string]$state.ScheduledAt; $scheduleEntry.TimeZoneId = [string]$state.TimeZoneId
+            $scheduleEntry.ExecutionKey = ''; $scheduleEntry.CompletedExecutionKey = ''; $scheduleEntry.NextAttemptAt = ''; $scheduleEntry.AttemptCount = 0
+            $saved = Save-ScheduleEvents
+            if (-not $saved) {
+                foreach ($name in $previous.Keys) { $scheduleEntry[$name] = $previous[$name] }
+            }
+        }
+    }
+    else {
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
+        $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
+    }
     Clear-PendingState -ChatId $ChatId
     if ($saved) {
-        Add-AuditEntry "📅 scheduled $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - user $UserId"
+        $auditAction = if ($state.ContainsKey('MutationAction')) { [string]$state.MutationAction } else { 'created' }
+        Add-AuditEntry "📅 schedule $auditAction $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - user $UserId"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ الجدولة.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }
     else {
@@ -2672,7 +2731,11 @@ function Get-UpcomingScheduleKeyboard {
     $rows = @()
     foreach ($scheduleEntry in @(Get-UpcomingScheduleEvents)) {
         $at = [datetimeoffset]$scheduleEntry.ScheduledAt
-        $rows += , @( (New-Button "🗑 $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schcancel:$($scheduleEntry.Id)") )
+        $rows += , @(
+            (New-Button "✏️ $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schededit:$($scheduleEntry.Id)"),
+            (New-Button '📄 نسخ' "schedcopy:$($scheduleEntry.Id)"),
+            (New-Button '🗑' "schcancel:$($scheduleEntry.Id)")
+        )
     }
     $rows += , @( (New-Button "⬅️ الجدولة" 'menu:schedule') )
     return @{ inline_keyboard = $rows }
@@ -5665,6 +5728,14 @@ function Invoke-CallbackQuery {
         }
         'schedule:confirm' {
             Confirm-ScheduledShow -ChatId $chatId -UserId $userId
+            break
+        }
+        'schededit:*' {
+            Start-ScheduleMutationFlow -Action edit -EventId $data.Substring(10) -ChatId $chatId -UserId $userId
+            break
+        }
+        'schedcopy:*' {
+            Start-ScheduleMutationFlow -Action copy -EventId $data.Substring(10) -ChatId $chatId -UserId $userId
             break
         }
         'schcancel:*' {

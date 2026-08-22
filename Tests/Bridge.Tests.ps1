@@ -2711,6 +2711,45 @@ Describe 'Reliable schedule store and executor' {
         { Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json -ErrorAction Stop } | Should -Not -Throw
     }
 
+    It 'copies an event to a new reviewed time without changing the original' {
+        Mock Send-TelegramMessage { }
+        $originalAt = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Layer 4 -Values @{ Headline = 'copy' } -ScheduledAt $originalAt -Recurrence daily -ChatId 101 -UserId 101
+        $script:ScheduleEvents.Add($entry)
+
+        Start-ScheduleMutationFlow -Action copy -EventId $entry.Id -ChatId 101 -UserId 101
+        Complete-ScheduleText -ChatId 101 -Value '2099-08-22 11:30'
+        Confirm-ScheduledShow -ChatId 101 -UserId 101
+
+        $script:ScheduleEvents.Count | Should -Be 2
+        $script:ScheduleEvents[0].Id | Should -Be $entry.Id
+        $script:ScheduleEvents[0].ScheduledAt | Should -Be $originalAt.ToString('o')
+        $copy = @($script:ScheduleEvents | Where-Object Id -ne $entry.Id)[0]
+        $copy.TemplateKey | Should -Be 'urgent'
+        $copy.Values.Headline | Should -Be 'copy'
+        $copy.Recurrence | Should -Be 'daily'
+    }
+
+    It 'edits only the reviewed event time and preserves its stable id' {
+        Mock Send-TelegramMessage { }
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Layer 4 -Values @{} -ScheduledAt ([datetimeoffset]'2099-08-21T10:00:00+03:00') -Recurrence once -ChatId 101 -UserId 101
+        $script:ScheduleEvents.Add($entry)
+
+        Start-ScheduleMutationFlow -Action edit -EventId $entry.Id -ChatId 101 -UserId 101
+        Complete-ScheduleText -ChatId 101 -Value '2099-08-23 12:45'
+        Confirm-ScheduledShow -ChatId 101 -UserId 101
+
+        $script:ScheduleEvents.Count | Should -Be 1
+        $script:ScheduleEvents[0].Id | Should -Be $entry.Id
+        ([datetimeoffset]$script:ScheduleEvents[0].ScheduledAt).ToString('yyyy-MM-dd HH:mm') | Should -Be '2099-08-23 12:45'
+        $script:ScheduleEvents[0].TimeZoneId | Should -Be ([System.TimeZoneInfo]::Local.Id)
+    }
+
+    It 'includes the timezone id in event summaries' {
+        $entry = New-ScheduledShowEvent -TemplateKey urgent -ScheduledAt ([datetimeoffset]'2099-08-21T10:00:00+03:00') -Recurrence once -ChatId 1 -UserId 1
+        Format-ScheduleEvent -ScheduleEntry $entry | Should -Match ([regex]::Escape([System.TimeZoneInfo]::Local.Id))
+    }
+
     It 'executes a one-time event once and never repeats it on later ticks' {
         $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
         $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2

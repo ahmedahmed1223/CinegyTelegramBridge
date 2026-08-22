@@ -1450,10 +1450,15 @@ Describe 'SHOW identity tracking' {
     BeforeEach {
         $script:OriginalReservedLayers = Get-Setting 'ReservedLayers'
         $script:OriginalDisabledTemplateKeys = Get-Setting 'DisabledTemplateKeys'
+        $script:OriginalSensitiveTemplateKeys = Get-Setting 'SensitiveTemplateKeys'
+        $script:OriginalSensitiveTemplateAutoHideSeconds = Get-Setting 'SensitiveTemplateAutoHideSeconds'
         $config.Settings | Add-Member -NotePropertyName ReservedLayers -NotePropertyValue '' -Force
         $config.Settings | Add-Member -NotePropertyName DisabledTemplateKeys -NotePropertyValue '' -Force
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue '' -Force
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue 30 -Force
         $OnAir.Clear()
         $LastShow.Clear()
+        $script:AutoHideQueue.Clear()
         Mock Get-TemplateStore {
             [pscustomobject]@{
                 Map = @{
@@ -1489,8 +1494,11 @@ Describe 'SHOW identity tracking' {
     AfterEach {
         $config.Settings | Add-Member -NotePropertyName ReservedLayers -NotePropertyValue $script:OriginalReservedLayers -Force
         $config.Settings | Add-Member -NotePropertyName DisabledTemplateKeys -NotePropertyValue $script:OriginalDisabledTemplateKeys -Force
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue $script:OriginalSensitiveTemplateKeys -Force
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue $script:OriginalSensitiveTemplateAutoHideSeconds -Force
         $OnAir.Clear()
         $LastShow.Clear()
+        $script:AutoHideQueue.Clear()
     }
 
     It 'stores the SHOW event id with the local on-air record' {
@@ -1544,6 +1552,25 @@ Describe 'SHOW identity tracking' {
         $result.Error | Should -Match 'معطّل'
         Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'always schedules automatic hide for a configured sensitive template' {
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue 'urgent, breaking' -Force
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue 30 -Force
+
+        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        $script:AutoHideQueue[0].Layer | Should -Be 4
+        [math]::Round(($script:AutoHideQueue[0].At - (Get-Date)).TotalSeconds) | Should -BeIn @(29, 30)
+    }
+
+    It 'keeps a shorter operator timer for a sensitive template' {
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue 'urgent' -Force
+
+        Get-EffectiveAutoHideSeconds -Key urgent -RequestedSeconds 10 | Should -Be 10
+        Get-EffectiveAutoHideSeconds -Key urgent -RequestedSeconds 60 | Should -Be 30
+        Get-EffectiveAutoHideSeconds -Key other -RequestedSeconds 60 | Should -Be 60
     }
 }
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.18 — 2026-08-22
+
+- Added `SensitiveTemplateKeys` and `SensitiveTemplateAutoHideSeconds`.
+- Enforced an automatic-hide timer for configured sensitive templates through
+  ordinary, preset, and scheduled SHOW execution.
+- Treated the administrator duration as the maximum on-air lifetime while
+  retaining a shorter operator-selected timer.
+- Replaced an existing timer on the same layer instead of stacking timers that
+  could hide a later scene.
+- Added mandatory timer and duration-bound regression tests.
+
 ## 4.2.17 — 2026-08-22
 
 - Added an administrator-only redacted diagnostic ZIP via the diagnostics

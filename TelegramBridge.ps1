@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.17'
+$script:BridgeVersion = '4.2.18'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -81,6 +81,8 @@ $script:DefaultSettings = [ordered]@{
     HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
     ReservedLayers             = ''     # layers where SHOW is blocked; HIDE/EXIT remain available
     DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW
+    SensitiveTemplateKeys      = ''     # templates that must always receive an automatic hide timer
+    SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
@@ -149,6 +151,7 @@ $script:SettingDisplayMetadata = @{
     CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
+    SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
     PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
@@ -3089,6 +3092,20 @@ function Test-TemplateShowPolicy {
     return [pscustomobject]@{ Allowed = $true; Reason = '' }
 }
 
+function Get-EffectiveAutoHideSeconds {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [int]$RequestedSeconds = 0
+    )
+    $sensitiveKeys = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $isSensitive = @($sensitiveKeys | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    if (-not $isSensitive) { return [math]::Max(0, $RequestedSeconds) }
+    $requiredSeconds = Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1
+    if ($RequestedSeconds -gt 0) { return [math]::Min($RequestedSeconds, $requiredSeconds) }
+    return $requiredSeconds
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -3098,6 +3115,7 @@ function Invoke-ShowTemplateResult {
         [int]$AutoHideSeconds = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
     $operation = New-AirOperationContext
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
@@ -3185,6 +3203,9 @@ function Invoke-ShowTemplateResult {
 
         $suffix = ""
         if ($AutoHideSeconds -gt 0) {
+            for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
+                if ([int]$script:AutoHideQueue[$i].Layer -eq [int]$template.Layer) { $script:AutoHideQueue.RemoveAt($i) }
+            }
             $script:AutoHideQueue.Add(@{ Layer = $template.Layer; At = (Get-Date).AddSeconds($AutoHideSeconds); ChatId = $ChatId; UserId = $UserId })
             $suffix = " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
         }
@@ -3241,6 +3262,7 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
+    $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key ([string]$t.Key) -RequestedSeconds $AutoHideSeconds
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
     if (-not $lock.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)

@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.2.29 — 2026-08-22
+
+- Added opt-in CurrentUser DPAPI storage for the bot token and live-stream
+  source/destination URLs; the existing plaintext configuration remains the
+  disabled-by-default behavior.
+- Added the protected administrator setting `EnableDpapiSecrets` and an
+  explicit `Protect-BridgeSecrets.ps1` migration command.
+- Persisted only `dpapi:` references while enabled and prevented later config
+  saves from leaking decrypted values back to JSON.
+- Protected the encrypted store and the pre-migration backup with the same
+  strict Windows ACL, and excluded both from Git and release packages.
+- Added DPAPI round-trip, no-plaintext, migration, activation, deactivation,
+  and default-off regression tests.
+
 ## 4.2.28 — 2026-08-22
 
 - Added Windows ACL enforcement for `config.json`, its fallback copy, and all

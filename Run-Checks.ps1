@@ -41,7 +41,7 @@ $files = @(
     'config.example.json', 'templates.example.json',
     'Tests\Bridge.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md'
-    'Build-Release.ps1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
+    'Build-Release.ps1', 'Protect-BridgeSecrets.ps1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
 )
 foreach ($file in $files) {
     $path = Join-Path $root $file
@@ -74,7 +74,7 @@ $powerShellFiles = @(
     'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1'
-    'Build-Release.ps1', 'Run-Checks.ps1'
+    'Build-Release.ps1', 'Protect-BridgeSecrets.ps1', 'Run-Checks.ps1'
 )
 foreach ($file in $powerShellFiles) {
     $path = Join-Path $root $file

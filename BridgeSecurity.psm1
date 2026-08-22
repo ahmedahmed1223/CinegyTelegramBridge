@@ -60,4 +60,120 @@ function Protect-BridgeConfigurationAcl {
     Protect-BridgePathAcl -Path $targets
 }
 
-Export-ModuleMember -Function Protect-BridgePathAcl, Protect-BridgeConfigurationAcl
+function ConvertTo-BridgeProtectedSecret {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'DPAPI secret protection is available only on Windows.' }
+    $plainBytes = [Text.Encoding]::UTF8.GetBytes($Value)
+    try {
+        $cipherBytes = [Security.Cryptography.ProtectedData]::Protect(
+            $plainBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+        try { return [Convert]::ToBase64String($cipherBytes) }
+        finally { [Array]::Clear($cipherBytes, 0, $cipherBytes.Length) }
+    }
+    finally { [Array]::Clear($plainBytes, 0, $plainBytes.Length) }
+}
+
+function ConvertFrom-BridgeProtectedSecret {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$CipherText)
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'DPAPI secret protection is available only on Windows.' }
+    $cipherBytes = [Convert]::FromBase64String($CipherText)
+    try {
+        $plainBytes = [Security.Cryptography.ProtectedData]::Unprotect(
+            $cipherBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+        try { return [Text.Encoding]::UTF8.GetString($plainBytes) }
+        finally { [Array]::Clear($plainBytes, 0, $plainBytes.Length) }
+    }
+    finally { [Array]::Clear($cipherBytes, 0, $cipherBytes.Length) }
+}
+
+function Read-BridgeSecretStore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "DPAPI secret store not found: $Path" }
+    $document = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$document.Version -ne 1 -or [string]$document.Scope -ne 'CurrentUser') { throw 'Unsupported DPAPI secret-store format.' }
+    $result = @{}
+    foreach ($property in $document.Secrets.PSObject.Properties) {
+        $result[$property.Name] = ConvertFrom-BridgeProtectedSecret -CipherText ([string]$property.Value)
+    }
+    return $result
+}
+
+function Write-BridgeSecretStore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][hashtable]$Secrets)
+    $encrypted = [ordered]@{}
+    foreach ($name in @($Secrets.Keys | Sort-Object)) {
+        if ($name -notmatch '^[A-Za-z][A-Za-z0-9_.-]{0,63}$') { throw "Invalid secret name '$name'." }
+        $encrypted[$name] = ConvertTo-BridgeProtectedSecret -Value ([string]$Secrets[$name])
+    }
+    $document = [ordered]@{ Version = 1; Scope = 'CurrentUser'; Secrets = $encrypted }
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    $temporary = "$Path.tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, ($document | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $Path -Force -ErrorAction Stop
+        Protect-BridgePathAcl -Path $Path
+    }
+    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+
+function Resolve-BridgeConfigurationSecrets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$StorePath)
+    $references = @{}
+    $store = $null
+    $fields = @(
+        @{ Path = 'BotToken'; Object = $Config; Name = 'BotToken' }
+        @{ Path = 'LiveStream.SourceUrl'; Object = $Config.LiveStream; Name = 'SourceUrl' }
+        @{ Path = 'LiveStream.RtmpDestination'; Object = $Config.LiveStream; Name = 'RtmpDestination' }
+    )
+    foreach ($field in $fields) {
+        if ($null -eq $field.Object -or $field.Object.PSObject.Properties.Match($field.Name).Count -eq 0) { continue }
+        $value = [string]$field.Object.($field.Name)
+        if ($value -notmatch '^dpapi:([A-Za-z][A-Za-z0-9_.-]{0,63})$') { continue }
+        if ($null -eq $store) { $store = Read-BridgeSecretStore -Path $StorePath }
+        $secretName = $Matches[1]
+        if (-not $store.ContainsKey($secretName)) { throw "DPAPI secret '$secretName' is missing from the store." }
+        $references[$field.Path] = "dpapi:$secretName"
+        $field.Object.($field.Name) = [string]$store[$secretName]
+    }
+    return [pscustomobject]@{ Config = $Config; References = $references; StorePath = $StorePath }
+}
+
+function ConvertTo-BridgePersistableConfig {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config, [hashtable]$References = @{})
+    $copy = $Config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    foreach ($path in $References.Keys) {
+        switch ($path) {
+            'BotToken' { $copy.BotToken = [string]$References[$path] }
+            'LiveStream.SourceUrl' { $copy.LiveStream.SourceUrl = [string]$References[$path] }
+            'LiveStream.RtmpDestination' { $copy.LiveStream.RtmpDestination = [string]$References[$path] }
+        }
+    }
+    return $copy
+}
+
+function Update-BridgeReferencedSecrets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config, [hashtable]$References = @{}, [Parameter(Mandatory)][string]$StorePath)
+    if ($References.Count -eq 0) { return }
+    $secrets = Read-BridgeSecretStore -Path $StorePath
+    foreach ($path in $References.Keys) {
+        $name = ([string]$References[$path]).Substring(6)
+        switch ($path) {
+            'BotToken' { $secrets[$name] = [string]$Config.BotToken }
+            'LiveStream.SourceUrl' { $secrets[$name] = [string]$Config.LiveStream.SourceUrl }
+            'LiveStream.RtmpDestination' { $secrets[$name] = [string]$Config.LiveStream.RtmpDestination }
+        }
+    }
+    Write-BridgeSecretStore -Path $StorePath -Secrets $secrets
+}
+
+Export-ModuleMember -Function Protect-BridgePathAcl, Protect-BridgeConfigurationAcl, ConvertTo-BridgeProtectedSecret, `
+    ConvertFrom-BridgeProtectedSecret, Read-BridgeSecretStore, Write-BridgeSecretStore, `
+    Resolve-BridgeConfigurationSecrets, ConvertTo-BridgePersistableConfig, Update-BridgeReferencedSecrets

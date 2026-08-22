@@ -1028,6 +1028,53 @@ Describe 'Role-aware status menus' {
 
 }
 
+Describe 'DPAPI activation through administrator settings' {
+    BeforeEach {
+        $script:OriginalConfigForDpapi = $config
+        $script:OriginalReferencesForDpapi = $script:SecretReferences
+        $script:OriginalStoreForDpapi = $script:SecretStorePath
+        $script:OriginalConfigPathForDpapi = $script:ConfigPath
+        $config = (Get-Content -LiteralPath (Join-Path $script:Root 'config.example.json') -Raw | ConvertFrom-Json)
+        $script:ConfigPath = Join-Path $TestDrive 'config.json'
+        $script:SecretStorePath = Join-Path $TestDrive 'secrets.dpapi.json'
+        $script:SecretReferences = @{}
+        Copy-Item -LiteralPath (Join-Path $script:Root 'config.example.json') -Destination $script:ConfigPath
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $config = $script:OriginalConfigForDpapi
+        $script:SecretReferences = $script:OriginalReferencesForDpapi
+        $script:SecretStorePath = $script:OriginalStoreForDpapi
+        $script:ConfigPath = $script:OriginalConfigPathForDpapi
+    }
+
+    It 'leaves plaintext behavior unchanged while the option is disabled' {
+        Save-Config -Path $script:ConfigPath
+        $saved = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+        $saved.Settings.EnableDpapiSecrets | Should -BeFalse
+        $saved.BotToken | Should -Be $config.BotToken
+        Test-Path -LiteralPath $script:SecretStorePath | Should -BeFalse
+    }
+
+    It 'moves secrets to DPAPI when enabled and restores plaintext persistence when disabled' {
+        $config.Settings.EnableDpapiSecrets = $true
+        Save-Config -Path $script:ConfigPath
+
+        $encrypted = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+        $encrypted.BotToken | Should -Be 'dpapi:BotToken'
+        $encrypted.LiveStream.SourceUrl | Should -Match '^dpapi:'
+        Test-Path -LiteralPath $script:SecretStorePath | Should -BeTrue
+        (Get-Content -LiteralPath $script:SecretStorePath -Raw) | Should -Not -Match [regex]::Escape([string]$config.BotToken)
+
+        $config.Settings.EnableDpapiSecrets = $false
+        Save-Config -Path $script:ConfigPath
+        $plain = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+        $plain.BotToken | Should -Be $config.BotToken
+        $plain.LiveStream.SourceUrl | Should -Be $config.LiveStream.SourceUrl
+    }
+}
+
 Describe 'Private-chat-only policy' {
     BeforeEach {
         Mock Confirm-TelegramCallback { }

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.28'
+$script:BridgeVersion = '4.2.29'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -74,6 +74,7 @@ $script:DefaultSettings = [ordered]@{
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
     EnableRawCommand           = $true   # allow the admin /أمر Device Cmd escape hatch
     EnableFullTemplateManagement = $false # permits structural template edits from Telegram
+    EnableDpapiSecrets        = $false  # opt-in; current plaintext config behavior remains the default
     # --- features ---
     EnableSnapshot             = $true
     EnableLiveRelay            = $true
@@ -193,6 +194,12 @@ catch {
     $config = Get-Content -Path $backupPath -Raw | ConvertFrom-Json
     Copy-Item -Path $backupPath -Destination $ConfigPath -Force -ErrorAction SilentlyContinue
 }
+$configDirectory = Split-Path -Parent $ConfigPath
+$configuredSecretStore = if ($config.PSObject.Properties.Match('SecretStorePath').Count -gt 0) { [string]$config.SecretStorePath } else { 'secrets.dpapi.json' }
+$script:SecretStorePath = if ([IO.Path]::IsPathRooted($configuredSecretStore)) { $configuredSecretStore } else { Join-Path $configDirectory $configuredSecretStore }
+$resolvedSecrets = Resolve-BridgeConfigurationSecrets -Config $config -StorePath $script:SecretStorePath
+$config = $resolvedSecrets.Config
+$script:SecretReferences = $resolvedSecrets.References
 
 function Get-JsonProp {
     <# Safely reads a possibly-absent property from a ConvertFrom-Json object
@@ -216,6 +223,11 @@ function Save-Config {
        clobbered by the next approval - and the in-memory copy picks that
        manual edit up at the same time. #>
     param([string]$Path = $ConfigPath)
+    if ($LoadOnly -and [IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($ConfigPath) -and
+        [IO.Path]::GetFileName($Path) -eq 'config.example.json') {
+        $script:LastConfigSaveFailed = $false
+        return
+    }
     $managed = @('AllowedChatIds', 'AdminChatIds', 'AllowedUserIds', 'AdminUserIds', 'Settings', 'LiveStream')
     $target = $null
     try { $target = Get-Content -Path $Path -Raw | ConvertFrom-Json }
@@ -260,7 +272,29 @@ function Save-Config {
                     Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -Skip $keep)
             foreach ($oldBackup in $oldBackups) { Remove-Item -LiteralPath $oldBackup.FullName -Force -ErrorAction SilentlyContinue }
         }
-        $target | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding utf8 -ErrorAction Stop
+        $targetSettings = Get-JsonProp $target 'Settings'
+        $dpapiEnabled = $targetSettings -and $targetSettings.PSObject.Properties.Match('EnableDpapiSecrets').Count -gt 0 -and [bool]$targetSettings.EnableDpapiSecrets
+        if ($dpapiEnabled) {
+            if ($script:SecretReferences.Count -eq 0) {
+                $secrets = @{}
+                foreach ($entry in @(
+                        @{ Path = 'BotToken'; Name = 'BotToken'; Value = [string]$config.BotToken }
+                        @{ Path = 'LiveStream.SourceUrl'; Name = 'LiveStream.SourceUrl'; Value = [string]$config.LiveStream.SourceUrl }
+                        @{ Path = 'LiveStream.RtmpDestination'; Name = 'LiveStream.RtmpDestination'; Value = [string]$config.LiveStream.RtmpDestination }
+                    )) {
+                    if ([string]::IsNullOrWhiteSpace($entry.Value)) { continue }
+                    $secrets[$entry.Name] = $entry.Value
+                    $script:SecretReferences[$entry.Path] = "dpapi:$($entry.Name)"
+                }
+                Write-BridgeSecretStore -Path $script:SecretStorePath -Secrets $secrets
+            }
+            else { Update-BridgeReferencedSecrets -Config $config -References $script:SecretReferences -StorePath $script:SecretStorePath }
+            $target = ConvertTo-BridgePersistableConfig -Config $target -References $script:SecretReferences
+        }
+        elseif ($script:SecretReferences.ContainsKey('BotToken')) {
+            $target.BotToken = [string]$config.BotToken
+        }
+        $target | ConvertTo-Json -Depth 20 | Set-Content -Path $tempPath -Encoding utf8 -ErrorAction Stop
         if (Test-Path $Path) { Copy-Item -Path $Path -Destination $backupPath -Force -ErrorAction SilentlyContinue }
         Move-Item -Path $tempPath -Destination $Path -Force -ErrorAction Stop
         Protect-BridgeConfigurationAcl -ConfigPath $Path
@@ -2934,7 +2968,7 @@ function Get-PendingKeyboard {
 # Settings whose whole purpose is to restrict access. Turning one off from a
 # chat button - by accident or by someone who got hold of an admin's phone -
 # silently weakens the security model, so they require an explicit confirm.
-$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement')
+$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets')
 
 # Allowed values for string settings. A typo here would silently stop graphics
 # updating, so the choice is constrained rather than free text.

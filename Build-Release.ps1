@@ -25,11 +25,11 @@ $allowList = @(
     'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
-    'Run-Checks.ps1', 'Build-Release.ps1',
+    'Run-Checks.ps1', 'Build-Release.ps1', 'Protect-BridgeSecrets.ps1',
     'config.example.json', 'templates.example.json',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md'
 )
-$forbiddenNames = @('config.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json')
+$forbiddenNames = @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json')
 $releaseRoot = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version"
 $zipPath = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version.zip"
 $checksumPath = "$zipPath.sha256"

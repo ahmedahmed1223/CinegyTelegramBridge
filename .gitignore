@@ -1,5 +1,7 @@
 # Holds the live bot token and the operator whitelist - never commit it.
 config.json
+secrets.dpapi.json
+*.pre-dpapi.bak
 
 # Runtime output: logs, rotated logs, ffmpeg stderr, snapshots, pid + usage state.
 logs/

@@ -1,5 +1,6 @@
 {
   "BotToken": "123456789:REPLACE_WITH_TOKEN_FROM_BOTFATHER",
+  "SecretStorePath": "secrets.dpapi.json",
   "_comment_ids": "AllowedChatIds/AdminChatIds are chat ids; AllowedUserIds/AdminUserIds are Telegram user ids. In a private chat the two are identical. In a GROUP they differ, and with Settings.RequireUserLevelAuth = true only the user lists grant access there - so adding a group does not authorize every member.",
   "AirServerAddress": "127.0.0.1",
   "AirChannelNumber": 0,
@@ -25,6 +26,7 @@
     "EnableSelfServiceRequests": true,
     "EnableRawCommand": true,
     "EnableFullTemplateManagement": false,
+    "EnableDpapiSecrets": false,
     "EnableSnapshot": true,
     "EnableLiveRelay": true,
     "EnableTimedShow": true,

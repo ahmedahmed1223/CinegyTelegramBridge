@@ -85,6 +85,8 @@ $script:DefaultSettings = [ordered]@{
     DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW
     SensitiveTemplateKeys      = ''     # templates that must always receive an automatic hide timer
     SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
+    TemplateTestLayer         = 0       # dedicated non-program test layer; 0 disables template testing
+    TemplateTestAutoHideSeconds = 10    # short safety timeout for the dedicated test layer
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
@@ -158,6 +160,8 @@ $script:SettingDisplayMetadata = @{
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
+    TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
+    TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
     SchedulePreNotifyMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الإشعار المسبق للحدث المجدول (0 للتعطيل)' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
@@ -3140,6 +3144,7 @@ function Get-TemplateAdminDetailKeyboard {
     $rows = @()
     if (Get-Setting 'EnableFullTemplateManagement') {
         $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex") )
+        if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button '🧪 اختبار على طبقة التجربة' "tadm:test:$TemplateIndex")) }
     }
     $rows += , @( (New-Button '⬅️ القوالب' 'menu:templatesadmin') )
     return @{ inline_keyboard = $rows }
@@ -3449,6 +3454,12 @@ function New-AirOperationContext {
         Id        = "air-$([guid]::NewGuid().ToString('N'))"
         Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     }
+}
+
+function Get-TemplateTestReviewKeyboard {
+    return @{ inline_keyboard = @(
+        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+    ) }
 }
 
 function Write-AirOperationResult {

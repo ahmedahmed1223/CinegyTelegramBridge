@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.37 — 2026-08-22
+
+- Extracts private-chat, operator, administrator, disabled-user, and legacy private-chat fallback decisions into `Modules/BridgeAuthorization.psm1`.
+- Keeps user administration, approval messages, and interactive flows in the bridge while routing their authorization decisions through an explicit-input policy module.
+- Adds direct policy tests for allowed and disabled users, sender/chat separation, administrator identity, group rejection, and legacy positive-id compatibility.
+- Includes the authorization module and tests in all parser, required-file, Pester, packaging, signing, and manifest gates.
+
 ## 4.2.36 — 2026-08-22
 
 - Extracts bounded Telegram HTTP transport and retry behavior into the independent `Modules/BridgeTelegram.psm1` module.

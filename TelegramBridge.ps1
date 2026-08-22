@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.36'
+$script:BridgeVersion = '4.2.37'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -58,6 +58,7 @@ Import-Module (Join-Path $moduleRoot "BridgeSecurity.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettings.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeStorage.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeTelegram.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeAuthorization.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -1067,23 +1068,16 @@ function Test-Authorized {
        AllowedUserIds explicitly - whitelisting a group no longer implicitly
        authorizes every member of it. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    if ($UserId -eq 0) { $UserId = $ChatId }
-    if (Test-UserDisabled -UserId $UserId) { return $false }
-    if ($UserId -ne 0 -and (@(Get-JsonProp $config 'AllowedUserIds') -contains $UserId)) { return $true }
-    if (Get-Setting 'RequireUserLevelAuth') {
-        if ($ChatId -ne $UserId) { return $false }
-    }
-    return (@(Get-JsonProp $config 'AllowedChatIds') -contains $ChatId)
+    return Test-BridgeAuthorized -ChatId $ChatId -UserId $UserId `
+        -AllowedUserIds @(Get-JsonProp $config 'AllowedUserIds') -AllowedChatIds @(Get-JsonProp $config 'AllowedChatIds') `
+        -DisabledUserIds @($script:DisabledUserIds.Keys) -RequireUserLevelAuth:([bool](Get-Setting 'RequireUserLevelAuth'))
 }
 
 function Test-Admin {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    if ($UserId -eq 0) { $UserId = $ChatId }
-    if ($UserId -ne 0 -and (@(Get-JsonProp $config 'AdminUserIds') -contains $UserId)) { return $true }
-    if (Get-Setting 'RequireUserLevelAuth') {
-        if ($ChatId -ne $UserId) { return $false }
-    }
-    return (@(Get-JsonProp $config 'AdminChatIds') -contains $ChatId)
+    return Test-BridgeAdministrator -ChatId $ChatId -UserId $UserId `
+        -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds') `
+        -RequireUserLevelAuth:([bool](Get-Setting 'RequireUserLevelAuth'))
 }
 
 function Test-TelegramPrivateChat {
@@ -1091,11 +1085,7 @@ function Test-TelegramPrivateChat {
        Telegram always supplies chat.type; the positive-id fallback keeps old
        saved/test callback payloads compatible without authorizing groups. #>
     param($Chat)
-    if (-not $Chat) { return $false }
-    $type = [string](Get-JsonProp $Chat 'type')
-    if (-not [string]::IsNullOrWhiteSpace($type)) { return $type -eq 'private' }
-    $id = [long](Get-JsonProp $Chat 'id')
-    return $id -gt 0
+    return Test-BridgePrivateChat -Chat $Chat
 }
 
 # ============================================================================

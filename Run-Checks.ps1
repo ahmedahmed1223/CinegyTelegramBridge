@@ -35,11 +35,11 @@ function Write-Section {
 # ---------------------------------------------------------- files and JSON
 Write-Section "1/4  Required files and JSON"
 $files = @(
-    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1',
+    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1', 'BridgeSettings.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
     'config.example.json', 'templates.example.json',
-    'Tests\Bridge.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1',
+    'Tests\Bridge.Tests.ps1', 'Tests\BridgeSettings.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md'
     'Build-Release.ps1', 'Protect-BridgeSecrets.ps1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
 )
@@ -71,7 +71,7 @@ foreach ($file in $jsonFiles) {
 # ---------------------------------------------------------------- parse check
 Write-Section "2/4  Syntax (PowerShell parser)"
 $powerShellFiles = @(
-    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1',
+    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1', 'BridgeSettings.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1'
     'Build-Release.ps1', 'Protect-BridgeSecrets.ps1', 'Run-Checks.ps1'

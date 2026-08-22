@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.34 — 2026-08-22
+
+- Extracts setting lookup, integer normalization, and schema initialization into the pure `BridgeSettings.psm1` module.
+- Keeps the existing `Get-Setting`, `Get-SettingInt`, and `Initialize-Settings` bridge interfaces so callers and administrator workflows retain identical behavior.
+- Adds direct module tests covering configured values, defaults, numeric boundaries, non-destructive initialization, and complete-schema no-op behavior.
+- Includes the new module and tests in parser, required-file, Pester, and allow-listed release-package gates.
+
 ## 4.2.33 — 2026-08-22
 
 - Keeps safe rollback disabled by default through `EnableSafeRollback`; administrators can opt in without changing the existing operating workflow.

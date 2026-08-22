@@ -49,11 +49,12 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.33'
+$script:BridgeVersion = '4.2.34'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
 Import-Module (Join-Path $scriptRoot "BridgeSecurity.psm1") -Force
+Import-Module (Join-Path $scriptRoot "BridgeSettings.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -376,21 +377,12 @@ function Get-ConfigSaveWarning {
 
 function Get-Setting {
     param([Parameter(Mandatory)][string]$Name)
-    $settings = Get-JsonProp $config 'Settings'
-    if ($settings) {
-        $value = Get-JsonProp $settings $Name
-        if ($null -ne $value) { return $value }
-    }
-    if ($script:DefaultSettings.Contains($Name)) { return $script:DefaultSettings[$Name] }
-    return $null
+    return Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name
 }
 
 function Get-SettingInt {
     param([Parameter(Mandatory)][string]$Name, [int]$Minimum = 0)
-    $value = 0
-    if (-not [int]::TryParse([string](Get-Setting $Name), [ref]$value)) { $value = 0 }
-    if ($value -lt $Minimum) { $value = $Minimum }
-    return $value
+    return Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum
 }
 
 function Get-LayerName {
@@ -447,24 +439,7 @@ function Initialize-Settings {
     <# Fills in any setting missing from config.json with its default, so the
        file is self-documenting after first run and older configs upgrade
        cleanly. #>
-    $settings = Get-JsonProp $config 'Settings'
-    if (-not $settings) {
-        $settings = [pscustomobject]@{}
-        $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $settings -Force
-    }
-    $added = $false
-    foreach ($name in $script:DefaultSettings.Keys) {
-        if ($settings.PSObject.Properties.Match($name).Count -eq 0) {
-            $settings | Add-Member -NotePropertyName $name -NotePropertyValue $script:DefaultSettings[$name] -Force
-            $added = $true
-        }
-    }
-    foreach ($name in @('AllowedUserIds', 'AdminUserIds')) {
-        if ($config.PSObject.Properties.Match($name).Count -eq 0) {
-            $config | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
-            $added = $true
-        }
-    }
+    $added = Initialize-BridgeSettings -Config $config -Defaults $script:DefaultSettings
     if ($added) { Save-Config }
 }
 

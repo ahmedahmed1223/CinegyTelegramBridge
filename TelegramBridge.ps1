@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.40'
+$script:BridgeVersion = '4.2.41'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -62,6 +62,7 @@ Import-Module (Join-Path $moduleRoot "BridgeAuthorization.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeFlowState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeCinegyState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -5124,18 +5125,7 @@ function ConvertTo-ProcessArgumentLine {
        external process launch therefore goes through this, which applies the
        standard Windows argv quoting rules. #>
     param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Arguments)
-    $quoted = foreach ($arg in $Arguments) {
-        if ($null -eq $arg -or $arg -eq '') { '""' }
-        elseif ($arg -notmatch '[\s"]') { $arg }
-        else {
-            # Double any backslashes that precede a quote, and any run of
-            # backslashes at the very end, then wrap the whole thing.
-            $escaped = [regex]::Replace($arg, '(\\*)"', '$1$1\"')
-            $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
-            '"' + $escaped + '"'
-        }
-    }
-    return ($quoted -join ' ')
+    return ConvertTo-BridgeProcessArgumentLine -Arguments $Arguments
 }
 
 function Get-LastErrorLine {
@@ -5155,14 +5145,7 @@ function Get-LastErrorLine {
 
 function Get-FfmpegInputArguments {
     param([Parameter(Mandatory)][string]$SourceType, [Parameter(Mandatory)][string]$SourceUrl, [switch]$Realtime)
-    $prefix = if ($Realtime) { @('-re') } else { @() }
-    switch ($SourceType.ToLowerInvariant()) {
-        'srt' { return $prefix + @('-i', $SourceUrl) }
-        'm3u8' { return $prefix + @('-i', $SourceUrl) }
-        'hls' { return $prefix + @('-i', $SourceUrl) }
-        'ndi' { return @('-f', 'libndi_newtek', '-i', $SourceUrl) }
-        default { throw "LiveStream.SourceType '$SourceType' غير معروف (المتوقع m3u8, hls, srt, أو ndi)." }
-    }
+    return Get-BridgeFfmpegInputArguments -SourceType $SourceType -SourceUrl $SourceUrl -Realtime:$Realtime
 }
 
 # ---- snapshot (fully asynchronous: never blocks the polling loop) ----
@@ -5215,10 +5198,10 @@ function Start-SnapshotJob {
     $errLog = Join-Path $logDir "snapshot-$stamp.err"
     $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
 
-    $argLine = ConvertTo-ProcessArgumentLine -Arguments (@('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '2', $outPath))
+    $processArguments = @('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '2', $outPath)
     try {
-        $proc = Start-Process -FilePath $ffmpeg -ArgumentList $argLine `
-            -WorkingDirectory $scriptRoot -WindowStyle Hidden -PassThru -RedirectStandardError $errLog
+        $proc = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $processArguments `
+            -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
     }
     catch {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل تشغيل ffmpeg: $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -5378,10 +5361,8 @@ function Start-RelayProcess {
 
     # Quoted for the same reason as the snapshot: source URLs, RTMP keys and
     # paths can all contain spaces.
-    $argLine = ConvertTo-ProcessArgumentLine -Arguments $relayArgs
-    $script:RelayProcess = Start-Process -FilePath $ffmpeg -ArgumentList $argLine `
-        -WorkingDirectory $scriptRoot -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+    $script:RelayProcess = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $relayArgs `
+        -WorkingDirectory $scriptRoot -StandardOutputPath $stdoutLog -StandardErrorPath $stderrLog
     # pid + process start time, so a recycled PID cannot be mistaken for ours.
     $stamp = "$($script:RelayProcess.Id)|$($script:RelayProcess.StartTime.Ticks)"
     Set-Content -Path $relayPidFile -Value $stamp -Encoding ascii

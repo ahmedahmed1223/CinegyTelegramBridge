@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.2.41 — 2026-08-22
+
+- Extracts Windows-safe argument quoting, ffmpeg input selection, and hidden redirected process launch into `Modules/BridgeMedia.psm1`.
+- Routes both asynchronous snapshots and the live relay through the shared media-process launcher while retaining bridge-owned jobs, watchdogs, PID ownership, messages, and cleanup.
+- Adds direct tests for paths with spaces, empty and quoted arguments, supported/unsupported inputs, and exact hidden redirected process launch parameters.
+
 ## 4.2.40 — 2026-08-22
 
 - Extracts schedule due-time, completed-occurrence, retry timing, retry count, exponential backoff, and maximum-delay decisions into `Modules/BridgeSchedulePolicy.psm1`.

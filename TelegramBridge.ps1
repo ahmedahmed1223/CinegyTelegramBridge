@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.24'
+$script:BridgeVersion = '4.2.25'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -91,6 +91,7 @@ $script:DefaultSettings = [ordered]@{
     # --- safety ---
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
+    TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
     MaxFieldLength             = 200     # reject text too long for a graphic
     LogAirXml                  = $false  # log the exact XML sent to Air Pro (diagnostics)
     ReshowClearsLayer          = $true   # hide a live layer before re-showing so new text is applied
@@ -141,6 +142,7 @@ $script:DefaultSettings = [ordered]@{
 
 $script:SettingDisplayMetadata = @{
     AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
+    TelegramRequestTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة إرسال رسائل وملفات Telegram' }
     MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }
     PostShowDelayMs = @{ Unit = 'مللي ثانية'; Description = 'تأخير إعادة إرسال النص بعد العرض' }
     PendingStateTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مدة صلاحية عملية الإدخال غير المكتملة' }
@@ -741,7 +743,7 @@ function Send-TelegramMessage {
         $sent = $false
         for ($attempt = 1; $attempt -le 2 -and -not $sent; $attempt++) {
             try {
-                Invoke-RestMethod -Uri "$apiBase/sendMessage" -Method Post -Body $body | Out-Null
+                Invoke-RestMethod -Uri "$apiBase/sendMessage" -Method Post -Body $body -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
                 $sent = $true
             }
             catch {
@@ -769,7 +771,7 @@ function Send-TelegramPhoto {
             $form = @{ chat_id = "$ChatId"; photo = Get-Item -Path $FilePath }
             if ($Caption) { $form.caption = $Caption }
             if ($ReplyMarkup) { $form.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
-            Invoke-RestMethod -Uri "$apiBase/sendPhoto" -Method Post -Form $form | Out-Null
+            Invoke-RestMethod -Uri "$apiBase/sendPhoto" -Method Post -Form $form -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
             $sent = $true
         }
         catch {
@@ -949,7 +951,7 @@ function Send-TelegramDocument {
         try {
             $form = @{ chat_id = "$ChatId"; document = Get-Item -LiteralPath $FilePath -ErrorAction Stop }
             if ($Caption) { $form.caption = $Caption }
-            Invoke-RestMethod -Uri "$apiBase/sendDocument" -Method Post -Form $form | Out-Null
+            Invoke-RestMethod -Uri "$apiBase/sendDocument" -Method Post -Form $form -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
             return $true
         }
         catch {

@@ -83,6 +83,7 @@
     "SensitiveTemplateKeys": "",
     "SensitiveTemplateAutoHideSeconds": 30,
     "MaintenanceMode": false,
+    "TelegramRequestTimeoutSeconds": 15,
     "LayerNames": "7=عاجل;8=أخبار;9=شريط الأخبار"
   },
   "LiveStream": {

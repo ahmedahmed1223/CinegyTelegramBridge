@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.25 — 2026-08-22
+
+- Added `TelegramRequestTimeoutSeconds` with a 15-second default for
+  `sendMessage`, `sendPhoto`, and `sendDocument`.
+- Retained one bounded retry for transient Telegram send failures.
+- Kept long polling on its independent poll timeout.
+- Added send retry and timeout propagation tests for text and multipart
+  uploads, completing the existing HTTP, Cinegy timeout, disk-failure, and
+  corrupt-JSON coverage.
+
 ## 4.2.24 — 2026-08-22
 
 - Counted field limits using Unicode text elements rather than UTF-16 code

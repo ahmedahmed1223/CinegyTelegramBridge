@@ -399,6 +399,45 @@ Describe 'Unicode-aware field limits' {
     }
 }
 
+Describe 'Telegram API send reliability' {
+    BeforeEach {
+        $script:OriginalTelegramRequestTimeoutSeconds = Get-Setting 'TelegramRequestTimeoutSeconds'
+        $config.Settings | Add-Member -NotePropertyName TelegramRequestTimeoutSeconds -NotePropertyValue 7 -Force
+        Mock Start-Sleep { }
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName TelegramRequestTimeoutSeconds -NotePropertyValue $script:OriginalTelegramRequestTimeoutSeconds -Force
+    }
+
+    It 'retries a transient sendMessage failure once with a bounded timeout' {
+        $script:TelegramSendAttemptForTest = 0
+        Mock Invoke-RestMethod {
+            $script:TelegramSendAttemptForTest++
+            if ($script:TelegramSendAttemptForTest -eq 1) { throw 'temporary HTTP failure' }
+            [pscustomobject]@{ ok = $true }
+        }
+
+        { Send-TelegramMessage -ChatId 10 -Text 'اختبار' } | Should -Not -Throw
+
+        Should -Invoke Invoke-RestMethod -Times 2 -Exactly -ParameterFilter { $Uri -match '/sendMessage$' -and $TimeoutSec -eq 7 }
+        Should -Invoke Start-Sleep -Times 1 -Exactly
+    }
+
+    It 'bounds photo and document uploads with the same timeout' {
+        $photo = Join-Path $TestDrive 'frame.jpg'; Set-Content -LiteralPath $photo -Value 'x'
+        $document = Join-Path $TestDrive 'diag.zip'; Set-Content -LiteralPath $document -Value 'x'
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
+
+        Send-TelegramPhoto -ChatId 10 -FilePath $photo
+        Send-TelegramDocument -ChatId 10 -FilePath $document | Should -BeTrue
+
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendPhoto$' -and $TimeoutSec -eq 7 }
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendDocument$' -and $TimeoutSec -eq 7 }
+    }
+}
+
 Describe 'ConvertTo-ProcessArgumentLine' {
     It 'quotes a path containing spaces' {
         # The ffmpeg exit -22 regression: "D:\cingy cg\..." was split at the space.

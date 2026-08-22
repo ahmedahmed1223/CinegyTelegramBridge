@@ -2252,6 +2252,19 @@ Describe 'On-air identity persistence' {
 
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
     }
+
+    It 'restores on-air state from the last validated backup when the primary JSON is corrupt' {
+        $OnAir[4] = @{ Key = 'urgent'; At = Get-Date; UserId = 20; ActiveId = '{SAFE}' }
+        Save-OnAirState
+        Test-Path -LiteralPath "$($script:onAirFile).bak" | Should -BeTrue
+        Set-Content -LiteralPath $script:onAirFile -Value '{broken-json'
+        $OnAir.Clear()
+
+        Import-OnAirState
+
+        $OnAir[4].ActiveId | Should -Be '{SAFE}'
+        { Get-Content -LiteralPath $script:onAirFile -Raw | ConvertFrom-Json -ErrorAction Stop } | Should -Not -Throw
+    }
 }
 
 Describe 'Exit scene on-air record cleanup' {
@@ -2594,6 +2607,21 @@ Describe 'Reliable schedule store and executor' {
         $script:ScheduleEvents.Count | Should -Be 1
         $script:ScheduleEvents[0].Id | Should -Be $id
         $script:ScheduleEvents[0].TimeZoneId | Should -Not -BeNullOrEmpty
+    }
+
+    It 'restores scheduled events from the last validated backup when the primary JSON is corrupt' {
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt ([datetimeoffset]'2026-08-21T10:00:00+03:00') -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($entry)
+        Save-ScheduleEvents | Should -BeTrue
+        Test-Path -LiteralPath "$($script:scheduleFile).bak" | Should -BeTrue
+        Set-Content -LiteralPath $script:scheduleFile -Value '[broken-json'
+        $script:ScheduleEvents.Clear()
+
+        Import-ScheduleEvents
+
+        $script:ScheduleEvents.Count | Should -Be 1
+        $script:ScheduleEvents[0].Id | Should -Be $entry.Id
+        { Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json -ErrorAction Stop } | Should -Not -Throw
     }
 
     It 'executes a one-time event once and never repeats it on later ticks' {

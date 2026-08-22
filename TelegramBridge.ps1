@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.18'
+$script:BridgeVersion = '4.2.19'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -503,6 +503,63 @@ function Write-BridgeLog {
     catch {
         Write-Host "(logging failed: $($_.Exception.Message))"
     }
+}
+
+function Write-ValidatedJsonState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Json
+    )
+    $temporary = "$Path.tmp"
+    $backup = "$Path.bak"
+    $backupTemporary = "$backup.tmp"
+    try {
+        $Json | ConvertFrom-Json -ErrorAction Stop | Out-Null
+        $parent = Split-Path $Path -Parent
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null }
+        Set-Content -LiteralPath $temporary -Value $Json -Encoding utf8 -ErrorAction Stop
+        Get-Content -LiteralPath $temporary -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop | Out-Null
+        Move-Item -LiteralPath $temporary -Destination $Path -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $Path -Destination $backupTemporary -Force -ErrorAction Stop
+        Move-Item -LiteralPath $backupTemporary -Destination $backup -Force -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Remove-Item -LiteralPath $temporary, $backupTemporary -Force -ErrorAction SilentlyContinue
+        Write-BridgeLog "Validated JSON state write failed for '$([IO.Path]::GetFileName($Path))': $($_.Exception.Message)" 'ERROR'
+        return $false
+    }
+}
+
+function Read-ValidatedJsonState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$AsHashtable
+    )
+    $backup = "$Path.bak"
+    $primaryError = ''
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+            $data = if ($AsHashtable) { $text | ConvertFrom-Json -AsHashtable -ErrorAction Stop } else { $text | ConvertFrom-Json -ErrorAction Stop }
+            return [pscustomobject]@{ Data = $data; Recovered = $false }
+        }
+        catch { $primaryError = $_.Exception.Message }
+    }
+    if (-not (Test-Path -LiteralPath $backup)) {
+        if ($primaryError) { throw "Primary JSON is invalid and no backup exists: $primaryError" }
+        return $null
+    }
+    try {
+        $backupText = Get-Content -LiteralPath $backup -Raw -ErrorAction Stop
+        $data = if ($AsHashtable) { $backupText | ConvertFrom-Json -AsHashtable -ErrorAction Stop } else { $backupText | ConvertFrom-Json -ErrorAction Stop }
+        $restoreTemporary = "$Path.restore.tmp"
+        Set-Content -LiteralPath $restoreTemporary -Value $backupText -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $restoreTemporary -Destination $Path -Force -ErrorAction Stop
+        Write-BridgeLog "Recovered '$([IO.Path]::GetFileName($Path))' from its last validated backup" 'WARN'
+        return [pscustomobject]@{ Data = $data; Recovered = $true }
+    }
+    catch { throw "Primary and backup JSON are invalid: primary=$primaryError; backup=$($_.Exception.Message)" }
 }
 
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
@@ -1421,9 +1478,10 @@ function Import-OnAirState {
     <# Restores what the bridge believed was live before a restart, so the
        🔴 row and one-tap hide survive a service bounce. Treated as advisory:
        it is the bot's own record, not a query of Air Pro. #>
-    if (-not (Test-Path $onAirFile)) { return }
     try {
-        $raw = Get-Content -Path $onAirFile -Raw | ConvertFrom-Json
+        $read = Read-ValidatedJsonState -Path $onAirFile
+        if (-not $read) { return }
+        $raw = $read.Data
         foreach ($prop in $raw.PSObject.Properties) {
             $layer = 0
             if (-not [int]::TryParse($prop.Name, [ref]$layer)) { continue }
@@ -1463,11 +1521,9 @@ function Save-OnAirState {
                 Source = if (Get-JsonProp $info 'Source') { [string](Get-JsonProp $info 'Source') } else { 'bridge' }
             }
         }
-        $tempPath = "$onAirFile.tmp"
         $json = $out | ConvertTo-Json -Depth 4
-        Write-BridgeLog "Writing temporary onair payload to $tempPath (size: $($json.Length) chars)" "DEBUG"
-        Set-Content -LiteralPath $tempPath -Value $json -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $tempPath -Destination $onAirFile -Force -ErrorAction Stop
+        Write-BridgeLog "Writing validated onair payload (size: $($json.Length) chars)" "DEBUG"
+        if (-not (Write-ValidatedJsonState -Path $onAirFile -Json $json)) { throw 'validated state write failed' }
         # Log a successful write so operators can see when the onair.json was updated.
         Write-BridgeLog "Wrote onair.json ($($out.Keys.Count) layer(s)) to $onAirFile" "INFO"
     }
@@ -1871,10 +1927,8 @@ function New-ScheduledShowEvent {
 
 function Save-ScheduleEvents {
     try {
-        $temporary = "$script:scheduleFile.tmp"
         $json = ConvertTo-Json -InputObject @($script:ScheduleEvents.ToArray()) -Depth 8
-        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:scheduleFile -Force -ErrorAction Stop
+        if (-not (Write-ValidatedJsonState -Path $script:scheduleFile -Json $json)) { throw 'validated state write failed' }
         return $true
     }
     catch {
@@ -1914,9 +1968,10 @@ function Write-ScheduleExecutionEntry {
 }
 
 function Import-ScheduleEvents {
-    if (-not (Test-Path -LiteralPath $script:scheduleFile)) { return }
     try {
-        $raw = Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json -AsHashtable
+        $read = Read-ValidatedJsonState -Path $script:scheduleFile -AsHashtable
+        if (-not $read) { return }
+        $raw = $read.Data
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         $recovered = $false
         foreach ($scheduleEntry in @($raw)) {

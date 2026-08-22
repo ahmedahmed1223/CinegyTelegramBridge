@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.19 — 2026-08-22
+
+- Added shared validated JSON state read/write helpers with atomic temporary
+  files and a last-known-good `.bak` copy.
+- Applied automatic corruption recovery to `onair.json` and `schedule.json`.
+- Repaired the primary state file from its validated backup during import.
+- Preserved current in-memory state when neither primary nor backup can be
+  parsed instead of replacing it with an empty collection.
+- Added corruption and recovery tests alongside existing Cinegy/Telegram
+  outage, recovery-notification, and interrupted-schedule coverage.
+
 ## 4.2.18 — 2026-08-22
 
 - Added `SensitiveTemplateKeys` and `SensitiveTemplateAutoHideSeconds`.

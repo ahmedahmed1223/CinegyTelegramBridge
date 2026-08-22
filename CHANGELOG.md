@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.2.44 — 2026-08-22
+
+- Refreshes the display name of an already tracked external Cinegy scene when later live status exposes its actual `.cintitle` filename.
+- Replaces legacy generic names such as `Cinegy Type Layer 8 On` without deleting the on-air record or changing its layer identity and preserves the original Cinegy event name as diagnostic metadata.
+- Adds an explicit regression test for upgrading an existing live external record in place.
+- Reorganizes full status into active scenes, Cinegy connection, service health, operations/scheduling, and access sections.
+- Expands active-scene status with source, operator Alias, elapsed time, and retained Cinegy event metadata; main-menu hide buttons now include both layer and template name.
+- Adds an explicit `Alias` action per authorized user, with interactive edit/delete flow, persistence, audit, and tests.
+
 ## 4.2.43 — 2026-08-22
 
 - Adds `Modules/BridgeRuntimeState.psm1` as an explicit, isolated runtime-state model.

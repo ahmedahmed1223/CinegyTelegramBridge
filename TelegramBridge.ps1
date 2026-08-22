@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.43'
+$script:BridgeVersion = '4.2.44'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -2545,7 +2545,7 @@ function Get-MainMenuKeyboard {
     # and the operator can see at a glance what the bridge believes is up.
     if ($script:OnAir.Count -gt 0) {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $liveRow = @( (New-Button "🔴 إخفاء $($script:OnAir[$layer].Key)" "hide:$layer") )
+            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer") )
             # A timer can be attached to something already live, not just at
             # the moment it is put on air.
             if (Get-Setting 'EnableTimedShow') {
@@ -2738,6 +2738,7 @@ function Get-UsersAdminKeyboard {
         $role = if ($user.Role -eq 'admin') { 'مشرف' } else { 'مشغّل' }
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
         $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
+        $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
         $lastActivity = if ($user.LastActivityAt) { ([datetime]$user.LastActivityAt).ToString('MM-dd HH:mm') } else { 'غير معروف' }
         $rows += , @((New-Button "🕒 آخر نشاط: $lastActivity" "usr:revoke:$($user.UserId)"))
         $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
@@ -2748,7 +2749,47 @@ function Get-UsersAdminKeyboard {
 
 function Show-UsersAdminScreen {
     param([Parameter(Mandatory)][long]$ChatId)
-    Send-TelegramMessage -ChatId $ChatId -Text '👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، أو استخدم زر السحب مع التأكيد.' -ReplyMarkup (Get-UsersAdminKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد." -ReplyMarkup (Get-UsersAdminKeyboard)
+}
+
+function Start-UserAliasEdit {
+    param(
+        [Parameter(Mandatory)][long]$TargetUserId,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$AdminUserId
+    )
+    if (-not (Test-Admin -ChatId $ChatId -UserId $AdminUserId)) { return }
+    if (@(Get-AuthorizedUsers | Where-Object UserId -eq $TargetUserId).Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'المستخدم لم يعد ضمن قائمة المصرح لهم.' -ReplyMarkup (Get-UsersAdminKeyboard)
+        return
+    }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='user_alias_edit'; TargetUserId=$TargetUserId; UserId=$AdminUserId }
+    $current = Get-UserDisplayName -UserId $TargetUserId
+    Send-TelegramMessage -ChatId $ChatId -Text "✏️ الاسم التشغيلي للمستخدم $TargetUserId`nالحالي: $current`n`nأرسل الاسم الجديد، أو أرسل - لحذف الـAlias." -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-UserAliasEdit {
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$AdminUserId,
+        [AllowEmptyString()][string]$Value = ''
+    )
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'user_alias_edit' -or [long]$state.UserId -ne $AdminUserId) { return $false }
+    $target = [long]$state.TargetUserId
+    $alias = $Value.Trim()
+    if ($alias -eq '-') { $alias = '' }
+    if ([string]::IsNullOrWhiteSpace($alias)) { $alias = '' }
+    if (-not (Set-UserAlias -TargetUserId $target -Alias $alias)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر حفظ الاسم التشغيلي.' -ReplyMarkup (Get-UsersAdminKeyboard)
+        return $false
+    }
+    Clear-PendingState -ChatId $ChatId
+    $action = if ($alias) { "تعيين Alias '$alias'" } else { 'حذف Alias' }
+    Write-BridgeLog "Admin $AdminUserId updated alias for user ${target}: $action"
+    Add-AuditEntry "👤 $action للمستخدم $target - by $(Get-UserDisplayName -UserId $AdminUserId)"
+    Show-UsersAdminScreen -ChatId $ChatId
+    return $true
 }
 
 function Get-FavoritesManagementKeyboard {
@@ -4264,19 +4305,28 @@ function Get-OnAirSummary {
     <# Shows the bridge's tracked layers after they have been reconciled with
        Cinegy. Externally started scenes cannot be named reliably, but a scene
        hidden outside the bridge is removed by Update-OnAirStateFromCinegy. #>
-    if ($script:OnAir.Count -eq 0) { return "على الهواء: لا شيء (حسب علم البوت)" }
-    $parts = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+    if ($script:OnAir.Count -eq 0) { return "📺 المشاهد النشطة`n• لا توجد مشاهد على الهواء حسب آخر فحص." }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('📺 المشاهد النشطة')
+    foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         $info = $script:OnAir[$layer]
-        $age = [int]((Get-Date) - $info.At).TotalSeconds
+        $age = [math]::Max(0, [int]((Get-Date) - $info.At).TotalSeconds)
         $ageText = if ($age -ge 60) { "$([int]($age / 60)) دقيقة" } else { "$age ثانية" }
         $source = [string](Get-JsonProp $info 'Source')
-        if ($source -eq 'cinegy') { "🟣 طبقة $layer : $($info.Key) | المصدر: Cinegy Air (منذ $ageText)" }
+        if ($source -eq 'cinegy') {
+            $eventName = [string](Get-JsonProp $info 'CinegyEventName')
+            $detail = "   المصدر: Cinegy Air · منذ $ageText"
+            if ($eventName) { $detail += " · الحدث: $eventName" }
+            $lines.Add("🟣 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
+            $lines.Add($detail)
+        }
         else {
             $operator = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { Get-UserDisplayName -UserId ([long]$info.UserId) } else { 'غير معروف' }
-            "🔵 طبقة $layer : $($info.Key) | المصدر: Bot · المستخدم: $operator (منذ $ageText)"
+            $lines.Add("🔵 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
+            $lines.Add("   المصدر: Bot · المستخدم: $operator · منذ $ageText")
         }
     }
-    return "🔴 على الهواء: " + ($parts -join "، ")
+    return ($lines -join "`n")
 }
 
 function Invoke-StatusCommand {
@@ -4527,14 +4577,15 @@ function Invoke-FullStatusCommand {
         $overall = "🟢 كل شيء سليم"
     }
 
-    $sep = '━━━━━━━━━━━━━━━━━'
     $now = Get-Date
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("📊 الحالة الكاملة — v$($script:BridgeVersion)")
     $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
     $lines.Add($overall)
     $lines.Add('')
-    $lines.Add($sep)
+    $lines.Add((Get-OnAirSummary))
+    $lines.Add('')
+    $lines.Add('🎛 اتصال Cinegy')
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
@@ -4542,15 +4593,15 @@ function Invoke-FullStatusCommand {
     $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
     $lines.Add((Format-CinegyLayerDashboard -LayerStatuses $layerStatuses))
     $lines.Add('')
-    $lines.Add($sep)
+    $lines.Add('🩺 صحة الخدمات')
     $lines.Add($health.Text)
     $lines.Add('')
-    $lines.Add($sep)
+    $lines.Add('⚙️ التشغيل والجدولة')
     $lines.Add("📡 البث المباشر: $(Get-LiveRelayStatusText)")
     $lines.Add("🖼 الصور المعلّقة: $($script:SnapshotJobs.Count) · مؤقتات الإخفاء: $($script:AutoHideQueue.Count)")
     $lines.Add("🗓 الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count)")
     $lines.Add('')
-    $lines.Add($sep)
+    $lines.Add('👥 الوصول')
     $lines.Add("🔐 المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم")
     $lines.Add("🔔 طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)")
     $lines.Add('')
@@ -6167,6 +6218,12 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'usr:alias:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Start-UserAliasEdit -TargetUserId ([long]$data.Substring(10)) -ChatId $chatId -AdminUserId $userId
+            }
+            break
+        }
         'usr:revoke:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-UserRevocation -TargetUserId ([long]$data.Substring(11)) -ChatId $chatId -AdminUserId $userId }
             break
@@ -6881,6 +6938,7 @@ try {
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
+                                'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
                                 'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }

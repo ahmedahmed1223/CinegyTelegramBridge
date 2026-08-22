@@ -13,7 +13,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.43
+## Version 4.2.44
+
+Version 4.2.44 updates restored external on-air records in place when Cinegy later exposes the actual `.cintitle` filename, so main-menu hide buttons no longer retain a legacy generic layer-event label.
+Status now presents each active scene with its layer, source, elapsed time, operator Alias or Cinegy event metadata; full status is grouped into operational sections. Administrators can edit or delete each user's Alias directly from user management.
 
 External or scheduled Cinegy scenes now display the actual `.cintitle` template name when Cinegy includes it in the active-item description; the layer remains the reconciliation identity and the generic Cinegy event name is retained only as diagnostic metadata.
 Long inline-button labels are shortened safely at `ButtonTextMaxLength` visible text elements (default `32`); set it to `0` in administrator settings to retain full labels.

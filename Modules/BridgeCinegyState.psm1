@@ -46,11 +46,21 @@ function Resolve-BridgeCinegyLayerState {
         $actualId=[string](Get-CinegyStateProperty $Status ActiveId)
         $normalized=$actualId.Trim().Trim('{','}')
         $hasId=-not [string]::IsNullOrWhiteSpace($normalized) -and $normalized -ne '00000000-0000-0000-0000-000000000000'
+        $updated=$null
         if($hasId -and $actualId -ne [string](Get-CinegyStateProperty $TrackedRecord ActiveId)){
             $updated=Copy-CinegyTrackedRecord $TrackedRecord
             $updated.ActiveId=$actualId
-            return [pscustomobject]@{Action='update';Record=$updated;Change=$null}
         }
+        $source=[string](Get-CinegyStateProperty $TrackedRecord Source)
+        $templateName=[string](Get-CinegyStateProperty $Status ActiveTemplateName)
+        if($source -eq 'cinegy' -and -not [string]::IsNullOrWhiteSpace($templateName) -and
+            $templateName -ne [string](Get-CinegyStateProperty $TrackedRecord Key)){
+            if(-not $updated){$updated=Copy-CinegyTrackedRecord $TrackedRecord}
+            $updated.Key=$templateName
+            $eventName=[string](Get-CinegyStateProperty $Status ActiveName)
+            if(-not [string]::IsNullOrWhiteSpace($eventName)){$updated.CinegyEventName=$eventName}
+        }
+        if($updated){return [pscustomobject]@{Action='update';Record=$updated;Change=$null}}
         return [pscustomobject]@{Action='keep';Record=$TrackedRecord;Change=$null}
     }
     if(-not $DiscoverExternal -or -not $isOnAir){return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}}

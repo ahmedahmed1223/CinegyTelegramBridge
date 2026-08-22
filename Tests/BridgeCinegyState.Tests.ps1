@@ -62,4 +62,22 @@ Describe 'Cinegy layer reconciliation policy' {
         $added.Record.Key | Should -Be 'ticker'
         $added.Record.CinegyEventName | Should -Be 'Cinegy Type Layer 8 On'
     }
+
+    It 'refreshes the display name of an already tracked external Cinegy scene' {
+        $tracked=@{
+            Key='Cinegy Type Layer 8 On';ActiveId='external-2';UserId=0;
+            At='2026-08-22T10:00:00Z';Source='cinegy'
+        }
+        $status=[pscustomobject]@{
+            Success=$true;IsOnAir=$true;ActiveId='external-2';
+            ActiveName='Cinegy Type Layer 8 On';ActiveTemplateName='ticker';Layer=8
+        }
+
+        $result=Resolve-BridgeCinegyLayerState -Layer 8 -TrackedRecord $tracked -Status $status
+
+        $result.Action | Should -Be 'update'
+        $result.Record.Key | Should -Be 'ticker'
+        $result.Record.CinegyEventName | Should -Be 'Cinegy Type Layer 8 On'
+        $tracked.Key | Should -Be 'Cinegy Type Layer 8 On'
+    }
 }

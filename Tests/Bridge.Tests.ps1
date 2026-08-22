@@ -500,6 +500,29 @@ Describe 'Authorized user administration' {
         Revoke-AuthorizedUser -TargetUserId 202 | Out-Null
         $script:UserProfiles.ContainsKey('202') | Should -BeFalse
     }
+
+    It 'offers an alias action for every user in the management keyboard' {
+        $keyboard = Get-UsersAdminKeyboard
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_ })
+
+        @($buttons.callback_data) | Should -Contain 'usr:alias:202'
+        @($buttons.text) -join ' ' | Should -Match 'Alias'
+    }
+
+    It 'edits and removes a user alias through the interactive admin flow' {
+        $script:UserAliases = @{}
+        $script:userAliasesFile = Join-Path $TestDrive 'user-aliases-admin.json'
+        Mock Send-TelegramMessage { }
+
+        Start-UserAliasEdit -TargetUserId 202 -ChatId 101 -AdminUserId 101
+        (Get-PendingState -ChatId 101).Mode | Should -Be 'user_alias_edit'
+        Complete-UserAliasEdit -ChatId 101 -AdminUserId 101 -Value 'مخرج الأخبار'
+        Get-UserDisplayName -UserId 202 | Should -Be 'مخرج الأخبار'
+
+        Start-UserAliasEdit -TargetUserId 202 -ChatId 101 -AdminUserId 101
+        Complete-UserAliasEdit -ChatId 101 -AdminUserId 101 -Value '-'
+        Get-UserDisplayName -UserId 202 | Should -Be '202'
+    }
 }
 
 Describe 'Test runtime isolation' {
@@ -1517,13 +1540,28 @@ Describe 'Simple and full status reports' {
     }
 
     It 'includes the operator identity in the on-air summary so multiple users are visible' {
+        $script:UserAliases['777'] = 'مخرج الأخبار'
         $script:OnAir[4] = @{ Key = 'urgent'; At = (Get-Date).AddMinutes(-2); UserId = 777; ActiveId = '{A}'; Source = 'bridge' }
-        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-5); UserId = 0; ActiveId = '{B}'; Source = 'cinegy' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-5); UserId = 0; ActiveId = '{B}'; Source = 'cinegy'; CinegyEventName = 'Cinegy Type Layer 8 On' }
 
         $summary = Get-OnAirSummary
 
-        $summary | Should -Match '🔵.*طبقة 4.*urgent.*Bot.*777'
-        $summary | Should -Match '🟣.*طبقة 8.*ticker.*Cinegy Air'
+        $summary | Should -Match '🔵.*طبقة 4.*urgent'
+        $summary | Should -Match 'Bot.*مخرج الأخبار'
+        $summary | Should -Match '🟣.*طبقة 8.*ticker'
+        $summary | Should -Match 'Cinegy Air.*Cinegy Type Layer 8 On'
+    }
+
+    It 'identifies each live template and layer in the main-menu hide buttons' {
+        Mock Test-Admin { $false }
+        $script:OnAir[4] = @{ Key = 'urgent'; At = Get-Date; UserId = 777; ActiveId = '{A}'; Source = 'bridge' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = Get-Date; UserId = 0; ActiveId = '{B}'; Source = 'cinegy' }
+
+        $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
+        $labels = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
+
+        $labels | Should -Contain '🔴 إخفاء 4 · urgent'
+        $labels | Should -Contain '🔴 إخفاء 8 · ticker'
     }
 
     It 'merges layer details and health timings into the administrator full status' {
@@ -1538,7 +1576,9 @@ Describe 'Simple and full status reports' {
         Invoke-CallbackQuery -CallbackQuery $callback
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4'
+            $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4' -and
+                $Text -match '📺 المشاهد النشطة' -and $Text -match '🎛 اتصال Cinegy' -and
+                $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول'
         }
     }
 

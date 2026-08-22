@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.31 — 2026-08-22
+
+- Added administrator template-registry export through Telegram.
+- Added opt-in full-management import of JSON documents up to 1 MiB, with
+  bounded download, safe Telegram file-path validation, and temporary staging.
+- Validated every template key, absolute `.cintitle` path, positive layer, and
+  field name before showing added/changed/removed/unchanged counts.
+- Required an explicit confirmation before atomic replacement and created a
+  timestamped backup of the previous registry.
+- Blocked imports that change or remove a template currently on air or used by
+  an upcoming schedule, and removed staged files on cancellation or expiry.
+
 ## 4.2.30 — 2026-08-22
 
 - Added private per-user template search across key, description, and optional

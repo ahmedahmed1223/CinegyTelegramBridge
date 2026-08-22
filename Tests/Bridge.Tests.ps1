@@ -141,6 +141,100 @@ Describe 'Template search categories and last-used metadata' {
     }
 }
 
+Describe 'Administrator template registry import and export' {
+    BeforeEach {
+        $script:OriginalTemplateRegistryPathForImport = $config.TemplateRegistryPath
+        $script:OriginalLogDirForImport = $script:logDir
+        $script:OriginalFullTemplateManagementForImport = $config.Settings.EnableFullTemplateManagement
+        $config.Settings.EnableFullTemplateManagement = $true
+        $script:logDir = $TestDrive
+        $script:PendingState.Clear()
+        $script:OnAir = @{}
+        $script:ScheduleEvents = [Collections.Generic.List[object]]::new()
+        $script:TemplateCache = @{ WriteTime=[datetime]::MinValue; Path=''; Map=@{}; Order=@(); Errors=@() }
+        $script:ImportRegistryPath = Join-Path $TestDrive 'templates.json'
+        Remove-Item -LiteralPath "$($script:ImportRegistryPath).backups" -Recurse -Force -ErrorAction SilentlyContinue
+        $config.TemplateRegistryPath = $script:ImportRegistryPath
+        $script:CurrentRegistry = [ordered]@{
+            alpha = [ordered]@{ path='C:\Scenes\Alpha.cintitle'; layer=1; fields=@('Title') }
+            beta = [ordered]@{ path='C:\Scenes\Beta.cintitle'; layer=2; fields=@() }
+        }
+        $script:ImportedRegistry = [ordered]@{
+            alpha = [ordered]@{ path='C:\Scenes\Alpha.cintitle'; layer=1; fields=@('Title') }
+            gamma = [ordered]@{ path='C:\Scenes\Gamma.cintitle'; layer=3; category='أخبار'; fields=@() }
+        }
+        $script:CurrentRegistry | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $script:ImportRegistryPath
+        $script:IncomingPath = Join-Path $TestDrive 'incoming.json'
+        $script:ImportedRegistry | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $script:IncomingPath
+        Mock Test-Admin { $true }
+        $script:ImportSentTexts = [Collections.Generic.List[string]]::new()
+        Mock Send-TelegramMessage { $script:ImportSentTexts.Add([string]$Text) | Out-Null }
+        Mock Send-TelegramDocument { $true }
+        Mock Add-AuditEntry { }
+    }
+
+    AfterEach {
+        $config.TemplateRegistryPath = $script:OriginalTemplateRegistryPathForImport
+        $script:logDir = $script:OriginalLogDirForImport
+        $config.Settings.EnableFullTemplateManagement = $script:OriginalFullTemplateManagementForImport
+    }
+
+    It 'validates a bounded registry and rejects unsafe definitions' {
+        (Test-TemplateRegistryImport -Path $script:IncomingPath).Success | Should -BeTrue
+        $invalidPath = Join-Path $TestDrive 'invalid.json'
+        @{ bad = @{ path='relative.cintitle'; layer=0; fields=@() } } | ConvertTo-Json -Depth 5 | Set-Content $invalidPath
+        $invalid = Test-TemplateRegistryImport -Path $invalidPath
+        $invalid.Success | Should -BeFalse
+        $invalid.Error | Should -Match 'مسار|طبقة'
+    }
+
+    It 'computes additions removals changes and unchanged definitions' {
+        $comparison = Get-TemplateRegistryImportComparison -Current ($script:CurrentRegistry | ConvertTo-Json -Depth 10 | ConvertFrom-Json) `
+            -Imported ($script:ImportedRegistry | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+        $comparison.Added | Should -Be @('gamma')
+        $comparison.Removed | Should -Be @('beta')
+        $comparison.Unchanged | Should -Be @('alpha')
+        $comparison.Changed.Count | Should -Be 0
+    }
+
+    It 'applies atomically with a backup only after validation' {
+        $result = Apply-TemplateRegistryImport -StagedPath $script:IncomingPath
+        $result.Success | Should -BeTrue -Because $result.Error
+        Test-Path -LiteralPath $result.BackupPath | Should -BeTrue
+        $saved = Get-Content -LiteralPath $script:ImportRegistryPath -Raw | ConvertFrom-Json
+        $saved.PSObject.Properties.Name | Should -Contain 'gamma'
+        $saved.PSObject.Properties.Name | Should -Not -Contain 'beta'
+    }
+
+    It 'blocks changing or removing a template that is live or scheduled' {
+        $script:OnAir[2] = @{ Key='beta'; UserId=10 }
+        $result = Apply-TemplateRegistryImport -StagedPath $script:IncomingPath
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'الهواء|جدولة'
+        Test-Path -LiteralPath "$($script:ImportRegistryPath).backups" | Should -BeFalse
+    }
+
+    It 'stages an uploaded document and requires confirmation before replacement' {
+        Mock Receive-TelegramDocument {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
+            Copy-Item -LiteralPath $script:IncomingPath -Destination $DestinationPath
+            return $DestinationPath
+        }
+        Start-TemplateRegistryImport -ChatId 100 -UserId 100
+        Receive-TemplateRegistryImport -Document ([pscustomobject]@{ file_name='templates.json'; file_size=500; file_id='safe-id' }) -ChatId 100 -UserId 100
+        $state = Get-PendingState -ChatId 100
+        $state.Mode | Should -Be 'template_import_review' -Because ($script:ImportSentTexts -join ' | ')
+        Test-Path -LiteralPath $state.ImportStagedPath | Should -BeTrue
+        (Get-Content -LiteralPath $script:ImportRegistryPath -Raw) | Should -Match 'beta'
+    }
+
+    It 'exports only to an administrator through the existing document sender' {
+        Invoke-TemplateRegistryExport -ChatId 100 -UserId 100
+        Should -Invoke Send-TelegramDocument -Times 1 -Exactly -ParameterFilter { $FilePath -eq $script:ImportRegistryPath }
+        Should -Invoke Add-AuditEntry -Times 1 -Exactly
+    }
+}
+
 Describe 'User aliases' {
     BeforeEach {
         $script:UserAliases = @{}
@@ -494,6 +588,23 @@ Describe 'Telegram API send reliability' {
 
         Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendPhoto$' -and $TimeoutSec -eq 7 }
         Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendDocument$' -and $TimeoutSec -eq 7 }
+    }
+
+    It 'downloads a Telegram document to an explicit bounded destination' {
+        $destination = Join-Path $TestDrive 'imports\templates.json'
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok=$true; result=[pscustomobject]@{ file_path='documents/file_1.json' } } }
+        Mock Invoke-WebRequest { Set-Content -LiteralPath $OutFile -Value '{"safe":true}' -NoNewline }
+
+        Receive-TelegramDocument -FileId 'abc_123' -DestinationPath $destination -MaximumBytes 100 | Should -Be $destination
+        Test-Path -LiteralPath $destination | Should -BeTrue
+        Should -Invoke Invoke-WebRequest -Times 1 -Exactly -ParameterFilter { $Uri -match '/file/bot.+/documents/file_1\.json$' -and $TimeoutSec -eq 7 }
+    }
+
+    It 'rejects a traversal path returned by Telegram before downloading' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok=$true; result=[pscustomobject]@{ file_path='../config.json' } } }
+        Mock Invoke-WebRequest { throw 'must not download' }
+        { Receive-TelegramDocument -FileId 'abc' -DestinationPath (Join-Path $TestDrive 'x.json') } | Should -Throw '*مسار*'
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
     }
 }
 

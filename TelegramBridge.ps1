@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.30'
+$script:BridgeVersion = '4.2.31'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -1001,6 +1001,32 @@ function Send-TelegramDocument {
         }
     }
     return $false
+}
+
+function Receive-TelegramDocument {
+    param(
+        [Parameter(Mandatory)][string]$FileId,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [int]$MaximumBytes = 1048576
+    )
+    $metadata = Invoke-RestMethod -Uri "$apiBase/getFile?file_id=$([uri]::EscapeDataString($FileId))" -Method Get `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)
+    if (-not (Get-JsonProp $metadata 'ok')) { throw 'Telegram رفض طلب معلومات الملف.' }
+    $result = Get-JsonProp $metadata 'result'
+    $remotePath = [string](Get-JsonProp $result 'file_path')
+    if ([string]::IsNullOrWhiteSpace($remotePath) -or $remotePath.Contains('..') -or $remotePath -notmatch '^[A-Za-z0-9_./-]+$') {
+        throw 'Telegram أعاد مسار ملف غير صالح.'
+    }
+    $directory = Split-Path -Parent $DestinationPath
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    Invoke-WebRequest -Uri "https://api.telegram.org/file/bot$($config.BotToken)/$remotePath" -OutFile $DestinationPath `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
+    $length = (Get-Item -LiteralPath $DestinationPath -ErrorAction Stop).Length
+    if ($length -le 0 -or $length -gt $MaximumBytes) {
+        Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
+        throw "حجم ملف الاستيراد غير صالح ($length بايت)."
+    }
+    return $DestinationPath
 }
 
 function Save-UserProfiles {
@@ -3100,6 +3126,9 @@ function Get-TemplateAdminCatalogueKeyboard {
         $template = $store.Map[$store.Order[$i]]
         $rows += , @( (New-Button "$($template.Key) (طبقة $($template.Layer))" "tadm:$i") )
     }
+    $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
+    if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
+    $rows += , $transferRow
     if (Get-Setting 'EnableFullTemplateManagement') { $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') ) }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد قوالب صالحة' 'menu') ) }
     $rows += , @( (New-Button '⬅️ القائمة' 'menu') )
@@ -3350,6 +3379,9 @@ function Clear-PendingState {
     if ($script:PendingState.ContainsKey($ChatId)) {
         $state = $script:PendingState[$ChatId]
         if ($state.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$state.LockLayer) }
+        if ($state.ContainsKey('ImportStagedPath') -and (Test-Path -LiteralPath ([string]$state.ImportStagedPath))) {
+            Remove-Item -LiteralPath ([string]$state.ImportStagedPath) -Force -ErrorAction SilentlyContinue
+        }
         $script:PendingState.Remove($ChatId)
         if ([string]$state.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
     }
@@ -4531,6 +4563,143 @@ function Get-BridgeDiagnosticsSnapshot {
             Blocked = [int]$script:AirOperationCounters.Blocked
         }
     }
+}
+
+function Test-TemplateRegistryImport {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $rawText = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        if ([Text.Encoding]::UTF8.GetByteCount($rawText) -gt 1048576) { throw 'الملف أكبر من 1 ميغابايت.' }
+        $document = $rawText | ConvertFrom-Json -ErrorAction Stop
+        $properties = @($document.PSObject.Properties)
+        if ($properties.Count -eq 0 -or $properties.Count -gt 200) { throw 'يجب أن يحتوي السجل بين قالب واحد و200 قالب.' }
+        foreach ($property in $properties) {
+            if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw "مفتاح القالب '$($property.Name)' غير صالح." }
+            $entry = $property.Value
+            $templatePath = [string](Get-JsonProp $entry 'path')
+            if ([string]::IsNullOrWhiteSpace($templatePath) -or -not [IO.Path]::IsPathRooted($templatePath) -or
+                -not [IO.Path]::GetExtension($templatePath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
+                throw "القالب '$($property.Name)' يحتاج مسارًا مطلقًا لملف .cintitle."
+            }
+            $layer = 0
+            if (-not [int]::TryParse([string](Get-JsonProp $entry 'layer'), [ref]$layer) -or $layer -le 0) {
+                throw "القالب '$($property.Name)' يحتاج رقم طبقة موجبًا."
+            }
+            foreach ($field in @(Get-JsonProp $entry 'fields' | Where-Object { $null -ne $_ })) {
+                $fieldName = if ($field -is [string]) { [string]$field } else { [string](Get-JsonProp $field 'name') }
+                if ([string]::IsNullOrWhiteSpace($fieldName)) { throw "القالب '$($property.Name)' يحتوي حقلاً بلا اسم." }
+            }
+        }
+        return [pscustomobject]@{ Success=$true; Error=''; Document=$document; Count=$properties.Count }
+    }
+    catch { return [pscustomobject]@{ Success=$false; Error=Protect-SensitiveText $_.Exception.Message; Document=$null; Count=0 } }
+}
+
+function Get-TemplateRegistryImportComparison {
+    param([Parameter(Mandatory)]$Current, [Parameter(Mandatory)]$Imported)
+    $currentNames = @($Current.PSObject.Properties.Name)
+    $importedNames = @($Imported.PSObject.Properties.Name)
+    $added = @($importedNames | Where-Object { $currentNames -notcontains $_ })
+    $removed = @($currentNames | Where-Object { $importedNames -notcontains $_ })
+    $changed = @($importedNames | Where-Object {
+        $currentNames -contains $_ -and
+        ((Get-JsonProp $Current $_ | ConvertTo-Json -Depth 20 -Compress) -ne (Get-JsonProp $Imported $_ | ConvertTo-Json -Depth 20 -Compress))
+    })
+    $unchanged = @($importedNames | Where-Object { $currentNames -contains $_ -and $changed -notcontains $_ })
+    return [pscustomobject]@{ Added=$added; Removed=$removed; Changed=$changed; Unchanged=$unchanged }
+}
+
+function Start-TemplateRegistryImport {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Get-Setting 'EnableFullTemplateManagement')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🔒 فعّل إدارة القوالب الكاملة أولاً.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    Clear-PendingState -ChatId $ChatId
+    Set-PendingState -ChatId $ChatId -State @{ Mode='template_import_upload'; UserId=$UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text '📥 أرسل ملف JSON واحدًا (بحد أقصى 1 ميغابايت). سيُفحص ويُعرض الفرق قبل أي استبدال.' -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Invoke-TemplateRegistryExport {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
+    $path = Get-TemplateRegistryFilePath
+    if (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption '📤 نسخة تعريفات القوالب. لا تحتوي حالة الهواء أو قيم النصوص المستخدمة.') {
+        Add-AuditEntry "📤 تصدير تعريفات القوالب - user $UserId"
+    }
+}
+
+function Receive-TemplateRegistryImport {
+    param([Parameter(Mandatory)]$Document, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'template_import_upload' -or [long]$state.UserId -ne $UserId -or
+        -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
+    $fileName = [string](Get-JsonProp $Document 'file_name')
+    $fileSize = [long](Get-JsonProp $Document 'file_size')
+    if (-not $fileName.EndsWith('.json', [StringComparison]::OrdinalIgnoreCase) -or $fileSize -le 0 -or $fileSize -gt 1048576) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ يجب رفع ملف JSON حجمه بين 1 بايت و1 ميغابايت.' -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    $stagingDirectory = Join-Path $script:logDir 'template-imports'
+    $stagedPath = Join-Path $stagingDirectory "staged-$([guid]::NewGuid().ToString('N')).json"
+    try {
+        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $stagedPath -MaximumBytes 1048576 | Out-Null
+        $validation = Test-TemplateRegistryImport -Path $stagedPath
+        if (-not $validation.Success) { throw $validation.Error }
+        $current = Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json
+        $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $validation.Document
+        $state = @{ Mode='template_import_review'; UserId=$UserId; ImportStagedPath=$stagedPath }
+        Set-PendingState -ChatId $ChatId -State $state
+        $summary = "🔎 مراجعة استيراد القوالب`nالإجمالي: $($validation.Count)`nمضاف: $($comparison.Added.Count)`nمعدّل: $($comparison.Changed.Count)`nمحذوف: $($comparison.Removed.Count)`nبلا تغيير: $($comparison.Unchanged.Count)`n`nلن يُستبدل الملف حتى التأكيد."
+        Send-TelegramMessage -ChatId $ChatId -Text $summary -ReplyMarkup @{ inline_keyboard=@(
+            , @((New-Button '✅ اعتماد الاستيراد' 'timport:confirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+        ) }
+    }
+    catch {
+        Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ رُفض ملف الاستيراد: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+    }
+}
+
+function Apply-TemplateRegistryImport {
+    param([Parameter(Mandatory)][string]$StagedPath)
+    $path = Get-TemplateRegistryFilePath
+    $temporary = "$path.import.tmp"
+    try {
+        $validation = Test-TemplateRegistryImport -Path $StagedPath
+        if (-not $validation.Success) { throw $validation.Error }
+        $current = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $validation.Document
+        $unsafeKeys = @($comparison.Removed + $comparison.Changed | Sort-Object -Unique)
+        $liveKeys = @($script:OnAir.Values | ForEach-Object { [string](Get-JsonProp $_ 'Key') })
+        $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
+        $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
+        if ($blocked.Count -gt 0) { throw "لا يمكن تغيير أو حذف قالب مستخدم على الهواء أو في جدولة قادمة: $($blocked -join '، ')" }
+        $backupDirectory = "$path.backups"
+        New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
+        $backupPath = Join-Path $backupDirectory "templates-import-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        [IO.File]::WriteAllText($temporary, ($validation.Document | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        $script:TemplateCache = @{ WriteTime=[datetime]::MinValue; Path=''; Map=@{}; Order=@(); Errors=@() }
+        return [pscustomobject]@{ Success=$true; Error=''; BackupPath=$backupPath; Comparison=$comparison }
+    }
+    catch { return [pscustomobject]@{ Success=$false; Error=Protect-SensitiveText $_.Exception.Message; BackupPath=''; Comparison=$null } }
+    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+
+function Confirm-TemplateRegistryImport {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'template_import_review' -or [long]$state.UserId -ne $UserId) { return }
+    $stagedPath = [string]$state.ImportStagedPath
+    $result = Apply-TemplateRegistryImport -StagedPath $stagedPath
+    Clear-PendingState -ChatId $ChatId
+    if ($result.Success) {
+        Add-AuditEntry "📥 استيراد تعريفات القوالب مع نسخة احتياطية - user $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text '✅ تم استيراد تعريفات القوالب وحفظ نسخة من السجل السابق.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+    }
+    else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر اعتماد الاستيراد: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }
 
 function Get-DiagnosticWarnings {
@@ -6006,8 +6175,22 @@ function Invoke-CallbackQuery {
         }
         'menu:templatesadmin' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $pendingImport = Get-PendingState -ChatId $chatId
+                if ($pendingImport -and [string]$pendingImport.Mode -like 'template_import_*') { Clear-PendingState -ChatId $chatId }
                 Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
             }
+            break
+        }
+        'timport:export' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-TemplateRegistryExport -ChatId $chatId -UserId $userId }
+            break
+        }
+        'timport:start' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-TemplateRegistryImport -ChatId $chatId -UserId $userId }
+            break
+        }
+        'timport:confirm' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Confirm-TemplateRegistryImport -ChatId $chatId -UserId $userId }
             break
         }
         'tadm:*' {
@@ -6557,10 +6740,16 @@ try {
                     Write-BridgeLog "Ignoring message from non-private chat $chatId" "WARN"
                     continue
                 }
-                $text = [string](Get-JsonProp $message 'text')
-                if ([string]::IsNullOrWhiteSpace($text)) { continue }
                 $fromObj = Get-JsonProp $message 'from'
                 $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { $chatId }
+                $document = Get-JsonProp $message 'document'
+                if ($document) {
+                    try { Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId }
+                    catch { Write-BridgeLog "Unhandled error processing document from $chatId : $($_.Exception.Message)" 'ERROR' }
+                    continue
+                }
+                $text = [string](Get-JsonProp $message 'text')
+                if ([string]::IsNullOrWhiteSpace($text)) { continue }
 
                 try {
                     # Persistent-keyboard taps are checked first and on purpose:

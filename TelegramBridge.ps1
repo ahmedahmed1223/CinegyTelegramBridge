@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.26'
+$script:BridgeVersion = '4.2.27'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -4525,7 +4525,7 @@ function Clear-DiagnosticLog {
     )
     try {
         if ($Kind -eq 'runtime') {
-            foreach ($file in @(Get-ChildItem -LiteralPath $script:logDir -File -Filter 'bridge.*.log' -ErrorAction SilentlyContinue)) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $script:logDir -File -Filter '*.log' -ErrorAction SilentlyContinue)) {
                 Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
             }
             [IO.File]::WriteAllText($script:logPath, '', [Text.UTF8Encoding]::new($false))

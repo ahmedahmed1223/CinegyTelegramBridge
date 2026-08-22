@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.2.27 — 2026-08-22
+
+- Extended the administrator-confirmed runtime cleanup to all direct `.log`
+  files in `logs`, including bridge rotations and relay stdout/stderr logs.
+- Kept `audit.jsonl`, `onair.json`, schedules, templates, backups, and
+  diagnostic subdirectories outside runtime-log cleanup.
+- Retained a fresh audit record after either runtime or audit cleanup.
+
 ## 4.2.26 — 2026-08-22
 
 - Added Windows/PowerShell 7 GitHub Actions for parser, PSScriptAnalyzer, and

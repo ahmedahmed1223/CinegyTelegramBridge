@@ -1271,6 +1271,8 @@ Describe 'Administrator log cleanup' {
         Set-Content -LiteralPath $script:auditFile -Value '{"old":"audit"}'
         Set-Content -LiteralPath $script:logPath -Value 'old runtime line'
         Set-Content -LiteralPath (Join-Path $TestDrive 'bridge.1.log') -Value 'old rotated line'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'relay-stderr.log') -Value 'old relay error'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'onair.json') -Value '{"live":true}'
         Mock Test-Admin { $true }
         Mock Test-CallbackAdmin { $true }
         Mock Confirm-TelegramCallback { }
@@ -1292,6 +1294,8 @@ Describe 'Administrator log cleanup' {
 
         (Get-Content -LiteralPath $script:logPath -Raw) | Should -Not -Match 'old runtime'
         Test-Path -LiteralPath (Join-Path $TestDrive 'bridge.1.log') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $TestDrive 'relay-stderr.log') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $TestDrive 'onair.json') -Raw) | Should -Match 'live'
         (Get-Content -LiteralPath $script:auditFile -Raw) | Should -Match 'log_clear'
     }
 

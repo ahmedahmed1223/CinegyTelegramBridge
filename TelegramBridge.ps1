@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.0.0'
+$script:BridgeVersion = '4.1.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -743,6 +743,18 @@ function Test-Admin {
     return (@(Get-JsonProp $config 'AdminChatIds') -contains $ChatId)
 }
 
+function Test-TelegramPrivateChat {
+    <# This bridge is intentionally operated through one-to-one chats only.
+       Telegram always supplies chat.type; the positive-id fallback keeps old
+       saved/test callback payloads compatible without authorizing groups. #>
+    param($Chat)
+    if (-not $Chat) { return $false }
+    $type = [string](Get-JsonProp $Chat 'type')
+    if (-not [string]::IsNullOrWhiteSpace($type)) { return $type -eq 'private' }
+    $id = [long](Get-JsonProp $Chat 'id')
+    return $id -gt 0
+}
+
 # ============================================================================
 #  Template registry (cached, validated, deterministically ordered)
 # ============================================================================
@@ -1087,7 +1099,8 @@ function Format-CinegyLayerDashboard {
             }
         }
 
-        if ($trackedKey) {
+        $trackedSource = if ($script:OnAir.ContainsKey($layer)) { [string](Get-JsonProp $script:OnAir[$layer] 'Source') } else { '' }
+        if ($trackedKey -and $trackedSource -ne 'cinegy') {
             $lines.Add("🔴 $(Get-LayerDisplayName -Layer $layer): $trackedKey")
         }
         else {
@@ -1185,6 +1198,7 @@ function Import-OnAirState {
                 At     = $at
                 UserId = [long](Get-JsonProp $prop.Value 'UserId')
                 ActiveId = [string](Get-JsonProp $prop.Value 'ActiveId')
+                Source = if (Get-JsonProp $prop.Value 'Source') { [string](Get-JsonProp $prop.Value 'Source') } else { 'bridge' }
             }
         }
         if ($script:OnAir.Count -gt 0) { Write-BridgeLog "Restored on-air record for $($script:OnAir.Count) layer(s) from the previous run" }
@@ -1209,6 +1223,7 @@ function Save-OnAirState {
                 At = $atStr
                 UserId = [long](Get-JsonProp $info 'UserId')
                 ActiveId = [string](Get-JsonProp $info 'ActiveId')
+                Source = if (Get-JsonProp $info 'Source') { [string](Get-JsonProp $info 'Source') } else { 'bridge' }
             }
         }
         $tempPath = "$onAirFile.tmp"
@@ -1216,8 +1231,8 @@ function Save-OnAirState {
         Write-BridgeLog "Writing temporary onair payload to $tempPath (size: $($json.Length) chars)" "DEBUG"
         Set-Content -LiteralPath $tempPath -Value $json -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $tempPath -Destination $onAirFile -Force -ErrorAction Stop
-        # Log a successful write so operators can see when the onair.json was updated
-        try { Write-BridgeLog "Wrote onair.json ($($out.Keys.Count) layer(s)) to $onAirFile" "INFO" } catch {}
+        # Log a successful write so operators can see when the onair.json was updated.
+        Write-BridgeLog "Wrote onair.json ($($out.Keys.Count) layer(s)) to $onAirFile" "INFO"
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
@@ -1262,16 +1277,21 @@ function Test-OnAirTemplateMatch {
 }
 
 function Update-OnAirStateFromCinegy {
-    <# Reconciles the bridge's persisted record with Cinegy's real GFX layer
-       status. Only layers already tracked by the bridge are queried: Cinegy's
-       status identifies an active item but cannot reliably map an externally
-       triggered item back to a templates.json key. A failed query never
-       removes state, because an unavailable engine is not the same as a
-       hidden graphic. #>
-    param([string]$Reason = 'manual', [object[]]$LayerStatuses = @(), [int]$TimeoutSec = 0)
+    <# Reconciles onair.json with Cinegy's current GFX-layer state. Regular
+       watchdog calls verify bridge-tracked layers only. Operator checks pass a
+       full dashboard sample with -DiscoverExternal, allowing scenes started
+       directly in Cinegy to become hideable without turning onair.json into a
+       historical log. Failed queries never add or remove state. #>
+    param(
+        [string]$Reason = 'manual',
+        [object[]]$LayerStatuses = @(),
+        [int]$TimeoutSec = 0,
+        [switch]$DiscoverExternal
+    )
     if ($TimeoutSec -le 0) { $TimeoutSec = Get-AirTimeout }
 
     $checked = [System.Collections.Generic.List[int]]::new()
+    $added = [System.Collections.Generic.List[int]]::new()
     $removed = [System.Collections.Generic.List[int]]::new()
     $failed = [System.Collections.Generic.List[int]]::new()
     $changes = [System.Collections.Generic.List[object]]::new()
@@ -1301,10 +1321,8 @@ function Update-OnAirStateFromCinegy {
         $trackedId = [string](Get-JsonProp $record 'ActiveId')
         $actualId = [string]$status.ActiveId
 
-        $trackedNormalized = $trackedId.Trim().Trim('{', '}')
         $actualNormalized = $actualId.Trim().Trim('{', '}')
 
-        $hasTrackedId = -not [string]::IsNullOrWhiteSpace($trackedNormalized)
         $hasActualId = -not [string]::IsNullOrWhiteSpace($actualNormalized) -and
             $actualNormalized -ne '00000000-0000-0000-0000-000000000000'
 
@@ -1312,7 +1330,9 @@ function Update-OnAirStateFromCinegy {
         # two IDs almost never match. A mismatch alone must NOT drop a layer that
         # is genuinely on air - adopt Cinegy's real id and keep the record.
         if ($status.IsOnAir) {
-            if ($hasActualId) {
+            if ($hasActualId -and $actualId -ne [string](Get-JsonProp $record 'ActiveId')) {
+                # Only mark dirty when the id genuinely changed, so a layer
+                # sitting on air does not rewrite onair.json every sync tick.
                 $record.ActiveId = $actualId
                 $script:OnAirDirty = $true
             }
@@ -1333,6 +1353,9 @@ function Update-OnAirStateFromCinegy {
                 ClientIdentity  = [string](Get-JsonProp $status 'ClientIdentity')
             })
             $script:OnAir.Remove([int]$layer)
+            $recordSource = [string](Get-JsonProp $record 'Source')
+            if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
+            Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy confirmed hidden; template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId'))" "INFO"
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
             for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
@@ -1344,7 +1367,32 @@ function Update-OnAirStateFromCinegy {
         }
     }
 
-    if ($removed.Count -gt 0 -or $script:OnAirDirty) {
+    if ($DiscoverExternal) {
+        foreach ($item in @($LayerStatuses)) {
+            $layer = 0
+            if (-not [int]::TryParse([string](Get-JsonProp $item 'Layer'), [ref]$layer)) { continue }
+            if ($script:OnAir.ContainsKey($layer)) { continue }
+            if (-not [bool](Get-JsonProp $item 'Success')) {
+                if (-not $failed.Contains($layer)) { $failed.Add($layer) }
+                Write-BridgeLog "Could not discover GFX layer $layer during $Reason comparison: $([string](Get-JsonProp $item 'Error'))" "WARN"
+                continue
+            }
+            if (-not [bool](Get-JsonProp $item 'IsOnAir')) { continue }
+
+            $activeId = [string](Get-JsonProp $item 'ActiveId')
+            $activeName = [string](Get-JsonProp $item 'ActiveName')
+            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = "مشهد خارجي · طبقة $layer" }
+            $script:OnAir[$layer] = @{
+                Key = $activeName; At = Get-Date; UserId = 0L
+                ActiveId = $activeId; Source = 'cinegy'
+            }
+            $added.Add($layer)
+            $script:OnAirDirty = $true
+            Write-BridgeLog "Cinegy state comparison ($Reason) discovered external on-air scene '$activeName' on layer $layer; added to onair.json for operator hide/exit" "INFO"
+        }
+    }
+
+    if ($added.Count -gt 0 -or $removed.Count -gt 0 -or $script:OnAirDirty) {
         Save-OnAirState
         $script:OnAirDirty = $false
         if ($removed.Count -gt 0) {
@@ -1352,11 +1400,18 @@ function Update-OnAirStateFromCinegy {
         }
     }
 
+    $suppliedCount = @($LayerStatuses).Count
+    if ($failed.Count -eq 0 -and ($checked.Count -gt 0 -or $suppliedCount -gt 0)) {
+        $script:LastCinegyStateSuccess = Get-Date
+    }
+
     return [pscustomobject]@{
         Checked = $checked.ToArray()
+        Added   = $added.ToArray()
         Removed = $removed.ToArray()
         Failed  = $failed.ToArray()
         Changes = $changes.ToArray()
+        LastSuccessfulAt = if ($script:LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:LastCinegyStateSuccess } else { $null }
     }
 }
 
@@ -1816,6 +1871,7 @@ $script:RelayState = @{
 
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
 $script:LastCinegyStateCheck = [datetime]::MinValue
+$script:LastCinegyStateSuccess = [datetime]::MinValue
 $script:LastCinegyHealthCheck = [datetime]::MinValue
 $script:LastCinegyHealthState = 'unknown'
 $script:TelegramConnectionState = 'unknown'
@@ -2038,7 +2094,7 @@ function Get-LayerDashboardKeyboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $button = New-Button "🔄 إعادة فحص · $(Get-LayerDisplayName -Layer $layer)" 'menu:layers'
+            $button = New-Button "🔄 فحص ومقارنة · $(Get-LayerDisplayName -Layer $layer)" 'menu:layers'
         }
         elseif ($status.IsOnAir) {
             $button = New-Button "🙈 إخفاء $(Get-LayerDisplayName -Layer $layer)" "hide:$layer"
@@ -2050,7 +2106,7 @@ function Get-LayerDashboardKeyboard {
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
-    $rows += , @( (New-Button "🔄 تحديث" 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
+    $rows += , @( (New-Button "🔎 فحص ومقارنة مع Cinegy" 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2479,7 +2535,7 @@ function Get-HelpText {
         "🧰 أدوات مفيدة",
         "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
         "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
-        "🎚 الطبقات: تفحص Cinegy مباشرة وتعرض كل طبقة كـ ظاهر، خارجي، مخفي أو غير معروف.",
+        "🎚 الطبقات: تفحص Cinegy مباشرة، تقارن الطبقات المعروفة مع onair.json، وتعرض كل طبقة كـ ظاهر، خارجي، مخفي أو غير معروف.",
         "اضغط على طبقة ظاهرة لإخفائها سريعًا؛ والضغط على طبقة غير ظاهرة يحدّث لوحة الطبقات.",
         "ℹ️ الحالة: ملخص سريع للجميع يعرض خادم Air والقناة والقوالب المتابعة.",
         "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
@@ -3074,8 +3130,9 @@ function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $store = Get-TemplateStore
-    $sync = Update-OnAirStateFromCinegy -Reason 'status' `
-        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $layerStatuses = @(Get-CinegyLayerDashboard)
+    $sync = Update-OnAirStateFromCinegy -Reason 'status' -LayerStatuses $layerStatuses `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
 
     # Quick overall line so a non-admin glance shows whether anything is off.
     if ($sync.Failed.Count -gt 0) {
@@ -3097,6 +3154,10 @@ function Invoke-StatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
+    if ($lastSuccessfulAt) {
+        $lines.Add("🔄 آخر فحص ناجح: $(([datetime]$lastSuccessfulAt).ToString('yyyy-MM-dd HH:mm:ss'))")
+    }
     $lines.Add((Get-OnAirSummary))
     $lines.Add('')
     $lines.Add($sep)
@@ -3264,7 +3325,7 @@ function Invoke-FullStatusCommand {
     $store = Get-TemplateStore
     $layerStatuses = @(Get-CinegyLayerDashboard)
     $sync = Update-OnAirStateFromCinegy -Reason 'full-status' -LayerStatuses $layerStatuses `
-        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
     $health = Get-HealthStatusReport
     # Overall status line derived from the live signals so a quick glance at
     # the top of the message tells the operator whether anything needs attention.
@@ -4252,6 +4313,11 @@ function Invoke-CallbackQuery {
         return
     }
 
+    if ($msgObj -and -not (Test-TelegramPrivateChat -Chat $msgObj.chat)) {
+        Write-BridgeLog "Ignoring callback from non-private chat $chatId" "WARN"
+        return
+    }
+
     if (-not (Test-Authorized -ChatId $chatId -UserId $userId)) {
         Write-BridgeLog "Rejected callback from unauthorized chat $chatId / user $userId" "WARN"
         $queued = Request-Approval -ChatId $chatId -UserId $userId -From $fromObj
@@ -4387,7 +4453,13 @@ function Invoke-CallbackQuery {
         }
         'menu:layers' {
             $layerStatuses = @(Get-CinegyLayerDashboard)
-            Send-TelegramMessage -ChatId $chatId -Text (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses) -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
+            $comparison = Update-OnAirStateFromCinegy -Reason 'operator-check' -LayerStatuses $layerStatuses `
+                -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
+            $comparisonText = @(
+                "🔎 نتيجة المقارنة: أضيف $(@($comparison.Added).Count) · أزيل $(@($comparison.Removed).Count) · تعذر $(@($comparison.Failed).Count)",
+                (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)
+            ) -join "`n`n"
+            Send-TelegramMessage -ChatId $chatId -Text $comparisonText -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
             break
         }
         'menu:refreshstatus' {
@@ -5014,6 +5086,10 @@ try {
                 $message = Get-JsonProp $update 'message'
                 if (-not $message) { continue }
                 $chatId = [long]$message.chat.id
+                if (-not (Test-TelegramPrivateChat -Chat $message.chat)) {
+                    Write-BridgeLog "Ignoring message from non-private chat $chatId" "WARN"
+                    continue
+                }
                 $text = [string](Get-JsonProp $message 'text')
                 if ([string]::IsNullOrWhiteSpace($text)) { continue }
                 $fromObj = Get-JsonProp $message 'from'
@@ -5088,7 +5164,8 @@ finally {
         Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
     }
     if ($script:InstanceMutex) {
-        try { $script:InstanceMutex.ReleaseMutex() } catch { }
+        try { $script:InstanceMutex.ReleaseMutex() }
+        catch { Write-BridgeLog "Could not release instance mutex: $($_.Exception.Message)" "DEBUG" }
         $script:InstanceMutex.Dispose()
     }
 }

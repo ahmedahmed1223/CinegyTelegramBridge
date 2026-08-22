@@ -1,5 +1,34 @@
 # Changelog
 
+## 4.1.0 — 2026-08-22
+
+- Added an operator-triggered live reconciliation against every Cinegy GFX
+  layer referenced by `templates.json` from both Status and the Layers panel.
+- Scenes started directly in Cinegy are discovered, recorded in `onair.json`
+  with `Source: cinegy`, and exposed to operators for HIDE/EXIT actions.
+- Kept `onair.json` as current operational state only; historical actions and
+  detailed add/remove reasons are written to `bridge.log`.
+- Unreachable or uncertain Cinegy reads never add or remove an on-air record.
+- Persisted each record's source (`bridge` or `cinegy`) across restarts.
+- Added the last successful Cinegy comparison time to the status screen and a
+  comparison summary to the Layers panel.
+- Added regression coverage for discovery, uncertain reads, comparison from
+  the Layers panel, and detailed removal logging.
+
+## 4.0.1 — 2026-08-22
+
+- Fixed the release gate so the five on-air persistence smoke tests are
+  discovered and executed by Pester.
+- Prevented `onair.json` from being rewritten on every Cinegy sync when the
+  tracked `ActiveId` has not changed, with a regression test for the behavior.
+- Restricted the bridge to private Telegram chats; group, supergroup, and
+  channel updates are ignored before authorization or command dispatch.
+- Added regression coverage proving a successful EXIT removes and persists the
+  on-air template record, while a failed Cinegy EXIT keeps it for recovery.
+- Cleaned actionable PSScriptAnalyzer warnings and documented the intentional
+  UTF-8-without-BOM and private helper naming exclusions.
+- Added `DEVELOPMENT-PLAN.md` with the 4.0.1–5.0 roadmap and release gate.
+
 ## 4.0.0
 
 - Fixed onair.json losing live templates: a layer that is genuinely on air is

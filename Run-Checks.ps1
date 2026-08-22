@@ -38,7 +38,8 @@ $files = @(
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
     'config.example.json', 'templates.example.json',
-    'Tests\Bridge.Tests.ps1', 'README.md', 'CHANGELOG.md'
+    'Tests\Bridge.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1',
+    'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md'
 )
 foreach ($file in $files) {
     $path = Join-Path $root $file
@@ -99,11 +100,11 @@ elseif (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
 }
 else {
     Import-Module PSScriptAnalyzer -ErrorAction Stop
-    # The bridge deliberately uses Write-Host for console output and a few
-    # non-standard verbs kept for readability; those rules are excluded rather
-    # than left to drown out real findings.
+    # PowerShell 7 reads UTF-8 without BOM correctly. The bridge also keeps one
+    # private XML helper with a domain-specific verb. Exclude those intentional
+    # style choices so every reported warning is actionable.
     $results = Invoke-ScriptAnalyzer -Path $root -Recurse -Severity Error, Warning `
-        -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns
+        -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs
     if ($results) {
         $errorCount = @($results | Where-Object { $_.Severity -eq 'Error' }).Count
         if ($errorCount -gt 0) { $failed = $true }

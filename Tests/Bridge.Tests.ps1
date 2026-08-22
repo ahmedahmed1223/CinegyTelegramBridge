@@ -634,6 +634,30 @@ Describe 'Role-aware status menus' {
 
 }
 
+Describe 'Private-chat-only policy' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'ignores callbacks originating from a Telegram group' {
+        $callback = [pscustomobject]@{
+            id = 'group-menu-1'
+            from = [pscustomobject]@{ id = 200 }
+            message = [pscustomobject]@{
+                chat = [pscustomobject]@{ id = -100123; type = 'supergroup' }
+            }
+            data = 'menu'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Test-Authorized -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
 Describe 'Simple and full status reports' {
     BeforeEach {
         $script:OnAir.Clear()
@@ -654,7 +678,12 @@ Describe 'Simple and full status reports' {
                 OutputState = 'Normal'; LicenseState = 'Licensed'; ClientConnected = $true; ClientIdentity = 'Client 1'
             })
         }
-        Mock Update-OnAirStateFromCinegy { [pscustomobject]@{ Checked = @(4); Removed = @(); Failed = @() } }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{
+                Checked = @(4); Added = @(); Removed = @(); Failed = @()
+                LastSuccessfulAt = [datetime]'2026-08-22T11:20:00'
+            }
+        }
         Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
         Mock Get-AirTelemetryStatus {
             [pscustomobject]@{
@@ -675,7 +704,8 @@ Describe 'Simple and full status reports' {
 
         Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and $Text -notmatch 'صحة الخدمات'
+            $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and
+                $Text -match 'آخر فحص ناجح.*2026-08-22 11:20:00' -and $Text -notmatch 'صحة الخدمات'
         }
     }
 
@@ -1723,11 +1753,49 @@ Describe 'On-air identity persistence' {
     }
 }
 
+Describe 'Exit scene on-air record cleanup' {
+    BeforeEach {
+        $OnAir.Clear()
+        $OnAir[7] = @{
+            Key = 'urgent'; At = Get-Date; UserId = 10
+            ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        }
+        Mock Save-OnAirState { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach { $OnAir.Clear() }
+
+    It 'removes and persists the template record after a successful exit button action' {
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true; Error = '' } }
+
+        Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42
+
+        $OnAir.ContainsKey(7) | Should -BeFalse
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'تم الخروج من المشهد'
+        }
+    }
+
+    It 'keeps the template record when Cinegy rejects the exit action' {
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $false; Error = 'timeout' } }
+
+        Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42
+
+        $OnAir.ContainsKey(7) | Should -BeTrue
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
+    }
+}
+
 Describe 'Update-OnAirStateFromCinegy' {
     BeforeEach {
         $OnAir.Clear()
         $OnAir[4] = @{ Key = 'lower-third'; At = Get-Date; UserId = 10 }
         Mock Save-OnAirState { }
+        Mock Write-BridgeLog { }
     }
 
     AfterEach { $OnAir.Clear() }
@@ -1742,6 +1810,9 @@ Describe 'Update-OnAirStateFromCinegy' {
         $OnAir.ContainsKey(4) | Should -BeFalse
         $result.Removed | Should -Be @(4)
         Should -Invoke Save-OnAirState -Times 1 -Exactly
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter {
+            $Message -match 'removed on-air record.*layer 4.*confirmed hidden'
+        }
     }
 
     It 'keeps the tracked template when Cinegy reports a different active id but is still on air' {
@@ -1764,6 +1835,25 @@ Describe 'Update-OnAirStateFromCinegy' {
         $OnAir[4].ActiveId | Should -Be '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}'
         $result.Removed | Should -Be @()
         Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'does not rewrite onair state when Cinegy reports the already tracked active id' {
+        $OnAir[4].ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success    = $true
+                IsOnAir    = $true
+                ActiveId   = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+                ActiveName = 'lower-third.cintitle'
+            }
+        }
+
+        $result = Update-OnAirStateFromCinegy
+
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $OnAir[4].ActiveId | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        @($result.Removed).Count | Should -Be 0
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
     }
 
     It 'formats an actionable external change alert without inventing a source IP' {
@@ -1851,6 +1941,36 @@ Describe 'Update-OnAirStateFromCinegy' {
         $result.Removed | Should -Be @(4)
         Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
     }
+
+    It 'adds an externally started Cinegy scene during a full layer comparison' {
+        $OnAir.Clear()
+        $sample = [pscustomobject]@{
+            Layer = 7; Success = $true; IsOnAir = $true
+            ActiveId = '{CINEGY-EXTERNAL-GUID}'; ActiveName = 'Breaking News On'
+        }
+
+        $result = Update-OnAirStateFromCinegy -Reason 'operator-check' -LayerStatuses @($sample) -DiscoverExternal
+
+        $result.Added | Should -Be @(7)
+        $OnAir.ContainsKey(7) | Should -BeTrue
+        $OnAir[7].Key | Should -Be 'Breaking News On'
+        $OnAir[7].Source | Should -Be 'cinegy'
+        $OnAir[7].UserId | Should -Be 0
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'does not invent an external record when the Cinegy layer query is uncertain' {
+        $OnAir.Clear()
+        $sample = [pscustomobject]@{
+            Layer = 7; Success = $false; IsOnAir = $null; Error = 'timeout'
+        }
+
+        $result = Update-OnAirStateFromCinegy -Reason 'operator-check' -LayerStatuses @($sample) -DiscoverExternal
+
+        @($result.Added).Count | Should -Be 0
+        $OnAir.ContainsKey(7) | Should -BeFalse
+        Should -Invoke Save-OnAirState -Times 0 -Exactly
+    }
 }
 
 Describe 'Cinegy layer dashboard' {
@@ -1906,6 +2026,9 @@ Describe 'Layer quick panel' {
                 [pscustomobject]@{ Layer = 4; Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' }
             )
         }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(2, 4); Added = @(2); Removed = @(); Failed = @(); Changes = @() }
+        }
     }
 
     It 'shows actual layer states as quick action buttons' {
@@ -1919,6 +2042,9 @@ Describe 'Layer quick panel' {
         Invoke-CallbackQuery -CallbackQuery $callback
 
         Should -Invoke Get-CinegyLayerDashboard -Times 1 -Exactly
+        Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly -ParameterFilter {
+            $Reason -eq 'operator-check' -and $DiscoverExternal
+        }
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $labels = @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
             $labels -contains '🙈 إخفاء طبقة 2' -and

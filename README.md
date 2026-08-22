@@ -13,11 +13,14 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 3.0
+## Version 4.1.0
 
-Version 3.0 strengthens on-air safety, scheduling, content management, and
-operational monitoring while retaining the existing two-level permission
-model and compatibility with 2.x configuration files:
+Version 4.1.0 adds live comparison with Cinegy. Opening Status or Layers reads
+every graphics layer referenced by `templates.json`, reconciles it with
+`onair.json`, and makes scenes started directly in Cinegy available for
+operator HIDE/EXIT actions. `onair.json` remains current state only; historical
+operations and reconciliation reasons stay in `bridge.log`. The bot
+intentionally accepts private Telegram chats only.
 
 - Every `SHOW` source—including template buttons, presets, and typed commands—
   passes through a review screen. Required fields, per-layer preparation locks,
@@ -606,6 +609,8 @@ If you need playlist transport from Telegram too:
 
 ## Security notes
 
+- This bridge is for one-to-one Telegram chats only. Updates from groups,
+  supergroups, and channels are ignored before authorization or dispatch.
 - **The bot token is the crown jewel.** Anyone holding it *is* the bot: they
   can read everything sent to it and impersonate it to your admins. Rotate
   the current one (see the warning in Setup), keep it out of source control

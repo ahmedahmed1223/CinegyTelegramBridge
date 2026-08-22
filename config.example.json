@@ -72,6 +72,8 @@
     "NotifyAdminsOnCinegyHealth": true,
     "CinegyStateStaleSeconds": 45,
     "ScheduleConflictWindowMinutes": 2,
+    "SchedulePaused": false,
+    "SchedulePreNotifyMinutes": 0,
     "ScheduleMaxRetries": 0,
     "ScheduleRetryDelaySeconds": 30,
     "ScheduleRetryBackoffFactor": 2,

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.22'
+$script:BridgeVersion = '4.2.23'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -112,6 +112,8 @@ $script:DefaultSettings = [ordered]@{
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
+    SchedulePaused              = $false # keep events pending without executing them
+    SchedulePreNotifyMinutes    = 0      # disabled by default; notify shortly before an occurrence
     ScheduleMaxRetries          = 0       # safe default: do not replay a failed SHOW unless admin opts in
     ScheduleRetryDelaySeconds   = 30      # wait before an opted-in scheduled SHOW retry
     ScheduleRetryBackoffFactor  = 2       # exponential multiplier per failed attempt
@@ -153,6 +155,7 @@ $script:SettingDisplayMetadata = @{
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
+    SchedulePreNotifyMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الإشعار المسبق للحدث المجدول (0 للتعطيل)' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
     PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
     FavoritesCount = @{ Unit = 'قوالب'; Description = 'عدد القوالب المفضلة المعروضة' }
@@ -1970,7 +1973,8 @@ function New-ScheduledShowEvent {
         [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
         [Parameter(Mandatory)][ValidateSet('once', 'daily', 'weekly')][string]$Recurrence,
         [Parameter(Mandatory)][long]$ChatId,
-        [Parameter(Mandatory)][long]$UserId
+        [Parameter(Mandatory)][long]$UserId,
+        [string]$RecurrenceUntil = ''
     )
     return @{
         Id = [guid]::NewGuid().ToString(); TemplateKey = $TemplateKey; Layer = $Layer; Values = $Values
@@ -1978,7 +1982,8 @@ function New-ScheduledShowEvent {
         Recurrence = $Recurrence; Status = 'pending'; ChatId = $ChatId; UserId = $UserId
         CreatedAt = [datetimeoffset]::Now.ToString('o'); ExecutionKey = ''
         CompletedExecutionKey = ''; StartedAt = ''; CompletedAt = ''; LastResult = ''
-        AttemptCount = 0; NextAttemptAt = ''
+        AttemptCount = 0; NextAttemptAt = ''; RecurrenceUntil = $RecurrenceUntil
+        NotificationExecutionKey = ''
     }
 }
 
@@ -2058,9 +2063,20 @@ function Add-ScheduledShowEvent {
 function Update-ScheduleQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     if (Get-Setting 'MaintenanceMode') { return }
+    if (Get-Setting 'SchedulePaused') { return }
     foreach ($scheduleEntry in @($script:ScheduleEvents)) {
         if ([string]$scheduleEntry.Status -ne 'pending') { continue }
         $scheduledAt = [datetimeoffset]$scheduleEntry.ScheduledAt
+        $occurrenceKey = "$($scheduleEntry.Id)|$($scheduledAt.ToString('o'))"
+        $notifyMinutes = Get-SettingInt 'SchedulePreNotifyMinutes' 0
+        $minutesUntil = ($scheduledAt - $Now).TotalMinutes
+        if ($notifyMinutes -gt 0 -and $minutesUntil -gt 0 -and $minutesUntil -le $notifyMinutes -and
+            [string](Get-JsonProp $scheduleEntry 'NotificationExecutionKey') -ne $occurrenceKey) {
+            $roundedMinutes = [math]::Max(1, [math]::Ceiling($minutesUntil))
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $roundedMinutes دقائق.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
+            $scheduleEntry.NotificationExecutionKey = $occurrenceKey
+            Save-ScheduleEvents | Out-Null
+        }
         $nextAttemptRaw = [string](Get-JsonProp $scheduleEntry 'NextAttemptAt')
         $dueAt = if ([string]::IsNullOrWhiteSpace($nextAttemptRaw)) { $scheduledAt } else { [datetimeoffset]$nextAttemptRaw }
         if ($dueAt -gt $Now) { continue }
@@ -2091,7 +2107,14 @@ function Update-ScheduleQueue {
                 $days = if ([string]$scheduleEntry.Recurrence -eq 'daily') { 1 } else { 7 }
                 do { $scheduledAt = Get-NextLocalOccurrence -Occurrence $scheduledAt -Days $days -TimeZoneId ([string]$scheduleEntry.TimeZoneId) } while ($scheduledAt -le $Now)
                 $scheduleEntry.ScheduledAt = $scheduledAt.ToString('o')
-                $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''; $scheduleEntry.AttemptCount = 0
+                $untilText = [string](Get-JsonProp $scheduleEntry 'RecurrenceUntil')
+                $pastEnd = $false
+                if (-not [string]::IsNullOrWhiteSpace($untilText)) {
+                    $untilDate = [datetime]::MinValue
+                    if ([datetime]::TryParse($untilText, [ref]$untilDate)) { $pastEnd = $scheduledAt.Date -gt $untilDate.Date }
+                }
+                $scheduleEntry.Status = if ($pastEnd) { 'completed' } else { 'pending' }
+                $scheduleEntry.ExecutionKey = ''; $scheduleEntry.AttemptCount = 0; $scheduleEntry.NotificationExecutionKey = ''
             }
         }
         else {
@@ -2177,7 +2200,7 @@ function Start-ScheduleMutationFlow {
         Mode = 'schedule_time'; MutationAction = $Action; OriginalEventId = $EventId
         TemplateKey = [string]$entry.TemplateKey; Layer = [int](Get-JsonProp $entry 'Layer')
         Fields = @($values.Keys); Values = $values; Recurrence = [string]$entry.Recurrence
-        TimeZoneId = [string]$entry.TimeZoneId; UserId = $UserId
+        TimeZoneId = [string]$entry.TimeZoneId; RecurrenceUntil = [string](Get-JsonProp $entry 'RecurrenceUntil'); UserId = $UserId
     }
     Set-PendingState -ChatId $ChatId -State $state
     $verb = if ($Action -eq 'copy') { 'نسخ الحدث إلى موعد جديد' } else { 'تعديل موعد الحدث' }
@@ -2209,6 +2232,20 @@ function Complete-ScheduleText {
     param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value)
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state) { return }
+    if ($state.Mode -eq 'schedule_end_date') {
+        $endDate = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact($Value.Trim(), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$endDate)) {
+            Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل تاريخ الانتهاء بصيغة YYYY-MM-DD.' -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        if ($endDate.Date -lt ([datetimeoffset]$state.ScheduledAt).Date) {
+            Send-TelegramMessage -ChatId $ChatId -Text '❌ تاريخ الانتهاء يجب ألا يسبق أول موعد.' -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $state.RecurrenceUntil = $endDate.ToString('yyyy-MM-dd')
+        Show-ScheduleReview -ChatId $ChatId -State $state
+        return
+    }
     if ($state.Mode -eq 'schedule_fields') {
         $required = $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
         if ($required -and [string]::IsNullOrWhiteSpace($Value)) {
@@ -2254,6 +2291,10 @@ function Show-ScheduleReview {
         $reviewTitle, "القالب: $($State.TemplateKey)",
         "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
     )
+    if ([string]$State.Recurrence -ne 'once') {
+        $until = [string](Get-JsonProp $State 'RecurrenceUntil')
+        $lines += "نهاية التكرار: $(if ($until) { $until } else { 'بدون تاريخ انتهاء' })"
+    }
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
     $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt ([datetimeoffset]$State.ScheduledAt) `
         -WindowMinutes (Get-SettingInt 'ScheduleConflictWindowMinutes' 2))
@@ -2264,7 +2305,7 @@ function Show-ScheduleReview {
     }
     $lines += ''; $lines += 'لن يُحفظ الحدث حتى تضغط تأكيد الجدولة.'
     $State.Mode = 'schedule_review'; Set-PendingState -ChatId $ChatId -State $State
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard -State $State)
 }
 
 function Confirm-ScheduledShow {
@@ -2281,8 +2322,10 @@ function Confirm-ScheduledShow {
                 ScheduledAt = [string]$scheduleEntry.ScheduledAt; TimeZoneId = [string]$scheduleEntry.TimeZoneId
                 ExecutionKey = [string]$scheduleEntry.ExecutionKey; CompletedExecutionKey = [string]$scheduleEntry.CompletedExecutionKey
                 NextAttemptAt = [string]$scheduleEntry.NextAttemptAt; AttemptCount = [int]$scheduleEntry.AttemptCount
+                RecurrenceUntil = [string](Get-JsonProp $scheduleEntry 'RecurrenceUntil')
             }
             $scheduleEntry.ScheduledAt = [string]$state.ScheduledAt; $scheduleEntry.TimeZoneId = [string]$state.TimeZoneId
+            $scheduleEntry.RecurrenceUntil = [string](Get-JsonProp $state 'RecurrenceUntil')
             $scheduleEntry.ExecutionKey = ''; $scheduleEntry.CompletedExecutionKey = ''; $scheduleEntry.NextAttemptAt = ''; $scheduleEntry.AttemptCount = 0
             $saved = Save-ScheduleEvents
             if (-not $saved) {
@@ -2291,7 +2334,7 @@ function Confirm-ScheduledShow {
         }
     }
     else {
-        $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId -RecurrenceUntil ([string](Get-JsonProp $state 'RecurrenceUntil'))
         $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
     }
     Clear-PendingState -ChatId $ChatId
@@ -2722,9 +2765,13 @@ function Get-ScheduleRecurrenceKeyboard {
 }
 
 function Get-ScheduleReviewKeyboard {
-    return @{ inline_keyboard = @(
-            , @( (New-Button "✅ تأكيد الجدولة" 'schedule:confirm'), (New-Button "❌ إلغاء" 'cancel') )
-        ) }
+    param([hashtable]$State)
+    $rows = @()
+    if ($State -and [string]$State.Recurrence -ne 'once') {
+        $rows += , @((New-Button '📆 تحديد نهاية التكرار' 'schedule:setend'), (New-Button '♾ بدون انتهاء' 'schedule:clearend'))
+    }
+    $rows += , @((New-Button "✅ تأكيد الجدولة" 'schedule:confirm'), (New-Button "❌ إلغاء" 'cancel'))
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-UpcomingScheduleKeyboard {
@@ -5730,6 +5777,20 @@ function Invoke-CallbackQuery {
             Confirm-ScheduledShow -ChatId $chatId -UserId $userId
             break
         }
+        'schedule:setend' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $userId -or [string]$state.Recurrence -eq 'once') { break }
+            $state.Mode = 'schedule_end_date'; Set-PendingState -ChatId $chatId -State $state
+            Send-TelegramMessage -ChatId $chatId -Text '📆 أرسل آخر تاريخ مسموح للتكرار بصيغة YYYY-MM-DD.' -ReplyMarkup (Get-CancelKeyboard)
+            break
+        }
+        'schedule:clearend' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $userId) { break }
+            $state.RecurrenceUntil = ''
+            Show-ScheduleReview -ChatId $chatId -State $state
+            break
+        }
         'schededit:*' {
             Start-ScheduleMutationFlow -Action edit -EventId $data.Substring(10) -ChatId $chatId -UserId $userId
             break
@@ -6350,7 +6411,7 @@ try {
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text | Out-Null }
-                                { $_ -in @('schedule_fields', 'schedule_time') } { Complete-ScheduleText -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -in @('schedule_fields', 'schedule_time', 'schedule_end_date') } { Complete-ScheduleText -ChatId $chatId -Value $text | Out-Null }
                                 default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj | Out-Null }
                             }
                         }

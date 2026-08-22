@@ -2661,8 +2661,12 @@ Describe 'Reliable schedule store and executor' {
     BeforeEach {
         $script:OriginalScheduleMaxRetries = Get-Setting 'ScheduleMaxRetries'
         $script:OriginalScheduleRetryDelaySeconds = Get-Setting 'ScheduleRetryDelaySeconds'
+        $script:OriginalSchedulePaused = Get-Setting 'SchedulePaused'
+        $script:OriginalSchedulePreNotifyMinutes = Get-Setting 'SchedulePreNotifyMinutes'
         $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue 0 -Force
         $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue 30 -Force
+        $config.Settings | Add-Member -NotePropertyName SchedulePaused -NotePropertyValue $false -Force
+        $config.Settings | Add-Member -NotePropertyName SchedulePreNotifyMinutes -NotePropertyValue 0 -Force
         $script:OriginalScheduleFileForTest = $script:scheduleFile
         $script:OriginalScheduleExecutionFileForTest = $script:scheduleExecutionFile
         $script:scheduleFile = Join-Path $TestDrive 'schedule.json'
@@ -2677,6 +2681,8 @@ Describe 'Reliable schedule store and executor' {
     AfterEach {
         $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue $script:OriginalScheduleMaxRetries -Force
         $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue $script:OriginalScheduleRetryDelaySeconds -Force
+        $config.Settings | Add-Member -NotePropertyName SchedulePaused -NotePropertyValue $script:OriginalSchedulePaused -Force
+        $config.Settings | Add-Member -NotePropertyName SchedulePreNotifyMinutes -NotePropertyValue $script:OriginalSchedulePreNotifyMinutes -Force
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         $script:scheduleFile = $script:OriginalScheduleFileForTest
         $script:scheduleExecutionFile = $script:OriginalScheduleExecutionFileForTest
@@ -2761,6 +2767,43 @@ Describe 'Reliable schedule store and executor' {
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
         $scheduleEntry.Status | Should -Be 'completed'
         $scheduleEntry.CompletedExecutionKey | Should -Be $scheduleEntry.ExecutionKey
+    }
+
+    It 'keeps due events pending while scheduling is paused' {
+        $config.Settings | Add-Member -NotePropertyName SchedulePaused -NotePropertyValue $true -Force
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey urgent -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($entry)
+
+        Update-ScheduleQueue -Now $now
+
+        $entry.Status | Should -Be 'pending'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'sends one advance notification per occurrence without executing early' {
+        $config.Settings | Add-Member -NotePropertyName SchedulePreNotifyMinutes -NotePropertyValue 10 -Force
+        Mock Send-TelegramMessage { }
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey urgent -ScheduledAt $now.AddMinutes(5) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($entry)
+
+        Update-ScheduleQueue -Now $now
+        Update-ScheduleQueue -Now $now.AddMinutes(1)
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 1 -and $Text -match 'بعد.*دقائق|قريب' }
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'completes a recurring event when its next occurrence exceeds the end date' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey urgent -ScheduledAt $now.AddMinutes(-1) -Recurrence daily -ChatId 1 -UserId 2 -RecurrenceUntil '2099-08-21'
+        $script:ScheduleEvents.Add($entry)
+
+        Update-ScheduleQueue -Now $now
+
+        $entry.Status | Should -Be 'completed'
+        $entry.LastResult | Should -Be 'success'
     }
 
     It 'writes a content-free JSONL execution result for each attempt' {

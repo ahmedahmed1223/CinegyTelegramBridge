@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.2.23 — 2026-08-22
+
+- Added `SchedulePaused` to keep all events pending without executing or
+  deleting them.
+- Added optional `SchedulePreNotifyMinutes` notifications, disabled by default,
+  with one notification per occurrence.
+- Added reviewed recurrence end dates for daily and weekly events, including
+  validation that the end does not precede the first occurrence.
+- Completed recurring events after their next local occurrence exceeds the
+  configured end date.
+- Preserved recurrence end dates during copy and edit operations.
+- Added pause, notification de-duplication, recurrence completion, and UI flow
+  coverage.
+
 ## 4.2.22 — 2026-08-22
 
 - Added copy and edit-time buttons for each pending schedule event.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.2.38 — 2026-08-22
+
+- Extracts interactive pending-flow storage, timeout evaluation, and removal into `Modules/BridgeFlowState.psm1`.
+- Preserves bridge-owned cleanup effects for layer locks, staged imports, and persisted drafts while reducing direct `$script:PendingState` manipulation.
+- Supports numeric chat keys restored through different PowerShell/JSON key types.
+- Adds direct flow-state tests and bridge compatibility coverage for cancellation, expiry, periodic cleanup, draft persistence, and lock release.
+- Completes the planned first separation of Telegram transport, authorization policy, and interactive flow state.
+
 ## 4.2.37 — 2026-08-22
 
 - Extracts private-chat, operator, administrator, disabled-user, and legacy private-chat fallback decisions into `Modules/BridgeAuthorization.psm1`.

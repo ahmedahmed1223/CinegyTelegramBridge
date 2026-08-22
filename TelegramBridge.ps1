@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.37'
+$script:BridgeVersion = '4.2.38'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -59,6 +59,7 @@ Import-Module (Join-Path $moduleRoot "BridgeSettings.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeStorage.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeTelegram.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeAuthorization.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeFlowState.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -3289,8 +3290,7 @@ function Unlock-GfxLayer {
 
 function Set-PendingState {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
-    $State.StartedAt = Get-Date
-    $script:PendingState[$ChatId] = $State
+    Set-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId -State $State
     if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
 }
 
@@ -3299,27 +3299,29 @@ function Get-PendingState {
        aged out. Expiry is checked on read as well as on the tick so a stale
        entry can never be consumed. #>
     param([Parameter(Mandatory)][long]$ChatId)
-    if (-not $script:PendingState.ContainsKey($ChatId)) { return $null }
-    $state = $script:PendingState[$ChatId]
     $timeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
-    if (((Get-Date) - $state.StartedAt).TotalMinutes -ge $timeout) {
-        Clear-PendingState -ChatId $ChatId
+    $result=Get-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId -TimeoutMinutes $timeout
+    if (-not $result.State) { return $null }
+    if ($result.Expired) {
+        Complete-PendingStateCleanup -ChatId $ChatId -State $result.State
         return $null
     }
-    return $state
+    return $result.State
+}
+
+function Complete-PendingStateCleanup {
+    param([Parameter(Mandatory)][long]$ChatId,[Parameter(Mandatory)][hashtable]$State)
+    if ($State.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$State.LockLayer) }
+    if ($State.ContainsKey('ImportStagedPath') -and (Test-Path -LiteralPath ([string]$State.ImportStagedPath))) {
+        Remove-Item -LiteralPath ([string]$State.ImportStagedPath) -Force -ErrorAction SilentlyContinue
+    }
+    if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
 }
 
 function Clear-PendingState {
     param([Parameter(Mandatory)][long]$ChatId)
-    if ($script:PendingState.ContainsKey($ChatId)) {
-        $state = $script:PendingState[$ChatId]
-        if ($state.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$state.LockLayer) }
-        if ($state.ContainsKey('ImportStagedPath') -and (Test-Path -LiteralPath ([string]$state.ImportStagedPath))) {
-            Remove-Item -LiteralPath ([string]$state.ImportStagedPath) -Force -ErrorAction SilentlyContinue
-        }
-        $script:PendingState.Remove($ChatId)
-        if ([string]$state.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
-    }
+    $state=Remove-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId
+    if ($state) { Complete-PendingStateCleanup -ChatId $ChatId -State $state }
 }
 
 # ============================================================================

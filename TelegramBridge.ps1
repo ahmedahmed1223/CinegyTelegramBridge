@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.16'
+$script:BridgeVersion = '4.2.17'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -427,6 +427,8 @@ else {
     $logPath = Join-Path $logDir 'bridge.log'
 }
 New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
+$script:logDir = $logDir
+$script:logPath = $logPath
 
 $relayPidFile = Join-Path $logDir "relay.pid"
 $usageFile = Join-Path $logDir "usage.json"
@@ -745,6 +747,7 @@ $script:BotCommandList = @(
     @{ command = 'settings'; description = '⚙️ الإعدادات (للمشرفين)' }
     @{ command = 'audit'; description = '📜 سجل آخر العمليات (للمشرفين)' }
     @{ command = 'diagnostics'; description = '🧪 تقرير التشخيص (للمشرفين)' }
+    @{ command = 'diagbundle'; description = '📦 حزمة تشخيص منقحة (للمشرفين)' }
 )
 
 function Register-BotCommands {
@@ -814,6 +817,30 @@ function Import-UserProfiles {
         }
     }
     catch { Write-BridgeLog "Could not read user-profiles.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Send-TelegramDocument {
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][string]$FilePath,
+        [string]$Caption = ''
+    )
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            $form = @{ chat_id = "$ChatId"; document = Get-Item -LiteralPath $FilePath -ErrorAction Stop }
+            if ($Caption) { $form.caption = $Caption }
+            Invoke-RestMethod -Uri "$apiBase/sendDocument" -Method Post -Form $form | Out-Null
+            return $true
+        }
+        catch {
+            if ($attempt -eq 2) {
+                Write-BridgeLog "Failed to send Telegram document to $ChatId : $($_.Exception.Message)" 'ERROR'
+                return $false
+            }
+            Start-Sleep -Milliseconds 400
+        }
+    }
+    return $false
 }
 
 function Save-UserProfiles {
@@ -4018,7 +4045,7 @@ function Get-BridgeDiagnosticsSnapshot {
     $driveName = $root.TrimEnd(':')
     $drive = Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
     $runtimeStorageBytes = 0L
-    foreach ($runtimeFile in @(Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue)) {
+    foreach ($runtimeFile in @(Get-ChildItem -LiteralPath $script:logDir -File -ErrorAction SilentlyContinue)) {
         $length = Get-JsonProp $runtimeFile 'Length'
         if ($null -ne $length) { $runtimeStorageBytes += [long]$length }
     }
@@ -4072,9 +4099,78 @@ function Get-DiagnosticWarnings {
 
 function Get-DiagnosticsKeyboard {
     return @{ inline_keyboard = @(
+        , @((New-Button '📦 حزمة تشخيص منقحة' 'diag:bundle'))
         , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime'), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit'))
         , @((New-Button '🏠 القائمة' 'menu:main'))
     ) }
+}
+
+function New-DiagnosticBundle {
+    $bundleDirectory = Join-Path $script:logDir 'diagnostics'
+    New-Item -ItemType Directory -Path $bundleDirectory -Force -ErrorAction Stop | Out-Null
+    $id = [guid]::NewGuid().ToString('N')
+    $stagingDirectory = Join-Path $bundleDirectory "staging-$id"
+    $bundlePath = Join-Path $bundleDirectory "cinegy-bridge-diagnostics-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$($id.Substring(0,8)).zip"
+    New-Item -ItemType Directory -Path $stagingDirectory -Force -ErrorAction Stop | Out-Null
+    try {
+        $snapshot = Get-BridgeDiagnosticsSnapshot
+        $warnings = @(Get-DiagnosticWarnings -Snapshot $snapshot `
+            -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
+            -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
+            -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
+        $summary = [ordered]@{
+            generatedAtUtc      = [DateTime]::UtcNow.ToString('o')
+            bridgeVersion       = $script:BridgeVersion
+            powershellVersion   = [string]$PSVersionTable.PSVersion
+            uptimeSeconds       = [long]([timespan]$snapshot.Uptime).TotalSeconds
+            processor           = Protect-DiagnosticText ([string]$snapshot.Processor)
+            workingSetMB        = $snapshot.WorkingSetMB
+            privateMemoryMB     = $snapshot.PrivateMemoryMB
+            diskFreeGB          = $snapshot.DiskFreeGB
+            runtimeStorageBytes = $snapshot.RuntimeStorageBytes
+            backupStorageBytes  = $snapshot.BackupStorageBytes
+            airOperations       = $snapshot.AirOperations
+            warnings            = @($warnings | ForEach-Object { Protect-DiagnosticText $_ })
+        }
+        $summaryPath = Join-Path $stagingDirectory 'summary.json'
+        [IO.File]::WriteAllText($summaryPath, ($summary | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+
+        $recentPath = Join-Path $stagingDirectory 'recent-runtime.log'
+        $recentLines = if (Test-Path -LiteralPath $script:logPath) { @(Get-Content -LiteralPath $script:logPath -Tail 200 -ErrorAction SilentlyContinue) } else { @() }
+        $safeLines = @($recentLines | ForEach-Object { Protect-DiagnosticText ([string]$_) })
+        [IO.File]::WriteAllLines($recentPath, [string[]]$safeLines, [Text.UTF8Encoding]::new($false))
+
+        Compress-Archive -LiteralPath $summaryPath, $recentPath -DestinationPath $bundlePath -CompressionLevel Optimal -ErrorAction Stop
+        return $bundlePath
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingDirectory) { Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-DiagnosticBundleCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'هذا الخيار للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $bundlePath = $null
+    try {
+        $bundlePath = New-DiagnosticBundle
+        if (Send-TelegramDocument -ChatId $ChatId -FilePath $bundlePath -Caption '📦 حزمة تشخيص منقحة: لا تحتوي الإعدادات أو حالة الهواء أو معرفات المستخدمين.') {
+            Add-AuditEntry "📦 تنزيل حزمة تشخيص منقحة - user $UserId"
+        }
+        else {
+            Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر إرسال حزمة التشخيص.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+        }
+    }
+    catch {
+        Write-BridgeLog "Diagnostic bundle creation failed: $($_.Exception.Message)" 'ERROR'
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر إنشاء حزمة التشخيص.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+    }
+    finally {
+        if ($bundlePath -and (Test-Path -LiteralPath $bundlePath)) { Remove-Item -LiteralPath $bundlePath -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 function Request-DiagnosticLogClear {
@@ -4099,10 +4195,10 @@ function Clear-DiagnosticLog {
     )
     try {
         if ($Kind -eq 'runtime') {
-            foreach ($file in @(Get-ChildItem -LiteralPath $logDir -File -Filter 'bridge.*.log' -ErrorAction SilentlyContinue)) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $script:logDir -File -Filter 'bridge.*.log' -ErrorAction SilentlyContinue)) {
                 Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
             }
-            [IO.File]::WriteAllText($logPath, '', [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($script:logPath, '', [Text.UTF8Encoding]::new($false))
         }
         else {
             [IO.File]::WriteAllText($script:auditFile, '', [Text.UTF8Encoding]::new($false))
@@ -5042,6 +5138,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('حالة', 'status') } { Invoke-StatusCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صحة', 'health', 'fullstatus') } { Invoke-HealthCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('حزمةتشخيص', 'diagbundle') } { Invoke-DiagnosticBundleCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
         { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text "📅 الجدولة:" -ReplyMarkup (Get-ScheduleMenuKeyboard) }
         { $_ -in @('سجل', 'audit') } {
@@ -5238,6 +5335,10 @@ function Invoke-CallbackQuery {
         }
         'menu:diagnostics' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticsCommand -ChatId $chatId -UserId $userId }
+            break
+        }
+        'diag:bundle' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticBundleCommand -ChatId $chatId -UserId $userId }
             break
         }
         'diag:clearruntime' {

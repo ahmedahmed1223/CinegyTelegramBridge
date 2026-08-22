@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.2.17 — 2026-08-22
+
+- Added an administrator-only redacted diagnostic ZIP via the diagnostics
+  screen and `/diagbundle`.
+- Limited bundle contents to `summary.json` and the latest 200 sanitized
+  runtime lines; configuration, on-air state, schedules, templates, and audit
+  history are never packaged.
+- Removed bot credentials and stable user/chat/from/admin identifiers from
+  exported text.
+- Deleted the generated ZIP locally after the Telegram send attempt.
+- Corrected runtime-path isolation so diagnostics and cleanup always target
+  the selected runtime directory.
+- Added bundle allow-list, redaction, and administrator delivery tests.
+
 ## 4.2.16 — 2026-08-22
 
 - Added administrator-only buttons to clear runtime logs or the structured

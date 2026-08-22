@@ -1154,6 +1154,42 @@ Describe 'Administrator log cleanup' {
     }
 }
 
+Describe 'Redacted diagnostic bundle' {
+    BeforeEach {
+        $script:logDir = Join-Path $TestDrive 'bundle-runtime'
+        New-Item -ItemType Directory -Path $script:logDir -Force | Out-Null
+        $script:logPath = Join-Path $script:logDir 'bridge.log'
+        Set-Content -LiteralPath $script:logPath -Value @(
+            '2026-08-22 [INFO] AIR_OP user=123456 chat=987654 target="ticker"'
+            '2026-08-22 [ERROR] token 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345 from 55555'
+        )
+    }
+
+    It 'contains only a health summary and redacted recent runtime lines' {
+        $bundle = New-DiagnosticBundle
+        $extract = Join-Path $TestDrive 'bundle-extracted'
+        [IO.Compression.ZipFile]::ExtractToDirectory($bundle, $extract)
+
+        @(Get-ChildItem -LiteralPath $extract -File).Name | Sort-Object | Should -Be @('recent-runtime.log', 'summary.json')
+        $allText = (Get-Content -LiteralPath (Join-Path $extract 'summary.json') -Raw) + "`n" +
+            (Get-Content -LiteralPath (Join-Path $extract 'recent-runtime.log') -Raw)
+        $allText | Should -Not -Match '123456|987654|55555|ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        $allText | Should -Not -Match 'BotToken|AllowedUserIds|onair'
+        $allText | Should -Match 'user=\*\*\*|chat=\*\*\*'
+    }
+
+    It 'is available only through the administrator command' {
+        Mock Test-Admin { $true }
+        Mock New-DiagnosticBundle { Join-Path $TestDrive 'diagnostics.zip' }
+        Mock Send-TelegramDocument { $true }
+        Mock Remove-Item { }
+
+        Invoke-DiagnosticBundleCommand -ChatId 100 -UserId 100
+
+        Should -Invoke Send-TelegramDocument -Times 1 -Exactly -ParameterFilter { $ChatId -eq 100 -and $FilePath -match 'diagnostics\.zip$' }
+    }
+}
+
 Describe 'Admin configuration backup menu' {
     BeforeEach {
         Mock Confirm-TelegramCallback { }

@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.16
+## Version 4.2.17
 
-Version 4.2.16 adds storage-growth warnings and confirmed administrator controls for clearing the runtime or audit history without touching `onair.json`. Version 4.2.15 adds an independent, permanent `logs/audit.jsonl` security and control trail, with UTC timestamps and correlation ids shared with air operations, and keeps helper return values such as `True` out of the runtime terminal. Version 4.2.14 expands administrator diagnostics with build and uptime data,
+Version 4.2.17 adds an administrator-only redacted diagnostic ZIP containing a health summary and sanitized recent runtime lines, never configuration, on-air state, editorial values, secrets, or actor identifiers. Version 4.2.16 adds storage-growth warnings and confirmed administrator controls for clearing the runtime or audit history without touching `onair.json`. Version 4.2.15 adds an independent, permanent `logs/audit.jsonl` security and control trail, with UTC timestamps and correlation ids shared with air operations, and keeps helper return values such as `True` out of the runtime terminal. Version 4.2.14 expands administrator diagnostics with build and uptime data,
 processor and memory, disk capacity, runtime-file sizes, and in-memory air
 operation outcome counters. Version 4.2.13 adds bounded exponential backoff to opted-in scheduled retries,
 configured by `ScheduleRetryBackoffFactor` and `ScheduleRetryMaxDelaySeconds`. Version 4.2.12 adds a content-free, machine-readable
@@ -522,6 +522,7 @@ buttons are the primary way to operate the bot:
 | `/اخفاء` `/اخفاءالكل` `/خروج` | `/hide` `/hideall` `/exit` |
 | `/تحديث` `/حالة` `/صورة` | `/set` `/status` `/snapshot` |
 | `/سجل` `/اعدادات` `/أمر` | `/audit` `/settings` `/cmd` |
+| `/تشخيص` `/حزمةتشخيص` | `/diagnostics` `/diagbundle` |
 
 ## Watching the live air output in Telegram
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.3 — 2026-08-22
+
+- Added `logs/user-profiles.json` with approval time, approving administrator,
+  and last authorized activity time; message content is never stored.
+- Existing users receive unknown historical metadata until their first new
+  activity instead of invented timestamps.
+- User management now displays last activity, and revocation removes the
+  runtime profile while preserving the audit event.
+- Activity persistence is atomically flushed at most once per minute to keep
+  disk writes out of the high-frequency interaction path.
+- Added regression coverage for approval metadata, authorized-only activity,
+  and profile cleanup on revocation.
+
 ## 4.2.2 — 2026-08-22
 
 - Added an administrator user-management screen with Alias, role, and active

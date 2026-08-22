@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.2'
+$script:BridgeVersion = '4.2.3'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -418,6 +418,7 @@ $usageFile = Join-Path $logDir "usage.json"
 $script:userFavoritesFile = Join-Path $logDir "favorites.json"
 $script:userAliasesFile = Join-Path $logDir "user-aliases.json"
 $script:disabledUsersFile = Join-Path $logDir "disabled-users.json"
+$script:userProfilesFile = Join-Path $logDir "user-profiles.json"
 $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -732,6 +733,54 @@ function Show-MainMenu {
 # ============================================================================
 
 $script:DisabledUserIds = @{}
+$script:UserProfiles = @{}
+$script:UserProfilesDirty = $false
+$script:LastUserProfilesFlush = [datetime]::MinValue
+
+function Import-UserProfiles {
+    if (-not (Test-Path -LiteralPath $script:userProfilesFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:userProfilesFile -Raw | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) {
+            $script:UserProfiles[$prop.Name] = @{
+                AddedAt = [string](Get-JsonProp $prop.Value 'AddedAt'); AddedByUserId = [long](Get-JsonProp $prop.Value 'AddedByUserId')
+                LastActivityAt = [string](Get-JsonProp $prop.Value 'LastActivityAt')
+            }
+        }
+    }
+    catch { Write-BridgeLog "Could not read user-profiles.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-UserProfiles {
+    param([switch]$Force)
+    if (-not $script:UserProfilesDirty) { return $true }
+    if (-not $Force -and ((Get-Date) - $script:LastUserProfilesFlush).TotalSeconds -lt 60) { return $true }
+    try {
+        $temporary = "$($script:userProfilesFile).tmp"
+        $script:UserProfiles | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:userProfilesFile -Force -ErrorAction Stop
+        $script:UserProfilesDirty = $false; $script:LastUserProfilesFlush = Get-Date
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write user-profiles.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Record-UserApprovalMetadata {
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ApprovedByUserId)
+    $script:UserProfiles[[string]$TargetUserId] = @{ AddedAt = (Get-Date).ToString('o'); AddedByUserId = $ApprovedByUserId; LastActivityAt = $null }
+    $script:UserProfilesDirty = $true
+    return Save-UserProfiles -Force
+}
+
+function Update-UserLastActivity {
+    param([Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Authorized -ChatId $UserId -UserId $UserId)) { return $false }
+    $id = [string]$UserId
+    if (-not $script:UserProfiles.ContainsKey($id)) { $script:UserProfiles[$id] = @{ AddedAt = ''; AddedByUserId = 0L; LastActivityAt = '' } }
+    $script:UserProfiles[$id].LastActivityAt = (Get-Date).ToString('o'); $script:UserProfilesDirty = $true
+    Save-UserProfiles | Out-Null
+    return $true
+}
 
 function Import-DisabledUsers {
     if (-not (Test-Path -LiteralPath $script:disabledUsersFile)) { return }
@@ -779,7 +828,8 @@ function Revoke-AuthorizedUser {
         $config | Add-Member -NotePropertyName $name -NotePropertyValue $remaining -Force
     }
     $script:DisabledUserIds.Remove([string]$TargetUserId)
-    Save-DisabledUsers | Out-Null; Save-Config
+    $script:UserProfiles.Remove([string]$TargetUserId); $script:UserProfilesDirty = $true
+    Save-DisabledUsers | Out-Null; Save-UserProfiles -Force | Out-Null; Save-Config
     return [pscustomobject]@{ Success = $true; Error = '' }
 }
 
@@ -793,6 +843,9 @@ function Get-AuthorizedUsers {
                 UserId = $id; Alias = Get-UserDisplayName -UserId $id
                 Role = if ($adminIds -contains $id) { 'admin' } else { 'operator' }
                 Disabled = Test-UserDisabled -UserId $id
+                AddedAt = if ($script:UserProfiles.ContainsKey([string]$id)) { [string]$script:UserProfiles[[string]$id].AddedAt } else { '' }
+                AddedByUserId = if ($script:UserProfiles.ContainsKey([string]$id)) { [long]$script:UserProfiles[[string]$id].AddedByUserId } else { 0L }
+                LastActivityAt = if ($script:UserProfiles.ContainsKey([string]$id)) { [string]$script:UserProfiles[[string]$id].LastActivityAt } else { '' }
             }
         })
 }
@@ -2189,6 +2242,8 @@ function Get-UsersAdminKeyboard {
         $role = if ($user.Role -eq 'admin') { 'مشرف' } else { 'مشغّل' }
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
         $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
+        $lastActivity = if ($user.LastActivityAt) { ([datetime]$user.LastActivityAt).ToString('MM-dd HH:mm') } else { 'غير معروف' }
+        $rows += , @((New-Button "🕒 آخر نشاط: $lastActivity" "usr:revoke:$($user.UserId)"))
         $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
     }
     $rows += , @((New-Button '⬅️ رجوع' 'menu'))
@@ -3705,6 +3760,7 @@ function Grant-UserAccess {
         $changed = $true
     }
     if ($changed) { Save-Config }
+    Record-UserApprovalMetadata -TargetUserId $targetUserId -ApprovedByUserId $ApproverUserId | Out-Null
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"
@@ -4488,6 +4544,7 @@ function Invoke-BridgeCommand {
         Send-TelegramMessage -ChatId $ChatId -Text $msg
         return
     }
+    Update-UserLastActivity -UserId $UserId | Out-Null
 
     $text = $Text.Trim()
     if ($text -notmatch '^/(\S+)\s*(.*)$') {
@@ -4569,6 +4626,7 @@ function Invoke-CallbackQuery {
         Send-TelegramMessage -ChatId $chatId -Text $msg
         return
     }
+    Update-UserLastActivity -UserId $userId | Out-Null
 
     switch -Wildcard ($data) {
         'menu' {
@@ -5289,7 +5347,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
         try { & $step }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -5348,6 +5406,7 @@ Import-UsageCounts
 Import-UserFavorites
 Import-UserAliases
 Import-DisabledUsers
+Import-UserProfiles
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues

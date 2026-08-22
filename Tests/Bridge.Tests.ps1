@@ -110,6 +110,8 @@ Describe 'Authorized user administration' {
         $config.AdminChatIds = @(101); $config.AdminUserIds = @(101)
         $script:DisabledUserIds = @{}
         $script:disabledUsersFile = Join-Path $TestDrive 'disabled-users.json'
+        $script:UserProfiles = @{}
+        $script:userProfilesFile = Join-Path $TestDrive 'user-profiles.json'
         Mock Save-Config { }
     }
 
@@ -161,6 +163,25 @@ Describe 'Authorized user administration' {
         $config.AllowedUserIds | Should -Contain 202
         (Get-PendingState -ChatId 101).Mode | Should -Be 'user_revoke'
         Should -Invoke Save-Config -Times 0 -Exactly
+    }
+
+    It 'records who approved a user and when they were added' {
+        Record-UserApprovalMetadata -TargetUserId 202 -ApprovedByUserId 101 | Should -BeTrue
+        $script:UserProfiles['202'].AddedByUserId | Should -Be 101
+        $script:UserProfiles['202'].AddedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'updates last activity only for an authorized user' {
+        Update-UserLastActivity -UserId 202 | Should -BeTrue
+        $script:UserProfiles['202'].LastActivityAt | Should -Not -BeNullOrEmpty
+        Update-UserLastActivity -UserId 303 | Should -BeFalse
+        $script:UserProfiles.ContainsKey('303') | Should -BeFalse
+    }
+
+    It 'removes the runtime profile when access is revoked' {
+        $script:UserProfiles['202'] = @{ AddedAt = (Get-Date).ToString('o'); AddedByUserId = 101; LastActivityAt = $null }
+        Revoke-AuthorizedUser -TargetUserId 202 | Out-Null
+        $script:UserProfiles.ContainsKey('202') | Should -BeFalse
     }
 }
 

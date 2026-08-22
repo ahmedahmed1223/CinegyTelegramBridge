@@ -1297,6 +1297,10 @@ Describe 'Get-AirTelemetryStatus' {
 
 Describe 'SHOW identity tracking' {
     BeforeEach {
+        $script:OriginalReservedLayers = Get-Setting 'ReservedLayers'
+        $script:OriginalDisabledTemplateKeys = Get-Setting 'DisabledTemplateKeys'
+        $config.Settings | Add-Member -NotePropertyName ReservedLayers -NotePropertyValue '' -Force
+        $config.Settings | Add-Member -NotePropertyName DisabledTemplateKeys -NotePropertyValue '' -Force
         $OnAir.Clear()
         $LastShow.Clear()
         Mock Get-TemplateStore {
@@ -1332,6 +1336,8 @@ Describe 'SHOW identity tracking' {
     }
 
     AfterEach {
+        $config.Settings | Add-Member -NotePropertyName ReservedLayers -NotePropertyValue $script:OriginalReservedLayers -Force
+        $config.Settings | Add-Member -NotePropertyName DisabledTemplateKeys -NotePropertyValue $script:OriginalDisabledTemplateKeys -Force
         $OnAir.Clear()
         $LastShow.Clear()
     }
@@ -1365,6 +1371,28 @@ Describe 'SHOW identity tracking' {
         $result.Error | Should -Match 'التحقق'
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
         Should -Invoke Update-OnAirStateFromCinegy -Times 0 -Exactly
+    }
+
+    It 'blocks SHOW on an administrator-reserved layer before Cinegy is queried' {
+        $config.Settings | Add-Member -NotePropertyName ReservedLayers -NotePropertyValue '4, 9' -Force
+
+        $result = Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'محجوزة'
+        Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'blocks a temporarily disabled template before Cinegy is queried' {
+        $config.Settings | Add-Member -NotePropertyName DisabledTemplateKeys -NotePropertyValue 'urgent;logo' -Force
+
+        $result = Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'معطّل'
+        Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 }
 

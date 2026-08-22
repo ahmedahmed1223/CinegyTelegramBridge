@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.9 — 2026-08-22
+
+- Added administrator-editable `ReservedLayers` and `DisabledTemplateKeys`
+  settings.
+- Blocked SHOW preparation and final execution for reserved layers and
+  temporarily disabled templates before any Cinegy query or mutation.
+- Kept HIDE and EXIT available for reserved layers so operators can still take
+  content off air safely.
+- Applied the central execution policy to scheduled and interactive SHOW paths.
+- Added regression coverage proving blocked policies send no Cinegy command.
+
 ## 4.2.8 — 2026-08-22
 
 - Added a unique `air-*` correlation id to every SHOW, HIDE, EXIT, and live

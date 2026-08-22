@@ -68,6 +68,8 @@
     "NotifyAdminsOnExternalChange": true,
     "NotifyAdminsOnCinegyHealth": true,
     "CinegyStateStaleSeconds": 45,
+    "ReservedLayers": "",
+    "DisabledTemplateKeys": "",
     "MaintenanceMode": false,
     "LayerNames": "7=عاجل;8=أخبار;9=شريط الأخبار"
   },

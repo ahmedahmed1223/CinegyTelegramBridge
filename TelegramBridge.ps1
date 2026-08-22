@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.8'
+$script:BridgeVersion = '4.2.9'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -79,6 +79,8 @@ $script:DefaultSettings = [ordered]@{
     EnableTimedShow            = $true
     EnableHideAll              = $true
     HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
+    ReservedLayers             = ''     # layers where SHOW is blocked; HIDE/EXIT remain available
+    DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
@@ -2881,6 +2883,23 @@ function Test-MaintenanceControl {
     return $false
 }
 
+function Test-TemplateShowPolicy {
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][int]$Layer)
+    $reserved = @()
+    foreach ($part in ([string](Get-Setting 'ReservedLayers') -split '[,;\s]+')) {
+        $parsedLayer = 0
+        if ([int]::TryParse($part.Trim(), [ref]$parsedLayer) -and $parsedLayer -gt 0) { $reserved += $parsedLayer }
+    }
+    if ($reserved -contains $Layer) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا." }
+    }
+    $disabled = @([string](Get-Setting 'DisabledTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (@($disabled | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا." }
+    }
+    return [pscustomobject]@{ Allowed = $true; Reason = '' }
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -2902,6 +2921,12 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+    $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer)
+    if (-not $policy.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$policy.Reason)
+        return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
+    }
 
     # SHOW is the only operation that can replace visible content. Verify the
     # target layer immediately before mutating it; an unreachable Cinegy must
@@ -3020,6 +3045,11 @@ function Start-ShowFlow {
     $t = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $t) {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer)
+    if (-not $policy.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)

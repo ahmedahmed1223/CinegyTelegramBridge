@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.2.33 — 2026-08-22
+
+- Keeps safe rollback disabled by default through `EnableSafeRollback`; administrators can opt in without changing the existing operating workflow.
+
+- Added short-lived, in-memory rollback candidates for correlated bot scenes
+  replaced by SHOW or removed manually with HIDE/EXIT.
+- Kept editorial field values out of every disk file and expired candidates
+  after the configurable `RollbackWindowSeconds` interval.
+- Required operator ownership or administrator access, a review step, a layer
+  lock, and an immediate Cinegy comparison before restoration.
+- Required exact `ActiveId` continuity after replacement or a still-empty layer
+  after HIDE/EXIT; external changes, timeout, uncertainty, and expiry cancel and
+  invalidate rollback without sending a playout command.
+- Added regression tests for correlation, replacement, hide restoration,
+  review, expiry, external changes, and Cinegy uncertainty.
+
 ## 4.2.32 — 2026-08-22
 
 - Added an administrator-configured template test layer, disabled by default.

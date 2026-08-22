@@ -86,6 +86,8 @@
     "SensitiveTemplateAutoHideSeconds": 30,
     "TemplateTestLayer": 0,
     "TemplateTestAutoHideSeconds": 10,
+  "EnableSafeRollback": false,
+  "RollbackWindowSeconds": 120,
     "MaintenanceMode": false,
     "TelegramRequestTimeoutSeconds": 15,
     "LayerNames": "7=عاجل;8=أخبار;9=شريط الأخبار"

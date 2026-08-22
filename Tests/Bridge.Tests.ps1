@@ -299,6 +299,106 @@ Describe 'Isolated template test layer and definition comparison' {
     }
 }
 
+Describe 'Safe in-memory layer rollback' {
+    BeforeEach {
+        $config.Settings.EnableSafeRollback=$true
+        $script:RollbackCandidates=@{}; $script:LastSuccessfulLayerShows=@{}; $script:OnAir=@{}
+        $script:PendingState.Clear(); $script:LayerLocks=@{}; $script:AutoHideQueue=[Collections.Generic.List[object]]::new()
+        Mock Get-TemplateStore {
+            @{ Order=@('alpha','beta'); Map=@{
+                alpha=@{ Key='alpha'; Layer=5; Path='C:\Scenes\Alpha.cintitle'; Fields=@('Title'); FieldTypes=@{}; Presets=@() }
+                beta=@{ Key='beta'; Layer=5; Path='C:\Scenes\Beta.cintitle'; Fields=@('Title'); FieldTypes=@{}; Presets=@() }
+            }; Errors=@() }
+        }
+        Mock Test-Admin { $false }
+        Mock Send-TelegramMessage { }
+        Mock Save-OnAirState { }
+        Mock Add-UsageCount { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Write-AirOperationResult { }
+        Mock Update-OnAirStateFromCinegy { [pscustomobject]@{ Added=@(); Removed=@(); Failed=@() } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success=$true; EventId='event-new'; Error=''; Xml='' } }
+    }
+
+    AfterEach {
+        $config.Settings.EnableSafeRollback=$false
+    }
+
+    It 'keeps rollback disabled by default until the administrator enables it' {
+        $config.Settings.EnableSafeRollback=$false
+        Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'} } `
+            -ExpectedState hidden -ActorUserId 10
+        Get-RollbackCandidate -Layer 5 -UserId 10 | Should -BeNullOrEmpty
+        $script:RollbackCandidates.ContainsKey(5) | Should -BeFalse
+    }
+
+    It 'creates a rollback candidate only when the previous bot scene correlates with live ActiveId' {
+        $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10; At=(Get-Date) }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+
+        $candidate = Get-RollbackCandidate -Layer 5 -UserId 10
+        $candidate.Restore.Key | Should -Be 'alpha'
+        $candidate.Restore.Variables.Title | Should -Be 'old'
+        $candidate.ExpectedActiveId | Should -Be 'event-new'
+        $script:LastSuccessfulLayerShows[5].Key | Should -Be 'beta'
+    }
+
+    It 'does not offer rollback when the previous snapshot does not match Cinegy' {
+        $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10 }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='external-event'; Error='' } }
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+        Get-RollbackCandidate -Layer 5 -UserId 10 | Should -BeNullOrEmpty
+    }
+
+    It 'captures a correlated manual hide as a restore-to-empty-state candidate' {
+        $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10 }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success=$true; Error='' } }
+        Mock Sync-LayerAfterOperatorAction { }
+        Invoke-HideLayer -Layer 5 -ChatId 10 -UserId 10 | Should -BeTrue
+        (Get-RollbackCandidate -Layer 5 -UserId 10).ExpectedState | Should -Be 'hidden'
+    }
+
+    It 'restores only after review when the expected current scene still matches' {
+        Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old' } `
+            -ExpectedState replace -ExpectedActiveId 'event-current' -ActorUserId 10
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-current'; Error='' } }
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success=$true } }
+
+        Start-SafeRollbackReview -Layer 5 -ChatId 10 -UserId 10
+        (Get-PendingState -ChatId 10).Mode | Should -Be 'safe_rollback_review'
+        Confirm-SafeRollback -Layer 5 -ChatId 10 -UserId 10
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'alpha' -and $Variables.Title -eq 'old' }
+    }
+
+    It 'cancels and invalidates rollback on external change or uncertain Cinegy state' {
+        foreach ($status in @(
+            [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='different'; Error='' },
+            [pscustomobject]@{ Success=$false; IsOnAir=$null; ActiveId=''; Error='timeout' }
+        )) {
+            $script:PendingState.Clear(); $script:RollbackCandidates=@{}
+            Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'} } `
+                -ExpectedState replace -ExpectedActiveId 'event-current' -ActorUserId 10
+            Mock Get-TitlerLayerStatus { return $status }
+            Mock Invoke-ShowTemplateResult { throw 'must not execute' }
+            Start-SafeRollbackReview -Layer 5 -ChatId 10 -UserId 10
+            Confirm-SafeRollback -Layer 5 -ChatId 10 -UserId 10
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            $script:RollbackCandidates.ContainsKey(5) | Should -BeFalse
+        }
+    }
+
+    It 'expires candidates and never writes their editorial values to disk' {
+        Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='secret editorial value'} } `
+            -ExpectedState hidden -ActorUserId 10
+        $script:RollbackCandidates[5].ExpiresAt=(Get-Date).AddSeconds(-1)
+        Get-RollbackCandidate -Layer 5 -UserId 10 | Should -BeNullOrEmpty
+        $script:RollbackCandidates.ContainsKey(5) | Should -BeFalse
+    }
+}
+
 Describe 'User aliases' {
     BeforeEach {
         $script:UserAliases = @{}

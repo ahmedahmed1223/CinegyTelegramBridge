@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.32'
+$script:BridgeVersion = '4.2.33'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -87,6 +87,8 @@ $script:DefaultSettings = [ordered]@{
     SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
     TemplateTestLayer         = 0       # dedicated non-program test layer; 0 disables template testing
     TemplateTestAutoHideSeconds = 10    # short safety timeout for the dedicated test layer
+    EnableSafeRollback         = $false # opt-in; preserves the current workflow by default
+    RollbackWindowSeconds       = 120   # in-memory safe rollback lifetime; editorial values are never persisted
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
@@ -162,6 +164,8 @@ $script:SettingDisplayMetadata = @{
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
+    EnableSafeRollback = @{ Unit = ''; Description = 'تفعيل التراجع الآمن قصير العمر (معطل افتراضيًا)' }
+    RollbackWindowSeconds = @{ Unit = 'ثانية'; Description = 'مدة صلاحية التراجع الآمن داخل الذاكرة' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
     SchedulePreNotifyMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الإشعار المسبق للحدث المجدول (0 للتعطيل)' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
@@ -2567,6 +2571,8 @@ $script:PendingApprovals = @{}
 
 # ChatId -> @{ Key; Variables } - powers the 🔁 repeat button.
 $script:LastShow = @{}
+$script:LastSuccessfulLayerShows = @{}
+$script:RollbackCandidates = @{}
 
 # Layer -> @{ Key; At; UserId } for everything THIS bridge has put on air and
 # not yet hidden. Air Pro exposes no "what is currently on screen" query, so
@@ -3017,8 +3023,25 @@ function Get-AfterShowKeyboard {
     $first = @( (New-Button "🙈 إخفاء هذا (طبقة $Layer)" "hide:$Layer"), (New-Button "🚪 خروج" "exit:$Layer") )
     if (Get-Setting 'EnableTimedShow') { $first += (New-Button "⏱ مؤقت" "timer:$Layer") }
     $rows = @( , $first )
+    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ تراجع آمن' "rollback:$Layer")) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard = $rows }
+}
+
+function Get-AfterLayerRemovalKeyboard {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    $rows = @()
+    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ استعادة المشهد السابق' "rollback:$Layer")) }
+    $rows += $menu.inline_keyboard
+    return @{ inline_keyboard=$rows }
+}
+
+function Get-RollbackReviewKeyboard {
+    param([Parameter(Mandatory)][int]$Layer)
+    return @{ inline_keyboard=@(
+        , @((New-Button '✅ تأكيد التراجع' "rollbackconfirm:$Layer"), (New-Button '❌ إلغاء' 'menu'))
+    ) }
 }
 
 function Get-CancelKeyboard {
@@ -3525,6 +3548,50 @@ function Get-EffectiveAutoHideSeconds {
     return $requiredSeconds
 }
 
+function Copy-ShowVariables {
+    param([hashtable]$Variables = @{})
+    $copy = @{}
+    foreach ($name in $Variables.Keys) { $copy[[string]$name] = [string]$Variables[$name] }
+    return $copy
+}
+
+function Set-RollbackCandidate {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][hashtable]$RestoreSnapshot,
+        [Parameter(Mandatory)][ValidateSet('replace','hidden')][string]$ExpectedState,
+        [string]$ExpectedActiveId = '',
+        [Parameter(Mandatory)][long]$ActorUserId
+    )
+    if (-not (Get-Setting 'EnableSafeRollback')) { return }
+    $window = [math]::Max(10, [math]::Min(900, (Get-SettingInt 'RollbackWindowSeconds' 10)))
+    $script:RollbackCandidates[$Layer] = @{
+        Id=[guid]::NewGuid().ToString('N'); Layer=$Layer; Restore=$RestoreSnapshot
+        ExpectedState=$ExpectedState; ExpectedActiveId=$ExpectedActiveId
+        ActorUserId=$ActorUserId; CreatedAt=(Get-Date); ExpiresAt=(Get-Date).AddSeconds($window)
+    }
+}
+
+function Get-RollbackCandidate {
+    param([Parameter(Mandatory)][int]$Layer, [long]$UserId = 0)
+    if (-not (Get-Setting 'EnableSafeRollback')) { return $null }
+    if (-not $script:RollbackCandidates.ContainsKey($Layer)) { return $null }
+    $candidate = $script:RollbackCandidates[$Layer]
+    if ((Get-Date) -ge [datetime]$candidate.ExpiresAt) { $script:RollbackCandidates.Remove($Layer) | Out-Null; return $null }
+    if ($UserId -gt 0 -and [long]$candidate.ActorUserId -ne $UserId -and -not (Test-Admin -ChatId $UserId -UserId $UserId)) { return $null }
+    return $candidate
+}
+
+function Get-CorrelatedLayerSnapshot {
+    param([Parameter(Mandatory)][int]$Layer, $LiveStatus)
+    if (-not $script:LastSuccessfulLayerShows.ContainsKey($Layer) -or -not $LiveStatus -or
+        -not $LiveStatus.Success -or $LiveStatus.IsOnAir -ne $true) { return $null }
+    $snapshot = $script:LastSuccessfulLayerShows[$Layer]
+    $activeId = [string](Get-JsonProp $LiveStatus 'ActiveId')
+    if ([string]::IsNullOrWhiteSpace($activeId) -or $activeId -ne [string]$snapshot.ActiveId) { return $null }
+    return $snapshot
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -3575,6 +3642,7 @@ function Invoke-ShowTemplateResult {
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
+    $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
 
     # A scene that is already loaded on the layer keeps running with the values
     # it was started with, so a second SHOW can leave the PREVIOUS text on air.
@@ -3606,6 +3674,15 @@ function Invoke-ShowTemplateResult {
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
 
     if ($result.Success) {
+        if ($previousSnapshot) {
+            Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
+                -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
+        }
+        else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
+        $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
+            Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
+            ActiveId=[string]$result.EventId; At=(Get-Date)
+        }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
         $script:OnAir[[int]$template.Layer] = @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = [string]$result.EventId
@@ -3872,12 +3949,19 @@ function Invoke-HideLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
         return $false
     }
+    $rollbackSnapshot = $null
+    if (-not $Quiet -and (Get-Setting 'EnableSafeRollback')) {
+        $preHideStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preHideStatus
+    }
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
+        if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         Write-BridgeLog "User $UserId hid layer $Layer"
         Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $UserId"
-        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
     elseif (-not $Quiet) {
@@ -3897,12 +3981,19 @@ function Invoke-ExitLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
         return $false
     }
+    $rollbackSnapshot = $null
+    if (Get-Setting 'EnableSafeRollback') {
+        $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preExitStatus
+    }
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
+        if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
         Write-BridgeLog "User $UserId exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
     else {
@@ -3910,6 +4001,59 @@ function Invoke-ExitLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
     }
     return $result.Success
+}
+
+function Start-SafeRollbackReview {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
+    if (-not $candidate) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد تراجع صالح لهذه الطبقة، أو انتهت مدته.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $snapshot = $candidate.Restore
+    $expected = if ([string]$candidate.ExpectedState -eq 'hidden') { 'يجب أن تبقى الطبقة فارغة' } else { 'يجب أن يبقى المشهد الحالي نفسه دون تغيير خارجي' }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='safe_rollback_review'; UserId=$UserId; Layer=$Layer; CandidateId=[string]$candidate.Id }
+    Send-TelegramMessage -ChatId $ChatId -Text "↩️ مراجعة التراجع الآمن`nالطبقة: $Layer`nسيُستعاد القالب: $($snapshot.Key)`nشرط التنفيذ: $expected`nتنتهي الصلاحية: $(([datetime]$candidate.ExpiresAt).ToString('HH:mm:ss'))`n`nسيُفحص Cinegy مباشرة بعد التأكيد." -ReplyMarkup (Get-RollbackReviewKeyboard -Layer $Layer)
+}
+
+function Confirm-SafeRollback {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'safe_rollback_review' -or [long]$state.UserId -ne $UserId -or [int]$state.Layer -ne $Layer) { return }
+    $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
+    Clear-PendingState -ChatId $ChatId
+    if (-not $candidate -or [string]$candidate.Id -ne [string]$state.CandidateId) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'انتهى أو تغير مرشح التراجع. لم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
+    $lock = Lock-GfxLayer -Layer $Layer -ChatId $ChatId -UserId $UserId -Key ([string]$candidate.Restore.Key)
+    if (-not $lock.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الطبقة قيد عملية أخرى؛ لم يُنفذ التراجع.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    try {
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $safe = $status.Success -and $null -ne $status.IsOnAir
+        if ($safe -and [string]$candidate.ExpectedState -eq 'hidden') { $safe = -not [bool]$status.IsOnAir }
+        elseif ($safe) {
+            $activeId = [string](Get-JsonProp $status 'ActiveId')
+            $safe = [bool]$status.IsOnAir -and -not [string]::IsNullOrWhiteSpace($activeId) -and $activeId -eq [string]$candidate.ExpectedActiveId
+        }
+        if (-not $safe) {
+            $script:RollbackCandidates.Remove($Layer) | Out-Null
+            Send-TelegramMessage -ChatId $ChatId -Text '⛔ تغيرت حالة Cinegy أو تعذر التحقق منها؛ أُلغي التراجع ولم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            return
+        }
+        $restore = $candidate.Restore
+        $result = Invoke-ShowTemplateResult -Key ([string]$restore.Key) -Variables ([hashtable]$restore.Variables) -ChatId $ChatId -UserId $UserId
+        if ($result -and $result.Success) {
+            Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - user $UserId"
+            Write-BridgeLog "User $UserId safely rolled layer $Layer back to '$($restore.Key)'" 'WARN'
+        }
+    }
+    finally { Unlock-GfxLayer -ChatId $ChatId -Layer $Layer }
 }
 
 function Invoke-HideAllLayers {
@@ -6435,6 +6579,8 @@ function Invoke-CallbackQuery {
             Invoke-PresetShow -TemplateIndex ([int]$parts[1]) -PresetIndex ([int]$parts[2]) -ChatId $chatId -UserId $userId
             break
         }
+        'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int]$data.Substring(16)) -ChatId $chatId -UserId $userId; break }
+        'rollback:*' { Start-SafeRollbackReview -Layer ([int]$data.Substring(9)) -ChatId $chatId -UserId $userId; break }
         'hide:*' { Invoke-HideLayer -Layer ([int]$data.Substring(5)) -ChatId $chatId -UserId $userId | Out-Null; break }
         'exit:*' { Invoke-ExitLayer -Layer ([int]$data.Substring(5)) -ChatId $chatId -UserId $userId; break }
         'updtpl:*' {

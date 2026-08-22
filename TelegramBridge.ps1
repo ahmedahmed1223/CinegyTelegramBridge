@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.14'
+$script:BridgeVersion = '4.2.15'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -433,6 +433,7 @@ $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
 $script:scheduleExecutionFile = Join-Path $logDir "schedule-execution.jsonl"
+$script:auditFile = Join-Path $logDir "audit.jsonl"
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -487,6 +488,43 @@ function Write-BridgeLog {
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
 
+function Write-AuditRecord {
+    <# Permanent machine-readable security and control audit trail. This is
+       intentionally separate from bridge.log (runtime diagnostics) and from
+       the short in-memory list displayed in Telegram. #>
+    param(
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][string]$Event,
+        [Parameter(Mandatory)][string]$Result,
+        [long]$UserId = 0,
+        [long]$ChatId = 0,
+        [string]$Action = '',
+        [int]$Layer = 0,
+        [string]$Target = '',
+        [long]$DurationMs = 0,
+        [string]$Message = ''
+    )
+    $record = [ordered]@{
+        timestampUtc = [DateTime]::UtcNow.ToString('o')
+        operationId  = Protect-SensitiveText (($OperationId -replace '[\r\n]+', ' ').Trim())
+        event        = Protect-SensitiveText (($Event -replace '[\r\n]+', ' ').Trim())
+        result       = Protect-SensitiveText (($Result -replace '[\r\n]+', ' ').Trim())
+        userId       = $UserId
+        chatId       = $ChatId
+        action       = Protect-SensitiveText (($Action -replace '[\r\n]+', ' ').Trim())
+        layer        = $Layer
+        target       = Protect-SensitiveText (($Target -replace '[\r\n]+', ' ').Trim())
+        durationMs   = $DurationMs
+        message      = Protect-SensitiveText (($Message -replace '[\r\n]+', ' ').Trim())
+    }
+    try {
+        Add-Content -LiteralPath $script:auditFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8
+    }
+    catch {
+        Write-BridgeLog "AUDIT_WRITE_FAILED id=$OperationId event=$Event error=$($_.Exception.Message)" 'ERROR'
+    }
+}
+
 function Add-AuditEntry {
     <# Short in-memory history surfaced by the admin's 📜 button, so "who put
        that on air?" can be answered from Telegram without opening the log. #>
@@ -494,6 +532,7 @@ function Add-AuditEntry {
     $script:AuditTrail.Add("$(Get-Date -Format 'HH:mm:ss') $Message")
     $max = Get-SettingInt 'AuditTrailSize' 1
     while ($script:AuditTrail.Count -gt $max) { $script:AuditTrail.RemoveAt(0) }
+    Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -Event activity -Result success -Message $Message
 }
 
 # ============================================================================
@@ -2979,6 +3018,7 @@ function Write-AirOperationResult {
     $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
+    Write-AuditRecord -OperationId $OperationId -Event air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level
 }
 
@@ -3954,7 +3994,7 @@ function Get-BridgeDiagnosticsSnapshot {
     $scriptFile = Join-Path $scriptRoot 'TelegramBridge.ps1'
     $buildTime = if (Test-Path -LiteralPath $scriptFile) { (Get-Item -LiteralPath $scriptFile).LastWriteTimeUtc } else { $null }
     $fileSizes = [ordered]@{}
-    foreach ($path in @($ConfigPath, (Get-TemplateRegistryFilePath), $onAirFile, $script:scheduleFile, $script:scheduleExecutionFile, $logPath)) {
+    foreach ($path in @($ConfigPath, (Get-TemplateRegistryFilePath), $onAirFile, $script:scheduleFile, $script:scheduleExecutionFile, $script:auditFile, $logPath)) {
         if ([string]::IsNullOrWhiteSpace([string]$path)) { continue }
         $name = [IO.Path]::GetFileName([string]$path)
         $fileSizes[$name] = if (Test-Path -LiteralPath $path) { [long](Get-Item -LiteralPath $path).Length } else { 0L }
@@ -5677,7 +5717,7 @@ function Invoke-BridgeTick {
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
     foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
-        try { & $step }
+        try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
 }
@@ -5765,7 +5805,7 @@ try {
 
                 $callback = Get-JsonProp $update 'callback_query'
                 if ($callback) {
-                    try { Invoke-CallbackQuery -CallbackQuery $callback }
+                    try { Invoke-CallbackQuery -CallbackQuery $callback | Out-Null }
                     catch { Write-BridgeLog "Unhandled error processing callback query: $($_.Exception.Message)" "ERROR" }
                     continue
                 }
@@ -5803,23 +5843,23 @@ try {
                         $state = Get-PendingState -ChatId $chatId
                         if ($state -and -not $text.StartsWith('/')) {
                             switch ($state.Mode) {
-                                'show_fields' { Resume-ShowFlow -ChatId $chatId -Value $text }
-                                'update_field' { Complete-UpdateField -ChatId $chatId -Value $text }
-                                'stream_url' { Complete-StreamUrl -ChatId $chatId -Value $text }
-                                'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text }
-                                'setting_text' { Complete-SettingText -ChatId $chatId -Value $text }
-                                'layer_name' { Complete-LayerName -ChatId $chatId -Value $text }
-                                'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text }
-                                'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text }
-                                'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text }
-                                { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text }
-                                { $_ -in @('schedule_fields', 'schedule_time') } { Complete-ScheduleText -ChatId $chatId -Value $text }
-                                default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj }
+                                'show_fields' { Resume-ShowFlow -ChatId $chatId -Value $text | Out-Null }
+                                'update_field' { Complete-UpdateField -ChatId $chatId -Value $text | Out-Null }
+                                'stream_url' { Complete-StreamUrl -ChatId $chatId -Value $text | Out-Null }
+                                'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
+                                'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
+                                'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
+                                'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
+                                'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
+                                'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -in @('schedule_fields', 'schedule_time') } { Complete-ScheduleText -ChatId $chatId -Value $text | Out-Null }
+                                default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj | Out-Null }
                             }
                         }
                         else {
                             Clear-PendingState -ChatId $chatId
-                            Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj
+                            Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj | Out-Null
                         }
                     }
                 }
@@ -5836,7 +5876,7 @@ try {
             $backoffSeconds = [Math]::Min($backoffSeconds * 2, 60)
         }
 
-        Invoke-BridgeTick
+        Invoke-BridgeTick | Out-Null
     }
 }
 finally {

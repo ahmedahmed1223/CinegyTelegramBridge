@@ -193,7 +193,11 @@ Describe 'Test runtime isolation' {
 }
 
 Describe 'Air operation result logging' {
-    BeforeEach { Mock Write-BridgeLog { } }
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        $script:auditFile = Join-Path $TestDrive 'audit.jsonl'
+        Remove-Item -LiteralPath $script:auditFile -Force -ErrorAction SilentlyContinue
+    }
 
     It 'writes a correlatable successful operation with duration and target' {
         Write-AirOperationResult -OperationId 'op-123' -Action SHOW -Result success -DurationMs 27 -UserId 20 -ChatId 10 -Layer 4 -Target urgent
@@ -213,6 +217,37 @@ Describe 'Air operation result logging' {
             $Level -eq 'WARN' -and $Message -match 'id=op-456' -and
                 $Message -match 'result=blocked' -and $Message -match 'cinegy timeout'
         }
+    }
+
+    It 'persists the same correlation id in the independent structured audit log' {
+        Write-AirOperationResult -OperationId 'op-jsonl' -Action SHOW -Result success -DurationMs 31 -UserId 20 -ChatId 10 -Layer 4 -Target urgent
+
+        $record = Get-Content -LiteralPath $script:auditFile | Select-Object -Last 1 | ConvertFrom-Json
+        $record.operationId | Should -Be 'op-jsonl'
+        $record.event | Should -Be 'air_control'
+        $record.action | Should -Be 'SHOW'
+        $record.result | Should -Be 'success'
+        $record.userId | Should -Be 20
+        $record.layer | Should -Be 4
+    }
+
+    It 'redacts secrets and keeps every audit entry on one JSONL line' {
+        Write-AuditRecord -OperationId 'audit-secret' -Event settings_change -Result success -UserId 20 -Message "token 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345`nnext"
+
+        $lines = @(Get-Content -LiteralPath $script:auditFile)
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Not -Match '123456:ABC'
+        ($lines[0] | ConvertFrom-Json).message | Should -Match '\*\*\*BOT_TOKEN\*\*\*'
+    }
+}
+
+Describe 'Quiet runtime orchestration' {
+    It 'does not leak periodic helper return values to the terminal' {
+        foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+            Mock $step { return $true }
+        }
+
+        @(Invoke-BridgeTick).Count | Should -Be 0
     }
 }
 

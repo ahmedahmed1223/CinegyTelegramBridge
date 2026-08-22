@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.14
+## Version 4.2.15
 
-Version 4.2.14 expands administrator diagnostics with build and uptime data,
+Version 4.2.15 adds an independent, permanent `logs/audit.jsonl` security and control trail, with UTC timestamps and correlation ids shared with air operations, and keeps helper return values such as `True` out of the runtime terminal. Version 4.2.14 expands administrator diagnostics with build and uptime data,
 processor and memory, disk capacity, runtime-file sizes, and in-memory air
 operation outcome counters. Version 4.2.13 adds bounded exponential backoff to opted-in scheduled retries,
 configured by `ScheduleRetryBackoffFactor` and `ScheduleRetryMaxDelaySeconds`. Version 4.2.12 adds a content-free, machine-readable
@@ -659,9 +659,10 @@ If you need playlist transport from Telegram too:
   breaking the request, but there's no content moderation — anyone
   authorized can put arbitrary text on air. That's a chat-membership problem
   to manage on the Telegram side, not something the script can fix.
-- All commands and failures are appended to `LogPath` (rotated at
-  `LogMaxSizeMB`, keeping `LogKeepFiles` generations) for an audit trail of
-  who put what on air and when. The last `AuditTrailSize` actions are also
+- Runtime commands and failures are appended to `LogPath` (rotated at
+  `LogMaxSizeMB`, keeping `LogKeepFiles` generations). Permanent structured
+  control and security events are written separately to `logs/audit.jsonl`,
+  with secrets redacted and air-operation correlation ids preserved. The last `AuditTrailSize` actions are also
   readable in-chat via 📜 السجل.
 - Self-service access requests are rate-limited (`MaxPendingApprovals`),
   expire (`PendingApprovalExpiryHours`), and can be disabled

@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.2.15 — 2026-08-22
+
+- Added the independent permanent `logs/audit.jsonl` audit trail.
+- Recorded UTC timestamp, correlation id, event, result, actor, action, layer,
+  target, duration, and redacted message as one machine-readable JSON object
+  per line.
+- Reused each air-control operation id in its structured audit record while
+  retaining the human-readable `AIR_OP` runtime entry in `bridge.log`.
+- Persisted general in-chat audit activity independently from the bounded
+  in-memory list.
+- Included the audit file size in administrator diagnostics.
+- Added correlation, persistence, single-line, and secret-redaction tests.
+- Suppressed helper return values such as `True` at the runtime orchestration
+  boundary while preserving actual operational log lines in the terminal.
+
 ## 4.2.14 — 2026-08-22
 
 - Added bridge build-file time and process uptime to administrator diagnostics.

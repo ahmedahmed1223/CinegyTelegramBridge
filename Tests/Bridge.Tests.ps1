@@ -720,7 +720,7 @@ Describe 'Telegram API send reliability' {
     BeforeEach {
         $script:OriginalTelegramRequestTimeoutSeconds = Get-Setting 'TelegramRequestTimeoutSeconds'
         $config.Settings | Add-Member -NotePropertyName TelegramRequestTimeoutSeconds -NotePropertyValue 7 -Force
-        Mock Start-Sleep { }
+        Mock Start-Sleep { } -ModuleName BridgeTelegram
         Mock Write-BridgeLog { }
     }
 
@@ -734,24 +734,24 @@ Describe 'Telegram API send reliability' {
             $script:TelegramSendAttemptForTest++
             if ($script:TelegramSendAttemptForTest -eq 1) { throw 'temporary HTTP failure' }
             [pscustomobject]@{ ok = $true }
-        }
+        } -ModuleName BridgeTelegram
 
         { Send-TelegramMessage -ChatId 10 -Text 'اختبار' } | Should -Not -Throw
 
-        Should -Invoke Invoke-RestMethod -Times 2 -Exactly -ParameterFilter { $Uri -match '/sendMessage$' -and $TimeoutSec -eq 7 }
-        Should -Invoke Start-Sleep -Times 1 -Exactly
+        Should -Invoke Invoke-RestMethod -ModuleName BridgeTelegram -Times 2 -Exactly -ParameterFilter { $Uri -match '/sendMessage$' -and $TimeoutSec -eq 7 }
+        Should -Invoke Start-Sleep -ModuleName BridgeTelegram -Times 1 -Exactly
     }
 
     It 'bounds photo and document uploads with the same timeout' {
         $photo = Join-Path $TestDrive 'frame.jpg'; Set-Content -LiteralPath $photo -Value 'x'
         $document = Join-Path $TestDrive 'diag.zip'; Set-Content -LiteralPath $document -Value 'x'
-        Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } } -ModuleName BridgeTelegram
 
         Send-TelegramPhoto -ChatId 10 -FilePath $photo
         Send-TelegramDocument -ChatId 10 -FilePath $document | Should -BeTrue
 
-        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendPhoto$' -and $TimeoutSec -eq 7 }
-        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendDocument$' -and $TimeoutSec -eq 7 }
+        Should -Invoke Invoke-RestMethod -ModuleName BridgeTelegram -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendPhoto$' -and $TimeoutSec -eq 7 }
+        Should -Invoke Invoke-RestMethod -ModuleName BridgeTelegram -Times 1 -Exactly -ParameterFilter { $Uri -match '/sendDocument$' -and $TimeoutSec -eq 7 }
     }
 
     It 'downloads a Telegram document to an explicit bounded destination' {

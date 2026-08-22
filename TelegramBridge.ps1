@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.35'
+$script:BridgeVersion = '4.2.36'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -57,6 +57,7 @@ Import-Module (Join-Path $moduleRoot "CinegyAirTitler.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSecurity.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettings.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeStorage.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeTelegram.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -726,22 +727,10 @@ function Send-TelegramMessage {
         if ($ReplyMarkup -and $i -eq ($chunks.Count - 1)) {
             $body.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress)
         }
-        # One retry: a transient network blip should not silently swallow an
-        # on-air confirmation or an access-approval notice.
-        $sent = $false
-        for ($attempt = 1; $attempt -le 2 -and -not $sent; $attempt++) {
-            try {
-                Invoke-RestMethod -Uri "$apiBase/sendMessage" -Method Post -Body $body -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
-                $sent = $true
-            }
-            catch {
-                if ($attempt -eq 2) {
-                    Write-BridgeLog "Failed to send Telegram message to $ChatId : $($_.Exception.Message)" "ERROR"
-                }
-                else {
-                    Start-Sleep -Milliseconds 400
-                }
-            }
+        $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $body `
+            -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+        if (-not $request.Success) {
+            Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
         }
     }
 }
@@ -753,22 +742,14 @@ function Send-TelegramPhoto {
         [string]$Caption,
         [hashtable]$ReplyMarkup
     )
-    $sent = $false
-    for ($attempt = 1; $attempt -le 2 -and -not $sent; $attempt++) {
-        try {
-            $form = @{ chat_id = "$ChatId"; photo = Get-Item -Path $FilePath }
-            if ($Caption) { $form.caption = $Caption }
-            if ($ReplyMarkup) { $form.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
-            Invoke-RestMethod -Uri "$apiBase/sendPhoto" -Method Post -Form $form -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
-            $sent = $true
-        }
-        catch {
-            if ($attempt -eq 2) {
-                Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($_.Exception.Message)" "ERROR"
-                Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($_.Exception.Message)"
-            }
-            else { Start-Sleep -Milliseconds 400 }
-        }
+    $form = @{ chat_id = "$ChatId"; photo = Get-Item -Path $FilePath }
+    if ($Caption) { $form.caption = $Caption }
+    if ($ReplyMarkup) { $form.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendPhoto" -Method Post -Form $form `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if (-not $request.Success) {
+        Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($request.Error)" "ERROR"
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($request.Error)"
     }
 }
 
@@ -935,22 +916,16 @@ function Send-TelegramDocument {
         [Parameter(Mandatory)][string]$FilePath,
         [string]$Caption = ''
     )
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
-        try {
-            $form = @{ chat_id = "$ChatId"; document = Get-Item -LiteralPath $FilePath -ErrorAction Stop }
-            if ($Caption) { $form.caption = $Caption }
-            Invoke-RestMethod -Uri "$apiBase/sendDocument" -Method Post -Form $form -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) | Out-Null
-            return $true
-        }
-        catch {
-            if ($attempt -eq 2) {
-                Write-BridgeLog "Failed to send Telegram document to $ChatId : $($_.Exception.Message)" 'ERROR'
-                return $false
-            }
-            Start-Sleep -Milliseconds 400
-        }
+    try { $form = @{ chat_id = "$ChatId"; document = Get-Item -LiteralPath $FilePath -ErrorAction Stop } }
+    catch { Write-BridgeLog "Failed to send Telegram document to $ChatId : $($_.Exception.Message)" 'ERROR'; return $false }
+    if ($Caption) { $form.caption = $Caption }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendDocument" -Method Post -Form $form `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if (-not $request.Success) {
+        Write-BridgeLog "Failed to send Telegram document to $ChatId : $($request.Error)" 'ERROR'
+        return $false
     }
-    return $false
+    return $true
 }
 
 function Receive-TelegramDocument {

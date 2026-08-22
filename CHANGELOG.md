@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.36 — 2026-08-22
+
+- Extracts bounded Telegram HTTP transport and retry behavior into the independent `Modules/BridgeTelegram.psm1` module.
+- Routes message, photo, and document uploads through the shared transport while preserving one transient retry, existing timeouts, logging, and photo fallback behavior.
+- Adds direct transport tests for retry success, structured terminal failure, and single-attempt behavior, and keeps bridge-level compatibility tests.
+- Includes the Telegram module and its tests in parser, required-file, Pester, release-package, signing, and manifest gates.
+
 ## 4.2.35 — 2026-08-22
 
 - Extracts validated JSON primary/backup writes and recovery reads into the independent `Modules/BridgeStorage.psm1` module.

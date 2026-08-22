@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.5'
+$script:BridgeVersion = '4.2.6'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -2939,6 +2939,21 @@ function Invoke-ShowTemplateResult {
     return $result
 }
 
+function Get-LayerShowContext {
+    param([Parameter(Mandatory)][int]$Layer, [datetime]$Now = (Get-Date))
+    $record = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $lastSuccess = if ($script:LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:LastCinegyStateSuccess } else { $null }
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
+        -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    return [pscustomobject]@{
+        IsKnown = ($freshness.State -eq 'connected')
+        IsOnAir = ($null -ne $record)
+        Key      = if ($record) { [string](Get-JsonProp $record 'Key') } else { '' }
+        UserId   = if ($record) { [long](Get-JsonProp $record 'UserId') } else { 0L }
+        Source   = if ($record) { [string](Get-JsonProp $record 'Source') } else { '' }
+    }
+}
+
 function Start-ShowFlow {
     <# Entry point for every SHOW source. ReviewImmediately is used when values
        already came from a preset or typed command; required missing fields
@@ -2963,6 +2978,7 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
+    $replacementContext = Get-LayerShowContext -Layer ([int]$t.Layer)
     $draftValues = @{}
     foreach ($name in $InitialValues.Keys) { $draftValues[[string]$name] = [string]$InitialValues[$name] }
     $required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
@@ -2984,7 +3000,7 @@ function Start-ShowFlow {
             Limits = @($t.FieldLimits); Required = $required
             Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
             Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
-            LockLayer = [int]$t.Layer
+            LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
         }
         Set-PendingState -ChatId $ChatId -State $state
         Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
@@ -2996,7 +3012,7 @@ function Start-ShowFlow {
         Required = $required
         Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
         Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
-        LockLayer = [int]$t.Layer
+        LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
     }
     Set-PendingState -ChatId $ChatId -State $state
     Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
@@ -3050,6 +3066,17 @@ function Format-ShowReviewText {
     $lines.Add("🔎 مراجعة قبل الإرسال")
     $lines.Add("القالب: $($State.Key)")
     $lines.Add("الطبقة: $($State.LockLayer)")
+    $context = Get-JsonProp $State 'ReplacementContext'
+    if ($context -and -not [bool](Get-JsonProp $context 'IsKnown')) {
+        $lines.Add("⚠️ تعذّر التحقق من حداثة حالة الطبقة؛ راجع شاشة الحالة قبل التأكيد عند الشك.")
+    }
+    if ($context -and [bool](Get-JsonProp $context 'IsOnAir')) {
+        $currentKey = [string](Get-JsonProp $context 'Key')
+        if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = 'مشهد غير مسمّى' }
+        $currentUserId = [long](Get-JsonProp $context 'UserId')
+        $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
+        $lines.Add("⚠️ سيتم استبدال القالب الحالي: $currentKey ($sourceText).")
+    }
     if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: $($State.AutoHideSeconds) ثانية") }
     $lines.Add("")
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {

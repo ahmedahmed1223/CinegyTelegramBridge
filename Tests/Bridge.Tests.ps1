@@ -1469,6 +1469,7 @@ Describe 'SHOW review gate' {
         }
         Mock Send-TelegramMessage { }
         Mock Invoke-ShowTemplateResult { }
+        Mock Get-LayerShowContext { [pscustomobject]@{ IsKnown = $true; IsOnAir = $false; Key = ''; UserId = 0; Source = '' } }
         Mock Confirm-TelegramCallback { }
         Mock Test-Authorized { $true }
     }
@@ -1506,6 +1507,30 @@ Describe 'SHOW review gate' {
         $state | Should -Not -BeNullOrEmpty
         $state.Mode | Should -Be 'show_review'
         Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'warns in the review when SHOW will replace the current layer scene' {
+        Mock Get-LayerShowContext {
+            [pscustomobject]@{ IsKnown = $true; IsOnAir = $true; Key = 'old-title'; UserId = 77; Source = 'bridge' }
+        }
+
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter {
+            $Text -match 'سيتم استبدال' -and $Text -match 'old-title' -and $Text -match '77'
+        }
+    }
+
+    It 'warns when the live layer cannot be verified before review' {
+        Mock Get-LayerShowContext {
+            [pscustomobject]@{ IsKnown = $false; IsOnAir = $false; Key = ''; UserId = 0; Source = '' }
+        }
+
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'تعذّر التحقق.*الطبقة' }
     }
 
     It 'sends the reviewed values only after the operator confirms' {

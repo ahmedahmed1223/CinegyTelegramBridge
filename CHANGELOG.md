@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.2.6 — 2026-08-22
+
+- Added the currently tracked scene to SHOW review before a layer replacement.
+- Identified whether that scene came from Cinegy Air, the bot, or a named
+  operator.
+- Added an explicit warning when the layer state sample is not fresh enough to
+  trust during review.
+- Added regression coverage for replacement and uncertain-state warnings.
+
 ## 4.2.5 — 2026-08-22
 
 - Added explicit Cinegy state freshness classification: connected, stale,

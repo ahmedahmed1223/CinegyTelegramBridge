@@ -100,6 +100,70 @@ Describe 'User aliases' {
     }
 }
 
+Describe 'Authorized user administration' {
+    BeforeEach {
+        $script:OriginalAllowedChatIds = @(Get-JsonProp $config 'AllowedChatIds')
+        $script:OriginalAllowedUserIds = @(Get-JsonProp $config 'AllowedUserIds')
+        $script:OriginalAdminChatIds = @(Get-JsonProp $config 'AdminChatIds')
+        $script:OriginalAdminUserIds = @(Get-JsonProp $config 'AdminUserIds')
+        $config.AllowedChatIds = @(101, 202); $config.AllowedUserIds = @(101, 202)
+        $config.AdminChatIds = @(101); $config.AdminUserIds = @(101)
+        $script:DisabledUserIds = @{}
+        $script:disabledUsersFile = Join-Path $TestDrive 'disabled-users.json'
+        Mock Save-Config { }
+    }
+
+    AfterEach {
+        $config.AllowedChatIds = $script:OriginalAllowedChatIds
+        $config.AllowedUserIds = $script:OriginalAllowedUserIds
+        $config.AdminChatIds = $script:OriginalAdminChatIds
+        $config.AdminUserIds = $script:OriginalAdminUserIds
+    }
+
+    It 'rejects a disabled user while preserving the whitelist entry' {
+        Set-UserDisabled -TargetUserId 202 -Disabled $true | Should -BeTrue
+        Test-Authorized -ChatId 202 -UserId 202 | Should -BeFalse
+        $config.AllowedUserIds | Should -Contain 202
+    }
+
+    It 'refuses to revoke the final administrator' {
+        $result = Revoke-AuthorizedUser -TargetUserId 101
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'آخر مشرف'
+        $config.AdminUserIds | Should -Contain 101
+    }
+
+    It 'refuses to disable the final administrator' {
+        Set-UserDisabled -TargetUserId 101 -Disabled $true | Should -BeFalse
+        Test-UserDisabled -UserId 101 | Should -BeFalse
+    }
+
+    It 'removes a regular user from both chat and user authorization lists' {
+        $result = Revoke-AuthorizedUser -TargetUserId 202
+        $result.Success | Should -BeTrue
+        $config.AllowedChatIds | Should -Not -Contain 202
+        $config.AllowedUserIds | Should -Not -Contain 202
+        Should -Invoke Save-Config -Times 1 -Exactly
+    }
+
+    It 'lists unique users with alias role and disabled state' {
+        $script:UserAliases['202'] = 'مخرج الأخبار'; $script:DisabledUserIds['202'] = $true
+        $users = @(Get-AuthorizedUsers)
+        $users.Count | Should -Be 2
+        ($users | Where-Object UserId -eq 101).Role | Should -Be 'admin'
+        ($users | Where-Object UserId -eq 202).Alias | Should -Be 'مخرج الأخبار'
+        ($users | Where-Object UserId -eq 202).Disabled | Should -BeTrue
+    }
+
+    It 'requires confirmation before revoking a user' {
+        Mock Send-TelegramMessage { }
+        Request-UserRevocation -TargetUserId 202 -ChatId 101 -AdminUserId 101
+        $config.AllowedUserIds | Should -Contain 202
+        (Get-PendingState -ChatId 101).Mode | Should -Be 'user_revoke'
+        Should -Invoke Save-Config -Times 0 -Exactly
+    }
+}
+
 Describe 'Test runtime isolation' {
     It 'never points on-air persistence at the live logs directory' {
         [IO.Path]::GetFullPath($script:onAirFile) | Should -BeLike "$([IO.Path]::GetFullPath($TestDrive))*"

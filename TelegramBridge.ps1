@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.1'
+$script:BridgeVersion = '4.2.2'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -417,6 +417,7 @@ $relayPidFile = Join-Path $logDir "relay.pid"
 $usageFile = Join-Path $logDir "usage.json"
 $script:userFavoritesFile = Join-Path $logDir "favorites.json"
 $script:userAliasesFile = Join-Path $logDir "user-aliases.json"
+$script:disabledUsersFile = Join-Path $logDir "disabled-users.json"
 $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -730,6 +731,79 @@ function Show-MainMenu {
 #  Authorization (user-level, not just chat-level)
 # ============================================================================
 
+$script:DisabledUserIds = @{}
+
+function Import-DisabledUsers {
+    if (-not (Test-Path -LiteralPath $script:disabledUsersFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:disabledUsersFile -Raw | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) { if ([bool]$prop.Value) { $script:DisabledUserIds[$prop.Name] = $true } }
+    }
+    catch { Write-BridgeLog "Could not read disabled-users.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-DisabledUsers {
+    try {
+        $temporary = "$($script:disabledUsersFile).tmp"
+        $script:DisabledUserIds | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:disabledUsersFile -Force -ErrorAction Stop
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write disabled-users.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Set-UserDisabled {
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][bool]$Disabled)
+    if ($TargetUserId -le 0) { return $false }
+    if ($Disabled) {
+        $adminIds = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
+        $activeAdmins = @($adminIds | Where-Object { -not (Test-UserDisabled -UserId ([long]$_)) })
+        if ($adminIds -contains $TargetUserId -and $activeAdmins.Count -le 1) { return $false }
+    }
+    if ($Disabled) { $script:DisabledUserIds[[string]$TargetUserId] = $true }
+    else { $script:DisabledUserIds.Remove([string]$TargetUserId) }
+    return Save-DisabledUsers
+}
+
+function Test-UserDisabled {
+    param([Parameter(Mandatory)][long]$UserId)
+    return $script:DisabledUserIds.ContainsKey([string]$UserId)
+}
+
+function Revoke-AuthorizedUser {
+    param([Parameter(Mandatory)][long]$TargetUserId)
+    $admins = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
+    if ($admins -contains $TargetUserId -and $admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن سحب صلاحية آخر مشرف.' } }
+    foreach ($name in @('AllowedChatIds', 'AllowedUserIds', 'AdminChatIds', 'AdminUserIds')) {
+        $remaining = @(@(Get-JsonProp $config $name) | Where-Object { [long]$_ -ne $TargetUserId })
+        $config | Add-Member -NotePropertyName $name -NotePropertyValue $remaining -Force
+    }
+    $script:DisabledUserIds.Remove([string]$TargetUserId)
+    Save-DisabledUsers | Out-Null; Save-Config
+    return [pscustomobject]@{ Success = $true; Error = '' }
+}
+
+function Get-AuthorizedUsers {
+    $ids = @(@(Get-JsonProp $config 'AllowedUserIds') + @(Get-JsonProp $config 'AllowedChatIds') + @(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') |
+            Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
+    $adminIds = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Sort-Object -Unique)
+    return @($ids | ForEach-Object {
+            $id = [long]$_
+            [pscustomobject]@{
+                UserId = $id; Alias = Get-UserDisplayName -UserId $id
+                Role = if ($adminIds -contains $id) { 'admin' } else { 'operator' }
+                Disabled = Test-UserDisabled -UserId $id
+            }
+        })
+}
+
+function Request-UserRevocation {
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$AdminUserId)
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'user_revoke'; TargetUserId = $TargetUserId; UserId = $AdminUserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ تأكيد سحب صلاحية $(Get-UserDisplayName -UserId $TargetUserId) ($TargetUserId)؟" `
+        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '✅ نعم، اسحب الصلاحية' 'usr:revokeconfirm'), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
+}
+
 function Test-Authorized {
     <# In a private chat chat.id == user.id, so the historical AllowedChatIds
        list keeps working untouched. In a group they differ, and with
@@ -738,6 +812,7 @@ function Test-Authorized {
        authorizes every member of it. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (Test-UserDisabled -UserId $UserId) { return $false }
     if ($UserId -ne 0 -and (@(Get-JsonProp $config 'AllowedUserIds') -contains $UserId)) { return $true }
     if (Get-Setting 'RequireUserLevelAuth') {
         if ($ChatId -ne $UserId) { return $false }
@@ -2064,6 +2139,7 @@ function Get-MainMenuKeyboard {
         $pendingCount = $script:PendingApprovals.Count
         $pendingLabel = if ($pendingCount -gt 0) { "👤 طلبات الوصول ($pendingCount)" } else { "👤 طلبات الوصول" }
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
+        $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
         $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
         $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
 
@@ -2105,6 +2181,23 @@ function Get-TemplatesKeyboard {
     }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-UsersAdminKeyboard {
+    $rows = @()
+    foreach ($user in @(Get-AuthorizedUsers)) {
+        $role = if ($user.Role -eq 'admin') { 'مشرف' } else { 'مشغّل' }
+        $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
+        $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
+        $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
+    }
+    $rows += , @((New-Button '⬅️ رجوع' 'menu'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-UsersAdminScreen {
+    param([Parameter(Mandatory)][long]$ChatId)
+    Send-TelegramMessage -ChatId $ChatId -Text '👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، أو استخدم زر السحب مع التأكيد.' -ReplyMarkup (Get-UsersAdminKeyboard)
 }
 
 function Get-FavoritesManagementKeyboard {
@@ -3255,6 +3348,7 @@ function Get-OnAirSummary {
 function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (Test-UserDisabled -UserId $UserId) { return $false }
     $store = Get-TemplateStore
     $layerStatuses = @(Get-CinegyLayerDashboard)
     $sync = Update-OnAirStateFromCinegy -Reason 'status' -LayerStatuses $layerStatuses `
@@ -4645,6 +4739,39 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:usersadmin' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId }
+            break
+        }
+        'usr:toggle:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $target = [long]$data.Substring(11); $disabled = Test-UserDisabled -UserId $target
+            if (Set-UserDisabled -TargetUserId $target -Disabled (-not $disabled)) {
+                $action = if ($disabled) { 'إعادة تفعيل' } else { 'تعطيل' }
+                Write-BridgeLog "Admin $userId changed user $target state: $action"
+                Add-AuditEntry "👥 $action المستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Show-UsersAdminScreen -ChatId $chatId
+            }
+            break
+        }
+        'usr:revoke:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-UserRevocation -TargetUserId ([long]$data.Substring(11)) -ChatId $chatId -AdminUserId $userId }
+            break
+        }
+        'usr:revokeconfirm' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'user_revoke' -or [long]$state.UserId -ne $userId) { break }
+            $target = [long]$state.TargetUserId; Clear-PendingState -ChatId $chatId
+            $result = Revoke-AuthorizedUser -TargetUserId $target
+            if ($result.Success) {
+                Write-BridgeLog "Admin $userId revoked user $target" 'WARN'
+                Add-AuditEntry "👥 سحب صلاحية المستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Send-TelegramMessage -ChatId $chatId -Text "✅ تم سحب صلاحية المستخدم $target." -ReplyMarkup (Get-UsersAdminKeyboard)
+            }
+            else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" -ReplyMarkup (Get-UsersAdminKeyboard) }
+            break
+        }
         'menu:layernames' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-LayerNamesScreen -ChatId $chatId -UserId $userId }
             break
@@ -5220,6 +5347,7 @@ Initialize-Settings
 Import-UsageCounts
 Import-UserFavorites
 Import-UserAliases
+Import-DisabledUsers
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues

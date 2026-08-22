@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.2 — 2026-08-22
+
+- Added an administrator user-management screen with Alias, role, and active
+  or disabled state for every authorized private-chat user.
+- Added persistent temporary disable/enable state in
+  `logs/disabled-users.json` without deleting whitelist entries.
+- Added confirmed permission revocation across chat/user and operator/admin
+  lists, with audit logging.
+- Prevented revoking or disabling the final active administrator.
+- Added regression coverage for disabled authorization, unique user listing,
+  confirmation, revocation, and final-administrator protection.
+
 ## 4.2.1 — 2026-08-22
 
 - Added `HealthFailureAlertThreshold` (default 3) for consecutive Cinegy and

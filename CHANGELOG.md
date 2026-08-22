@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.2.40 — 2026-08-22
+
+- Extracts schedule due-time, completed-occurrence, retry timing, retry count, exponential backoff, and maximum-delay decisions into `Modules/BridgeSchedulePolicy.psm1`.
+- Keeps persistence, notifications, SHOW invocation, recurrence advancement, and execution audit logging in the bridge orchestrator.
+- Adds direct policy tests and retains the full schedule store/executor, pause, notification, recurrence, restart, retry, conflict, and review-flow coverage.
+
 ## 4.2.39 — 2026-08-22
 
 - Extracts per-layer Cinegy reconciliation decisions into `Modules/BridgeCinegyState.psm1` while retaining network polling, logging, persistence, notifications, and timer cleanup in the bridge orchestrator.

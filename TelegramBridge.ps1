@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.39'
+$script:BridgeVersion = '4.2.40'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -61,6 +61,7 @@ Import-Module (Join-Path $moduleRoot "BridgeTelegram.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeAuthorization.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeFlowState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeCinegyState.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -2069,11 +2070,9 @@ function Update-ScheduleQueue {
             $scheduleEntry.NotificationExecutionKey = $occurrenceKey
             Save-ScheduleEvents | Out-Null
         }
-        $nextAttemptRaw = [string](Get-JsonProp $scheduleEntry 'NextAttemptAt')
-        $dueAt = if ([string]::IsNullOrWhiteSpace($nextAttemptRaw)) { $scheduledAt } else { [datetimeoffset]$nextAttemptRaw }
-        if ($dueAt -gt $Now) { continue }
-        $executionKey = "$($scheduleEntry.Id)|$($scheduledAt.ToString('o'))"
-        if ([string]$scheduleEntry.CompletedExecutionKey -eq $executionKey) { continue }
+        $dueState=Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $Now
+        if(-not $dueState.IsDue){continue}
+        $executionKey=$dueState.ExecutionKey
 
         $scheduleEntry.Status = 'running'; $scheduleEntry.ExecutionKey = $executionKey
         $scheduleEntry.StartedAt = $Now.ToString('o')
@@ -2111,18 +2110,17 @@ function Update-ScheduleQueue {
         }
         else {
             $scheduleEntry.LastResult = if ($result) { [string]$result.Error } else { 'SHOW returned no result.' }
-            $attemptCount = 0
-            [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'), [ref]$attemptCount) | Out-Null
-            $attemptCount++
-            $scheduleEntry.AttemptCount = $attemptCount
             $maxRetries = Get-SettingInt 'ScheduleMaxRetries' 0
-            if ($attemptCount -le $maxRetries) {
-                $delay = Get-RetryDelaySeconds -BaseSeconds (Get-SettingInt 'ScheduleRetryDelaySeconds' 30) `
-                    -Attempt $attemptCount -Factor (Get-SettingInt 'ScheduleRetryBackoffFactor' 2) `
-                    -MaxSeconds (Get-SettingInt 'ScheduleRetryMaxDelaySeconds' 300)
+            $priorAttemptCount=0
+            [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'),[ref]$priorAttemptCount)|Out-Null
+            $retry=Get-BridgeScheduleRetryDecision -PriorAttemptCount $priorAttemptCount -MaxRetries $maxRetries `
+                -BaseSeconds (Get-SettingInt 'ScheduleRetryDelaySeconds' 30) -Factor (Get-SettingInt 'ScheduleRetryBackoffFactor' 2) `
+                -MaxDelaySeconds (Get-SettingInt 'ScheduleRetryMaxDelaySeconds' 300) -Now $Now
+            $scheduleEntry.AttemptCount=$retry.AttemptCount
+            if ($retry.ShouldRetry) {
                 $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''
-                $scheduleEntry.NextAttemptAt = $Now.AddSeconds($delay).ToString('o')
-                Write-BridgeLog "Scheduled event $($scheduleEntry.Id) SHOW failed; retry $attemptCount/$maxRetries at $($scheduleEntry.NextAttemptAt): $($scheduleEntry.LastResult)" 'WARN'
+                $scheduleEntry.NextAttemptAt = $retry.NextAttemptAt.ToString('o')
+                Write-BridgeLog "Scheduled event $($scheduleEntry.Id) SHOW failed; retry $($retry.AttemptCount)/$maxRetries at $($scheduleEntry.NextAttemptAt): $($scheduleEntry.LastResult)" 'WARN'
             }
             else {
                 $scheduleEntry.Status = 'failed'; $scheduleEntry.NextAttemptAt = ''

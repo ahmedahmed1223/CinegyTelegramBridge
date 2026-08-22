@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.11'
+$script:BridgeVersion = '4.2.12'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -430,6 +430,7 @@ $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
+$script:scheduleExecutionFile = Join-Path $logDir "schedule-execution.jsonl"
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -1795,6 +1796,36 @@ function Save-ScheduleEvents {
     }
 }
 
+function Write-ScheduleExecutionEntry {
+    param(
+        [Parameter(Mandatory)][hashtable]$ScheduleEntry,
+        [Parameter(Mandatory)][ValidateSet('success', 'failed')][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [int]$Attempt = 1,
+        [string]$ErrorText = ''
+    )
+    try {
+        $record = [ordered]@{
+            Timestamp    = [datetimeoffset]::Now.ToString('o')
+            EventId      = [string]$ScheduleEntry.Id
+            ExecutionKey = [string]$ScheduleEntry.ExecutionKey
+            TemplateKey  = [string]$ScheduleEntry.TemplateKey
+            Layer        = [int](Get-JsonProp $ScheduleEntry 'Layer')
+            ScheduledAt  = [string]$ScheduleEntry.ScheduledAt
+            Attempt      = $Attempt
+            Result       = $Result
+            DurationMs   = $DurationMs
+            Error        = if ($ErrorText) { Protect-SensitiveText $ErrorText } else { '' }
+        }
+        Add-Content -LiteralPath $script:scheduleExecutionFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8 -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Could not append schedule execution log: $($_.Exception.Message)" 'ERROR'
+        return $false
+    }
+}
+
 function Import-ScheduleEvents {
     if (-not (Test-Path -LiteralPath $script:scheduleFile)) { return }
     try {
@@ -1841,7 +1872,14 @@ function Update-ScheduleQueue {
         $scheduleEntry.StartedAt = $Now.ToString('o')
         if (-not (Save-ScheduleEvents)) { $scheduleEntry.Status = 'pending'; continue }
 
+        $priorAttempts = 0
+        [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'), [ref]$priorAttempts) | Out-Null
+        $executionTimer = [System.Diagnostics.Stopwatch]::StartNew()
         $result = Invoke-ShowTemplateResult -Key ([string]$scheduleEntry.TemplateKey) -Variables $scheduleEntry.Values -ChatId ([long]$scheduleEntry.ChatId) -UserId ([long]$scheduleEntry.UserId)
+        $executionTimer.Stop()
+        $executionResult = if ($result -and $result.Success) { 'success' } else { 'failed' }
+        $executionError = if ($executionResult -eq 'failed') { if ($result) { [string]$result.Error } else { 'SHOW returned no result.' } } else { '' }
+        Write-ScheduleExecutionEntry -ScheduleEntry $scheduleEntry -Result $executionResult -DurationMs $executionTimer.ElapsedMilliseconds -Attempt ($priorAttempts + 1) -ErrorText $executionError | Out-Null
         if ($result -and $result.Success) {
             $scheduleEntry.CompletedExecutionKey = $executionKey
             $scheduleEntry.CompletedAt = [datetimeoffset]::Now.ToString('o')

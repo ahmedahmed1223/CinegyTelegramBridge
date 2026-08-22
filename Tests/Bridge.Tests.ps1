@@ -2386,7 +2386,10 @@ Describe 'Reliable schedule store and executor' {
         $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue 0 -Force
         $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue 30 -Force
         $script:OriginalScheduleFileForTest = $script:scheduleFile
+        $script:OriginalScheduleExecutionFileForTest = $script:scheduleExecutionFile
         $script:scheduleFile = Join-Path $TestDrive 'schedule.json'
+        $script:scheduleExecutionFile = Join-Path $TestDrive 'schedule-execution.jsonl'
+        Remove-Item -LiteralPath $script:scheduleExecutionFile -Force -ErrorAction SilentlyContinue
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         Mock Write-BridgeLog { }
         Mock Add-AuditEntry { }
@@ -2398,6 +2401,7 @@ Describe 'Reliable schedule store and executor' {
         $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue $script:OriginalScheduleRetryDelaySeconds -Force
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         $script:scheduleFile = $script:OriginalScheduleFileForTest
+        $script:scheduleExecutionFile = $script:OriginalScheduleExecutionFileForTest
     }
 
     It 'persists and restores a pending event with a stable id and timezone' {
@@ -2425,6 +2429,23 @@ Describe 'Reliable schedule store and executor' {
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
         $scheduleEntry.Status | Should -Be 'completed'
         $scheduleEntry.CompletedExecutionKey | Should -Be $scheduleEntry.ExecutionKey
+    }
+
+    It 'writes a content-free JSONL execution result for each attempt' {
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Layer 4 -Values @{ 'Headline.Text' = 'secret editorial text' } -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+
+        $line = Get-Content -LiteralPath $script:scheduleExecutionFile -Raw
+        $record = $line | ConvertFrom-Json
+        $record.EventId | Should -Be $scheduleEntry.Id
+        $record.TemplateKey | Should -Be 'urgent'
+        $record.Layer | Should -Be 4
+        $record.Result | Should -Be 'success'
+        $record.DurationMs | Should -BeGreaterOrEqual 0
+        $line | Should -Not -Match 'secret editorial text|Headline.Text'
     }
 
     It 'advances a daily event only after successful completion' {

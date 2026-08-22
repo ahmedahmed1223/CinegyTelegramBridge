@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.12 — 2026-08-22
+
+- Added independent `logs/schedule-execution.jsonl` execution history.
+- Recorded timestamp, event and execution ids, template, layer, scheduled time,
+  attempt number, result, duration, and sanitized error for every scheduled
+  SHOW attempt.
+- Excluded template field names and editorial values from the execution log.
+- Logged retry attempts independently while preserving `schedule.json` as the
+  current schedule state.
+- Added persistence and privacy regression coverage for the JSONL record.
+
 ## 4.2.11 — 2026-08-22
 
 - Added `ScheduleMaxRetries` and `ScheduleRetryDelaySeconds` settings.

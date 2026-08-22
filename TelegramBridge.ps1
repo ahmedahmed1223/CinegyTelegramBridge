@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.42'
+$script:BridgeVersion = '4.2.43'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -64,6 +64,7 @@ Import-Module (Join-Path $moduleRoot "BridgeCinegyState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -104,6 +105,7 @@ $script:DefaultSettings = [ordered]@{
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
     MaintenanceMode           = $false  # blocks playout mutations while monitoring remains available
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
+    ButtonTextMaxLength        = 32      # visual text elements; 0 disables shortening
     # --- safety ---
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
@@ -160,6 +162,7 @@ $script:SettingDisplayMetadata = @{
     AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
     TelegramRequestTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة إرسال رسائل وملفات Telegram' }
     MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }
+    ButtonTextMaxLength = @{ Unit = 'حرفًا'; Description = 'الحد البصري لنص أزرار Telegram (0 للتعطيل)' }
     PostShowDelayMs = @{ Unit = 'مللي ثانية'; Description = 'تأخير إعادة إرسال النص بعد العرض' }
     PendingStateTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مدة صلاحية عملية الإدخال غير المكتملة' }
     SnapshotCooldownSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل قبل التقاط صورة بث جديدة' }
@@ -1467,7 +1470,8 @@ function Format-CinegyLayerDashboard {
             $lines.Add("🔴 $(Get-LayerDisplayName -Layer $layer): $trackedKey")
         }
         else {
-            $activeName = [string](Get-JsonProp $status 'ActiveName')
+            $activeName = [string](Get-JsonProp $status 'ActiveTemplateName')
+            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = [string](Get-JsonProp $status 'ActiveName') }
             if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = 'مشهد غير مسمّى' }
             $lines.Add("🟠 $(Get-LayerDisplayName -Layer $layer): $activeName (خارجي)")
         }
@@ -1750,7 +1754,7 @@ function Update-OnAirStateFromCinegy {
 
     $suppliedCount = @($LayerStatuses).Count
     if ($failed.Count -eq 0 -and ($checked.Count -gt 0 -or $suppliedCount -gt 0)) {
-        $script:LastCinegyStateSuccess = Get-Date
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = Get-Date
     }
 
     return [pscustomobject]@{
@@ -1759,7 +1763,7 @@ function Update-OnAirStateFromCinegy {
         Removed = $removed.ToArray()
         Failed  = $failed.ToArray()
         Changes = $changes.ToArray()
-        LastSuccessfulAt = if ($script:LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:LastCinegyStateSuccess } else { $null }
+        LastSuccessfulAt = if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }
     }
 }
 
@@ -2479,21 +2483,10 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 # Live relay (ffmpeg -> Telegram Video Chat RTMP). Telegram's Bot API cannot
 # push continuous video to a chat; the supported route is a Group/Channel
 # Video Chat's RTMP ingestion endpoint.
-$script:RelayProcess = $null
-$script:RelayState = @{
-    ShouldRun    = $false          # user intent, distinguishes "stopped" from "crashed"
-    VerifyAt     = $null           # deferred startup check, keeps the loop unblocked
-    NotifyChatId = 0
-    Restarts     = 0
-    LastCheck    = [datetime]::MinValue
-}
+$script:RuntimeState = New-BridgeRuntimeState
+$script:RelayState = $script:RuntimeState.Relay
 
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
-$script:LastCinegyStateCheck = [datetime]::MinValue
-$script:LastCinegyStateSuccess = [datetime]::MinValue
-$script:LastCinegyHealthCheck = [datetime]::MinValue
-$script:LastCinegyHealthState = 'unknown'
-$script:TelegramConnectionState = 'unknown'
 $script:LastConfigSaveFailed = $false
 $script:HealthHistory = @{
     Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
@@ -2510,7 +2503,13 @@ $script:HealthHistory = @{
 
 function New-Button {
     param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][string]$Data)
-    return @{ text = $Text; callback_data = $Data }
+    $maxLength = Get-SettingInt 'ButtonTextMaxLength'
+    $displayText = $Text
+    if ($maxLength -gt 1 -and (Get-TextElementCount -Text $Text) -gt $maxLength) {
+        $info = [Globalization.StringInfo]::new($Text)
+        $displayText = $info.SubstringByTextElements(0, $maxLength - 1).TrimEnd() + '…'
+    }
+    return @{ text = $displayText; callback_data = $Data }
 }
 
 function Get-MainMenuKeyboard {
@@ -3606,7 +3605,7 @@ function Invoke-ShowTemplateResult {
 function Get-LayerShowContext {
     param([Parameter(Mandatory)][int]$Layer, [datetime]$Now = (Get-Date))
     $record = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
-    $lastSuccess = if ($script:LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:LastCinegyStateSuccess } else { $null }
+    $lastSuccess = if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
         -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
     return [pscustomobject]@{
@@ -4988,7 +4987,7 @@ function Invoke-DiagnosticsCommand {
         "طابور postbox: $($script:PostShowQueue.Count) | مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
         "الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count) | ملف الجدولة: $script:scheduleFile",
         "لقطات قيد التنفيذ: $($script:SnapshotJobs.Count) | relay: $relayState",
-        "حالة Cinegy المحلية: $script:LastCinegyHealthState",
+        "حالة Cinegy المحلية: $($script:RuntimeState.Monitoring.CinegyHealthState)",
         "",
         (Format-CinegyTelemetryStatus -Telemetry $telemetry)
     ) -join "`n"
@@ -5295,7 +5294,7 @@ function Get-RunningRelayProcess {
        resolve to an unrelated ffmpeg - very plausibly one of this bridge's own
        short-lived snapshot captures - and the menu would claim the relay is
        live while offering to kill the wrong process. #>
-    if ($script:RelayProcess -and -not $script:RelayProcess.HasExited) { return $script:RelayProcess }
+    if ($script:RelayState.Process -and -not $script:RelayState.Process.HasExited) { return $script:RelayState.Process }
     if (Test-Path $relayPidFile) {
         $raw = ''
         try { $raw = (Get-Content $relayPidFile -Raw -ErrorAction Stop).Trim() } catch { $raw = '' }
@@ -5362,10 +5361,10 @@ function Start-RelayProcess {
 
     # Quoted for the same reason as the snapshot: source URLs, RTMP keys and
     # paths can all contain spaces.
-    $script:RelayProcess = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $relayArgs `
+    $script:RelayState.Process = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $relayArgs `
         -WorkingDirectory $scriptRoot -StandardOutputPath $stdoutLog -StandardErrorPath $stderrLog
     # pid + process start time, so a recycled PID cannot be mistaken for ours.
-    $stamp = "$($script:RelayProcess.Id)|$($script:RelayProcess.StartTime.Ticks)"
+    $stamp = "$($script:RelayState.Process.Id)|$($script:RelayState.Process.StartTime.Ticks)"
     Set-Content -Path $relayPidFile -Value $stamp -Encoding ascii
     return $true
 }
@@ -5390,7 +5389,7 @@ function Start-LiveRelay {
     $script:RelayState.Restarts = 0
     $script:RelayState.NotifyChatId = $ChatId
     $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
-    Write-BridgeLog "User $UserId started live relay (PID $($script:RelayProcess.Id))"
+    Write-BridgeLog "User $UserId started live relay (PID $($script:RelayState.Process.Id))"
     Add-AuditEntry "▶️ بدء البث - user $UserId"
     Send-TelegramMessage -ChatId $ChatId -Text "⏳ جاري بدء البث..." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
@@ -5414,7 +5413,7 @@ function Stop-LiveRelay {
     catch {
         Send-TelegramMessage -ChatId $ChatId -Text "فشل إيقاف البث: $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
-    $script:RelayProcess = $null
+    $script:RelayState.Process = $null
     Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
 }
 
@@ -5427,13 +5426,13 @@ function Update-RelayWatchdog {
         if ((Get-Date) -lt $script:RelayState.VerifyAt) { return }
         $script:RelayState.VerifyAt = $null
         $notify = [long]$script:RelayState.NotifyChatId
-        if ($script:RelayProcess -and $script:RelayProcess.HasExited) {
+        if ($script:RelayState.Process -and $script:RelayState.Process.HasExited) {
             # Capture the exit code before clearing the reference.
-            $exitCode = $script:RelayProcess.ExitCode
+            $exitCode = $script:RelayState.Process.ExitCode
             $detail = Get-LastErrorLine -Path (Join-Path $logDir "relay-stderr.log")
             Write-BridgeLog "Live relay exited immediately (code $exitCode): $detail" "ERROR"
             $script:RelayState.ShouldRun = $false
-            $script:RelayProcess = $null
+            $script:RelayState.Process = $null
             Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
             if ($notify) {
                 $msg = "❌ توقف البث فورًا بعد التشغيل (كود $exitCode)."
@@ -5461,7 +5460,7 @@ function Update-RelayWatchdog {
     if($decision.Action -eq 'running'){return}
 
     Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
-    $script:RelayProcess = $null
+    $script:RelayState.Process = $null
 
     if ($decision.Action -eq 'stay_down') {
         $script:RelayState.ShouldRun = $false
@@ -6669,8 +6668,8 @@ function Update-Heartbeat {
 function Update-CinegyStateWatchdog {
     $now = Get-Date
     $interval = Get-SettingInt 'CinegyStateCheckSeconds' 1
-    if (($now - $script:LastCinegyStateCheck).TotalSeconds -lt $interval) { return }
-    $script:LastCinegyStateCheck = $now
+    if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt $interval) { return }
+    $script:RuntimeState.Monitoring.LastCinegyStateCheck = $now
 
     $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
@@ -6682,8 +6681,8 @@ function Update-CinegyStateWatchdog {
 function Update-CinegyHealthWatchdog {
     $now = Get-Date
     $interval = Get-SettingInt 'CinegyHealthCheckSeconds' 1
-    if (($now - $script:LastCinegyHealthCheck).TotalSeconds -lt $interval) { return }
-    $script:LastCinegyHealthCheck = $now
+    if (($now - $script:RuntimeState.Monitoring.LastCinegyHealthCheck).TotalSeconds -lt $interval) { return }
+    $script:RuntimeState.Monitoring.LastCinegyHealthCheck = $now
 
     $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
@@ -6691,9 +6690,9 @@ function Update-CinegyHealthWatchdog {
     elseif ($telemetry.Healthy) { 'healthy' }
     else { 'unhealthy' }
 
-    $oldState = $script:LastCinegyHealthState; $history = $script:HealthHistory.Cinegy
+    $oldState = $script:RuntimeState.Monitoring.CinegyHealthState; $history = $script:HealthHistory.Cinegy
     if ($newState -ne $oldState) { Write-BridgeLog "Cinegy health changed from $oldState to $newState" }
-    $script:LastCinegyHealthState = $newState
+    $script:RuntimeState.Monitoring.CinegyHealthState = $newState
     if ($newState -eq 'healthy') {
         $shouldRecover = [bool]$history.AlertSent
         $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
@@ -6715,9 +6714,9 @@ function Update-CinegyHealthWatchdog {
 function Set-TelegramConnectionState {
     param([Parameter(Mandatory)][bool]$Connected, [string]$ErrorMessage = '')
     $newState = if ($Connected) { 'connected' } else { 'disconnected' }
-    $oldState = $script:TelegramConnectionState; $history = $script:HealthHistory.Telegram; $now = Get-Date
+    $oldState = $script:RuntimeState.Monitoring.TelegramConnectionState; $history = $script:HealthHistory.Telegram; $now = Get-Date
     if ($newState -ne $oldState) { Write-BridgeLog "Telegram connection changed from $oldState to $newState" }
-    $script:TelegramConnectionState = $newState
+    $script:RuntimeState.Monitoring.TelegramConnectionState = $newState
     if ($Connected) {
         $shouldRecover = [bool]$history.AlertSent
         $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false

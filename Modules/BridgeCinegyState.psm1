@@ -54,9 +54,12 @@ function Resolve-BridgeCinegyLayerState {
         return [pscustomobject]@{Action='keep';Record=$TrackedRecord;Change=$null}
     }
     if(-not $DiscoverExternal -or -not $isOnAir){return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}}
-    $name=[string](Get-CinegyStateProperty $Status ActiveName)
+    $name=[string](Get-CinegyStateProperty $Status ActiveTemplateName)
+    $cinegyEventName=[string](Get-CinegyStateProperty $Status ActiveName)
+    if([string]::IsNullOrWhiteSpace($name)){$name=$cinegyEventName}
     if([string]::IsNullOrWhiteSpace($name)){$name="مشهد خارجي · طبقة $Layer"}
     $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
+    if(-not [string]::IsNullOrWhiteSpace($cinegyEventName)){$record.CinegyEventName=$cinegyEventName}
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}
 }
 

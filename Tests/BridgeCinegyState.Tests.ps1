@@ -50,4 +50,16 @@ Describe 'Cinegy layer reconciliation policy' {
         $added.Record.Key | Should -Be 'Scheduled lower third'
         $added.Record.At | Should -Be $now
     }
+
+    It 'prefers the extracted template name over the generic Cinegy layer event name' {
+        $status=[pscustomobject]@{
+            Success=$true;IsOnAir=$true;ActiveId='external-2';
+            ActiveName='Cinegy Type Layer 8 On';ActiveTemplateName='ticker';Layer=8
+        }
+
+        $added=Resolve-BridgeCinegyLayerState -Layer 8 -Status $status -DiscoverExternal
+
+        $added.Record.Key | Should -Be 'ticker'
+        $added.Record.CinegyEventName | Should -Be 'Cinegy Type Layer 8 On'
+    }
 }

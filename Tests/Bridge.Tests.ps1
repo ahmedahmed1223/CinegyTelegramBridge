@@ -716,6 +716,21 @@ Describe 'Unicode-aware field limits' {
     }
 }
 
+Describe 'Compact Telegram button labels' {
+    It 'shortens a long Arabic template label without changing its callback command' {
+        $original = $config.Settings.ButtonTextMaxLength
+        try {
+            $config.Settings.ButtonTextMaxLength = 18
+            $button = New-Button '🔴 إخفاء حركة سلايد طويلة جدًا للمشهد' 'hide:8'
+
+            (Get-TextElementCount -Text $button.text) | Should -BeLessOrEqual 18
+            $button.text | Should -Match '…$'
+            $button.callback_data | Should -Be 'hide:8'
+        }
+        finally { $config.Settings.ButtonTextMaxLength = $original }
+    }
+}
+
 Describe 'Telegram API send reliability' {
     BeforeEach {
         $script:OriginalTelegramRequestTimeoutSeconds = Get-Setting 'TelegramRequestTimeoutSeconds'
@@ -1835,6 +1850,45 @@ InModuleScope CinegyAirTitler {
 }
 
 Describe 'Get-TitlerLayerStatus' {
+    It 'extracts the external template filename from the Cinegy item description' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '<Item Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}" Name="Cinegy Type Layer 8 On" Description="Show ticker.cintitle on layer 8" IsEmpty="n"/>'
+                }
+            }
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Status><Active Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}"/><License State="Licensed"/><Output State="Normal"/><Client Connected="n" Identity=""/></Status>'
+            }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 8
+
+        $result.ActiveTemplateName | Should -Be 'ticker'
+        $result.ActiveName | Should -Be 'Cinegy Type Layer 8 On'
+    }
+
+    It 'preserves Arabic and spaces when extracting a template from a full path' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return [pscustomobject]@{
+                    StatusCode = 200
+                    Content = '<Item Id="{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}" Name="Cinegy Type Layer 8 On" Description="Show D:\Titles\حركة سلايد.cintitle on layer 8" IsEmpty="n"/>'
+                }
+            }
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Status><Active Id="{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}"/></Status>'
+            }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 8
+
+        $result.ActiveTemplateName | Should -Be 'حركة سلايد'
+    }
+
     It 'returns operational metadata and the active Cinegy item name' {
         Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
             if ($Uri -like '*/status/active') {
@@ -3474,9 +3528,9 @@ Describe 'Cinegy telemetry text' {
 
 Describe 'Cinegy monitoring watchdogs' {
     BeforeEach {
-        $script:LastCinegyStateCheck = [datetime]::MinValue
-        $script:LastCinegyHealthCheck = [datetime]::MinValue
-        $script:LastCinegyHealthState = 'unknown'
+        $script:RuntimeState.Monitoring.LastCinegyStateCheck = [datetime]::MinValue
+        $script:RuntimeState.Monitoring.LastCinegyHealthCheck = [datetime]::MinValue
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'unknown'
         $script:HealthHistory.Cinegy.FailureCount = 0
         $script:HealthHistory.Cinegy.OutageStartedAt = $null
         $script:HealthHistory.Cinegy.AlertSent = $false
@@ -3534,9 +3588,9 @@ Describe 'Cinegy monitoring watchdogs' {
 
         Update-CinegyHealthWatchdog
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
-        $script:LastCinegyHealthCheck = [datetime]::MinValue
+        $script:RuntimeState.Monitoring.LastCinegyHealthCheck = [datetime]::MinValue
         Update-CinegyHealthWatchdog
-        $script:LastCinegyHealthCheck = [datetime]::MinValue
+        $script:RuntimeState.Monitoring.LastCinegyHealthCheck = [datetime]::MinValue
         Update-CinegyHealthWatchdog
 
         Should -Invoke Get-AirTelemetryStatus -Times 3 -Exactly
@@ -3550,7 +3604,7 @@ Describe 'Cinegy monitoring watchdogs' {
 
 Describe 'Bridge lifecycle notifications' {
     BeforeEach {
-        $script:TelegramConnectionState = 'unknown'
+        $script:RuntimeState.Monitoring.TelegramConnectionState = 'unknown'
         $script:HealthHistory.Telegram.FailureCount = 0
         $script:HealthHistory.Telegram.OutageStartedAt = $null
         $script:HealthHistory.Telegram.AlertSent = $false

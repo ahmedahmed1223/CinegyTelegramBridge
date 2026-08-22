@@ -262,6 +262,8 @@ function Get-TitlerLayerStatus {
         $isOnAir = $false
         $activeItemXml = ''
         $activeName = ''
+        $activeDescription = ''
+        $activeTemplateName = ''
 
         if ($hasActiveItem) {
             $activeUri = "$uri/active"
@@ -273,6 +275,10 @@ function Get-TitlerLayerStatus {
             $isEmpty = [string]$itemNode.GetAttribute('IsEmpty')
             $isOnAir = $isEmpty -notmatch '^(?i:y|yes|true|1)$'
             $activeName = [string]$itemNode.GetAttribute('Name')
+            $activeDescription = [string]$itemNode.GetAttribute('Description')
+            if ($activeDescription -match '(?i)^\s*(?:Show|Play|Take)\s+(?:.*[\\/])?(?<Template>.+?)\.cintitle(?:\s+on\s+layer\s+\d+)?\s*$') {
+                $activeTemplateName = [string]$Matches.Template
+            }
         }
 
         return [pscustomobject]@{
@@ -280,6 +286,8 @@ function Get-TitlerLayerStatus {
             IsOnAir    = $isOnAir
             ActiveId   = $activeId
             ActiveName = $activeName
+            ActiveTemplateName = $activeTemplateName
+            ActiveDescription = $activeDescription
             LicenseState = $licenseState
             OutputState = $outputState
             ClientConnected = $clientConnected
@@ -296,6 +304,8 @@ function Get-TitlerLayerStatus {
             IsOnAir  = $null
             ActiveId = ''
             ActiveName = ''
+            ActiveTemplateName = ''
+            ActiveDescription = ''
             LicenseState = ''
             OutputState = ''
             ClientConnected = $false

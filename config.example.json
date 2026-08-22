@@ -35,6 +35,7 @@
     "EnableFavorites": true,
     "SharedFavoritesEnabled": false,
     "EnablePersistentMenuButton": true,
+    "ButtonTextMaxLength": 32,
     "DropPendingUpdatesOnStart": true,
     "AirCommandTimeoutSeconds": 3,
     "MaxFieldLength": 200,

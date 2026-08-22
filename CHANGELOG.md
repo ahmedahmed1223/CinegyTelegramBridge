@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.43 — 2026-08-22
+
+- Adds `Modules/BridgeRuntimeState.psm1` as an explicit, isolated runtime-state model.
+- Consolidates relay process ownership, relay intent/restart/watchdog fields, and Cinegy/Telegram monitoring timestamps and states under that model.
+- Removes the separate global relay-process and monitoring variables while retaining the existing relay-state compatibility reference during gradual migration.
+- Adds isolation/default tests and keeps relay, freshness, external-change, outage-threshold, and recovery coverage.
+- Extracts the actual `.cintitle` template name from Cinegy's active-item `Description` for externally started or scheduled scenes, instead of presenting the generic layer event name; retains the Cinegy event name as diagnostic metadata.
+- Shortens long Telegram button labels centrally at a configurable Unicode-aware visual limit (`ButtonTextMaxLength`, default `32`, `0` disables), without changing callback commands.
+- Completes the planned modularization and gradual global-state reduction work without a broad rewrite.
+
 ## 4.2.42 — 2026-08-22
 
 - Extracts live-relay watchdog timing, healthy/idle/wait states, disabled restart, retry-limit, and restart-count decisions into `Modules/BridgeRelayPolicy.psm1`.

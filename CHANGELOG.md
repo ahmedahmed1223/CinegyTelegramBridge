@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.0 — 2026-08-22
+
+- Added independently editable per-user favourites in `logs/favorites.json`.
+- Kept usage-ranked templates as fallback and added the disabled
+  `SharedFavoritesEnabled` placeholder for a future unified list.
+- Added persistent operator aliases in `logs/user-aliases.json`, managed by
+  `/alias USER_ID name` and displayed in status and audit text.
+- Added regression coverage for user isolation, removal, invalid templates,
+  alias normalization, and alias removal.
+- Expanded the development backlog to retain all previously proposed items.
+
 ## 4.1.2 — 2026-08-22
 
 - Fixed the Pester harness writing synthetic template records into the live

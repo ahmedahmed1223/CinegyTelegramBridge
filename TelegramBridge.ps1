@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.1.2'
+$script:BridgeVersion = '4.2.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -81,6 +81,7 @@ $script:DefaultSettings = [ordered]@{
     HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
+    SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     # --- safety ---
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
@@ -412,6 +413,8 @@ New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue 
 
 $relayPidFile = Join-Path $logDir "relay.pid"
 $usageFile = Join-Path $logDir "usage.json"
+$script:userFavoritesFile = Join-Path $logDir "favorites.json"
+$script:userAliasesFile = Join-Path $logDir "user-aliases.json"
 $onAirFile = Join-Path $logDir "onair.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -1153,6 +1156,8 @@ function Format-CinegyTelemetryStatus {
 # ---- usage counters (drive the ⭐ favourites row) ----
 
 $script:UsageCounts = @{}
+$script:UserFavorites = @{}
+$script:UserAliases = @{}
 $script:UsageDirty = $false
 $script:LastUsageFlush = [datetime]::MinValue
 
@@ -1463,10 +1468,81 @@ function Format-ExternalCinegyChangeAlert {
     return ($lines -join "`n")
 }
 
+function Import-UserFavorites {
+    if (-not (Test-Path -LiteralPath $script:userFavoritesFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:userFavoritesFile -Raw | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) { $script:UserFavorites[$prop.Name] = @($prop.Value | ForEach-Object { [string]$_ }) }
+    }
+    catch { Write-BridgeLog "Could not read favorites.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-UserFavorites {
+    try {
+        $temporary = "$($script:userFavoritesFile).tmp"
+        $script:UserFavorites | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:userFavoritesFile -Force -ErrorAction Stop
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write favorites.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Set-UserFavorite {
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][bool]$Enabled)
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($TemplateKey)) { return $false }
+    $id = [string]$UserId
+    $current = if ($script:UserFavorites.ContainsKey($id)) { @($script:UserFavorites[$id]) } else { @() }
+    if ($Enabled) { if ($current -notcontains $TemplateKey) { $current += $TemplateKey } }
+    else { $current = @($current | Where-Object { $_ -ne $TemplateKey }) }
+    $script:UserFavorites[$id] = $current
+    return Save-UserFavorites
+}
+
+function Import-UserAliases {
+    if (-not (Test-Path -LiteralPath $script:userAliasesFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:userAliasesFile -Raw | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) { $script:UserAliases[$prop.Name] = [string]$prop.Value }
+    }
+    catch { Write-BridgeLog "Could not read user-aliases.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-UserAliases {
+    try {
+        $temporary = "$($script:userAliasesFile).tmp"
+        $script:UserAliases | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:userAliasesFile -Force -ErrorAction Stop
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write user-aliases.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Set-UserAlias {
+    param([Parameter(Mandatory)][long]$TargetUserId, [AllowEmptyString()][string]$Alias = '')
+    if ($TargetUserId -le 0) { return $false }
+    $id = [string]$TargetUserId; $clean = $Alias.Trim()
+    if ([string]::IsNullOrWhiteSpace($clean)) { $script:UserAliases.Remove($id) }
+    else { $script:UserAliases[$id] = $clean }
+    return Save-UserAliases
+}
+
+function Get-UserDisplayName {
+    param([Parameter(Mandatory)][long]$UserId)
+    $id = [string]$UserId
+    if ($script:UserAliases.ContainsKey($id) -and -not [string]::IsNullOrWhiteSpace([string]$script:UserAliases[$id])) { return [string]$script:UserAliases[$id] }
+    return $id
+}
+
 function Get-FavoriteTemplateKeys {
+    param([long]$UserId = 0)
     $count = Get-SettingInt 'FavoritesCount' 0
     if ($count -le 0) { return @() }
     $store = Get-TemplateStore
+    $id = [string]$UserId
+    if ($UserId -gt 0 -and $script:UserFavorites.ContainsKey($id)) {
+        return @($script:UserFavorites[$id] | Where-Object { $store.Map.ContainsKey($_) } | Select-Object -First $count)
+    }
     return @(
         $script:UsageCounts.GetEnumerator() |
         Where-Object { $store.Map.ContainsKey($_.Key) } |
@@ -1932,7 +2008,7 @@ function Get-MainMenuKeyboard {
         # an empty array emits ZERO objects, so an unwrapped assignment yields
         # $null and $null.Count throws under Set-StrictMode. Same rule applies
         # to every array-returning helper called below.
-        $favs = @(Get-FavoriteTemplateKeys)
+        $favs = @(Get-FavoriteTemplateKeys -UserId $UserId)
         if ($favs.Count -gt 0) {
             $favRow = @()
             foreach ($key in $favs) {
@@ -1941,6 +2017,7 @@ function Get-MainMenuKeyboard {
             }
             if ($favRow.Count -gt 0) { $rows += , $favRow }
         }
+        $rows += , @( (New-Button "⭐ إدارة المفضلة" "menu:favorites") )
     }
 
     $rows += , @( (New-Button "🙈 اخفاء طبقة" "menu:hide"), (New-Button "🚪 خروج من المشهد" "menu:exit") )
@@ -2025,6 +2102,18 @@ function Get-TemplatesKeyboard {
         $rows += , @( (New-Button "لا توجد قوالب معرّفة" "menu") )
     }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-FavoritesManagementKeyboard {
+    param([Parameter(Mandatory)][long]$UserId)
+    $store = Get-TemplateStore; $selected = @(Get-FavoriteTemplateKeys -UserId $UserId); $rows = @()
+    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+        $key = [string]$store.Order[$i]
+        $mark = if ($selected -contains $key) { '✅' } else { '▫️' }
+        $rows += , @((New-Button "$mark $key" "favtoggle:$i"))
+    }
+    $rows += , @((New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -3143,7 +3232,7 @@ function Get-OnAirSummary {
         $info = $script:OnAir[$layer]
         $age = [int]((Get-Date) - $info.At).TotalSeconds
         $ageText = if ($age -ge 60) { "$([int]($age / 60)) دقيقة" } else { "$age ثانية" }
-        $userText = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { " | المستخدم: $($info.UserId)" } else { "" }
+        $userText = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { " | المستخدم: $(Get-UserDisplayName -UserId ([long]$info.UserId))" } else { "" }
         "طبقة $layer : $($info.Key)${userText} (منذ $ageText)"
     }
     return "🔴 على الهواء: " + ($parts -join "، ")
@@ -4254,6 +4343,27 @@ function Invoke-SetCommand {
     Invoke-SetValues -Values $values -ChatId $ChatId -UserId $UserId
 }
 
+function Invoke-UserAliasCommand {
+    param([string]$ArgText, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'هذا الخيار للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if ($ArgText -notmatch '^\s*(\d+)\s*(.*)$') {
+        Send-TelegramMessage -ChatId $ChatId -Text "الاستخدام: /alias USER_ID الاسم`nلحذف الاسم: /alias USER_ID -"
+        return
+    }
+    $targetUserId = [long]$Matches[1]; $alias = $Matches[2].Trim()
+    if ($alias -eq '-') { $alias = '' }
+    if (Set-UserAlias -TargetUserId $targetUserId -Alias $alias) {
+        $result = if ($alias) { "✅ تم تعيين اسم المستخدم $targetUserId إلى: $alias" } else { "✅ تم حذف الاسم المستعار للمستخدم $targetUserId" }
+        Write-BridgeLog "Admin $(Get-UserDisplayName -UserId $UserId) updated alias for user $targetUserId"
+        Add-AuditEntry "👤 Alias للمستخدم $targetUserId عُدّل بواسطة $(Get-UserDisplayName -UserId $UserId)"
+        Send-TelegramMessage -ChatId $ChatId -Text $result -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    else { Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر حفظ الاسم المستعار.' }
+}
+
 function Invoke-BridgeCommand {
     <# Named Invoke-BridgeCommand rather than Invoke-Command so it does not
        shadow PowerShell's built-in remoting cmdlet. #>
@@ -4438,6 +4548,21 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl')
             break
         }
+        'menu:favorites' {
+            Send-TelegramMessage -ChatId $chatId -Text '⭐ اختر القوالب التي تريد إظهارها في مفضلتك:' -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+            break
+        }
+        'favtoggle:*' {
+            $template = Get-TemplateByIndex -Index ([int]$data.Substring(10))
+            if (-not $template) { break }
+            $selected = @(Get-FavoriteTemplateKeys -UserId $userId) -contains [string]$template.Key
+            if (Set-UserFavorite -UserId $userId -TemplateKey ([string]$template.Key) -Enabled (-not $selected)) {
+                $action = if ($selected) { 'أزيل من' } else { 'أضيف إلى' }
+                Add-AuditEntry "⭐ $($template.Key) $action مفضلة $(Get-UserDisplayName -UserId $userId)"
+                Send-TelegramMessage -ChatId $chatId -Text "✅ $($template.Key): $action المفضلة." -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+            }
+            break
+        }
         'menu:timed' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب، ثم حدّد مدة الإخفاء التلقائي:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tplT')
             break
@@ -4485,6 +4610,7 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text $comparisonText -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
             break
         }
+        { $_ -in @('اسم', 'alias') } { Invoke-UserAliasCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         'menu:refreshstatus' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Invoke-FullStatusCommand -ChatId $chatId -UserId $userId
@@ -5069,6 +5195,8 @@ if (-not $AllowMultipleInstances) {
 
 Initialize-Settings
 Import-UsageCounts
+Import-UserFavorites
+Import-UserAliases
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues

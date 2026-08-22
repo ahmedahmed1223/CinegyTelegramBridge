@@ -13,9 +13,10 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.1.2
+## Version 4.2.0
 
-Version 4.1.2 isolates every test runtime file from the live bridge state.
+Version 4.2.0 adds editable per-user favourites and administrator-managed
+operator aliases. Version 4.1.2 isolated every test runtime file from the live bridge state.
 It retains the 4.1.1 live comparison with Cinegy during startup as well as on
 operator request. Opening Status or Layers reads
 every graphics layer referenced by `templates.json`, reconciles it with
@@ -357,9 +358,12 @@ menu:
   final review before Cinegy receives `SHOW`; templates without fields and
   preset buttons follow the same review gate. Previous/edit/preview/cancel
   controls preserve the draft while navigating.
-- **⭐ favourites** → the most-used templates get their own row at the top,
-  so the everyday ones are one tap away. Counts live in `logs/usage.json`;
-  the row size is `FavoritesCount` and it can be switched off entirely.
+- **⭐ المفضلة** → every operator edits an independent list from
+  **إدارة المفضلة**. Selections live in `logs/favorites.json`; usage-ranked
+  templates remain the fallback until the user makes a selection.
+  `SharedFavoritesEnabled` is reserved for a future unified list and is off.
+- Administrators set an operator Alias with `/alias USER_ID الاسم` and remove
+  it with `/alias USER_ID -`. Aliases are stored in `logs/user-aliases.json`.
 - **🙈 اخفاء طبقة** / **🚪 خروج من المشهد** → shows a button per known GFX
   layer (derived from the layers used in `templates.json`) — tap one to
   hide that layer / exit its scene, no need to type a layer number.

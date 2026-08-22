@@ -52,6 +52,54 @@ BeforeAll {
     }
 }
 
+Describe 'Per-user editable favourites' {
+    BeforeEach {
+        $script:UserFavorites = @{}
+        $script:userFavoritesFile = Join-Path $TestDrive 'favorites.json'
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ urgent = 1; lowerthird = 2 }; Order = @('urgent', 'lowerthird'); Errors = @() }
+        }
+    }
+
+    It 'keeps manually selected favourites isolated by user id' {
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $true | Should -BeTrue
+        Set-UserFavorite -UserId 202 -TemplateKey 'lowerthird' -Enabled $true | Should -BeTrue
+        @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('urgent')
+        @(Get-FavoriteTemplateKeys -UserId 202) | Should -Be @('lowerthird')
+    }
+
+    It 'removes a favourite without changing another users selection' {
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $true | Out-Null
+        Set-UserFavorite -UserId 202 -TemplateKey 'urgent' -Enabled $true | Out-Null
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $false | Should -BeTrue
+        @(Get-FavoriteTemplateKeys -UserId 101).Count | Should -Be 0
+        @(Get-FavoriteTemplateKeys -UserId 202) | Should -Be @('urgent')
+    }
+
+    It 'rejects a template key that is not in the catalogue' {
+        Set-UserFavorite -UserId 101 -TemplateKey 'missing' -Enabled $true | Should -BeFalse
+        @(Get-FavoriteTemplateKeys -UserId 101).Count | Should -Be 0
+    }
+}
+
+Describe 'User aliases' {
+    BeforeEach {
+        $script:UserAliases = @{}
+        $script:userAliasesFile = Join-Path $TestDrive 'user-aliases.json'
+    }
+
+    It 'stores a trimmed alias and resolves it instead of the numeric id' {
+        Set-UserAlias -TargetUserId 101 -Alias '  مخرج الأخبار  ' | Should -BeTrue
+        Get-UserDisplayName -UserId 101 | Should -Be 'مخرج الأخبار'
+    }
+
+    It 'removes an alias when an empty value is saved' {
+        Set-UserAlias -TargetUserId 101 -Alias 'مخرج الأخبار' | Out-Null
+        Set-UserAlias -TargetUserId 101 -Alias '' | Should -BeTrue
+        Get-UserDisplayName -UserId 101 | Should -Be '101'
+    }
+}
+
 Describe 'Test runtime isolation' {
     It 'never points on-air persistence at the live logs directory' {
         [IO.Path]::GetFullPath($script:onAirFile) | Should -BeLike "$([IO.Path]::GetFullPath($TestDrive))*"

@@ -31,6 +31,7 @@
     "EnableHideAll": true,
     "HideAllLayers": "all",
     "EnableFavorites": true,
+    "SharedFavoritesEnabled": false,
     "EnablePersistentMenuButton": true,
     "DropPendingUpdatesOnStart": true,
     "AirCommandTimeoutSeconds": 3,

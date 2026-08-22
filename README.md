@@ -13,10 +13,14 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.0
+## Version 4.2.1
 
-Version 4.2.0 adds editable per-user favourites and administrator-managed
+Version 4.2.1 adds thresholded Cinegy and Telegram outage/recovery alerts and
+shows consecutive failures plus outage start time in full status. Version 4.2.0 adds editable per-user favourites and administrator-managed
 operator aliases. Version 4.1.2 isolated every test runtime file from the live bridge state.
+On-air summaries label external or scheduled scenes as `🟣 Cinegy Air` and
+Telegram-operated scenes as `🔵 Bot · operator`. HIDE and EXIT immediately
+read the affected layer before changing the local state.
 It retains the 4.1.1 live comparison with Cinegy during startup as well as on
 operator request. Opening Status or Layers reads
 every graphics layer referenced by `templates.json`, reconciles it with

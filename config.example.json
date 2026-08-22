@@ -53,6 +53,7 @@
     "CinegyStateCheckSeconds": 15,
     "CinegyHealthCheckSeconds": 60,
     "CinegyMonitorTimeoutSeconds": 1,
+    "HealthFailureAlertThreshold": 3,
     "MaxPendingApprovals": 20,
     "PendingApprovalExpiryHours": 24,
     "FavoritesCount": 3,

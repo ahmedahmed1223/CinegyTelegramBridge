@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.1 — 2026-08-22
+
+- Added `HealthFailureAlertThreshold` (default 3) for consecutive Cinegy and
+  Telegram failures before notifying administrators.
+- Outages now produce one alert and one recovery message without repeats.
+- Full health status includes the consecutive failure count and outage start.
+- On-air status distinguishes `🟣 Cinegy Air` external or scheduled scenes
+  from `🔵 Bot · operator` scenes created through Telegram.
+- Successful HIDE and EXIT commands read the affected Cinegy layer and
+  reconcile `onair.json` from the confirmed result.
+- Added regression coverage for thresholding, deduplication, recovery, and
+  clearing outage state.
+
 ## 4.2.0 — 2026-08-22
 
 - Added independently editable per-user favourites in `logs/favorites.json`.

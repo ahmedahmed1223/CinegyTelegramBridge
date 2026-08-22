@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.0'
+$script:BridgeVersion = '4.2.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -105,6 +105,7 @@ $script:DefaultSettings = [ordered]@{
     CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
+    HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
     FavoritesCount             = 3
@@ -136,6 +137,7 @@ $script:SettingDisplayMetadata = @{
     CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
+    HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
     PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
     FavoritesCount = @{ Unit = 'قوالب'; Description = 'عدد القوالب المفضلة المعروضة' }
@@ -1976,8 +1978,8 @@ $script:LastCinegyHealthState = 'unknown'
 $script:TelegramConnectionState = 'unknown'
 $script:LastConfigSaveFailed = $false
 $script:HealthHistory = @{
-    Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null }
-    Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null }
+    Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
+    Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
 }
 
 # ============================================================================
@@ -2922,12 +2924,20 @@ function Get-FieldPromptText {
     return "القالب '$($State.Key)' - أرسل نص الحقل ($($index + 1)/$($State.Fields.Count))$limitText`:`n$label"
 }
 
+function Sync-LayerAfterOperatorAction {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$Reason)
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    return Update-OnAirStateFromCinegy -Reason $Reason -LayerStatuses @($status) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+}
+
 function Invoke-HideLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Quiet)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
-        if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir.Remove($Layer); Save-OnAirState }
+        Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         Write-BridgeLog "User $UserId hid layer $Layer"
         Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $UserId"
         if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
@@ -2943,7 +2953,7 @@ function Invoke-ExitLayer {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
-        if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir.Remove($Layer); Save-OnAirState }
+        Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
         Write-BridgeLog "User $UserId exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -3232,8 +3242,12 @@ function Get-OnAirSummary {
         $info = $script:OnAir[$layer]
         $age = [int]((Get-Date) - $info.At).TotalSeconds
         $ageText = if ($age -ge 60) { "$([int]($age / 60)) دقيقة" } else { "$age ثانية" }
-        $userText = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { " | المستخدم: $(Get-UserDisplayName -UserId ([long]$info.UserId))" } else { "" }
-        "طبقة $layer : $($info.Key)${userText} (منذ $ageText)"
+        $source = [string](Get-JsonProp $info 'Source')
+        if ($source -eq 'cinegy') { "🟣 طبقة $layer : $($info.Key) | المصدر: Cinegy Air (منذ $ageText)" }
+        else {
+            $operator = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { Get-UserDisplayName -UserId ([long]$info.UserId) } else { 'غير معروف' }
+            "🔵 طبقة $layer : $($info.Key) | المصدر: Bot · المستخدم: $operator (منذ $ageText)"
+        }
     }
     return "🔴 على الهواء: " + ($parts -join "، ")
 }
@@ -3343,7 +3357,9 @@ function Get-HealthStatusReport {
             "$($history.LastError) — $(([datetime]$history.LastErrorAt).ToString('yyyy-MM-dd HH:mm:ss'))"
         }
         else { 'لا يوجد' }
-        "$service — آخر نجاح: $lastSuccess | آخر خطأ: $lastError"
+        $failureCount = [int]$history.FailureCount
+        $outage = if ($history.OutageStartedAt) { ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss') } else { 'لا يوجد' }
+        "$service — آخر نجاح: $lastSuccess | آخر خطأ: $lastError | فشل متتالٍ: $failureCount | بداية الانقطاع: $outage"
     }
     $historyText = $historyLines -join "`n"
     $text = @(
@@ -5094,40 +5110,47 @@ function Update-CinegyHealthWatchdog {
     elseif ($telemetry.Healthy) { 'healthy' }
     else { 'unhealthy' }
 
-    $oldState = $script:LastCinegyHealthState
-    if ($newState -eq $oldState) { return }
+    $oldState = $script:LastCinegyHealthState; $history = $script:HealthHistory.Cinegy
+    if ($newState -ne $oldState) { Write-BridgeLog "Cinegy health changed from $oldState to $newState" }
     $script:LastCinegyHealthState = $newState
-    Write-BridgeLog "Cinegy health changed from $oldState to $newState"
-
-    if (-not (Get-Setting 'NotifyAdminsOnCinegyHealth')) { return }
-    switch ($newState) {
-        'unhealthy' {
-            Send-AdminBroadcast -Text "🔴 تحذير صحة Cinegy`n$(Format-CinegyTelemetryStatus -Telemetry $telemetry)"
-        }
-        'unreachable' {
-            Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى قياسات صحة Cinegy. تحقق من Air والاتصال بالشبكة."
-        }
-        'healthy' {
-            if ($oldState -in @('unhealthy', 'unreachable')) {
-                Send-AdminBroadcast -Text "💚 تعافت صحة Cinegy وعادت القياسات إلى الحالة السليمة."
-            }
-        }
+    if ($newState -eq 'healthy') {
+        $shouldRecover = [bool]$history.AlertSent
+        $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
+        if ($shouldRecover -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) { Send-AdminBroadcast -Text "💚 تعافت صحة Cinegy وعادت القياسات إلى الحالة السليمة." }
+        return
+    }
+    if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
+    $history.FailureCount = [int]$history.FailureCount + 1; $history.LastErrorAt = $now
+    $history.LastError = if ($newState -eq 'unreachable') { 'تعذّر الوصول' } else { 'قياسات غير سليمة' }
+    $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
+    if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) {
+        $history.AlertSent = $true
+        $started = ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss')
+        $detail = if ($newState -eq 'unhealthy') { Format-CinegyTelemetryStatus -Telemetry $telemetry } else { 'تعذّر الوصول إلى قياسات صحة Cinegy. تحقق من Air والاتصال بالشبكة.' }
+        Send-AdminBroadcast -Text "🔴 تحذير صحة Cinegy بعد $($history.FailureCount) حالات فشل متتالية`nبداية الانقطاع: $started`n$detail"
     }
 }
 
 function Set-TelegramConnectionState {
     param([Parameter(Mandatory)][bool]$Connected, [string]$ErrorMessage = '')
     $newState = if ($Connected) { 'connected' } else { 'disconnected' }
-    $oldState = $script:TelegramConnectionState
-    if ($newState -eq $oldState) { return }
+    $oldState = $script:TelegramConnectionState; $history = $script:HealthHistory.Telegram; $now = Get-Date
+    if ($newState -ne $oldState) { Write-BridgeLog "Telegram connection changed from $oldState to $newState" }
     $script:TelegramConnectionState = $newState
-    Write-BridgeLog "Telegram connection changed from $oldState to $newState"
-    if (-not $Connected) {
-        $safeError = Protect-SensitiveText $ErrorMessage
-        Send-AdminBroadcast -Text "⚠️ فُقد اتصال Telegram: $safeError"
+    if ($Connected) {
+        $shouldRecover = [bool]$history.AlertSent
+        $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
+        if ($shouldRecover) { Send-AdminBroadcast -Text "✅ استعاد البوت اتصال Telegram وعادت دورة التحديث للعمل." }
+        return
     }
-    elseif ($oldState -eq 'disconnected') {
-        Send-AdminBroadcast -Text "✅ استعاد البوت اتصال Telegram وعادت دورة التحديث للعمل."
+    if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
+    $history.FailureCount = [int]$history.FailureCount + 1
+    $history.LastError = Protect-SensitiveText $ErrorMessage; $history.LastErrorAt = $now
+    $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
+    if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent) {
+        $history.AlertSent = $true
+        $started = ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss')
+        Send-AdminBroadcast -Text "⚠️ فُقد اتصال Telegram بعد $($history.FailureCount) حالات فشل متتالية`nبداية الانقطاع: $started`n$($history.LastError)"
     }
 }
 

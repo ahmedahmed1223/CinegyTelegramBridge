@@ -765,13 +765,13 @@ Describe 'Simple and full status reports' {
     }
 
     It 'includes the operator identity in the on-air summary so multiple users are visible' {
-        $script:OnAir[4] = @{ Key = 'urgent'; At = (Get-Date).AddMinutes(-2); UserId = 777; ActiveId = '{A}' }
-        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-5); UserId = 888; ActiveId = '{B}' }
+        $script:OnAir[4] = @{ Key = 'urgent'; At = (Get-Date).AddMinutes(-2); UserId = 777; ActiveId = '{A}'; Source = 'bridge' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-5); UserId = 0; ActiveId = '{B}'; Source = 'cinegy' }
 
         $summary = Get-OnAirSummary
 
-        $summary | Should -Match 'طبقة 4.*urgent.*المستخدم: 777'
-        $summary | Should -Match 'طبقة 8.*ticker.*المستخدم: 888'
+        $summary | Should -Match '🔵.*طبقة 4.*urgent.*Bot.*777'
+        $summary | Should -Match '🟣.*طبقة 8.*ticker.*Cinegy Air'
     }
 
     It 'merges layer details and health timings into the administrator full status' {
@@ -1819,6 +1819,7 @@ Describe 'Exit scene on-air record cleanup' {
         Mock Write-BridgeLog { }
         Mock Add-AuditEntry { }
         Mock Send-TelegramMessage { }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Layer = 7; Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' } }
     }
 
     AfterEach { $OnAir.Clear() }
@@ -1829,6 +1830,7 @@ Describe 'Exit scene on-air record cleanup' {
         Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42
 
         $OnAir.ContainsKey(7) | Should -BeFalse
+        Should -Invoke Get-TitlerLayerStatus -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 }
         Should -Invoke Save-OnAirState -Times 1 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $Text -match 'تم الخروج من المشهد'
@@ -2275,9 +2277,13 @@ Describe 'Cinegy monitoring watchdogs' {
         $script:LastCinegyStateCheck = [datetime]::MinValue
         $script:LastCinegyHealthCheck = [datetime]::MinValue
         $script:LastCinegyHealthState = 'unknown'
+        $script:HealthHistory.Cinegy.FailureCount = 0
+        $script:HealthHistory.Cinegy.OutageStartedAt = $null
+        $script:HealthHistory.Cinegy.AlertSent = $false
         Mock Get-SettingInt {
             if ($Name -eq 'CinegyStateCheckSeconds') { return 15 }
             if ($Name -eq 'CinegyHealthCheckSeconds') { return 60 }
+            if ($Name -eq 'HealthFailureAlertThreshold') { return 2 }
             return 1
         }
         Mock Get-Setting { $true }
@@ -2306,7 +2312,7 @@ Describe 'Cinegy monitoring watchdogs' {
         }
     }
 
-    It 'deduplicates unhealthy telemetry and sends one recovery notice' {
+    It 'alerts only after the Cinegy failure threshold and sends one recovery notice' {
         $script:telemetryCall = 0
         Mock Get-AirTelemetryStatus {
             $script:telemetryCall++
@@ -2327,6 +2333,7 @@ Describe 'Cinegy monitoring watchdogs' {
         }
 
         Update-CinegyHealthWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
         $script:LastCinegyHealthCheck = [datetime]::MinValue
         Update-CinegyHealthWatchdog
         $script:LastCinegyHealthCheck = [datetime]::MinValue
@@ -2335,23 +2342,33 @@ Describe 'Cinegy monitoring watchdogs' {
         Should -Invoke Get-AirTelemetryStatus -Times 3 -Exactly
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تحذير صحة Cinegy' }
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تعافت صحة Cinegy' }
+        $script:HealthHistory.Cinegy.FailureCount | Should -Be 0
+        $script:HealthHistory.Cinegy.OutageStartedAt | Should -BeNullOrEmpty
     }
 }
 
 Describe 'Bridge lifecycle notifications' {
     BeforeEach {
         $script:TelegramConnectionState = 'unknown'
+        $script:HealthHistory.Telegram.FailureCount = 0
+        $script:HealthHistory.Telegram.OutageStartedAt = $null
+        $script:HealthHistory.Telegram.AlertSent = $false
+        Mock Get-SettingInt { 2 }
         Mock Send-AdminBroadcast { }
         Mock Write-BridgeLog { }
     }
 
-    It 'deduplicates Telegram failures and sends one recovery notification' {
+    It 'alerts only after the Telegram failure threshold and sends one recovery notification' {
         Set-TelegramConnectionState -Connected:$false -ErrorMessage 'timeout'
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
         Set-TelegramConnectionState -Connected:$false -ErrorMessage 'timeout again'
+        Set-TelegramConnectionState -Connected:$false -ErrorMessage 'timeout third'
         Set-TelegramConnectionState -Connected:$true
 
         Should -Invoke Send-AdminBroadcast -Times 2 -Exactly
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'استعاد.*Telegram' }
+        $script:HealthHistory.Telegram.FailureCount | Should -Be 0
+        $script:HealthHistory.Telegram.OutageStartedAt | Should -BeNullOrEmpty
     }
 
     It 'notifies admins when the bridge starts' {

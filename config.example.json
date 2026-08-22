@@ -71,6 +71,8 @@
     "ScheduleConflictWindowMinutes": 2,
     "ScheduleMaxRetries": 0,
     "ScheduleRetryDelaySeconds": 30,
+    "ScheduleRetryBackoffFactor": 2,
+    "ScheduleRetryMaxDelaySeconds": 300,
     "ReservedLayers": "",
     "DisabledTemplateKeys": "",
     "MaintenanceMode": false,

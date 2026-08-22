@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.2.13 — 2026-08-22
+
+- Changed opted-in scheduled retry delays from fixed to exponential backoff.
+- Added `ScheduleRetryBackoffFactor` with a default factor of 2.
+- Added `ScheduleRetryMaxDelaySeconds` with a default cap of 300 seconds.
+- Normalized invalid timing values to a positive bounded delay.
+- Added deterministic growth and cap regression coverage.
+
 ## 4.2.12 — 2026-08-22
 
 - Added independent `logs/schedule-execution.jsonl` execution history.

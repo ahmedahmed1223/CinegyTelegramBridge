@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.12'
+$script:BridgeVersion = '4.2.13'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -112,6 +112,8 @@ $script:DefaultSettings = [ordered]@{
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
     ScheduleMaxRetries          = 0       # safe default: do not replay a failed SHOW unless admin opts in
     ScheduleRetryDelaySeconds   = 30      # wait before an opted-in scheduled SHOW retry
+    ScheduleRetryBackoffFactor  = 2       # exponential multiplier per failed attempt
+    ScheduleRetryMaxDelaySeconds = 300    # cap retry delay even with many attempts
     HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
@@ -1903,9 +1905,11 @@ function Update-ScheduleQueue {
             $scheduleEntry.AttemptCount = $attemptCount
             $maxRetries = Get-SettingInt 'ScheduleMaxRetries' 0
             if ($attemptCount -le $maxRetries) {
-                $delay = Get-SettingInt 'ScheduleRetryDelaySeconds' 30
+                $delay = Get-RetryDelaySeconds -BaseSeconds (Get-SettingInt 'ScheduleRetryDelaySeconds' 30) `
+                    -Attempt $attemptCount -Factor (Get-SettingInt 'ScheduleRetryBackoffFactor' 2) `
+                    -MaxSeconds (Get-SettingInt 'ScheduleRetryMaxDelaySeconds' 300)
                 $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''
-                $scheduleEntry.NextAttemptAt = $Now.AddSeconds([math]::Max(1, $delay)).ToString('o')
+                $scheduleEntry.NextAttemptAt = $Now.AddSeconds($delay).ToString('o')
                 Write-BridgeLog "Scheduled event $($scheduleEntry.Id) SHOW failed; retry $attemptCount/$maxRetries at $($scheduleEntry.NextAttemptAt): $($scheduleEntry.LastResult)" 'WARN'
             }
             else {
@@ -2327,6 +2331,16 @@ function Get-TemplatesKeyboard {
     }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-RetryDelaySeconds {
+    param([int]$BaseSeconds, [int]$Attempt, [int]$Factor = 2, [int]$MaxSeconds = 300)
+    $base = [math]::Max(1, $BaseSeconds)
+    $safeAttempt = [math]::Min(31, [math]::Max(1, $Attempt))
+    $safeFactor = [math]::Max(1, $Factor)
+    $cap = [math]::Max(1, $MaxSeconds)
+    $calculated = [double]$base * [math]::Pow([double]$safeFactor, [double]($safeAttempt - 1))
+    return [int][math]::Min([double]$cap, $calculated)
 }
 
 function Get-ScheduleLayerConflicts {

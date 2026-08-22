@@ -13,9 +13,10 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.12
+## Version 4.2.13
 
-Version 4.2.12 adds a content-free, machine-readable
+Version 4.2.13 adds bounded exponential backoff to opted-in scheduled retries,
+configured by `ScheduleRetryBackoffFactor` and `ScheduleRetryMaxDelaySeconds`. Version 4.2.12 adds a content-free, machine-readable
 `logs/schedule-execution.jsonl` record for every scheduled SHOW attempt. Version 4.2.11 adds an opt-in retry policy for failed scheduled SHOW events,
 with safe zero-retry defaults and persisted attempt timing. Version 4.2.10 warns during schedule review when another pending event targets
 the same layer within `ScheduleConflictWindowMinutes`. Version 4.2.9 adds administrator-managed `ReservedLayers` and

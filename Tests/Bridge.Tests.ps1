@@ -2569,6 +2569,18 @@ Describe 'Schedule layer conflict detection' {
     }
 }
 
+Describe 'Bounded retry backoff' {
+    It 'grows exponentially and never exceeds the configured cap' {
+        Get-RetryDelaySeconds -BaseSeconds 10 -Attempt 1 -Factor 2 -MaxSeconds 25 | Should -Be 10
+        Get-RetryDelaySeconds -BaseSeconds 10 -Attempt 2 -Factor 2 -MaxSeconds 25 | Should -Be 20
+        Get-RetryDelaySeconds -BaseSeconds 10 -Attempt 3 -Factor 2 -MaxSeconds 25 | Should -Be 25
+    }
+
+    It 'normalizes unsafe values to a positive bounded delay' {
+        Get-RetryDelaySeconds -BaseSeconds 0 -Attempt 0 -Factor 0 -MaxSeconds 0 | Should -Be 1
+    }
+}
+
 Describe 'Telegram schedule review flow' {
     BeforeEach {
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()

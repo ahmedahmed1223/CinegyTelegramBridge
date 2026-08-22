@@ -82,6 +82,65 @@ Describe 'Per-user editable favourites' {
     }
 }
 
+Describe 'Template search categories and last-used metadata' {
+    BeforeEach {
+        $script:TemplateLastUsed = @{}
+        Mock Get-TemplateStore {
+            @{
+                Order = @('lowerthird', 'urgent', 'weather')
+                Map = @{
+                    lowerthird = @{ Key='lowerthird'; Layer=5; Category='أسماء'; Description='اسم الضيف'; Fields=@('Name'); Presets=@() }
+                    urgent = @{ Key='urgent'; Layer=7; Category='أخبار'; Description='خبر عاجل'; Fields=@('Headline'); Presets=@() }
+                    weather = @{ Key='weather'; Layer=8; Category='أخبار'; Description='درجات الحرارة'; Fields=@(); Presets=@() }
+                }
+                Errors=@(); InvalidKeys=@(); SharedLayers=@{}
+            }
+        }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'lists unique categories and retains original template indexes in a filtered keyboard' {
+        @(Get-TemplateCategories) | Should -Be @('أخبار', 'أسماء')
+        $keyboard = Get-TemplatesKeyboard -Prefix tpl -Category 'أخبار'
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'tpl:1'
+        $callbacks | Should -Contain 'tpl:2'
+        $callbacks | Should -Not -Contain 'tpl:0'
+    }
+
+    It 'searches key description and category without case sensitivity' {
+        $keyboard = Get-TemplatesKeyboard -Prefix tpl -Query 'URGENT'
+        $labels = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object text)
+        ($labels -join ' ') | Should -Match 'urgent'
+        ($labels -join ' ') | Should -Not -Match 'weather'
+
+        $categorySearch = Get-TemplatesKeyboard -Prefix tpl -Query 'أخبار'
+        $categoryCallbacks = @($categorySearch.inline_keyboard | ForEach-Object { $_ } | ForEach-Object callback_data)
+        $categoryCallbacks | Should -Contain 'tpl:1'
+        $categoryCallbacks | Should -Contain 'tpl:2'
+    }
+
+    It 'shows the last successful use time and completes a private search flow' {
+        $script:TemplateLastUsed['urgent'] = [datetime]'2026-08-22T12:34:00Z'
+        (Get-TemplateLastUsedLabel -Key urgent) | Should -Match '08-22'
+
+        Start-TemplateSearch -ChatId 10 -UserId 20
+        (Get-PendingState -ChatId 10).Mode | Should -Be 'template_search'
+        Complete-TemplateSearch -ChatId 10 -Value 'urgent'
+        Get-PendingState -ChatId 10 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 2 -Exactly
+    }
+
+    It 'provides a non-mutating preview before selecting a template' {
+        $preview = Get-TemplatePreviewText -Template (Get-TemplateStore).Map.urgent
+        $preview | Should -Match 'أخبار|خبر عاجل|Headline|طبقة: 7'
+        $keyboard = Get-TemplatesKeyboard -Prefix tpl
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'tplinfo:1'
+        (Get-TemplatePreviewKeyboard -TemplateIndex 1).inline_keyboard[0][0].callback_data | Should -Be 'tpl:1'
+    }
+}
+
 Describe 'User aliases' {
     BeforeEach {
         $script:UserAliases = @{}

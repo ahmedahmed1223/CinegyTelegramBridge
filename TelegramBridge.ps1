@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.29'
+$script:BridgeVersion = '4.2.30'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -1361,6 +1361,7 @@ function Get-TemplateStore {
             FieldTypes  = $fieldTypes
             MaxLength   = $templateLimit
             Description = [string](Get-JsonProp $entry 'description')
+            Category    = [string](Get-JsonProp $entry 'category')
             Order       = $order
             Presets     = $presets
         }
@@ -1442,7 +1443,7 @@ function Save-TemplateDefinitionChange {
             }
             if ($Action -eq 'create') { $target = [pscustomobject]@{}; $raw | Add-Member -NotePropertyName $TemplateKey -NotePropertyValue $target }
             else { $target = $existing }
-            foreach ($name in @('path', 'layer', 'order', 'description', 'fields')) {
+            foreach ($name in @('path', 'layer', 'order', 'description', 'category', 'fields')) {
                 if ($Definition.ContainsKey($name)) { $target | Add-Member -NotePropertyName $name -NotePropertyValue $Definition[$name] -Force }
             }
         }
@@ -1562,6 +1563,7 @@ function Format-CinegyTelemetryStatus {
 # ---- usage counters (drive the ⭐ favourites row) ----
 
 $script:UsageCounts = @{}
+$script:TemplateLastUsed = @{}
 $script:UserFavorites = @{}
 $script:UserAliases = @{}
 $script:UsageDirty = $false
@@ -1571,7 +1573,13 @@ function Import-UsageCounts {
     if (-not (Test-Path $usageFile)) { return }
     try {
         $raw = Get-Content -Path $usageFile -Raw | ConvertFrom-Json
-        foreach ($prop in $raw.PSObject.Properties) { $script:UsageCounts[$prop.Name] = [int]$prop.Value }
+        foreach ($prop in $raw.PSObject.Properties) {
+            if ($prop.Value -is [ValueType]) { $script:UsageCounts[$prop.Name] = [int]$prop.Value; continue }
+            $script:UsageCounts[$prop.Name] = [int](Get-JsonProp $prop.Value 'Count')
+            $lastUsed = [string](Get-JsonProp $prop.Value 'LastUsedUtc')
+            $parsed = [datetime]::MinValue
+            if ([datetime]::TryParse($lastUsed, [ref]$parsed)) { $script:TemplateLastUsed[$prop.Name] = $parsed.ToUniversalTime() }
+        }
     }
     catch { Write-BridgeLog "Could not read usage.json: $($_.Exception.Message)" "WARN" }
 }
@@ -1583,6 +1591,7 @@ function Add-UsageCount {
     param([Parameter(Mandatory)][string]$Key)
     if (-not $script:UsageCounts.ContainsKey($Key)) { $script:UsageCounts[$Key] = 0 }
     $script:UsageCounts[$Key]++
+    $script:TemplateLastUsed[$Key] = [datetime]::UtcNow
     $script:UsageDirty = $true
 }
 
@@ -1592,7 +1601,14 @@ function Save-UsageCounts {
     if (-not $Force -and ((Get-Date) - $script:LastUsageFlush).TotalSeconds -lt 60) { return }
     $script:LastUsageFlush = Get-Date
     try {
-        $script:UsageCounts | ConvertTo-Json -Depth 3 | Set-Content -Path $usageFile -Encoding utf8 -ErrorAction Stop
+        $persisted = [ordered]@{}
+        foreach ($key in @($script:UsageCounts.Keys | Sort-Object)) {
+            $persisted[$key] = [ordered]@{
+                Count = [int]$script:UsageCounts[$key]
+                LastUsedUtc = if ($script:TemplateLastUsed.ContainsKey($key)) { ([datetime]$script:TemplateLastUsed[$key]).ToUniversalTime().ToString('o') } else { '' }
+            }
+        }
+        $persisted | ConvertTo-Json -Depth 4 | Set-Content -Path $usageFile -Encoding utf8 -ErrorAction Stop
         $script:UsageDirty = $false
     }
     catch { Write-BridgeLog "Could not write usage.json: $($_.Exception.Message)" "WARN" }
@@ -2671,15 +2687,39 @@ function Get-MainMenuKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-TemplateCategories {
+    $store = Get-TemplateStore
+    return @($store.Order | ForEach-Object { ([string]$store.Map[$_].Category).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Get-TemplateLastUsedLabel {
+    param([Parameter(Mandatory)][string]$Key)
+    if (-not $script:TemplateLastUsed.ContainsKey($Key)) { return '' }
+    return " · 🕘 $(([datetime]$script:TemplateLastUsed[$Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
+}
+
 function Get-TemplatesKeyboard {
     <# Prefix selects what tapping a template does: tpl = show now,
        tplT = show with auto-hide, updtpl = pick a field to update. #>
-    param([string]$Prefix = 'tpl')
+    param([string]$Prefix = 'tpl', [string]$Category = '', [string]$Query = '', [switch]$BrowseControls)
     $store = Get-TemplateStore
     $rows = @()
+    if ($BrowseControls -and $Prefix -eq 'tpl') {
+        $rows += , @((New-Button '🔎 بحث' 'menu:templatesearch'), (New-Button '🗂 التصنيفات' 'menu:templatecategories'))
+    }
+    $matched = 0
     for ($i = 0; $i -lt $store.Order.Count; $i++) {
         $t = $store.Map[$store.Order[$i]]
-        $rows += , @( (New-Button "$($t.Key) (طبقة $($t.Layer))" "$Prefix`:$i") )
+        if ($Category -and -not ([string]$t.Category).Equals($Category, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($Query) {
+            $haystack = "$($t.Key) $($t.Description) $($t.Category)"
+            if ($haystack.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        }
+        $matched++
+        $categoryLabel = if ([string]::IsNullOrWhiteSpace([string]$t.Category)) { '' } else { " · $($t.Category)" }
+        $templateRow = @((New-Button "$($t.Key) (طبقة $($t.Layer))$categoryLabel$(Get-TemplateLastUsedLabel -Key ([string]$t.Key))" "$Prefix`:$i"))
+        if ($Prefix -eq 'tpl') { $templateRow += (New-Button 'ℹ️' "tplinfo:$i") }
+        $rows += , $templateRow
         # Presets are only meaningful for an immediate show.
         if ($Prefix -eq 'tpl') {
             $presetRow = @()
@@ -2690,11 +2730,59 @@ function Get-TemplatesKeyboard {
             if ($presetRow.Count -gt 0) { $rows += , $presetRow }
         }
     }
-    if ($store.Order.Count -eq 0) {
-        $rows += , @( (New-Button "لا توجد قوالب معرّفة" "menu") )
+    if ($matched -eq 0) {
+        $rows += , @( (New-Button $(if ($Query -or $Category) { 'لا توجد نتائج مطابقة' } else { 'لا توجد قوالب معرّفة' }) "menu:templates") )
     }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateCategoriesKeyboard {
+    $categories = @(Get-TemplateCategories)
+    $rows = @()
+    for ($i = 0; $i -lt $categories.Count; $i++) { $rows += , @((New-Button "🗂 $($categories[$i])" "tplcat:$i")) }
+    if ($categories.Count -eq 0) { $rows += , @((New-Button 'لا توجد تصنيفات معرّفة' 'menu:templates')) }
+    $rows += , @((New-Button '📋 كل القوالب' 'menu:templates'), (New-Button '⬅️ رجوع' 'menu'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplatePreviewText {
+    param([Parameter(Mandatory)]$Template)
+    $category = if ([string]::IsNullOrWhiteSpace([string]$Template.Category)) { 'غير مصنف' } else { [string]$Template.Category }
+    $description = if ([string]::IsNullOrWhiteSpace([string]$Template.Description)) { 'لا يوجد وصف.' } else { [string]$Template.Description }
+    $fields = if (@($Template.Fields).Count -eq 0) { 'بلا حقول تحريرية' } else { @($Template.Fields) -join '، ' }
+    $lastUsed = if ($script:TemplateLastUsed.ContainsKey([string]$Template.Key)) {
+        ([datetime]$script:TemplateLastUsed[[string]$Template.Key]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    else { 'لم يُستخدم بعد' }
+    return "ℹ️ $($Template.Key)`nالتصنيف: $category`nالطبقة: $($Template.Layer)`nالوصف: $description`nالحقول: $fields`nآخر استخدام: $lastUsed"
+}
+
+function Get-TemplatePreviewKeyboard {
+    param([Parameter(Mandatory)][int]$TemplateIndex)
+    return @{ inline_keyboard = @(
+        , @((New-Button '▶️ اختيار هذا القالب' "tpl:$TemplateIndex"))
+        , @((New-Button '⬅️ القوالب' 'menu:templates'))
+    ) }
+}
+
+function Start-TemplateSearch {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_search'; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text '🔎 أرسل جزءًا من اسم القالب أو وصفه أو تصنيفه:' -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-TemplateSearch {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'template_search') { return }
+    Clear-PendingState -ChatId $ChatId
+    $query = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($query)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لم تُدخل عبارة بحث.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
+        return
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "🔎 نتائج البحث عن '$query':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Query $query -BrowseControls)
 }
 
 function Get-RetryDelaySeconds {
@@ -5652,7 +5740,36 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:templates' {
-            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl')
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره أو استخدم البحث والتصنيفات:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl' -BrowseControls)
+            break
+        }
+        'menu:templatesearch' {
+            Start-TemplateSearch -ChatId $chatId -UserId $userId
+            break
+        }
+        'menu:templatecategories' {
+            Send-TelegramMessage -ChatId $chatId -Text '🗂 اختر تصنيف القوالب:' -ReplyMarkup (Get-TemplateCategoriesKeyboard)
+            break
+        }
+        'tplcat:*' {
+            $categories = @(Get-TemplateCategories)
+            $categoryIndex = [int]$data.Substring(7)
+            if ($categoryIndex -lt 0 -or $categoryIndex -ge $categories.Count) {
+                Send-TelegramMessage -ChatId $chatId -Text 'التصنيف لم يعد متاحًا.' -ReplyMarkup (Get-TemplateCategoriesKeyboard)
+                break
+            }
+            $category = [string]$categories[$categoryIndex]
+            Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$category':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $category -BrowseControls)
+            break
+        }
+        'tplinfo:*' {
+            $templateIndex = [int]$data.Substring(8)
+            $template = Get-TemplateByIndex -Index $templateIndex
+            if (-not $template) {
+                Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد متاحًا.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
+                break
+            }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-TemplatePreviewText -Template $template) -ReplyMarkup (Get-TemplatePreviewKeyboard -TemplateIndex $templateIndex)
             break
         }
         'menu:favorites' {
@@ -6472,6 +6589,7 @@ try {
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
+                                'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }

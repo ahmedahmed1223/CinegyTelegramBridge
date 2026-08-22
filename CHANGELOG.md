@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.30 — 2026-08-22
+
+- Added private per-user template search across key, description, and optional
+  category without changing stable callback indexes.
+- Added category browsing and documented optional `category` values in the
+  example registry and administrator definition editor.
+- Added a non-mutating template detail preview before SHOW selection.
+- Persisted and displayed the local time of each template's last successful
+  use while remaining compatible with legacy integer usage counters.
+
 ## 4.2.29 — 2026-08-22
 
 - Added opt-in CurrentUser DPAPI storage for the bot token and live-stream

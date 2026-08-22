@@ -1,6 +1,7 @@
 {
   "lower3rd": {
     "description": "Standard lower-third: headline + supporting line",
+    "category": "أسماء",
     "path": "C:\\Cinegy\\Titler\\Scenes\\Lower3rd.cintitle",
     "layer": 5,
     "order": 10,
@@ -17,6 +18,7 @@
   },
   "breaking-news": {
     "description": "Breaking news strap",
+    "category": "أخبار",
     "path": "C:\\Cinegy\\Titler\\Scenes\\BreakingNews.cintitle",
     "layer": 6,
     "order": 20,
@@ -24,6 +26,7 @@
   },
   "sponsor-bug": {
     "description": "Sponsor bug, no editable text fields",
+    "category": "شعارات",
     "path": "C:\\Cinegy\\Titler\\Scenes\\SponsorBug.cintitle",
     "layer": 4,
     "order": 30,

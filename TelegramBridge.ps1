@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.15'
+$script:BridgeVersion = '4.2.16'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -124,6 +124,9 @@ $script:DefaultSettings = [ordered]@{
     LogKeepFiles               = 5
     AuditTrailSize             = 50
     ConfigBackupKeepFiles      = 10
+    DiskFreeWarningGB          = 2
+    RuntimeStorageWarningMB    = 100
+    BackupStorageWarningMB     = 50
     # --- notifications ---
     HeartbeatEnabled           = $false
     HeartbeatHour              = 9       # 0-23, local time
@@ -155,6 +158,9 @@ $script:SettingDisplayMetadata = @{
     LogKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد ملفات السجل المحتفَظ بها' }
     AuditTrailSize = @{ Unit = 'سجل'; Description = 'عدد عناصر سجل العمليات المحتفَظ بها' }
     ConfigBackupKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد نسخ الإعدادات المحتفَظ بها' }
+    DiskFreeWarningGB = @{ Unit = 'غيغابايت'; Description = 'حد تنبيه انخفاض مساحة القرص' }
+    RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
+    BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
 }
 
@@ -467,6 +473,15 @@ function Protect-SensitiveText {
     $safe = [regex]::Replace($safe, '(?i)(passphrase=)[^\s&"'']+', '$1***')
     $safe = [regex]::Replace($safe, '\d{6,}:[A-Za-z0-9_\-]{25,}', '***BOT_TOKEN***')
     return $safe
+}
+
+function Protect-DiagnosticText {
+    <# Diagnostic exports are more restrictive than the private runtime log:
+       redact stable actor identifiers as well as credentials. #>
+    param([AllowEmptyString()][string]$Text)
+    $safe = Protect-SensitiveText $Text
+    if ([string]::IsNullOrEmpty($safe)) { return $safe }
+    return [regex]::Replace($safe, '(?i)\b(user|chat|from|admin|actor)(?:Id)?(=|\s+)\d+\b', '$1$2***')
 }
 
 function Write-BridgeLog {
@@ -4002,6 +4017,20 @@ function Get-BridgeDiagnosticsSnapshot {
     $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($scriptRoot)).TrimEnd('\', '/')
     $driveName = $root.TrimEnd(':')
     $drive = Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
+    $runtimeStorageBytes = 0L
+    foreach ($runtimeFile in @(Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue)) {
+        $length = Get-JsonProp $runtimeFile 'Length'
+        if ($null -ne $length) { $runtimeStorageBytes += [long]$length }
+    }
+    $backupStorageBytes = 0L
+    foreach ($backupDir in @("$ConfigPath.backups", "$(Get-TemplateRegistryFilePath).backups")) {
+        if (Test-Path -LiteralPath $backupDir) {
+            foreach ($backupFile in @(Get-ChildItem -LiteralPath $backupDir -File -Recurse -ErrorAction SilentlyContinue)) {
+                $length = Get-JsonProp $backupFile 'Length'
+                if ($null -ne $length) { $backupStorageBytes += [long]$length }
+            }
+        }
+    }
     return [pscustomobject]@{
         BuildTimeUtc  = $buildTime
         ProcessStart  = $process.StartTime
@@ -4010,12 +4039,82 @@ function Get-BridgeDiagnosticsSnapshot {
         WorkingSetMB  = [math]::Round($process.WorkingSet64 / 1MB, 1)
         PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
         DiskFreeGB    = if ($drive) { [math]::Round([double]$drive.Free / 1GB, 2) } else { $null }
+        RuntimeStorageBytes = $runtimeStorageBytes
+        BackupStorageBytes = $backupStorageBytes
         FileSizes     = $fileSizes
         AirOperations = [pscustomobject]@{
             Success = [int]$script:AirOperationCounters.Success
             Failed  = [int]$script:AirOperationCounters.Failed
             Blocked = [int]$script:AirOperationCounters.Blocked
         }
+    }
+}
+
+function Get-DiagnosticWarnings {
+    param(
+        [Parameter(Mandatory)]$Snapshot,
+        [int]$DiskFreeWarningGB = 2,
+        [int]$RuntimeStorageWarningMB = 100,
+        [int]$BackupStorageWarningMB = 50
+    )
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    if ($null -ne $Snapshot.DiskFreeGB -and [double]$Snapshot.DiskFreeGB -lt [math]::Max(1, $DiskFreeWarningGB)) {
+        $warnings.Add("⚠️ مساحة القرص الحرة منخفضة: $($Snapshot.DiskFreeGB) GB")
+    }
+    if ([long]$Snapshot.RuntimeStorageBytes -gt ([math]::Max(1, $RuntimeStorageWarningMB) * 1MB)) {
+        $warnings.Add("⚠️ حجم السجلات وملفات التشغيل تجاوز $RuntimeStorageWarningMB MB")
+    }
+    if ([long]$Snapshot.BackupStorageBytes -gt ([math]::Max(1, $BackupStorageWarningMB) * 1MB)) {
+        $warnings.Add("⚠️ حجم النسخ الاحتياطية تجاوز $BackupStorageWarningMB MB")
+    }
+    return $warnings.ToArray()
+}
+
+function Get-DiagnosticsKeyboard {
+    return @{ inline_keyboard = @(
+        , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime'), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit'))
+        , @((New-Button '🏠 القائمة' 'menu:main'))
+    ) }
+}
+
+function Request-DiagnosticLogClear {
+    param(
+        [Parameter(Mandatory)][ValidateSet('runtime', 'audit')][string]$Kind,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$UserId
+    )
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'diagnostic_log_clear'; Kind = $Kind; UserId = $UserId }
+    $label = if ($Kind -eq 'runtime') { 'سجل التشغيل الحالي وكل نسخه المدورة' } else { 'سجل التدقيق الدائم' }
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ هل تريد مسح $label؟`nلا يؤثر هذا على onair.json أو القوالب الموجودة على الهواء." -ReplyMarkup @{
+        inline_keyboard = @(
+            , @((New-Button '⚠️ نعم، امسح' 'diag:clearconfirm'), (New-Button '❌ إلغاء' 'menu:diagnostics'))
+        )
+    }
+}
+
+function Clear-DiagnosticLog {
+    param(
+        [Parameter(Mandatory)][ValidateSet('runtime', 'audit')][string]$Kind,
+        [Parameter(Mandatory)][long]$UserId
+    )
+    try {
+        if ($Kind -eq 'runtime') {
+            foreach ($file in @(Get-ChildItem -LiteralPath $logDir -File -Filter 'bridge.*.log' -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            }
+            [IO.File]::WriteAllText($logPath, '', [Text.UTF8Encoding]::new($false))
+        }
+        else {
+            [IO.File]::WriteAllText($script:auditFile, '', [Text.UTF8Encoding]::new($false))
+        }
+        $operationId = "audit-$([guid]::NewGuid().ToString('N'))"
+        Write-AuditRecord -OperationId $operationId -Event log_clear -Result success -UserId $UserId -Action CLEAR -Target $Kind -Message 'administrator confirmed log cleanup'
+        Write-BridgeLog "Administrator user $UserId cleared $Kind log history" 'WARN'
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Failed to clear $Kind log history: $($_.Exception.Message)" 'ERROR'
+        return $false
     }
 }
 
@@ -4035,6 +4134,10 @@ function Invoke-DiagnosticsCommand {
     $uptime = [timespan]$diagnostics.Uptime
     $fileText = ($diagnostics.FileSizes.GetEnumerator() | ForEach-Object { "$($_.Key)=$([math]::Round([double]$_.Value / 1KB, 1))KB" }) -join ' | '
     $diskText = if ($null -ne $diagnostics.DiskFreeGB) { "$($diagnostics.DiskFreeGB) GB" } else { 'غير معروف' }
+    $diagnosticWarnings = @(Get-DiagnosticWarnings -Snapshot $diagnostics `
+        -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
+        -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
+        -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
     $text = @(
         "🧪 تشخيص Cinegy Telegram Bridge",
         "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
@@ -4054,7 +4157,8 @@ function Invoke-DiagnosticsCommand {
         "",
         (Format-CinegyTelemetryStatus -Telemetry $telemetry)
     ) -join "`n"
-    Send-TelegramMessage -ChatId $ChatId -Text (Protect-SensitiveText $text) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    if ($diagnosticWarnings.Count -gt 0) { $text += "`n`n" + ($diagnosticWarnings -join "`n") }
+    Send-TelegramMessage -ChatId $ChatId -Text (Protect-SensitiveText $text) -ReplyMarkup (Get-DiagnosticsKeyboard)
 }
 
 function Invoke-AuditCommand {
@@ -5134,6 +5238,31 @@ function Invoke-CallbackQuery {
         }
         'menu:diagnostics' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticsCommand -ChatId $chatId -UserId $userId }
+            break
+        }
+        'diag:clearruntime' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-DiagnosticLogClear -Kind runtime -ChatId $chatId -UserId $userId }
+            break
+        }
+        'diag:clearaudit' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-DiagnosticLogClear -Kind audit -ChatId $chatId -UserId $userId }
+            break
+        }
+        'diag:clearconfirm' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'diagnostic_log_clear' -or [long]$state.UserId -ne $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text 'انتهى أو تغيّر طلب المسح. افتح التشخيص وابدأ من جديد.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+                break
+            }
+            $kind = [string]$state.Kind
+            Clear-PendingState -ChatId $chatId
+            if (Clear-DiagnosticLog -Kind $kind -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text '✅ تم مسح السجل المحدد بأمان.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+            }
+            else {
+                Send-TelegramMessage -ChatId $chatId -Text '❌ تعذر مسح السجل. راجع سجل التشغيل وصلاحيات الملفات.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+            }
             break
         }
         'menu:layers' {

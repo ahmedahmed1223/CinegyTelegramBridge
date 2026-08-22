@@ -1087,6 +1087,71 @@ Describe 'Admin diagnostics command' {
         $snapshot.AirOperations.Failed | Should -Be 1
         $snapshot.AirOperations.Blocked | Should -Be 1
     }
+
+    It 'warns when free disk or retained runtime storage crosses configured limits' {
+        $snapshot = [pscustomobject]@{
+            DiskFreeGB = 0.5
+            RuntimeStorageBytes = 120MB
+            BackupStorageBytes = 80MB
+        }
+
+        $warnings = @(Get-DiagnosticWarnings -Snapshot $snapshot -DiskFreeWarningGB 2 -RuntimeStorageWarningMB 100 -BackupStorageWarningMB 50)
+        $warnings.Count | Should -Be 3
+        $warnings -join ' ' | Should -Match 'القرص'
+        $warnings -join ' ' | Should -Match 'السجلات'
+        $warnings -join ' ' | Should -Match 'النسخ'
+    }
+
+    It 'removes user and chat identifiers as well as secrets from diagnostic text' {
+        $safe = Protect-DiagnosticText "AIR_OP user=123456 chat=987654 token=123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345 user 55555 from 44444"
+
+        $safe | Should -Not -Match '123456|987654|55555|44444|ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        $safe | Should -Match 'user=\*\*\*|chat=\*\*\*|user \*\*\*|from \*\*\*'
+    }
+}
+
+Describe 'Administrator log cleanup' {
+    BeforeEach {
+        $script:PendingState.Clear()
+        $script:auditFile = Join-Path $TestDrive 'audit.jsonl'
+        $script:logPath = Join-Path $TestDrive 'bridge.log'
+        $script:logDir = $TestDrive
+        Set-Content -LiteralPath $script:auditFile -Value '{"old":"audit"}'
+        Set-Content -LiteralPath $script:logPath -Value 'old runtime line'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'bridge.1.log') -Value 'old rotated line'
+        Mock Test-Admin { $true }
+        Mock Test-CallbackAdmin { $true }
+        Mock Confirm-TelegramCallback { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'requires a fresh per-admin confirmation before deleting a log' {
+        Request-DiagnosticLogClear -Kind runtime -ChatId 100 -UserId 100
+
+        (Get-Content -LiteralPath $script:logPath -Raw) | Should -Match 'old runtime'
+        $state = Get-PendingState -ChatId 100
+        $state.Mode | Should -Be 'diagnostic_log_clear'
+        $state.Kind | Should -Be 'runtime'
+        $state.UserId | Should -Be 100
+    }
+
+    It 'clears the current and rotated runtime logs but preserves the audit trail' {
+        Clear-DiagnosticLog -Kind runtime -UserId 100 | Should -BeTrue
+
+        (Get-Content -LiteralPath $script:logPath -Raw) | Should -Not -Match 'old runtime'
+        Test-Path -LiteralPath (Join-Path $TestDrive 'bridge.1.log') | Should -BeFalse
+        (Get-Content -LiteralPath $script:auditFile -Raw) | Should -Match 'log_clear'
+    }
+
+    It 'clears old audit entries and creates a new record identifying the cleanup operation' {
+        Clear-DiagnosticLog -Kind audit -UserId 100 | Should -BeTrue
+
+        $content = Get-Content -LiteralPath $script:auditFile -Raw
+        $content | Should -Not -Match 'old.*audit'
+        $record = $content | ConvertFrom-Json
+        $record.event | Should -Be 'log_clear'
+        $record.target | Should -Be 'audit'
+    }
 }
 
 Describe 'Admin configuration backup menu' {

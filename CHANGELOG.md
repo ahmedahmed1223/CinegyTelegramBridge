@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.2.16 — 2026-08-22
+
+- Added administrator-only buttons to clear runtime logs or the structured
+  audit history independently.
+- Required a fresh, expiring, per-administrator confirmation before deletion.
+- Kept `onair.json`, schedules, templates, and backups outside cleanup scope.
+- Recreated an audit record after cleanup identifying the administrator and
+  selected history type.
+- Added configurable low-disk, runtime-storage, and backup-storage warnings to
+  administrator diagnostics.
+- Added stricter diagnostic text redaction for user/chat/from/admin identifiers.
+- Added confirmation, cleanup isolation, audit recreation, warning, and
+  redaction regression tests.
+
 ## 4.2.15 — 2026-08-22
 
 - Added the independent permanent `logs/audit.jsonl` audit trail.

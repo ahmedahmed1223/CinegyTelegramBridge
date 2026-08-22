@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.24 — 2026-08-22
+
+- Counted field limits using Unicode text elements rather than UTF-16 code
+  units, so emoji and Arabic combining marks match what operators see.
+- Added Unicode-safe Telegram chunk boundaries that never split surrogate
+  pairs or ordinary combining sequences.
+- Preserved the existing 3500-code-unit Telegram safety ceiling.
+- Added emoji, Arabic diacritic, invalid-surrogate, long-line, XML-special,
+  and message-loss regression coverage.
+
 ## 4.2.23 — 2026-08-22
 
 - Added `SchedulePaused` to keep all events pending without executing or

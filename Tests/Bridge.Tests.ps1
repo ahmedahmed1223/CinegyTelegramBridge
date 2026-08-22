@@ -371,6 +371,32 @@ Describe 'Split-TelegramText' {
         foreach ($c in $chunks) { $c.Length | Should -BeLessOrEqual 3500 }
         ($chunks -join '') | Should -Be ('x' * 9000)
     }
+
+    It 'never splits a Unicode surrogate pair or combining text element' {
+        $text = ('x' * 3499) + '😀' + 'عَ' + ('y' * 20)
+        $chunks = @(Split-TelegramText -Text $text)
+
+        ($chunks -join '') | Should -Be $text
+        foreach ($chunk in $chunks) {
+            $chunk.Length | Should -BeLessOrEqual 3500
+            { [Text.UTF8Encoding]::new($false, $true).GetBytes($chunk) } | Should -Not -Throw
+        }
+        $chunks[0] | Should -Be ('x' * 3499)
+    }
+}
+
+Describe 'Unicode-aware field limits' {
+    BeforeEach { Mock Send-TelegramMessage { } }
+
+    It 'counts emoji as visible text elements rather than two UTF-16 units' {
+        Test-FieldLength -Value '😀😀😀' -ChatId 1 -FieldLimit 3 | Should -BeTrue
+        Test-FieldLength -Value '😀😀😀😀' -ChatId 1 -FieldLimit 3 | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '\(4 حرفًا\).*3' }
+    }
+
+    It 'counts an Arabic letter plus its combining mark as one text element' {
+        Get-TextElementCount -Text 'عَجَل' | Should -Be 3
+    }
 }
 
 Describe 'ConvertTo-ProcessArgumentLine' {

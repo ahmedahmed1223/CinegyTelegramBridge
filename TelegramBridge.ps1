@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.23'
+$script:BridgeVersion = '4.2.24'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -654,6 +654,29 @@ function Add-AuditEntry {
 $apiBase = "https://api.telegram.org/bot$($config.BotToken)"
 $script:TelegramTextLimit = 3500   # below the hard 4096 so captions/markup fit
 
+function Get-TextElementCount {
+    param([AllowEmptyString()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return 0 }
+    return [Globalization.StringInfo]::ParseCombiningCharacters($Text).Count
+}
+
+function Get-SafeTextPrefixLength {
+    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][int]$MaximumCodeUnits)
+    if ($Text.Length -le $MaximumCodeUnits) { return $Text.Length }
+    $boundaries = [Globalization.StringInfo]::ParseCombiningCharacters($Text)
+    $prefixLength = 0
+    foreach ($boundary in $boundaries) {
+        if ($boundary -gt $MaximumCodeUnits) { break }
+        $prefixLength = $boundary
+    }
+    if ($prefixLength -gt 0) { return $prefixLength }
+    # An exceptionally large combining sequence can exceed the whole Telegram
+    # chunk. Fall back to a code-point-safe cut so progress is still made.
+    $prefixLength = [math]::Min($MaximumCodeUnits, $Text.Length)
+    if ($prefixLength -gt 0 -and [char]::IsHighSurrogate($Text[$prefixLength - 1])) { $prefixLength-- }
+    return [math]::Max(1, $prefixLength)
+}
+
 function Split-TelegramText {
     <# Telegram rejects messages over 4096 characters outright. Long template
        listings and audit dumps are chunked on line boundaries.
@@ -681,8 +704,9 @@ function Split-TelegramText {
                 $chunks.Add($current.ToString())
                 $current.Clear() | Out-Null
             }
-            $chunks.Add($line.Substring(0, $limit))
-            $line = $line.Substring($limit)
+            $prefixLength = Get-SafeTextPrefixLength -Text $line -MaximumCodeUnits $limit
+            $chunks.Add($line.Substring(0, $prefixLength))
+            $line = $line.Substring($prefixLength)
         }
         $separator = if ($current.Length -gt 0) { 1 } else { 0 }
         if (($current.Length + $separator + $line.Length) -gt $limit) {
@@ -3630,9 +3654,10 @@ function Test-FieldLength {
         [hashtable]$ReplyMarkup
     )
     $max = Get-EffectiveFieldLimit -FieldLimit $FieldLimit
-    if ($max -le 0 -or $Value.Length -le $max) { return $true }
+    $visibleLength = Get-TextElementCount -Text $Value
+    if ($max -le 0 -or $visibleLength -le $max) { return $true }
     if (-not $ReplyMarkup) { $ReplyMarkup = Get-FieldPromptKeyboard }
-    Send-TelegramMessage -ChatId $ChatId -Text "❌ النص طويل جدًا ($($Value.Length) حرفًا) والحد الأقصى $max حرفًا. أرسل نصًا أقصر." -ReplyMarkup $ReplyMarkup
+    Send-TelegramMessage -ChatId $ChatId -Text "❌ النص طويل جدًا ($visibleLength حرفًا) والحد الأقصى $max حرفًا. أرسل نصًا أقصر." -ReplyMarkup $ReplyMarkup
     return $false
 }
 

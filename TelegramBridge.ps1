@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.41'
+$script:BridgeVersion = '4.2.42'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -63,6 +63,7 @@ Import-Module (Join-Path $moduleRoot "BridgeFlowState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeCinegyState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -5446,31 +5447,37 @@ function Update-RelayWatchdog {
         return
     }
 
-    if (-not $script:RelayState.ShouldRun) { return }
     $interval = Get-SettingInt 'RelayWatchdogSeconds' 5
-    if (((Get-Date) - $script:RelayState.LastCheck).TotalSeconds -lt $interval) { return }
-    $script:RelayState.LastCheck = Get-Date
-    if (Get-RunningRelayProcess) { return }
+    $now=Get-Date
+    $running=$null
+    if($script:RelayState.ShouldRun -and ($now-$script:RelayState.LastCheck).TotalSeconds -ge $interval){$running=Get-RunningRelayProcess}
+    $maxRestarts = Get-SettingInt 'RelayMaxRestarts' 0
+    $decision=Get-BridgeRelayWatchdogDecision -ShouldRun:([bool]$script:RelayState.ShouldRun) `
+        -HasRunningProcess:([bool]$running) -AutoRestart:([bool](Get-Setting 'RelayAutoRestart')) `
+        -Restarts ([int]$script:RelayState.Restarts) -MaxRestarts $maxRestarts `
+        -LastCheck ([datetime]$script:RelayState.LastCheck) -IntervalSeconds $interval -Now $now
+    if($decision.Action -in @('idle','wait')){return}
+    $script:RelayState.LastCheck=$decision.CheckedAt
+    if($decision.Action -eq 'running'){return}
 
     Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
     $script:RelayProcess = $null
 
-    if (-not (Get-Setting 'RelayAutoRestart')) {
+    if ($decision.Action -eq 'stay_down') {
         $script:RelayState.ShouldRun = $false
         Write-BridgeLog "Live relay died and RelayAutoRestart is off - staying down" "WARN"
         if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "⚠️ توقف البث المباشر (إعادة التشغيل التلقائي معطّلة)." }
         return
     }
 
-    $maxRestarts = Get-SettingInt 'RelayMaxRestarts' 0
-    if ($script:RelayState.Restarts -ge $maxRestarts) {
+    if ($decision.Action -eq 'give_up') {
         $script:RelayState.ShouldRun = $false
         Write-BridgeLog "Live relay exceeded RelayMaxRestarts ($maxRestarts) - giving up" "ERROR"
         if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "⚠️ توقف البث نهائيًا بعد $maxRestarts محاولة إعادة تشغيل. راجع logs\relay-stderr.log." }
         return
     }
 
-    $script:RelayState.Restarts++
+    $script:RelayState.Restarts=$decision.Restarts
     Write-BridgeLog "Live relay died - auto-restart attempt $($script:RelayState.Restarts)/$maxRestarts" "WARN"
     try {
         Start-RelayProcess | Out-Null

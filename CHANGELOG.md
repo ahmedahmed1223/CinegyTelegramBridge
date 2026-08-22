@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.2.42 — 2026-08-22
+
+- Extracts live-relay watchdog timing, healthy/idle/wait states, disabled restart, retry-limit, and restart-count decisions into `Modules/BridgeRelayPolicy.psm1`.
+- Keeps process ownership, PID cleanup, logging, administrator notifications, and actual restart execution in the bridge.
+- Adds direct policy tests for every watchdog branch and completes the planned first separation of scheduling, live relay, and ffmpeg process handling.
+
 ## 4.2.41 — 2026-08-22
 
 - Extracts Windows-safe argument quoting, ffmpeg input selection, and hidden redirected process launch into `Modules/BridgeMedia.psm1`.

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.10'
+$script:BridgeVersion = '4.2.11'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -110,6 +110,8 @@ $script:DefaultSettings = [ordered]@{
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
+    ScheduleMaxRetries          = 0       # safe default: do not replay a failed SHOW unless admin opts in
+    ScheduleRetryDelaySeconds   = 30      # wait before an opted-in scheduled SHOW retry
     HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
@@ -1775,6 +1777,7 @@ function New-ScheduledShowEvent {
         Recurrence = $Recurrence; Status = 'pending'; ChatId = $ChatId; UserId = $UserId
         CreatedAt = [datetimeoffset]::Now.ToString('o'); ExecutionKey = ''
         CompletedExecutionKey = ''; StartedAt = ''; CompletedAt = ''; LastResult = ''
+        AttemptCount = 0; NextAttemptAt = ''
     }
 }
 
@@ -1828,7 +1831,9 @@ function Update-ScheduleQueue {
     foreach ($scheduleEntry in @($script:ScheduleEvents)) {
         if ([string]$scheduleEntry.Status -ne 'pending') { continue }
         $scheduledAt = [datetimeoffset]$scheduleEntry.ScheduledAt
-        if ($scheduledAt -gt $Now) { continue }
+        $nextAttemptRaw = [string](Get-JsonProp $scheduleEntry 'NextAttemptAt')
+        $dueAt = if ([string]::IsNullOrWhiteSpace($nextAttemptRaw)) { $scheduledAt } else { [datetimeoffset]$nextAttemptRaw }
+        if ($dueAt -gt $Now) { continue }
         $executionKey = "$($scheduleEntry.Id)|$($scheduledAt.ToString('o'))"
         if ([string]$scheduleEntry.CompletedExecutionKey -eq $executionKey) { continue }
 
@@ -1841,6 +1846,7 @@ function Update-ScheduleQueue {
             $scheduleEntry.CompletedExecutionKey = $executionKey
             $scheduleEntry.CompletedAt = [datetimeoffset]::Now.ToString('o')
             $scheduleEntry.LastResult = 'success'
+            $scheduleEntry.NextAttemptAt = ''
             if ([string]$scheduleEntry.Recurrence -eq 'once') {
                 $scheduleEntry.Status = 'completed'
             }
@@ -1848,12 +1854,25 @@ function Update-ScheduleQueue {
                 $days = if ([string]$scheduleEntry.Recurrence -eq 'daily') { 1 } else { 7 }
                 do { $scheduledAt = Get-NextLocalOccurrence -Occurrence $scheduledAt -Days $days -TimeZoneId ([string]$scheduleEntry.TimeZoneId) } while ($scheduledAt -le $Now)
                 $scheduleEntry.ScheduledAt = $scheduledAt.ToString('o')
-                $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''
+                $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''; $scheduleEntry.AttemptCount = 0
             }
         }
         else {
-            $scheduleEntry.Status = 'failed'
             $scheduleEntry.LastResult = if ($result) { [string]$result.Error } else { 'SHOW returned no result.' }
+            $attemptCount = 0
+            [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'), [ref]$attemptCount) | Out-Null
+            $attemptCount++
+            $scheduleEntry.AttemptCount = $attemptCount
+            $maxRetries = Get-SettingInt 'ScheduleMaxRetries' 0
+            if ($attemptCount -le $maxRetries) {
+                $delay = Get-SettingInt 'ScheduleRetryDelaySeconds' 30
+                $scheduleEntry.Status = 'pending'; $scheduleEntry.ExecutionKey = ''
+                $scheduleEntry.NextAttemptAt = $Now.AddSeconds([math]::Max(1, $delay)).ToString('o')
+                Write-BridgeLog "Scheduled event $($scheduleEntry.Id) SHOW failed; retry $attemptCount/$maxRetries at $($scheduleEntry.NextAttemptAt): $($scheduleEntry.LastResult)" 'WARN'
+            }
+            else {
+                $scheduleEntry.Status = 'failed'; $scheduleEntry.NextAttemptAt = ''
+            }
         }
         Save-ScheduleEvents | Out-Null
     }

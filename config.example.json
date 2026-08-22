@@ -69,6 +69,8 @@
     "NotifyAdminsOnCinegyHealth": true,
     "CinegyStateStaleSeconds": 45,
     "ScheduleConflictWindowMinutes": 2,
+    "ScheduleMaxRetries": 0,
+    "ScheduleRetryDelaySeconds": 30,
     "ReservedLayers": "",
     "DisabledTemplateKeys": "",
     "MaintenanceMode": false,

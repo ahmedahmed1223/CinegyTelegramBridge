@@ -2381,6 +2381,10 @@ Describe 'Layer quick panel' {
 
 Describe 'Reliable schedule store and executor' {
     BeforeEach {
+        $script:OriginalScheduleMaxRetries = Get-Setting 'ScheduleMaxRetries'
+        $script:OriginalScheduleRetryDelaySeconds = Get-Setting 'ScheduleRetryDelaySeconds'
+        $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue 0 -Force
+        $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue 30 -Force
         $script:OriginalScheduleFileForTest = $script:scheduleFile
         $script:scheduleFile = Join-Path $TestDrive 'schedule.json'
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
@@ -2390,6 +2394,8 @@ Describe 'Reliable schedule store and executor' {
     }
 
     AfterEach {
+        $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue $script:OriginalScheduleMaxRetries -Force
+        $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue $script:OriginalScheduleRetryDelaySeconds -Force
         $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
         $script:scheduleFile = $script:OriginalScheduleFileForTest
     }
@@ -2460,6 +2466,31 @@ Describe 'Reliable schedule store and executor' {
 
         Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
         $script:ScheduleEvents[0].Status | Should -Be 'interrupted'
+    }
+
+    It 'retries a failed occurrence only after the configured delay' {
+        $config.Settings | Add-Member -NotePropertyName ScheduleMaxRetries -NotePropertyValue 1 -Force
+        $config.Settings | Add-Member -NotePropertyName ScheduleRetryDelaySeconds -NotePropertyValue 30 -Force
+        $script:ScheduledShowCall = 0
+        Mock Invoke-ShowTemplateResult {
+            $script:ScheduledShowCall++
+            if ($script:ScheduledShowCall -eq 1) { return [pscustomobject]@{ Success = $false; Error = 'timeout' } }
+            return [pscustomobject]@{ Success = $true; Error = '' }
+        }
+        $now = [datetimeoffset]'2026-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+        Update-ScheduleQueue -Now $now.AddSeconds(20)
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $scheduleEntry.Status | Should -Be 'pending'
+        $scheduleEntry.AttemptCount | Should -Be 1
+        $scheduleEntry.LastResult | Should -Be 'timeout'
+
+        Update-ScheduleQueue -Now $now.AddSeconds(31)
+        Should -Invoke Invoke-ShowTemplateResult -Times 2 -Exactly
+        $scheduleEntry.Status | Should -Be 'completed'
     }
 
     It 'parses only a clear future local time and reports the timezone' {

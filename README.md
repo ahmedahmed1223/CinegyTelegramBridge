@@ -13,9 +13,10 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.10
+## Version 4.2.11
 
-Version 4.2.10 warns during schedule review when another pending event targets
+Version 4.2.11 adds an opt-in retry policy for failed scheduled SHOW events,
+with safe zero-retry defaults and persisted attempt timing. Version 4.2.10 warns during schedule review when another pending event targets
 the same layer within `ScheduleConflictWindowMinutes`. Version 4.2.9 adds administrator-managed `ReservedLayers` and
 `DisabledTemplateKeys` safety policies. They block SHOW preparation and final
 execution while leaving emergency HIDE and EXIT available. Version 4.2.8 writes one correlatable `AIR_OP` result to `bridge.log` for every

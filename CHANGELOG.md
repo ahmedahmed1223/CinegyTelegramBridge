@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.11 — 2026-08-22
+
+- Added `ScheduleMaxRetries` and `ScheduleRetryDelaySeconds` settings.
+- Kept retries disabled by default (`ScheduleMaxRetries = 0`) to avoid
+  surprising delayed graphics on air.
+- Persisted attempt count, next-attempt time, and last failure reason with each
+  scheduled event.
+- Deferred retries until their configured time and cleared retry state after a
+  successful recurring occurrence.
+- Preserved the existing no-replay rule for occurrences interrupted while
+  marked `running` across a bridge restart.
+- Added deterministic retry-delay regression coverage.
+
 ## 4.2.10 — 2026-08-22
 
 - Added same-layer scheduled-event conflict detection.

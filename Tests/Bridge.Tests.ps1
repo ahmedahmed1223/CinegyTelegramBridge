@@ -2305,3 +2305,43 @@ Describe 'Bridge lifecycle notifications' {
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'بدأ تشغيل' -and $Text -match $script:BridgeVersion }
     }
 }
+
+Describe 'Startup Cinegy reconciliation' {
+    BeforeEach {
+        Mock Get-CinegyLayerDashboard {
+            @(
+                [pscustomobject]@{ Layer = 4; Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' },
+                [pscustomobject]@{ Layer = 7; Success = $true; IsOnAir = $true; ActiveId = '{EXTERNAL}'; ActiveName = 'Studio Lower Third' }
+            )
+        }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(4); Added = @(7); Removed = @(4); Failed = @(); Changes = @(); LastSuccessfulAt = Get-Date }
+        }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'performs a full external-discovery comparison during startup' {
+        { $script:result = Initialize-CinegyOnAirState } | Should -Not -Throw
+
+        Should -Invoke Get-CinegyLayerDashboard -Times 1 -Exactly
+        Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly -ParameterFilter {
+            $Reason -eq 'startup' -and $DiscoverExternal -and @($LayerStatuses).Count -eq 2
+        }
+        $script:result.Added | Should -Be @(7)
+    }
+
+    It 'logs that uncertain startup layers were preserved rather than cleared' {
+        Mock Get-CinegyLayerDashboard {
+            @([pscustomobject]@{ Layer = 4; Success = $false; IsOnAir = $null; Error = 'timeout' })
+        }
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(); Added = @(); Removed = @(); Failed = @(4); Changes = @(); LastSuccessfulAt = $null }
+        }
+
+        { Initialize-CinegyOnAirState | Out-Null } | Should -Not -Throw
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+            $Level -eq 'WARN' -and $Message -match 'Startup.*preserved.*4'
+        }
+    }
+}

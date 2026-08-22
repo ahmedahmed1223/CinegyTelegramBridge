@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.1.1 — 2026-08-22
+
+- Added a full Cinegy layer comparison during bridge startup before operator
+  commands are accepted.
+- Startup now discovers scenes launched directly from Cinegy and restores them
+  to `onair.json` as current, hideable state.
+- Unreachable startup layers preserve their previous local records and produce
+  an explicit warning in `bridge.log` rather than being treated as hidden.
+- Added a startup reconciliation summary to `bridge.log` with checked, added,
+  and removed counts.
+- Added regression coverage for full startup discovery and uncertain-layer
+  preservation. Existing restart tests continue to verify scheduled
+  occurrences are not replayed after a service restart.
+
 ## 4.1.0 — 2026-08-22
 
 - Added an operator-triggered live reconciliation against every Cinegy GFX

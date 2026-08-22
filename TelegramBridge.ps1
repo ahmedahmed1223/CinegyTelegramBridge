@@ -48,7 +48,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.1.0'
+$script:BridgeVersion = '4.1.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -1413,6 +1413,22 @@ function Update-OnAirStateFromCinegy {
         Changes = $changes.ToArray()
         LastSuccessfulAt = if ($script:LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:LastCinegyStateSuccess } else { $null }
     }
+}
+
+function Initialize-CinegyOnAirState {
+    <# Startup is the highest-risk moment for stale state: read every configured
+       GFX layer before accepting operator commands, discover scenes started in
+       Cinegy, and preserve any local record whose layer cannot be verified. #>
+    $layerStatuses = @(Get-CinegyLayerDashboard)
+    $sync = Update-OnAirStateFromCinegy -Reason 'startup' -LayerStatuses $layerStatuses `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
+    if ($sync.Failed.Count -gt 0) {
+        Write-BridgeLog "Startup Cinegy comparison uncertain; preserved on-air record(s) for unverified layer(s): $($sync.Failed -join ', ')" "WARN"
+    }
+    else {
+        Write-BridgeLog "Startup Cinegy comparison complete (added: $(@($sync.Added).Count); removed: $(@($sync.Removed).Count); checked: $(@($layerStatuses).Count))" "INFO"
+    }
+    return $sync
 }
 
 function Format-ExternalCinegyChangeAlert {
@@ -5050,10 +5066,7 @@ Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues
 Import-ScheduleEvents
-$startupSync = Update-OnAirStateFromCinegy -Reason 'startup'
-if ($startupSync.Failed.Count -gt 0) {
-    Write-BridgeLog "Startup state sync could not verify layer(s): $($startupSync.Failed -join ', ')" "WARN"
-}
+Initialize-CinegyOnAirState | Out-Null
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 

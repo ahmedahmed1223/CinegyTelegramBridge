@@ -13,9 +13,10 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.1.0
+## Version 4.1.1
 
-Version 4.1.0 adds live comparison with Cinegy. Opening Status or Layers reads
+Version 4.1.1 adds live comparison with Cinegy during startup as well as on
+operator request. Opening Status or Layers reads
 every graphics layer referenced by `templates.json`, reconciles it with
 `onair.json`, and makes scenes started directly in Cinegy available for
 operator HIDE/EXIT actions. `onair.json` remains current state only; historical

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.4'
+$script:BridgeVersion = '4.2.5'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -104,6 +104,7 @@ $script:DefaultSettings = [ordered]@{
     RelayMaxRestarts           = 20
     RelayWatchdogSeconds       = 20
     CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
+    CinegyStateStaleSeconds    = 45      # age after which the last successful state sample is stale
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
@@ -1572,6 +1573,26 @@ function Initialize-CinegyOnAirState {
         Write-BridgeLog "Startup Cinegy comparison complete (added: $(@($sync.Added).Count); removed: $(@($sync.Removed).Count); checked: $(@($layerStatuses).Count))" "INFO"
     }
     return $sync
+}
+
+function Get-CinegyStateFreshness {
+    param(
+        [AllowNull()][object]$LastSuccessfulAt,
+        [int]$FailedCount = 0,
+        [datetime]$Now = (Get-Date),
+        [int]$StaleAfterSeconds = 45
+    )
+    if ($FailedCount -gt 0) {
+        return [pscustomobject]@{ State = 'unavailable'; Label = '🔴 غير متاح'; AgeSeconds = $null }
+    }
+    if ($null -eq $LastSuccessfulAt -or [string]::IsNullOrWhiteSpace([string]$LastSuccessfulAt)) {
+        return [pscustomobject]@{ State = 'unknown'; Label = '⚪ غير معروف'; AgeSeconds = $null }
+    }
+    $ageSeconds = [math]::Max(0, [math]::Floor(($Now - ([datetime]$LastSuccessfulAt)).TotalSeconds))
+    if ($ageSeconds -gt [math]::Max(1, $StaleAfterSeconds)) {
+        return [pscustomobject]@{ State = 'stale'; Label = "🟠 متأخر منذ $ageSeconds ثانية"; AgeSeconds = $ageSeconds }
+    }
+    return [pscustomobject]@{ State = 'connected'; Label = '🟢 متصل'; AgeSeconds = $ageSeconds }
 }
 
 function Format-ExternalCinegyChangeAlert {
@@ -3455,6 +3476,9 @@ function Invoke-StatusCommand {
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
+        -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
     if ($lastSuccessfulAt) {
         $lines.Add("🔄 آخر فحص ناجح: $(([datetime]$lastSuccessfulAt).ToString('yyyy-MM-dd HH:mm:ss'))")
     }
@@ -3653,6 +3677,10 @@ function Invoke-FullStatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
+        -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
     $lines.Add((Format-CinegyLayerDashboard -LayerStatuses $layerStatuses))
     $lines.Add('')
     $lines.Add($sep)

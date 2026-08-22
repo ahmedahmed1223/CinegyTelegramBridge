@@ -67,6 +67,7 @@
     "NotifyAdminsOnRelayFailure": true,
     "NotifyAdminsOnExternalChange": true,
     "NotifyAdminsOnCinegyHealth": true,
+    "CinegyStateStaleSeconds": 45,
     "MaintenanceMode": false,
     "LayerNames": "7=عاجل;8=أخبار;9=شريط الأخبار"
   },

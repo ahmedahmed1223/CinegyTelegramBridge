@@ -13,9 +13,11 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.4
+## Version 4.2.5
 
-Version 4.2.4 adds an administrator-controlled maintenance mode that blocks
+Version 4.2.5 classifies the current Cinegy state sample as connected, stale,
+unavailable, or unknown in both status views, using the configurable
+`CinegyStateStaleSeconds` threshold. Version 4.2.4 adds an administrator-controlled maintenance mode that blocks
 SHOW, HIDE, EXIT, live-value updates, and new or due scheduled SHOW operations
 without changing anything already on air. The administrator-only emergency
 hide-all command remains available. Version 4.2.3 records approval provenance and last authorized activity in

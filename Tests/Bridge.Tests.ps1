@@ -968,6 +968,27 @@ Describe 'Simple and full status reports' {
     }
 }
 
+Describe 'Cinegy state freshness classification' {
+    It 'classifies a recent successful comparison as connected' {
+        $now = [datetime]'2026-08-22T12:00:00'
+        (Get-CinegyStateFreshness -LastSuccessfulAt $now.AddSeconds(-10) -FailedCount 0 -Now $now -StaleAfterSeconds 45).State | Should -Be 'connected'
+    }
+
+    It 'classifies an old successful comparison as stale' {
+        $now = [datetime]'2026-08-22T12:00:00'
+        (Get-CinegyStateFreshness -LastSuccessfulAt $now.AddSeconds(-60) -FailedCount 0 -Now $now -StaleAfterSeconds 45).State | Should -Be 'stale'
+    }
+
+    It 'classifies a failed live comparison as unavailable' {
+        $now = [datetime]'2026-08-22T12:00:00'
+        (Get-CinegyStateFreshness -LastSuccessfulAt $now.AddSeconds(-10) -FailedCount 1 -Now $now -StaleAfterSeconds 45).State | Should -Be 'unavailable'
+    }
+
+    It 'classifies a never-successful comparison as unknown' {
+        (Get-CinegyStateFreshness -LastSuccessfulAt $null -FailedCount 0 -Now ([datetime]'2026-08-22T12:00:00') -StaleAfterSeconds 45).State | Should -Be 'unknown'
+    }
+}
+
 Describe 'Admin diagnostics command' {
     BeforeEach {
         Mock Test-Authorized { $true }

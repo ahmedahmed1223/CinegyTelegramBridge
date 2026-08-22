@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.2.5 — 2026-08-22
+
+- Added explicit Cinegy state freshness classification: connected, stale,
+  unavailable, or unknown.
+- Added `CinegyStateStaleSeconds` with a 45-second default threshold.
+- Displayed the classification in both the operator status and administrator
+  full-status views.
+- Added deterministic tests for all four classifications.
+
 ## 4.2.4 — 2026-08-22
 
 - Added an administrator-controlled maintenance mode in Settings.

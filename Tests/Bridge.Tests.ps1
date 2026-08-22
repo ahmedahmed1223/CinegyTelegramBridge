@@ -235,6 +235,70 @@ Describe 'Administrator template registry import and export' {
     }
 }
 
+Describe 'Isolated template test layer and definition comparison' {
+    BeforeEach {
+        $script:OriginalTestLayer = $config.Settings.TemplateTestLayer
+        $script:OriginalTestSeconds = $config.Settings.TemplateTestAutoHideSeconds
+        $script:OriginalFullManagementForTest = $config.Settings.EnableFullTemplateManagement
+        $config.Settings.TemplateTestLayer = 9
+        $config.Settings.TemplateTestAutoHideSeconds = 7
+        $config.Settings.EnableFullTemplateManagement = $true
+        $script:PendingState.Clear(); $script:OnAir=@{}; $script:AutoHideQueue=[Collections.Generic.List[object]]::new()
+        Mock Test-Admin { $true }
+        Mock Get-TemplateStore {
+            @{ Order=@('alpha'); Map=@{ alpha=@{ Key='alpha'; Path='C:\Scenes\Alpha.cintitle'; Layer=5; Fields=@('Title'); FieldTypes=@{}; Description='test' } }; Errors=@() }
+        }
+        Mock Send-TelegramMessage { }
+        Mock Save-OnAirState { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$false } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success=$true; EventId='test-event'; Error='' } }
+    }
+
+    AfterEach {
+        $config.Settings.TemplateTestLayer = $script:OriginalTestLayer
+        $config.Settings.TemplateTestAutoHideSeconds = $script:OriginalTestSeconds
+        $config.Settings.EnableFullTemplateManagement = $script:OriginalFullManagementForTest
+    }
+
+    It 'refuses to use a production template layer as the test layer' {
+        $config.Settings.TemplateTestLayer = 5
+        Start-TemplateTestReview -TemplateIndex 0 -ChatId 10 -UserId 10
+        Get-PendingState -ChatId 10 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'طبقة إنتاج' }
+    }
+
+    It 'requires review then verifies the layer is empty before any SHOW' {
+        Start-TemplateTestReview -TemplateIndex 0 -ChatId 10 -UserId 10
+        (Get-PendingState -ChatId 10).Mode | Should -Be 'template_test_review'
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true } }
+
+        Confirm-TemplateTest -ChatId 10 -UserId 10
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+        $script:OnAir.ContainsKey(9) | Should -BeFalse
+    }
+
+    It 'shows only on the isolated layer and always creates an automatic hide deadline' {
+        Start-TemplateTestReview -TemplateIndex 0 -ChatId 10 -UserId 10
+        Confirm-TemplateTest -ChatId 10 -UserId 10
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 9 -and $Variables.Title -eq 'TEST' }
+        $script:OnAir[9].Source | Should -Be 'BotTest'
+        $script:AutoHideQueue.Count | Should -Be 1
+        [int](($script:AutoHideQueue[0].At - (Get-Date)).TotalSeconds) | Should -BeLessOrEqual 7
+        Should -Invoke Save-OnAirState -Times 1 -Exactly
+    }
+
+    It 'shows field-level before and after differences before an edit is saved' {
+        $existing = [pscustomobject]@{ path='C:\Scenes\Alpha.cintitle'; layer=5; description='قديم'; fields=@('Title') }
+        $definition = @{ path='C:\Scenes\Alpha.cintitle'; layer=6; description='جديد'; fields=@('Title') }
+        $text = Get-TemplateDefinitionComparisonText -Existing $existing -Definition $definition
+        $text | Should -Match 'layer|description|قبل|بعد'
+        $text | Should -Not -Match 'path.*قبل'
+    }
+}
+
 Describe 'User aliases' {
     BeforeEach {
         $script:UserAliases = @{}

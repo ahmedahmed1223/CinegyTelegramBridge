@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.31'
+$script:BridgeVersion = '4.2.32'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -4432,6 +4432,25 @@ function Start-TemplateDefinitionPrompt {
     Send-TelegramMessage -ChatId $ChatId -Text "أرسل تعريف القالب بصيغة JSON في رسالة واحدة.`nمثال:`n$example" -ReplyMarkup (Get-CancelKeyboard)
 }
 
+function Get-TemplateDefinitionComparisonText {
+    param($Existing, [Parameter(Mandatory)][hashtable]$Definition)
+    $lines = [Collections.Generic.List[string]]::new()
+    foreach ($name in @('path', 'layer', 'order', 'description', 'category', 'fields')) {
+        if (-not $Definition.ContainsKey($name)) { continue }
+        [string]$oldJson = if ($Existing) { Get-JsonProp $Existing $name | ConvertTo-Json -Depth 10 -Compress } else { '<غير موجود>' }
+        [string]$newJson = $Definition[$name] | ConvertTo-Json -Depth 10 -Compress
+        if ([string]::IsNullOrEmpty($oldJson)) { $oldJson = 'null' }
+        if ([string]::IsNullOrEmpty($newJson)) { $newJson = 'null' }
+        if ($oldJson -ne $newJson) {
+            $oldDisplay = if ($oldJson.Length -gt 120) { $oldJson.Substring(0,117) + '...' } else { $oldJson }
+            $newDisplay = if ($newJson.Length -gt 120) { $newJson.Substring(0,117) + '...' } else { $newJson }
+            $lines.Add("• $name`n  قبل: $oldDisplay`n  بعد: $newDisplay")
+        }
+    }
+    if ($lines.Count -eq 0) { return 'الاختلافات: لا توجد تغييرات فعلية.' }
+    return "الاختلافات:`n$($lines -join "`n")"
+}
+
 function Complete-TemplateDefinitionJson {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Value)
     $state = Get-PendingState -ChatId $ChatId
@@ -4443,7 +4462,9 @@ function Complete-TemplateDefinitionJson {
     if ([string]::IsNullOrWhiteSpace($key)) { Send-TelegramMessage -ChatId $ChatId -Text '❌ يتطلب القالب الجديد مفتاح key.' -ReplyMarkup (Get-CancelKeyboard); return }
     $state.Mode = 'template_definition_review'; $state.TemplateKey = $key; $state.Definition = $definition
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة $($state.Action) للقالب '$key'`nالمسار: $($definition.path)`nالطبقة: $($definition.layer)`nلن يُحفظ شيء قبل التأكيد." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+    $existing = if ($state.Action -eq 'edit') { Get-JsonProp (Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json) $key } else { $null }
+    $comparison = Get-TemplateDefinitionComparisonText -Existing $existing -Definition $definition
+    Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة $($state.Action) للقالب '$key'`nالمسار: $($definition.path)`nالطبقة: $($definition.layer)`n`n$comparison`n`nلن يُحفظ شيء قبل التأكيد، وستُنشأ نسخة احتياطية من التعريفات الحالية." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
 }
 
 function Confirm-TemplateDefinitionChange {
@@ -4574,6 +4595,65 @@ function Get-BridgeDiagnosticsSnapshot {
             Blocked = [int]$script:AirOperationCounters.Blocked
         }
     }
+}
+
+function Start-TemplateTestReview {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -or -not (Get-Setting 'EnableFullTemplateManagement')) { return }
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
+    $testLayer = Get-SettingInt 'TemplateTestLayer' 0
+    if ($testLayer -le 0) { Send-TelegramMessage -ChatId $ChatId -Text 'طبقة تجربة القوالب معطلة. اضبط TemplateTestLayer أولاً.' -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex); return }
+    if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $testLayer) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ طبقة التجربة $testLayer مستخدمة كطبقة إنتاج في سجل القوالب. اختر طبقة مستقلة." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
+        return
+    }
+    $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
+    Set-PendingState -ChatId $ChatId -State @{ Mode='template_test_review'; UserId=$UserId; TemplateIndex=$TemplateIndex; TestLayer=$testLayer; AutoHideSeconds=$seconds }
+    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $seconds ثانية`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
+}
+
+function Confirm-TemplateTest {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'template_test_review' -or [long]$state.UserId -ne $UserId) { return }
+    Clear-PendingState -ChatId $ChatId
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
+    $template = Get-TemplateByIndex -Index ([int]$state.TemplateIndex)
+    $testLayer = Get-SettingInt 'TemplateTestLayer' 0
+    if (-not $template -or $testLayer -le 0 -or $testLayer -ne [int]$state.TestLayer -or
+        (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $testLayer)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تغيّر تعريف القالب أو طبقة التجربة. ابدأ المراجعة من جديد.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $testLayer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $status.Success -or $null -eq $status.IsOnAir) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ تعذر التأكد من فراغ طبقة التجربة $testLayer؛ لم يُرسل شيء." -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    if ([bool]$status.IsOnAir) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $testLayer مشغولة حاليًا؛ أخفها أو اختر طبقة أخرى." -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $variables = @{}
+    foreach ($field in @($template.Fields)) { $variables[[string]$field] = 'TEST' }
+    $types = @{}
+    foreach ($field in @($template.FieldTypes.Keys)) { if ($template.FieldTypes[$field]) { $types[$field] = [string]$template.FieldTypes[$field] } }
+    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $testLayer -TemplatePath ([string]$template.Path) -Variables $variables -Types $types `
+        -DefaultType ([string](Get-Setting 'AirVariableType')) -TimeoutSec (Get-AirTimeout)
+    if (-not $result.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل اختبار القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $script:OnAir[$testLayer] = @{ Key="[TEST] $($template.Key)"; At=(Get-Date); UserId=$UserId; ActiveId=[string]$result.EventId; Source='BotTest' }
+    Save-OnAirState
+    $seconds = [math]::Max(3, [math]::Min(300, [int]$state.AutoHideSeconds))
+    $script:AutoHideQueue.Add(@{ Layer=$testLayer; At=(Get-Date).AddSeconds($seconds); ChatId=$ChatId; UserId=$UserId })
+    Write-BridgeLog "Admin $UserId tested template '$($template.Key)' on isolated layer $testLayer for $seconds seconds" 'WARN'
+    Add-AuditEntry "🧪 اختبار قالب $($template.Key) على طبقة $testLayer - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ بدأ اختبار '$($template.Key)' على طبقة التجربة $testLayer وسيُخفى خلال $seconds ثانية." -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
 }
 
 function Test-TemplateRegistryImport {
@@ -6209,6 +6289,8 @@ function Invoke-CallbackQuery {
                 $token = $data.Substring(5)
                 if ($token -eq 'create') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
+                elseif ($token -eq 'testconfirm') { Confirm-TemplateTest -ChatId $chatId -UserId $userId }
+                elseif ($token -match '^test:(\d+)$') { Start-TemplateTestReview -TemplateIndex ([int]$Matches[1]) -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^(edit|delete):(\d+)$') { Start-TemplateDefinitionPrompt -Action $Matches[1] -TemplateIndex ([int]$Matches[2]) -ChatId $chatId -UserId $userId }
                 else { Show-TemplateAdminDetail -TemplateIndex ([int]$token) -ChatId $chatId -UserId $userId }
             }

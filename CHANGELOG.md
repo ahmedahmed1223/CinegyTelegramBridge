@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.32 — 2026-08-22
+
+- Added an administrator-configured template test layer, disabled by default.
+- Required the test layer to be absent from every production template
+  definition and verified directly with Cinegy that it is empty before SHOW.
+- Added administrator review and confirmation, synthetic `TEST` field values,
+  explicit `BotTest` tracking, and a mandatory 3-300 second automatic hide.
+- Added field-level before/after comparison to template-definition review and
+  stated that the existing timestamped backup is created before saving.
+- Added regression tests for production-layer rejection, occupied/uncertain
+  layer blocking, isolated SHOW targeting, automatic hide, and comparison.
+
 ## 4.2.31 — 2026-08-22
 
 - Added administrator template-registry export through Telegram.

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.3'
+$script:BridgeVersion = '4.2.4'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -82,6 +82,7 @@ $script:DefaultSettings = [ordered]@{
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
     SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
+    MaintenanceMode           = $false  # blocks playout mutations while monitoring remains available
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     # --- safety ---
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
@@ -1798,6 +1799,7 @@ function Add-ScheduledShowEvent {
 
 function Update-ScheduleQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    if (Get-Setting 'MaintenanceMode') { return }
     foreach ($scheduleEntry in @($script:ScheduleEvents)) {
         if ([string]$scheduleEntry.Status -ne 'pending') { continue }
         $scheduledAt = [datetimeoffset]$scheduleEntry.ScheduledAt
@@ -1870,6 +1872,7 @@ function Format-ScheduleEvent {
 
 function Start-ScheduleShowFlow {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
     Clear-PendingState -ChatId $ChatId
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) { return }
@@ -1940,6 +1943,7 @@ function Confirm-ScheduledShow {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $UserId) { return }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
     $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId
     $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
     Clear-PendingState -ChatId $ChatId
@@ -2821,6 +2825,14 @@ function Get-HelpText {
 #  Core on-air actions
 # ============================================================================
 
+function Test-MaintenanceControl {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
+    if (-not (Get-Setting 'MaintenanceMode')) { return $true }
+    if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -2830,6 +2842,9 @@ function Invoke-ShowTemplateResult {
         [int]$AutoHideSeconds = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
+    }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -3081,8 +3096,15 @@ function Sync-LayerAfterOperatorAction {
 }
 
 function Invoke-HideLayer {
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Quiet)
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [switch]$Quiet,
+        [switch]$MaintenanceOverride
+    )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) { return $false }
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
@@ -3099,6 +3121,7 @@ function Invoke-HideLayer {
 function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
@@ -3116,6 +3139,7 @@ function Invoke-HideAllLayers {
        the administrator. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    $maintenanceOverride = Test-Admin -ChatId $ChatId -UserId $UserId
     $layers = @(Get-HideAllTargetLayers)
     if ($layers.Count -eq 0) {
         Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -3123,7 +3147,7 @@ function Invoke-HideAllLayers {
     }
     $ok = @(); $failed = @()
     foreach ($l in $layers) {
-        if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet) { $ok += $l } else { $failed += $l }
+        if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
     }
     $script:AutoHideQueue.Clear()
     Write-BridgeLog "User $UserId triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','))" "WARN"
@@ -3136,6 +3160,7 @@ function Invoke-HideAllLayers {
 function Invoke-SetValues {
     param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
     if ($result.Success) {

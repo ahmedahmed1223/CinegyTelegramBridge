@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.4 — 2026-08-22
+
+- Added an administrator-controlled maintenance mode in Settings.
+- Maintenance mode blocks SHOW, ordinary HIDE, EXIT, live-value updates, and
+  creation or execution of scheduled SHOW operations without altering current
+  on-air scenes.
+- Due scheduled events remain pending and resume after maintenance is disabled.
+- The administrator-only emergency hide-all action remains available during
+  maintenance.
+- Added regression coverage proving that blocked controls do not send Cinegy
+  commands and that the emergency override is restricted to the hide-all path.
+
 ## 4.2.3 — 2026-08-22
 
 - Added `logs/user-profiles.json` with approval time, approving administrator,

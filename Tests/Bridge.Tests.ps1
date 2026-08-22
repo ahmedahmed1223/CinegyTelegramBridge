@@ -192,6 +192,49 @@ Describe 'Test runtime isolation' {
     }
 }
 
+Describe 'Maintenance mode control gate' {
+    BeforeEach {
+        $script:OriginalMaintenanceMode = Get-Setting 'MaintenanceMode'
+        $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $true -Force
+        Mock Send-TelegramMessage { }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = '{A}' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ urgent = [pscustomobject]@{ Key='urgent'; Layer=4; Path='urgent.cintitle'; FieldTypes=@{} } }; Order=@('urgent'); Errors=@() }
+        }
+    }
+
+    AfterEach { $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $script:OriginalMaintenanceMode -Force }
+
+    It 'blocks SHOW before any Cinegy command is sent' {
+        $result = Invoke-ShowTemplateResult -Key urgent -ChatId 10 -UserId 10
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'الصيانة'
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'blocks a normal HIDE before any Cinegy command is sent' {
+        Invoke-HideLayer -Layer 4 -ChatId 10 -UserId 10 | Should -BeFalse
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'blocks starting a new scheduled SHOW' {
+        Mock Clear-PendingState { }
+        Mock Get-TemplateByIndex { throw 'The schedule flow must stop before loading a template.' }
+        Start-ScheduleShowFlow -TemplateIndex 0 -ChatId 10 -UserId 10
+        Should -Invoke Get-TemplateByIndex -Times 0 -Exactly
+    }
+
+    It 'allows the administrator emergency hide-all override' {
+        Mock Test-Admin { $true }
+        Mock Get-HideAllTargetLayers { @(4) }
+        Mock Invoke-HideLayer { $true }
+        Mock Write-BridgeLog { }; Mock Add-AuditEntry { }
+        Invoke-HideAllLayers -ChatId 1 -UserId 1
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 4 -and $MaintenanceOverride }
+    }
+}
+
 Describe 'Split-TelegramText' {
     It 'returns the short message as a plain string, not a nested array' {
         # The System.Object[] regression: the element must be a string.
@@ -846,6 +889,23 @@ Describe 'Simple and full status reports' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and
                 $Text -match 'آخر فحص ناجح.*2026-08-22 11:20:00' -and $Text -notmatch 'صحة الخدمات'
+        }
+    }
+
+    It 'keeps status and Cinegy reconciliation available during maintenance' {
+        $original = Get-Setting 'MaintenanceMode'
+        try {
+            $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $true -Force
+            Mock Test-Admin { $false }
+
+            Invoke-StatusCommand -ChatId 200 -UserId 200
+
+            Should -Invoke Get-CinegyLayerDashboard -Times 1 -Exactly
+            Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'القناة' }
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $original -Force
         }
     }
 

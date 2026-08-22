@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.13'
+$script:BridgeVersion = '4.2.14'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -485,6 +485,7 @@ function Write-BridgeLog {
 }
 
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
+$script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
 
 function Add-AuditEntry {
     <# Short in-memory history surfaced by the admin's 📜 button, so "who put
@@ -2976,6 +2977,8 @@ function Write-AirOperationResult {
     $message = "AIR_OP id=$OperationId action=$Action result=$Result durationMs=$DurationMs user=$UserId chat=$ChatId layer=$Layer target=`"$cleanTarget`""
     if (-not [string]::IsNullOrWhiteSpace($cleanError)) { $message += " error=`"$cleanError`"" }
     $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
+    $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
+    $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
     Write-BridgeLog $message $level
 }
 
@@ -3946,6 +3949,36 @@ function Invoke-HealthCommand {
     Invoke-FullStatusCommand -ChatId $ChatId -UserId $UserId
 }
 
+function Get-BridgeDiagnosticsSnapshot {
+    $process = Get-Process -Id $PID
+    $scriptFile = Join-Path $scriptRoot 'TelegramBridge.ps1'
+    $buildTime = if (Test-Path -LiteralPath $scriptFile) { (Get-Item -LiteralPath $scriptFile).LastWriteTimeUtc } else { $null }
+    $fileSizes = [ordered]@{}
+    foreach ($path in @($ConfigPath, (Get-TemplateRegistryFilePath), $onAirFile, $script:scheduleFile, $script:scheduleExecutionFile, $logPath)) {
+        if ([string]::IsNullOrWhiteSpace([string]$path)) { continue }
+        $name = [IO.Path]::GetFileName([string]$path)
+        $fileSizes[$name] = if (Test-Path -LiteralPath $path) { [long](Get-Item -LiteralPath $path).Length } else { 0L }
+    }
+    $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($scriptRoot)).TrimEnd('\', '/')
+    $driveName = $root.TrimEnd(':')
+    $drive = Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
+    return [pscustomobject]@{
+        BuildTimeUtc  = $buildTime
+        ProcessStart  = $process.StartTime
+        Uptime        = (Get-Date) - $process.StartTime
+        Processor     = if ($env:PROCESSOR_IDENTIFIER) { $env:PROCESSOR_IDENTIFIER } else { [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() }
+        WorkingSetMB  = [math]::Round($process.WorkingSet64 / 1MB, 1)
+        PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
+        DiskFreeGB    = if ($drive) { [math]::Round([double]$drive.Free / 1GB, 2) } else { $null }
+        FileSizes     = $fileSizes
+        AirOperations = [pscustomobject]@{
+            Success = [int]$script:AirOperationCounters.Success
+            Failed  = [int]$script:AirOperationCounters.Failed
+            Blocked = [int]$script:AirOperationCounters.Blocked
+        }
+    }
+}
+
 function Invoke-DiagnosticsCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -3957,9 +3990,20 @@ function Invoke-DiagnosticsCommand {
     $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     $relayState = if ($script:RelayState.ShouldRun) { 'مطلوب التشغيل' } else { 'متوقف' }
+    $diagnostics = Get-BridgeDiagnosticsSnapshot
+    $buildText = if ($diagnostics.BuildTimeUtc) { ([datetime]$diagnostics.BuildTimeUtc).ToString('yyyy-MM-dd HH:mm:ss') + ' UTC' } else { 'غير معروف' }
+    $uptime = [timespan]$diagnostics.Uptime
+    $fileText = ($diagnostics.FileSizes.GetEnumerator() | ForEach-Object { "$($_.Key)=$([math]::Round([double]$_.Value / 1KB, 1))KB" }) -join ' | '
+    $diskText = if ($null -ne $diagnostics.DiskFreeGB) { "$($diagnostics.DiskFreeGB) GB" } else { 'غير معروف' }
     $text = @(
         "🧪 تشخيص Cinegy Telegram Bridge",
         "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
+        "وقت البناء: $buildText | مدة التشغيل: $([int]$uptime.TotalHours)س $($uptime.Minutes)د",
+        "المعالج: $($diagnostics.Processor)",
+        "الذاكرة: Working $($diagnostics.WorkingSetMB) MB | Private $($diagnostics.PrivateMemoryMB) MB",
+        "مساحة القرص الحرة: $diskText",
+        "أحجام الملفات: $fileText",
+        "عمليات الهواء: نجاح $($diagnostics.AirOperations.Success) | فشل $($diagnostics.AirOperations.Failed) | محظور $($diagnostics.AirOperations.Blocked)",
         "Cinegy: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)",
         "القوالب: $(@($store.Order).Count) | تحذيرات القوالب: $(@($store.Errors).Count)",
         "المحادثات المعلقة: $($script:PendingState.Count) | أقفال الطبقات: $($script:LayerLocks.Count)",

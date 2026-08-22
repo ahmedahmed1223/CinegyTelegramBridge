@@ -1015,6 +1015,7 @@ Describe 'Cinegy state freshness classification' {
 
 Describe 'Admin diagnostics command' {
     BeforeEach {
+        $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
         Mock Test-Authorized { $true }
         Mock Test-Admin { $true }
         Mock Send-TelegramMessage { }
@@ -1034,8 +1035,22 @@ Describe 'Admin diagnostics command' {
         Invoke-BridgeCommand -Text '/diagnostics' -ChatId 100 -UserId 100
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $Text -match 'تشخيص' -and $Text -match 'Bridge' -and $Text -match 'Cinegy' -and $Text -notmatch [regex]::Escape([string]$config.BotToken)
+            $Text -match 'تشخيص' -and $Text -match 'Bridge' -and $Text -match 'Cinegy' -and
+                $Text -match 'الذاكرة' -and $Text -match 'مساحة القرص' -and $Text -match 'أحجام الملفات' -and
+                $Text -match 'نجاح.*فشل.*محظور' -and $Text -notmatch [regex]::Escape([string]$config.BotToken)
         }
+    }
+
+    It 'counts successful failed and blocked air operations without reading log files' {
+        Mock Write-BridgeLog { }
+        Write-AirOperationResult -OperationId a -Action SHOW -Result success -DurationMs 1 -UserId 1 -ChatId 1
+        Write-AirOperationResult -OperationId b -Action HIDE -Result failed -DurationMs 1 -UserId 1 -ChatId 1
+        Write-AirOperationResult -OperationId c -Action EXIT -Result blocked -DurationMs 1 -UserId 1 -ChatId 1
+
+        $snapshot = Get-BridgeDiagnosticsSnapshot
+        $snapshot.AirOperations.Success | Should -Be 1
+        $snapshot.AirOperations.Failed | Should -Be 1
+        $snapshot.AirOperations.Blocked | Should -Be 1
     }
 }
 

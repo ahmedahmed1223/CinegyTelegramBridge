@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.2.14 — 2026-08-22
+
+- Added bridge build-file time and process uptime to administrator diagnostics.
+- Added processor architecture, working-set memory, private memory, and free
+  disk capacity.
+- Added byte-derived sizes for configuration, templates, on-air state,
+  schedule state, schedule execution history, and bridge log files.
+- Added in-memory success, failure, and blocked counters for air-control
+  operations without reparsing logs.
+- Kept diagnostics administrator-only and passed all output through existing
+  secret redaction.
+- Added diagnostic content and counter regression coverage.
+
 ## 4.2.13 — 2026-08-22
 
 - Changed opted-in scheduled retry delays from fixed to exponential backoff.

@@ -142,7 +142,7 @@ Describe 'Authorized user administration' {
 
     It 'removes a regular user from both chat and user authorization lists' {
         $result = Revoke-AuthorizedUser -TargetUserId 202
-        $result.Success | Should -BeTrue
+        $result.Success | Should -BeTrue -Because $result.Error
         $config.AllowedChatIds | Should -Not -Contain 202
         $config.AllowedUserIds | Should -Not -Contain 202
         Should -Invoke Save-Config -Times 1 -Exactly

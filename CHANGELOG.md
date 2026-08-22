@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.2.28 — 2026-08-22
+
+- Added Windows ACL enforcement for `config.json`, its fallback copy, and all
+  versioned configuration backups at startup and after save or restore.
+- Restricted access to the bridge runtime identity, Local System, and the
+  built-in Administrators group using stable Windows security identifiers.
+- Added an integration test that verifies protected inheritance and the exact
+  allow-list on temporary files and directories.
+
 ## 4.2.27 — 2026-08-22
 
 - Extended the administrator-confirmed runtime cleanup to all direct `.log`

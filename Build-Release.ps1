@@ -22,7 +22,7 @@ if (-not $SkipChecks) {
 }
 
 $allowList = @(
-    'TelegramBridge.ps1', 'CinegyAirTitler.psm1',
+    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1',
     'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
     'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
     'Run-Checks.ps1', 'Build-Release.ps1',

@@ -49,10 +49,11 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.27'
+$script:BridgeVersion = '4.2.28'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
+Import-Module (Join-Path $scriptRoot "BridgeSecurity.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -179,6 +180,7 @@ $script:SettingDisplayMetadata = @{
 if (-not (Test-Path $ConfigPath)) {
     throw "Config file not found at '$ConfigPath'. Copy config.example.json to config.json and edit it first."
 }
+if (-not $LoadOnly) { Protect-BridgeConfigurationAcl -ConfigPath $ConfigPath }
 try {
     $config = Get-Content -Path $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 }
@@ -261,6 +263,7 @@ function Save-Config {
         $target | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding utf8 -ErrorAction Stop
         if (Test-Path $Path) { Copy-Item -Path $Path -Destination $backupPath -Force -ErrorAction SilentlyContinue }
         Move-Item -Path $tempPath -Destination $Path -Force -ErrorAction Stop
+        Protect-BridgeConfigurationAcl -ConfigPath $Path
         $script:LastConfigSaveFailed = $false
     }
     catch {
@@ -291,6 +294,7 @@ function Restore-ConfigBackup {
         }
         Copy-Item -LiteralPath $BackupPath -Destination $restoreTempPath -Force -ErrorAction Stop
         Move-Item -LiteralPath $restoreTempPath -Destination $Path -Force -ErrorAction Stop
+        Protect-BridgeConfigurationAcl -ConfigPath $Path
         return [pscustomobject]@{ Success = $true; Error = '' }
     }
     catch {

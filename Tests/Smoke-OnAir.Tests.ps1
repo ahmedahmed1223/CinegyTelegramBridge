@@ -20,7 +20,7 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:Root = Split-Path -Parent $PSScriptRoot
-    . (Join-Path $script:Root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json'
+    . (Join-Path $script:Root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json' -RuntimePath $TestDrive
 
     Mock Send-TelegramMessage { }
     Mock Write-BridgeLog { }

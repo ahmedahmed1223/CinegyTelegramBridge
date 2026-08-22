@@ -36,6 +36,7 @@
 
 param(
     [string]$ConfigPath = ".\config.json",
+    [string]$RuntimePath = '',
     [switch]$AllowMultipleInstances,
     # Dot-source the script with -LoadOnly to get every function defined
     # without contacting Telegram, taking the single-instance mutex, or
@@ -48,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.1.1'
+$script:BridgeVersion = '4.1.2'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
@@ -399,8 +400,14 @@ function Initialize-Settings {
 #  Logging (with rotation) and audit trail
 # ============================================================================
 
-$logPath = Join-Path $scriptRoot $config.LogPath
-$logDir = Split-Path $logPath -Parent
+if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
+    $logPath = Join-Path $scriptRoot $config.LogPath
+    $logDir = Split-Path $logPath -Parent
+}
+else {
+    $logDir = if ([IO.Path]::IsPathRooted($RuntimePath)) { $RuntimePath } else { Join-Path $scriptRoot $RuntimePath }
+    $logPath = Join-Path $logDir 'bridge.log'
+}
 New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
 
 $relayPidFile = Join-Path $logDir "relay.pid"

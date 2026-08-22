@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.1.2 — 2026-08-22
+
+- Fixed the Pester harness writing synthetic template records into the live
+  `logs/onair.json` file while `Run-Checks.ps1` was running.
+- Added an explicit `RuntimePath` parameter so tests isolate `onair.json`,
+  schedules, drafts, recent values, usage data, relay state, snapshots, and
+  `bridge.log` inside Pester's `TestDrive`.
+- Added a release-gate regression test that fails if test persistence points
+  at the live `logs` directory.
+- Verified the live `onair.json` hash and timestamp remain unchanged across the
+  complete 146-test suite.
+
 ## 4.1.1 — 2026-08-22
 
 - Added a full Cinegy layer comparison during bridge startup before operator

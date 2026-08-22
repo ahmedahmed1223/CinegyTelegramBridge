@@ -28,7 +28,7 @@ BeforeAll {
     # -LoadOnly defines every function without touching Telegram, the mutex,
     # or the polling loop. config.example.json is used so a real config is
     # never read or rewritten by the tests.
-    . (Join-Path $script:Root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json'
+    . (Join-Path $script:Root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json' -RuntimePath $TestDrive
     # Promote the dot-sourced path into this test file's script scope so
     # persistence tests can redirect it safely to Pester's TestDrive.
     $script:onAirFile = $onAirFile
@@ -49,6 +49,13 @@ BeforeAll {
     # Sanity: -LoadOnly must have defined the functions without running the bot.
     if (-not (Get-Command Split-TelegramText -ErrorAction SilentlyContinue)) {
         throw "TelegramBridge.ps1 did not load its functions; check the -LoadOnly guard."
+    }
+}
+
+Describe 'Test runtime isolation' {
+    It 'never points on-air persistence at the live logs directory' {
+        [IO.Path]::GetFullPath($script:onAirFile) | Should -BeLike "$([IO.Path]::GetFullPath($TestDrive))*"
+        [IO.Path]::GetFullPath($script:onAirFile) | Should -Not -BeLike "$([IO.Path]::GetFullPath((Join-Path $script:Root 'logs')))*"
     }
 }
 

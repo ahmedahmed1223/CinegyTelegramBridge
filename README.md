@@ -13,9 +13,10 @@ those scripts were refactored into reusable functions in
 `CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.1.1
+## Version 4.1.2
 
-Version 4.1.1 adds live comparison with Cinegy during startup as well as on
+Version 4.1.2 isolates every test runtime file from the live bridge state.
+It retains the 4.1.1 live comparison with Cinegy during startup as well as on
 operator request. Opening Status or Layers reads
 every graphics layer referenced by `templates.json`, reconciles it with
 `onair.json`, and makes scenes started directly in Cinegy available for
@@ -637,3 +638,6 @@ If you need playlist transport from Telegram too:
 - Self-service access requests are rate-limited (`MaxPendingApprovals`),
   expire (`PendingApprovalExpiryHours`), and can be disabled
   (`EnableSelfServiceRequests`).
+`Run-Checks.ps1` passes a temporary runtime directory to the bridge. Tests do
+not read or write the live `logs/onair.json`, schedule, draft, usage, or log
+files.

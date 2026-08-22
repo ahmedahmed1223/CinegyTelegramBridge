@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
+$scriptRoot = Split-Path -Parent (Split-Path -Path $MyInvocation.MyCommand.Path -Parent)
 
 function Find-Nssm {
     param([string]$Explicit)
@@ -34,7 +34,7 @@ if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
 
 $nssmPath = Find-Nssm -Explicit $NssmPath
 if (-not $nssmPath) {
-    throw "Service '$ServiceName' exists but nssm.exe could not be found to remove it cleanly. Locate the nssm.exe you installed with and pass it via -NssmPath, e.g. .\Uninstall-BridgeService-NSSM.ps1 -NssmPath 'C:\nssm\nssm.exe'."
+    throw "Service '$ServiceName' exists but nssm.exe could not be found to remove it cleanly. Locate the nssm.exe you installed with and pass it via -NssmPath, e.g. .\scripts\Uninstall-BridgeService-NSSM.ps1 -NssmPath 'C:\nssm\nssm.exe'."
 }
 
 & $nssmPath stop $ServiceName confirm 2>$null | Out-Null

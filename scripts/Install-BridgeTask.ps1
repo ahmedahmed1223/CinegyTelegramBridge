@@ -14,9 +14,9 @@
     bridge (usually the Air Pro playout box itself):
 
         cd 'D:\cingy cg\CinegyTelegramBridge'
-        .\Install-BridgeTask.ps1
+        .\scripts\Install-BridgeTask.ps1
 
-    To remove it later, run .\Uninstall-BridgeTask.ps1 (also as Admin).
+    To remove it later, run .\scripts\Uninstall-BridgeTask.ps1 (also as Admin).
 #>
 
 param(
@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
+$scriptRoot = Split-Path -Parent (Split-Path -Path $MyInvocation.MyCommand.Path -Parent)
 
 $pwshCmd = Get-Command pwsh.exe -ErrorAction SilentlyContinue
 $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { "$env:ProgramFiles\PowerShell\7\pwsh.exe" }

@@ -1,5 +1,5 @@
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot '..\BridgeSecurity.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeSecurity.psm1') -Force
 }
 
 Describe 'Windows configuration ACL protection' -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
@@ -64,7 +64,7 @@ Describe 'Optional DPAPI secret storage' -Skip:([Environment]::OSVersion.Platfor
         $storePath = Join-Path $TestDrive 'custom-secrets.dpapi.json'
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\config.example.json') -Destination $configPath
 
-        & (Join-Path $PSScriptRoot '..\Protect-BridgeSecrets.ps1') -ConfigPath $configPath -SecretStorePath $storePath -Confirm:$false | Out-Null
+        & (Join-Path $PSScriptRoot '..\scripts\Protect-BridgeSecrets.ps1') -ConfigPath $configPath -SecretStorePath $storePath -Confirm:$false | Out-Null
 
         $migrated = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         $migrated.Settings.EnableDpapiSecrets | Should -BeTrue

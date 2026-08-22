@@ -1,13 +1,13 @@
 #requires -Version 7
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+    [string]$ConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'config.json'),
     [string]$SecretStorePath = '',
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'BridgeSecurity.psm1') -Force
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\BridgeSecurity.psm1') -Force
 $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
 if ([string]::IsNullOrWhiteSpace($SecretStorePath)) {
     $SecretStorePath = Join-Path (Split-Path -Parent $ConfigPath) 'secrets.dpapi.json'

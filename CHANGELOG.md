@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.2.35 — 2026-08-22
+
+- Extracts validated JSON primary/backup writes and recovery reads into the independent `Modules/BridgeStorage.psm1` module.
+- Adds direct storage tests for atomic primary/backup creation, invalid-input protection, backup recovery, and missing-state handling.
+- Organizes reusable modules under `Modules/`, administration and installation tools under `scripts/`, and historical reviews under `docs/archive/`.
+- Updates runtime imports, test imports, release packaging, recursive signing/manifest generation, documentation, and required-file/parser gates for the organized layout.
+- Removes only regenerated build/test outputs and example-config backups; live `config.json`, its backups, `templates.json`, and `logs/` remain untouched.
+
 ## 4.2.34 — 2026-08-22
 
 - Extracts setting lookup, integer normalization, and schema initialization into the pure `BridgeSettings.psm1` module.

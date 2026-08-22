@@ -1,7 +1,7 @@
 #requires -Version 7
 
 BeforeAll {
-    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'BridgeSettings.psm1') -Force
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\BridgeSettings.psm1') -Force
 }
 
 Describe 'Bridge settings module' {

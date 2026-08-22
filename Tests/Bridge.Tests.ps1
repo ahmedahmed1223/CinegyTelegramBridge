@@ -18,7 +18,7 @@
 #>
 
 BeforeDiscovery {
-    $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'CinegyAirTitler.psm1'
+    $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\CinegyAirTitler.psm1'
     Import-Module $modulePath -Force
 }
 
@@ -3363,7 +3363,7 @@ Describe 'Reliable schedule store and executor' {
         '[]' | Set-Content -LiteralPath $script:scheduleFile -Encoding utf8
         $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt ([datetimeoffset]::Now.AddHours(1)) -Recurrence once -ChatId 1 -UserId 2
         $script:ScheduleEvents.Add($scheduleEntry)
-        Mock Move-Item { throw 'disk failure' }
+        Mock Move-Item { throw 'disk failure' } -ModuleName BridgeStorage
 
         Save-ScheduleEvents | Should -BeFalse
 

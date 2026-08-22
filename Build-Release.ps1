@@ -22,10 +22,10 @@ if (-not $SkipChecks) {
 }
 
 $allowList = @(
-    'TelegramBridge.ps1', 'CinegyAirTitler.psm1', 'BridgeSecurity.psm1', 'BridgeSettings.psm1',
-    'Install-BridgeTask.ps1', 'Uninstall-BridgeTask.ps1',
-    'Install-BridgeService-NSSM.ps1', 'Uninstall-BridgeService-NSSM.ps1',
-    'Run-Checks.ps1', 'Build-Release.ps1', 'Protect-BridgeSecrets.ps1',
+    'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1',
+    'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
+    'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
+    'Run-Checks.ps1', 'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1',
     'config.example.json', 'templates.example.json',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md'
 )
@@ -41,28 +41,32 @@ New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 foreach ($relativePath in $allowList) {
     $source = Join-Path $root $relativePath
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required release file missing: $relativePath" }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $releaseRoot $relativePath) -Force
+    $destination = Join-Path $releaseRoot $relativePath
+    $destinationDirectory = Split-Path -Parent $destination
+    if (-not (Test-Path -LiteralPath $destinationDirectory)) { New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null }
+    Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
 $signed = $false
 if (-not [string]::IsNullOrWhiteSpace($CodeSigningThumbprint)) {
     $certificate = Get-ChildItem -LiteralPath Cert:\CurrentUser\My | Where-Object Thumbprint -eq $CodeSigningThumbprint | Select-Object -First 1
     if (-not $certificate) { throw "Code-signing certificate '$CodeSigningThumbprint' was not found in Cert:\CurrentUser\My." }
-    foreach ($file in @(Get-ChildItem -LiteralPath $releaseRoot -File | Where-Object Extension -in @('.ps1', '.psm1'))) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $releaseRoot -File -Recurse | Where-Object Extension -in @('.ps1', '.psm1'))) {
         $signature = Set-AuthenticodeSignature -LiteralPath $file.FullName -Certificate $certificate -HashAlgorithm SHA256
         if ($signature.Status -ne 'Valid') { throw "Signing failed for $($file.Name): $($signature.StatusMessage)" }
     }
     $signed = $true
 }
 
-$packagedFiles = @(Get-ChildItem -LiteralPath $releaseRoot -File)
+$packagedFiles = @(Get-ChildItem -LiteralPath $releaseRoot -File -Recurse)
 foreach ($file in $packagedFiles) {
     if ($forbiddenNames -contains $file.Name -or $file.Name -match '\.(bak|tmp|log|jsonl)$') {
         throw "Forbidden runtime or secret-bearing file entered the package: $($file.Name)"
     }
 }
-$manifestFiles = @($packagedFiles | Sort-Object Name | ForEach-Object {
-    [ordered]@{ Name = $_.Name; Length = $_.Length; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+$manifestFiles = @($packagedFiles | Sort-Object FullName | ForEach-Object {
+    $relativeName = [IO.Path]::GetRelativePath($releaseRoot, $_.FullName).Replace('\','/')
+    [ordered]@{ Name = $relativeName; Length = $_.Length; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
 })
 $manifest = [ordered]@{
     Product = 'CinegyTelegramBridge'; Version = $Version

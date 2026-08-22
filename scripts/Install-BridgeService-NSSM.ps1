@@ -19,9 +19,9 @@
     bridge (usually the Air Pro playout box itself):
 
         cd 'D:\cingy cg\CinegyTelegramBridge'
-        .\Install-BridgeService-NSSM.ps1
+        .\scripts\Install-BridgeService-NSSM.ps1
 
-    To remove it later, run .\Uninstall-BridgeService-NSSM.ps1 (also as Admin).
+    To remove it later, run .\scripts\Uninstall-BridgeService-NSSM.ps1 (also as Admin).
 #>
 
 param(
@@ -30,7 +30,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
+$scriptRoot = Split-Path -Parent (Split-Path -Path $MyInvocation.MyCommand.Path -Parent)
 
 function Find-Nssm {
     param([string]$Explicit)

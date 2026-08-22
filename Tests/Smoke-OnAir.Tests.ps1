@@ -14,7 +14,7 @@
 #>
 
 BeforeDiscovery {
-    $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'CinegyAirTitler.psm1'
+    $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\CinegyAirTitler.psm1'
     Import-Module $modulePath -Force
 }
 

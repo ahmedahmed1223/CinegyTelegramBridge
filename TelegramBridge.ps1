@@ -8,12 +8,12 @@
     hide/exit it, push a live variable update, grab an on-air snapshot,
     and relay the live air output into a Telegram Video Chat.
 
-    Built on top of CinegyAirTitler.psm1, which wraps the HTTP control
+Built on top of Modules/CinegyAirTitler.psm1, which wraps the HTTP control
     surfaces demonstrated in https://github.com/Cinegy/Cinegy.Powershell
     (Titler/PushTitlerTemplateOnAir.ps1, HideTitlerTemplateOnAir.ps1,
     ExitSceneTitlerTemplateOnAir.ps1, PushTitlerVariableToPostbox.ps1).
 
-    Design notes (see REVIEW.md / TASKS.md for the full rationale):
+Design notes (see docs/archive/REVIEW.md and docs/archive/TASKS.md for the historical rationale):
 
       * The polling loop must never block. Anything slow (ffmpeg snapshot,
         relay startup verification) is started asynchronously and polled
@@ -49,12 +49,14 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.34'
+$script:BridgeVersion = '4.2.35'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
-Import-Module (Join-Path $scriptRoot "CinegyAirTitler.psm1") -Force
-Import-Module (Join-Path $scriptRoot "BridgeSecurity.psm1") -Force
-Import-Module (Join-Path $scriptRoot "BridgeSettings.psm1") -Force
+$moduleRoot = Join-Path $scriptRoot 'Modules'
+Import-Module (Join-Path $moduleRoot "CinegyAirTitler.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeSecurity.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeSettings.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeStorage.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -536,25 +538,9 @@ function Write-ValidatedJsonState {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Json
     )
-    $temporary = "$Path.tmp"
-    $backup = "$Path.bak"
-    $backupTemporary = "$backup.tmp"
-    try {
-        $Json | ConvertFrom-Json -ErrorAction Stop | Out-Null
-        $parent = Split-Path $Path -Parent
-        if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null }
-        Set-Content -LiteralPath $temporary -Value $Json -Encoding utf8 -ErrorAction Stop
-        Get-Content -LiteralPath $temporary -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop | Out-Null
-        Move-Item -LiteralPath $temporary -Destination $Path -Force -ErrorAction Stop
-        Copy-Item -LiteralPath $Path -Destination $backupTemporary -Force -ErrorAction Stop
-        Move-Item -LiteralPath $backupTemporary -Destination $backup -Force -ErrorAction Stop
-        return $true
-    }
-    catch {
-        Remove-Item -LiteralPath $temporary, $backupTemporary -Force -ErrorAction SilentlyContinue
-        Write-BridgeLog "Validated JSON state write failed for '$([IO.Path]::GetFileName($Path))': $($_.Exception.Message)" 'ERROR'
-        return $false
-    }
+    $success = Write-BridgeValidatedJson -Path $Path -Json $Json
+    if (-not $success) { Write-BridgeLog "Validated JSON state write failed for '$([IO.Path]::GetFileName($Path))'" 'ERROR' }
+    return $success
 }
 
 function Read-ValidatedJsonState {
@@ -562,30 +548,11 @@ function Read-ValidatedJsonState {
         [Parameter(Mandatory)][string]$Path,
         [switch]$AsHashtable
     )
-    $backup = "$Path.bak"
-    $primaryError = ''
-    if (Test-Path -LiteralPath $Path) {
-        try {
-            $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-            $data = if ($AsHashtable) { $text | ConvertFrom-Json -AsHashtable -ErrorAction Stop } else { $text | ConvertFrom-Json -ErrorAction Stop }
-            return [pscustomobject]@{ Data = $data; Recovered = $false }
-        }
-        catch { $primaryError = $_.Exception.Message }
-    }
-    if (-not (Test-Path -LiteralPath $backup)) {
-        if ($primaryError) { throw "Primary JSON is invalid and no backup exists: $primaryError" }
-        return $null
-    }
-    try {
-        $backupText = Get-Content -LiteralPath $backup -Raw -ErrorAction Stop
-        $data = if ($AsHashtable) { $backupText | ConvertFrom-Json -AsHashtable -ErrorAction Stop } else { $backupText | ConvertFrom-Json -ErrorAction Stop }
-        $restoreTemporary = "$Path.restore.tmp"
-        Set-Content -LiteralPath $restoreTemporary -Value $backupText -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $restoreTemporary -Destination $Path -Force -ErrorAction Stop
+    $result = Read-BridgeValidatedJson -Path $Path -AsHashtable:$AsHashtable
+    if ($result -and $result.Recovered) {
         Write-BridgeLog "Recovered '$([IO.Path]::GetFileName($Path))' from its last validated backup" 'WARN'
-        return [pscustomobject]@{ Data = $data; Recovered = $true }
     }
-    catch { throw "Primary and backup JSON are invalid: primary=$primaryError; backup=$($_.Exception.Message)" }
+    return $result
 }
 
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()

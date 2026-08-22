@@ -10,12 +10,12 @@ It's built directly on the HTTP control surfaces that Cinegy demonstrates in
 (`Titler/PushTitlerTemplateOnAir.ps1`, `HideTitlerTemplateOnAir.ps1`,
 `ExitSceneTitlerTemplateOnAir.ps1`, `PushTitlerVariableToPostbox.ps1`) —
 those scripts were refactored into reusable functions in
-`CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
+`Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.34
+## Version 4.2.35
 
-Version 4.2.34 begins the planned modularization by moving setting lookup, normalization, and initialization into a tested independent module while retaining the existing bridge interfaces. Version 4.2.33 adds opt-in (`EnableSafeRollback`, disabled by default) short-lived in-memory safe rollback gated by exact live Cinegy state, without persisting editorial values. Version 4.2.32 adds confirmed template testing on a dedicated non-production layer, mandatory automatic hide, and before/after definition comparison. Version 4.2.31 adds administrator template-registry export and confirmed, validated import with comparison, backup, and live/scheduled-template protection. Version 4.2.30 adds template search, category browsing, a non-mutating detail preview, and persisted last-used times. Version 4.2.29 adds optional CurrentUser DPAPI protection from the administrator settings while retaining plaintext configuration as the default. Version 4.2.28 restricts Windows access to configuration and its backups to the runtime identity, SYSTEM, and Administrators. Version 4.2.27 extends the confirmed administrator runtime cleanup to every direct `.log` file in `logs`, including relay logs, while preserving audit and on-air state. Version 4.2.26 adds Windows CI, persisted Pester results, an allow-listed release ZIP, manifest and SHA-256 checksum, optional Authenticode signing, and documented upgrade/rollback steps. Version 4.2.25 adds bounded, configurable timeouts to Telegram message, photo, and document sends while retaining the existing single transient retry. Version 4.2.24 makes field limits and Telegram message splitting Unicode-aware, preserving emoji, Arabic combining marks, and other text elements. Version 4.2.23 adds schedule pausing, optional advance notifications, and reviewed recurrence end dates. Version 4.2.22 adds reviewed copying and time editing for pending schedule events, with timezone ids shown in summaries and atomic rollback on save failure. Version 4.2.21 validates template path syntax, excludes invalid definitions from SHOW controls, and reports shared layers as allowed operational information in health status. Version 4.2.20 adds a private per-user operation page with actionable results and a safe retry button that always returns to SHOW review before Cinegy is changed. Version 4.2.19 keeps validated backups of on-air and schedule state and automatically repairs a corrupt primary JSON file from the last successful state. Version 4.2.18 enforces administrator-defined automatic-hide lifetimes for sensitive templates, including ordinary and scheduled SHOW paths. Version 4.2.17 adds an administrator-only redacted diagnostic ZIP containing a health summary and sanitized recent runtime lines, never configuration, on-air state, editorial values, secrets, or actor identifiers. Version 4.2.16 adds storage-growth warnings and confirmed administrator controls for clearing the runtime or audit history without touching `onair.json`. Version 4.2.15 adds an independent, permanent `logs/audit.jsonl` security and control trail, with UTC timestamps and correlation ids shared with air operations, and keeps helper return values such as `True` out of the runtime terminal. Version 4.2.14 expands administrator diagnostics with build and uptime data,
+Version 4.2.35 extracts validated JSON storage into a tested module and organizes modules, administrator scripts, and archived planning documents into dedicated folders. Version 4.2.34 begins the planned modularization by moving setting lookup, normalization, and initialization into a tested independent module while retaining the existing bridge interfaces. Version 4.2.33 adds opt-in (`EnableSafeRollback`, disabled by default) short-lived in-memory safe rollback gated by exact live Cinegy state, without persisting editorial values. Version 4.2.32 adds confirmed template testing on a dedicated non-production layer, mandatory automatic hide, and before/after definition comparison. Version 4.2.31 adds administrator template-registry export and confirmed, validated import with comparison, backup, and live/scheduled-template protection. Version 4.2.30 adds template search, category browsing, a non-mutating detail preview, and persisted last-used times. Version 4.2.29 adds optional CurrentUser DPAPI protection from the administrator settings while retaining plaintext configuration as the default. Version 4.2.28 restricts Windows access to configuration and its backups to the runtime identity, SYSTEM, and Administrators. Version 4.2.27 extends the confirmed administrator runtime cleanup to every direct `.log` file in `logs`, including relay logs, while preserving audit and on-air state. Version 4.2.26 adds Windows CI, persisted Pester results, an allow-listed release ZIP, manifest and SHA-256 checksum, optional Authenticode signing, and documented upgrade/rollback steps. Version 4.2.25 adds bounded, configurable timeouts to Telegram message, photo, and document sends while retaining the existing single transient retry. Version 4.2.24 makes field limits and Telegram message splitting Unicode-aware, preserving emoji, Arabic combining marks, and other text elements. Version 4.2.23 adds schedule pausing, optional advance notifications, and reviewed recurrence end dates. Version 4.2.22 adds reviewed copying and time editing for pending schedule events, with timezone ids shown in summaries and atomic rollback on save failure. Version 4.2.21 validates template path syntax, excludes invalid definitions from SHOW controls, and reports shared layers as allowed operational information in health status. Version 4.2.20 adds a private per-user operation page with actionable results and a safe retry button that always returns to SHOW review before Cinegy is changed. Version 4.2.19 keeps validated backups of on-air and schedule state and automatically repairs a corrupt primary JSON file from the last successful state. Version 4.2.18 enforces administrator-defined automatic-hide lifetimes for sensitive templates, including ordinary and scheduled SHOW paths. Version 4.2.17 adds an administrator-only redacted diagnostic ZIP containing a health summary and sanitized recent runtime lines, never configuration, on-air state, editorial values, secrets, or actor identifiers. Version 4.2.16 adds storage-growth warnings and confirmed administrator controls for clearing the runtime or audit history without touching `onair.json`. Version 4.2.15 adds an independent, permanent `logs/audit.jsonl` security and control trail, with UTC timestamps and correlation ids shared with air operations, and keeps helper return values such as `True` out of the runtime terminal. Version 4.2.14 expands administrator diagnostics with build and uptime data,
 processor and memory, disk capacity, runtime-file sizes, and in-memory air
 operation outcome counters. Version 4.2.13 adds bounded exponential backoff to opted-in scheduled retries,
 configured by `ScheduleRetryBackoffFactor` and `ScheduleRetryMaxDelaySeconds`. Version 4.2.12 adds a content-free, machine-readable
@@ -93,7 +93,7 @@ Telegram operator  →  Telegram Bot API (getUpdates long-poll)
                             ↓
                    TelegramBridge.ps1 (PowerShell 7, runs on/near Air Pro)
                             ↓
-                   CinegyAirTitler.psm1
+                   Modules/CinegyAirTitler.psm1
                             ↓
       HTTP POST  http://<air-host>:<5521+channel>/video/command   (SHOW/HIDE/EXIT)
       HTTP POST  http://<air-host>:<5521+channel>/postbox         (live SetValue)
@@ -110,16 +110,15 @@ host that can reach the engine's control port.
 
 | File | Purpose |
 |---|---|
-| `CinegyAirTitler.psm1` | Reusable functions for SHOW/HIDE/EXIT, postbox updates, GFX layer status metadata, and Cinegy telemetry. |
+| `Modules/` | Reusable Cinegy, security, settings, and validated-storage PowerShell modules. |
 | `TelegramBridge.ps1` | The bot itself — polling loop, button dispatch, authorization, async ffmpeg jobs, watchdog, logging. |
 | `config.example.json` | Bot token, whitelists, Air server address/channel, `LiveStream` and `Settings` blocks. Copy to `config.json` and edit. |
 | `templates.example.json` | Named title templates (friendly key → `.cintitle` path, GFX layer, field list, optional `order` and `presets`). Copy to `templates.json` and edit. |
-| `Install-BridgeTask.ps1` / `Uninstall-BridgeTask.ps1` | Registers/removes a Windows Scheduled Task so the bridge auto-starts at boot and auto-restarts on crash — see "Make it run like a service" below. |
-| `Install-BridgeService-NSSM.ps1` / `Uninstall-BridgeService-NSSM.ps1` | Alternative to the above: registers/removes a real Windows Service via [NSSM](https://nssm.cc/), with its own stdout/stderr logs. |
+| `scripts/Install-BridgeTask.ps1` / `scripts/Uninstall-BridgeTask.ps1` | Registers/removes a Windows Scheduled Task so the bridge auto-starts at boot and auto-restarts on crash — see "Make it run like a service" below. |
+| `scripts/Install-BridgeService-NSSM.ps1` / `scripts/Uninstall-BridgeService-NSSM.ps1` | Alternative to the above: registers/removes a real Windows Service via [NSSM](https://nssm.cc/), with its own stdout/stderr logs. |
 | `Run-Checks.ps1` | Required-file and JSON validation + syntax check + PSScriptAnalyzer + Pester in one command. Run it after every change; it touches nothing live. |
 | `Tests\Bridge.Tests.ps1` | Unit tests for safety gates, Cinegy state/health, persistence, presets, scheduling, configuration recovery, and core helpers. |
-| `REVIEW.md` / `REVIEW-2.md` | Technical reviews: findings, impact, recommended fixes, and an honest critique of what is still weak. |
-| `TASKS.md` | Implementation log — what was built for each review item, and the one item still needing your action (rotating the bot token). |
+| `docs/archive/` | Archived technical reviews and historical implementation logs retained for traceability. |
 
 ## Setup
 
@@ -177,7 +176,7 @@ Edit `config.json`:
   channel/instance number.
 - `Settings` — every runtime option, all editable live from the bot's
   ⚙️ Settings screen. Missing keys are auto-filled with their defaults on
-  first run. See the table in `TASKS.md` for what each one does.
+  first run. See `docs/archive/TASKS.md` for the historical settings rationale.
 
 All of these are lists, so any number of Telegram accounts can control the
 bot.
@@ -292,14 +291,14 @@ overrides this if you ever genuinely need two, e.g. two different bots.)
 
 ### 4. Make it run like a service (auto-start, auto-restart)
 
-`Install-BridgeTask.ps1` registers the bridge as a Windows **Scheduled
+`scripts/Install-BridgeTask.ps1` registers the bridge as a Windows **Scheduled
 Task** — starts at boot, runs as `SYSTEM` (no one needs to be logged in),
 restarts automatically if it crashes. No third-party tool required.
 
 ```powershell
 cd 'D:\cingy cg\CinegyTelegramBridge'
 # Right-click PowerShell -> "Run as Administrator" first, then:
-.\Install-BridgeTask.ps1
+.\scripts\Install-BridgeTask.ps1
 ```
 
 It'll ask if you want to start it immediately. Useful commands afterward:
@@ -311,19 +310,19 @@ Get-ScheduledTask   -TaskName 'CinegyTelegramBridge' | Get-ScheduledTaskInfo   #
 Get-Content .\logs\bridge.log -Wait -Tail 20              # tail the log live
 ```
 
-To remove it: `.\Uninstall-BridgeTask.ps1` (also as Administrator).
+To remove it: `.\scripts\Uninstall-BridgeTask.ps1` (also as Administrator).
 
 #### Alternative: a real Windows Service via NSSM
 
 If you'd rather have an actual service entry in `services.msc` — with its
 own stdout/stderr logs and more fine-grained restart control — use
 [NSSM](https://nssm.cc/) (the Non-Sucking Service Manager) instead of the
-Scheduled Task above. `Install-BridgeService-NSSM.ps1` automates this too:
+Scheduled Task above. `scripts/Install-BridgeService-NSSM.ps1` automates this too:
 
 ```powershell
 cd 'D:\cingy cg\CinegyTelegramBridge'
 # Right-click PowerShell -> "Run as Administrator" first, then:
-.\Install-BridgeService-NSSM.ps1
+.\scripts\Install-BridgeService-NSSM.ps1
 ```
 
 NSSM itself is a small third-party `.exe`, not part of Windows, so the
@@ -348,7 +347,7 @@ Get-Service   'CinegyTelegramBridge'          # or open services.msc
 
 It logs the bridge's own output to `logs\bridge.log` as usual, plus raw
 process stdout/stderr to `logs\service-stdout.log` / `logs\service-stderr.log`
-(auto-rotated by NSSM). To remove it: `.\Uninstall-BridgeService-NSSM.ps1`
+(auto-rotated by NSSM). To remove it: `.\scripts\Uninstall-BridgeService-NSSM.ps1`
 (also as Administrator).
 
 Only run **one** of the two options (Scheduled Task *or* NSSM service) at a
@@ -442,7 +441,7 @@ menu:
   ✅/❌; numbers open a "send me the new value" prompt. Every change is saved
   to `config.json` immediately and recorded in the audit trail, and
   **♻️ استعادة الافتراضي** resets everything. Full option table in
-  `TASKS.md`. **🚨 طبقات إخفاء الكل** opens a checkbox panel: select exactly
+  `docs/archive/TASKS.md`. **🚨 طبقات إخفاء الكل** opens a checkbox panel: select exactly
   the layers the emergency action may hide, or restore the default of all
   configured layers.
 - Settings now show their real units and Arabic purpose, for example seconds,
@@ -631,7 +630,7 @@ If you need playlist transport from Telegram too:
 
 1. Confirm the exact `Device`/`Cmd`/`Op1` values with Cinegy support or
    their Air Remote Control API documentation.
-2. Either add a dedicated function to `CinegyAirTitler.psm1` (same pattern
+2. Either add a dedicated function to `Modules/CinegyAirTitler.psm1` (same pattern
    as `Show-TitlerTemplate`), or use the admin-only `/cmd <Device> <Cmd>
    [Op1]` command already wired up as a generic passthrough to
    `Send-AirCommand`.
@@ -650,7 +649,7 @@ If you need playlist transport from Telegram too:
 - DPAPI protection is optional and disabled by default. Enable
   `EnableDpapiSecrets` from the administrator Settings screen while the bridge
   is running under its final task/service account, or run
-  `pwsh -File .\Protect-BridgeSecrets.ps1 -Confirm:$false` as that same account.
+  `pwsh -File .\scripts\Protect-BridgeSecrets.ps1 -Confirm:$false` as that same account.
   The resulting `secrets.dpapi.json` can be decrypted only by that Windows
   identity on that machine; changing the service account requires disabling
   the option first or migrating again under the new account. Keep the protected

@@ -4354,3 +4354,89 @@ Describe 'Layer removal confirmation' {
         Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
     }
 }
+
+Describe 'Black output watchdog' {
+    BeforeEach {
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        $script:OutputBlackAlerted = $false
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Send-AdminBroadcast {}
+        Mock Send-TelegramMessage {}
+        Mock Start-Sleep {}
+        Mock Get-MonitorFrame { 'frame.jpg' }
+        Mock Remove-Item {}
+        Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'OutputMonitorMinutes' }
+        Mock Get-SettingInt { 6 } -ParameterFilter { $Name -eq 'OutputBlackLuminance' }
+        Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'OutputBlackConfirmSeconds' }
+        Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NotifyOperatorsOnBlackOutput' }
+    }
+
+    It 'alerts only after a second capture confirms the black' {
+        Mock Get-BridgeFrameLuminance { 0.5 }
+
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Get-BridgeFrameLuminance -Times 2 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'أسود' }
+    }
+
+    It 'stays silent when the second capture is not black' {
+        # A cut or a fade reads as black for one frame. Alerting on that would
+        # train operators to ignore the alert.
+        $script:probe = 0
+        Mock Get-BridgeFrameLuminance { $script:probe++; if ($script:probe -eq 1) { 0.5 } else { 120 } }
+
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'never takes a second capture when the first is bright' {
+        Mock Get-BridgeFrameLuminance { 130 }
+
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Get-BridgeFrameLuminance -Times 1 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'does not repeat the alert while the output stays black' {
+        Mock Get-BridgeFrameLuminance { 0.5 }
+
+        Update-OutputBlackWatchdog
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'reports recovery once the picture comes back' {
+        Mock Get-BridgeFrameLuminance { 0.5 }
+        Update-OutputBlackWatchdog
+
+        Mock Get-BridgeFrameLuminance { 140 }
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'عاد المخرج' }
+    }
+
+    It 'does nothing at all when monitoring is disabled' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorMinutes' }
+        Mock Get-BridgeFrameLuminance { 0 }
+
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Get-MonitorFrame -Times 0 -Exactly
+    }
+
+    It 'stays quiet when the capture itself failed, rather than assuming black' {
+        Mock Get-MonitorFrame { $null }
+
+        Update-OutputBlackWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}

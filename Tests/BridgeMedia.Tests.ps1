@@ -31,3 +31,45 @@ Describe 'External media process module' {
         }
     }
 }
+
+Describe 'Frame luminance' {
+    BeforeAll {
+        Add-Type -AssemblyName System.Drawing
+        function New-SolidJpeg { param([string]$Path, [int]$R, [int]$G, [int]$B)
+            $bmp = [System.Drawing.Bitmap]::new(64, 48)
+            try {
+                $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+                try { $gfx.Clear([System.Drawing.Color]::FromArgb($R, $G, $B)) } finally { $gfx.Dispose() }
+                $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+            }
+            finally { $bmp.Dispose() }
+            return $Path
+        }
+    }
+
+    It 'reads a black frame as near zero' {
+        $path = New-SolidJpeg -Path (Join-Path $TestDrive 'black.jpg') -R 0 -G 0 -B 0
+        Get-BridgeFrameLuminance -Path $path | Should -BeLessThan 6
+    }
+
+    It 'reads a white frame as near maximum' {
+        $path = New-SolidJpeg -Path (Join-Path $TestDrive 'white.jpg') -R 255 -G 255 -B 255
+        Get-BridgeFrameLuminance -Path $path | Should -BeGreaterThan 240
+    }
+
+    It 'weights green above blue, matching perceived brightness' {
+        $green = New-SolidJpeg -Path (Join-Path $TestDrive 'green.jpg') -R 0 -G 255 -B 0
+        $blue = New-SolidJpeg -Path (Join-Path $TestDrive 'blue.jpg') -R 0 -G 0 -B 255
+        (Get-BridgeFrameLuminance -Path $green) | Should -BeGreaterThan (Get-BridgeFrameLuminance -Path $blue)
+    }
+
+    It 'reports a dark-but-not-black frame above the black threshold' {
+        # A dimly lit studio must not be mistaken for loss of output.
+        $path = New-SolidJpeg -Path (Join-Path $TestDrive 'dim.jpg') -R 40 -G 40 -B 40
+        Get-BridgeFrameLuminance -Path $path | Should -BeGreaterThan 6
+    }
+
+    It 'returns null rather than a number when the file cannot be read' {
+        Get-BridgeFrameLuminance -Path (Join-Path $TestDrive 'missing.jpg') | Should -BeNullOrEmpty
+    }
+}

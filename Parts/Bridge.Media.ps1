@@ -171,6 +171,117 @@ function Update-SnapshotJobs {
     foreach ($job in $done) { $script:SnapshotJobs.Remove($job) | Out-Null }
 }
 
+function Get-MonitorFrame {
+    <# Grabs one frame synchronously for the black-output monitor.
+
+       Deliberately synchronous, unlike the operator snapshot: this runs on a
+       timer nobody is waiting on, once an hour, and bounding it with a short
+       timeout is simpler than threading another async job through the tick.
+       Returns the file path, or $null with the reason logged. #>
+    param([int]$TimeoutSeconds = 8)
+    $ls = Get-LiveStreamConfig
+    $sourceUrl = [string]$ls.SourceUrl
+    if ([string]::IsNullOrWhiteSpace($sourceUrl)) { return $null }
+    $ffmpeg = Get-FfmpegPath
+    if (-not $ffmpeg) { return $null }
+
+    $stamp = "monitor-$([guid]::NewGuid().ToString('N'))"
+    $outPath = Join-Path $script:logDir "$stamp.jpg"
+    $errLog = Join-Path $script:logDir "$stamp.err"
+    try {
+        $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string]$ls.SourceType) -SourceUrl $sourceUrl)
+        $proc = Start-BridgeMediaProcess -FilePath $ffmpeg `
+            -Arguments (@('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '5', $outPath)) `
+            -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
+        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-BridgeLog "Output monitor capture timed out after ${TimeoutSeconds}s" 'WARN'
+            return $null
+        }
+        if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outPath)) {
+            Write-BridgeLog "Output monitor capture failed (exit $($proc.ExitCode)): $(Get-LastErrorLine -Path $errLog)" 'WARN'
+            return $null
+        }
+        return $outPath
+    }
+    catch {
+        Write-BridgeLog "Output monitor capture could not start: $($_.Exception.Message)" 'WARN'
+        return $null
+    }
+    finally { Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue }
+}
+
+function Update-OutputBlackWatchdog {
+    <#
+        Looks at the actual picture on a timer and reports a black output.
+
+        Every other health check in the bridge asks a component whether it is
+        happy. Cinegy can answer healthy, the relay process can be alive, the
+        graphics layers can all be correct, and the transmission can still be
+        a black rectangle. This is the only check that looks at the output.
+
+        A single black frame is not evidence: a cut, a fade, a momentary
+        source glitch all read as black. It therefore confirms with a second
+        capture a few seconds later and alerts only if both are black.
+    #>
+    $intervalMinutes = Get-SettingInt 'OutputMonitorMinutes' 0
+    if ($intervalMinutes -le 0) { return }
+    $now = Get-Date
+    if (($now - $script:LastOutputMonitorAt).TotalMinutes -lt $intervalMinutes) { return }
+    $script:LastOutputMonitorAt = $now
+
+    $threshold = Get-SettingInt 'OutputBlackLuminance' 1
+    $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
+
+    $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
+    if (-not $firstPath) { return }
+    $first = Get-BridgeFrameLuminance -Path $firstPath
+    Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $first) { return }
+
+    if ($first -gt $threshold) {
+        if ($script:OutputBlackAlerted) {
+            $script:OutputBlackAlerted = $false
+            Write-BridgeLog "Output brightness recovered (luma $first)"
+            Send-OutputBlackNotification -Recovered -Luminance $first
+        }
+        return
+    }
+
+    # Confirm before crying wolf: cuts and fades are legitimately black.
+    Start-Sleep -Seconds ([math]::Max(1, (Get-SettingInt 'OutputBlackConfirmSeconds' 1)))
+    $secondPath = Get-MonitorFrame -TimeoutSeconds $timeout
+    if (-not $secondPath) { return }
+    $second = Get-BridgeFrameLuminance -Path $secondPath
+    Remove-Item -LiteralPath $secondPath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $second -or $second -gt $threshold) {
+        Write-BridgeLog "Output monitor: first frame dark (luma $first) but second was not (luma $second) - treated as a transition"
+        return
+    }
+
+    if ($script:OutputBlackAlerted) { return }
+    $script:OutputBlackAlerted = $true
+    Write-BridgeLog "Output confirmed black across two captures (luma $first then $second)" 'WARN'
+    Add-AuditEntry "🖤 تأكيد شاشة سوداء على المخرج (سطوع $second)"
+    Send-OutputBlackNotification -Luminance $second
+}
+
+function Send-OutputBlackNotification {
+    <# Administrators always hear about a black output. Operators hear about it
+       only if NotifyOperatorsOnBlackOutput is on, because during a planned
+       break a broadcast to everyone is noise, not information. #>
+    param([double]$Luminance = 0, [switch]$Recovered)
+    $text = if ($Recovered) { "💡 عاد المخرج إلى الإضاءة الطبيعية (سطوع $Luminance)." }
+    else { "🖤 المخرج أسود — تأكّد عبر لقطتين متتاليتين (سطوع $Luminance).`nتحقّق من المصدر وسلسلة البث." }
+    Send-AdminBroadcast -Text $text
+    if (-not (Get-Setting 'NotifyOperatorsOnBlackOutput')) { return }
+    $adminIds = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })
+    foreach ($chatId in @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })) {
+        if ($adminIds -contains $chatId) { continue }   # already told above
+        Send-TelegramMessage -ChatId $chatId -Text $text
+    }
+}
+
 function Update-UploadCleanup {
     <#
         Sweeps documents operators uploaded to the bot.

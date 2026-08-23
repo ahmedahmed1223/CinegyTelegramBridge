@@ -158,6 +158,10 @@ $script:DefaultSettings = [ordered]@{
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this
     UploadRetentionMinutes     = 60      # delete staged operator uploads older than this; 0 keeps them
     ConfirmLayerRemoval        = $false  # ask before hide/exit, naming the template; costs the emergency path a tap
+    OutputMonitorMinutes       = 60      # look at the actual picture this often; 0 disables
+    OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
+    OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
+    NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
     AutoHideDefaultSeconds     = 10      # pre-selected duration for the timed-show button
     AutoHidePresetSeconds      = '5,10,15,30,60,120'  # quick-pick durations offered on screen
     RelayAutoRestart           = $true
@@ -209,6 +213,10 @@ $script:SettingDisplayMetadata = @{
     SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
+    OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
+    OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
+    OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
+    NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
     AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
     RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
@@ -537,6 +545,8 @@ $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()
 $script:LastSnapshotAt = [datetime]::MinValue
 $script:LastSnapshotFile = ''
 $script:LastUploadSweep = [datetime]::MinValue
+$script:LastOutputMonitorAt = [datetime]::MinValue
+$script:OutputBlackAlerted = $false
 $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.

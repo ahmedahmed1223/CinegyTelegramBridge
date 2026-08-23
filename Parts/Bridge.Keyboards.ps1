@@ -90,9 +90,10 @@ function Get-MainMenuKeyboard {
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )
+        $rows += , @( (New-Button "🆕 ما الجديد" "menu:whatsnew") )
     }
     else {
-        $rows += , @( (New-Button "❓ مساعدة" "menu:help") )
+        $rows += , @( (New-Button "❓ مساعدة" "menu:help"), (New-Button "🆕 ما الجديد" "menu:whatsnew") )
     }
 
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {

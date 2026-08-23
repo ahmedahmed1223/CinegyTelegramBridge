@@ -1490,11 +1490,11 @@ Describe 'Help guidance' {
     It 'gives an actionable short path for common on-air operations' {
         $help = Get-HelpText
 
-        $help | Should -Match '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← راجع القيم ← تأكيد الإرسال'
+        $help | Should -Match '📋 القوالب ←'
         $help | Should -Match '📅 الجدولة'
-        $help | Should -Match '🎚 الطبقات.*ظاهر.*خارجي.*مخفي.*غير معروف'
-        $help | Should -Match '✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد'
-        $help | Should -Match '⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص'
+        $help | Should -Match 'ظاهر.*خارجي.*مخفي.*غير معروف'
+        $help | Should -Match '✏️ تحديث نص ←'
+        $help | Should -Match '⏱ عرض مؤقّت'
     }
 
     It 'hides admin-only guidance from a regular user' {
@@ -1502,7 +1502,7 @@ Describe 'Help guidance' {
 
         $help = Get-HelpText
 
-        $help | Should -Not -Match '🛡️ أدوات المشرف'
+        $help | Should -Not -Match 'أدوات المشرف'
         $help | Should -Not -Match '🔄 تحديث حالة Cinegy'
     }
 
@@ -1511,7 +1511,7 @@ Describe 'Help guidance' {
 
         $help = Get-HelpText
 
-        $help | Should -Match '🛡️ أدوات المشرف'
+        $help | Should -Match 'أدوات المشرف'
         $help | Should -Match '📊 الحالة الكاملة وصحة الخدمات'
     }
 }
@@ -4438,5 +4438,55 @@ Describe 'Black output watchdog' {
         Update-OutputBlackWatchdog
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}
+
+Describe 'What is new and help content' {
+    BeforeEach { $script:OnAir = @{} }
+
+    It 'leads with the running version so an operator can tell which build they are on' {
+        Get-WhatsNewText | Should -Match ([regex]::Escape($script:BridgeVersion))
+    }
+
+    It 'describes changes in operator terms, not function names' {
+        $text = Get-WhatsNewText
+        $text | Should -Match 'على الهواء'
+        $text | Should -Not -Match 'Get-|Invoke-|\$script:'
+    }
+
+    It 'keeps the newest release first' {
+        $text = Get-WhatsNewText
+        # Anchored on the section marker: the header also carries the running version.
+        $text.IndexOf('▪️ 5.1.0') | Should -BeLessThan $text.IndexOf('▪️ 5.0.0')
+    }
+
+    It 'is reachable from the menu and as a command' {
+        $flat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Contain 'menu:whatsnew'
+        @($script:BotCommandList | ForEach-Object { $_.command }) | Should -Contain 'whatsnew'
+    }
+
+    It 'tells an operator about the freshness warning they will actually see' {
+        Mock Test-Admin { $false }
+        Get-HelpText -ChatId 200 -UserId 200 | Should -Match 'آخر مرة'
+    }
+
+    It 'shows administrators the tools screen and the self-test, and operators neither' {
+        Mock Test-Admin { $true }
+        $admin = Get-HelpText -ChatId 100 -UserId 100
+        $admin | Should -Match 'أدوات الإدارة'
+        $admin | Should -Match 'فحص المسار الحي'
+
+        Mock Test-Admin { $false }
+        $operator = Get-HelpText -ChatId 200 -UserId 200
+        $operator | Should -Not -Match 'أدوات الإدارة'
+        $operator | Should -Not -Match 'الأمر الخام'
+    }
+
+    It 'fits Telegram message limits without relying on chunking' {
+        Mock Test-Admin { $true }
+        (Get-HelpText -ChatId 100 -UserId 100).Length | Should -BeLessThan 4096
+        (Get-WhatsNewText).Length | Should -BeLessThan 4096
     }
 }

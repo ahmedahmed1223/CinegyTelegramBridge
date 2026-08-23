@@ -364,6 +364,7 @@ $script:BotCommandList = @(
     @{ command = 'menu'; description = '🏠 عرض القائمة الرئيسية من جديد' }
     @{ command = 'cancel'; description = '❌ إلغاء أي عملية معلّقة والبدء من جديد' }
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
+    @{ command = 'whatsnew'; description = '🆕 ملخص تغييرات الإصدارات الأخيرة' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
     @{ command = 'myoperations'; description = '🧾 آخر عملياتي وإعادة المحاولة' }

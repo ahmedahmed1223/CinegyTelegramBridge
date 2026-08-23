@@ -344,6 +344,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:whatsnew' {
+            Send-TelegramMessage -ChatId $chatId -Text (Get-WhatsNewText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'menu:selftest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-BridgeSelfTest -ChatId $chatId -UserId $userId | Out-Null }
             break

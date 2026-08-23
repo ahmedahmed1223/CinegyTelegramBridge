@@ -22,7 +22,7 @@ function Send-TelegramMessage {
             $body.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress)
         }
         $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $body `
-            -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+            -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
         if (-not $request.Success) {
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
         }
@@ -40,7 +40,7 @@ function Send-TelegramPhoto {
     if ($Caption) { $form.caption = $Caption }
     if ($ReplyMarkup) { $form.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendPhoto" -Method Post -Form $form `
-        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
     if (-not $request.Success) {
         Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($request.Error)" "ERROR"
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($request.Error)"
@@ -51,13 +51,15 @@ function Confirm-TelegramCallback {
     <# Acknowledges a button press so Telegram stops showing the loading
        spinner on the client. Optional Text shows a small toast. #>
     param([Parameter(Mandatory)][string]$CallbackQueryId, [string]$Text)
-    try {
-        $body = @{ callback_query_id = $CallbackQueryId }
-        if ($Text) { $body.text = $Text }
-        Invoke-RestMethod -Uri "$apiBase/answerCallbackQuery" -Method Post -Body $body | Out-Null
-    }
-    catch {
-        Write-BridgeLog "Failed to answer callback query $CallbackQueryId : $($_.Exception.Message)" "ERROR"
+    $body = @{ callback_query_id = $CallbackQueryId }
+    if ($Text) { $body.text = $Text }
+    # Routed through the shared request wrapper like every other send, so a
+    # flood-limited acknowledgement honours retry_after instead of being
+    # dropped and leaving the operator's button spinning.
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerCallbackQuery" -Method Post -Body $body `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if (-not $request.Success) {
+        Write-BridgeLog "Failed to answer callback query $CallbackQueryId : $($request.Error)" "ERROR"
     }
 }
 
@@ -65,7 +67,13 @@ function Get-TelegramUpdates {
     <# Returns the update array, never $null. Telegram can reply with
        ok:false (409 Conflict when a second poller exists, or after a token
        revoke) and StrictMode would otherwise throw on the missing 'result'
-       property, turning a clear condition into a confusing crash loop. #>
+       property, turning a clear condition into a confusing crash loop.
+
+       Deliberately NOT routed through Invoke-BridgeTelegramRequest, unlike
+       every send: the polling loop already IS this call's retry policy, with
+       its own exponential backoff to 60s. Retrying inside a retry would
+       square the delay and stall the bridge on a transient blip. It therefore
+       throws and lets the loop decide. #>
     param([long]$Offset, [int]$TimeoutSeconds)
     $uri = "$apiBase/getUpdates?timeout=$TimeoutSeconds&offset=$Offset"
     $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec ($TimeoutSeconds + 10)

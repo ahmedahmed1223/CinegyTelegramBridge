@@ -16,7 +16,7 @@ function Send-TelegramDocument {
     catch { Write-BridgeLog "Failed to send Telegram document to $ChatId : $($_.Exception.Message)" 'ERROR'; return $false }
     if ($Caption) { $form.caption = $Caption }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendDocument" -Method Post -Form $form `
-        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
     if (-not $request.Success) {
         Write-BridgeLog "Failed to send Telegram document to $ChatId : $($request.Error)" 'ERROR'
         return $false

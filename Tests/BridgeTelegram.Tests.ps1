@@ -48,3 +48,41 @@ Describe 'Telegram HTTP transport module' {
         Should -Invoke Start-Sleep -ModuleName BridgeTelegram -Times 0 -Exactly
     }
 }
+
+Describe 'Telegram 429 retry delay' {
+    BeforeAll {
+        function New-FakeTelegramError {
+            param([int]$StatusCode, [string]$Body)
+            $record = [pscustomobject]@{
+                Exception     = [pscustomobject]@{ Response = [pscustomobject]@{ StatusCode = $StatusCode } }
+                ErrorDetails  = [pscustomobject]@{ Message = $Body }
+            }
+            return $record
+        }
+    }
+
+    It 'waits the retry_after Telegram asked for, converted to milliseconds' {
+        $err = New-FakeTelegramError -StatusCode 429 -Body '{"ok":false,"error_code":429,"parameters":{"retry_after":7}}'
+        Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 | Should -Be 7000
+    }
+
+    It 'keeps the fixed delay for a non-429 failure' {
+        $err = New-FakeTelegramError -StatusCode 500 -Body '{"ok":false,"error_code":500}'
+        Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 | Should -Be 400
+    }
+
+    It 'keeps the fixed delay when a 429 carries no retry_after' {
+        $err = New-FakeTelegramError -StatusCode 429 -Body '{"ok":false,"error_code":429}'
+        Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 | Should -Be 400
+    }
+
+    It 'caps an implausibly long retry_after so the bridge cannot be parked for hours' {
+        $err = New-FakeTelegramError -StatusCode 429 -Body '{"parameters":{"retry_after":99999}}'
+        Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 -MaximumDelayMs 60000 | Should -Be 60000
+    }
+
+    It 'falls back to the fixed delay for a transport error with no response at all' {
+        $err = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'connection refused' } }
+        Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 | Should -Be 400
+    }
+}

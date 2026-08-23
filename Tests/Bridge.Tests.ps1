@@ -3082,7 +3082,9 @@ Describe 'Exit scene on-air record cleanup' {
         Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42
 
         $OnAir.ContainsKey(7) | Should -BeFalse
-        Should -Invoke Get-TitlerLayerStatus -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 }
+        # Deliberately no longer reconciles against a status read: Cinegy keeps
+        # the item Active after EXIT_SCENE_LOOP, so that read cannot tell an
+        # exited scene from a live one and used to preserve the record.
         Should -Invoke Save-OnAirState -Times 1 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $Text -match 'تم الخروج من المشهد'
@@ -4134,5 +4136,60 @@ Describe 'Template test layer safety' {
         Complete-SettingValue -ChatId 100 -Value '9'
 
         Should -Invoke Set-Setting -Times 1 -Exactly -ParameterFilter { $Name -eq 'TemplateTestLayer' -and $Value -eq 9 }
+    }
+}
+
+Describe 'Exit clears the on-air record Cinegy cannot report' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:onAirFile = Join-Path $TestDrive "onair-exit-$([guid]::NewGuid().ToString('N')).json"
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Send-TelegramMessage {}
+        Mock Get-AfterLayerRemovalKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        Mock Write-AirOperationResult {}
+        Mock Test-MaintenanceControl { $true }
+        Mock Set-RollbackCandidate {}
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true } }
+        # Reproduces the live failure: after EXIT_SCENE_LOOP the item is still
+        # Active under the same Id, with no IsEmpty marker to read.
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $true; ActiveId = '{0A1072EA-9EFF-11F1-96C0-C85EA97266A8}'
+                ActiveName = ''; ActiveTemplateName = ''; ActiveDescription = ''
+            }
+        }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'drops the record even though Cinegy still reports the layer active' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; ActiveId = '{0A1072EA-9EFF-11F1-96C0-C85EA97266A8}'; Source = 'bridge' }
+
+        Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42 | Should -BeTrue
+
+        $script:OnAir.ContainsKey(7) | Should -BeFalse
+    }
+
+    It 'leaves other layers alone' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 0; Source = 'cinegy' }
+
+        Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42 | Out-Null
+
+        $script:OnAir.ContainsKey(8) | Should -BeTrue
+    }
+
+    It 'keeps the record when the exit command itself failed' {
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $false; Error = 'engine unreachable' } }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-ExitLayer -Layer 7 -ChatId 42 -UserId 42 | Should -BeFalse
+
+        $script:OnAir.ContainsKey(7) | Should -BeTrue
+    }
+
+    It 'is a no-op for a layer that was not tracked' {
+        Remove-OnAirRecord -Layer 3 -Reason 'test' | Should -BeFalse
     }
 }

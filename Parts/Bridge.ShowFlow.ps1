@@ -642,7 +642,11 @@ function Invoke-ExitLayer {
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
-        Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
+        # Dropped directly rather than reconciled: Cinegy keeps the playlist
+        # item Active after EXIT_SCENE_LOOP, so a status read here cannot tell
+        # an exited scene from a live one and would preserve the record for
+        # ever. See Remove-OnAirRecord.
+        Remove-OnAirRecord -Layer $Layer -Reason 'after-exit' | Out-Null
         Write-BridgeLog "User $UserId exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)

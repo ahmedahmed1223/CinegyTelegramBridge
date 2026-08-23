@@ -78,6 +78,31 @@ function Import-OnAirState {
     catch { Write-BridgeLog "Could not read onair.json: $($_.Exception.Message)" "WARN" }
 }
 
+function Remove-OnAirRecord {
+    <#
+        Drops the bridge's own record for a layer after the operator has
+        successfully removed the graphic from it.
+
+        HIDE makes Cinegy report the layer's active item with IsEmpty="y", so
+        reconciling against a status read afterwards correctly clears the
+        record. EXIT_SCENE_LOOP does not: the playlist item stays Active under
+        the same Id with no IsEmpty marker, so a read after EXIT is
+        indistinguishable from a live scene. Reconciliation therefore kept the
+        record forever, and the bridge went on claiming a graphic was on air
+        long after it had left the screen.
+
+        The bridge just performed the removal and knows what it did; a read
+        that cannot represent the change is not evidence against it.
+    #>
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$Reason)
+    if (-not $script:OnAir.ContainsKey([int]$Layer)) { return $false }
+    $script:OnAir.Remove([int]$Layer)
+    $script:OnAirDirty = $true
+    Save-OnAirState
+    Write-BridgeLog "Dropped on-air record for layer $Layer ($Reason)"
+    return $true
+}
+
 function Save-OnAirState {
     try {
         Write-BridgeLog "Save-OnAirState invoked (in-memory layers: $($script:OnAir.Keys.Count))" "DEBUG"

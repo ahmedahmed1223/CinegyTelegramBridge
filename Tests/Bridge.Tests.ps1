@@ -754,6 +754,79 @@ Describe 'Compact Telegram button labels' {
     }
 }
 
+Describe 'News ticker management' {
+    BeforeEach {
+        $script:OriginalNewsSettings = @{}
+        foreach ($name in @('EnableNewsTickerManagement','NewsFilePath','NewsItemSeparator','NewsMaxItemLength','NewsMaxItems','AllowOperatorsDeleteNews','AllowOperatorsRestoreNews','AllowOperatorsClearAllNews')) {
+            $script:OriginalNewsSettings[$name] = Get-JsonProp $config.Settings $name
+        }
+        $script:NewsLivePath = Join-Path $TestDrive 'news.txt'
+        [IO.File]::WriteAllText($script:NewsLivePath, "خبر أول |`r`nخبر ثان |`r`n", [Text.UTF8Encoding]::new($true))
+        $config.Settings | Add-Member EnableNewsTickerManagement $true -Force
+        $config.Settings | Add-Member NewsFilePath $script:NewsLivePath -Force
+        $config.Settings | Add-Member NewsItemSeparator '|' -Force
+        $config.Settings | Add-Member NewsMaxItemLength 500 -Force
+        $config.Settings | Add-Member NewsMaxItems 100 -Force
+        $config.Settings | Add-Member AllowOperatorsDeleteNews $false -Force
+        $config.Settings | Add-Member AllowOperatorsRestoreNews $false -Force
+        $config.Settings | Add-Member AllowOperatorsClearAllNews $false -Force
+        $script:newsDraftFile = Join-Path $TestDrive 'news-draft.json'
+        $script:newsBackupDirectory = Join-Path $TestDrive 'news-backups'
+        $script:NewsTickerDraft = $null
+        Mock Send-TelegramMessage { }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $false }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+    }
+
+    AfterEach { $script:NewsTickerDraft = $null }
+
+    It 'adds a permanent news-management button when the feature is enabled' {
+        $keyboard = Get-PersistentReplyKeyboard
+        @($keyboard.keyboard[0].text) | Should -Contain '📰 إدارة شريط الأخبار'
+    }
+
+    It 'allows one user to hold the draft lock and reports the live items' {
+        $first = Start-NewsTickerDraft -ChatId 101 -UserId 101
+        $second = Start-NewsTickerDraft -ChatId 202 -UserId 202
+
+        $first.Success | Should -BeTrue
+        $first.Draft.Items | Should -Be @('خبر أول','خبر ثان')
+        $second.Success | Should -BeFalse
+        $second.Error | Should -Match '101'
+    }
+
+    It 'keeps manual changes in the draft until reviewed publish' {
+        $before = (Get-FileHash $script:NewsLivePath -Algorithm SHA256).Hash
+        Start-NewsTickerDraft -ChatId 101 -UserId 101 | Out-Null
+        Add-NewsTickerDraftItem -UserId 101 -Text 'خبر ثالث' | Should -BeTrue
+
+        (Get-FileHash $script:NewsLivePath -Algorithm SHA256).Hash | Should -Be $before
+        (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
+        (Publish-NewsTickerDraft -ChatId 101 -UserId 101).Success | Should -BeTrue
+        (Get-NewsTickerSnapshot -Path $script:NewsLivePath -Separator '|').Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
+        Get-NewsTickerDraft | Should -BeNullOrEmpty
+    }
+
+    It 'imports separator or line based TXT content into the draft without publishing' {
+        Start-NewsTickerDraft -ChatId 101 -UserId 101 | Out-Null
+        $result = Import-NewsTickerTextToDraft -UserId 101 -Text "مستورد أول`r`nمستورد ثان" -Mode replace
+
+        $result.Success | Should -BeTrue
+        (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('مستورد أول','مستورد ثان')
+        (Get-NewsTickerSnapshot -Path $script:NewsLivePath -Separator '|').Items | Should -Be @('خبر أول','خبر ثان')
+    }
+
+    It 'keeps clear-all unavailable to an operator unless explicitly enabled' {
+        Start-NewsTickerDraft -ChatId 101 -UserId 101 | Out-Null
+        Clear-NewsTickerDraftItems -ChatId 101 -UserId 101 | Should -BeFalse
+        $config.Settings.AllowOperatorsClearAllNews = $true
+        Clear-NewsTickerDraftItems -ChatId 101 -UserId 101 | Should -BeTrue
+        (Get-NewsTickerDraft -UserId 101).Items.Count | Should -Be 0
+    }
+}
+
 Describe 'Telegram API send reliability' {
     BeforeEach {
         $script:OriginalTelegramRequestTimeoutSeconds = Get-Setting 'TelegramRequestTimeoutSeconds'

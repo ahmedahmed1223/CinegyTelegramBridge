@@ -686,3 +686,6 @@ If you need playlist transport from Telegram too:
 `Run-Checks.ps1` passes a temporary runtime directory to the bridge. Tests do
 not read or write the live `logs/onair.json`, schedule, draft, usage, or log
 files.
+# إدارة شريط الأخبار
+
+عند تفعيل `EnableNewsTickerManagement` يظهر زر Telegram دائم باسم `📰 إدارة شريط الأخبار`. يعمل التحرير في مسودة واحدة مقفلة ولا يكتب إلى `NewsFilePath` إلا بعد المراجعة وتأكيد النشر. يدعم الإدخال اليدوي واستيراد ملفات TXT بترميز UTF-8؛ والفاصل الافتراضي `|` قابل للتغيير من `NewsItemSeparator`. ينشئ النشر نسخة احتياطية ويرفض الكتابة إذا تغيّر الملف خارجيًا منذ فتح المسودة.

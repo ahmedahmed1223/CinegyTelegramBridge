@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.2.44'
+$script:BridgeVersion = '4.3.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -65,6 +65,7 @@ Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
 
 # Resolve the config path relative to the script, not the caller's cwd, so a
 # Scheduled Task / service with a different working directory still works.
@@ -106,6 +107,17 @@ $script:DefaultSettings = [ordered]@{
     MaintenanceMode           = $false  # blocks playout mutations while monitoring remains available
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     ButtonTextMaxLength        = 32      # visual text elements; 0 disables shortening
+    EnableNewsTickerManagement = $true
+    NewsFilePath               = 'D:\cingy cg\ticker msg\news.txt'
+    NewsItemSeparator          = '|'
+    NewsMaxItemLength          = 1000
+    NewsMaxItems               = 200
+    NewsImportMaxBytes         = 1048576
+    NewsBackupKeepFiles        = 20
+    NewsDraftTimeoutMinutes    = 30
+    AllowOperatorsDeleteNews   = $false
+    AllowOperatorsRestoreNews  = $false
+    AllowOperatorsClearAllNews = $false
     # --- safety ---
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
@@ -483,6 +495,10 @@ $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
 $script:scheduleExecutionFile = Join-Path $logDir "schedule-execution.jsonl"
 $script:auditFile = Join-Path $logDir "audit.jsonl"
+$script:newsDraftFile = Join-Path $logDir 'news-draft.json'
+$script:newsBackupDirectory = Join-Path $logDir 'news-backups'
+$script:newsImportDirectory = Join-Path $logDir 'news-imports'
+$script:NewsTickerDraft = $null
 
 function Invoke-LogRotation {
     <# Renames bridge.log -> bridge.1.log -> bridge.2.log ... keeping
@@ -873,10 +889,13 @@ function Register-BotCommands {
 # included) to avoid ever swallowing legitimate on-air text.
 $script:MenuHotword = '🏠 القائمة'
 $script:HelpHotword = '🆘 مساعدة'
+$script:NewsHotword = '📰 إدارة شريط الأخبار'
 
 function Get-PersistentReplyKeyboard {
+    $buttons = @(@{ text = $script:MenuHotword }, @{ text = $script:HelpHotword })
+    if (Get-Setting 'EnableNewsTickerManagement') { $buttons += @{ text = $script:NewsHotword } }
     return @{
-        keyboard        = @( , @( @{ text = $script:MenuHotword }, @{ text = $script:HelpHotword } ) )
+        keyboard        = @( , $buttons )
         resize_keyboard = $true
         is_persistent   = $true
     }
@@ -917,6 +936,155 @@ function Import-UserProfiles {
         }
     }
     catch { Write-BridgeLog "Could not read user-profiles.json: $($_.Exception.Message)" 'WARN' }
+}
+
+# ============================================================================
+#  News ticker editor (single durable draft; the live file changes on publish)
+# ============================================================================
+function Get-NewsTickerConfiguredSnapshot {
+    Get-NewsTickerSnapshot -Path ([string](Get-Setting 'NewsFilePath')) -Separator ([string](Get-Setting 'NewsItemSeparator')) `
+        -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+}
+
+function Save-NewsTickerDraft {
+    if (-not $script:NewsTickerDraft) { return $false }
+    try {
+        $json = $script:NewsTickerDraft | ConvertTo-Json -Depth 8
+        $parent=Split-Path -Parent $script:newsDraftFile;if(-not(Test-Path -LiteralPath $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null}
+        $temp="$script:newsDraftFile.$([guid]::NewGuid().ToString('N')).tmp"
+        [IO.File]::WriteAllText($temp,$json,[Text.UTF8Encoding]::new($true));[IO.File]::Move($temp,$script:newsDraftFile,$true)
+        return $true
+    } catch { Write-BridgeLog "Could not save news draft: $($_.Exception.Message)" 'ERROR'; return $false }
+}
+
+function Import-NewsTickerDraft {
+    if (-not (Test-Path -LiteralPath $script:newsDraftFile)) { return }
+    try { $script:NewsTickerDraft = Get-Content -LiteralPath $script:newsDraftFile -Raw | ConvertFrom-Json -AsHashtable }
+    catch { Write-BridgeLog "Could not load news draft: $($_.Exception.Message)" 'WARN'; $script:NewsTickerDraft = $null }
+}
+
+function Get-NewsTickerDraft { param([long]$UserId = 0)
+    if (-not $script:NewsTickerDraft) { return $null }
+    if ($UserId -and [long]$script:NewsTickerDraft.OwnerUserId -ne $UserId) { return $null }
+    return $script:NewsTickerDraft
+}
+
+function Remove-NewsTickerDraft {
+    $script:NewsTickerDraft = $null
+    Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction SilentlyContinue
+}
+
+function Start-NewsTickerDraft {
+    param([long]$ChatId,[long]$UserId)
+    if ($script:NewsTickerDraft) {
+        if ([long]$script:NewsTickerDraft.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''} }
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا للمستخدم $($script:NewsTickerDraft.OwnerUserId)."}
+    }
+    $snapshot = Get-NewsTickerConfiguredSnapshot
+    if (-not $snapshot.Success) { return [pscustomobject]@{Success=$false;Draft=$null;Error=$snapshot.Error} }
+    $script:NewsTickerDraft = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
+    Save-NewsTickerDraft | Out-Null
+    return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''}
+}
+
+function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
+    $draft = Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return $false }
+    $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
+    if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
+    $draft.Items = @($draft.Items) + @($parsed.Items); $draft.UpdatedAt=(Get-Date).ToString('o'); return (Save-NewsTickerDraft)
+}
+function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text)
+    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return $false}
+    $parsed=ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
+    if(-not $parsed.Success -or @($parsed.Items).Count -ne 1){return $false};$items=@($draft.Items);$items[$Index]=$parsed.Items[0];$draft.Items=$items;$draft.UpdatedAt=(Get-Date).ToString('o');return(Save-NewsTickerDraft)
+}
+function Remove-NewsTickerDraftItem { param([long]$ChatId,[long]$UserId,[int]$Index)
+    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return $false}
+    if(-not(Test-Admin -ChatId $ChatId -UserId $UserId)-and -not(Get-Setting 'AllowOperatorsDeleteNews')){return $false}
+    $items=[Collections.Generic.List[string]]::new();@($draft.Items)|ForEach-Object{$items.Add([string]$_)};$items.RemoveAt($Index);$draft.Items=@($items);return(Save-NewsTickerDraft)
+}
+function Move-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[int]$Delta)
+    $draft=Get-NewsTickerDraft -UserId $UserId;$target=$Index+$Delta;if(-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count){return $false}
+    $items=@($draft.Items);$swap=$items[$target];$items[$target]=$items[$Index];$items[$Index]=$swap;$draft.Items=$items;return(Save-NewsTickerDraft)
+}
+
+function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[ValidateSet('replace','append')][string]$Mode='replace')
+    $draft=Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return [pscustomobject]@{Success=$false;Error='لا توجد مسودة مملوكة لك.'} }
+    $parsed=ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if (-not $parsed.Success) { return [pscustomobject]@{Success=$false;Error=($parsed.Errors -join ' ')} }
+    $items = if ($Mode -eq 'append') { @($draft.Items)+@($parsed.Items) } else { @($parsed.Items) }
+    $validated=ConvertFrom-NewsTickerText -Text (ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))) -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if (-not $validated.Success) { return [pscustomobject]@{Success=$false;Error=($validated.Errors -join ' ')} }
+    $draft.Items=@($validated.Items);$draft.UpdatedAt=(Get-Date).ToString('o'); Save-NewsTickerDraft | Out-Null
+    return [pscustomobject]@{Success=$true;Count=$draft.Items.Count;Error=''}
+}
+
+function Clear-NewsTickerDraftItems { param([long]$ChatId,[long]$UserId)
+    if (-not (Get-NewsTickerDraft -UserId $UserId)) { return $false }
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -and -not (Get-Setting 'AllowOperatorsClearAllNews')) { return $false }
+    $script:NewsTickerDraft.Items=@();$script:NewsTickerDraft.UpdatedAt=(Get-Date).ToString('o');return (Save-NewsTickerDraft)
+}
+
+function Publish-NewsTickerDraft { param([long]$ChatId,[long]$UserId)
+    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft){return [pscustomobject]@{Success=$false;Error='لا توجد مسودة مملوكة لك.'}}
+    $result=Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if($result.Success){ Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا";Remove-NewsTickerDraft }
+    return $result
+}
+
+function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
+    $rows=@();$draft=Get-NewsTickerDraft
+    if(-not $draft){$rows+=,@(@{text='✏️ بدء التحرير';callback_data='news:start'},@{text='📥 استيراد TXT';callback_data='news:import'})}
+    elseif([long]$draft.OwnerUserId -eq $UserId){$rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='📝 تعديل وترتيب';callback_data='news:list'});$rows+=,@(@{text='📥 استيراد TXT';callback_data='news:import'},@{text='👁 معاينة';callback_data='news:preview'});if((Test-Admin -ChatId $ChatId -UserId $UserId)-or(Get-Setting 'AllowOperatorsClearAllNews')){$rows+=,@(@{text='🧹 مسح الكل';callback_data='news:clear'})};$rows+=,@(@{text='✅ مراجعة ونشر';callback_data='news:publish'},@{text='🗑 إلغاء المسودة';callback_data='news:cancel'})}
+    else{$rows+=,@(@{text="🔒 لدى $($draft.OwnerUserId)";callback_data='news:refresh'});if(Test-Admin -ChatId $ChatId -UserId $UserId){$rows+=,@(@{text='🔓 إلغاء القفل (مشرف)';callback_data='news:unlock'})}}
+    if((Test-Admin -ChatId $ChatId -UserId $UserId)-or(Get-Setting 'AllowOperatorsRestoreNews')){$rows+=,@(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})}
+    $rows+=,@(@{text='🔄 تحديث';callback_data='news:refresh'},@{text='⬅️ الرئيسية';callback_data='menu'});return @{inline_keyboard=$rows}
+}
+
+function Get-NewsTickerBackupsKeyboard {
+    $rows=@();$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10)
+    for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text=$files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss');callback_data="news:restore:$i"})};$rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
+}
+
+function Get-NewsTickerItemsKeyboard { param([long]$UserId)
+    $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@();if($draft){for($i=0;$i-lt @($draft.Items).Count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 35){$label=$label.Substring(0,34)+'…'};$rows+=,@(@{text=$label;callback_data="news:item:$i"})}}
+    $rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
+}
+
+function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
+    $snapshot=Get-NewsTickerConfiguredSnapshot
+    $text=if($snapshot.Success){"📰 إدارة شريط الأخبار`nالحالي: $(@($snapshot.Items).Count) خبرًا."}else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}
+    if($script:NewsTickerDraft){$text+="`nالمسودة مقفلة للمستخدم $($script:NewsTickerDraft.OwnerUserId) وتحتوي $(@($script:NewsTickerDraft.Items).Count) خبرًا."}
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]$Value)
+    Clear-PendingState -ChatId $ChatId
+    $ok=Add-NewsTickerDraftItem -UserId $UserId -Text $Value
+    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){'✅ أضيف الخبر إلى المسودة فقط.'}else{'❌ لم تتم الإضافة؛ تحقق من النص والحدود.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+}
+function Complete-NewsTickerEditText { param([long]$ChatId,[long]$UserId,[string]$Value)
+    $state=Get-PendingState -ChatId $ChatId;if(-not $state -or $state.Mode-ne'news_edit_text'){return};$index=[int]$state.Index;Clear-PendingState -ChatId $ChatId
+    $ok=Update-NewsTickerDraftItem -UserId $UserId -Index $index -Text $Value
+    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){'✅ حُدّث الخبر في المسودة.'}else{'❌ تعذر تعديل الخبر.'}) -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $UserId)
+}
+
+function Receive-NewsTickerImport { param($Document,[long]$ChatId,[long]$UserId)
+    $state=Get-PendingState -ChatId $ChatId
+    if(-not $state -or $state.Mode -ne 'news_import_upload' -or [long]$state.UserId -ne $UserId){Send-TelegramMessage -ChatId $ChatId -Text 'ابدأ الاستيراد من إدارة شريط الأخبار أولًا.';return}
+    $name=[string](Get-JsonProp $Document 'file_name');if([IO.Path]::GetExtension($name) -ine '.txt'){Send-TelegramMessage -ChatId $ChatId -Text 'يُقبل ملف TXT فقط.';return}
+    $staged=Join-Path $script:newsImportDirectory ("news-$([guid]::NewGuid().ToString('N')).txt")
+    try {
+        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $staged -MaximumBytes (Get-SettingInt 'NewsImportMaxBytes' 1)|Out-Null
+        $snapshot=Get-NewsTickerSnapshot -Path $staged -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+        if(-not $snapshot.Success){throw $snapshot.Error}
+        $text=ConvertTo-NewsTickerText -Items @($snapshot.Items) -Separator ([string](Get-Setting 'NewsItemSeparator'))
+        $result=Import-NewsTickerTextToDraft -UserId $UserId -Text $text -Mode replace
+        if(-not $result.Success){throw $result.Error}
+        Clear-PendingState -ChatId $ChatId
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ استورد $($result.Count) خبرًا إلى المسودة فقط. راجعها قبل النشر." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    } catch { Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الاستيراد: $($_.Exception.Message)" }
+    finally {Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue}
 }
 
 function Send-TelegramDocument {
@@ -5975,6 +6143,58 @@ function Invoke-CallbackQuery {
     Update-UserLastActivity -UserId $userId | Out-Null
 
     switch -Wildcard ($data) {
+        'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+        'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+        'news:start' {
+            $result=Start-NewsTickerDraft -ChatId $chatId -UserId $userId
+            if(-not $result.Success){Send-TelegramMessage -ChatId $chatId -Text "🔒 $($result.Error)" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)}else{Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break
+        }
+        'news:add' {
+            if(-not(Get-NewsTickerDraft -UserId $userId)){Send-TelegramMessage -ChatId $chatId -Text 'لا توجد مسودة مملوكة لك.';break}
+            Set-PendingState -ChatId $chatId -State @{Mode='news_add_text';UserId=$userId;StartedAt=(Get-Date)}
+            Send-TelegramMessage -ChatId $chatId -Text 'أرسل نص الخبر الجديد:';break
+        }
+        'news:preview' {
+            $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
+            $preview=@($draft.Items|ForEach-Object -Begin {$i=0} -Process {$i++;"$i. $_"}) -join "`n"
+            Send-TelegramMessage -ChatId $chatId -Text "👁 معاينة المسودة ($(@($draft.Items).Count)):`n$preview" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+        }
+        'news:publish' {
+            $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
+            Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm'},@{text='إلغاء';callback_data='news:refresh'}))};break
+        }
+        'news:publishconfirm' {
+            $result=Publish-NewsTickerDraft -ChatId $chatId -UserId $userId
+            Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.'}else{"❌ لم يتم النشر: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+        }
+        'news:list' { Send-TelegramMessage -ChatId $chatId -Text 'اختر خبرًا لتعديله أو ترتيب موقعه:' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:item:*' {
+            $i=[int]$data.Substring(10);$draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft -or $i-ge @($draft.Items).Count){break}
+            Send-TelegramMessage -ChatId $chatId -Text "$(($i+1)). $($draft.Items[$i])" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✏️ تعديل';callback_data="news:edit:$i"},@{text='🗑 حذف';callback_data="news:delete:$i"}),,@(@{text='⬆️';callback_data="news:up:$i"},@{text='⬇️';callback_data="news:down:$i"}),,@(@{text='⬅️ القائمة';callback_data='news:list'}))};break
+        }
+        'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
+        'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ حُذف من المسودة.'}else{'⛔ الحذف غير مسموح.'}) -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:up:*' { Move-NewsTickerDraftItem -UserId $userId -Index ([int]$data.Substring(8)) -Delta -1|Out-Null;Send-TelegramMessage -ChatId $chatId -Text 'تم تحديث الترتيب.' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:down:*' { Move-NewsTickerDraftItem -UserId $userId -Index ([int]$data.Substring(10)) -Delta 1|Out-Null;Send-TelegramMessage -ChatId $chatId -Text 'تم تحديث الترتيب.' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
+        'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm'},@{text='إلغاء';callback_data='news:refresh'}))};break }
+        'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
+        'news:backups' { Send-TelegramMessage -ChatId $chatId -Text 'اختر نسخة لمراجعة استعادتها:' -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
+        'news:restore:*' {
+            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int]$data.Substring(13)
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ استعادة';callback_data="news:restoreconfirm:$i"},@{text='إلغاء';callback_data='news:backups'}))};break
+        }
+        'news:restoreconfirm:*' {
+            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int]$data.Substring(20);$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10);if($i-ge $files.Count){break}
+            $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $files[$i].FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+        }
+        'news:cancel' { if(Get-NewsTickerDraft -UserId $userId){Remove-NewsTickerDraft};Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break }
+        'news:import' {
+            $started=Start-NewsTickerDraft -ChatId $chatId -UserId $userId;if(-not $started.Success){Send-TelegramMessage -ChatId $chatId -Text $started.Error;break}
+            Set-PendingState -ChatId $chatId -State @{Mode='news_import_upload';UserId=$userId;StartedAt=(Get-Date)}
+            Send-TelegramMessage -ChatId $chatId -Text '📥 أرسل ملف TXT UTF-8. سيُستورد إلى المسودة فقط ثم يمكنك معاينته ونشره.';break
+        }
         'menu' {
             Clear-PendingState -ChatId $chatId
             Send-TelegramMessage -ChatId $chatId -Text "القائمة الرئيسية:" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
@@ -6855,6 +7075,7 @@ if (-not $AllowMultipleInstances) {
 
 Initialize-Settings
 Import-UsageCounts
+Import-NewsTickerDraft
 Import-UserFavorites
 Import-UserAliases
 Import-DisabledUsers
@@ -6904,7 +7125,11 @@ try {
                 $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { $chatId }
                 $document = Get-JsonProp $message 'document'
                 if ($document) {
-                    try { Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId }
+                    try {
+                        $uploadState=Get-PendingState -ChatId $chatId
+                        if($uploadState -and $uploadState.Mode -eq 'news_import_upload'){Receive-NewsTickerImport -Document $document -ChatId $chatId -UserId $userId}
+                        else{Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId}
+                    }
                     catch { Write-BridgeLog "Unhandled error processing document from $chatId : $($_.Exception.Message)" 'ERROR' }
                     continue
                 }
@@ -6916,9 +7141,13 @@ try {
                     # they are the escape hatch for a user stuck mid-flow, so
                     # they must not be consumed as a field value.
                     $trimmed = $text.Trim()
-                    if ($trimmed -eq $script:MenuHotword -or $trimmed -eq $script:HelpHotword) {
+                    if ($trimmed -eq $script:MenuHotword -or $trimmed -eq $script:HelpHotword -or $trimmed -eq $script:NewsHotword) {
                         if (-not (Test-Authorized -ChatId $chatId -UserId $userId)) {
                             Invoke-BridgeCommand -Text '/start' -ChatId $chatId -UserId $userId -From $fromObj
+                        }
+                        elseif ($trimmed -eq $script:NewsHotword) {
+                            Clear-PendingState -ChatId $chatId
+                            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
                         }
                         elseif ($trimmed -eq $script:HelpHotword) {
                             Clear-PendingState -ChatId $chatId
@@ -6939,6 +7168,8 @@ try {
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
+                                'news_add_text' { Complete-NewsTickerAddText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
+                                'news_edit_text' { Complete-NewsTickerEditText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }

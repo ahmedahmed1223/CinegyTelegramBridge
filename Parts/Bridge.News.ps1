@@ -15,9 +15,11 @@ function Save-NewsTickerDraft {
     if (-not $script:NewsTickerDraft) { return $false }
     try {
         $json = $script:NewsTickerDraft | ConvertTo-Json -Depth 8
-        $parent=Split-Path -Parent $script:newsDraftFile;if(-not(Test-Path -LiteralPath $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null}
-        $temp="$script:newsDraftFile.$([guid]::NewGuid().ToString('N')).tmp"
-        [IO.File]::WriteAllText($temp,$json,[Text.UTF8Encoding]::new($true));[IO.File]::Move($temp,$script:newsDraftFile,$true)
+        $parent = Split-Path -Parent $script:newsDraftFile
+        if (-not (Test-Path -LiteralPath $parent)) { [IO.Directory]::CreateDirectory($parent) | Out-Null }
+        $temp = "$script:newsDraftFile.$([guid]::NewGuid().ToString('N')).tmp"
+        [IO.File]::WriteAllText($temp, $json, [Text.UTF8Encoding]::new($true))
+        [IO.File]::Move($temp, $script:newsDraftFile, $true)
         return $true
     } catch { Write-BridgeLog "Could not save news draft: $($_.Exception.Message)" 'ERROR'; return $false }
 }
@@ -60,20 +62,39 @@ function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
 }
 
 function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text)
-    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return $false}
-    $parsed=ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
-    if(-not $parsed.Success -or @($parsed.Items).Count -ne 1){return $false};$items=@($draft.Items);$items[$Index]=$parsed.Items[0];$draft.Items=$items;$draft.UpdatedAt=(Get-Date).ToString('o');return(Save-NewsTickerDraft)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
+    $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
+    if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
+    $items = @($draft.Items)
+    $items[$Index] = $parsed.Items[0]
+    $draft.Items = $items
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    return (Save-NewsTickerDraft)
 }
 
 function Remove-NewsTickerDraftItem { param([long]$ChatId,[long]$UserId,[int]$Index)
-    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return $false}
-    if(-not(Test-Admin -ChatId $ChatId -UserId $UserId)-and -not(Get-Setting 'AllowOperatorsDeleteNews')){return $false}
-    $items=[Collections.Generic.List[string]]::new();@($draft.Items)|ForEach-Object{$items.Add([string]$_)};$items.RemoveAt($Index);$draft.Items=@($items);return(Save-NewsTickerDraft)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -and -not (Get-Setting 'AllowOperatorsDeleteNews')) { return $false }
+    $items = [Collections.Generic.List[string]]::new()
+    @($draft.Items) | ForEach-Object { $items.Add([string]$_) }
+    $items.RemoveAt($Index)
+    $draft.Items = @($items)
+    return (Save-NewsTickerDraft)
 }
 
 function Move-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[int]$Delta)
-    $draft=Get-NewsTickerDraft -UserId $UserId;$target=$Index+$Delta;if(-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count){return $false}
-    $items=@($draft.Items);$swap=$items[$target];$items[$target]=$items[$Index];$items[$Index]=$swap;$draft.Items=$items;$draft.UpdatedAt=(Get-Date).ToString('o');return(Save-NewsTickerDraft)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    $target = $Index + $Delta
+    if (-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count) { return $false }
+    $items = @($draft.Items)
+    $swap = $items[$target]
+    $items[$target] = $items[$Index]
+    $items[$Index] = $swap
+    $draft.Items = $items
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    return (Save-NewsTickerDraft)
 }
 
 function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[ValidateSet('replace','append')][string]$Mode='replace')
@@ -83,30 +104,56 @@ function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[Valid
     $items = if ($Mode -eq 'append') { @($draft.Items)+@($parsed.Items) } else { @($parsed.Items) }
     $validated=ConvertFrom-NewsTickerText -Text (ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))) -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if (-not $validated.Success) { return [pscustomobject]@{Success=$false;Error=($validated.Errors -join ' ')} }
-    $draft.Items=@($validated.Items);$draft.UpdatedAt=(Get-Date).ToString('o'); Save-NewsTickerDraft | Out-Null
+    $draft.Items = @($validated.Items)
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    Save-NewsTickerDraft | Out-Null
     return [pscustomobject]@{Success=$true;Count=$draft.Items.Count;Error=''}
 }
 
 function Clear-NewsTickerDraftItems { param([long]$ChatId,[long]$UserId)
     if (-not (Get-NewsTickerDraft -UserId $UserId)) { return $false }
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -and -not (Get-Setting 'AllowOperatorsClearAllNews')) { return $false }
-    $script:NewsTickerDraft.Items=@();$script:NewsTickerDraft.UpdatedAt=(Get-Date).ToString('o');return (Save-NewsTickerDraft)
+    $script:NewsTickerDraft.Items = @()
+    $script:NewsTickerDraft.UpdatedAt = (Get-Date).ToString('o')
+    return (Save-NewsTickerDraft)
 }
 
 function Publish-NewsTickerDraft { param([long]$UserId)
-    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft){return [pscustomobject]@{Success=$false;Error='لا توجد مسودة مملوكة لك.'}}
-    $result=Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-    if($result.Success){ Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا";Remove-NewsTickerDraft }
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return [pscustomobject]@{Success=$false;Error='لا توجد مسودة مملوكة لك.'} }
+    $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if ($result.Success) {
+        Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا"
+        Remove-NewsTickerDraft
+    }
     return $result
 }
 
 function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
-    $rows=@();$draft=Get-NewsTickerDraft
-    if(-not $draft){$rows+=,@(@{text='✏️ بدء التحرير';callback_data='news:start'},@{text='📥 استيراد TXT';callback_data='news:import'})}
-    elseif([long]$draft.OwnerUserId -eq $UserId){$rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='📝 تعديل وترتيب';callback_data='news:list'});$rows+=,@(@{text='📥 استيراد TXT';callback_data='news:import'},@{text='👁 معاينة';callback_data='news:preview'});if((Test-Admin -ChatId $ChatId -UserId $UserId)-or(Get-Setting 'AllowOperatorsClearAllNews')){$rows+=,@(@{text='🧹 مسح الكل';callback_data='news:clear'})};$rows+=,@(@{text='✅ مراجعة ونشر';callback_data='news:publish'},@{text='🗑 إلغاء المسودة';callback_data='news:cancel'})}
-    else{$rows+=,@(@{text="🔒 لدى $($draft.OwnerUserId)";callback_data='news:refresh'});if(Test-Admin -ChatId $ChatId -UserId $UserId){$rows+=,@(@{text='🔓 إلغاء القفل (مشرف)';callback_data='news:unlock'})}}
-    if((Test-Admin -ChatId $ChatId -UserId $UserId)-or(Get-Setting 'AllowOperatorsRestoreNews')){$rows+=,@(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})}
-    $rows+=,@(@{text='🔄 تحديث';callback_data='news:refresh'},@{text='⬅️ الرئيسية';callback_data='menu'});return @{inline_keyboard=$rows}
+    $rows = @()
+    $draft = Get-NewsTickerDraft
+    if (-not $draft) {
+        $rows += , @(@{text='✏️ بدء التحرير';callback_data='news:start'}, @{text='📥 استيراد TXT';callback_data='news:import'})
+    }
+    elseif ([long]$draft.OwnerUserId -eq $UserId) {
+        $rows += , @(@{text='➕ إضافة خبر';callback_data='news:add'}, @{text='📝 تعديل وترتيب';callback_data='news:list'})
+        $rows += , @(@{text='📥 استيراد TXT';callback_data='news:import'}, @{text='👁 معاينة';callback_data='news:preview'})
+        if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsClearAllNews')) {
+            $rows += , @(@{text='🧹 مسح الكل';callback_data='news:clear'})
+        }
+        $rows += , @(@{text='✅ مراجعة ونشر';callback_data='news:publish'}, @{text='🗑 إلغاء المسودة';callback_data='news:cancel'})
+    }
+    else {
+        $rows += , @(@{text="🔒 لدى $($draft.OwnerUserId)";callback_data='news:refresh'})
+        if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+            $rows += , @(@{text='🔓 إلغاء القفل (مشرف)';callback_data='news:unlock'})
+        }
+    }
+    if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsRestoreNews')) {
+        $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
+    }
+    $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})
+    return @{inline_keyboard=$rows}
 }
 
 function Edit-TelegramMessageText {

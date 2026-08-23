@@ -6241,11 +6241,13 @@ function Invoke-CallbackQuery {
         'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
         'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
         'news:up:*' {
-            $i=[int]$data.Substring(8);if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⬆️ حُرِّك لأعلى'}
+            $i=[int]$data.Substring(8)
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "⬆️ صار في الموضع $(($i+1)-1) من $((@(Get-NewsTickerDraft -UserId $userId).Items).Count)"}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:down:*' {
-            $i=[int]$data.Substring(10);if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⬇️ حُرِّك لأسفل'}
+            $i=[int]$data.Substring(10)
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "⬇️ صار في الموضع $(($i+1)+1) من $((@(Get-NewsTickerDraft -UserId $userId).Items).Count)"}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
         'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }

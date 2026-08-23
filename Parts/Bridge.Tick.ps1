@@ -1,0 +1,177 @@
+#requires -Version 7
+<#
+    Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
+    share the bridge script's scope and $script: state.
+
+    Declarations only - ordered initialization stays in TelegramBridge.ps1.
+#>
+
+function Update-PendingExpiry {
+    $stateTimeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
+    foreach ($chatId in @($script:PendingState.Keys)) {
+        $state = $script:PendingState[$chatId]
+        if (((Get-Date) - $state.StartedAt).TotalMinutes -ge $stateTimeout) {
+            Clear-PendingState -ChatId ([long]$chatId)
+            Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
+            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId ([long]$chatId))
+        }
+    }
+
+    $approvalTimeout = Get-SettingInt 'PendingApprovalExpiryHours' 1
+    foreach ($chatId in @($script:PendingApprovals.Keys)) {
+        if (((Get-Date) - $script:PendingApprovals[$chatId].RequestedAt).TotalHours -ge $approvalTimeout) {
+            $script:PendingApprovals.Remove($chatId)
+            Write-BridgeLog "Expired stale access request from $chatId"
+        }
+    }
+}
+
+function Update-PostShowQueue {
+    <# Fires the deferred postbox write that follows a SHOW. Failures are
+       logged but never surfaced to the operator: the SHOW itself already
+       succeeded and was already confirmed in chat. #>
+    if ($script:PostShowQueue.Count -eq 0) { return }
+    $due = @($script:PostShowQueue | Where-Object { (Get-Date) -ge $_.At })
+    foreach ($item in $due) {
+        $script:PostShowQueue.Remove($item) | Out-Null
+        $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Values $item.Values -TimeoutSec (Get-AirTimeout)
+        if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air post-show POSTBOX ($($item.Key)): success=$($result.Success) $($result.Xml)" }
+        if (-not $result.Success) {
+            Write-BridgeLog "Post-show postbox write failed for '$($item.Key)': $($result.Error)" "WARN"
+        }
+    }
+}
+
+function Update-AutoHideQueue {
+    if ($script:AutoHideQueue.Count -eq 0) { return }
+    $due = @($script:AutoHideQueue | Where-Object { (Get-Date) -ge $_.At })
+    foreach ($item in $due) {
+        $script:AutoHideQueue.Remove($item) | Out-Null
+        Write-BridgeLog "Auto-hiding layer $($item.Layer) (timed show by user $($item.UserId))"
+        if (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet) {
+            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏱ تم الإخفاء التلقائي للطبقة $($item.Layer)."
+        }
+        else {
+            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ فشل الإخفاء التلقائي للطبقة $($item.Layer) - أخفها يدويًا."
+        }
+    }
+}
+
+function Update-Heartbeat {
+    if (-not (Get-Setting 'HeartbeatEnabled')) { return }
+    $now = Get-Date
+    if ($now.Date -eq $script:LastHeartbeatDate) { return }
+    if ($now.Hour -ne (Get-SettingInt 'HeartbeatHour' 0)) { return }
+    $script:LastHeartbeatDate = $now.Date
+    $store = Get-TemplateStore
+    Send-AdminBroadcast -Text "💚 الجسر يعمل. القوالب: $($store.Order.Count)، البث: $(Get-LiveRelayStatusText)"
+    Write-BridgeLog "Heartbeat sent to admins"
+}
+
+function Update-CinegyStateWatchdog {
+    $now = Get-Date
+    $interval = Get-SettingInt 'CinegyStateCheckSeconds' 1
+    if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt $interval) { return }
+    $script:RuntimeState.Monitoring.LastCinegyStateCheck = $now
+
+    $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if ($sync.Removed.Count -gt 0 -and (Get-Setting 'NotifyAdminsOnExternalChange')) {
+        Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
+    }
+}
+
+function Update-CinegyHealthWatchdog {
+    $now = Get-Date
+    $interval = Get-SettingInt 'CinegyHealthCheckSeconds' 1
+    if (($now - $script:RuntimeState.Monitoring.LastCinegyHealthCheck).TotalSeconds -lt $interval) { return }
+    $script:RuntimeState.Monitoring.LastCinegyHealthCheck = $now
+
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    $newState = if (-not $telemetry.Success -or $null -eq $telemetry.Healthy) { 'unreachable' }
+    elseif ($telemetry.Healthy) { 'healthy' }
+    else { 'unhealthy' }
+
+    $oldState = $script:RuntimeState.Monitoring.CinegyHealthState; $history = $script:HealthHistory.Cinegy
+    if ($newState -ne $oldState) { Write-BridgeLog "Cinegy health changed from $oldState to $newState" }
+    $script:RuntimeState.Monitoring.CinegyHealthState = $newState
+    if ($newState -eq 'healthy') {
+        $shouldRecover = [bool]$history.AlertSent
+        $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
+        if ($shouldRecover -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) { Send-AdminBroadcast -Text "💚 تعافت صحة Cinegy وعادت القياسات إلى الحالة السليمة." }
+        return
+    }
+    if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
+    $history.FailureCount = [int]$history.FailureCount + 1; $history.LastErrorAt = $now
+    $history.LastError = if ($newState -eq 'unreachable') { 'تعذّر الوصول' } else { 'قياسات غير سليمة' }
+    $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
+    if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) {
+        $history.AlertSent = $true
+        $started = ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss')
+        $detail = if ($newState -eq 'unhealthy') { Format-CinegyTelemetryStatus -Telemetry $telemetry } else { 'تعذّر الوصول إلى قياسات صحة Cinegy. تحقق من Air والاتصال بالشبكة.' }
+        Send-AdminBroadcast -Text "🔴 تحذير صحة Cinegy بعد $($history.FailureCount) حالات فشل متتالية`nبداية الانقطاع: $started`n$detail"
+    }
+}
+
+function Set-TelegramConnectionState {
+    param([Parameter(Mandatory)][bool]$Connected, [string]$ErrorMessage = '')
+    $newState = if ($Connected) { 'connected' } else { 'disconnected' }
+    $oldState = $script:RuntimeState.Monitoring.TelegramConnectionState; $history = $script:HealthHistory.Telegram; $now = Get-Date
+    if ($newState -ne $oldState) { Write-BridgeLog "Telegram connection changed from $oldState to $newState" }
+    $script:RuntimeState.Monitoring.TelegramConnectionState = $newState
+    if ($Connected) {
+        $shouldRecover = [bool]$history.AlertSent
+        $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
+        if ($shouldRecover) { Send-AdminBroadcast -Text "✅ استعاد البوت اتصال Telegram وعادت دورة التحديث للعمل." }
+        return
+    }
+    if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
+    $history.FailureCount = [int]$history.FailureCount + 1
+    $history.LastError = Protect-SensitiveText $ErrorMessage; $history.LastErrorAt = $now
+    $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
+    if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent) {
+        $history.AlertSent = $true
+        $started = ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss')
+        Send-AdminBroadcast -Text "⚠️ فُقد اتصال Telegram بعد $($history.FailureCount) حالات فشل متتالية`nبداية الانقطاع: $started`n$($history.LastError)"
+    }
+}
+
+function Send-BridgeStartupNotification {
+    Send-AdminBroadcast -Text "🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion`nAir: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)"
+}
+
+function Invoke-BridgeTick {
+    <# Everything time-based happens here, between long-polls. Each helper is
+       cheap and non-blocking; any failure is logged rather than allowed to
+       kill the loop. #>
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+        try { & $step | Out-Null }
+        catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
+    }
+}
+
+function Get-BasePollTimeout {
+    $value = 0
+    if (-not [int]::TryParse([string](Get-JsonProp $config 'PollTimeoutSeconds'), [ref]$value) -or $value -le 0) { $value = 30 }
+    return $value
+}
+
+function Get-EffectivePollTimeout {
+    <# Long-poll for the configured time normally, but collapse to 1 second
+       whenever async work is outstanding so a finished snapshot or a dead
+       relay is noticed within a second instead of up to 30. #>
+    if ($script:PostShowQueue.Count -gt 0) { return 1 }
+    if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
+    $base = Get-BasePollTimeout
+    $upcoming = @(Get-UpcomingScheduleEvents)
+    if ($upcoming.Count -gt 0) {
+        $secondsToEvent = [int][Math]::Ceiling((([datetimeoffset]$upcoming[0].ScheduledAt) - [datetimeoffset]::Now).TotalSeconds)
+        $base = [Math]::Min($base, [Math]::Max(1, $secondsToEvent))
+    }
+    if ($script:RelayState.ShouldRun) { return [Math]::Min($base, (Get-SettingInt 'RelayWatchdogSeconds' 5)) }
+    $base = [Math]::Min($base, (Get-SettingInt 'CinegyStateCheckSeconds' 1))
+    return [Math]::Min($base, (Get-SettingInt 'CinegyHealthCheckSeconds' 1))
+}
+

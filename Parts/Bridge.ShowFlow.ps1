@@ -1,0 +1,1033 @@
+#requires -Version 7
+<#
+    Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
+    share the bridge script's scope and $script: state.
+
+    Declarations only - ordered initialization stays in TelegramBridge.ps1.
+#>
+
+function Lock-GfxLayer {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][string]$Key
+    )
+    if ($script:LayerLocks.ContainsKey($Layer)) {
+        $existing = $script:LayerLocks[$Layer]
+        if ([long]$existing.ChatId -ne $ChatId -or [long]$existing.UserId -ne $UserId) {
+            return [pscustomobject]@{
+                Success = $false
+                OwnerChatId = [long]$existing.ChatId
+                OwnerUserId = [long]$existing.UserId
+                Key = [string]$existing.Key
+            }
+        }
+    }
+    $script:LayerLocks[$Layer] = @{
+        ChatId = $ChatId; UserId = $UserId; Key = $Key; StartedAt = (Get-Date)
+    }
+    return [pscustomobject]@{ Success = $true; OwnerChatId = $ChatId; OwnerUserId = $UserId; Key = $Key }
+}
+
+function Unlock-GfxLayer {
+    param([Parameter(Mandatory)][long]$ChatId, [int]$Layer = 0)
+    foreach ($candidate in @($script:LayerLocks.Keys)) {
+        if (($Layer -le 0 -or [int]$candidate -eq $Layer) -and [long]$script:LayerLocks[$candidate].ChatId -eq $ChatId) {
+            $script:LayerLocks.Remove($candidate)
+        }
+    }
+}
+
+function Set-PendingState {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
+    Set-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId -State $State
+    if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
+}
+
+function Get-PendingState {
+    <# Returns the pending flow for a chat, or $null if there is none or it has
+       aged out. Expiry is checked on read as well as on the tick so a stale
+       entry can never be consumed. #>
+    param([Parameter(Mandatory)][long]$ChatId)
+    $timeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
+    $result=Get-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId -TimeoutMinutes $timeout
+    if (-not $result.State) { return $null }
+    if ($result.Expired) {
+        Complete-PendingStateCleanup -ChatId $ChatId -State $result.State
+        return $null
+    }
+    return $result.State
+}
+
+function Complete-PendingStateCleanup {
+    param([Parameter(Mandatory)][long]$ChatId,[Parameter(Mandatory)][hashtable]$State)
+    if ($State.ContainsKey('LockLayer')) { Unlock-GfxLayer -ChatId $ChatId -Layer ([int]$State.LockLayer) }
+    if ($State.ContainsKey('ImportStagedPath') -and (Test-Path -LiteralPath ([string]$State.ImportStagedPath))) {
+        Remove-Item -LiteralPath ([string]$State.ImportStagedPath) -Force -ErrorAction SilentlyContinue
+    }
+    if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
+}
+
+function Clear-PendingState {
+    param([Parameter(Mandatory)][long]$ChatId)
+    $state=Remove-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId
+    if ($state) { Complete-PendingStateCleanup -ChatId $ChatId -State $state }
+}
+
+function Get-HelpText {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+
+    $lines = @(
+        "📘 دليل استخدام بوت Cinegy Air",
+        "",
+        "🚀 الاستخدام السريع",
+        "",
+        "▶️ نشر قالب على الهواء:",
+        "📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← راجع القيم ← تأكيد الإرسال",
+        "حتى القالب بلا حقول يمر بشاشة مراجعة قبل الهواء.",
+        "",
+        "✏️ تغيير النص أثناء العرض:",
+        "✏️ تحديث نص ← اختر القالب ← اختر الحقل ← أرسل النص الجديد",
+        "يُحدّث النص دون إعادة تشغيل حركة القالب.",
+        "",
+        "⏱ عرض لمدة محددة:",
+        "⏱ عرض مؤقّت ← اختر القالب ← اختر المدة ← أدخل النص",
+        "سيخفي البوت الطبقة تلقائيًا عند انتهاء المدة.",
+        "",
+        "🛑 إنهاء العرض والطوارئ",
+        "🙈 إخفاء طبقة: إخفاء القالب فورًا من طبقة محددة.",
+        "🚪 خروج من المشهد: تشغيل نهاية المشهد أو الخروج من الحلقة.",
+        "🚨 إخفاء الكل: يعرض الطبقات ثم يطلب تأكيدًا ثانيًا قبل الإخفاء.",
+        "",
+        "🧰 أدوات مفيدة",
+        "⭐ المفضّلة: أسرع وصول إلى القوالب الأكثر استخدامًا.",
+        "🔁 إعادة الأخير: تكرار آخر قالب عرضته بالقيم نفسها.",
+        "🎚 الطبقات: تفحص Cinegy مباشرة، تقارن الطبقات المعروفة مع onair.json، وتعرض كل طبقة كـ ظاهر، خارجي، مخفي أو غير معروف.",
+        "اضغط على طبقة ظاهرة لإخفائها سريعًا؛ والضغط على طبقة غير ظاهرة يحدّث لوحة الطبقات.",
+        "ℹ️ الحالة: ملخص سريع للجميع يعرض خادم Air والقناة والقوالب المتابعة.",
+        "📸 صورة من البث: إرسال لقطة حديثة من خرج القناة.",
+        "📅 الجدولة: اختر القالب والقيم والموعد ثم مرة واحدة/يومي/أسبوعي وراجع الحدث قبل حفظه.",
+        ""
+    )
+    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+        $lines += "🛡️ أدوات المشرف"
+        $lines += "⚙️ الإعدادات، 👤 طلبات الوصول، 📊 الحالة الكاملة وصحة الخدمات،"
+        $lines += "⚡ إدارة النصوص الجاهزة، ▶️/⏹ البث المباشر، 🔗 رابط البث، 📜 السجل، 🛠 أمر خام."
+        $lines += ""
+    }
+    $lines += "↩️ الرجوع أو الإلغاء"
+    $lines += "• اضغط 🏠 القائمة للرجوع، حتى أثناء إدخال النص."
+    $lines += "• اضغط ☰ بجانب مربع الكتابة لعرض الأوامر."
+    $lines += "• أرسل /الغاء لإلغاء العملية الحالية، أو /قائمة لفتح القائمة."
+    return ($lines -join "`n")
+}
+
+function New-AirOperationContext {
+    return [pscustomobject]@{
+        Id        = "air-$([guid]::NewGuid().ToString('N'))"
+        Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+}
+
+function Get-TemplateTestReviewKeyboard {
+    return @{ inline_keyboard = @(
+        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+    ) }
+}
+
+function Write-AirOperationResult {
+    param(
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('success', 'failed', 'blocked')][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][long]$ChatId,
+        [int]$Layer = 0,
+        [string]$Target = '',
+        [string]$ErrorText = ''
+    )
+    $cleanTarget = ($Target -replace '[\r\n]+', ' ').Replace('"', "'")
+    $cleanError = ($ErrorText -replace '[\r\n]+', ' ').Replace('"', "'")
+    $message = "AIR_OP id=$OperationId action=$Action result=$Result durationMs=$DurationMs user=$UserId chat=$ChatId layer=$Layer target=`"$cleanTarget`""
+    if (-not [string]::IsNullOrWhiteSpace($cleanError)) { $message += " error=`"$cleanError`"" }
+    $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
+    $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
+    $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
+    Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
+    Write-AuditRecord -OperationId $OperationId -Event air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
+    Write-BridgeLog $message $level
+}
+
+function Test-MaintenanceControl {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
+    if (-not (Get-Setting 'MaintenanceMode')) { return $true }
+    if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
+function Test-TemplateShowPolicy {
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][int]$Layer)
+    $reserved = @()
+    foreach ($part in ([string](Get-Setting 'ReservedLayers') -split '[,;\s]+')) {
+        $parsedLayer = 0
+        if ([int]::TryParse($part.Trim(), [ref]$parsedLayer) -and $parsedLayer -gt 0) { $reserved += $parsedLayer }
+    }
+    if ($reserved -contains $Layer) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا." }
+    }
+    $disabled = @([string](Get-Setting 'DisabledTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (@($disabled | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا." }
+    }
+    return [pscustomobject]@{ Allowed = $true; Reason = '' }
+}
+
+function Get-EffectiveAutoHideSeconds {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [int]$RequestedSeconds = 0
+    )
+    $sensitiveKeys = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $isSensitive = @($sensitiveKeys | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    if (-not $isSensitive) { return [math]::Max(0, $RequestedSeconds) }
+    $requiredSeconds = Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1
+    if ($RequestedSeconds -gt 0) { return [math]::Min($RequestedSeconds, $requiredSeconds) }
+    return $requiredSeconds
+}
+
+function Copy-ShowVariables {
+    param([hashtable]$Variables = @{})
+    $copy = @{}
+    foreach ($name in $Variables.Keys) { $copy[[string]$name] = [string]$Variables[$name] }
+    return $copy
+}
+
+function Set-RollbackCandidate {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][hashtable]$RestoreSnapshot,
+        [Parameter(Mandatory)][ValidateSet('replace','hidden')][string]$ExpectedState,
+        [string]$ExpectedActiveId = '',
+        [Parameter(Mandatory)][long]$ActorUserId
+    )
+    if (-not (Get-Setting 'EnableSafeRollback')) { return }
+    $window = [math]::Max(10, [math]::Min(900, (Get-SettingInt 'RollbackWindowSeconds' 10)))
+    $script:RollbackCandidates[$Layer] = @{
+        Id=[guid]::NewGuid().ToString('N'); Layer=$Layer; Restore=$RestoreSnapshot
+        ExpectedState=$ExpectedState; ExpectedActiveId=$ExpectedActiveId
+        ActorUserId=$ActorUserId; CreatedAt=(Get-Date); ExpiresAt=(Get-Date).AddSeconds($window)
+    }
+}
+
+function Get-RollbackCandidate {
+    param([Parameter(Mandatory)][int]$Layer, [long]$UserId = 0)
+    if (-not (Get-Setting 'EnableSafeRollback')) { return $null }
+    if (-not $script:RollbackCandidates.ContainsKey($Layer)) { return $null }
+    $candidate = $script:RollbackCandidates[$Layer]
+    if ((Get-Date) -ge [datetime]$candidate.ExpiresAt) { $script:RollbackCandidates.Remove($Layer) | Out-Null; return $null }
+    if ($UserId -gt 0 -and [long]$candidate.ActorUserId -ne $UserId -and -not (Test-Admin -ChatId $UserId -UserId $UserId)) { return $null }
+    return $candidate
+}
+
+function Get-CorrelatedLayerSnapshot {
+    param([Parameter(Mandatory)][int]$Layer, $LiveStatus)
+    if (-not $script:LastSuccessfulLayerShows.ContainsKey($Layer) -or -not $LiveStatus -or
+        -not $LiveStatus.Success -or $LiveStatus.IsOnAir -ne $true) { return $null }
+    $snapshot = $script:LastSuccessfulLayerShows[$Layer]
+    $activeId = [string](Get-JsonProp $LiveStatus 'ActiveId')
+    if ([string]::IsNullOrWhiteSpace($activeId) -or $activeId -ne [string]$snapshot.ActiveId) { return $null }
+    return $snapshot
+}
+
+function Invoke-ShowTemplateResult {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [hashtable]$Variables = @{},
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [int]$AutoHideSeconds = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
+        return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
+    }
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($Key)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'unknown template'
+        return
+    }
+    $template = $store.Map[$Key]
+    $attemptVariables = @{}
+    foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
+    $script:LastShowAttempts[[string]$UserId] = @{
+        Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
+    }
+    $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer)
+    if (-not $policy.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$policy.Reason)
+        return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
+    }
+
+    # SHOW is the only operation that can replace visible content. Verify the
+    # target layer immediately before mutating it; an unreachable Cinegy must
+    # never be interpreted as an empty or safe layer.
+    $layerStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer ([int]$template.Layer) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $layerStatus.Success) {
+        $errorText = [string](Get-JsonProp $layerStatus 'Error')
+        Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText $errorText
+        return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
+    }
+    $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
+    Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
+    $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
+
+    # A scene that is already loaded on the layer keeps running with the values
+    # it was started with, so a second SHOW can leave the PREVIOUS text on air.
+    # Taking the layer down first forces the scene to initialise with the new
+    # variables. (To change text without re-firing the animation, use the
+    # ✏️ تحديث نص button, which writes to the live postbox instead.)
+    if ((Get-Setting 'ReshowClearsLayer') -and $script:OnAir.ContainsKey([int]$template.Layer)) {
+        $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $template.Layer -TimeoutSec (Get-AirTimeout)
+        if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show HIDE on layer $($template.Layer): success=$($clear.Success)" }
+    }
+
+    # Only pass through explicit per-field type overrides; everything else
+    # takes the AirVariableType default.
+    $types = @{}
+    foreach ($name in @($template.FieldTypes.Keys)) {
+        if ($template.FieldTypes[$name]) { $types[$name] = [string]$template.FieldTypes[$name] }
+    }
+    $defaultType = [string](Get-Setting 'AirVariableType')
+    if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
+
+    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
+        -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
+
+    # Air Pro answers 200 OK even when it does not recognise a variable name,
+    # so "Success" only means the request was accepted - not that the text
+    # landed. Turn on LogAirXml to see exactly what was transmitted.
+    if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
+
+    if ($result.Success) {
+        if ($previousSnapshot) {
+            Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
+                -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
+        }
+        else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
+        $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
+            Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
+            ActiveId=[string]$result.EventId; At=(Get-Date)
+        }
+        $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
+        $script:OnAir[[int]$template.Layer] = @{
+            Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = [string]$result.EventId
+        }
+        Save-OnAirState
+        Add-UsageCount -Key $Key
+        Write-BridgeLog "User $UserId (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
+        Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - user $UserId"
+
+        # Belt and braces: also write the values through the postbox, which is
+        # the channel this scene actually honours.
+        if ((Get-Setting 'SetValuesAfterShow') -and $Variables.Count -gt 0) {
+            $delay = Get-SettingInt 'PostShowDelayMs' 0
+            $script:PostShowQueue.Add(@{
+                    At = (Get-Date).AddMilliseconds($delay); Values = $Variables
+                    Layer = [int]$template.Layer; Key = $Key
+                })
+        }
+
+        $suffix = ""
+        if ($AutoHideSeconds -gt 0) {
+            for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
+                if ([int]$script:AutoHideQueue[$i].Layer -eq [int]$template.Layer) { $script:AutoHideQueue.RemoveAt($i) }
+            }
+            $script:AutoHideQueue.Add(@{ Layer = $template.Layer; At = (Get-Date).AddSeconds($AutoHideSeconds); ChatId = $ChatId; UserId = $UserId })
+            $suffix = " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
+        }
+        # A one-tap hide right where the operator is looking: previously taking
+        # something back off air meant going 🙈 -> pick layer, which is several
+        # taps too many when a wrong graphic is live.
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إظهار '$Key' على الهواء (طبقة $($template.Layer)).$suffix" -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key
+    }
+    else {
+        Write-BridgeLog "User $UserId failed to push template '$Key': $($result.Error)" "ERROR"
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$result.Error)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    return $result
+}
+
+function Get-LayerShowContext {
+    param([Parameter(Mandatory)][int]$Layer, [datetime]$Now = (Get-Date))
+    $record = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $lastSuccess = if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
+        -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    return [pscustomobject]@{
+        IsKnown = ($freshness.State -eq 'connected')
+        IsOnAir = ($null -ne $record)
+        Key      = if ($record) { [string](Get-JsonProp $record 'Key') } else { '' }
+        UserId   = if ($record) { [long](Get-JsonProp $record 'UserId') } else { 0L }
+        Source   = if ($record) { [string](Get-JsonProp $record 'Source') } else { '' }
+    }
+}
+
+function Start-ShowFlow {
+    <# Entry point for every SHOW source. ReviewImmediately is used when values
+       already came from a preset or typed command; required missing fields
+       still force the ordinary field-entry flow. #>
+    param(
+        [Parameter(Mandatory)][int]$TemplateIndex,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [int]$AutoHideSeconds = 0,
+        [hashtable]$InitialValues = @{},
+        [switch]$ReviewImmediately
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Clear-PendingState -ChatId $ChatId
+    $t = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $t) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer)
+    if (-not $policy.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key ([string]$t.Key) -RequestedSeconds $AutoHideSeconds
+    $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
+    if (-not $lock.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $replacementContext = Get-LayerShowContext -Layer ([int]$t.Layer)
+    $draftValues = @{}
+    foreach ($name in $InitialValues.Keys) { $draftValues[[string]$name] = [string]$InitialValues[$name] }
+    $required = @(Get-JsonProp $t 'FieldRequired' | Where-Object { $null -ne $_ })
+    $canReviewImmediately = [bool]$ReviewImmediately
+    if ($canReviewImmediately) {
+        for ($i = 0; $i -lt $t.Fields.Count; $i++) {
+            if ($i -lt $required.Count -and [bool]$required[$i]) {
+                $fieldName = [string]$t.Fields[$i]
+                if (-not $draftValues.ContainsKey($fieldName) -or [string]::IsNullOrWhiteSpace([string]$draftValues[$fieldName])) {
+                    $canReviewImmediately = $false
+                    break
+                }
+            }
+        }
+    }
+    if ($t.Fields.Count -eq 0 -or $canReviewImmediately) {
+        $state = @{
+            Mode = 'show_review'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
+            Limits = @($t.FieldLimits); Required = $required
+            Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
+            Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+            LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
+        }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
+        return
+    }
+    $state = @{
+        Mode = 'show_fields'; Key = $t.Key; Fields = @($t.Fields); Labels = @($t.FieldLabels)
+        Limits = @($t.FieldLimits)
+        Required = $required
+        Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
+        Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+        LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
+    }
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+}
+
+function Resume-ShowFlow {
+    <# Called for each text reply (or the ⏭ skip button) while a show_fields
+       flow is pending. Advances one field, or fires the template once full.
+
+       -Skip omits the field from the variable set entirely rather than sending
+       an empty string, so the scene keeps whatever text it was designed with
+       instead of being blanked. #>
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "", [switch]$Skip)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    $isRequired = $state.Required -and $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
+    if ($isRequired -and ($Skip -or [string]::IsNullOrWhiteSpace($Value))) {
+        $message = if ($Skip) { "❌ هذا الحقل مطلوب ولا يمكن تخطيه." } else { "❌ هذا الحقل مطلوب ولا يمكن تركه فارغًا." }
+        Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+        return
+    }
+    if (-not $Skip) {
+        # Re-prompt rather than push oversized text: a pasted paragraph would
+        # otherwise go straight to air and wreck the graphic's layout.
+        $limit = 0
+        if ($state.Limits -and $state.Index -lt @($state.Limits).Count) { $limit = [int]$state.Limits[$state.Index] }
+        if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-FieldPromptKeyboard -State $state))) { return }
+        $fieldName = [string]$state.Fields[$state.Index]
+        $state.Values[$fieldName] = $Value
+        $isSensitive = Test-SensitiveFieldName -FieldName $fieldName
+        if ($state.ContainsKey('Sensitives') -and $state.Index -lt @($state.Sensitives).Count) {
+            $isSensitive = $isSensitive -or [bool]$state.Sensitives[$state.Index]
+        }
+        Add-RecentFieldValue -UserId ([long]$state.UserId) -FieldName $fieldName -Value $Value -Sensitive:$isSensitive
+    }
+    $state.Index++
+
+    if ($state.Index -ge $state.Fields.Count) {
+        $state.Mode = 'show_review'
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard)
+        return
+    }
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+}
+
+function Format-ShowReviewText {
+    param([Parameter(Mandatory)][hashtable]$State)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("🔎 مراجعة قبل الإرسال")
+    $lines.Add("القالب: $($State.Key)")
+    $lines.Add("الطبقة: $($State.LockLayer)")
+    $context = Get-JsonProp $State 'ReplacementContext'
+    if ($context -and -not [bool](Get-JsonProp $context 'IsKnown')) {
+        $lines.Add("⚠️ تعذّر التحقق من حداثة حالة الطبقة؛ راجع شاشة الحالة قبل التأكيد عند الشك.")
+    }
+    if ($context -and [bool](Get-JsonProp $context 'IsOnAir')) {
+        $currentKey = [string](Get-JsonProp $context 'Key')
+        if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = 'مشهد غير مسمّى' }
+        $currentUserId = [long](Get-JsonProp $context 'UserId')
+        $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
+        $lines.Add("⚠️ سيتم استبدال القالب الحالي: $currentKey ($sourceText).")
+    }
+    if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: $($State.AutoHideSeconds) ثانية") }
+    $lines.Add("")
+    for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
+        $name = [string]$State.Fields[$i]
+        $label = $name
+        if ($State.Labels -and $i -lt @($State.Labels).Count -and $State.Labels[$i]) { $label = [string]$State.Labels[$i] }
+        $value = if ($State.Values.ContainsKey($name)) { [string]$State.Values[$name] } else { "(متروك)" }
+        $lines.Add("• $label`: $value")
+    }
+    $lines.Add("")
+    $lines.Add("لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.")
+    return ($lines -join "`n")
+}
+
+function Get-EffectiveFieldLimit {
+    <# Resolution order: per-field maxLength -> per-template maxLength -> the
+       global MaxFieldLength setting. A graphic's usable text length depends on
+       its design, so one global number is a floor, not the whole answer. #>
+    param([int]$FieldLimit = 0)
+    if ($FieldLimit -gt 0) { return $FieldLimit }
+    return (Get-SettingInt 'MaxFieldLength' 0)
+}
+
+function Test-FieldLength {
+    <# Returns $true when the text is short enough to put on air, otherwise
+       tells the operator and returns $false. The pending flow is deliberately
+       left intact so they can simply retype the value. #>
+    param(
+        [AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory)][long]$ChatId,
+        [int]$FieldLimit = 0,
+        [hashtable]$ReplyMarkup
+    )
+    $max = Get-EffectiveFieldLimit -FieldLimit $FieldLimit
+    $visibleLength = Get-TextElementCount -Text $Value
+    if ($max -le 0 -or $visibleLength -le $max) { return $true }
+    if (-not $ReplyMarkup) { $ReplyMarkup = Get-FieldPromptKeyboard }
+    Send-TelegramMessage -ChatId $ChatId -Text "❌ النص طويل جدًا ($visibleLength حرفًا) والحد الأقصى $max حرفًا. أرسل نصًا أقصر." -ReplyMarkup $ReplyMarkup
+    return $false
+}
+
+function Get-FieldPromptText {
+    <# Shows the operator-friendly label when templates.json provides one,
+       falling back to the raw variable name (e.g. "Ajel.center") otherwise. #>
+    param([Parameter(Mandatory)][hashtable]$State)
+    $index = [int]$State.Index
+    $name = [string]$State.Fields[$index]
+    $label = $name
+    if ($State.Labels -and $index -lt @($State.Labels).Count -and $State.Labels[$index]) {
+        $label = "$($State.Labels[$index])`n($name)"
+    }
+    # Tell the operator the limit up front rather than rejecting after typing.
+    $limit = 0
+    if ($State.Limits -and $index -lt @($State.Limits).Count) { $limit = [int]$State.Limits[$index] }
+    $limit = Get-EffectiveFieldLimit -FieldLimit $limit
+    $limitText = if ($limit -gt 0) { " (الحد: $limit حرفًا)" } else { "" }
+    return "القالب '$($State.Key)' - أرسل نص الحقل ($($index + 1)/$($State.Fields.Count))$limitText`:`n$label"
+}
+
+function Sync-LayerAfterOperatorAction {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$Reason)
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    return Update-OnAirStateFromCinegy -Reason $Reason -LayerStatuses @($status) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+}
+
+function Invoke-HideLayer {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [switch]$Quiet,
+        [switch]$MaintenanceOverride
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        return $false
+    }
+    $rollbackSnapshot = $null
+    if (-not $Quiet -and (Get-Setting 'EnableSafeRollback')) {
+        $preHideStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preHideStatus
+    }
+    $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+    if ($result.Success) {
+        if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
+        Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
+        Write-BridgeLog "User $UserId hid layer $Layer"
+        Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $UserId"
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
+    }
+    elseif (-not $Quiet) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إخفاء الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    if (-not $result.Success) {
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
+    }
+    return $result.Success
+}
+
+function Invoke-ExitLayer {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        return $false
+    }
+    $rollbackSnapshot = $null
+    if (Get-Setting 'EnableSafeRollback') {
+        $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preExitStatus
+    }
+    $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+    if ($result.Success) {
+        if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
+        Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-exit' | Out-Null
+        Write-BridgeLog "User $UserId exited scene on layer $Layer"
+        Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الخروج من المشهد على الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
+    }
+    return $result.Success
+}
+
+function Start-SafeRollbackReview {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
+    if (-not $candidate) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد تراجع صالح لهذه الطبقة، أو انتهت مدته.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $snapshot = $candidate.Restore
+    $expected = if ([string]$candidate.ExpectedState -eq 'hidden') { 'يجب أن تبقى الطبقة فارغة' } else { 'يجب أن يبقى المشهد الحالي نفسه دون تغيير خارجي' }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='safe_rollback_review'; UserId=$UserId; Layer=$Layer; CandidateId=[string]$candidate.Id }
+    Send-TelegramMessage -ChatId $ChatId -Text "↩️ مراجعة التراجع الآمن`nالطبقة: $Layer`nسيُستعاد القالب: $($snapshot.Key)`nشرط التنفيذ: $expected`nتنتهي الصلاحية: $(([datetime]$candidate.ExpiresAt).ToString('HH:mm:ss'))`n`nسيُفحص Cinegy مباشرة بعد التأكيد." -ReplyMarkup (Get-RollbackReviewKeyboard -Layer $Layer)
+}
+
+function Confirm-SafeRollback {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'safe_rollback_review' -or [long]$state.UserId -ne $UserId -or [int]$state.Layer -ne $Layer) { return }
+    $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
+    Clear-PendingState -ChatId $ChatId
+    if (-not $candidate -or [string]$candidate.Id -ne [string]$state.CandidateId) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'انتهى أو تغير مرشح التراجع. لم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
+    $lock = Lock-GfxLayer -Layer $Layer -ChatId $ChatId -UserId $UserId -Key ([string]$candidate.Restore.Key)
+    if (-not $lock.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الطبقة قيد عملية أخرى؛ لم يُنفذ التراجع.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    try {
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        $safe = $status.Success -and $null -ne $status.IsOnAir
+        if ($safe -and [string]$candidate.ExpectedState -eq 'hidden') { $safe = -not [bool]$status.IsOnAir }
+        elseif ($safe) {
+            $activeId = [string](Get-JsonProp $status 'ActiveId')
+            $safe = [bool]$status.IsOnAir -and -not [string]::IsNullOrWhiteSpace($activeId) -and $activeId -eq [string]$candidate.ExpectedActiveId
+        }
+        if (-not $safe) {
+            $script:RollbackCandidates.Remove($Layer) | Out-Null
+            Send-TelegramMessage -ChatId $ChatId -Text '⛔ تغيرت حالة Cinegy أو تعذر التحقق منها؛ أُلغي التراجع ولم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            return
+        }
+        $restore = $candidate.Restore
+        $result = Invoke-ShowTemplateResult -Key ([string]$restore.Key) -Variables ([hashtable]$restore.Variables) -ChatId $ChatId -UserId $UserId
+        if ($result -and $result.Success) {
+            Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - user $UserId"
+            Write-BridgeLog "User $UserId safely rolled layer $Layer back to '$($restore.Key)'" 'WARN'
+        }
+    }
+    finally { Unlock-GfxLayer -ChatId $ChatId -Layer $Layer }
+}
+
+function Invoke-HideAllLayers {
+    <# Emergency "get it off air" button - hides only the layers selected by
+       the administrator. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $maintenanceOverride = Test-Admin -ChatId $ChatId -UserId $UserId
+    $layers = @(Get-HideAllTargetLayers)
+    if ($layers.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $ok = @(); $failed = @()
+    foreach ($l in $layers) {
+        if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
+    }
+    $script:AutoHideQueue.Clear()
+    Write-BridgeLog "User $UserId triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','))" "WARN"
+    Add-AuditEntry "🚨 إخفاء الكل - user $UserId"
+    $text = "🚨 تم إخفاء الطبقات: $($ok -join ', ')"
+    if ($failed.Count -gt 0) { $text += "`n❌ فشلت: $($failed -join ', ')" }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Invoke-SetValues {
+    param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $operation = New-AirOperationContext
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText 'maintenance mode'
+        return $false
+    }
+    $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
+    if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
+    if ($result.Success) {
+        Write-BridgeLog "User $UserId set values: $($Values.Keys -join ', ')"
+        Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - user $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم التحديث: $($Values.Keys -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',')
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل التحديث: $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText ([string]$result.Error)
+    }
+    return $result.Success
+}
+
+function Start-UpdateFieldPrompt {
+    param([Parameter(Mandatory)][string]$FieldName, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$FieldLimit = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'update_field'; Field = $FieldName; UserId = $UserId; FieldLimit = $FieldLimit }
+    $limit = Get-EffectiveFieldLimit -FieldLimit $FieldLimit
+    $limitText = if ($limit -gt 0) { " (الحد: $limit حرفًا)" } else { "" }
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل القيمة الجديدة لـ '$FieldName'$limitText`:" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-UpdateField {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "")
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    $limit = 0
+    if ($state.ContainsKey('FieldLimit')) { $limit = [int]$state.FieldLimit }
+    if (-not (Test-FieldLength -Value $Value -ChatId $ChatId -FieldLimit $limit -ReplyMarkup (Get-CancelKeyboard))) { return }
+    Clear-PendingState -ChatId $ChatId
+    Invoke-SetValues -Values @{ $state.Field = $Value } -ChatId $ChatId -UserId $state.UserId
+}
+
+function Set-LayerAutoHide {
+    <# Attaches (or replaces) an auto-hide timer on a layer that is already on
+       air. Replacing rather than stacking matters: two timers on one layer
+       would hide it twice, the second one possibly killing a later graphic. #>
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][int]$Seconds,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if ($Seconds -le 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "المدة يجب أن تكون أكبر من صفر." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    foreach ($existing in @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq $Layer })) {
+        $script:AutoHideQueue.Remove($existing) | Out-Null
+    }
+    $script:AutoHideQueue.Add(@{ Layer = $Layer; At = (Get-Date).AddSeconds($Seconds); ChatId = $ChatId; UserId = $UserId })
+    Write-BridgeLog "User $UserId set an auto-hide timer of $Seconds s on layer $Layer"
+    Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text "⏱ سيتم إخفاء الطبقة $Layer بعد $(Format-Duration -Seconds $Seconds)." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Complete-TimedShowCustom {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "")
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    $seconds = 0
+    if (-not [int]::TryParse($Value.Trim(), [ref]$seconds) -or $seconds -le 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل رقمًا صحيحًا أكبر من صفر (بالثواني)." -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    Clear-PendingState -ChatId $ChatId
+    Start-ShowFlow -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $state.UserId -AutoHideSeconds $seconds
+}
+
+function Complete-LayerTimerCustom {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "")
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    $seconds = 0
+    if (-not [int]::TryParse($Value.Trim(), [ref]$seconds) -or $seconds -le 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل رقمًا صحيحًا أكبر من صفر (بالثواني)." -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    Clear-PendingState -ChatId $ChatId
+    Set-LayerAutoHide -Layer ([int]$state.Layer) -Seconds $seconds -ChatId $ChatId -UserId $state.UserId
+}
+
+function Invoke-RepeatLastShow {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not $script:LastShow.ContainsKey($ChatId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "لا يوجد إظهار سابق لإعادته." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $last = $script:LastShow[$ChatId]
+    $templateIndex = Get-TemplateIndex -Key ([string]$last.Key)
+    if ($templateIndex -lt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب السابق لم يعد موجودًا في ملف القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $last.Variables
+}
+
+function Get-MyOperationsKeyboard {
+    param([Parameter(Mandatory)][long]$UserId)
+    $rows = @()
+    if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
+        $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
+    }
+    $rows += , @((New-Button '🔄 تحديث' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Test-NewsTickerFilePathSetting {
+    param([AllowEmptyString()][string]$Path = '')
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathFullyQualified($Path)) { return $false }
+    if (-not [IO.Path]::GetExtension($Path).Equals('.txt', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    try { [void][IO.Path]::GetFullPath($Path); return $true } catch { return $false }
+}
+
+function Invoke-MyOperationsCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
+    if ($history.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد عمليات تحكم مسجلة لك منذ آخر تشغيل.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('🧾 آخر عملياتك:')
+    foreach ($item in $history) {
+        $icon = switch ([string]$item.Result) { 'success' { '✅' }; 'blocked' { '⛔' }; default { '❌' } }
+        $target = if ([string]::IsNullOrWhiteSpace([string]$item.Target)) { '-' } else { [string]$item.Target }
+        $advice = if ([string]$item.Result -eq 'failed') { ' — افحص الاتصال ثم أعد المحاولة' } elseif ([string]$item.Result -eq 'blocked') { ' — راجع السياسة أو حالة Cinegy' } else { '' }
+        $lines.Add("$icon $(([datetime]$item.At).ToString('HH:mm:ss')) $($item.Action) · $target · طبقة $($item.Layer) · $($item.DurationMs)ms$advice")
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+}
+
+function Invoke-RetryLastShowAttempt {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $key = [string]$UserId
+    if (-not $script:LastShowAttempts.ContainsKey($key)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد محاولة عرض قابلة للمراجعة.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    $attempt = $script:LastShowAttempts[$key]
+    $templateIndex = Get-TemplateIndex -Key ([string]$attempt.Key)
+    if ($templateIndex -lt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'القالب المستخدم في المحاولة لم يعد موجودًا.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        return
+    }
+    Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId `
+        -InitialValues $attempt.Variables -AutoHideSeconds ([int]$attempt.AutoHideSeconds) -ReviewImmediately
+}
+
+function Invoke-PresetShow {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $t = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $t -or $PresetIndex -ge $t.Presets.Count) {
+        Send-TelegramMessage -ChatId $ChatId -Text "النص الجاهز غير موجود." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $preset = $t.Presets[$PresetIndex]
+    $variables = @{}
+    for ($i = 0; $i -lt $t.Fields.Count -and $i -lt $preset.Values.Count; $i++) {
+        $variables[[string]$t.Fields[$i]] = [string]$preset.Values[$i]
+    }
+    Start-ShowFlow -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId -InitialValues $variables -ReviewImmediately
+}
+
+function Show-PresetAdminTemplate {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب لم يعد موجودًا." -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
+        return
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "⚡ النصوص الجاهزة للقالب '$($template.Key)'`nاختر نصًا لإدارته أو أنشئ نصًا جديدًا:" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $TemplateIndex)
+}
+
+function Show-PresetAdminReview {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
+    $actionLabel = switch ([string]$State.Action) {
+        'create' { 'إنشاء' }; 'edit' { 'تعديل القيم' }; 'rename' { 'إعادة تسمية' }; 'delete' { 'حذف' }
+    }
+    $lines = @("🔎 مراجعة تغيير النص الجاهز", "العملية: $actionLabel", "القالب: $($State.TemplateKey)")
+    if ($State.Name) { $lines += "الاسم: $($State.Name)" }
+    if ($State.Action -in @('create', 'edit')) {
+        for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
+            $value = if ($i -lt @($State.Values).Count) { [string]$State.Values[$i] } else { '' }
+            $lines += "• $($State.Fields[$i]): $value"
+        }
+    }
+    $lines += ''
+    $lines += 'لن يُعدّل ملف القوالب حتى تضغط حفظ التغيير.'
+    $State.Mode = 'preset_admin_review'
+    Set-PendingState -ChatId $ChatId -State $State
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-PresetReviewKeyboard)
+}
+
+function Start-PresetAdminCreate {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) { return }
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = 'preset_admin_name'; Action = 'create'; TemplateIndex = $TemplateIndex
+        TemplateKey = [string]$template.Key; PresetIndex = -1; UserId = $UserId
+        Fields = @($template.Fields); Values = @(); Name = ''; Index = 0
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل اسم النص الجاهز الجديد للقالب '$($template.Key)':" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Start-PresetAdminEditValues {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template -or $PresetIndex -lt 0 -or $PresetIndex -ge @($template.Presets).Count) { return }
+    $state = @{
+        Mode = 'preset_admin_values'; Action = 'edit'; TemplateIndex = $TemplateIndex
+        TemplateKey = [string]$template.Key; PresetIndex = $PresetIndex; UserId = $UserId
+        Fields = @($template.Fields); Values = @(); Name = [string]$template.Presets[$PresetIndex].Name; Index = 0
+    }
+    if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+    Set-PendingState -ChatId $ChatId -State $state
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-PresetAdminText {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    if ($state.Mode -eq 'preset_admin_name') {
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            Send-TelegramMessage -ChatId $ChatId -Text "الاسم لا يمكن أن يكون فارغًا." -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+        $state.Name = $Value.Trim()
+        if ($state.Action -eq 'rename') { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        $state.Mode = 'preset_admin_values'
+        if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    if ($state.Mode -eq 'preset_admin_values') {
+        $state.Values = @($state.Values) + @([string]$Value)
+        $state.Index = [int]$state.Index + 1
+        if ($state.Index -ge $state.Fields.Count) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
+        Set-PendingState -ChatId $ChatId -State $state
+        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل ($($state.Index + 1)/$($state.Fields.Count)):`n$($state.Fields[$state.Index])" -ReplyMarkup (Get-CancelKeyboard)
+    }
+}
+
+function Confirm-PresetAdminChange {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'preset_admin_review' -or [long]$state.UserId -ne $UserId) {
+        Send-TelegramMessage -ChatId $ChatId -Text "انتهت مراجعة التغيير. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $templateIndex = [int]$state.TemplateIndex
+    $result = Save-TemplatePresetChange -TemplateKey ([string]$state.TemplateKey) -PresetIndex ([int]$state.PresetIndex) -Action ([string]$state.Action) -Name ([string]$state.Name) -Values @($state.Values)
+    Clear-PendingState -ChatId $ChatId
+    if ($result.Success) {
+        Write-BridgeLog "Admin $UserId applied preset $($state.Action) to template '$($state.TemplateKey)'"
+        Add-AuditEntry "⚡ Preset $($state.Action) / $($state.TemplateKey) - admin $UserId"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ تغيير النص الجاهز، وأُنشئت نسخة احتياطية." -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ التغيير: $($result.Error)" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+    }
+}
+
+function Invoke-TemplatesCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $store = Get-TemplateStore
+    if ($store.Order.Count -eq 0) {
+        $text = "لا توجد قوالب معرّفة حاليًا."
+        if ($store.Errors.Count -gt 0) { $text += "`n⚠️ " + ($store.Errors -join "`n⚠️ ") }
+        Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $lines = foreach ($key in $store.Order) {
+        $t = $store.Map[$key]
+        "$($t.Key) (طبقة $($t.Layer)): $($t.Description)  الحقول: $($t.Fields -join ', ')"
+    }
+    $text = ($lines -join "`n")
+    if ($store.Errors.Count -gt 0) { $text += "`n`n⚠️ " + ($store.Errors -join "`n⚠️ ") }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+

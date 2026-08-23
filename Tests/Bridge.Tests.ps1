@@ -787,6 +787,12 @@ Describe 'News ticker management' {
         @($keyboard.keyboard[0].text) | Should -Contain '📰 إدارة شريط الأخبار'
     }
 
+    It 'shows news management inside the main inline menu' {
+        $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $callbacks | Should -Contain 'menu:news'
+    }
+
     It 'allows one user to hold the draft lock and reports the live items' {
         $first = Start-NewsTickerDraft -ChatId 101 -UserId 101
         $second = Start-NewsTickerDraft -ChatId 202 -UserId 202

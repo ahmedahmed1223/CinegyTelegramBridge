@@ -2738,6 +2738,9 @@ function Get-MainMenuKeyboard {
     $rows += , $fourthRow
     $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
     $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops') )
+    if (Get-Setting 'EnableNewsTickerManagement') {
+        $rows += , @( (New-Button "📰 إدارة شريط الأخبار" 'menu:news') )
+    }
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )

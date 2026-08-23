@@ -1055,6 +1055,23 @@ function Edit-TelegramMessageText {
     return $true
 }
 
+function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Index,[int]$MessageId=0,[string]$CallbackQueryId='')
+    <# One message per news item: full text in the body, move/edit/delete
+       buttons carrying the item's CURRENT index. Re-rendered in place after
+       every move so the buttons can never point at a stale index. #>
+    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return}
+    $count=@($draft.Items).Count
+    $rows=@(,@(@{text='⬆️ تحريك لأعلى';callback_data="news:up:$Index"},@{text='⬇️ تحريك لأسفل';callback_data="news:down:$Index"}))
+    $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$Index"},@{text='🗑 حذف';callback_data="news:delete:$Index"})
+    $rows+=,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'})
+    $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
+    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){
+        if($CallbackQueryId){Confirm-TelegramCallback -CallbackQueryId $CallbackQueryId -Text "الموضع $($Index+1) من $count"}
+        return
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
+}
+
 function Get-NewsTickerReorderKeyboard { param([long]$UserId)
     <# One row per draft item: ⬆️ moves it up, the numbered label opens the
        per-item editor, ⬇️ moves it down. The whole list lives in ONE message
@@ -6229,25 +6246,18 @@ function Invoke-CallbackQuery {
         }
         'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }
         'news:item:*' {
-            $i=[int]$data.Substring(10);$draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft -or $i-ge @($draft.Items).Count){break}
-            <# Full text goes in the message BODY (not the button), with move
-               buttons here so the operator never needs to return to the list
-               just to reposition one item. #>
-            $rows=@(,@(@{text='⬆️ تحريك لأعلى';callback_data="news:up:$i"},@{text='⬇️ تحريك لأسفل';callback_data="news:down:$i"}))
-            $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$i"},@{text='🗑 حذف';callback_data="news:delete:$i"})
-            $rows+=,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'})
-            Send-TelegramMessage -ChatId $chatId -Text "📰 الخبر $(($i+1)) من $(@($draft.Items).Count):`n`n$($draft.Items[$i])" -ReplyMarkup @{inline_keyboard=$rows};break
+            $i=[int]$data.Substring(10);Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index $i;break
         }
         'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
         'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
         'news:up:*' {
             $i=[int]$data.Substring(8)
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "⬆️ صار في الموضع $(($i+1)-1) من $((@(Get-NewsTickerDraft -UserId $userId).Items).Count)"}
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i-1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:down:*' {
             $i=[int]$data.Substring(10)
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "⬇️ صار في الموضع $(($i+1)+1) من $((@(Get-NewsTickerDraft -UserId $userId).Items).Count)"}
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
         'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.0.0 — 2026-08-23
+
+- Splits `TelegramBridge.ps1` from 7407 lines into a 973-line orchestrator plus 14 dot-sourced declaration files under `Parts/`. Parts are dot-sourced rather than imported because they must share the script scope and `$script:` state; only declarations move, while the 64 ordered top-level initialization statements stay put because they depend on `$config`.
+- Replaces all 40 hand-counted `$data.Substring(N)` callback parses with `Get-CallbackArg $data '<prefix>'`, making the off-by-N class that broke news reordering unrepresentable. A renamed prefix now throws instead of slicing silently.
+- Backs off Cinegy layer reconciliation while Air is unreachable: an unverifiable layer doubles the wait up to `CinegyStateBackoffMaxSeconds` (default 60) and the first success clears it, so a dead engine no longer freezes the polling loop for layers x timeout on every interval. The long-poll timeout follows the widened interval.
+- Honours Telegram's `retry_after` on HTTP 429 instead of retrying at a fixed 400 ms, and raises sends to three attempts, so admin broadcasts and chunked long messages are no longer dropped under flood limits. Callback acknowledgements now use the same wrapper. `Get-TelegramUpdates` deliberately stays outside it, because the polling loop already is its retry policy.
+- Renames the `Write-AuditRecord` parameter that shadowed the automatic `$Event` variable. The emitted audit field name is unchanged.
+- Fails the verification gate on analyzer warnings, not only errors, and excludes `dist/` and `artifacts/` so stale release copies stop reporting findings already fixed. Clears the six real findings this exposed, including a `Publish-NewsTickerDraft` parameter that was never used and a DPAPI test teardown that restored into a local and therefore did nothing.
+- Unpacks the semicolon-chained news draft functions, verified behaviour-preserving by comparing parsed token streams.
+- Test suite grows from 307 to 328.
 ## 4.2.44 — 2026-08-22
 
 - Refreshes the display name of an already tracked external Cinegy scene when later live status exposes its actual `.cintitle` filename.

@@ -157,7 +157,7 @@ function Write-AirOperationResult {
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
     Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
-    Write-AuditRecord -OperationId $OperationId -Event air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
+    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level
 }
 

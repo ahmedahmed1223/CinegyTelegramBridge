@@ -574,7 +574,7 @@ Describe 'Air operation result logging' {
     }
 
     It 'redacts secrets and keeps every audit entry on one JSONL line' {
-        Write-AuditRecord -OperationId 'audit-secret' -Event settings_change -Result success -UserId 20 -Message "token 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345`nnext"
+        Write-AuditRecord -OperationId 'audit-secret' -EventName settings_change -Result success -UserId 20 -Message "token 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345`nnext"
 
         $lines = @(Get-Content -LiteralPath $script:auditFile)
         $lines.Count | Should -Be 1

@@ -378,7 +378,7 @@ function Write-AuditRecord {
        the short in-memory list displayed in Telegram. #>
     param(
         [Parameter(Mandatory)][string]$OperationId,
-        [Parameter(Mandatory)][string]$Event,
+        [Parameter(Mandatory)][string]$EventName,
         [Parameter(Mandatory)][string]$Result,
         [long]$UserId = 0,
         [long]$ChatId = 0,
@@ -391,7 +391,7 @@ function Write-AuditRecord {
     $record = [ordered]@{
         timestampUtc = [DateTime]::UtcNow.ToString('o')
         operationId  = Protect-SensitiveText (($OperationId -replace '[\r\n]+', ' ').Trim())
-        event        = Protect-SensitiveText (($Event -replace '[\r\n]+', ' ').Trim())
+        event        = Protect-SensitiveText (($EventName -replace '[\r\n]+', ' ').Trim())
         result       = Protect-SensitiveText (($Result -replace '[\r\n]+', ' ').Trim())
         userId       = $UserId
         chatId       = $ChatId
@@ -405,7 +405,7 @@ function Write-AuditRecord {
         Add-Content -LiteralPath $script:auditFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8
     }
     catch {
-        Write-BridgeLog "AUDIT_WRITE_FAILED id=$OperationId event=$Event error=$($_.Exception.Message)" 'ERROR'
+        Write-BridgeLog "AUDIT_WRITE_FAILED id=$OperationId event=$EventName error=$($_.Exception.Message)" 'ERROR'
     }
 }
 
@@ -416,7 +416,7 @@ function Add-AuditEntry {
     $script:AuditTrail.Add("$(Get-Date -Format 'HH:mm:ss') $Message")
     $max = Get-SettingInt 'AuditTrailSize' 1
     while ($script:AuditTrail.Count -gt $max) { $script:AuditTrail.RemoveAt(0) }
-    Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -Event activity -Result success -Message $Message
+    Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -EventName activity -Result success -Message $Message
 }
 
 function Get-TextElementCount {

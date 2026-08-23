@@ -796,7 +796,7 @@ function Clear-DiagnosticLog {
             [IO.File]::WriteAllText($script:auditFile, '', [Text.UTF8Encoding]::new($false))
         }
         $operationId = "audit-$([guid]::NewGuid().ToString('N'))"
-        Write-AuditRecord -OperationId $operationId -Event log_clear -Result success -UserId $UserId -Action CLEAR -Target $Kind -Message 'administrator confirmed log cleanup'
+        Write-AuditRecord -OperationId $operationId -EventName log_clear -Result success -UserId $UserId -Action CLEAR -Target $Kind -Message 'administrator confirmed log cleanup'
         Write-BridgeLog "Administrator user $UserId cleared $Kind log history" 'WARN'
         return $true
     }

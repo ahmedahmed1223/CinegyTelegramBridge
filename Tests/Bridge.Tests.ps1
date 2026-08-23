@@ -793,6 +793,29 @@ Describe 'News ticker management' {
         $callbacks | Should -Contain 'menu:news'
     }
 
+    It 'shows the current news file as a clearly named administrator setting' {
+        $keyboard = Get-SettingsKeyboard
+        $labels = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.text } })
+        @($labels | Where-Object { $_ -like '📰 ملف الأخبار*' }).Count | Should -Be 1
+    }
+
+    It 'accepts only an absolute txt path for the news file setting' {
+        Test-NewsTickerFilePathSetting -Path 'news.txt' | Should -BeFalse
+        Test-NewsTickerFilePathSetting -Path 'D:\ticker\news.json' | Should -BeFalse
+        Test-NewsTickerFilePathSetting -Path 'D:\ticker\news.txt' | Should -BeTrue
+    }
+
+    It 'does not save an invalid news file path submitted through settings' {
+        $before = [string](Get-Setting 'NewsFilePath')
+        Mock Save-Config { }
+        Set-PendingState -ChatId 101 -State @{ Mode='setting_text'; Name='NewsFilePath'; UserId=101 }
+
+        Complete-SettingText -ChatId 101 -Value 'relative\news.txt'
+
+        Get-Setting 'NewsFilePath' | Should -Be $before
+        $config.Settings.NewsFilePath = $before
+    }
+
     It 'allows one user to hold the draft lock and reports the live items' {
         $first = Start-NewsTickerDraft -ChatId 101 -UserId 101
         $second = Start-NewsTickerDraft -ChatId 202 -UserId 202

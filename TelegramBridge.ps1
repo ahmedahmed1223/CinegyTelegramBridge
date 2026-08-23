@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '4.3.0'
+$script:BridgeVersion = '4.3.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -1005,7 +1005,7 @@ function Remove-NewsTickerDraftItem { param([long]$ChatId,[long]$UserId,[int]$In
 }
 function Move-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[int]$Delta)
     $draft=Get-NewsTickerDraft -UserId $UserId;$target=$Index+$Delta;if(-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count){return $false}
-    $items=@($draft.Items);$swap=$items[$target];$items[$target]=$items[$Index];$items[$Index]=$swap;$draft.Items=$items;return(Save-NewsTickerDraft)
+    $items=@($draft.Items);$swap=$items[$target];$items[$target]=$items[$Index];$items[$Index]=$swap;$draft.Items=$items;$draft.UpdatedAt=(Get-Date).ToString('o');return(Save-NewsTickerDraft)
 }
 
 function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[ValidateSet('replace','append')][string]$Mode='replace')
@@ -1041,6 +1041,47 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     $rows+=,@(@{text='🔄 تحديث';callback_data='news:refresh'},@{text='⬅️ الرئيسية';callback_data='menu'});return @{inline_keyboard=$rows}
 }
 
+function Edit-TelegramMessageText {
+    <# Edits an existing message in place so interactive screens (e.g. the
+       news reorder list) never pile up duplicate messages with stale
+       buttons. Falls back to returning $false so callers can resend. #>
+    param([Parameter(Mandatory)][long]$ChatId,[Parameter(Mandatory)][int]$MessageId,
+        [Parameter(Mandatory)][string]$Text,[hashtable]$ReplyMarkup)
+    $body = @{ chat_id = $ChatId; message_id = $MessageId; text = $Text }
+    if ($ReplyMarkup) { $body.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if (-not $request.Success) { Write-BridgeLog "Failed to edit Telegram message ${MessageId}: $($request.Error)" "WARN"; return $false }
+    return $true
+}
+
+function Get-NewsTickerReorderKeyboard { param([long]$UserId)
+    <# One row per draft item: ⬆️ moves it up, the numbered label opens the
+       per-item editor, ⬇️ moves it down. The whole list lives in ONE message
+       that is edited in place, so indexes can never go stale. #>
+    $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
+    if($draft){$count=@($draft.Items).Count
+        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 30){$label=$label.Substring(0,29)+'…'}
+            $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
+            $rows+=,@($row)}}
+    else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}
+    $rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
+}
+
+function Get-NewsTickerReorderText { param([long]$UserId)
+    $draft=Get-NewsTickerDraft -UserId $UserId
+    if(-not $draft){return '📝 الترتيب والتعديل'+"`n"+'⚠️ لا توجد مسودة مملوكة لك.'}
+    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`nاضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط نص الخبر لتعديله أو حذفه."
+}
+
+function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)
+    <# Edits the originating message when possible so repeated ⬆️/⬇️ presses
+       reuse a single message instead of flooding the chat with stale lists. #>
+    $text=Get-NewsTickerReorderText -UserId $UserId;$kb=Get-NewsTickerReorderKeyboard -UserId $UserId
+    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $kb)){return}
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb
+}
+
 function Get-NewsTickerBackupsKeyboard {
     $rows=@();$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10)
     for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text=$files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss');callback_data="news:restore:$i"})};$rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
@@ -1066,7 +1107,7 @@ function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]
 function Complete-NewsTickerEditText { param([long]$ChatId,[long]$UserId,[string]$Value)
     $state=Get-PendingState -ChatId $ChatId;if(-not $state -or $state.Mode-ne'news_edit_text'){return};$index=[int]$state.Index;Clear-PendingState -ChatId $ChatId
     $ok=Update-NewsTickerDraftItem -UserId $UserId -Index $index -Text $Value
-    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){'✅ حُدّث الخبر في المسودة.'}else{'❌ تعذر تعديل الخبر.'}) -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $UserId)
+    Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ حُدّث الخبر في المسودة.'}else{'❌ تعذر تعديل الخبر.'});Show-NewsTickerReorderScreen -ChatId $chatId -UserId $UserId
 }
 
 function Receive-NewsTickerImport { param($Document,[long]$ChatId,[long]$UserId)
@@ -3220,7 +3261,8 @@ function Get-SettingsKeyboard {
             $rows += , @( (New-Button "$mark $lock$name" "cfg:t:$name") )
         }
         elseif ($script:DefaultSettings[$name] -is [string]) {
-            $rows += , @( (New-Button "🔤 $name = $value" "cfg:s:$name") )
+            $label = if ($name -eq 'NewsFilePath') { "📰 ملف الأخبار = $value" } else { "🔤 $name = $value" }
+            $rows += , @( (New-Button $label "cfg:s:$name") )
         }
         else {
             $rows += , @( (New-Button "🔢 $name = $(Format-SettingDisplay -Name $name -Value $value)" "cfg:v:$name") )
@@ -3397,7 +3439,10 @@ function Show-SettingChoices {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_text'; Name = $Name; UserId = $UserId }
-    $prompt = "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):"
+    $prompt = if ($Name -eq 'NewsFilePath') {
+        "أرسل المسار المطلق لملف الأخبار بصيغة TXT.`nالحالي: $(Get-Setting $Name)`nالافتراضي: $($script:DefaultSettings[$Name])`nلن يتم إنشاء الملف أو تعديله في هذه الخطوة."
+    }
+    else { "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" }
     Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -3408,6 +3453,11 @@ function Complete-SettingText {
     $trimmed = $Value.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+        Clear-PendingState -ChatId $ChatId
+        return
+    }
+    if ($state.Name -eq 'NewsFilePath' -and -not (Test-NewsTickerFilePathSetting -Path $trimmed)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ يجب إدخال مسار مطلق ينتهي بـ .txt، مثل:`nD:\cingy cg\ticker msg\news.txt`nلم يتغيّر الإعداد." -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return
     }
@@ -4286,6 +4336,13 @@ function Get-MyOperationsKeyboard {
     }
     $rows += , @((New-Button '🔄 تحديث' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
     return @{ inline_keyboard = $rows }
+}
+
+function Test-NewsTickerFilePathSetting {
+    param([AllowEmptyString()][string]$Path = '')
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathFullyQualified($Path)) { return $false }
+    if (-not [IO.Path]::GetExtension($Path).Equals('.txt', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    try { [void][IO.Path]::GetFullPath($Path); return $true } catch { return $false }
 }
 
 function Invoke-MyOperationsCommand {
@@ -6170,15 +6227,21 @@ function Invoke-CallbackQuery {
             $result=Publish-NewsTickerDraft -ChatId $chatId -UserId $userId
             Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.'}else{"❌ لم يتم النشر: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
-        'news:list' { Send-TelegramMessage -ChatId $chatId -Text 'اختر خبرًا لتعديله أو ترتيب موقعه:' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }
         'news:item:*' {
             $i=[int]$data.Substring(10);$draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft -or $i-ge @($draft.Items).Count){break}
-            Send-TelegramMessage -ChatId $chatId -Text "$(($i+1)). $($draft.Items[$i])" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✏️ تعديل';callback_data="news:edit:$i"},@{text='🗑 حذف';callback_data="news:delete:$i"}),,@(@{text='⬆️';callback_data="news:up:$i"},@{text='⬇️';callback_data="news:down:$i"}),,@(@{text='⬅️ القائمة';callback_data='news:list'}))};break
+            Send-TelegramMessage -ChatId $chatId -Text "$(($i+1)). $($draft.Items[$i])" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✏️ تعديل';callback_data="news:edit:$i"},@{text='🗑 حذف';callback_data="news:delete:$i"}),,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))};break
         }
         'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
-        'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ حُذف من المسودة.'}else{'⛔ الحذف غير مسموح.'}) -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
-        'news:up:*' { Move-NewsTickerDraftItem -UserId $userId -Index ([int]$data.Substring(8)) -Delta -1|Out-Null;Send-TelegramMessage -ChatId $chatId -Text 'تم تحديث الترتيب.' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
-        'news:down:*' { Move-NewsTickerDraftItem -UserId $userId -Index ([int]$data.Substring(10)) -Delta 1|Out-Null;Send-TelegramMessage -ChatId $chatId -Text 'تم تحديث الترتيب.' -ReplyMarkup (Get-NewsTickerItemsKeyboard -UserId $userId);break }
+        'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ حُذف من المسودة.'}else{'⛔ الحذف غير مسموح.'});Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId;break }
+        'news:up:*' {
+            $i=[int]$data.Substring(8);if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
+            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
+        }
+        'news:down:*' {
+            $i=[int]$data.Substring(10);if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
+            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
+        }
         'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
         'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm'},@{text='إلغاء';callback_data='news:refresh'}))};break }
         'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }

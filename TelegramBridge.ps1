@@ -112,7 +112,6 @@ $script:DefaultSettings = [ordered]@{
     NewsItemSeparator          = '|'
     NewsMaxItemLength          = 1000
     NewsMaxItems               = 200
-    NewsButtonScroll           = $false   # ⬅️➡️ marquee buttons for long news text in the reorder list
     NewsImportMaxBytes         = 1048576
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
@@ -972,26 +971,7 @@ function Get-NewsTickerDraft { param([long]$UserId = 0)
 
 function Remove-NewsTickerDraft {
     $script:NewsTickerDraft = $null
-    $script:NewsTickerScrollOffsets = @{}
     Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction SilentlyContinue
-}
-
-# Per-item scroll windows used to "marquee" long news text across its button
-# label (Telegram inline buttons cannot scroll on their own); each ⬅️➡️ press
-# advances the visible window for that item.
-$script:NewsTickerScrollOffsets = @{}
-$script:NewsTickerScrollWidth = 28
-$script:NewsTickerScrollStep = 24
-
-function Get-NewsTickerItemLabel { param([long]$UserId,[int]$Index,[int]$MaxChars)
-    $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft){return ''}
-    $item=[string]$draft.Items[$Index]
-    if($item.Length-le ($script:NewsTickerScrollWidth+1)){return "$(($Index+1)). $item"}
-    $key="$UserId`:$Index"
-    $offset=0;if($script:NewsTickerScrollOffsets.ContainsKey($key)){$offset=$script:NewsTickerScrollOffsets[$key]}
-    if($offset-gt [Math]::Max(0,$item.Length-$script:NewsTickerScrollWidth)){$offset=0} # reset after edits shrink the item
-    $window=$item.Substring($offset,[Math]::Min($script:NewsTickerScrollWidth,$item.Length-$offset))
-    return "$(($Index+1)). …$window…"
 }
 
 function Start-NewsTickerDraft {
@@ -1080,17 +1060,9 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
        per-item editor, ⬇️ moves it down. The whole list lives in ONE message
        that is edited in place, so indexes can never go stale. #>
     $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
-    if($draft){$count=@($draft.Items).Count;$scrollEnabled=[bool](Get-Setting 'NewsButtonScroll')
-        for($i=0;$i-lt $count;$i++){$label=Get-NewsTickerItemLabel -UserId $UserId -Index $i -MaxChars 30
-            $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}}
-            if($scrollEnabled -and [string]$draft.Items[$i].Length-gt ($script:NewsTickerScrollWidth+1)){
-                $key="$UserId`:$i";$offset=0;if($script:NewsTickerScrollOffsets.ContainsKey($key)){$offset=$script:NewsTickerScrollOffsets[$key]}
-                $row+=,@{text='⬅️';callback_data="news:scrollback:$i"};$row+=,@{text=$label;callback_data="news:item:$i"};$row+=,@{text='➡️';callback_data="news:scrollfwd:$i"}
-            } else {
-                if([string]$draft.Items[$i].Length-gt 31){$label="$(($i+1)). $(([string]$draft.Items[$i]).Substring(0,30))…"}
-                $row+=,@{text=$label;callback_data="news:item:$i"}
-            }
-            if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
+    if($draft){$count=@($draft.Items).Count
+        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 30){$label=$label.Substring(0,29)+'…'}
+            $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
             $rows+=,@($row)}}
     else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}
     $rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
@@ -6262,17 +6234,6 @@ function Invoke-CallbackQuery {
         }
         'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
         'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ حُذف من المسودة.'}else{'⛔ الحذف غير مسموح.'});Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId;break }
-        'news:scrollback:*' {
-            $i=[int]$data.Substring(16);$key="$userId`:$i";$max=[Math]::Max(0,[string](Get-NewsTickerDraft -UserId $userId).Items[$i].Length-$script:NewsTickerScrollWidth)
-            $offset=0;if($script:NewsTickerScrollOffsets.ContainsKey($key)){$offset=$script:NewsTickerScrollOffsets[$key]}
-            $script:NewsTickerScrollOffsets[$key]=[Math]::Max(0,$offset-$script:NewsTickerScrollStep);Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break
-        }
-        'news:scrollfwd:*' {
-            $i=[int]$data.Substring(14);$key="$userId`:$i";$item=[string](Get-NewsTickerDraft -UserId $userId).Items[$i];$max=[Math]::Max(0,$item.Length-$script:NewsTickerScrollWidth)
-            $offset=0;if($script:NewsTickerScrollOffsets.ContainsKey($key)){$offset=$script:NewsTickerScrollOffsets[$key]}
-            if($offset-ge $max){$script:NewsTickerScrollOffsets[$key]=0}else{$script:NewsTickerScrollOffsets[$key]=[Math]::Min($max,$offset+$script:NewsTickerScrollStep)}
-            Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break
-        }
         'news:up:*' {
             $i=[int]$data.Substring(8);if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break

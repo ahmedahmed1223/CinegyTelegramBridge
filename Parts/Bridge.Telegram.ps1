@@ -150,12 +150,13 @@ function Show-MainMenu {
        half-finished flow, re-pins the persistent keyboard, then shows the
        inline menu. A message can only carry one reply_markup, hence two
        sends. #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Intro = "اختر من القائمة:")
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Intro = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
     if (Get-Setting 'EnablePersistentMenuButton') {
         Send-TelegramMessage -ChatId $ChatId -Text "استخدم زر 🏠 القائمة أسفل الشاشة في أي وقت للرجوع إلى هنا." -ReplyMarkup (Get-PersistentReplyKeyboard)
     }
+    if ([string]::IsNullOrWhiteSpace($Intro)) { $Intro = Get-MainMenuIntro }
     Send-TelegramMessage -ChatId $ChatId -Text $Intro -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

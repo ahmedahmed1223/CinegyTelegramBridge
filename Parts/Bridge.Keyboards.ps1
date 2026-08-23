@@ -21,6 +21,30 @@ function Get-MainMenuKeyboard {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
+
+    # What is on air comes FIRST, before anything that puts more on air.
+    # This menu is what an operator opens when a wrong graphic is live, and
+    # every row above the fix is a row they must scroll past to reach it.
+    if ($script:OnAir.Count -gt 0) {
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer") )
+            # A timer can be attached to something already live, not just at
+            # the moment it is put on air.
+            if (Get-Setting 'EnableTimedShow') {
+                $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
+                $label = if ($pending.Count -gt 0) {
+                    "⏱ $([int](($pending[0].At - (Get-Date)).TotalSeconds)) ث"
+                }
+                else { "⏱ مؤقت" }
+                $liveRow += (New-Button $label "timer:$layer")
+            }
+            $rows += , $liveRow
+        }
+        if (Get-Setting 'EnableHideAll') {
+            $rows += , @( (New-Button "🚨 إخفاء الكل" "menu:hideall") )
+        }
+    }
+
     $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers") )
     $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
@@ -46,27 +70,12 @@ function Get-MainMenuKeyboard {
 
     $rows += , @( (New-Button "🙈 اخفاء طبقة" "menu:hide"), (New-Button "🚪 خروج من المشهد" "menu:exit") )
 
-    # One tap per live layer, so taking a wrong graphic off air is immediate
-    # and the operator can see at a glance what the bridge believes is up.
-    if ($script:OnAir.Count -gt 0) {
-        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer") )
-            # A timer can be attached to something already live, not just at
-            # the moment it is put on air.
-            if (Get-Setting 'EnableTimedShow') {
-                $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
-                $label = if ($pending.Count -gt 0) {
-                    "⏱ $([int](($pending[0].At - (Get-Date)).TotalSeconds)) ث"
-                }
-                else { "⏱ مؤقت" }
-                $liveRow += (New-Button $label "timer:$layer")
-            }
-            $rows += , $liveRow
-        }
-    }
-
+    # Live layers and the emergency hide are rendered at the top of this
+    # keyboard instead of here; see the on-air block above.
     $thirdRow = @()
-    if (Get-Setting 'EnableHideAll') { $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall") }
+    if ((Get-Setting 'EnableHideAll') -and $script:OnAir.Count -eq 0) {
+        $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall")
+    }
     if ($script:LastShow.ContainsKey($ChatId)) { $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat") }
     if ($thirdRow.Count -gt 0) { $rows += , $thirdRow }
 
@@ -89,22 +98,48 @@ function Get-MainMenuKeyboard {
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $pendingCount = $script:PendingApprovals.Count
         $pendingLabel = if ($pendingCount -gt 0) { "👤 طلبات الوصول ($pendingCount)" } else { "👤 طلبات الوصول" }
+        # Settings and access requests stay one tap away because they are used
+        # during a shift. The rest is configuration an operator opens rarely,
+        # and five permanent rows of it pushed the live controls off screen.
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
-        $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
-        $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
-        $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
-
-        if (Get-Setting 'EnableLiveRelay') {
-            $relayRunning = [bool](Get-RunningRelayProcess)
-            $relayLabel = if ($relayRunning) { "⏹ إيقاف البث" } else { "▶️ بدء البث" }
-            $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
-            $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
-        }
-
-        $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
-        if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
-        $rows += , $adminRow
+        $rows += , @( (New-Button "🗂 أدوات الإدارة" "menu:admintools") )
     }
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-MainMenuIntro {
+    <# The line above the main menu. It used to read "اختر من القائمة:", which
+       tells the operator nothing they cannot already see. Saying what is on
+       air instead answers the question they actually opened the menu with,
+       without spending a tap on ℹ️ الحالة. #>
+    if ($script:OnAir.Count -eq 0) { return '⚫️ لا شيء على الهواء.' }
+    $names = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+        "$layer · $($script:OnAir[$layer].Key)"
+    }
+    return "🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')"
+}
+
+function Get-AdminToolsKeyboard {
+    <# The rarely-used administrator surface, split out of the main menu so a
+       live-layer row is never pushed below the fold by configuration. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $rows = @()
+    $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
+    $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
+    $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
+
+    if (Get-Setting 'EnableLiveRelay') {
+        $relayRunning = [bool](Get-RunningRelayProcess)
+        $relayLabel = if ($relayRunning) { "⏹ إيقاف البث" } else { "▶️ بدء البث" }
+        $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
+        $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
+    }
+
+    $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
+    if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
+    $rows += , $adminRow
+    $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
     return @{ inline_keyboard = $rows }
 }
 

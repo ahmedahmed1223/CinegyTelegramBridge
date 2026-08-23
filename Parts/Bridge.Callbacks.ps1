@@ -118,7 +118,7 @@ function Invoke-CallbackQuery {
         }
         'menu' {
             Clear-PendingState -ChatId $chatId
-            Send-TelegramMessage -ChatId $chatId -Text "القائمة الرئيسية:" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'cancel' {
@@ -342,6 +342,12 @@ function Invoke-CallbackQuery {
         }
         'menu:settings' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'menu:admintools' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text '🗂 أدوات الإدارة' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+            }
             break
         }
         'menu:usersadmin' {

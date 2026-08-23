@@ -3990,3 +3990,92 @@ Describe 'Cinegy state watchdog backoff wiring' {
         $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds | Should -Be 0
     }
 }
+
+Describe 'Main menu on-air priority' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:AutoHideQueue = @()
+        Mock Test-Admin { $false }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'puts every live layer above anything that can put more on air' {
+        $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 1; Source = 'bot' }
+
+        $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+        $firstRowData = @($rows[0] | ForEach-Object { $_.callback_data })
+
+        # The operator opens this menu when the wrong graphic is live; the fix
+        # must not sit below the buttons that caused it.
+        $firstRowData | Should -Contain 'hide:3'
+    }
+
+    It 'places the emergency hide-all directly under the live layers' {
+        $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 1; Source = 'bot' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 1; Source = 'cinegy' }
+
+        $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $hideAllIndex = [array]::IndexOf($flat, 'menu:hideall')
+        $templatesIndex = [array]::IndexOf($flat, 'menu:templates')
+
+        $hideAllIndex | Should -BeGreaterThan -1
+        $hideAllIndex | Should -BeLessThan $templatesIndex
+    }
+
+    It 'still offers hide-all when nothing is tracked as live' {
+        $flat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Contain 'menu:hideall'
+    }
+
+    It 'reports what is on air instead of a static prompt' {
+        Get-MainMenuIntro | Should -Be '⚫️ لا شيء على الهواء.'
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 1; Source = 'cinegy' }
+        Get-MainMenuIntro | Should -Match '8 · ticker'
+    }
+}
+
+Describe 'Administrator tools grouping' {
+    BeforeEach { $script:OnAir = @{} }
+
+    It 'keeps settings and access requests one tap away for an administrator' {
+        Mock Test-Admin { $true }
+        $flat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Contain 'menu:settings'
+        $flat | Should -Contain 'menu:pending'
+        $flat | Should -Contain 'menu:admintools'
+    }
+
+    It 'moves the rarely used configuration off the main menu' {
+        Mock Test-Admin { $true }
+        $flat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        foreach ($moved in @('menu:usersadmin', 'menu:presetsadmin', 'menu:templatesadmin', 'menu:audit', 'menu:diagnostics')) {
+            $flat | Should -Not -Contain $moved
+        }
+    }
+
+    It 'still reaches every moved entry from the tools screen, with a way back' {
+        Mock Test-Admin { $true }
+        $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        foreach ($moved in @('menu:usersadmin', 'menu:presetsadmin', 'menu:templatesadmin', 'menu:audit', 'menu:diagnostics')) {
+            $flat | Should -Contain $moved
+        }
+        $flat | Should -Contain 'menu'
+    }
+
+    It 'shows no administrator surface at all to an operator' {
+        Mock Test-Admin { $false }
+        $flat = @((Get-MainMenuKeyboard -ChatId 200 -UserId 200).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Not -Contain 'menu:admintools'
+        $flat | Should -Not -Contain 'menu:settings'
+    }
+}

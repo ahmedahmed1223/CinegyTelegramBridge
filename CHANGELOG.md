@@ -9,7 +9,9 @@
 - Renames the `Write-AuditRecord` parameter that shadowed the automatic `$Event` variable. The emitted audit field name is unchanged.
 - Fails the verification gate on analyzer warnings, not only errors, and excludes `dist/` and `artifacts/` so stale release copies stop reporting findings already fixed. Clears the six real findings this exposed, including a `Publish-NewsTickerDraft` parameter that was never used and a DPAPI test teardown that restored into a local and therefore did nothing.
 - Unpacks the semicolon-chained news draft functions, verified behaviour-preserving by comparing parsed token streams.
-- Test suite grows from 307 to 328.
+- Leads the main menu with what is on air: live-layer hide buttons and the emergency hide-all now render above everything that can put more on air, and the menu message reports the live state instead of a static prompt. Five rows of rarely used administrator configuration move behind a single `🗂 أدوات الإدارة` entry; settings and access requests stay one tap away, and operators see no change.
+- Refuses a `TemplateTestLayer` that registered templates already occupy, naming the clashing templates, so a template test cannot go out on a programme layer.
+- Test suite grows from 307 to 341.
 ## 4.2.44 — 2026-08-22
 
 - Refreshes the display name of an already tracked external Cinegy scene when later live status exposes its actual `.cintitle` filename.

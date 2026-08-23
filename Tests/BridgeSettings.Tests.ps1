@@ -6,29 +6,29 @@ BeforeAll {
 
 Describe 'Bridge settings module' {
     BeforeEach {
-        $defaults = [ordered]@{ Enabled=$false; Limit=12; Label='default' }
+        $script:defaults = [ordered]@{ Enabled=$false; Limit=12; Label='default' }
     }
 
     It 'uses configured values and falls back to schema defaults for missing values' {
         $config = [pscustomobject]@{ Settings=[pscustomobject]@{ Enabled=$true } }
 
-        Get-BridgeSetting -Config $config -Defaults $defaults -Name Enabled | Should -BeTrue
-        Get-BridgeSetting -Config $config -Defaults $defaults -Name Label | Should -Be 'default'
-        Get-BridgeSetting -Config $config -Defaults $defaults -Name Missing | Should -BeNullOrEmpty
+        Get-BridgeSetting -Config $config -Defaults $script:defaults -Name Enabled | Should -BeTrue
+        Get-BridgeSetting -Config $config -Defaults $script:defaults -Name Label | Should -Be 'default'
+        Get-BridgeSetting -Config $config -Defaults $script:defaults -Name Missing | Should -BeNullOrEmpty
     }
 
     It 'normalizes invalid and below-minimum integer settings at the requested boundary' {
         $invalid = [pscustomobject]@{ Settings=[pscustomobject]@{ Limit='not-a-number' } }
         $below = [pscustomobject]@{ Settings=[pscustomobject]@{ Limit=-4 } }
 
-        Get-BridgeSettingInt -Config $invalid -Defaults $defaults -Name Limit -Minimum 3 | Should -Be 3
-        Get-BridgeSettingInt -Config $below -Defaults $defaults -Name Limit -Minimum 3 | Should -Be 3
+        Get-BridgeSettingInt -Config $invalid -Defaults $script:defaults -Name Limit -Minimum 3 | Should -Be 3
+        Get-BridgeSettingInt -Config $below -Defaults $script:defaults -Name Limit -Minimum 3 | Should -Be 3
     }
 
     It 'initializes only missing settings and identity arrays without overwriting configured values' {
         $config = [pscustomobject]@{ Settings=[pscustomobject]@{ Enabled=$true } }
 
-        $changed = Initialize-BridgeSettings -Config $config -Defaults $defaults
+        $changed = Initialize-BridgeSettings -Config $config -Defaults $script:defaults
 
         $changed | Should -BeTrue
         $config.Settings.Enabled | Should -BeTrue
@@ -45,6 +45,6 @@ Describe 'Bridge settings module' {
             AdminUserIds=@(20)
         }
 
-        Initialize-BridgeSettings -Config $config -Defaults $defaults | Should -BeFalse
+        Initialize-BridgeSettings -Config $config -Defaults $script:defaults | Should -BeFalse
     }
 }

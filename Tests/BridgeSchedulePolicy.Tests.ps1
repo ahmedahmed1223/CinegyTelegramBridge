@@ -7,23 +7,23 @@ BeforeAll {
 Describe 'Schedule execution policy' {
     It 'uses the scheduled time before a retry and blocks a completed occurrence' {
         $scheduled=[datetimeoffset]'2026-08-22T10:00:00+00:00'
-        $event=@{Id='evt-1';ScheduledAt=$scheduled.ToString('o');NextAttemptAt='';CompletedExecutionKey=''}
+        $scheduleEntry=@{Id='evt-1';ScheduledAt=$scheduled.ToString('o');NextAttemptAt='';CompletedExecutionKey=''}
 
-        $due=Get-BridgeScheduleDueState -ScheduleEntry $event -Now $scheduled
+        $due=Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $scheduled
         $due.IsDue | Should -BeTrue
         $due.ExecutionKey | Should -Be "evt-1|$($scheduled.ToString('o'))"
 
-        $event.CompletedExecutionKey=$due.ExecutionKey
-        (Get-BridgeScheduleDueState -ScheduleEntry $event -Now $scheduled.AddHours(1)).IsDue | Should -BeFalse
+        $scheduleEntry.CompletedExecutionKey=$due.ExecutionKey
+        (Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $scheduled.AddHours(1)).IsDue | Should -BeFalse
     }
 
     It 'uses NextAttemptAt as the retry due time' {
         $scheduled=[datetimeoffset]'2026-08-22T10:00:00+00:00'
         $retry=$scheduled.AddMinutes(2)
-        $event=@{Id='evt-2';ScheduledAt=$scheduled.ToString('o');NextAttemptAt=$retry.ToString('o');CompletedExecutionKey=''}
+        $scheduleEntry=@{Id='evt-2';ScheduledAt=$scheduled.ToString('o');NextAttemptAt=$retry.ToString('o');CompletedExecutionKey=''}
 
-        (Get-BridgeScheduleDueState -ScheduleEntry $event -Now $retry.AddSeconds(-1)).IsDue | Should -BeFalse
-        (Get-BridgeScheduleDueState -ScheduleEntry $event -Now $retry).IsDue | Should -BeTrue
+        (Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $retry.AddSeconds(-1)).IsDue | Should -BeFalse
+        (Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $retry).IsDue | Should -BeTrue
     }
 
     It 'calculates bounded exponential retries and then a terminal failure' {

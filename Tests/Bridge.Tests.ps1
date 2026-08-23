@@ -833,7 +833,7 @@ Describe 'News ticker management' {
 
         (Get-FileHash $script:NewsLivePath -Algorithm SHA256).Hash | Should -Be $before
         (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
-        (Publish-NewsTickerDraft -ChatId 101 -UserId 101).Success | Should -BeTrue
+        (Publish-NewsTickerDraft -UserId 101).Success | Should -BeTrue
         (Get-NewsTickerSnapshot -Path $script:NewsLivePath -Separator '|').Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
         Get-NewsTickerDraft | Should -BeNullOrEmpty
     }
@@ -1577,7 +1577,7 @@ Describe 'DPAPI activation through administrator settings' {
     }
 
     AfterEach {
-        $config = $script:OriginalConfigForDpapi
+        $script:config = $script:OriginalConfigForDpapi
         $script:SecretReferences = $script:OriginalReferencesForDpapi
         $script:SecretStorePath = $script:OriginalStoreForDpapi
         $script:ConfigPath = $script:OriginalConfigPathForDpapi

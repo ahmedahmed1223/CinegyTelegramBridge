@@ -60,7 +60,7 @@ function Invoke-CallbackQuery {
         }
         'news:preview' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
-            $preview=@($draft.Items|ForEach-Object -Begin {$i=0} -Process {$i++;"$i. $_"}) -join "`n"
+            $position=0;$preview=@($draft.Items|ForEach-Object {$position++;"$position. $_"}) -join "`n"
             Send-TelegramMessage -ChatId $chatId -Text "👁 معاينة المسودة ($(@($draft.Items).Count)):`n$preview" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:publish' {
@@ -68,7 +68,7 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm'},@{text='إلغاء';callback_data='news:refresh'}))};break
         }
         'news:publishconfirm' {
-            $result=Publish-NewsTickerDraft -ChatId $chatId -UserId $userId
+            $result=Publish-NewsTickerDraft -UserId $userId
             Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.'}else{"❌ لم يتم النشر: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }

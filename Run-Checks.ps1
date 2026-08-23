@@ -107,14 +107,22 @@ else {
     # PowerShell 7 reads UTF-8 without BOM correctly. The bridge also keeps one
     # private XML helper with a domain-specific verb. Exclude those intentional
     # style choices so every reported warning is actionable.
-    $results = Invoke-ScriptAnalyzer -Path $root -Recurse -Severity Error, Warning `
-        -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs
+    # dist/ and artifacts/ hold built copies of *previous* releases. Scanning
+    # them reports findings already fixed in the working tree, which is how a
+    # stale $Event kept being reported after it had been renamed here.
+    $results = @(Invoke-ScriptAnalyzer -Path $root -Recurse -Severity Error, Warning `
+            -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs |
+            Where-Object { $_.ScriptPath -notlike "$root\dist\*" -and $_.ScriptPath -notlike "$root\artifacts\*" })
     if ($results) {
+        # Warnings fail the gate too. The five rules above are excluded as
+        # deliberate style, so anything still reported here is actionable -
+        # letting warnings pass is what buried a real automatic-variable bind
+        # among hundreds of cosmetic ones.
+        $failed = $true
         $errorCount = @($results | Where-Object { $_.Severity -eq 'Error' }).Count
-        if ($errorCount -gt 0) { $failed = $true }
         $results | Sort-Object Severity, ScriptName, Line |
             Format-Table Severity, ScriptName, Line, RuleName, Message -AutoSize -Wrap | Out-String | Write-Host
-        Write-Host "  $($results.Count) finding(s), $errorCount error(s)" -ForegroundColor $(if ($errorCount) { 'Red' } else { 'Yellow' })
+        Write-Host "  $($results.Count) finding(s), $errorCount error(s)" -ForegroundColor Red
     }
     else {
         Write-Host "  ok    no findings" -ForegroundColor Green

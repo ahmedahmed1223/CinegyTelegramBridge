@@ -1375,6 +1375,66 @@ Describe 'Template definition storage' {
     }
 }
 
+Describe 'Template create wizard' {
+    BeforeEach {
+        $script:OriginalTemplateRegistryPathForWizardTest = $config.TemplateRegistryPath
+        $script:OriginalFullTemplateManagementForWizard = $config.Settings.EnableFullTemplateManagement
+        $config.Settings.EnableFullTemplateManagement = $true
+        $script:WizardRegistryPathForTest = New-TempTemplateFile -Json '{ "urgent": { "path": "titles/urgent.cintitle", "layer": 4, "fields": ["Headline.Text"] } }'
+        Clear-PendingState -ChatId 77
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:WizardRegistryPathForTest -Force -ErrorAction SilentlyContinue
+        $config.TemplateRegistryPath = $script:OriginalTemplateRegistryPathForWizardTest
+        $config.Settings.EnableFullTemplateManagement = $script:OriginalFullTemplateManagementForWizard
+        Clear-PendingState -ChatId 77
+    }
+
+    It 'walks key, path, layer and fields into a reviewable create definition' {
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_key'
+
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'new-template'
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_path'
+
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'titles/new.cintitle'
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_path'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_layer'
+
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value '4'
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_fields'
+
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'Headline.Text, Subtitle.Text'
+        $state = Get-PendingState -ChatId 77
+        $state.Mode | Should -Be 'template_definition_review'
+        $state.Action | Should -Be 'create'
+        $state.TemplateKey | Should -Be 'new-template'
+        $state.Definition['path'] | Should -Be 'titles/new.cintitle'
+        $state.Definition['layer'] | Should -Be 4
+        @($state.Definition['fields']).Count | Should -Be 2
+    }
+
+    It 'rejects a duplicate key without leaving the step' {
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'urgent'
+        (Get-PendingState -ChatId 77).Mode | Should -Be 'template_create_key'
+    }
+
+    It 'accepts an empty field list via لا يوجد' {
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'plain'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'titles/plain.cintitle'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value '9'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'لا يوجد'
+        $state = Get-PendingState -ChatId 77
+        @($state.Definition['fields']).Count | Should -Be 0
+    }
+}
+
 Describe 'Telegram preset management flow' {
     BeforeEach {
         Clear-PendingState -ChatId 91

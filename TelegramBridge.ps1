@@ -3304,7 +3304,10 @@ function Get-TemplateAdminCatalogueKeyboard {
     $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
     if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
     $rows += , $transferRow
-    if (Get-Setting 'EnableFullTemplateManagement') { $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') ) }
+    if (Get-Setting 'EnableFullTemplateManagement') {
+        $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
+        $rows += , @( (New-Button '📄 إضافة عبر JSON' 'tadm:createjson') )
+    }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد قوالب صالحة' 'menu') ) }
     $rows += , @( (New-Button '⬅️ القائمة' 'menu') )
     return @{ inline_keyboard = $rows }
@@ -4747,6 +4750,94 @@ function Start-TemplateDefinitionPrompt {
     $example = if ($Action -eq 'create') { '{"key":"new-template","path":"titles/new.cintitle","layer":4,"fields":["Headline.Text"]}' } else { "{`"path`":`"$($template.Path)`",`"layer`":$($template.Layer),`"fields`":[]}" }
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_json'; Action=$Action; TemplateKey=if ($template) { $template.Key } else { '' }; UserId=$UserId }
     Send-TelegramMessage -ChatId $ChatId -Text "أرسل تعريف القالب بصيغة JSON في رسالة واحدة.`nمثال:`n$example" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Start-TemplateCreateWizard {
+    <# Guided create flow: asks for key, path, layer and fields one at a
+       time instead of requiring a raw JSON document. Ends in the same
+       template_definition_review state as the JSON path, so saving, backups
+       and validation are shared. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Get-Setting 'EnableFullTemplateManagement')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🔒 التحكم الكامل بالقوالب معطّل من الإعدادات.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='template_create_key'; Definition=@{}; UserId=$UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "➕ إضافة قالب (1/4)`nأرسل مفتاح القالب (أحرف إنجليزية وأرقام ونقاط/شرطات، مثل: new-template):" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-TemplateCreateWizardStep {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.UserId -ne [string]$UserId) { return }
+    $definition = $state.Definition
+    switch ([string]$state.Mode) {
+        'template_create_key' {
+            $trimmed = $Value.Trim()
+            if ($trimmed -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') {
+                Send-TelegramMessage -ChatId $ChatId -Text '❌ مفتاح غير صالح. استخدم أحرفًا وأرقامًا ونقاط/شرطات فقط (حتى 64 حرفًا):' -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            $existing = Get-JsonProp (Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json) $trimmed
+            if ($existing) { Send-TelegramMessage -ChatId $ChatId -Text "❌ يوجد قالب بالمفتاح '$trimmed' بالفعل. أرسل مفتاحًا آخر:" -ReplyMarkup (Get-CancelKeyboard); return }
+            $definition['key'] = $trimmed
+            $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text "(2/4) أرسل مسار ملف القالب نسبةً إلى مجلد المشروع، مثل:`ntitles/new.cintitle" -ReplyMarkup (Get-CancelKeyboard)
+        }
+        'template_create_path' {
+            $trimmed = $Value.Trim().Replace('/', '\')
+            if ($trimmed -match '^(تم|ok)$') {
+                if ($definition.ContainsKey('pendingPath')) {
+                    $definition['path'] = ([string]$definition['pendingPath']).Replace('\', '/'); $definition.Remove('pendingPath')
+                    $state.Mode = 'template_create_layer'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+                    Send-TelegramMessage -ChatId $ChatId -Text '(3/4) أرسل رقم الطبقة (رقم موجب، مثل 4 أو 7):' -ReplyMarkup (Get-CancelKeyboard); return
+                }
+                Send-TelegramMessage -ChatId $ChatId -Text '❌ لا يوجد مسار معلّق للمتابعة. أرسل مسار ملف القالب أولًا:' -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            if ([IO.Path]::IsPathRooted($trimmed) -or [IO.Path]::GetExtension($trimmed) -ne '.cintitle') {
+                Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل مسارًا نسبيًا ينتهي بـ .cintitle، مثل:`ntitles/new.cintitle" -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            $root = [IO.Path]::GetFullPath($scriptRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+            $resolved = [IO.Path]::GetFullPath((Join-Path $scriptRoot $trimmed))
+            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+                Send-TelegramMessage -ChatId $ChatId -Text '❌ المسار يجب أن يبقى داخل مجلد المشروع. أرسل مسارًا نسبيًا:' -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            if (-not (Test-Path -LiteralPath $resolved)) {
+                $definition['pendingPath'] = $trimmed
+                $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+                Send-TelegramMessage -ChatId $ChatId -Text "⚠️ الملف غير موجود بعد: $trimmed`nللمتابعة بهذا المسار أرسل: تم`nأو أرسل مسارًا آخر لإعادة الإدخال." -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            $definition.Remove('pendingPath')
+            $definition['path'] = $trimmed.Replace('\', '/')
+            $state.Mode = 'template_create_layer'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text '(3/4) أرسل رقم الطبقة (رقم موجب، مثل 4 أو 7):' -ReplyMarkup (Get-CancelKeyboard)
+        }
+        'template_create_layer' {
+            $layer = 0
+            if (-not [int]::TryParse($Value.Trim(), [ref]$layer) -or $layer -le 0) {
+                Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل رقم طبقة موجبًا (مثل 4):' -ReplyMarkup (Get-CancelKeyboard); return
+            }
+            $definition['layer'] = $layer
+            $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text "(4/4) أرسل أسماء الحقول مفصولة بفواصل (مثل: Headline.Text, Subtitle.Text)`nأو أرسل: لا يوجد إذا كان القالب بلا حقول." -ReplyMarkup (Get-CancelKeyboard)
+        }
+        'template_create_fields' {
+            $trimmed = $Value.Trim()
+            $fields = @()
+            if ($trimmed -notmatch '^(لا\s*يوجد|none)$' -and $trimmed.Length -gt 0) {
+                foreach ($part in ($trimmed -split '[,;\n]+')) {
+                    $name = $part.Trim()
+                    if ($name) { $fields += $name }
+                }
+                if (@($fields | Where-Object { -not $_ }).Count -gt 0) { $fields = @($fields | Where-Object { $_ }) }
+            }
+            $definition['fields'] = @($fields)
+            $state.Mode = 'template_definition_review'; $state.Action = 'create'
+            $state.TemplateKey = [string]$definition['key']; $state.Definition = $definition
+            Set-PendingState -ChatId $ChatId -State $state
+            $fieldsLabel = if (@($fields).Count -gt 0) { @($fields) -join '، ' } else { 'لا توجد حقول' }
+            Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة القالب الجديد '$($state.TemplateKey)'`nالمسار: $($definition['path'])`nالطبقة: $($definition['layer'])`nالحقول: $fieldsLabel`n`nلن يُحفظ شيء قبل التأكيد، وستُنشأ نسخة احتياطية من التعريفات الحالية." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+        }
+    }
 }
 
 function Get-TemplateDefinitionComparisonText {
@@ -6666,7 +6757,8 @@ function Invoke-CallbackQuery {
         'tadm:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $token = $data.Substring(5)
-                if ($token -eq 'create') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
+                if ($token -eq 'create') { Start-TemplateCreateWizard -ChatId $chatId -UserId $userId }
+                elseif ($token -eq 'createjson') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'testconfirm') { Confirm-TemplateTest -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^test:(\d+)$') { Start-TemplateTestReview -TemplateIndex ([int]$Matches[1]) -ChatId $chatId -UserId $userId }
@@ -7268,6 +7360,7 @@ try {
                                 'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -like 'template_create_*' } { Complete-TemplateCreateWizardStep -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text | Out-Null }
                                 { $_ -in @('schedule_fields', 'schedule_time', 'schedule_end_date') } { Complete-ScheduleText -ChatId $chatId -Value $text | Out-Null }
                                 default { Invoke-BridgeCommand -Text $text -ChatId $chatId -UserId $userId -From $fromObj | Out-Null }

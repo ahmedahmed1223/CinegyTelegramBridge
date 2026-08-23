@@ -4203,3 +4203,78 @@ Describe 'Exit clears the on-air record Cinegy cannot report' {
         Remove-OnAirRecord -Layer 3 -Reason 'test' | Should -BeFalse
     }
 }
+
+Describe 'Live self-test' {
+    BeforeEach {
+        $script:OnAir = @{}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Send-TelegramMessage {}
+        Mock Get-AdminToolsKeyboard { @{ inline_keyboard = @() } }
+        Mock Test-MaintenanceControl { $true }
+        # Default first so unrelated settings still resolve, then the override.
+        Mock Get-SettingInt { 3 }
+        Mock Get-SettingInt { 15 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-TemplateStore { @{ Map = @{ 'lower-third' = @{ Key = 'lower-third'; Path = 'C:\t.cintitle'; Layer = 3; Fields = @('A'); FieldTypes = @{} } }; Order = @('lower-third'); Errors = @() } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = 'e1' } }
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true } }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'runs the full path and reports success when the layer ends up empty' {
+        $script:probe = 0
+        Mock Get-TitlerLayerStatus {
+            $script:probe++
+            # empty, then live after SHOW, then empty again after cleanup
+            [pscustomobject]@{ Success = $true; IsOnAir = ($script:probe -eq 2) }
+        }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeTrue
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'نجح' }
+    }
+
+    It 'fails and says so when the layer is still occupied afterwards' {
+        # The exact shape of today's incident: the scene never actually leaves.
+        $script:probe = 0
+        Mock Get-TitlerLayerStatus {
+            $script:probe++
+            [pscustomobject]@{ Success = $true; IsOnAir = ($script:probe -ne 1) }
+        }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'فشل' }
+    }
+
+    It 'always attempts cleanup even when SHOW failed' {
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $false; Error = 'engine refused' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false } }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'refuses to touch a layer that production templates use' {
+        Mock Get-SettingInt { 3 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false } }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+
+    It 'sends nothing to air when no test layer is configured' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'refuses to start when the test layer is already busy' {
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true } }
+
+        Invoke-BridgeSelfTest -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+}

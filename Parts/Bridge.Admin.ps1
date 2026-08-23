@@ -489,6 +489,93 @@ function Start-TemplateTestReview {
     Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $seconds ثانية`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
+function Invoke-BridgeSelfTest {
+    <#
+        Exercises the whole air path on the isolated test layer and reports
+        what Cinegy said at every step: SHOW, read back, EXIT, read back.
+
+        This is the check that was missing. Every individual piece had tests,
+        but nothing ever asserted end to end that a scene the bridge put up
+        actually came down again - which is how EXIT leaving a permanent
+        on-air record reached production and stayed there.
+
+        Refuses to run unless a dedicated test layer is configured and free,
+        and always attempts a HIDE afterwards so a failed run cannot leave a
+        graphic behind.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
+
+    $layer = Get-SettingInt 'TemplateTestLayer' 0
+    if ($layer -le 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد طبقة تجربة. اضبط TemplateTestLayer على طبقة غير مستخدمة أولًا.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $conflict = @(Get-TemplateTestLayerConflict -Layer $layer)
+    if ($conflict.Count -gt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $layer مستخدمة في قوالب الإنتاج: $($conflict -join '، ')" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $store = Get-TemplateStore
+    $template = if ($store.Order.Count -gt 0) { $store.Map[$store.Order[0]] } else { $null }
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد قوالب مسجّلة لإجراء الفحص.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+
+    $timeout = Get-AirTimeout
+    $monitorTimeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $steps = [System.Collections.Generic.List[string]]::new()
+    $failed = $false
+    $record = {
+        param([string]$Name, [bool]$Ok, [string]$Detail)
+        $steps.Add("$(if ($Ok) { '✅' } else { '❌' }) $Name$(if ($Detail) { " — $Detail" })")
+        if (-not $Ok) { $script:BridgeSelfTestFailed = $true }
+    }
+    $script:BridgeSelfTestFailed = $false
+
+    $before = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $monitorTimeout
+    & $record "قراءة حالة الطبقة $layer" ([bool]$before.Success) $(if ($before.Success) { '' } else { [string]$before.Error })
+    if (-not $before.Success -or [bool]$before.IsOnAir) {
+        & $record 'الطبقة جاهزة للفحص' $false 'مشغولة أو غير مقروءة؛ لم يُرسل شيء'
+        Send-TelegramMessage -ChatId $ChatId -Text ("🧪 فحص المسار الحي — فشل`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+
+    $variables = @{}
+    foreach ($field in @($template.Fields)) { $variables[[string]$field] = 'SELF-TEST' }
+    try {
+        $show = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $layer -TemplatePath ([string]$template.Path) -Variables $variables -Types @{} `
+            -DefaultType ([string](Get-Setting 'AirVariableType')) -TimeoutSec $timeout
+        & $record 'إرسال SHOW' ([bool]$show.Success) $(if ($show.Success) { '' } else { [string]$show.Error })
+
+        if ($show.Success) {
+            $afterShow = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $monitorTimeout
+            & $record 'Cinegy يؤكد ظهور المشهد' ([bool]$afterShow.Success -and [bool]$afterShow.IsOnAir) ''
+
+            $exit = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $timeout
+            & $record 'إرسال EXIT' ([bool]$exit.Success) $(if ($exit.Success) { '' } else { [string]$exit.Error })
+        }
+    }
+    finally {
+        # HIDE regardless: EXIT alone can leave the item Active, and a failed
+        # run must never leave the test layer occupied.
+        $hide = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $timeout
+        & $record 'تنظيف الطبقة (HIDE)' ([bool]$hide.Success) $(if ($hide.Success) { '' } else { [string]$hide.Error })
+        Remove-OnAirRecord -Layer $layer -Reason 'self-test cleanup' | Out-Null
+        $final = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $monitorTimeout
+        & $record 'الطبقة فارغة بعد الفحص' ([bool]$final.Success -and -not [bool]$final.IsOnAir) ''
+    }
+
+    $failed = [bool]$script:BridgeSelfTestFailed
+    $header = if ($failed) { '🧪 فحص المسار الحي — فشل' } else { '🧪 فحص المسار الحي — نجح' }
+    Write-BridgeLog "Live self-test on layer $layer by user ${UserId}: $(if ($failed) { 'FAILED' } else { 'passed' })" $(if ($failed) { 'WARN' } else { 'INFO' })
+    Add-AuditEntry "🧪 فحص المسار الحي على طبقة $layer - $(if ($failed) { 'فشل' } else { 'نجح' }) - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text ("$header`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    return (-not $failed)
+}
+
 function Confirm-TemplateTest {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $state = Get-PendingState -ChatId $ChatId

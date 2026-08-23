@@ -147,6 +147,7 @@ function Get-AdminToolsKeyboard {
         $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
     }
 
+    $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest") )
     $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
     if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
     $rows += , $adminRow

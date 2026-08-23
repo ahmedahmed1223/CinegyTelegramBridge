@@ -344,6 +344,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:selftest' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-BridgeSelfTest -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
         'menu:admintools' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Send-TelegramMessage -ChatId $chatId -Text '🗂 أدوات الإدارة' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)

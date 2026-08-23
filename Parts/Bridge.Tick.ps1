@@ -69,6 +69,34 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Update-StaleOnAirWatchdog {
+    <# Tells the administrators when the bridge has been claiming a graphic is
+       on air for implausibly long, so a record that outlived its scene is
+       noticed in minutes rather than discovered by someone looking at the
+       output. Alerts once per layer; the flag clears when the record goes. #>
+    $threshold = Get-SettingInt 'StaleOnAirAlertHours' 0
+    if ($threshold -le 0) { return }
+    $now = Get-Date
+    if (($now - $script:RuntimeState.Monitoring.LastStaleOnAirCheck).TotalMinutes -lt 5) { return }
+    $script:RuntimeState.Monitoring.LastStaleOnAirCheck = $now
+
+    # Drop flags for layers that are no longer tracked, so a re-shown layer
+    # can alert again later instead of staying silent for ever.
+    foreach ($layer in @($script:StaleOnAirAlerted)) {
+        if (-not $script:OnAir.ContainsKey([int]$layer)) { $script:StaleOnAirAlerted.Remove([int]$layer) | Out-Null }
+    }
+
+    $stale = @(Get-BridgeStaleOnAirLayers -OnAir $script:OnAir -Now $now `
+            -ThresholdHours $threshold -AlreadyAlerted @($script:StaleOnAirAlerted))
+    if ($stale.Count -eq 0) { return }
+
+    foreach ($item in $stale) { $script:StaleOnAirAlerted.Add([int]$item.Layer) | Out-Null }
+    $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $($_.Hours) ساعة" })
+    Write-BridgeLog "Stale on-air record(s) reported to administrators: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
+    Send-AdminBroadcast -Text ("⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:`n" + ($lines -join "`n") +
+        "`nإن كانت الشاشة خالية فاضغط إخفاء على الطبقة لتصفية السجل.")
+}
+
 function Get-CinegyStateCheckInterval {
     <# Configured interval, widened while Air is unreachable. See
        Get-BridgeCinegyStateBackoff for why the widening exists. #>
@@ -168,7 +196,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

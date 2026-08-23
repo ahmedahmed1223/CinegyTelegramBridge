@@ -166,6 +166,7 @@ $script:DefaultSettings = [ordered]@{
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     CinegyStateBackoffMaxSeconds = 60    # ceiling for backing off reconciliation while Air is unreachable
+    StaleOnAirAlertHours      = 6       # warn admins about a bridge record on air this long; 0 disables
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
     SchedulePaused              = $false # keep events pending without executing them
     SchedulePreNotifyMinutes    = 0      # disabled by default; notify shortly before an occurrence
@@ -211,6 +212,7 @@ $script:SettingDisplayMetadata = @{
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     CinegyStateBackoffMaxSeconds = @{ Unit = 'ثانية'; Description = 'أقصى تباعد لفحص طبقات Cinegy عند تعذّر الوصول' }
+    StaleOnAirAlertHours = @{ Unit = 'ساعة'; Description = 'تنبيه المشرفين عن سجل على الهواء منذ هذه المدة (0 للتعطيل)' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
@@ -551,6 +553,8 @@ $script:RelayState = $script:RuntimeState.Relay
 
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
 $script:LastConfigSaveFailed = $false
+# Layers already reported as stale, so the alert fires once per record.
+$script:StaleOnAirAlerted = [System.Collections.Generic.HashSet[int]]::new()
 $script:HealthHistory = @{
     Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
     Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }

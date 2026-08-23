@@ -105,3 +105,41 @@ Describe 'Cinegy state reconciliation backoff' {
         Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 60 -MaximumSeconds 60 -Reachable | Should -Be 0
     }
 }
+
+Describe 'Stale on-air detection' {
+    BeforeAll { $script:Now = [datetime]'2026-08-23T18:00:00' }
+
+    It 'reports a bridge record older than the threshold' {
+        $onAir = @{ 7 = @{ Key = 'Urgent'; At = $script:Now.AddHours(-7); Source = 'bridge' } }
+        $stale = @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6)
+        $stale.Count | Should -Be 1
+        $stale[0].Layer | Should -Be 7
+        $stale[0].Key | Should -Be 'Urgent'
+        $stale[0].Hours | Should -Be 7
+    }
+
+    It 'leaves a recent record alone' {
+        $onAir = @{ 7 = @{ Key = 'Urgent'; At = $script:Now.AddHours(-1); Source = 'bridge' } }
+        @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6) | Should -BeNullOrEmpty
+    }
+
+    It 'ignores Cinegy-owned scenes, which are legitimately up for days' {
+        $onAir = @{ 8 = @{ Key = 'ticker'; At = $script:Now.AddDays(-3); Source = 'cinegy' } }
+        @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6) | Should -BeNullOrEmpty
+    }
+
+    It 'does not report a layer that was already alerted' {
+        $onAir = @{ 7 = @{ Key = 'Urgent'; At = $script:Now.AddHours(-9); Source = 'bridge' } }
+        @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6 -AlreadyAlerted @(7)) | Should -BeNullOrEmpty
+    }
+
+    It 'is disabled by a zero threshold' {
+        $onAir = @{ 7 = @{ Key = 'Urgent'; At = $script:Now.AddDays(-2); Source = 'bridge' } }
+        @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 0) | Should -BeNullOrEmpty
+    }
+
+    It 'treats a record with no Source as bridge-pushed' {
+        $onAir = @{ 7 = @{ Key = 'Urgent'; At = $script:Now.AddHours(-8) } }
+        @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6) | Should -HaveCount 1
+    }
+}

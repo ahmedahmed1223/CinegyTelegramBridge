@@ -99,4 +99,46 @@ function Get-BridgeCinegyStateBackoff {
     else { $CurrentBackoffSeconds * 2 }
     return [Math]::Min($next, $MaximumSeconds)
 }
-Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeCinegyStateBackoff
+function Get-BridgeStaleOnAirLayers {
+    <#
+        Names bridge-pushed layers that have been on air implausibly long.
+
+        A record can outlive the graphic it describes: the bridge can die
+        between SHOW and EXIT, or a scene can be taken down inside Cinegy in a
+        way the status endpoint cannot express. The bridge then reports a
+        graphic that left the screen hours ago, and offers a hide button for
+        nothing - which is exactly how a stale 'Urgent' record survived an
+        EXIT and went unnoticed for an hour and a half.
+
+        Only bridge-pushed records are considered: a Cinegy-owned scene such as
+        a permanent ticker is legitimately up for days.
+
+        This reports; it never removes. Deleting a record the operator can
+        still see on screen would be worse than the stale one.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$OnAir,
+        [Parameter(Mandatory)][datetime]$Now,
+        [ValidateRange(0, 168)][int]$ThresholdHours = 6,
+        [object[]]$AlreadyAlerted = @()
+    )
+    if ($ThresholdHours -le 0) { return @() }
+    $alerted = @($AlreadyAlerted | ForEach-Object { [int]$_ })
+    $stale = foreach ($layer in ($OnAir.Keys | Sort-Object)) {
+        $record = $OnAir[$layer]
+        $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
+        if ($source -ne 'bridge') { continue }
+        if ($alerted -contains [int]$layer) { continue }
+        $at = $record.At
+        if ($at -isnot [datetime]) { continue }
+        if (($Now - $at).TotalHours -lt $ThresholdHours) { continue }
+        [pscustomobject]@{
+            Layer = [int]$layer
+            Key   = [string]$record.Key
+            Hours = [math]::Floor(($Now - $at).TotalHours)
+        }
+    }
+    return @($stale)
+}
+Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff

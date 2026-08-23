@@ -4032,9 +4032,19 @@ Describe 'Main menu on-air priority' {
     }
 
     It 'reports what is on air instead of a static prompt' {
-        Get-MainMenuIntro | Should -Be '⚫️ لا شيء على الهواء.'
+        Get-MainMenuIntro | Should -Match 'لا شيء على الهواء'
         $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 1; Source = 'cinegy' }
         Get-MainMenuIntro | Should -Match '8 · ticker'
+    }
+
+    It 'states how old the on-air claim is, not just what it claims' {
+        # A stale "on air" that reads identically to a fresh one is what let an
+        # exited scene sit unnoticed for an hour and a half.
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = [datetime]::MinValue
+        Get-MainMenuIntro | Should -Match 'لم يتم التحقّق بعد'
+
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = (Get-Date)
+        Get-MainMenuIntro | Should -Match 'تحقّق قبل'
     }
 }
 

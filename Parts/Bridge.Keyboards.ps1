@@ -112,11 +112,22 @@ function Get-MainMenuIntro {
        tells the operator nothing they cannot already see. Saying what is on
        air instead answers the question they actually opened the menu with,
        without spending a tap on ℹ️ الحالة. #>
-    if ($script:OnAir.Count -eq 0) { return '⚫️ لا شيء على الهواء.' }
+    $freshness = Get-CinegyStateFreshness `
+        -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
+        -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
+    # How old the claim is matters as much as the claim: a stale 'on air' that
+    # looks identical to a fresh one is what let an exited scene go unnoticed.
+    $age = switch ($freshness.State) {
+        'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
+        default { 'لم يتم التحقّق بعد' }
+    }
+    if ($script:OnAir.Count -eq 0) { return "⚫️ لا شيء على الهواء — $age" }
     $names = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         "$layer · $($script:OnAir[$layer].Key)"
     }
-    return "🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')"
+    return "🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')`n$age"
 }
 
 function Get-AdminToolsKeyboard {

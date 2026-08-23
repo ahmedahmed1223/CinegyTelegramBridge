@@ -13,6 +13,7 @@ function New-BridgeRuntimeState {
             LastCinegyStateCheck=[datetime]::MinValue;LastCinegyStateSuccess=[datetime]::MinValue
             LastCinegyHealthCheck=[datetime]::MinValue
             CinegyStateBackoffSeconds=0
+            LastStaleOnAirCheck=[datetime]::MinValue
         }
     }
 }

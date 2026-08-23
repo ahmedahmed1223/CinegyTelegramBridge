@@ -1,5 +1,27 @@
 # Changelog
 
+## 5.1.0 — 2026-08-23
+
+- Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.
+- The main menu now states how old the on-air claim is and flags it when Cinegy could not be reached. A stale claim reading identically to a fresh one is what let an exited scene go unnoticed.
+- Adds `Invoke-BridgeSelfTest` (🧪 فحص المسار الحي): SHOW, read back, EXIT, read back, reporting what Cinegy said at each step. Refuses a layer that is busy or that production templates use, and always attempts a HIDE afterwards.
+- Adds `ConfirmLayerRemoval` (default off): a confirmation before hide and exit naming the template, how long it has been on air, and who pushed it. Off by default because it costs the emergency path a tap.
+- Deletes staged operator uploads past `UploadRetentionMinutes` (default 60). News and template registry uploads were staged, parsed, then left on the playout machine for ever.
+- Adds an output monitor that looks at the picture itself: a frame every `OutputMonitorMinutes` (default 60), and on a dark frame a confirming second capture `OutputBlackConfirmSeconds` later. Alerts only when both are black, once, then reports recovery. Administrators always hear; operators only when `NotifyOperatorsOnBlackOutput` is on.
+- Adds 🆕 ما الجديد and `/whatsnew`: operator-facing release notes describing what changed on screen rather than in the code.
+- Rewrites the help screen grouped by task rather than by menu, covering the on-air rows, the freshness warning, the removal confirmation, the admin tools screen, the self-test and the output monitor.
+- Test suite grows from 345 to 384.
+## 5.1.0 — 2026-08-23
+
+- Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.
+- The main menu now states how old the on-air claim is and flags it when Cinegy could not be reached. A stale claim reading identically to a fresh one is what let an exited scene go unnoticed.
+- Adds `Invoke-BridgeSelfTest` (🧪 فحص المسار الحي): SHOW, read back, EXIT, read back, reporting what Cinegy said at each step. Refuses a layer that is busy or that production templates use, and always attempts a HIDE afterwards.
+- Adds `ConfirmLayerRemoval` (default off): a confirmation before hide and exit naming the template, how long it has been on air, and who pushed it. Off by default because it costs the emergency path a tap.
+- Deletes staged operator uploads past `UploadRetentionMinutes` (default 60). News and template registry uploads were staged, parsed, then left on the playout machine for ever.
+- Adds an output monitor that looks at the picture itself: a frame every `OutputMonitorMinutes` (default 60), and on a dark frame a confirming second capture `OutputBlackConfirmSeconds` later. Alerts only when both are black, once, then reports recovery. Administrators always hear; operators only when `NotifyOperatorsOnBlackOutput` is on.
+- Adds 🆕 ما الجديد and `/whatsnew`: operator-facing release notes describing what changed on screen rather than in the code.
+- Rewrites the help screen grouped by task rather than by menu, covering the on-air rows, the freshness warning, the removal confirmation, the admin tools screen, the self-test and the output monitor.
+- Test suite grows from 345 to 384.
 ## 5.0.0 — 2026-08-23
 
 - Splits `TelegramBridge.ps1` from 7407 lines into a 973-line orchestrator plus 14 dot-sourced declaration files under `Parts/`. Parts are dot-sourced rather than imported because they must share the script scope and `$script:` state; only declarations move, while the 64 ordered top-level initialization statements stay put because they depend on `$config`.

@@ -3940,3 +3940,53 @@ Describe 'Callback prefix wiring' {
         $orphans | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Cinegy state watchdog backoff wiring' {
+    BeforeEach {
+        $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds = 0
+        $script:RuntimeState.Monitoring.LastCinegyStateCheck = [datetime]::MinValue
+        Mock Write-BridgeLog {}
+        Mock Send-AdminBroadcast {}
+    }
+
+    It 'widens the interval when a tracked layer cannot be verified' {
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(); Added = @(); Removed = @(); Failed = @(4); Changes = @() }
+        }
+
+        Update-CinegyStateWatchdog
+
+        $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds | Should -BeGreaterThan 0
+        Get-CinegyStateCheckInterval | Should -Be $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds
+    }
+
+    It 'skips the reconciliation entirely while the widened interval has not elapsed' {
+        # This is the point of the whole change: an unreachable engine must not
+        # be re-probed on the configured interval, because each probe blocks
+        # the polling loop for its timeout.
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(); Added = @(); Removed = @(); Failed = @(4); Changes = @() }
+        }
+
+        Update-CinegyStateWatchdog
+        Update-CinegyStateWatchdog
+
+        Should -Invoke Update-OnAirStateFromCinegy -Times 1 -Exactly
+    }
+
+    It 'restores the configured interval after the engine answers again' {
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(); Added = @(); Removed = @(); Failed = @(4); Changes = @() }
+        }
+        Update-CinegyStateWatchdog
+        $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds | Should -BeGreaterThan 0
+
+        Mock Update-OnAirStateFromCinegy {
+            [pscustomobject]@{ Checked = @(4); Added = @(); Removed = @(); Failed = @(); Changes = @() }
+        }
+        $script:RuntimeState.Monitoring.LastCinegyStateCheck = [datetime]::MinValue
+        Update-CinegyStateWatchdog
+
+        $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds | Should -Be 0
+    }
+}

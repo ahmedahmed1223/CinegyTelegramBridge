@@ -69,14 +69,36 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Get-CinegyStateCheckInterval {
+    <# Configured interval, widened while Air is unreachable. See
+       Get-BridgeCinegyStateBackoff for why the widening exists. #>
+    $interval = Get-SettingInt 'CinegyStateCheckSeconds' 1
+    return [Math]::Max($interval, [int]$script:RuntimeState.Monitoring.CinegyStateBackoffSeconds)
+}
+
 function Update-CinegyStateWatchdog {
     $now = Get-Date
-    $interval = Get-SettingInt 'CinegyStateCheckSeconds' 1
-    if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt $interval) { return }
+    if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt (Get-CinegyStateCheckInterval)) { return }
     $script:RuntimeState.Monitoring.LastCinegyStateCheck = $now
 
     $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+
+    # A layer that could not be verified means the engine did not answer. With
+    # nothing tracked there is no request to fail, which counts as reachable.
+    $previousBackoff = [int]$script:RuntimeState.Monitoring.CinegyStateBackoffSeconds
+    $reachable = @($sync.Failed).Count -eq 0
+    $script:RuntimeState.Monitoring.CinegyStateBackoffSeconds = Get-BridgeCinegyStateBackoff `
+        -BaseIntervalSeconds (Get-SettingInt 'CinegyStateCheckSeconds' 1) `
+        -CurrentBackoffSeconds $previousBackoff -Reachable:$reachable `
+        -MaximumSeconds (Get-SettingInt 'CinegyStateBackoffMaxSeconds' 1)
+    $newBackoff = [int]$script:RuntimeState.Monitoring.CinegyStateBackoffSeconds
+    if ($newBackoff -ne $previousBackoff) {
+        $detail = if ($newBackoff -gt 0) { "widened layer reconciliation to ${newBackoff}s after $(@($sync.Failed).Count) unverifiable layer(s)" }
+        else { 'restored the configured layer reconciliation interval' }
+        Write-BridgeLog "Cinegy state watchdog $detail"
+    }
+
     if ($sync.Removed.Count -gt 0 -and (Get-Setting 'NotifyAdminsOnExternalChange')) {
         Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
     }
@@ -171,7 +193,9 @@ function Get-EffectivePollTimeout {
         $base = [Math]::Min($base, [Math]::Max(1, $secondsToEvent))
     }
     if ($script:RelayState.ShouldRun) { return [Math]::Min($base, (Get-SettingInt 'RelayWatchdogSeconds' 5)) }
-    $base = [Math]::Min($base, (Get-SettingInt 'CinegyStateCheckSeconds' 1))
+    # Follows the widened interval while Air is unreachable, so a dead engine
+    # does not keep the long-poll short for nothing.
+    $base = [Math]::Min($base, (Get-CinegyStateCheckInterval))
     return [Math]::Min($base, (Get-SettingInt 'CinegyHealthCheckSeconds' 1))
 }
 

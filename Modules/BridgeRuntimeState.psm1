@@ -12,6 +12,7 @@ function New-BridgeRuntimeState {
             CinegyHealthState='unknown';TelegramConnectionState='unknown'
             LastCinegyStateCheck=[datetime]::MinValue;LastCinegyStateSuccess=[datetime]::MinValue
             LastCinegyHealthCheck=[datetime]::MinValue
+            CinegyStateBackoffSeconds=0
         }
     }
 }

@@ -81,3 +81,27 @@ Describe 'Cinegy layer reconciliation policy' {
         $tracked.Key | Should -Be 'Cinegy Type Layer 8 On'
     }
 }
+
+Describe 'Cinegy state reconciliation backoff' {
+    It 'asks for no extra wait while the engine answers' {
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 60 -Reachable | Should -Be 0
+    }
+
+    It 'starts backing off at twice the configured interval on the first failure' {
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 0 | Should -Be 30
+    }
+
+    It 'doubles on each consecutive failure' {
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 30 -MaximumSeconds 600 | Should -Be 60
+    }
+
+    It 'never exceeds the ceiling' {
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 45 -MaximumSeconds 60 | Should -Be 60
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 60 -MaximumSeconds 60 | Should -Be 60
+    }
+
+    It 'clears immediately on the first success rather than decaying' {
+        # An operator fixing Air should get normal responsiveness back at once.
+        Get-BridgeCinegyStateBackoff -BaseIntervalSeconds 15 -CurrentBackoffSeconds 60 -MaximumSeconds 60 -Reachable | Should -Be 0
+    }
+}

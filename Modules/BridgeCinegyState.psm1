@@ -73,4 +73,30 @@ function Resolve-BridgeCinegyLayerState {
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}
 }
 
-Export-ModuleMember -Function Resolve-BridgeCinegyLayerState
+function Get-BridgeCinegyStateBackoff {
+    <#
+        Decides how long to wait before the next tracked-layer reconciliation.
+
+        Every reconciliation issues one synchronous HTTP status read per
+        tracked GFX layer, on the single polling thread. With Air unreachable
+        that costs layers x timeout of dead air on the bot for every tick, on
+        the interval, indefinitely - and the operator finds a frozen bot at
+        exactly the moment the playout machine is already in trouble.
+
+        So an unreachable engine doubles the wait each time up to a ceiling,
+        and the first successful reconciliation clears it. Returns 0 when
+        healthy, meaning "use the configured interval, no extra wait".
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateRange(1, 3600)][int]$BaseIntervalSeconds,
+        [ValidateRange(0, 3600)][int]$CurrentBackoffSeconds = 0,
+        [switch]$Reachable,
+        [ValidateRange(1, 3600)][int]$MaximumSeconds = 60
+    )
+    if ($Reachable) { return 0 }
+    $next = if ($CurrentBackoffSeconds -lt $BaseIntervalSeconds) { $BaseIntervalSeconds * 2 }
+    else { $CurrentBackoffSeconds * 2 }
+    return [Math]::Min($next, $MaximumSeconds)
+}
+Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeCinegyStateBackoff

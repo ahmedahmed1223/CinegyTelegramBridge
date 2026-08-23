@@ -22,3 +22,6 @@ templates.test-*.json
 .worktrees/
 dist/
 artifacts/
+
+# Cygwin/Git-Bash crash dumps.
+*.stackdump

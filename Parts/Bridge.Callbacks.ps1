@@ -73,27 +73,27 @@ function Invoke-CallbackQuery {
         }
         'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }
         'news:item:*' {
-            $i=[int]$data.Substring(10);Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index $i;break
+            $i=[int](Get-CallbackArg $data 'news:item:');Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index $i;break
         }
-        'news:edit:*' { $i=[int]$data.Substring(10);Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
-        'news:delete:*' { $i=[int]$data.Substring(12);$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
+        'news:edit:*' { $i=[int](Get-CallbackArg $data 'news:edit:');Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
+        'news:delete:*' { $i=[int](Get-CallbackArg $data 'news:delete:');$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
         'news:up:*' {
-            $i=[int]$data.Substring(8);$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
+            $i=[int](Get-CallbackArg $data 'news:up:');$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "الموضع ${i} من $total"}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:down:*' {
-            $i=[int]$data.Substring(10);$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
+            $i=[int](Get-CallbackArg $data 'news:down:');$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "الموضع $(($i+1)+1) من $total"}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
         'news:iup:*' {
-            $i=[int]$data.Substring(9)
+            $i=[int](Get-CallbackArg $data 'news:iup:')
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i-1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:idown:*' {
-            $i=[int]$data.Substring(11)
+            $i=[int](Get-CallbackArg $data 'news:idown:')
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
@@ -102,11 +102,11 @@ function Invoke-CallbackQuery {
         'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
         'news:backups' { Send-TelegramMessage -ChatId $chatId -Text 'اختر نسخة لمراجعة استعادتها:' -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
         'news:restore:*' {
-            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int]$data.Substring(13)
+            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restore:')
             Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ استعادة';callback_data="news:restoreconfirm:$i"},@{text='إلغاء';callback_data='news:backups'}))};break
         }
         'news:restoreconfirm:*' {
-            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int]$data.Substring(20);$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10);if($i-ge $files.Count){break}
+            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restoreconfirm:');$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10);if($i-ge $files.Count){break}
             $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $files[$i].FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
             if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
@@ -189,7 +189,7 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text "انتهت مسودة الإدخال. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                 break
             }
-            $recentIndex = [int]($data.Substring(7))
+            $recentIndex = [int]((Get-CallbackArg $data 'recent:'))
             $fieldName = [string]$state.Fields[[int]$state.Index]
             $values = @(Get-RecentFieldValues -UserId $userId -FieldName $fieldName)
             if ($recentIndex -lt 0 -or $recentIndex -ge $values.Count) {
@@ -213,7 +213,7 @@ function Invoke-CallbackQuery {
         }
         'tplcat:*' {
             $categories = @(Get-TemplateCategories)
-            $categoryIndex = [int]$data.Substring(7)
+            $categoryIndex = [int](Get-CallbackArg $data 'tplcat:')
             if ($categoryIndex -lt 0 -or $categoryIndex -ge $categories.Count) {
                 Send-TelegramMessage -ChatId $chatId -Text 'التصنيف لم يعد متاحًا.' -ReplyMarkup (Get-TemplateCategoriesKeyboard)
                 break
@@ -223,7 +223,7 @@ function Invoke-CallbackQuery {
             break
         }
         'tplinfo:*' {
-            $templateIndex = [int]$data.Substring(8)
+            $templateIndex = [int](Get-CallbackArg $data 'tplinfo:')
             $template = Get-TemplateByIndex -Index $templateIndex
             if (-not $template) {
                 Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد متاحًا.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
@@ -237,7 +237,7 @@ function Invoke-CallbackQuery {
             break
         }
         'favtoggle:*' {
-            $template = Get-TemplateByIndex -Index ([int]$data.Substring(10))
+            $template = Get-TemplateByIndex -Index ([int](Get-CallbackArg $data 'favtoggle:'))
             if (-not $template) { break }
             $selected = @(Get-FavoriteTemplateKeys -UserId $userId) -contains [string]$template.Key
             if (Set-UserFavorite -UserId $userId -TemplateKey ([string]$template.Key) -Enabled (-not $selected)) {
@@ -350,7 +350,7 @@ function Invoke-CallbackQuery {
         }
         'usr:toggle:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $target = [long]$data.Substring(11); $disabled = Test-UserDisabled -UserId $target
+            $target = [long](Get-CallbackArg $data 'usr:toggle:'); $disabled = Test-UserDisabled -UserId $target
             if (Set-UserDisabled -TargetUserId $target -Disabled (-not $disabled)) {
                 $action = if ($disabled) { 'إعادة تفعيل' } else { 'تعطيل' }
                 Write-BridgeLog "Admin $userId changed user $target state: $action"
@@ -361,12 +361,12 @@ function Invoke-CallbackQuery {
         }
         'usr:alias:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Start-UserAliasEdit -TargetUserId ([long]$data.Substring(10)) -ChatId $chatId -AdminUserId $userId
+                Start-UserAliasEdit -TargetUserId ([long](Get-CallbackArg $data 'usr:alias:')) -ChatId $chatId -AdminUserId $userId
             }
             break
         }
         'usr:revoke:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-UserRevocation -TargetUserId ([long]$data.Substring(11)) -ChatId $chatId -AdminUserId $userId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-UserRevocation -TargetUserId ([long](Get-CallbackArg $data 'usr:revoke:')) -ChatId $chatId -AdminUserId $userId }
             break
         }
         'usr:revokeconfirm' {
@@ -411,13 +411,13 @@ function Invoke-CallbackQuery {
             break
         }
         'schtpl:*' {
-            Start-ScheduleShowFlow -TemplateIndex ([int]$data.Substring(7)) -ChatId $chatId -UserId $userId
+            Start-ScheduleShowFlow -TemplateIndex ([int](Get-CallbackArg $data 'schtpl:')) -ChatId $chatId -UserId $userId
             break
         }
         'schrec:*' {
             $state = Get-PendingState -ChatId $chatId
             if (-not $state -or $state.Mode -ne 'schedule_recurrence' -or [long]$state.UserId -ne $userId) { break }
-            $state.Recurrence = $data.Substring(7)
+            $state.Recurrence = (Get-CallbackArg $data 'schrec:')
             Show-ScheduleReview -ChatId $chatId -State $state
             break
         }
@@ -440,15 +440,15 @@ function Invoke-CallbackQuery {
             break
         }
         'schededit:*' {
-            Start-ScheduleMutationFlow -Action edit -EventId $data.Substring(10) -ChatId $chatId -UserId $userId
+            Start-ScheduleMutationFlow -Action edit -EventId (Get-CallbackArg $data 'schededit:') -ChatId $chatId -UserId $userId
             break
         }
         'schedcopy:*' {
-            Start-ScheduleMutationFlow -Action copy -EventId $data.Substring(10) -ChatId $chatId -UserId $userId
+            Start-ScheduleMutationFlow -Action copy -EventId (Get-CallbackArg $data 'schedcopy:') -ChatId $chatId -UserId $userId
             break
         }
         'schcancel:*' {
-            $eventId = $data.Substring(10)
+            $eventId = (Get-CallbackArg $data 'schcancel:')
             $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
             if (-not $scheduleEntry) { break }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
@@ -492,7 +492,7 @@ function Invoke-CallbackQuery {
         }
         'tadm:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $token = $data.Substring(5)
+                $token = (Get-CallbackArg $data 'tadm:')
                 if ($token -eq 'create') { Start-TemplateCreateWizard -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'createjson') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
@@ -505,7 +505,7 @@ function Invoke-CallbackQuery {
         }
         'padm:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Show-PresetAdminTemplate -TemplateIndex ([int]$data.Substring(5)) -ChatId $chatId
+                Show-PresetAdminTemplate -TemplateIndex ([int](Get-CallbackArg $data 'padm:')) -ChatId $chatId
             }
             break
         }
@@ -520,7 +520,7 @@ function Invoke-CallbackQuery {
         }
         'pac:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Start-PresetAdminCreate -TemplateIndex ([int]$data.Substring(4)) -ChatId $chatId -UserId $userId
+                Start-PresetAdminCreate -TemplateIndex ([int](Get-CallbackArg $data 'pac:')) -ChatId $chatId -UserId $userId
             }
             break
         }
@@ -597,7 +597,7 @@ function Invoke-CallbackQuery {
         'tplT:*' {
             # Pick the duration first, then collect the field text; the show
             # fires as soon as the last field is entered.
-            $idx = [int]($data.Substring(5))
+            $idx = [int]((Get-CallbackArg $data 'tplT:'))
             $t = Get-TemplateByIndex -Index $idx
             $name = if ($t) { $t.Key } else { '' }
             Send-TelegramMessage -ChatId $chatId -Text "المدة قبل الإخفاء التلقائي لـ '$name'`:" -ReplyMarkup (Get-DurationKeyboard -Prefix 'dur' -Token "$idx" -BackData 'menu:timed')
@@ -616,7 +616,7 @@ function Invoke-CallbackQuery {
             break
         }
         'timer:*' {
-            $layer = [int]($data.Substring(6))
+            $layer = [int]((Get-CallbackArg $data 'timer:'))
             Send-TelegramMessage -ChatId $chatId -Text "المدة قبل إخفاء الطبقة $layer`:" -ReplyMarkup (Get-DurationKeyboard -Prefix 'tlay' -Token "$layer")
             break
         }
@@ -633,7 +633,7 @@ function Invoke-CallbackQuery {
             break
         }
         'tpl:*' {
-            $idx = [int]($data.Substring(4))
+            $idx = [int]((Get-CallbackArg $data 'tpl:'))
             Start-ShowFlow -TemplateIndex $idx -ChatId $chatId -UserId $userId
             break
         }
@@ -642,12 +642,12 @@ function Invoke-CallbackQuery {
             Invoke-PresetShow -TemplateIndex ([int]$parts[1]) -PresetIndex ([int]$parts[2]) -ChatId $chatId -UserId $userId
             break
         }
-        'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int]$data.Substring(16)) -ChatId $chatId -UserId $userId; break }
-        'rollback:*' { Start-SafeRollbackReview -Layer ([int]$data.Substring(9)) -ChatId $chatId -UserId $userId; break }
-        'hide:*' { Invoke-HideLayer -Layer ([int]$data.Substring(5)) -ChatId $chatId -UserId $userId | Out-Null; break }
-        'exit:*' { Invoke-ExitLayer -Layer ([int]$data.Substring(5)) -ChatId $chatId -UserId $userId; break }
+        'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }
+        'rollback:*' { Start-SafeRollbackReview -Layer ([int](Get-CallbackArg $data 'rollback:')) -ChatId $chatId -UserId $userId; break }
+        'hide:*' { Invoke-HideLayer -Layer ([int](Get-CallbackArg $data 'hide:')) -ChatId $chatId -UserId $userId | Out-Null; break }
+        'exit:*' { Invoke-ExitLayer -Layer ([int](Get-CallbackArg $data 'exit:')) -ChatId $chatId -UserId $userId; break }
         'updtpl:*' {
-            $idx = [int]($data.Substring(7))
+            $idx = [int]((Get-CallbackArg $data 'updtpl:'))
             $t = Get-TemplateByIndex -Index $idx
             if (-not $t -or $t.Fields.Count -eq 0) {
                 Send-TelegramMessage -ChatId $chatId -Text "لا توجد حقول قابلة للتحديث في هذا القالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
@@ -673,13 +673,13 @@ function Invoke-CallbackQuery {
         }
         'approve:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Grant-UserAccess -TargetChatId ([long]$data.Substring(8)) -ApprovedBy $chatId -ApproverUserId $userId
+                Grant-UserAccess -TargetChatId ([long](Get-CallbackArg $data 'approve:')) -ApprovedBy $chatId -ApproverUserId $userId
             }
             break
         }
         'reject:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Deny-UserAccess -TargetChatId ([long]$data.Substring(7)) -RejectedBy $chatId -RejecterUserId $userId
+                Deny-UserAccess -TargetChatId ([long](Get-CallbackArg $data 'reject:')) -RejectedBy $chatId -RejecterUserId $userId
             }
             break
         }
@@ -711,7 +711,7 @@ function Invoke-CallbackQuery {
                     @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Sort-Object LastWriteTimeUtc, Name -Descending)
                 }
                 else { @() }
-                $index = [int]$data.Substring(12)
+                $index = [int](Get-CallbackArg $data 'cfg:restore:')
                 if ($index -lt 0 -or $index -ge $files.Count) {
                     Send-TelegramMessage -ChatId $chatId -Text "النسخة المحددة لم تعد موجودة." -ReplyMarkup (Get-ConfigBackupsKeyboard)
                     break
@@ -738,7 +738,7 @@ function Invoke-CallbackQuery {
             break
         }
         'hideallcfg:toggle:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -Layer ([int]$data.Substring(18)) -ChatId $chatId -UserId $userId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Set-HideAllLayerSelection -Layer ([int](Get-CallbackArg $data 'hideallcfg:toggle:')) -ChatId $chatId -UserId $userId }
             break
         }
         'layername:clear:*' {
@@ -763,22 +763,22 @@ function Invoke-CallbackQuery {
             break
         }
         'cfg:t:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-SettingToggle -Name $data.Substring(6) -ChatId $chatId -UserId $userId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-SettingToggle -Name (Get-CallbackArg $data 'cfg:t:') -ChatId $chatId -UserId $userId }
             break
         }
         'cfgc:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Invoke-SettingToggle -Name $data.Substring(5) -ChatId $chatId -UserId $userId -Confirmed
+                Invoke-SettingToggle -Name (Get-CallbackArg $data 'cfgc:') -ChatId $chatId -UserId $userId -Confirmed
             }
             break
         }
         'cfg:v:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-SettingValuePrompt -Name $data.Substring(6) -ChatId $chatId -UserId $userId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-SettingValuePrompt -Name (Get-CallbackArg $data 'cfg:v:') -ChatId $chatId -UserId $userId }
             break
         }
         'cfg:s:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $settingName = $data.Substring(6)
+                $settingName = (Get-CallbackArg $data 'cfg:s:')
                 if ($settingName -eq 'LayerNames') { Show-LayerNamesScreen -ChatId $chatId -UserId $userId }
                 else { Show-SettingChoices -Name $settingName -ChatId $chatId -UserId $userId }
             }

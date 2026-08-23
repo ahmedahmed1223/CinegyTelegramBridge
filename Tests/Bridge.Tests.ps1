@@ -3874,3 +3874,69 @@ Describe 'Startup Cinegy reconciliation' {
         }
     }
 }
+
+Describe 'Get-CallbackArg' {
+    It 'returns the payload that follows the prefix' {
+        Get-CallbackArg -Data 'news:idown:7' -Prefix 'news:idown:' | Should -Be '7'
+    }
+
+    It 'does not confuse a longer sibling prefix with a shorter one' {
+        # 'news:item:' and 'news:idown:' share a stem; Substring offsets used to
+        # be hand-counted here, and getting it wrong shipped a real bug.
+        Get-CallbackArg -Data 'news:item:3' -Prefix 'news:item:' | Should -Be '3'
+    }
+
+    It 'preserves a payload that itself contains a colon' {
+        Get-CallbackArg -Data 'cfg:v:Some:Name' -Prefix 'cfg:v:' | Should -Be 'Some:Name'
+    }
+
+    It 'returns an empty string when nothing follows the prefix' {
+        Get-CallbackArg -Data 'hide:' -Prefix 'hide:' | Should -Be ''
+    }
+
+    It 'throws instead of silently slicing when the prefix does not match' {
+        { Get-CallbackArg -Data 'exit:4' -Prefix 'hide:' } | Should -Throw -ExpectedMessage "*does not start with the expected prefix*"
+    }
+}
+
+Describe 'Callback prefix wiring' {
+    BeforeAll {
+        $script:CallbackSource = Get-Content -LiteralPath (Join-Path $script:Root 'Parts\Bridge.Callbacks.ps1') -Raw -Encoding utf8
+        # Every wildcard switch label in the dispatcher, e.g. 'news:idown:*'.
+        $script:HandledPrefixes = @([regex]::Matches($script:CallbackSource, "(?m)^\s*'(?<p>[^']*):\*'\s*\{") |
+                ForEach-Object { $_.Groups['p'].Value + ':' } | Sort-Object -Unique)
+    }
+
+    It 'no longer parses callback data with hand-counted offsets' {
+        # The whole point of Get-CallbackArg: a reintroduced Substring(N) here
+        # brings back the off-by-N class this replaced.
+        $script:CallbackSource | Should -Not -Match '\$data\.Substring\('
+    }
+
+    It 'passes each branch its own prefix rather than a sibling prefix' {
+        $mismatched = foreach ($m in [regex]::Matches($script:CallbackSource,
+                "(?ms)^\s*'(?<label>[^']*):\*'\s*\{(?<body>.*?)(?=^\s*'|\Z)")) {
+            $label = $m.Groups['label'].Value + ':'
+            foreach ($u in [regex]::Matches($m.Groups['body'].Value, "Get-CallbackArg \`$data '(?<used>[^']*)'")) {
+                if ($u.Groups['used'].Value -ne $label) { "$label used $($u.Groups['used'].Value)" }
+            }
+        }
+        @($mismatched) | Should -BeNullOrEmpty
+    }
+
+    It 'has a dispatcher branch for every prefixed button the keyboards emit' {
+        $keyboards = Get-Content -LiteralPath (Join-Path $script:Root 'Parts\Bridge.Keyboards.ps1') -Raw -Encoding utf8
+        # Buttons carry their callback as New-Button <text> "prefix:$value".
+        # The interpolated ones are exactly those a wildcard branch must catch.
+        $emitted = @([regex]::Matches($keyboards, '"(?<p>[a-zA-Z][a-zA-Z:]*:)\$') |
+                ForEach-Object { $_.Groups['p'].Value } | Sort-Object -Unique)
+        $emitted | Should -Not -BeNullOrEmpty
+        # A broader branch covers its narrower children the same way
+        # switch -Wildcard does: 'tadm:*' answers for 'tadm:edit:...'.
+        $orphans = @($emitted | Where-Object {
+                $button = $_
+                -not ($script:HandledPrefixes | Where-Object { $button.StartsWith($_, [System.StringComparison]::Ordinal) })
+            })
+        $orphans | Should -BeNullOrEmpty
+    }
+}

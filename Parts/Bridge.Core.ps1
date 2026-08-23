@@ -6,6 +6,28 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function Get-CallbackArg {
+    <# Strips a callback_data prefix and returns the payload that follows it.
+
+       Replaces hand-written $data.Substring(N), where N had to equal the
+       prefix length exactly and getting it wrong failed silently: the
+       'news:idown:' branch read from offset 10 instead of 11, shipped, and
+       broke news item reordering. Passing the prefix itself makes that whole
+       class of off-by-N bug unrepresentable, and a renamed prefix now throws
+       here instead of quietly slicing the wrong characters.
+
+       The payload is returned verbatim, so values that themselves contain ':'
+       survive exactly as Substring used to leave them. #>
+    param(
+        [Parameter(Mandatory)][string]$Data,
+        [Parameter(Mandatory)][string]$Prefix
+    )
+    if (-not $Data.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
+        throw "Callback '$Data' does not start with the expected prefix '$Prefix'."
+    }
+    return $Data.Substring($Prefix.Length)
+}
+
 function Get-JsonProp {
     <# Safely reads a possibly-absent property from a ConvertFrom-Json object
        without tripping Set-StrictMode's property-not-found error. Telegram and

@@ -4278,3 +4278,79 @@ Describe 'Live self-test' {
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 }
+
+Describe 'Layer removal confirmation' {
+    BeforeEach {
+        $script:OnAir = @{}
+        Mock Send-TelegramMessage {}
+        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ExitLayer { $true }
+        Mock Test-Authorized { $true }
+        Mock Test-TelegramPrivateChat { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserLastActivity {}
+    }
+    AfterAll { $script:OnAir = @{} }
+    BeforeAll {
+        function New-HideCallback { param([string]$Data)
+            [pscustomobject]@{ id = 'cb1'; data = $Data; from = [pscustomobject]@{ id = 42 }
+                message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 42; type = 'private' } } }
+        }
+    }
+
+    It 'names the template, its age and who pushed it' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date).AddMinutes(-4); UserId = 42; Source = 'bridge' }
+        $summary = Get-LayerRemovalSummary -Layer 7
+        $summary | Should -Match 'Urgent'
+        $summary | Should -Match 'الطبقة 7'
+        $summary | Should -Match 'على الهواء منذ'
+    }
+
+    It 'says plainly when the bridge has no record for the layer' {
+        Get-LayerRemovalSummary -Layer 3 | Should -Match 'لا يوجد سجل'
+    }
+
+    It 'marks a Cinegy-owned scene as started outside the bridge' {
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 0; Source = 'cinegy' }
+        Get-LayerRemovalSummary -Layer 8 | Should -Match 'خارج الجسر'
+    }
+
+    It 'keeps the emergency path at one tap while confirmation is off' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hide:7')
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+
+    It 'asks first when confirmation is on, and does not touch air yet' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hide:7')
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'Urgent' }
+    }
+
+    It 'executes once the operator confirms' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hidego:7')
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+
+    It 'confirms an exit the same way' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'exit:7')
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'exitgo:7')
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+    }
+}

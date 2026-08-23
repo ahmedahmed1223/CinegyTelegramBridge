@@ -654,8 +654,28 @@ function Invoke-CallbackQuery {
         }
         'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }
         'rollback:*' { Start-SafeRollbackReview -Layer ([int](Get-CallbackArg $data 'rollback:')) -ChatId $chatId -UserId $userId; break }
-        'hide:*' { Invoke-HideLayer -Layer ([int](Get-CallbackArg $data 'hide:')) -ChatId $chatId -UserId $userId | Out-Null; break }
-        'exit:*' { Invoke-ExitLayer -Layer ([int](Get-CallbackArg $data 'exit:')) -ChatId $chatId -UserId $userId; break }
+        # A confirmed removal names the template, not just the layer number:
+        # a layer number is not something an operator can check against the
+        # screen under pressure. Off by default so the emergency path keeps
+        # its single tap.
+        'hidego:*' { Invoke-HideLayer -Layer ([int](Get-CallbackArg $data 'hidego:')) -ChatId $chatId -UserId $userId | Out-Null; break }
+        'exitgo:*' { Invoke-ExitLayer -Layer ([int](Get-CallbackArg $data 'exitgo:')) -ChatId $chatId -UserId $userId; break }
+        'hide:*' {
+            $targetLayer = [int](Get-CallbackArg $data 'hide:')
+            if (Get-Setting 'ConfirmLayerRemoval') {
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الإخفاء`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide)
+            }
+            else { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'exit:*' {
+            $targetLayer = [int](Get-CallbackArg $data 'exit:')
+            if (Get-Setting 'ConfirmLayerRemoval') {
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الخروج من المشهد`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit)
+            }
+            else { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId }
+            break
+        }
         'updtpl:*' {
             $idx = [int]((Get-CallbackArg $data 'updtpl:'))
             $t = Get-TemplateByIndex -Index $idx

@@ -171,6 +171,37 @@ function Update-SnapshotJobs {
     foreach ($job in $done) { $script:SnapshotJobs.Remove($job) | Out-Null }
 }
 
+function Update-UploadCleanup {
+    <#
+        Sweeps documents operators uploaded to the bot.
+
+        A news import or a template registry file is staged to disk, parsed,
+        and then simply left there. Every upload accumulated for ever, on the
+        playout machine, holding whatever editorial text the operator sent -
+        content nobody intended the bridge to retain.
+
+        Staged uploads are consumed within seconds of arriving, so anything
+        older than the retention window is finished with by definition.
+    #>
+    param([switch]$Force)
+    $retention = Get-SettingInt 'UploadRetentionMinutes' 0
+    if ($retention -le 0) { return }
+    if (-not $Force -and ((Get-Date) - $script:LastUploadSweep).TotalSeconds -lt 300) { return }
+    $script:LastUploadSweep = Get-Date
+
+    $cutoff = (Get-Date).AddMinutes(-$retention)
+    $removed = 0
+    foreach ($directory in @($script:newsImportDirectory, (Join-Path $script:logDir 'template-imports'))) {
+        if (-not (Test-Path -LiteralPath $directory)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -ErrorAction SilentlyContinue)) {
+            if ($file.LastWriteTime -ge $cutoff) { continue }
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            $removed++
+        }
+    }
+    if ($removed -gt 0) { Write-BridgeLog "Upload cleanup removed $removed staged upload(s) older than $retention minute(s)" }
+}
+
 function Update-SnapshotCleanup {
     <# Snapshots are throwaway files. The success path already deletes the
        previously cached frame and the failure paths delete their own output,

@@ -156,6 +156,8 @@ $script:DefaultSettings = [ordered]@{
     SnapshotCooldownSeconds    = 10      # reuse the last frame instead of re-running ffmpeg
     SnapshotTimeoutSeconds     = 8       # hard kill ffmpeg after this
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this
+    UploadRetentionMinutes     = 60      # delete staged operator uploads older than this; 0 keeps them
+    ConfirmLayerRemoval        = $false  # ask before hide/exit, naming the template; costs the emergency path a tap
     AutoHideDefaultSeconds     = 10      # pre-selected duration for the timed-show button
     AutoHidePresetSeconds      = '5,10,15,30,60,120'  # quick-pick durations offered on screen
     RelayAutoRestart           = $true
@@ -205,6 +207,8 @@ $script:SettingDisplayMetadata = @{
     SnapshotCooldownSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل قبل التقاط صورة بث جديدة' }
     SnapshotTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة التقاط صورة البث' }
     SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
+    UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
+    ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
     RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
@@ -532,6 +536,7 @@ $script:OnAirDirty = $false   # set when the in-memory record changes so a sync 
 $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()
 $script:LastSnapshotAt = [datetime]::MinValue
 $script:LastSnapshotFile = ''
+$script:LastUploadSweep = [datetime]::MinValue
 $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.
@@ -845,6 +850,7 @@ Import-ScheduleEvents
 Initialize-CinegyOnAirState | Out-Null
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
+Update-UploadCleanup -Force     # and any staged upload left behind with it
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"

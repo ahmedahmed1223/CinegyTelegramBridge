@@ -130,6 +130,38 @@ function Get-MainMenuIntro {
     return "🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')`n$age"
 }
 
+function Get-LayerRemovalSummary {
+    <# Describes exactly what is about to be taken off air, so a confirmation
+       says "lower-third, on air 4 د, pushed by Ahmed" rather than the layer
+       number alone. A layer number is not something an operator can check
+       against the screen under pressure; a template name is. #>
+    param([Parameter(Mandatory)][int]$Layer)
+    if (-not $script:OnAir.ContainsKey([int]$Layer)) {
+        return "الطبقة $Layer — لا يوجد سجل لدى الجسر"
+    }
+    $record = $script:OnAir[[int]$Layer]
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add("الطبقة $Layer · $($record.Key)")
+    if ($record.At -is [datetime]) {
+        $parts.Add("على الهواء منذ $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))")
+    }
+    $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
+    $parts.Add($(switch ($source) {
+                'cinegy' { 'المصدر: Cinegy (خارج الجسر)' }
+                'BotTest' { 'المصدر: اختبار قالب' }
+                default { "أرسله: $(Get-UserDisplayName -UserId ([long]$record.UserId))" }
+            }))
+    return ($parts -join "`n")
+}
+
+function Get-LayerRemovalConfirmKeyboard {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][ValidateSet('hide', 'exit')][string]$Action)
+    $label = if ($Action -eq 'hide') { '✅ نعم، أخفِ' } else { '✅ نعم، اخرج' }
+    return @{ inline_keyboard = @(
+            , @( (New-Button $label "${Action}go:$Layer"), (New-Button '❌ إلغاء' 'menu') )
+        ) }
+}
+
 function Get-AdminToolsKeyboard {
     <# The rarely-used administrator surface, split out of the main menu so a
        live-layer row is never pushed below the fold by configuration. #>

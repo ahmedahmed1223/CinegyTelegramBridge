@@ -4079,3 +4079,60 @@ Describe 'Administrator tools grouping' {
         $flat | Should -Not -Contain 'menu:settings'
     }
 }
+
+Describe 'Template test layer safety' {
+    It 'reports no conflict when testing is disabled' {
+        Get-TemplateTestLayerConflict -Layer 0 | Should -BeNullOrEmpty
+    }
+
+    It 'names the production templates already occupying a candidate layer' {
+        Mock Get-TemplateStore {
+            @{ Map = @{ 'lower-third' = @{ Layer = 3 }; 'ticker' = @{ Layer = 8 }; 'bug' = @{ Layer = 3 } }; Order = @(); Errors = @() }
+        }
+
+        $conflict = @(Get-TemplateTestLayerConflict -Layer 3)
+
+        $conflict | Should -Be @('bug', 'lower-third')
+    }
+
+    It 'reports a free layer as safe to test on' {
+        Mock Get-TemplateStore {
+            @{ Map = @{ 'lower-third' = @{ Layer = 3 } }; Order = @(); Errors = @() }
+        }
+
+        Get-TemplateTestLayerConflict -Layer 9 | Should -BeNullOrEmpty
+    }
+
+    It 'refuses to point the test layer at a production layer' {
+        # Without this the "safe" test push goes out on the same layer as
+        # programme graphics, which is what the setting exists to prevent.
+        Mock Get-TemplateStore {
+            @{ Map = @{ 'lower-third' = @{ Layer = 3 } }; Order = @(); Errors = @() }
+        }
+        Mock Set-Setting {}
+        Mock Send-TelegramMessage {}
+        Mock Get-SettingsKeyboard { @{ inline_keyboard = @() } }
+        Set-PendingState -ChatId 100 -State @{ Mode = 'setting_value'; Name = 'TemplateTestLayer'; UserId = 100 }
+
+        Complete-SettingValue -ChatId 100 -Value '3'
+
+        Should -Invoke Set-Setting -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'lower-third' }
+    }
+
+    It 'accepts a free layer through the same path' {
+        Mock Get-TemplateStore {
+            @{ Map = @{ 'lower-third' = @{ Layer = 3 } }; Order = @(); Errors = @() }
+        }
+        Mock Set-Setting {}
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Get-SettingsKeyboard { @{ inline_keyboard = @() } }
+        Set-PendingState -ChatId 100 -State @{ Mode = 'setting_value'; Name = 'TemplateTestLayer'; UserId = 100 }
+
+        Complete-SettingValue -ChatId 100 -Value '9'
+
+        Should -Invoke Set-Setting -Times 1 -Exactly -ParameterFilter { $Name -eq 'TemplateTestLayer' -and $Value -eq 9 }
+    }
+}

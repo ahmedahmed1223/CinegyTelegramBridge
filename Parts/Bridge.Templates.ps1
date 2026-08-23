@@ -257,6 +257,25 @@ function Get-TemplateIndex {
     return [array]::IndexOf($store.Order, $Key)
 }
 
+function Get-TemplateTestLayerConflict {
+    <# Names the registered templates that already live on a candidate test
+       layer, or $null when the layer is free.
+
+       TemplateTestLayer exists so a template can be pushed somewhere harmless
+       before it is trusted on air. Pointing it at a layer a real template
+       already uses defeats that entirely: the "test" goes out on the same
+       layer as programme graphics, which is the exact accident the setting was
+       added to avoid. 0 disables testing and never conflicts.
+
+       Always returns an array, never $null: a caller writing @(...) around a
+       $null return gets a one-element array holding $null, whose .Count is 1,
+       so "no conflict" would read as "conflict" and block every free layer. #>
+    param([Parameter(Mandatory)][int]$Layer)
+    if ($Layer -le 0) { return @() }
+    $store = Get-TemplateStore
+    return @($store.Map.Keys | Where-Object { [int]$store.Map[$_].Layer -eq $Layer } | Sort-Object)
+}
+
 function Get-KnownLayers {
     $store = Get-TemplateStore
     $layers = @($store.Map.Values | ForEach-Object { $_.Layer } | Sort-Object -Unique)

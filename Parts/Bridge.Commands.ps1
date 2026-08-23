@@ -161,6 +161,13 @@ function Complete-SettingValue {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة لا يمكن أن تكون سالبة." -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
+    if ($state.Name -eq 'TemplateTestLayer') {
+        $conflict = @(Get-TemplateTestLayerConflict -Layer $parsed)
+        if ($conflict.Count -gt 0) {
+            Send-TelegramMessage -ChatId $ChatId -Text "❌ الطبقة $parsed مستخدمة في قوالب الإنتاج: $($conflict -join '، ')`nاختر طبقة غير مستخدمة، وإلا خرجت التجربة على الهواء. لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+            return
+        }
+    }
     Set-Setting -Name $state.Name -Value $parsed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $parsed"
     Add-AuditEntry "⚙️ $($state.Name) = $parsed - user $($state.UserId)"

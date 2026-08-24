@@ -1,5 +1,23 @@
 # Changelog
 
+## 5.2.0 — 2026-08-24
+
+- Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.
+- `ReservedLayers` now admits administrators, stating that the layer is reserved, while still refusing operators. It previously refused everyone including the administrators who reserved the layer, so touching a protected layer meant editing `config.json`. A disabled template stays blocked for everyone.
+- Warns administrators when a scheduled event is about to displace a live graphic (`NotifyOnScheduleOverwrite`, default on). The creation-time conflict check compares scheduled events only, and cannot know what an operator put up by hand.
+- Adds settings export and import. Export carries only the keys declared in `DefaultSettings`, so the bot token and the operator whitelist never reach a chat. Import refuses a foreign or malformed document, refuses an unknown key rather than dropping it, previews exactly which keys differ, and applies nothing until the same administrator confirms.
+- Adds a usage digest, on demand and weekly (`UsageDigestEnabled`, `UsageDigestDayOfWeek`): busiest templates, operation totals, and refusals.
+- Settings export now creates the log directory if it is missing rather than assuming an earlier code path made it.
+- Test suite grows from 384 to 403.
+## 5.2.0 — 2026-08-24
+
+- Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.
+- `ReservedLayers` now admits administrators, stating that the layer is reserved, while still refusing operators. It previously refused everyone including the administrators who reserved the layer, so touching a protected layer meant editing `config.json`. A disabled template stays blocked for everyone.
+- Warns administrators when a scheduled event is about to displace a live graphic (`NotifyOnScheduleOverwrite`, default on). The creation-time conflict check compares scheduled events only, and cannot know what an operator put up by hand.
+- Adds settings export and import. Export carries only the keys declared in `DefaultSettings`, so the bot token and the operator whitelist never reach a chat. Import refuses a foreign or malformed document, refuses an unknown key rather than dropping it, previews exactly which keys differ, and applies nothing until the same administrator confirms.
+- Adds a usage digest, on demand and weekly (`UsageDigestEnabled`, `UsageDigestDayOfWeek`): busiest templates, operation totals, and refusals.
+- Settings export now creates the log directory if it is missing rather than assuming an earlier code path made it.
+- Test suite grows from 384 to 403.
 ## 5.1.0 — 2026-08-23
 
 - Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.

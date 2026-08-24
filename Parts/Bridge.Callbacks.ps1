@@ -344,6 +344,19 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:sharestatus' {
+            # Sent as its own message with no keyboard, so a long-press copies just
+            # the summary rather than the surrounding chrome.
+            Send-TelegramMessage -ChatId $chatId -Text (Get-OnAirShareText)
+            Send-TelegramMessage -ChatId $chatId -Text 'انسخ الرسالة أعلاه وأرسلها لمن يحتاجها.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'menu:stats' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'menu:whatsnew' {
             Send-TelegramMessage -ChatId $chatId -Text (Get-WhatsNewText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break

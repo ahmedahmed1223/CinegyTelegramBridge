@@ -40,9 +40,13 @@ function Get-MainMenuKeyboard {
             }
             $rows += , $liveRow
         }
-        if (Get-Setting 'EnableHideAll') {
-            $rows += , @( (New-Button "🚨 إخفاء الكل" "menu:hideall") )
-        }
+        # A frame from the actual output, next to what the bridge believes is
+        # on air - so the operator can check the claim without leaving the chat.
+        $onAirTools = @()
+        if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button "🚨 إخفاء الكل" "menu:hideall") }
+        if (Get-Setting 'EnableSnapshot') { $onAirTools += (New-Button "📷 لقطة الآن" "menu:snapshot") }
+        $onAirTools += (New-Button "📋 نسخ الحالة" "menu:sharestatus")
+        $rows += , $onAirTools
     }
 
     # A rollback used to be reachable only from the message that offered it,
@@ -193,6 +197,7 @@ function Get-AdminToolsKeyboard {
     }
 
     $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
+    $rows += , @( (New-Button "📈 أرقام التشغيل" "menu:stats") )
     $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
     if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart") ) }
     $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )

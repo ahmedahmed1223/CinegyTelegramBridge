@@ -24,6 +24,9 @@ function Send-TelegramMessage {
         $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $body `
             -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
         if (-not $request.Success) {
+            # Counted separately: a flood limit is a capacity problem, not a bug,
+            # and telling them apart is the point of /stats.
+            if ($request.Error -match '429') { $script:TelegramRateLimitHits++ }
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
         }
     }

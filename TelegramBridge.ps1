@@ -179,7 +179,7 @@ $script:DefaultSettings = [ordered]@{
     StaleOnAirAlertHours      = 6       # warn admins about a bridge record on air this long; 0 disables
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
     SchedulePaused              = $false # keep events pending without executing them
-    SchedulePreNotifyMinutes    = 0      # disabled by default; notify shortly before an occurrence
+    SchedulePreNotifyMinutes    = 3      # notify this many minutes before a scheduled occurrence; 0 disables
     ScheduleMaxRetries          = 0       # safe default: do not replay a failed SHOW unless admin opts in
     ScheduleRetryDelaySeconds   = 30      # wait before an opted-in scheduled SHOW retry
     ScheduleRetryBackoffFactor  = 2       # exponential multiplier per failed attempt
@@ -373,6 +373,7 @@ $script:BotCommandList = @(
     @{ command = 'cancel'; description = '❌ إلغاء أي عملية معلّقة والبدء من جديد' }
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'whatsnew'; description = '🆕 ملخص تغييرات الإصدارات الأخيرة' }
+    @{ command = 'stats'; description = '📈 مدة التشغيل وأرقام العمليات (للمشرفين)' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
     @{ command = 'myoperations'; description = '🧾 آخر عملياتي وإعادة المحاولة' }
@@ -578,6 +579,8 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 $script:RuntimeState = New-BridgeRuntimeState
 $script:RelayState = $script:RuntimeState.Relay
 
+$script:BridgeStartedAt = Get-Date
+$script:TelegramRateLimitHits = 0
 $script:RestartRequested = $false
 $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue

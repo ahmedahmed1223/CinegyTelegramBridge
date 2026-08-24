@@ -4759,3 +4759,69 @@ Describe 'Administrator restart' {
         $flat | Should -Not -Contain 'menu:restart'
     }
 }
+
+Describe 'Operational numbers and status sharing' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:BridgeStartedAt = (Get-Date).AddHours(-26)
+        $script:TelegramRateLimitHits = 7
+        $script:AirOperationCounters = @{ Success = 12; Failed = 1; Blocked = 2 }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'reports uptime, which is what tells an administrator it has been restarting' {
+        $text = Get-BridgeStatsText
+        $text | Should -Match 'مدة التشغيل: 1 ي'
+        $text | Should -Match ([regex]::Escape($script:BridgeVersion))
+    }
+
+    It 'separates flood limits from ordinary failures' {
+        Get-BridgeStatsText | Should -Match '\(429\): 7'
+    }
+
+    It 'counts every air operation outcome' {
+        $text = Get-BridgeStatsText
+        $text | Should -Match 'عمليات الهواء: 15'
+    }
+
+    It 'shares a plain summary that survives being pasted elsewhere' {
+        $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date).AddMinutes(-4); UserId = 42; Source = 'bridge' }
+        $text = Get-OnAirShareText
+        $text | Should -Match 'طبقة 3: lower-third'
+        $text | Should -Match 'منذ'
+        # No inline-keyboard chrome, no callback data - it is meant to be copied.
+        $text | Should -Not -Match 'callback_data'
+    }
+
+    It 'says plainly when nothing is on air rather than sharing an empty list' {
+        Get-OnAirShareText | Should -Match 'لا شيء على الهواء'
+    }
+}
+
+Describe 'On-air row tools' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:RollbackCandidates = @{}
+        Mock Test-Admin { $false }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'offers an instant frame and a copyable status beside the live layers' {
+        # The operator can check the bridge's claim against the real output
+        # without leaving the chat.
+        $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Contain 'menu:snapshot'
+        $flat | Should -Contain 'menu:sharestatus'
+    }
+
+    It 'keeps the emergency hide on that same row' {
+        $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+        $rows = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard)
+        $toolRow = @($rows | Where-Object { @($_ | ForEach-Object { $_.callback_data }) -contains 'menu:hideall' })
+        @($toolRow[0] | ForEach-Object { $_.callback_data }) | Should -Contain 'menu:sharestatus'
+    }
+}

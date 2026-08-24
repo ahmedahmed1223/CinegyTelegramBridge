@@ -69,6 +69,52 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Get-BridgeStatsText {
+    <# Operational numbers an administrator asks for when something feels off:
+       how long this instance has been up, what it has done, and whether
+       Telegram has been throttling it. Uptime is the one that matters most -
+       a bridge that has been up for eleven minutes has been restarting. #>
+    $now = Get-Date
+    $uptime = $now - $script:BridgeStartedAt
+    $counters = $script:AirOperationCounters
+    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("📈 أرقام التشغيل — v$($script:BridgeVersion)")
+    $lines.Add('')
+    $lines.Add("مدة التشغيل: $([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
+    $lines.Add("منذ: $($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))")
+    $lines.Add('')
+    $lines.Add("عمليات الهواء: $total (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
+    $lines.Add("رسائل رفضها Telegram لتجاوز الحد (429): $($script:TelegramRateLimitHits)")
+    $lines.Add("اتصال Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)")
+    $lines.Add("صحة Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState)")
+
+    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
+    $lines.Add("آخر نبضة يومية: $lastBeat")
+    $lines.Add("مشاهد مسجّلة على الهواء: $($script:OnAir.Count)")
+    return ($lines -join "`n")
+}
+
+function Get-OnAirShareText {
+    <# A plain-text summary an operator can forward to the director instead of
+       retyping what is up. Deliberately plain: it has to survive being pasted
+       into another app, so no buttons and no layout that depends on Telegram. #>
+    $now = Get-Date
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("حالة الهواء — $($now.ToString('yyyy-MM-dd HH:mm'))")
+    if ($script:OnAir.Count -eq 0) { $lines.Add('لا شيء على الهواء.') }
+    else {
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $record = $script:OnAir[$layer]
+            $age = if ($record.At -is [datetime]) { " (منذ $(Format-Duration -Seconds ([int]($now - $record.At).TotalSeconds)))" } else { '' }
+            $lines.Add("- طبقة ${layer}: $($record.Key)$age")
+        }
+    }
+    $lines.Add("Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState)")
+    return ($lines -join "`n")
+}
+
 function Get-UsageDigestText {
     <# What the shift actually did, from counters the bridge already keeps.
        Meant to be read on a phone, so it is a handful of lines: the busiest

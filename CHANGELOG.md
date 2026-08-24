@@ -1,5 +1,31 @@
 # Changelog
 
+## 5.4.0 — 2026-08-24
+
+- **Fixes a phantom on-air record.** On startup the bot reported a template on layer 7 while the screen was blank. Discovery treated "not marked empty" as evidence of a live scene, but a spent item stays Active - briefly with no `IsEmpty` at all - and reports Cinegy's placeholder name `Item` with no description, exactly as every empty layer does. Discovery now requires a real describing name. Ambiguity must never ADD a record, and still never removes one.
+- Generalises undo. A push onto a verifiably empty layer now leaves an undo that clears the layer again - the commonest mistake there is. Deliberately not offered when correlation failed, since hiding would discard whatever the bridge could not identify rather than restore it.
+- Names who holds a layer lock, what they are preparing, and for how long, instead of printing a bare user id. An optional 🔒 badge on the template list (`ShowLayerLockBadge`, default off) shows the clash before a field is typed.
+- Asks why after an undo - wrong template, wrong timing, director asked, other - and reports the counts in the usage digest. `logs\cancel-reasons.json` holds counts only: no field text, no user ids.
+- Adds `/digest` and 🕘 ماذا فاتني, and `/who <template>`. Both read `audit.jsonl` rather than a new events file, which would only drift out of sync with the audit trail.
+- Adds a repeat radar: one template pushed three times inside an hour is queried, since that is almost always a paste slip. Asked after the push, never before.
+- Adds quiet hours (`QuietHoursEnabled`, default off): non-urgent administrator notices are batched overnight and delivered as one message when the window closes. A black output or a stale on-air record is always urgent and always immediate.
+- Adds an automatic maintenance window (`MaintenanceWindowStart`/`End`, `HH:mm`). Both it and quiet hours handle windows that cross midnight. An unset or malformed window is no window - neither may fail closed and block control of a live channel. The administrator emergency override still works inside one.
+- Adds one-hand mode (`OneHandMode`) for thumb-only use, and optional text shortcuts (`EnableTextShortcuts`) where a bare template name starts a show. Exact match only: a fuzzy match would put the wrong graphic on air from a typo.
+- `templates.json` is no longer tracked in git. It carries station-specific names and scene paths and belongs with `config.json`; `templates.example.json` remains for a fresh install.
+- Test suite grows from 434 to 477.
+## 5.4.0 — 2026-08-24
+
+- **Fixes a phantom on-air record.** On startup the bot reported a template on layer 7 while the screen was blank. Discovery treated "not marked empty" as evidence of a live scene, but a spent item stays Active - briefly with no `IsEmpty` at all - and reports Cinegy's placeholder name `Item` with no description, exactly as every empty layer does. Discovery now requires a real describing name. Ambiguity must never ADD a record, and still never removes one.
+- Generalises undo. A push onto a verifiably empty layer now leaves an undo that clears the layer again - the commonest mistake there is. Deliberately not offered when correlation failed, since hiding would discard whatever the bridge could not identify rather than restore it.
+- Names who holds a layer lock, what they are preparing, and for how long, instead of printing a bare user id. An optional 🔒 badge on the template list (`ShowLayerLockBadge`, default off) shows the clash before a field is typed.
+- Asks why after an undo - wrong template, wrong timing, director asked, other - and reports the counts in the usage digest. `logs\cancel-reasons.json` holds counts only: no field text, no user ids.
+- Adds `/digest` and 🕘 ماذا فاتني, and `/who <template>`. Both read `audit.jsonl` rather than a new events file, which would only drift out of sync with the audit trail.
+- Adds a repeat radar: one template pushed three times inside an hour is queried, since that is almost always a paste slip. Asked after the push, never before.
+- Adds quiet hours (`QuietHoursEnabled`, default off): non-urgent administrator notices are batched overnight and delivered as one message when the window closes. A black output or a stale on-air record is always urgent and always immediate.
+- Adds an automatic maintenance window (`MaintenanceWindowStart`/`End`, `HH:mm`). Both it and quiet hours handle windows that cross midnight. An unset or malformed window is no window - neither may fail closed and block control of a live channel. The administrator emergency override still works inside one.
+- Adds one-hand mode (`OneHandMode`) for thumb-only use, and optional text shortcuts (`EnableTextShortcuts`) where a bare template name starts a show. Exact match only: a fuzzy match would put the wrong graphic on air from a typo.
+- `templates.json` is no longer tracked in git. It carries station-specific names and scene paths and belongs with `config.json`; `templates.example.json` remains for a fresh install.
+- Test suite grows from 434 to 477.
 ## 5.3.0 — 2026-08-24
 
 - Adds 📷 لقطة الآن and 📋 نسخ الحالة to the on-air row. The frame lets an operator check what the bridge claims is on air against the real output without leaving the chat - the exact gap that let an exited scene sit unnoticed for ninety minutes. The status text is deliberately plain so it survives being pasted into another app.

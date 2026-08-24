@@ -103,6 +103,16 @@ function Get-WhatsNewText {
         mention things an operator can see or act on.
     #>
     $sections = @(
+        @{ Version = '5.4.0'; Items = @(
+                'إصلاح: لم يعد يظهر قالب وهمي على الهواء عند الإقلاع.'
+                'التراجع صار يشمل العرض على طبقة فارغة — يزيله بضغطة.'
+                'عند التعارض يظهر اسم من يجهّز الطبقة ومنذ متى.'
+                'بعد التراجع يسألك عن السبب — لتحسين التدريب لاحقًا.'
+                '🕘 ماذا فاتني و/who لمعرفة من استخدم قالبًا ومتى.'
+                'تنبيه عند تكرار القالب ثلاث مرات في ساعة.'
+                'وضع ليلي يؤجّل التنبيهات غير العاجلة، ونافذة صيانة تلقائية.'
+                'وضع اليد الواحدة، واختصار بكتابة اسم القالب مباشرة.'
+            ) }
         @{ Version = '5.3.0'; Items = @(
                 '📷 لقطة الآن بجانب صفّ الهواء — تتحقق من الشاشة دون مغادرة المحادثة.'
                 '📋 نسخ الحالة: ملخص نصّي جاهز للإرسال إلى المخرج.'
@@ -288,11 +298,29 @@ function Write-AirOperationResult {
     Write-BridgeLog $message $level
 }
 
+function Test-MaintenanceWindowActive {
+    <# The nightly slot when the playout machine is patched or re-cabled. An
+       unset or malformed window is no window: this must never fail closed and
+       silently block control of a live channel. #>
+    return (Test-BridgeMaintenanceWindow -Now (Get-Date) `
+            -StartTime ([string](Get-Setting 'MaintenanceWindowStart')) `
+            -EndTime ([string](Get-Setting 'MaintenanceWindowEnd')))
+}
+
 function Test-MaintenanceControl {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
-    if (-not (Get-Setting 'MaintenanceMode')) { return $true }
+    $manual = [bool](Get-Setting 'MaintenanceMode')
+    $scheduled = Test-MaintenanceWindowActive
+    if (-not $manual -and -not $scheduled) { return $true }
+    # The emergency override still works during a scheduled window: a machine
+    # being patched is no reason an administrator cannot pull a graphic that
+    # is wrongly on air.
     if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
-    Send-TelegramMessage -ChatId $ChatId -Text '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    $reason = if ($scheduled -and -not $manual) {
+        "🛠 نافذة الصيانة المجدولة مفتوحة ($([string](Get-Setting 'MaintenanceWindowStart'))–$([string](Get-Setting 'MaintenanceWindowEnd')))؛ أوامر الهواء متوقفة حتى نهايتها."
+    }
+    else { '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' }
+    Send-TelegramMessage -ChatId $ChatId -Text $reason -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $false
 }
 

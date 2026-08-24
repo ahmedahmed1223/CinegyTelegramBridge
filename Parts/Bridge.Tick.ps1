@@ -354,7 +354,7 @@ function Update-StaleOnAirWatchdog {
     foreach ($item in $stale) { $script:StaleOnAirAlerted.Add([int]$item.Layer) | Out-Null }
     $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $($_.Hours) ساعة" })
     Write-BridgeLog "Stale on-air record(s) reported to administrators: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
-    Send-AdminBroadcast -Text ("⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:`n" + ($lines -join "`n") +
+    Send-AdminBroadcast -Urgent -Text ("⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:`n" + ($lines -join "`n") +
         "`nإن كانت الشاشة خالية فاضغط إخفاء على الطبقة لتصفية السجل.")
 }
 
@@ -457,7 +457,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

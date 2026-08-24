@@ -6,6 +6,25 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function ConvertTo-OneHandLayout {
+    <#
+        Splits every row into single, full-width buttons.
+
+        An operator holding the phone in one hand, thumb only, cannot reliably
+        hit one of three buttons sharing a row - and the row that matters most
+        is the live-layer row, pressed under time pressure. Applied as a final
+        pass over a finished keyboard so no individual screen has to know
+        about it.
+    #>
+    param([Parameter(Mandatory)][hashtable]$Keyboard)
+    if (-not (Get-Setting 'OneHandMode')) { return $Keyboard }
+    $rows = @()
+    foreach ($row in @($Keyboard.inline_keyboard)) {
+        foreach ($button in @($row)) { $rows += , @($button) }
+    }
+    return @{ inline_keyboard = $rows }
+}
+
 function New-Button {
     param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][string]$Data)
     $maxLength = Get-SettingInt 'ButtonTextMaxLength'
@@ -121,7 +140,7 @@ function Get-MainMenuKeyboard {
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
         $rows += , @( (New-Button "🗂 أدوات الإدارة" "menu:admintools") )
     }
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-OneHandLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
 function Get-MainMenuIntro {

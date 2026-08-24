@@ -5016,3 +5016,91 @@ Describe 'Repeat radar' {
         1..5 | ForEach-Object { Test-RepeatedShow -Key 'alpha' | Should -BeFalse }
     }
 }
+
+Describe 'Quiet hours delivery' {
+    BeforeEach {
+        $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
+        Mock Send-TelegramMessage {}
+        Mock Write-BridgeLog {}
+        Mock Test-QuietHoursActive { $true }
+    }
+    AfterAll { $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new() }
+
+    It 'holds a routine notice instead of paging at 03:00' {
+        Send-AdminBroadcast -Text 'قالب لم يُتحقق منه'
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+        $script:QuietHoursQueue.Count | Should -Be 1
+    }
+
+    It 'still sends an urgent one immediately' {
+        # A black output means the channel is wrong right now.
+        Send-AdminBroadcast -Text 'المخرج أسود' -Urgent
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+        $script:QuietHoursQueue.Count | Should -Be 0
+    }
+
+    It 'delivers everything held as one message once the window passes' {
+        Send-AdminBroadcast -Text 'أول'
+        Send-AdminBroadcast -Text 'ثانٍ'
+        Mock Test-QuietHoursActive { $false }
+
+        Update-QuietHoursQueue
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'أول' -and $Text -match 'ثانٍ' }
+        $script:QuietHoursQueue.Count | Should -Be 0
+    }
+
+    It 'keeps holding while the window is still open' {
+        Send-AdminBroadcast -Text 'أول'
+        Update-QuietHoursQueue
+        $script:QuietHoursQueue.Count | Should -Be 1
+    }
+}
+
+Describe 'One-hand layout and text shortcuts' {
+    BeforeEach {
+        Mock Get-TemplateStore {
+            @{ Order = @('alpha', 'beta'); Map = @{
+                    alpha = @{ Key = 'alpha'; Layer = 3 }; beta = @{ Key = 'beta'; Layer = 4 }
+                }; Errors = @() }
+        }
+    }
+
+    It 'splits every row into full-width buttons when enabled' {
+        # Thumb-only use cannot reliably hit one of three buttons in a row.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'OneHandMode' }
+        $rows = New-Object System.Collections.ArrayList
+        [void]$rows.Add(@(@{ text = 'a' }, @{ text = 'b' }))
+        [void]$rows.Add(@(@{ text = 'c' }))
+        $keyboard = ConvertTo-OneHandLayout -Keyboard @{ inline_keyboard = $rows.ToArray() }
+        @($keyboard.inline_keyboard) | ForEach-Object { @($_).Count | Should -Be 1 }
+        @($keyboard.inline_keyboard).Count | Should -Be 3
+    }
+
+    It 'leaves the keyboard untouched when disabled' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'OneHandMode' }
+        $originalRows = New-Object System.Collections.ArrayList
+        [void]$originalRows.Add(@(@{ text = 'a' }, @{ text = 'b' }))
+        $original = @{ inline_keyboard = $originalRows.ToArray() }
+        @((ConvertTo-OneHandLayout -Keyboard $original).inline_keyboard[0]).Count | Should -Be 2
+    }
+
+    It 'resolves an exact template name to its index' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableTextShortcuts' }
+        Resolve-TemplateShortcut -Text 'beta' | Should -Be 1
+        Resolve-TemplateShortcut -Text 'BETA' | Should -Be 1
+    }
+
+    It 'refuses anything that is not an exact match' {
+        # A fuzzy match would put the wrong graphic on air from a typo.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableTextShortcuts' }
+        Resolve-TemplateShortcut -Text 'bet' | Should -Be -1
+        Resolve-TemplateShortcut -Text 'beta2' | Should -Be -1
+        Resolve-TemplateShortcut -Text '  ' | Should -Be -1
+    }
+
+    It 'is inert while the setting is off' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableTextShortcuts' }
+        Resolve-TemplateShortcut -Text 'beta' | Should -Be -1
+    }
+}

@@ -273,7 +273,7 @@ function Send-OutputBlackNotification {
     param([double]$Luminance = 0, [switch]$Recovered)
     $text = if ($Recovered) { "💡 عاد المخرج إلى الإضاءة الطبيعية (سطوع $Luminance)." }
     else { "🖤 المخرج أسود — تأكّد عبر لقطتين متتاليتين (سطوع $Luminance).`nتحقّق من المصدر وسلسلة البث." }
-    Send-AdminBroadcast -Text $text
+    Send-AdminBroadcast -Text $text -Urgent
     if (-not (Get-Setting 'NotifyOperatorsOnBlackOutput')) { return }
     $adminIds = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })
     foreach ($chatId in @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })) {

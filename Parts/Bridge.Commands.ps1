@@ -6,6 +6,21 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function Resolve-TemplateShortcut {
+    <# Maps typed text to a template index, or -1. Exact, case-insensitive
+       match on the template key only: anything looser risks putting the wrong
+       graphic on air because someone mistyped. #>
+    param([string]$Text)
+    if (-not (Get-Setting 'EnableTextShortcuts')) { return -1 }
+    $needle = ([string]$Text).Trim()
+    if ([string]::IsNullOrWhiteSpace($needle)) { return -1 }
+    $store = Get-TemplateStore
+    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+        if (([string]$store.Order[$i]).Equals($needle, [System.StringComparison]::OrdinalIgnoreCase)) { return $i }
+    }
+    return -1
+}
+
 function Show-SettingsScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -380,7 +395,15 @@ function Invoke-BridgeCommand {
             else { Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         }
         { $_ -in @('امر', 'أمر', 'cmd') } { Invoke-AdminRawCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
-        default { Send-TelegramMessage -ChatId $ChatId -Text "أمر غير معروف '/$command'. استخدم الأزرار أدناه:" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+        default {
+            # A bare template name is treated as "show this", which saves an
+            # operator who knows the rundown three taps through the menus.
+            # Off by default and exact-match only: a fuzzy match here would
+            # put the wrong graphic on air from a typo.
+            $shortcut = Resolve-TemplateShortcut -Text $command
+            if ($shortcut -ge 0) { Start-ShowFlow -TemplateIndex $shortcut -ChatId $ChatId -UserId $UserId; return }
+            Send-TelegramMessage -ChatId $ChatId -Text "أمر غير معروف '/$command'. استخدم الأزرار أدناه:" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        }
     }
 }
 

@@ -114,9 +114,45 @@ function Clear-PendingTelegramUpdates {
 }
 
 function Send-AdminBroadcast {
-    param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup)
+    <#
+        -Urgent bypasses quiet hours. Everything meaning the channel is wrong
+        right now - a black output, a graphic that will not come off - must be
+        urgent. Everything that can wait until someone is awake should not be:
+        a bot that pages at 03:00 about a template it could not verify gets
+        muted, and a muted bot is worse than a silent one, because the alert
+        that mattered then arrives to a muted chat.
+    #>
+    param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent)
+    if (-not $Urgent -and (Test-QuietHoursActive)) {
+        $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
+        Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
+        return
+    }
     foreach ($adminId in @(Get-JsonProp $config 'AdminChatIds')) {
         if ($adminId) { Send-TelegramMessage -ChatId ([long]$adminId) -Text $Text -ReplyMarkup $ReplyMarkup }
+    }
+}
+
+function Test-QuietHoursActive {
+    if (-not (Get-Setting 'QuietHoursEnabled')) { return $false }
+    return (Test-BridgeQuietHour -Hour ((Get-Date).Hour) `
+            -StartHour (Get-SettingInt 'QuietHoursStart' 0) -EndHour (Get-SettingInt 'QuietHoursEnd' 0))
+}
+
+function Update-QuietHoursQueue {
+    <# Delivers everything held overnight as one message once the window has
+       passed. One message rather than a burst: twenty notifications at 07:00
+       is the same wall of noise the batching was meant to avoid. #>
+    if ($script:QuietHoursQueue.Count -eq 0) { return }
+    if (Test-QuietHoursActive) { return }
+    $held = @($script:QuietHoursQueue)
+    $script:QuietHoursQueue.Clear()
+    $lines = @("🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count))") + @($held | ForEach-Object {
+            "• $($_.At.ToString('HH:mm')) — $(($_.Text -split "`n")[0])"
+        })
+    Write-BridgeLog "Flushed $($held.Count) quiet-hours notice(s)"
+    foreach ($adminId in @(Get-JsonProp $config 'AdminChatIds')) {
+        if ($adminId) { Send-TelegramMessage -ChatId ([long]$adminId) -Text ($lines -join "`n") }
     }
 }
 

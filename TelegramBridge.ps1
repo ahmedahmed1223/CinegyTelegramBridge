@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.3.0'
+$script:BridgeVersion = '5.4.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -162,6 +162,13 @@ $script:DefaultSettings = [ordered]@{
     RepeatWarningCount         = 3       # ask after this many pushes of one template in the window; 0 or 1 disables
     RepeatWarningWindowMinutes = 60      # the window the repeat count is measured over
     MissedEventsHours          = 12      # how far back ماذا فاتني looks
+    QuietHoursEnabled          = $false  # batch non-urgent admin notices overnight
+    QuietHoursStart            = 1       # hour the quiet window opens
+    QuietHoursEnd              = 7       # hour it closes and held notices are delivered
+    MaintenanceWindowStart     = ''      # HH:mm; empty disables the automatic window
+    MaintenanceWindowEnd       = ''      # HH:mm
+    OneHandMode                = $false  # one full-width button per row, for thumb-only use
+    EnableTextShortcuts        = $false  # let a bare template name start a show
     OutputMonitorMinutes       = 60      # look at the actual picture this often; 0 disables
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
@@ -225,6 +232,13 @@ $script:SettingDisplayMetadata = @{
     RepeatWarningCount = @{ Unit = 'مرة'; Description = 'التنبيه عند تكرار القالب هذا العدد خلال النافذة (0 للتعطيل)' }
     RepeatWarningWindowMinutes = @{ Unit = 'دقيقة'; Description = 'نافذة قياس تكرار القالب' }
     MissedEventsHours = @{ Unit = 'ساعة'; Description = 'المدة التي يغطيها ملخص «ماذا فاتني»' }
+    QuietHoursEnabled = @{ Unit = ''; Description = 'تجميع التنبيهات غير العاجلة ليلًا وإرسالها صباحًا' }
+    QuietHoursStart = @{ Unit = 'ساعة'; Description = 'بداية فترة الهدوء' }
+    QuietHoursEnd = @{ Unit = 'ساعة'; Description = 'نهاية فترة الهدوء ووقت إرسال المؤجّل' }
+    MaintenanceWindowStart = @{ Unit = 'HH:mm'; Description = 'بداية نافذة الصيانة التلقائية (فارغ للتعطيل)' }
+    MaintenanceWindowEnd = @{ Unit = 'HH:mm'; Description = 'نهاية نافذة الصيانة التلقائية' }
+    OneHandMode = @{ Unit = ''; Description = 'زر واحد بعرض الشاشة في كل صف (استخدام بيد واحدة)' }
+    EnableTextShortcuts = @{ Unit = ''; Description = 'كتابة اسم القالب مباشرة لبدء عرضه' }
     OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
@@ -591,6 +605,7 @@ $script:RelayState = $script:RuntimeState.Relay
 
 $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
+$script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0

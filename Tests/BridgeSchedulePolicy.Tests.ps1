@@ -41,3 +41,49 @@ Describe 'Schedule execution policy' {
         $terminal.NextAttemptAt | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Quiet hours and maintenance windows' {
+    It 'holds non-urgent notices inside a same-day window' {
+        Test-BridgeQuietHour -Hour 3 -StartHour 1 -EndHour 6 | Should -BeTrue
+        Test-BridgeQuietHour -Hour 9 -StartHour 1 -EndHour 6 | Should -BeFalse
+    }
+
+    It 'handles a window that crosses midnight, which is what a night shift is' {
+        Test-BridgeQuietHour -Hour 23 -StartHour 22 -EndHour 6 | Should -BeTrue
+        Test-BridgeQuietHour -Hour 2 -StartHour 22 -EndHour 6 | Should -BeTrue
+        Test-BridgeQuietHour -Hour 12 -StartHour 22 -EndHour 6 | Should -BeFalse
+    }
+
+    It 'treats the boundary hours consistently: start is in, end is out' {
+        Test-BridgeQuietHour -Hour 1 -StartHour 1 -EndHour 6 | Should -BeTrue
+        Test-BridgeQuietHour -Hour 6 -StartHour 1 -EndHour 6 | Should -BeFalse
+    }
+
+    It 'is disabled when start and end are the same hour' {
+        Test-BridgeQuietHour -Hour 3 -StartHour 4 -EndHour 4 | Should -BeFalse
+    }
+
+    It 'opens a maintenance window between its times' {
+        $now = [datetime]'2026-08-24T04:45:00'
+        Test-BridgeMaintenanceWindow -Now $now -StartTime '04:30' -EndTime '05:00' | Should -BeTrue
+    }
+
+    It 'closes it outside them' {
+        $now = [datetime]'2026-08-24T06:00:00'
+        Test-BridgeMaintenanceWindow -Now $now -StartTime '04:30' -EndTime '05:00' | Should -BeFalse
+    }
+
+    It 'handles a maintenance window that crosses midnight' {
+        Test-BridgeMaintenanceWindow -Now ([datetime]'2026-08-24T23:30:00') -StartTime '23:00' -EndTime '01:00' | Should -BeTrue
+        Test-BridgeMaintenanceWindow -Now ([datetime]'2026-08-24T00:30:00') -StartTime '23:00' -EndTime '01:00' | Should -BeTrue
+        Test-BridgeMaintenanceWindow -Now ([datetime]'2026-08-24T12:00:00') -StartTime '23:00' -EndTime '01:00' | Should -BeFalse
+    }
+
+    It 'never fails closed on an unset or malformed window' {
+        # Failing closed would silently block control of a live channel.
+        $now = [datetime]'2026-08-24T04:45:00'
+        Test-BridgeMaintenanceWindow -Now $now -StartTime '' -EndTime '' | Should -BeFalse
+        Test-BridgeMaintenanceWindow -Now $now -StartTime 'not-a-time' -EndTime '05:00' | Should -BeFalse
+        Test-BridgeMaintenanceWindow -Now $now -StartTime '04:30' -EndTime '04:30' | Should -BeFalse
+    }
+}

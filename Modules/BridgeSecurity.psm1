@@ -109,7 +109,17 @@ function Write-BridgeSecretStore {
         if ($name -notmatch '^[A-Za-z][A-Za-z0-9_.-]{0,63}$') { throw "Invalid secret name '$name'." }
         $encrypted[$name] = ConvertTo-BridgeProtectedSecret -Value ([string]$Secrets[$name])
     }
-    $document = [ordered]@{ Version = 1; Scope = 'CurrentUser'; Secrets = $encrypted }
+    # ProtectedBy records which identity can actually open this store. DPAPI
+    # CurrentUser secrets are unreadable by any other account, and both
+    # installers run the bridge as SYSTEM - so without this the readiness
+    # check cannot warn, and the mismatch only shows up as a service that
+    # restarts for ever. Purely informational: nothing is derived from it.
+    $document = [ordered]@{
+        Version     = 1
+        Scope       = 'CurrentUser'
+        ProtectedBy = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        Secrets     = $encrypted
+    }
     $directory = Split-Path -Parent $Path
     if (-not [string]::IsNullOrWhiteSpace($directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
     $temporary = "$Path.tmp"

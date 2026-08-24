@@ -20,11 +20,22 @@
 #>
 
 param(
-    [string]$TaskName = "CinegyTelegramBridge"
+    [string]$TaskName = "CinegyTelegramBridge",
+    [string]$RunAsAccount = 'SYSTEM'
 )
 
 $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent (Split-Path -Path $MyInvocation.MyCommand.Path -Parent)
+
+# ---- refuse to install something that cannot run -------------------------
+# Registering a supervisor around a broken configuration is the worst outcome
+# available: the bridge crashes, the task restarts it, and it does that for
+# ever while the task looks healthy.
+& (Join-Path $PSScriptRoot 'Test-BridgeReadiness.ps1') -RunAsAccount $RunAsAccount
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Install aborted. Fix the failures above and run this again.' -ForegroundColor Red
+    exit 1
+}
 
 $pwshCmd = Get-Command pwsh.exe -ErrorAction SilentlyContinue
 $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { "$env:ProgramFiles\PowerShell\7\pwsh.exe" }
@@ -43,7 +54,7 @@ $action = New-ScheduledTaskAction -Execute $pwshPath `
 
 $trigger = New-ScheduledTaskTrigger -AtStartup
 
-$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$principal = New-ScheduledTaskPrincipal -UserId $RunAsAccount -LogonType ServiceAccount -RunLevel Highest
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
@@ -62,9 +73,28 @@ Write-Host "Logs:        $scriptRoot\logs\bridge.log" -ForegroundColor Cyan
 
 $answer = Read-Host "Start it now? (Y/N)"
 if ($answer -match '^[Yy]') {
+    $launchedAt = Get-Date
     Start-ScheduledTask -TaskName $TaskName
-    Start-Sleep -Seconds 2
-    $info = Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo
-    Write-Host "State: $($info.LastTaskResult) / Last run: $($info.LastRunTime)" -ForegroundColor Green
+    Write-Host 'Waiting 12s to see whether it stays up...' -ForegroundColor Cyan
+    Start-Sleep -Seconds 12
+    Import-Module (Join-Path $scriptRoot 'Modules\BridgeInstall.psm1') -Force
+    $log = Join-Path $scriptRoot 'logs\bridge.log'
+    $starts = 0; $connected = $false
+    if (Test-Path -LiteralPath $log) {
+        foreach ($line in @(Get-Content -LiteralPath $log -Tail 200 -ErrorAction SilentlyContinue)) {
+            $stamp = [datetime]::MinValue
+            if (-not [datetime]::TryParse($line.Substring(0, [Math]::Min(19, $line.Length)), [ref]$stamp)) { continue }
+            if ($stamp -lt $launchedAt) { continue }
+            if ($line -match 'Bridge v.* starting') { $starts++ }
+            if ($line -match 'Telegram connection changed .* to connected') { $connected = $true }
+        }
+    }
+    # A task that ran and exited reports Ready, not Running - so a crash looks
+    # like success unless the log is consulted.
+    $state = if ((Get-ScheduledTask -TaskName $TaskName).State -eq 'Running') { 'Running' } else { 'Stopped' }
+    $verdict = Get-BridgeStartVerdict -State $state -StartupLinesSinceLaunch $starts -SawTelegramConnection:$connected
+    if ($verdict.Healthy) { Write-Host "  ok    $($verdict.Reason)" -ForegroundColor Green }
+    else { Write-Host "  FAIL  $($verdict.Reason)" -ForegroundColor Red }
+
     Write-Host "Tail the log to confirm it's polling: Get-Content '$scriptRoot\logs\bridge.log' -Wait -Tail 20" -ForegroundColor Cyan
 }

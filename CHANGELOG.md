@@ -12,7 +12,11 @@
 - Seeds the output monitor's timestamp to launch time so the first picture check lands one interval later, rather than probing the source during startup. This also stopped the test suite shelling out to ffmpeg against the example URL.
 - Gives the approval keyboard a way back to the menu, so no screen is a dead end. A phone's own back button leaves the chat entirely and cannot be intercepted by a bot; the help now says so and points at the on-screen buttons.
 - Release notes now carry a condensed summary of what version 4 brought, for operators who never saw its changelog.
-- Test suite grows from 384 to 410.
+- Adds `scripts\Test-BridgeReadiness.ps1` and `Modules\BridgeInstall.psm1`. Both installers now refuse to register a service over a configuration that cannot start: a supervisor wrapped around a broken config produces a bridge that crashes and is restarted for ever while `services.msc` reports it Running. It checks PowerShell 7, config.json validity, a real bot token, at least one administrator, and a parseable template registry; a missing ffmpeg warns rather than blocks.
+- Catches the DPAPI account trap by name. Secrets are protected with `DataProtectionScope::CurrentUser` while both installers run the bridge as `SYSTEM`, so protecting the token as yourself and then installing the service produced a bridge that could not decrypt its own token. `Protect-BridgeSecrets.ps1` now records `ProtectedBy` in the store, and the readiness check refuses the mismatch and names both accounts.
+- Both installers accept `-RunAsAccount`, and after starting they confirm the bridge actually came up by reading `logs\bridge.log` rather than trusting the service state. Repeated startup lines are reported as a crash loop.
+- `RELEASE.md` gains a first-install section covering the readiness check, the account choice, and the DPAPI trap.
+- Test suite grows from 384 to 427.
 ## 5.2.0 — 2026-08-24
 
 - Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.
@@ -25,7 +29,11 @@
 - Seeds the output monitor's timestamp to launch time so the first picture check lands one interval later, rather than probing the source during startup. This also stopped the test suite shelling out to ffmpeg against the example URL.
 - Gives the approval keyboard a way back to the menu, so no screen is a dead end. A phone's own back button leaves the chat entirely and cannot be intercepted by a bot; the help now says so and points at the on-screen buttons.
 - Release notes now carry a condensed summary of what version 4 brought, for operators who never saw its changelog.
-- Test suite grows from 384 to 410.
+- Adds `scripts\Test-BridgeReadiness.ps1` and `Modules\BridgeInstall.psm1`. Both installers now refuse to register a service over a configuration that cannot start: a supervisor wrapped around a broken config produces a bridge that crashes and is restarted for ever while `services.msc` reports it Running. It checks PowerShell 7, config.json validity, a real bot token, at least one administrator, and a parseable template registry; a missing ffmpeg warns rather than blocks.
+- Catches the DPAPI account trap by name. Secrets are protected with `DataProtectionScope::CurrentUser` while both installers run the bridge as `SYSTEM`, so protecting the token as yourself and then installing the service produced a bridge that could not decrypt its own token. `Protect-BridgeSecrets.ps1` now records `ProtectedBy` in the store, and the readiness check refuses the mismatch and names both accounts.
+- Both installers accept `-RunAsAccount`, and after starting they confirm the bridge actually came up by reading `logs\bridge.log` rather than trusting the service state. Repeated startup lines are reported as a crash loop.
+- `RELEASE.md` gains a first-install section covering the readiness check, the account choice, and the DPAPI trap.
+- Test suite grows from 384 to 427.
 ## 5.1.0 — 2026-08-23
 
 - Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.

@@ -26,7 +26,8 @@
 
 param(
     [string]$ServiceName = "CinegyTelegramBridge",
-    [string]$NssmPath
+    [string]$NssmPath,
+    [string]$RunAsAccount = 'SYSTEM'
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,6 +81,17 @@ $configPath = Join-Path $scriptRoot "config.json"
 if (-not (Test-Path $bridgeScript)) { throw "TelegramBridge.ps1 not found in $scriptRoot." }
 if (-not (Test-Path $configPath)) { throw "config.json not found in $scriptRoot. Copy config.example.json to config.json and edit it first." }
 
+
+# ---- refuse to install something that cannot run -------------------------
+# Registering a supervisor around a broken configuration is the worst
+# outcome available: the bridge crashes, the supervisor restarts it, and it
+# does that for ever while looking "Running" in services.msc.
+& (Join-Path $PSScriptRoot 'Test-BridgeReadiness.ps1') -RunAsAccount $RunAsAccount
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Install aborted. Fix the failures above and run this again.' -ForegroundColor Red
+    Write-Host "(To check without installing: .\scripts\Test-BridgeReadiness.ps1)" -ForegroundColor Cyan
+    exit 1
+}
 $logDir = Join-Path $scriptRoot "logs"
 New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
 $stdoutLog = Join-Path $logDir "service-stdout.log"
@@ -115,9 +127,38 @@ Write-Host "Status:      Get-Service   '$ServiceName'   (or open services.msc)" 
 Write-Host "App logs:    $scriptRoot\logs\bridge.log" -ForegroundColor Cyan
 Write-Host "Service I/O: $stdoutLog / $stderrLog" -ForegroundColor Cyan
 
+
+# ---- prove it actually came up ------------------------------------------
+Import-Module (Join-Path $scriptRoot 'Modules\BridgeInstall.psm1') -Force
+
+function Confirm-BridgeCameUp {
+    <# "Running" alone proves nothing: a bridge that dies on a bad token is
+       restarted every few seconds and is Running most times you look. The
+       startup lines written since launch are what separate the two. #>
+    param([Parameter(Mandatory)][string]$State, [Parameter(Mandatory)][datetime]$Since)
+    $log = Join-Path $scriptRoot 'logs\bridge.log'
+    $starts = 0
+    $connected = $false
+    if (Test-Path -LiteralPath $log) {
+        foreach ($line in @(Get-Content -LiteralPath $log -Tail 200 -ErrorAction SilentlyContinue)) {
+            $stamp = [datetime]::MinValue
+            if (-not [datetime]::TryParse($line.Substring(0, [Math]::Min(19, $line.Length)), [ref]$stamp)) { continue }
+            if ($stamp -lt $Since) { continue }
+            if ($line -match 'Bridge v.* starting') { $starts++ }
+            if ($line -match 'Telegram connection changed .* to connected') { $connected = $true }
+        }
+    }
+    $verdict = Get-BridgeStartVerdict -State $State -StartupLinesSinceLaunch $starts -SawTelegramConnection:$connected
+    if ($verdict.Healthy) { Write-Host "  ok    $($verdict.Reason)" -ForegroundColor Green }
+    else { Write-Host "  FAIL  $($verdict.Reason)" -ForegroundColor Red }
+    Write-Host "  Follow the log: Get-Content '$log' -Wait -Tail 20" -ForegroundColor Cyan
+    return $verdict.Healthy
+}
 $answer = Read-Host "Start it now? (Y/N)"
 if ($answer -match '^[Yy]') {
+    $launchedAt = Get-Date
     Start-Service $ServiceName
-    Start-Sleep -Seconds 2
-    Get-Service $ServiceName | Format-Table -AutoSize
+    Write-Host 'Waiting 12s to see whether it stays up...' -ForegroundColor Cyan
+    Start-Sleep -Seconds 12
+    if (-not (Confirm-BridgeCameUp -State ([string](Get-Service $ServiceName).Status) -Since $launchedAt)) { exit 1 }
 }

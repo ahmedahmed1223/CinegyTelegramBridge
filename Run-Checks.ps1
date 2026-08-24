@@ -40,9 +40,9 @@ $files = @(
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
     'config.example.json', 'templates.example.json',
-    'Tests\Bridge.Tests.ps1', 'Tests\BridgeNewsTicker.Tests.ps1', 'Tests\BridgeSettings.Tests.ps1', 'Tests\BridgeStorage.Tests.ps1', 'Tests\BridgeTelegram.Tests.ps1', 'Tests\BridgeAuthorization.Tests.ps1', 'Tests\BridgeFlowState.Tests.ps1', 'Tests\BridgeCinegyState.Tests.ps1', 'Tests\BridgeSchedulePolicy.Tests.ps1', 'Tests\BridgeMedia.Tests.ps1', 'Tests\BridgeRelayPolicy.Tests.ps1', 'Tests\BridgeRuntimeState.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1',
+    'Tests\Bridge.Tests.ps1', 'Tests\BridgeNewsTicker.Tests.ps1', 'Tests\BridgeSettings.Tests.ps1', 'Tests\BridgeStorage.Tests.ps1', 'Tests\BridgeTelegram.Tests.ps1', 'Tests\BridgeAuthorization.Tests.ps1', 'Tests\BridgeFlowState.Tests.ps1', 'Tests\BridgeCinegyState.Tests.ps1', 'Tests\BridgeSchedulePolicy.Tests.ps1', 'Tests\BridgeMedia.Tests.ps1', 'Tests\BridgeRelayPolicy.Tests.ps1', 'Tests\BridgeRuntimeState.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1', 'Tests\BridgeInstall.Tests.ps1',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md'
-    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
+    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'Modules\BridgeInstall.psm1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
 )
 foreach ($file in $files) {
     $path = Join-Path $root $file
@@ -75,7 +75,7 @@ $powerShellFiles = @(
     'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1', 'Modules\BridgeTelegram.psm1', 'Modules\BridgeAuthorization.psm1', 'Modules\BridgeFlowState.psm1', 'Modules\BridgeCinegyState.psm1', 'Modules\BridgeSchedulePolicy.psm1', 'Modules\BridgeMedia.psm1', 'Modules\BridgeRelayPolicy.psm1', 'Modules\BridgeRuntimeState.psm1', 'Modules\BridgeNewsTicker.psm1',
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1'
-    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'Run-Checks.ps1'
+    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'Modules\BridgeInstall.psm1', 'Run-Checks.ps1'
 )
 foreach ($file in $powerShellFiles) {
     $path = Join-Path $root $file

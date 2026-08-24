@@ -1,5 +1,37 @@
 # Release, upgrade, and rollback
 
+## First install
+
+Copy `config.example.json` to `config.json`, fill in the bot token and at
+least one `AdminChatIds` entry, then check the machine before registering
+anything around the bridge:
+
+```powershell
+.\scripts\Test-BridgeReadiness.ps1
+```
+
+It is read-only and contacts nothing. Exit code 0 means the bridge will run;
+1 means it would not, and prints why. Both installers run it first and refuse
+to register a service over a configuration that cannot start - a supervisor
+wrapped around a broken config produces a bridge that crashes and is
+restarted for ever while `services.msc` shows it Running.
+
+Then install one of:
+
+```powershell
+.\scripts\Install-BridgeTask.ps1              # built-in Task Scheduler
+.\scripts\Install-BridgeService-NSSM.ps1      # real Windows service, needs nssm.exe
+```
+
+Both default to running as `SYSTEM`. Pass `-RunAsAccount` to use another
+account, and note the trap it exists to catch: **DPAPI secrets are protected
+for one account only.** If you run `Protect-BridgeSecrets.ps1` as yourself and
+then install the service as `SYSTEM`, the bridge cannot decrypt its own token.
+The readiness check refuses that combination by name.
+
+After starting, both installers wait and then confirm the bridge actually came
+up, by reading `logs\bridge.log` rather than trusting the service state: a
+crash loop reports Running most times you look at it.
 ## Build and verify
 
 Run on Windows with PowerShell 7:
@@ -31,7 +63,8 @@ The package is allow-listed and never contains `config.json`, `templates.json`,
    installation.
 6. Copy the existing `config.json`, `templates.json`, and `logs` directory into
    the new directory.
-7. Run `.\Run-Checks.ps1`, then start the bridge and perform the Telegram/Cinegy
+7. Run `.\scripts\Test-BridgeReadiness.ps1` against the new directory, then
+   `.\Run-Checks.ps1`, then start the bridge and perform the Telegram/Cinegy
    smoke test described in the development plan.
 8. Switch the scheduled task or service to the new directory only after the
    smoke test succeeds.

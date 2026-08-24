@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.3.0 — 2026-08-24
+
+- Adds 📷 لقطة الآن and 📋 نسخ الحالة to the on-air row. The frame lets an operator check what the bridge claims is on air against the real output without leaving the chat - the exact gap that let an exited scene sit unnoticed for ninety minutes. The status text is deliberately plain so it survives being pasted into another app.
+- Adds `/stats` and 📈 أرقام التشغيل: uptime, air operation outcomes, Telegram and Cinegy connection states, and the last daily heartbeat. Uptime is the number that matters - a bridge up for eleven minutes has been restarting. Telegram flood limits (429) are counted separately from ordinary send failures, since a rate limit is a capacity problem rather than a bug.
+- Enables the pre-schedule warning by default at three minutes, and adds the Cinegy health line to it so the operator can decide whether to intervene. The mechanism already existed but shipped disabled.
+- Fixes another `"$layer:"` interpolation, where PowerShell reads the colon as a scope delimiter and the whole load fails.
+- Test suite grows from 427 to 434.
+## 5.3.0 — 2026-08-24
+
+- Adds 📷 لقطة الآن and 📋 نسخ الحالة to the on-air row. The frame lets an operator check what the bridge claims is on air against the real output without leaving the chat - the exact gap that let an exited scene sit unnoticed for ninety minutes. The status text is deliberately plain so it survives being pasted into another app.
+- Adds `/stats` and 📈 أرقام التشغيل: uptime, air operation outcomes, Telegram and Cinegy connection states, and the last daily heartbeat. Uptime is the number that matters - a bridge up for eleven minutes has been restarting. Telegram flood limits (429) are counted separately from ordinary send failures, since a rate limit is a capacity problem rather than a bug.
+- Enables the pre-schedule warning by default at three minutes, and adds the Cinegy health line to it so the operator can decide whether to intervene. The mechanism already existed but shipped disabled.
+- Fixes another `"$layer:"` interpolation, where PowerShell reads the colon as a scope delimiter and the whole load fails.
+- Test suite grows from 427 to 434.
 ## 5.2.0 — 2026-08-24
 
 - Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.

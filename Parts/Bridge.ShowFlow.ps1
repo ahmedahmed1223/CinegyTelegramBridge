@@ -249,20 +249,27 @@ function Test-MaintenanceControl {
 }
 
 function Test-TemplateShowPolicy {
-    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][int]$Layer)
+    <# A reserved layer normally carries something that must not be disturbed -
+       a station logo, a clock, a permanent ticker. Administrators may still
+       push to one deliberately, since they are who reserved it; operators
+       cannot. Pass -IsAdmin only where the caller has actually checked. #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][int]$Layer, [switch]$IsAdmin)
     $reserved = @()
     foreach ($part in ([string](Get-Setting 'ReservedLayers') -split '[,;\s]+')) {
         $parsedLayer = 0
         if ([int]::TryParse($part.Trim(), [ref]$parsedLayer) -and $parsedLayer -gt 0) { $reserved += $parsedLayer }
     }
+    if ($reserved -contains $Layer -and -not $IsAdmin) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا."; Warning = '' }
+    }
     if ($reserved -contains $Layer) {
-        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا." }
+        return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = "⚠️ الطبقة $Layer محجوزة — تتجاوزها بصلاحية المشرف." }
     }
     $disabled = @([string](Get-Setting 'DisabledTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if (@($disabled | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
-        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا." }
+        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا."; Warning = '' }
     }
-    return [pscustomobject]@{ Allowed = $true; Reason = '' }
+    return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = '' }
 }
 
 function Get-EffectiveAutoHideSeconds {
@@ -350,7 +357,7 @@ function Invoke-ShowTemplateResult {
     $script:LastShowAttempts[[string]$UserId] = @{
         Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
     }
-    $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer)
+    $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$policy.Reason)
@@ -489,7 +496,7 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer)
+    $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return

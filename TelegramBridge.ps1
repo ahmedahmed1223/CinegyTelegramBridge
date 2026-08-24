@@ -162,6 +162,7 @@ $script:DefaultSettings = [ordered]@{
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
+    NotifyOnScheduleOverwrite  = $true   # warn when a scheduled event displaces a live graphic
     AutoHideDefaultSeconds     = 10      # pre-selected duration for the timed-show button
     AutoHidePresetSeconds      = '5,10,15,30,60,120'  # quick-pick durations offered on screen
     RelayAutoRestart           = $true
@@ -217,6 +218,7 @@ $script:SettingDisplayMetadata = @{
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
+    NotifyOnScheduleOverwrite = @{ Unit = ''; Description = 'تنبيه عندما يستبدل حدث مجدول مشهدًا موجودًا على الهواء' }
     AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
     RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }

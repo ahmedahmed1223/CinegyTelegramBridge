@@ -4490,3 +4490,78 @@ Describe 'What is new and help content' {
         (Get-WhatsNewText).Length | Should -BeLessThan 4096
     }
 }
+
+Describe 'Reserved layers admit administrators only' {
+    BeforeEach {
+        # Default first so unrelated settings still resolve, then the override.
+        Mock Get-Setting { '' }
+        Mock Get-Setting { '9' } -ParameterFilter { $Name -eq 'ReservedLayers' }
+    }
+
+    It 'refuses an operator' {
+        $policy = Test-TemplateShowPolicy -Key 'lower-third' -Layer 9
+        $policy.Allowed | Should -BeFalse
+        $policy.Reason | Should -Match 'محجوزة'
+    }
+
+    It 'admits an administrator but says the layer is reserved' {
+        # They are who reserved it; refusing them means editing config to
+        # touch their own protected layer.
+        $policy = Test-TemplateShowPolicy -Key 'lower-third' -Layer 9 -IsAdmin
+        $policy.Allowed | Should -BeTrue
+        $policy.Warning | Should -Match 'محجوزة'
+    }
+
+    It 'leaves an unreserved layer alone for both roles' {
+        (Test-TemplateShowPolicy -Key 'lower-third' -Layer 3).Allowed | Should -BeTrue
+        (Test-TemplateShowPolicy -Key 'lower-third' -Layer 3).Warning | Should -BeNullOrEmpty
+    }
+
+    It 'still blocks a disabled template for an administrator' {
+        # Reserving a layer is about the layer; disabling a template is about
+        # the template, and admin rights do not override that.
+        Mock Get-Setting { 'broken-tpl' } -ParameterFilter { $Name -eq 'DisabledTemplateKeys' }
+        (Test-TemplateShowPolicy -Key 'broken-tpl' -Layer 3 -IsAdmin).Allowed | Should -BeFalse
+    }
+}
+
+Describe 'Undo survives navigating away' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:RollbackCandidates = @{}
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $false }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableSafeRollback' }
+    }
+    AfterAll { $script:RollbackCandidates = @{} }
+
+    It 'offers the rollback from the main menu, not only from the original message' {
+        $script:RollbackCandidates[3] = @{ Id = 'r1'; Layer = 3; ActorUserId = 42
+            ExpiresAt = (Get-Date).AddSeconds(45); CreatedAt = (Get-Date) }
+
+        $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Contain 'rollback:3'
+    }
+
+    It 'does not offer another operator someone else undo' {
+        $script:RollbackCandidates[3] = @{ Id = 'r1'; Layer = 3; ActorUserId = 42
+            ExpiresAt = (Get-Date).AddSeconds(45); CreatedAt = (Get-Date) }
+
+        $flat = @((Get-MainMenuKeyboard -ChatId 99 -UserId 99).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Not -Contain 'rollback:3'
+    }
+
+    It 'drops the button once the window has passed' {
+        $script:RollbackCandidates[3] = @{ Id = 'r1'; Layer = 3; ActorUserId = 42
+            ExpiresAt = (Get-Date).AddSeconds(-1); CreatedAt = (Get-Date).AddMinutes(-5) }
+
+        $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Not -Contain 'rollback:3'
+    }
+}

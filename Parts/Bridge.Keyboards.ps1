@@ -45,6 +45,18 @@ function Get-MainMenuKeyboard {
         }
     }
 
+    # A rollback used to be reachable only from the message that offered it,
+    # so navigating away lost it for the rest of its window. The fastest human
+    # error is pressing the wrong template; undo has to survive a tap on the
+    # wrong thing afterwards.
+    foreach ($layer in ($script:RollbackCandidates.Keys | Sort-Object)) {
+        $candidate = Get-RollbackCandidate -Layer ([int]$layer) -UserId $UserId
+        if (-not $candidate) { continue }
+        $secondsLeft = [int](([datetime]$candidate.ExpiresAt) - (Get-Date)).TotalSeconds
+        if ($secondsLeft -le 0) { continue }
+        $rows += , @( (New-Button "↩️ تراجع طبقة $layer ($secondsLeft ث)" "rollback:$layer") )
+    }
+
     $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers") )
     $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {

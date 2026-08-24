@@ -159,6 +159,22 @@ function Update-ScheduleQueue {
 
         $priorAttempts = 0
         [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'), [ref]$priorAttempts) | Out-Null
+        # Warn before a scheduled event overwrites a graphic that is live now.
+        # The conflict check at creation time only compares scheduled events
+        # against each other; it cannot know what an operator put up by hand
+        # in the meantime, which is the case that actually loses a graphic.
+        $targetLayer = 0
+        $scheduleStore = Get-TemplateStore
+        if ($scheduleStore.Map.ContainsKey([string]$scheduleEntry.TemplateKey)) {
+            $targetLayer = [int]$scheduleStore.Map[[string]$scheduleEntry.TemplateKey].Layer
+        }
+        if ($targetLayer -gt 0 -and $script:OnAir.ContainsKey($targetLayer) -and (Get-Setting 'NotifyOnScheduleOverwrite')) {
+            $displaced = $script:OnAir[$targetLayer]
+            Send-AdminBroadcast -Text ("⚠️ حدث مجدول يستبدل مشهدًا على الهواء`n" +
+                "الطبقة ${targetLayer}: '$($displaced.Key)' ← '$($scheduleEntry.TemplateKey)'")
+            Write-BridgeLog "Scheduled '$($scheduleEntry.TemplateKey)' is overwriting live '$($displaced.Key)' on layer $targetLayer" 'WARN'
+        }
+
         $executionTimer = [System.Diagnostics.Stopwatch]::StartNew()
         $result = Invoke-ShowTemplateResult -Key ([string]$scheduleEntry.TemplateKey) -Variables $scheduleEntry.Values -ChatId ([long]$scheduleEntry.ChatId) -UserId ([long]$scheduleEntry.UserId)
         $executionTimer.Stop()

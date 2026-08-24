@@ -354,6 +354,10 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
+        'menu:digest' {
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'menu:sharestatus' {
             # Sent as its own message with no keyboard, so a long-press copies just
             # the summary rather than the surrounding chrome.

@@ -99,7 +99,7 @@ function Get-MainMenuKeyboard {
     if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button "⏱ عرض مؤقّت" "menu:timed") }
     $rows += , $fourthRow
     $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
-    $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops') )
+    $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops'), (New-Button "🕘 ماذا فاتني" 'menu:digest') )
     if (Get-Setting 'EnableNewsTickerManagement') {
         $rows += , @( (New-Button "📰 إدارة شريط الأخبار" 'menu:news') )
     }
@@ -239,7 +239,7 @@ function Get-TemplatesKeyboard {
         $categoryLabel = if ([string]::IsNullOrWhiteSpace([string]$t.Category)) { '' } else { " · $($t.Category)" }
         # A lock badge here is the early warning: the operator sees the clash
         # before typing a single field, instead of after.
-        $lockBadge = if ($script:LayerLocks.ContainsKey([int]$t.Layer)) { '🔒 ' } else { '' }
+        $lockBadge = if ((Get-Setting 'ShowLayerLockBadge') -and $script:LayerLocks.ContainsKey([int]$t.Layer)) { '🔒 ' } else { '' }
         $templateRow = @((New-Button "$lockBadge$($t.Key) (طبقة $($t.Layer))$categoryLabel$(Get-TemplateLastUsedLabel -Key ([string]$t.Key))" "$Prefix`:$i"))
         if ($Prefix -eq 'tpl') { $templateRow += (New-Button 'ℹ️' "tplinfo:$i") }
         $rows += , $templateRow

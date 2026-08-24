@@ -479,6 +479,12 @@ function Invoke-ShowTemplateResult {
                 -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
         }
         else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
+        # Three of the same graphic in an hour is almost always a paste slip or
+        # a double tap. Asked after the push, never before: blocking a repeat
+        # that was deliberate would be worse than the mistake it prevents.
+        if (Test-RepeatedShow -Key ([string]$Key)) {
+            Send-TelegramMessage -ChatId $ChatId -Text "🔁 تكرار غير معتاد: عُرض '$Key' عدة مرات خلال فترة قصيرة.`nهل هذا مقصود؟ إن لم يكن، اضغط ↩️ تراجع من القائمة."
+        }
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
             ActiveId=[string]$result.EventId; At=(Get-Date)

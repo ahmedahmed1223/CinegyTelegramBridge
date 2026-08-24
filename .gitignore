@@ -1,5 +1,8 @@
-# Holds the live bot token and the operator whitelist - never commit it.
+# Local, station-specific and private: the live bot token, the operator
+# whitelist, and the real template registry with its scene paths. Ship
+# the .example.json files instead.
 config.json
+templates.json
 secrets.dpapi.json
 *.pre-dpapi.bak
 

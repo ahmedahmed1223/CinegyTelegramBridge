@@ -4873,6 +4873,7 @@ Describe 'Layer lock visibility' {
             @{ Order = @('alpha'); Map = @{ alpha = @{ Key = 'alpha'; Layer = 5; Category = ''; Presets = @() } }; Errors = @() }
         }
         Mock Get-TemplateLastUsedLabel { '' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ShowLayerLockBadge' }
 
         $labels = @((Get-TemplatesKeyboard -Prefix tpl).inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.text } })
         ($labels -join ' ') | Should -Match '🔒'
@@ -4922,5 +4923,96 @@ Describe 'Cancel reasons' {
         $script:CancelReasons = @{ 'template' = 3 }
 
         Get-UsageDigestText | Should -Match 'قالب خاطئ: 3'
+    }
+}
+
+Describe 'Missed events and template history' {
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:auditFile = Join-Path $TestDrive "audit-$([guid]::NewGuid().ToString('N')).jsonl"
+        $recent = (Get-Date).ToUniversalTime().AddMinutes(-30).ToString('o')
+        $old = (Get-Date).ToUniversalTime().AddDays(-3).ToString('o')
+        Set-Content -LiteralPath $script:auditFile -Encoding utf8 -Value @(
+            (@{ timestampUtc = $recent; action = 'SHOW'; result = 'success'; userId = 42; layer = 3; target = 'الانتخابات'; message = '' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = $recent; action = 'HIDE'; result = 'success'; userId = 42; layer = 3; target = ''; message = '' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = $recent; action = 'SHOW'; result = 'failed'; userId = 42; layer = 4; target = 'الطقس'; message = 'engine refused' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = $old; action = 'SHOW'; result = 'success'; userId = 99; layer = 3; target = 'الانتخابات'; message = '' } | ConvertTo-Json -Compress)
+        )
+        Mock Get-UserDisplayName { 'أحمد' }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'summarises what happened while nobody was looking' {
+        $text = Get-MissedEventsText -Hours 12
+        $text | Should -Match 'SHOW — 2'
+        $text | Should -Match 'HIDE — 1'
+    }
+
+    It 'calls out failures, which is the part worth reading' {
+        $text = Get-MissedEventsText -Hours 12
+        $text | Should -Match 'فاشلة: 1'
+        $text | Should -Match 'engine refused'
+    }
+
+    It 'ignores anything outside the window' {
+        # The three-day-old entry must not appear in a twelve-hour digest.
+        (Get-MissedEventsText -Hours 12) | Should -Not -Match 'أحمد'
+    }
+
+    It 'says so plainly when nothing happened' {
+        Set-Content -LiteralPath $script:auditFile -Value '' -Encoding utf8
+        Get-MissedEventsText -Hours 12 | Should -Match 'لا شيء مسجّل'
+    }
+
+    It 'answers who used a template, across the whole retained history' {
+        $text = Get-TemplateHistoryText -Query 'الانتخابات'
+        $text | Should -Match 'أحمد'
+        $text | Should -Match 'SHOW'
+    }
+
+    It 'reports honestly when a template has no recorded use' {
+        Get-TemplateHistoryText -Query 'لا-يوجد' | Should -Match 'لا يوجد سجل'
+    }
+
+    It 'asks for a name instead of dumping everything' {
+        Get-TemplateHistoryText -Query '   ' | Should -Match 'اكتب اسم القالب'
+    }
+}
+
+Describe 'Repeat radar' {
+    BeforeEach {
+        $script:RecentShowTimes = @{}
+        Mock Get-SettingInt { 3 } -ParameterFilter { $Name -eq 'RepeatWarningCount' }
+        Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'RepeatWarningWindowMinutes' }
+    }
+
+    It 'stays quiet for the first two pushes' {
+        Test-RepeatedShow -Key 'alpha' | Should -BeFalse
+        Test-RepeatedShow -Key 'alpha' | Should -BeFalse
+    }
+
+    It 'flags the third push inside the window' {
+        # A paste slip or a double tap, not editorial intent.
+        Test-RepeatedShow -Key 'alpha' | Out-Null
+        Test-RepeatedShow -Key 'alpha' | Out-Null
+        Test-RepeatedShow -Key 'alpha' | Should -BeTrue
+    }
+
+    It 'forgets pushes that fell outside the window' {
+        $now = Get-Date
+        Test-RepeatedShow -Key 'alpha' -Now $now.AddMinutes(-90) | Out-Null
+        Test-RepeatedShow -Key 'alpha' -Now $now.AddMinutes(-80) | Out-Null
+        Test-RepeatedShow -Key 'alpha' -Now $now | Should -BeFalse
+    }
+
+    It 'counts each template separately' {
+        Test-RepeatedShow -Key 'alpha' | Out-Null
+        Test-RepeatedShow -Key 'alpha' | Out-Null
+        Test-RepeatedShow -Key 'beta' | Should -BeFalse
+    }
+
+    It 'is disabled by a threshold of zero or one' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'RepeatWarningCount' }
+        1..5 | ForEach-Object { Test-RepeatedShow -Key 'alpha' | Should -BeFalse }
     }
 }

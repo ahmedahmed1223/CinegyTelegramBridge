@@ -158,6 +158,10 @@ $script:DefaultSettings = [ordered]@{
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this
     UploadRetentionMinutes     = 60      # delete staged operator uploads older than this; 0 keeps them
     ConfirmLayerRemoval        = $false  # ask before hide/exit, naming the template; costs the emergency path a tap
+    ShowLayerLockBadge         = $false  # mark templates whose layer someone else is preparing
+    RepeatWarningCount         = 3       # ask after this many pushes of one template in the window; 0 or 1 disables
+    RepeatWarningWindowMinutes = 60      # the window the repeat count is measured over
+    MissedEventsHours          = 12      # how far back ماذا فاتني looks
     OutputMonitorMinutes       = 60      # look at the actual picture this often; 0 disables
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
@@ -217,6 +221,10 @@ $script:SettingDisplayMetadata = @{
     SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
+    ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
+    RepeatWarningCount = @{ Unit = 'مرة'; Description = 'التنبيه عند تكرار القالب هذا العدد خلال النافذة (0 للتعطيل)' }
+    RepeatWarningWindowMinutes = @{ Unit = 'دقيقة'; Description = 'نافذة قياس تكرار القالب' }
+    MissedEventsHours = @{ Unit = 'ساعة'; Description = 'المدة التي يغطيها ملخص «ماذا فاتني»' }
     OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
@@ -374,6 +382,8 @@ $script:BotCommandList = @(
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'whatsnew'; description = '🆕 ملخص تغييرات الإصدارات الأخيرة' }
     @{ command = 'stats'; description = '📈 مدة التشغيل وأرقام العمليات (للمشرفين)' }
+    @{ command = 'digest'; description = '🕘 ماذا فاتني — ملخص ما حدث' }
+    @{ command = 'who'; description = '👤 من استخدم قالبًا (للمشرفين)' }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
     @{ command = 'myoperations'; description = '🧾 آخر عملياتي وإعادة المحاولة' }
@@ -580,6 +590,7 @@ $script:RuntimeState = New-BridgeRuntimeState
 $script:RelayState = $script:RuntimeState.Relay
 
 $script:CancelReasons = @{}
+$script:RecentShowTimes = @{}
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0

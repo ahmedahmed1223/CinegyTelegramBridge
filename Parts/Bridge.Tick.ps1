@@ -115,6 +115,109 @@ function Get-OnAirShareText {
     return ($lines -join "`n")
 }
 
+function Read-AuditRecords {
+    <# Reads recent audit entries. audit.jsonl is already the permanent,
+       structured record of every control action, so /digest and /who read it
+       rather than inventing a second log to drift out of sync with it. #>
+    param([int]$MaxLines = 500)
+    if (-not (Test-Path -LiteralPath $script:auditFile)) { return @() }
+    $records = foreach ($line in @(Get-Content -LiteralPath $script:auditFile -Tail $MaxLines -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+    }
+    return @($records)
+}
+
+function Get-MissedEventsText {
+    <#
+        What happened while nobody was looking.
+
+        After a restart, or after a night away, the operator has no idea what
+        the channel did. The audit trail holds it all but reads like a
+        machine log; this collapses it into the few sentences a human needs
+        before taking over a shift.
+    #>
+    param([int]$Hours = 12)
+    $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
+    $records = @(Read-AuditRecords | Where-Object {
+            $stamp = [datetime]::MinValue
+            [datetime]::TryParse([string]$_.timestampUtc, [ref]$stamp) -and $stamp.ToUniversalTime() -ge $since
+        })
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("🕘 ماذا فاتني — آخر $Hours ساعة")
+    if ($records.Count -eq 0) {
+        $lines.Add('')
+        $lines.Add('لا شيء مسجّل في هذه الفترة.')
+        return ($lines -join "`n")
+    }
+
+    $byAction = $records | Group-Object -Property action
+    $lines.Add('')
+    foreach ($group in ($byAction | Sort-Object Count -Descending)) {
+        $label = if ([string]::IsNullOrWhiteSpace($group.Name)) { 'أخرى' } else { $group.Name }
+        $lines.Add("• $label — $($group.Count)")
+    }
+
+    $failures = @($records | Where-Object { [string]$_.result -eq 'failed' })
+    if ($failures.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add("❌ عمليات فاشلة: $($failures.Count)")
+        foreach ($failure in @($failures | Select-Object -Last 3)) {
+            $lines.Add("  - $($failure.action) طبقة $($failure.layer): $($failure.message)")
+        }
+    }
+    $lines.Add('')
+    $lines.Add("الوضع الآن: $(if ($script:OnAir.Count -eq 0) { 'لا شيء على الهواء' } else { "$($script:OnAir.Count) مشهدًا على الهواء" })")
+    return ($lines -join "`n")
+}
+
+function Get-TemplateHistoryText {
+    <# Who used a template, and when. The answer already exists in the audit
+       trail; it just was not reachable without opening a file on the playout
+       machine, which nobody does mid-shift. #>
+    param([Parameter(Mandatory)][string]$Query, [int]$MaxResults = 10)
+    $needle = $Query.Trim()
+    if ([string]::IsNullOrWhiteSpace($needle)) { return 'اكتب اسم القالب بعد الأمر، مثل: /who الانتخابات' }
+
+    $hits = @(Read-AuditRecords -MaxLines 2000 | Where-Object {
+            [string]$_.target -and ([string]$_.target).IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        } | Select-Object -Last $MaxResults)
+
+    if ($hits.Count -eq 0) { return "لا يوجد سجل لاستخدام '$needle' ضمن ما هو محفوظ." }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("👤 من استخدم '$needle'")
+    $lines.Add('')
+    foreach ($hit in $hits) {
+        $stamp = [datetime]::MinValue
+        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
+        $lines.Add("• $when — $(Get-UserDisplayName -UserId ([long]$hit.userId)) — $($hit.action) ($($hit.result))")
+    }
+    return ($lines -join "`n")
+}
+
+function Test-RepeatedShow {
+    <#
+        Flags a template pushed unusually often in a short window.
+
+        Three of the same graphic within an hour is almost always a paste
+        slip or a double tap, not editorial intent - a common newsroom error
+        that nobody notices until it is on air twice. Asking costs a tap and
+        catches it; it never blocks the push.
+    #>
+    param([Parameter(Mandatory)][string]$Key, [datetime]$Now = (Get-Date))
+    $threshold = Get-SettingInt 'RepeatWarningCount' 0
+    if ($threshold -le 1) { return $false }
+    $windowMinutes = [math]::Max(1, (Get-SettingInt 'RepeatWarningWindowMinutes' 1))
+
+    if (-not $script:RecentShowTimes.ContainsKey($Key)) { $script:RecentShowTimes[$Key] = @() }
+    $cutoff = $Now.AddMinutes(-$windowMinutes)
+    $times = @(@($script:RecentShowTimes[$Key]) | Where-Object { $_ -is [datetime] -and $_ -ge $cutoff })
+    $times += $Now
+    $script:RecentShowTimes[$Key] = $times
+    return ($times.Count -ge $threshold)
+}
+
 function Get-CancelReasonLabel {
     param([Parameter(Mandatory)][string]$Reason)
     switch ($Reason) {

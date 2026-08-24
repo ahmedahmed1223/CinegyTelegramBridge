@@ -69,6 +69,55 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Get-UsageDigestText {
+    <# What the shift actually did, from counters the bridge already keeps.
+       Meant to be read on a phone, so it is a handful of lines: the busiest
+       templates, the operation totals, and anything that got refused. #>
+    param([int]$TopCount = 5)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('📊 ملخص الاستخدام')
+
+    $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
+    if ($ranked.Count -eq 0) { $lines.Add('• لم تُستخدم أي قوالب بعد.') }
+    else {
+        $lines.Add('')
+        $lines.Add('الأكثر استخدامًا:')
+        $rank = 0
+        foreach ($item in $ranked) {
+            $rank++
+            $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
+                " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
+            }
+            else { '' }
+            $lines.Add("$rank. $($item.Key) — $($item.Value)$lastUsed")
+        }
+    }
+
+    $counters = $script:AirOperationCounters
+    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
+    $lines.Add('')
+    $lines.Add("عمليات الهواء منذ آخر تشغيل: $total")
+    $lines.Add("✅ ناجحة $($counters.Success) · ❌ فاشلة $($counters.Failed) · ⛔ مرفوضة $($counters.Blocked)")
+    if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
+        $lines.Add('راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.')
+    }
+    return ($lines -join "`n")
+}
+
+function Update-UsageDigest {
+    <# Sends the digest to administrators on a chosen weekday, at the same hour
+       the daily heartbeat uses. Guarded by date like the heartbeat, so a
+       restart during that hour cannot send it twice. #>
+    if (-not (Get-Setting 'UsageDigestEnabled')) { return }
+    $now = Get-Date
+    if ($now.Date -eq $script:LastUsageDigestDate) { return }
+    if ([int]$now.DayOfWeek -ne (Get-SettingInt 'UsageDigestDayOfWeek' 0)) { return }
+    if ($now.Hour -ne (Get-SettingInt 'HeartbeatHour' 0)) { return }
+    $script:LastUsageDigestDate = $now.Date
+    Send-AdminBroadcast -Text (Get-UsageDigestText)
+    Write-BridgeLog 'Usage digest sent to admins'
+}
+
 function Update-StaleOnAirWatchdog {
     <# Tells the administrators when the bridge has been claiming a graphic is
        on air for implausibly long, so a record that outlived its scene is
@@ -196,7 +245,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

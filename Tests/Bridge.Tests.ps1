@@ -4565,3 +4565,127 @@ Describe 'Undo survives navigating away' {
         $flat | Should -Not -Contain 'rollback:3'
     }
 }
+
+Describe 'Settings export and import' {
+    BeforeEach {
+        $script:PendingSettingsImport = $null
+        Mock Test-Admin { $true }
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Get-AdminToolsKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-ConfigSaveWarning { '' }
+    }
+
+    It 'never puts the bot token or the whitelist into the exported document' {
+        # config.json holds both; a document is far easier to forward than the
+        # file on disk, so the export must carry settings and nothing else.
+        $script:ExportedPath = ''
+        Mock Send-TelegramDocument { $script:ExportedPath = $FilePath; $true }
+        Mock Remove-Item {}
+
+        Invoke-SettingsExport -ChatId 100 -UserId 100 | Should -BeTrue
+
+        $body = Get-Content -LiteralPath $script:ExportedPath -Raw
+        $body | Should -Not -Match 'BotToken'
+        $body | Should -Not -Match 'AllowedChatIds'
+        $body | Should -Not -Match 'AdminChatIds'
+        ($body | ConvertFrom-Json).Kind | Should -Be 'CinegyTelegramBridge.Settings'
+    }
+
+    It 'refuses a document that is not one of ours' {
+        $path = Join-Path $TestDrive 'foreign.json'
+        Set-Content -LiteralPath $path -Value '{"Kind":"something.else","Settings":{}}' -Encoding utf8
+        (Test-SettingsImport -Path $path).Success | Should -BeFalse
+    }
+
+    It 'refuses invalid JSON rather than importing nothing silently' {
+        $path = Join-Path $TestDrive 'broken.json'
+        Set-Content -LiteralPath $path -Value '{not json' -Encoding utf8
+        (Test-SettingsImport -Path $path).Success | Should -BeFalse
+    }
+
+    It 'refuses an unknown key instead of dropping it' {
+        # Applying half an import leaves a machine in a state nobody can
+        # reproduce from the file they thought they applied.
+        $path = Join-Path $TestDrive 'unknown.json'
+        Set-Content -LiteralPath $path -Value '{"Kind":"CinegyTelegramBridge.Settings","Settings":{"NotARealSetting":1}}' -Encoding utf8
+        $result = Test-SettingsImport -Path $path
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'NotARealSetting'
+    }
+
+    It 'lists only the keys that actually differ' {
+        $path = Join-Path $TestDrive 'diff.json'
+        $current = Get-Setting 'AirCommandTimeoutSeconds'
+        Set-Content -LiteralPath $path -Encoding utf8 -Value (@{
+                Kind = 'CinegyTelegramBridge.Settings'
+                Settings = @{ AirCommandTimeoutSeconds = $current; MaxFieldLength = 999 }
+            } | ConvertTo-Json -Depth 5)
+
+        $result = Test-SettingsImport -Path $path
+        $result.Success | Should -BeTrue
+        @($result.Changes).Count | Should -Be 1
+        $result.Changes[0].Name | Should -Be 'MaxFieldLength'
+    }
+
+    It 'applies nothing until the administrator confirms' {
+        Mock Set-Setting {}
+        $script:PendingSettingsImport = @{ Path = (Join-Path $TestDrive 'p.json'); UserId = 100
+            Changes = @([pscustomobject]@{ Name = 'MaxFieldLength'; From = 400; To = 999 }) }
+        Mock Remove-Item {}
+
+        Confirm-SettingsImport -ChatId 100 -UserId 100 -Cancel | Should -BeFalse
+        Should -Invoke Set-Setting -Times 0 -Exactly
+    }
+
+    It 'applies every listed change once confirmed' {
+        Mock Set-Setting {}
+        Mock Remove-Item {}
+        $script:PendingSettingsImport = @{ Path = (Join-Path $TestDrive 'p.json'); UserId = 100
+            Changes = @(
+                [pscustomobject]@{ Name = 'MaxFieldLength'; From = 400; To = 999 }
+                [pscustomobject]@{ Name = 'PostShowDelayMs'; From = 400; To = 250 }) }
+
+        Confirm-SettingsImport -ChatId 100 -UserId 100 | Should -BeTrue
+        Should -Invoke Set-Setting -Times 2 -Exactly
+    }
+
+    It 'will not let a different administrator confirm someone else review' {
+        Mock Set-Setting {}
+        $script:PendingSettingsImport = @{ Path = 'p.json'; UserId = 100; Changes = @() }
+
+        Confirm-SettingsImport -ChatId 200 -UserId 200 | Should -BeFalse
+        Should -Invoke Set-Setting -Times 0 -Exactly
+    }
+}
+
+Describe 'Usage digest' {
+    It 'ranks the busiest templates first' {
+        $script:UsageCounts = @{ 'ticker' = 3; 'lower-third' = 11; 'bug' = 7 }
+        $script:TemplateLastUsed = @{}
+        $text = Get-UsageDigestText
+        $text.IndexOf('lower-third') | Should -BeLessThan $text.IndexOf('bug')
+        $text.IndexOf('bug') | Should -BeLessThan $text.IndexOf('ticker')
+    }
+
+    It 'says plainly when nothing has been used yet' {
+        $script:UsageCounts = @{}
+        Get-UsageDigestText | Should -Match 'لم تُستخدم'
+    }
+
+    It 'reports failures and refusals, and points at the audit log' {
+        $script:UsageCounts = @{ 'ticker' = 1 }
+        $script:AirOperationCounters = @{ Success = 10; Failed = 2; Blocked = 1 }
+        $text = Get-UsageDigestText
+        $text | Should -Match 'فاشلة 2'
+        $text | Should -Match 'مرفوضة 1'
+        $text | Should -Match 'السجل'
+    }
+
+    It 'stays quiet about the audit log when nothing went wrong' {
+        $script:UsageCounts = @{ 'ticker' = 1 }
+        $script:AirOperationCounters = @{ Success = 4; Failed = 0; Blocked = 0 }
+        Get-UsageDigestText | Should -Not -Match 'راجع 📜'
+    }
+}

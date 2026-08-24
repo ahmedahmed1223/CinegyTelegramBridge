@@ -489,6 +489,119 @@ function Start-TemplateTestReview {
     Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $seconds ثانية`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
+function Invoke-SettingsExport {
+    <#
+        Exports the Settings block only - never the whole config.
+
+        config.json also holds the bot token and the operator whitelist, so
+        sending it as a document would publish both into a chat that is far
+        easier to forward than the file on disk. Only keys the bridge itself
+        declares in $script:DefaultSettings are written out, so a key added by
+        hand cannot smuggle anything into the export either.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    $payload = [ordered]@{}
+    foreach ($name in $script:DefaultSettings.Keys) { $payload[$name] = Get-Setting $name }
+    $document = [ordered]@{
+        Kind          = 'CinegyTelegramBridge.Settings'
+        BridgeVersion = $script:BridgeVersion
+        ExportedAt    = (Get-Date).ToString('o')
+        Settings      = $payload
+    }
+    $path = Join-Path $script:logDir "settings-export-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
+    try {
+        # The log directory normally exists, but the export must not depend on
+        # some earlier code path having created it first.
+        if (-not (Test-Path -LiteralPath $script:logDir)) {
+            New-Item -ItemType Directory -Path $script:logDir -Force -ErrorAction Stop | Out-Null
+        }
+        Set-Content -LiteralPath $path -Value ($document | ConvertTo-Json -Depth 8) -Encoding utf8 -ErrorAction Stop
+    }
+    catch {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $($_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "📤 نسخة الإعدادات ($($payload.Count) خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين."
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if ($sent) { Add-AuditEntry "📤 تصدير الإعدادات - user $UserId" }
+    return [bool]$sent
+}
+
+function Test-SettingsImport {
+    <# Validates an exported settings document before anything is applied, and
+       reports what would change. An unknown key is refused rather than
+       ignored: silently dropping half an import is how a machine ends up in a
+       state nobody can reproduce. #>
+    param([Parameter(Mandatory)][string]$Path)
+    try { $document = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Success = $false; Error = 'الملف ليس JSON صالحًا.'; Changes = @() } }
+    if ([string](Get-JsonProp $document 'Kind') -ne 'CinegyTelegramBridge.Settings') {
+        return [pscustomobject]@{ Success = $false; Error = 'الملف ليس نسخة إعدادات صادرة عن هذا الجسر.'; Changes = @() }
+    }
+    $incoming = Get-JsonProp $document 'Settings'
+    if (-not $incoming) { return [pscustomobject]@{ Success = $false; Error = 'لا يحتوي الملف على قسم Settings.'; Changes = @() } }
+
+    $changes = [System.Collections.Generic.List[object]]::new()
+    foreach ($property in $incoming.PSObject.Properties) {
+        if (-not $script:DefaultSettings.Contains($property.Name)) {
+            return [pscustomobject]@{ Success = $false; Error = "خيار غير معروف في الملف: $($property.Name)"; Changes = @() }
+        }
+        $current = Get-Setting $property.Name
+        if ([string]$current -eq [string]$property.Value) { continue }
+        $changes.Add([pscustomobject]@{ Name = $property.Name; From = $current; To = $property.Value })
+    }
+    return [pscustomobject]@{ Success = $true; Error = ''; Changes = @($changes) }
+}
+
+function Receive-SettingsImport {
+    param($Document, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
+    Clear-PendingState -ChatId $ChatId
+    $staged = Join-Path $script:logDir "template-imports/settings-$([guid]::NewGuid().ToString('N')).json"
+    try {
+        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $staged -MaximumBytes 262144 | Out-Null
+        $validation = Test-SettingsImport -Path $staged
+        if (-not $validation.Success) { throw $validation.Error }
+        if (@($validation.Changes).Count -eq 0) {
+            Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+            Send-TelegramMessage -ChatId $ChatId -Text '✅ الملف مطابق للإعدادات الحالية؛ لا يوجد ما يتغيّر.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+            return
+        }
+        $script:PendingSettingsImport = @{ Path = $staged; UserId = $UserId; Changes = @($validation.Changes) }
+        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $($_.From) ← $($_.To)" })
+        $more = if (@($validation.Changes).Count -gt 20) { "`n… و$(@($validation.Changes).Count - 20) خيارًا آخر." } else { '' }
+        Send-TelegramMessage -ChatId $ChatId -Text ("⚠️ مراجعة استيراد الإعدادات — $(@($validation.Changes).Count) تغييرًا:`n" + ($preview -join "`n") + $more) `
+            -ReplyMarkup @{ inline_keyboard = @(, @(
+                    @{ text = '✅ تطبيق'; callback_data = 'cfgimport:apply' },
+                    @{ text = '❌ إلغاء'; callback_data = 'cfgimport:cancel' })) }
+    }
+    catch {
+        Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $($_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+}
+
+function Confirm-SettingsImport {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Cancel)
+    $pending = $script:PendingSettingsImport
+    if (-not $pending -or [long]$pending.UserId -ne $UserId) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'انتهت مراجعة الاستيراد أو تغيّرت. ابدأ من جديد.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $script:PendingSettingsImport = $null
+    Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
+    if ($Cancel) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ أُلغي الاستيراد؛ لم يتغيّر شيء.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    foreach ($change in @($pending.Changes)) { Set-Setting -Name ([string]$change.Name) -Value $change.To }
+    Write-BridgeLog "Admin $UserId imported $(@($pending.Changes).Count) setting(s)" 'WARN'
+    Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    return $true
+}
+
 function Invoke-BridgeSelfTest {
     <#
         Exercises the whole air path on the isolated test layer and reports

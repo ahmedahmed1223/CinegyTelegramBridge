@@ -348,6 +348,31 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text (Get-WhatsNewText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
+        'menu:cfgexport' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-SettingsExport -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'menu:cfgimport' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Set-PendingState -ChatId $chatId -State @{ Mode = 'settings_import_upload'; UserId = $userId; StartedAt = (Get-Date) }
+                Send-TelegramMessage -ChatId $chatId -Text '📥 أرسل ملف الإعدادات المُصدَّر من هذا الجسر. ستراجع التغييرات قبل تطبيقها.' -ReplyMarkup (Get-CancelKeyboard)
+            }
+            break
+        }
+        'cfgimport:apply' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Confirm-SettingsImport -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'cfgimport:cancel' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Confirm-SettingsImport -ChatId $chatId -UserId $userId -Cancel | Out-Null }
+            break
+        }
+        'menu:usagedigest' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'menu:selftest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-BridgeSelfTest -ChatId $chatId -UserId $userId | Out-Null }
             break

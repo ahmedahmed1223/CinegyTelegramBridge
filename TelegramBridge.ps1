@@ -163,6 +163,8 @@ $script:DefaultSettings = [ordered]@{
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
     NotifyOnScheduleOverwrite  = $true   # warn when a scheduled event displaces a live graphic
+    UsageDigestEnabled         = $true   # weekly usage summary to administrators
+    UsageDigestDayOfWeek       = 0       # 0=Sunday .. 6=Saturday, sent at HeartbeatHour
     AutoHideDefaultSeconds     = 10      # pre-selected duration for the timed-show button
     AutoHidePresetSeconds      = '5,10,15,30,60,120'  # quick-pick durations offered on screen
     RelayAutoRestart           = $true
@@ -219,6 +221,8 @@ $script:SettingDisplayMetadata = @{
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
     NotifyOnScheduleOverwrite = @{ Unit = ''; Description = 'تنبيه عندما يستبدل حدث مجدول مشهدًا موجودًا على الهواء' }
+    UsageDigestEnabled = @{ Unit = ''; Description = 'إرسال ملخص استخدام أسبوعي للمشرفين' }
+    UsageDigestDayOfWeek = @{ Unit = 'يوم'; Description = 'يوم إرسال الملخص (0 الأحد .. 6 السبت)' }
     AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
     RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
@@ -569,6 +573,8 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 $script:RuntimeState = New-BridgeRuntimeState
 $script:RelayState = $script:RuntimeState.Relay
 
+$script:PendingSettingsImport = $null
+$script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
 $script:LastConfigSaveFailed = $false
 # Layers already reported as stale, so the alert fires once per record.
@@ -905,6 +911,7 @@ try {
                     try {
                         $uploadState=Get-PendingState -ChatId $chatId
                         if($uploadState -and $uploadState.Mode -eq 'news_import_upload'){Receive-NewsTickerImport -Document $document -ChatId $chatId -UserId $userId}
+                        elseif($uploadState -and $uploadState.Mode -eq 'settings_import_upload'){Receive-SettingsImport -Document $document -ChatId $chatId -UserId $userId}
                         else{Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId}
                     }
                     catch { Write-BridgeLog "Unhandled error processing document from $chatId : $($_.Exception.Message)" 'ERROR' }

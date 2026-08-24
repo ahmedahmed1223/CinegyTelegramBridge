@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.4.0'
+$script:BridgeVersion = '5.5.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -138,6 +138,7 @@ $script:DefaultSettings = [ordered]@{
     NewsImportMaxBytes         = 1048576
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
+    NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
@@ -606,6 +607,8 @@ $script:RelayState = $script:RuntimeState.Relay
 $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
 $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
+$script:NewsLockRequest = $null
+$script:NewsLockRequest = $null
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0

@@ -5186,3 +5186,105 @@ Describe 'News publish conflict reporting' {
         $result.PSObject.Properties.Name | Should -Contain 'Conflict'
     }
 }
+
+Describe 'News lock hand-over' {
+    BeforeEach {
+        $script:NewsLockRequest = $null
+        $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
+        Mock Send-TelegramMessage {}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Get-UserDisplayName { "user$UserId" }
+        Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
+        Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
+        Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'NewsLockRequestMinutes' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null; $script:NewsLockRequest = $null }
+
+    It 'asks the owner rather than taking the draft outright' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -match 'يطلب' }
+    }
+
+    It 'refuses a request from the owner themselves' {
+        Request-NewsLockRelease -ChatId 20 -UserId 20 | Should -BeFalse
+    }
+
+    It 'refuses a second requester while one is pending' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Request-NewsLockRelease -ChatId 22 -UserId 22 | Should -BeFalse
+    }
+
+    It 'hands over when the owner agrees, returning their text first' {
+        # An unpublished draft is somebody's work; dropping it silently or
+        # handing it to another person would both be worse than giving it back.
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+
+        Complete-NewsLockRelease -Reason 'granted by the owner' | Should -BeTrue
+
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -match 'نصّ مسودتك' }
+    }
+
+    It 'keeps the draft when the owner says they are still working' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+
+        Complete-NewsLockRelease -Denied | Should -BeFalse
+
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+    }
+
+    It 'grants automatically once the window passes, because silence cannot wait' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-10)
+
+        Update-NewsLockRequest
+
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+    }
+
+    It 'waits while the window is still open' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Update-NewsLockRequest
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'News publish conflict resolution' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('جديد'); BaseHash = 'STALE'; UpdatedAt = (Get-Date).ToString('o') }
+        Mock Write-BridgeLog {}
+        Mock Save-NewsTickerDraft { $true }
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('قائم١', 'قائم٢'); Hash = 'CURRENT'; Error = '' } }
+        Mock Publish-NewsTickerDraft { [pscustomobject]@{ Success = $true; Conflict = $false; Error = '' } }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'appends to what the other system wrote, keeping both' {
+        # Another system writes this file too, so a conflict is the normal
+        # case; refusing forever would make the bot useless for the ticker.
+        Resolve-NewsPublishConflict -UserId 20 -Mode append | Out-Null
+
+        @($script:NewsTickerDraft.Items) | Should -Be @('قائم١', 'قائم٢', 'جديد')
+        $script:NewsTickerDraft.BaseHash | Should -Be 'CURRENT'
+    }
+
+    It 'replaces only when that is explicitly chosen' {
+        Resolve-NewsPublishConflict -UserId 20 -Mode replace | Out-Null
+
+        @($script:NewsTickerDraft.Items) | Should -Be @('جديد')
+        $script:NewsTickerDraft.BaseHash | Should -Be 'CURRENT'
+    }
+
+    It 'refuses when the live file cannot be read, rather than guessing' {
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $false; Items = @(); Hash = ''; Error = 'binary data' } }
+        (Resolve-NewsPublishConflict -UserId 20 -Mode append).Success | Should -BeFalse
+    }
+
+    It 'refuses when the caller does not own the draft' {
+        (Resolve-NewsPublishConflict -UserId 99 -Mode append).Success | Should -BeFalse
+    }
+}

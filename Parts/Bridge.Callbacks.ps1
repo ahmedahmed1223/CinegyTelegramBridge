@@ -77,7 +77,10 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text '✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.' -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
             }
             elseif ($result.Conflict) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تغيّر ملف الأخبار خارج البوت منذ أن بدأت المسودة، فلم يُنشر شيء حفاظًا على ما كُتب.`nاضغط «إلغاء المسودة» ثم ابدأ مسودة جديدة على النص الحالي — نسختك محفوظة في السجل." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تغيّر ملف الأخبار خارج البوت منذ أن بدأت المسودة، فلم يُنشر شيء.`nنظام آخر يكتب هذا الملف أيضًا، فاختر كيف تريد المتابعة:" -ReplyMarkup @{inline_keyboard=@(
+                        , @(@{text='➕ أضف أخباري إلى الحالي';callback_data='news:rebaseappend'})
+                        , @(@{text='♻️ استبدل بالكامل بمسودتي';callback_data='news:rebasereplace'})
+                        , @(@{text='❌ إلغاء';callback_data='news:refresh'}))}
             }
             else {
                 Send-TelegramMessage -ChatId $chatId -Text "❌ لم يتم النشر: $($result.Error)" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
@@ -109,6 +112,28 @@ function Invoke-CallbackQuery {
             $i=[int](Get-CallbackArg $data 'news:idown:')
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
             else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
+        }
+        'news:rebaseappend' {
+            $result = Resolve-NewsPublishConflict -UserId $userId -Mode append
+            Send-TelegramMessage -ChatId $chatId -Text $(if ($result.Success) { '✅ أُضيفت أخبارك إلى النص الحالي ونُشر.' } else { "❌ لم يتم النشر: $($result.Error)" }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'news:rebasereplace' {
+            $result = Resolve-NewsPublishConflict -UserId $userId -Mode replace
+            Send-TelegramMessage -ChatId $chatId -Text $(if ($result.Success) { '✅ استُبدل النص بالكامل بمسودتك ونُشر. النص السابق محفوظ في النسخ.' } else { "❌ لم يتم النشر: $($result.Error)" }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'news:lockrequest' { Request-NewsLockRelease -ChatId $chatId -UserId $userId | Out-Null; break }
+        'news:lockgrant' {
+            $pending = $script:NewsLockRequest
+            if ($pending -and [long]$pending.OwnerUserId -eq $userId) { Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null }
+            break
+        }
+        'news:lockdeny' {
+            $pending = $script:NewsLockRequest
+            if ($pending -and [long]$pending.OwnerUserId -eq $userId) { Complete-NewsLockRelease -Denied | Out-Null }
+            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+            break
         }
         'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
         'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm'},@{text='إلغاء';callback_data='news:refresh'}))};break }

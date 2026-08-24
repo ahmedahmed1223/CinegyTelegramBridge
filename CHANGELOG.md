@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.5.0 — 2026-08-24
+
+- **Makes the ticker usable alongside another writer.** A second system writes the same `news.txt`, so a publish conflict is the normal case rather than an accident, and refusing forever made the bot useless for the ticker. A conflict now offers two explicit choices: append the draft's items to whatever is live now, or replace it entirely. Never a silent overwrite - the other writer's work is only discarded by a deliberate choice, and the previous text is backed up either way.
+- Adds a lock hand-over request. A non-owner can ask the operator holding the draft to release it; the owner has `NewsLockRequestMinutes` (default 5) to agree or refuse, and silence hands it over - an operator who has gone home cannot answer, and the ticker cannot wait for them. Previously the only way past someone else's draft was an administrator forcing it, which is the wrong tool for two operators on one channel.
+- The owner's unpublished items are sent back to them as text before the draft is released. An unpublished draft is somebody's work: transferring it to another person, or dropping it silently, would both be worse than handing it back.
+- The lock label now names the holder instead of showing a raw user id.
+- Test suite grows from 484 to 495.
+## 5.5.0 — 2026-08-24
+
+- **Makes the ticker usable alongside another writer.** A second system writes the same `news.txt`, so a publish conflict is the normal case rather than an accident, and refusing forever made the bot useless for the ticker. A conflict now offers two explicit choices: append the draft's items to whatever is live now, or replace it entirely. Never a silent overwrite - the other writer's work is only discarded by a deliberate choice, and the previous text is backed up either way.
+- Adds a lock hand-over request. A non-owner can ask the operator holding the draft to release it; the owner has `NewsLockRequestMinutes` (default 5) to agree or refuse, and silence hands it over - an operator who has gone home cannot answer, and the ticker cannot wait for them. Previously the only way past someone else's draft was an administrator forcing it, which is the wrong tool for two operators on one channel.
+- The owner's unpublished items are sent back to them as text before the draft is released. An unpublished draft is somebody's work: transferring it to another person, or dropping it silently, would both be worse than handing it back.
+- The lock label now names the holder instead of showing a raw user id.
+- Test suite grows from 484 to 495.
 ## 5.4.0 — 2026-08-24
 
 - **Fixes a phantom on-air record.** On startup the bot reported a template on layer 7 while the screen was blank. Discovery treated "not marked empty" as evidence of a live scene, but a spent item stays Active - briefly with no `IsEmpty` at all - and reports Cinegy's placeholder name `Item` with no description, exactly as every empty layer does. Discovery now requires a real describing name. Ambiguity must never ADD a record, and still never removes one.

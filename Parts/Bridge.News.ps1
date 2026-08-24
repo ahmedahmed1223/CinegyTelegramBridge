@@ -131,6 +131,131 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     return $result
 }
 
+function Resolve-NewsPublishConflict {
+    <#
+        Rebases a draft onto the ticker file as it is now.
+
+        Another system writes this file too, so a conflict is the normal case
+        rather than an accident, and refusing forever would make the bot
+        useless for the ticker. What must not happen is a silent overwrite of
+        the other writer's work - so this is only ever reached by an explicit
+        choice, and it says exactly what will be dropped or kept.
+
+        Mode 'replace' publishes the draft's items over whatever is there.
+        Mode 'append' keeps the current live items and adds the draft's after
+        them, which is what an operator adding a breaking line actually wants.
+    #>
+    param(
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][ValidateSet('replace', 'append')][string]$Mode
+    )
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error='لا توجد مسودة مملوكة لك.'} }
+
+    $live = Get-NewsTickerConfiguredSnapshot
+    if (-not $live.Success) { return [pscustomobject]@{Success=$false;Conflict=$false;Error=$live.Error} }
+
+    $items = if ($Mode -eq 'append') { @($live.Items) + @($draft.Items) } else { @($draft.Items) }
+    # Rebase onto the hash we just read, so the publish below is checked
+    # against the file as it is now rather than as it was yesterday.
+    $draft.BaseHash = $live.Hash
+    $draft.Items = @($items)
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    Save-NewsTickerDraft | Out-Null
+
+    Write-BridgeLog "User $UserId rebased the news draft onto the live file ($Mode, $(@($items).Count) item(s))" 'WARN'
+    return (Publish-NewsTickerDraft -UserId $UserId)
+}
+
+function Request-NewsLockRelease {
+    <#
+        Asks the current draft owner to hand the ticker over, and takes it if
+        they do not answer in time.
+
+        Without this the only way past someone else's draft was an
+        administrator forcing it, which is the wrong tool: the usual case is
+        an operator who went home with a draft open, and the person who needs
+        the ticker now is another operator, not an admin. A silent grab would
+        be worse - the owner may be mid-edit - so they get a window to say no,
+        and only silence hands it over.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $draft = Get-NewsTickerDraft
+    if (-not $draft) { return $false }
+    if ([long]$draft.OwnerUserId -eq $UserId) { return $false }
+
+    $existing = $script:NewsLockRequest
+    if ($existing -and [long]$existing.RequesterUserId -ne $UserId) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⏳ يوجد طلب فكّ قفل قيد الانتظار من $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId)). انتظر نتيجته." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+
+    $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
+    $script:NewsLockRequest = @{
+        RequesterUserId = $UserId; RequesterChatId = $ChatId
+        OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
+        RequestedAt = (Get-Date)
+    }
+    Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
+    Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Get-UserDisplayName -UserId $UserId)"
+
+    if ([long]$draft.OwnerChatId -gt 0) {
+        Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
+            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $minutes دقيقة للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
+            -ReplyMarkup @{inline_keyboard=@(,@(
+                    @{text='✅ سلّم القفل';callback_data='news:lockgrant'},
+                    @{text='⛔ ما زلت أعمل';callback_data='news:lockdeny'}))}
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $minutes دقيقة سيُمنح لك تلقائيًا." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    return $true
+}
+
+function Complete-NewsLockRelease {
+    <# Hands the ticker over. The owner's items are sent back to them as text
+       before the draft goes: an unpublished draft is somebody's work, and
+       either transferring it to another person or dropping it silently would
+       be worse than handing it back. #>
+    param([switch]$Denied, [string]$Reason = 'auto')
+    $request = $script:NewsLockRequest
+    if (-not $request) { return $false }
+    $script:NewsLockRequest = $null
+
+    if ($Denied) {
+        Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "⛔ رفض $(Get-UserDisplayName -UserId ([long]$request.OwnerUserId)) تسليم القفل؛ ما زال يعمل على المسودة."
+        Write-BridgeLog "News lock request from $($request.RequesterUserId) was denied by $($request.OwnerUserId)"
+        return $false
+    }
+
+    $draft = Get-NewsTickerDraft
+    $items = @(if ($draft) { $draft.Items } else { @() })
+    if ($draft -and [long]$request.OwnerChatId -gt 0 -and $items.Count -gt 0) {
+        $position = 0
+        $body = @($items | ForEach-Object { $position++; "$position. $_" }) -join "`n"
+        Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text "📄 نصّ مسودتك قبل تسليم القفل ($($items.Count) خبرًا):`n$body"
+    }
+    if ($draft) { Remove-NewsTickerDraft }
+
+    Write-BridgeLog "News lock handed to $($request.RequesterUserId) ($Reason)" 'WARN'
+    Add-AuditEntry "🔓 سُلّم قفل شريط الأخبار إلى $(Get-UserDisplayName -UserId ([long]$request.RequesterUserId)) ($Reason)"
+    if ([long]$request.OwnerChatId -gt 0) {
+        Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text '🔓 سُلّم قفل شريط الأخبار وأُلغيت مسودتك.'
+    }
+    Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text '🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.' `
+        -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
+    return $true
+}
+
+function Update-NewsLockRequest {
+    <# Grants a pending request once its window has passed. Silence is the
+       grant condition: an operator who has gone home cannot answer, and the
+       ticker cannot wait for them. #>
+    $request = $script:NewsLockRequest
+    if (-not $request) { return }
+    $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
+    if (((Get-Date) - [datetime]$request.RequestedAt).TotalMinutes -lt $minutes) { return }
+    Complete-NewsLockRelease -Reason 'no reply within the window' | Out-Null
+}
+
 function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     $rows = @()
     $draft = Get-NewsTickerDraft
@@ -146,7 +271,8 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         $rows += , @(@{text='✅ مراجعة ونشر';callback_data='news:publish'}, @{text='🗑 إلغاء المسودة';callback_data='news:cancel'})
     }
     else {
-        $rows += , @(@{text="🔒 لدى $($draft.OwnerUserId)";callback_data='news:refresh'})
+        $rows += , @(@{text="🔒 لدى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))";callback_data='news:refresh'})
+        $rows += , @(@{text='🔓 طلب فكّ القفل';callback_data='news:lockrequest'})
         if (Test-Admin -ChatId $ChatId -UserId $UserId) {
             $rows += , @(@{text='🔓 إلغاء القفل (مشرف)';callback_data='news:unlock'})
         }

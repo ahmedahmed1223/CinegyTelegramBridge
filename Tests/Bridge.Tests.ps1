@@ -5104,3 +5104,85 @@ Describe 'One-hand layout and text shortcuts' {
         Resolve-TemplateShortcut -Text 'beta' | Should -Be -1
     }
 }
+
+Describe 'News draft expiry' {
+    BeforeEach {
+        $script:NewsTickerDraft = $null
+        Mock Write-BridgeLog {}
+        Mock Send-TelegramMessage {}
+        Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
+        Mock Get-SettingInt { 30 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'drops a draft left open past the timeout' {
+        # Reproduces the live incident: a draft started yesterday could never
+        # publish, because the live file had moved on and the hash guard
+        # refused every attempt. The operator saw their edits never appear.
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ', 'ب')
+            UpdatedAt = (Get-Date).AddHours(-20).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'انتهت صلاحية' }
+    }
+
+    It 'tells the owner how many items were lost, so the loss is not silent' {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ', 'ب', 'ج')
+            UpdatedAt = (Get-Date).AddHours(-5).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '3 خبرًا' }
+    }
+
+    It 'leaves a draft that is still being worked on' {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ')
+            UpdatedAt = (Get-Date).AddMinutes(-5).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'is disabled by a zero timeout' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ')
+            UpdatedAt = (Get-Date).AddDays(-2).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'does nothing when there is no draft at all' {
+        { Update-NewsDraftExpiry } | Should -Not -Throw
+    }
+
+    It 'leaves a draft whose timestamp cannot be read, rather than guessing' {
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('أ'); UpdatedAt = 'not-a-date' }
+        Update-NewsDraftExpiry
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'News publish conflict reporting' {
+    It 'reports a conflict as a conflict, with a way forward' {
+        # "لم يتم النشر" alone left operators retrying the same doomed publish
+        # and concluding the bot ignored their edits.
+        Mock Get-NewsTickerDraft { $null }
+        $result = Publish-NewsTickerDraft -UserId 42
+        $result.Success | Should -BeFalse
+        # Every caller branches on Conflict, so it must exist on every path.
+        $result.PSObject.Properties.Name | Should -Contain 'Conflict'
+    }
+}

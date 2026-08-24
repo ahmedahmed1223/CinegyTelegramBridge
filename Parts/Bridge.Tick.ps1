@@ -218,6 +218,39 @@ function Test-RepeatedShow {
     return ($times.Count -ge $threshold)
 }
 
+function Update-NewsDraftExpiry {
+    <#
+        Drops a news draft that has gone stale, and says why.
+
+        A draft records the hash of the live ticker file when it was started,
+        and publishing refuses if the file changed since - correctly, because
+        publishing would otherwise silently discard whatever was written in
+        between. But nothing ever expired the draft, so one left open
+        overnight became permanently unpublishable: every attempt was refused
+        as a conflict, and the operator saw their edits simply never appear.
+
+        NewsDraftTimeoutMinutes existed as a setting and was read by nothing.
+        It is enforced here.
+    #>
+    $timeout = Get-SettingInt 'NewsDraftTimeoutMinutes' 0
+    if ($timeout -le 0) { return }
+    $draft = $script:NewsTickerDraft
+    if (-not $draft) { return }
+
+    $updatedAt = [datetime]::MinValue
+    $stamp = [string](Get-JsonProp $draft 'UpdatedAt')
+    if (-not [datetime]::TryParse($stamp, [ref]$updatedAt)) { return }
+    if (((Get-Date) - $updatedAt).TotalMinutes -lt $timeout) { return }
+
+    $owner = [long](Get-JsonProp $draft 'OwnerChatId')
+    $count = @(Get-JsonProp $draft 'Items').Count
+    Remove-NewsTickerDraft
+    Write-BridgeLog "Expired an abandoned news draft ($count item(s), idle for $timeout+ minutes)" 'WARN'
+    if ($owner -gt 0) {
+        Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $timeout دقيقة بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي."
+    }
+}
+
 function Get-CancelReasonLabel {
     param([Parameter(Mandatory)][string]$Reason)
     switch ($Reason) {
@@ -457,7 +490,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

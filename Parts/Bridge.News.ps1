@@ -120,7 +120,9 @@ function Clear-NewsTickerDraftItems { param([long]$ChatId,[long]$UserId)
 
 function Publish-NewsTickerDraft { param([long]$UserId)
     $draft = Get-NewsTickerDraft -UserId $UserId
-    if (-not $draft) { return [pscustomobject]@{Success=$false;Error='لا توجد مسودة مملوكة لك.'} }
+    # Carries Conflict so every caller can branch on it uniformly; without it
+    # $result.Conflict throws under StrictMode on this path.
+    if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error='لا توجد مسودة مملوكة لك.'} }
     $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
         Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا"

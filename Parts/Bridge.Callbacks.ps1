@@ -69,7 +69,20 @@ function Invoke-CallbackQuery {
         }
         'news:publishconfirm' {
             $result=Publish-NewsTickerDraft -UserId $userId
-            Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.'}else{"❌ لم يتم النشر: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            # A conflict is not a failure to report and forget: it means the
+            # live file moved on, and the operator's only way forward is a
+            # fresh draft. Saying just "لم يتم النشر" left people retrying the
+            # same doomed publish and concluding their edits were ignored.
+            if ($result.Success) {
+                Send-TelegramMessage -ChatId $chatId -Text '✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.' -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            }
+            elseif ($result.Conflict) {
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تغيّر ملف الأخبار خارج البوت منذ أن بدأت المسودة، فلم يُنشر شيء حفاظًا على ما كُتب.`nاضغط «إلغاء المسودة» ثم ابدأ مسودة جديدة على النص الحالي — نسختك محفوظة في السجل." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            }
+            else {
+                Send-TelegramMessage -ChatId $chatId -Text "❌ لم يتم النشر: $($result.Error)" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
         }
         'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }
         'news:item:*' {

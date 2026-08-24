@@ -348,6 +348,14 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text (Get-WhatsNewText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
+        'menu:restart' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Request-BridgeRestart -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'restart:confirm' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Confirm-BridgeRestart -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
         'menu:cfgexport' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-SettingsExport -ChatId $chatId -UserId $userId | Out-Null }
             break

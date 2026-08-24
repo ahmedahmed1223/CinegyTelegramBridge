@@ -163,6 +163,7 @@ $script:DefaultSettings = [ordered]@{
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
     NotifyOnScheduleOverwrite  = $true   # warn when a scheduled event displaces a live graphic
+    AllowRemoteRestart         = $false  # let an admin restart the bridge from Telegram; needs a service or task to bring it back
     UsageDigestEnabled         = $true   # weekly usage summary to administrators
     UsageDigestDayOfWeek       = 0       # 0=Sunday .. 6=Saturday, sent at HeartbeatHour
     AutoHideDefaultSeconds     = 10      # pre-selected duration for the timed-show button
@@ -221,6 +222,7 @@ $script:SettingDisplayMetadata = @{
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
     NotifyOnScheduleOverwrite = @{ Unit = ''; Description = 'تنبيه عندما يستبدل حدث مجدول مشهدًا موجودًا على الهواء' }
+    AllowRemoteRestart = @{ Unit = ''; Description = 'السماح للمشرف بإعادة تشغيل الجسر من البوت' }
     UsageDigestEnabled = @{ Unit = ''; Description = 'إرسال ملخص استخدام أسبوعي للمشرفين' }
     UsageDigestDayOfWeek = @{ Unit = 'يوم'; Description = 'يوم إرسال الملخص (0 الأحد .. 6 السبت)' }
     AutoHideDefaultSeconds = @{ Unit = 'ثانية'; Description = 'مدة الإخفاء التلقائي الافتراضية' }
@@ -552,7 +554,10 @@ $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()
 $script:LastSnapshotAt = [datetime]::MinValue
 $script:LastSnapshotFile = ''
 $script:LastUploadSweep = [datetime]::MinValue
-$script:LastOutputMonitorAt = [datetime]::MinValue
+# Seeded to now, not MinValue: the first output check should land one interval
+# after launch rather than during startup, when the source may not be up yet
+# and nobody is watching for the alert anyway.
+$script:LastOutputMonitorAt = Get-Date
 $script:OutputBlackAlerted = $false
 $script:LastSnapshotSweep = [datetime]::MinValue
 
@@ -573,6 +578,7 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 $script:RuntimeState = New-BridgeRuntimeState
 $script:RelayState = $script:RuntimeState.Relay
 
+$script:RestartRequested = $false
 $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
@@ -984,6 +990,13 @@ try {
         }
 
         Invoke-BridgeTick | Out-Null
+
+        # Leaving the loop rather than exiting in place, so the finally block
+        # below still stops the relay, saves counters and releases the mutex.
+        if ($script:RestartRequested) {
+            Write-BridgeLog 'Restart requested - leaving the polling loop' 'WARN'
+            break
+        }
     }
 }
 finally {

@@ -4689,3 +4689,73 @@ Describe 'Usage digest' {
         Get-UsageDigestText | Should -Not -Match 'راجع 📜'
     }
 }
+
+Describe 'Administrator restart' {
+    BeforeEach {
+        $script:RestartRequested = $false
+        $script:OnAir = @{}
+        Mock Test-Admin { $true }
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Get-AdminToolsKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'nssm.exe'; Supervised = $true } }
+    }
+    AfterAll { $script:RestartRequested = $false }
+
+    It 'refuses while the setting is off, whatever supervises the process' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+
+        Request-BridgeRestart -ChatId 100 -UserId 100 | Should -BeFalse
+        $script:RestartRequested | Should -BeFalse
+    }
+
+    It 'refuses when nothing would bring the bridge back' {
+        # Exiting unsupervised is not a restart, it is an outage with no way
+        # back in through the bot that just stopped.
+        Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'explorer.exe'; Supervised = $false } }
+
+        Request-BridgeRestart -ChatId 100 -UserId 100 | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'explorer.exe' }
+    }
+
+    It 'asks before restarting rather than acting on the first tap' {
+        Request-BridgeRestart -ChatId 100 -UserId 100 | Should -BeTrue
+        $script:RestartRequested | Should -BeFalse
+    }
+
+    It 'warns that scenes are on air when confirming' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Request-BridgeRestart -ChatId 100 -UserId 100 | Out-Null
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'على الهواء' }
+    }
+
+    It 'signals the loop rather than killing the process from a callback' {
+        # The finally block stops the relay, saves counters and releases the
+        # single-instance mutex; exiting here would skip all of it and the
+        # replacement would find the mutex still held.
+        Confirm-BridgeRestart -ChatId 100 -UserId 100 | Should -BeTrue
+        $script:RestartRequested | Should -BeTrue
+    }
+
+    It 'ignores a confirmation from a non-administrator' {
+        Mock Test-Admin { $false }
+
+        Confirm-BridgeRestart -ChatId 200 -UserId 200 | Should -BeFalse
+        $script:RestartRequested | Should -BeFalse
+    }
+
+    It 'hides the button entirely while the setting is off' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableLiveRelay' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableRawCommand' }
+
+        $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $flat | Should -Not -Contain 'menu:restart'
+    }
+}

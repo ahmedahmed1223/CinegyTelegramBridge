@@ -194,6 +194,7 @@ function Get-AdminToolsKeyboard {
 
     $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
     $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
+    if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart") ) }
     $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
     if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
     $rows += , $adminRow
@@ -610,7 +611,10 @@ function Get-HideAllConfirmKeyboard {
 
 function Get-ApprovalKeyboard {
     param([Parameter(Mandatory)][long]$TargetChatId)
-    return @{ inline_keyboard = @( , @( (New-Button "✅ موافقة" "approve:$TargetChatId"), (New-Button "❌ رفض" "reject:$TargetChatId") ) ) }
+    return @{ inline_keyboard = @(
+            , @( (New-Button "✅ موافقة" "approve:$TargetChatId"), (New-Button "❌ رفض" "reject:$TargetChatId") )
+            , @( (New-Button "⬅️ الرئيسية" "menu") )
+        ) }
 }
 
 function Get-PendingKeyboard {

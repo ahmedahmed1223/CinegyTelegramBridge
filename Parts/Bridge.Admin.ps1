@@ -489,6 +489,74 @@ function Start-TemplateTestReview {
     Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $seconds ثانية`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
+function Get-BridgeSupervisor {
+    <#
+        Works out whether something will start the bridge again if it exits.
+
+        This is the whole safety question behind a restart button. Under the
+        NSSM service (AppExit Default Restart) or the scheduled task
+        (RestartCount 999) exiting is a restart. Started by hand from a
+        console it is just an outage - on a playout machine, with nobody
+        necessarily in the room, and no way back in through the bot that
+        just stopped.
+
+        Returns Name and Supervised; walks the parent process because that is
+        the only thing that actually distinguishes the cases.
+    #>
+    try {
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ParentProcessId)" -ErrorAction Stop
+        $name = [string]$parent.Name
+    }
+    catch { return [pscustomobject]@{ Name = 'unknown'; Supervised = $false } }
+
+    switch -Wildcard ($name) {
+        'nssm*' { return [pscustomobject]@{ Name = $name; Supervised = $true } }
+        'services.exe' { return [pscustomobject]@{ Name = $name; Supervised = $true } }
+        'svchost.exe' { return [pscustomobject]@{ Name = $name; Supervised = $true } }   # Task Scheduler
+        'taskeng.exe' { return [pscustomobject]@{ Name = $name; Supervised = $true } }
+        default { return [pscustomobject]@{ Name = $name; Supervised = $false } }
+    }
+}
+
+function Request-BridgeRestart {
+    <# Shows what will happen and who is expected to bring the bridge back,
+       then asks. Never restarts on the first tap. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    if (-not (Get-Setting 'AllowRemoteRestart')) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ إعادة التشغيل من البوت معطّلة.`nفعّل AllowRemoteRestart من الإعدادات، وتأكد أولًا أن الجسر يعمل كخدمة أو كمهمة مجدولة تعيد تشغيله." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $supervisor = Get-BridgeSupervisor
+    if (-not $supervisor.Supervised) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يبدو أن هناك خدمة تعيد تشغيل الجسر (العملية الأصل: $($supervisor.Name)).`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $live = if ($script:OnAir.Count -gt 0) { "`n⚠️ يوجد $($script:OnAir.Count) مشهدًا مسجّلًا على الهواء. إعادة التشغيل لا تغيّر ما هو على الشاشة، لكن البوت لن يستجيب لثوانٍ." } else { '' }
+    Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $($supervisor.Name) تلقائيًا.$live") `
+        -ReplyMarkup @{ inline_keyboard = @(, @(
+                @{ text = '✅ نعم، أعد التشغيل'; callback_data = 'restart:confirm' },
+                @{ text = '❌ إلغاء'; callback_data = 'menu:admintools' })) }
+    return $true
+}
+
+function Confirm-BridgeRestart {
+    <# Signals the polling loop to leave. Exiting through the loop rather than
+       calling exit here matters: the script's finally block stops snapshot
+       jobs and the relay, saves counters, and releases the single-instance
+       mutex. Killing the process from inside a callback would skip all of it
+       and the replacement instance would find the mutex still held. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    if (-not (Get-Setting 'AllowRemoteRestart')) { return $false }
+    Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
+    Add-AuditEntry "♻️ إعادة تشغيل الجسر - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text '♻️ يُعاد التشغيل الآن… أرسل /بدء بعد قليل للتأكد من عودته.'
+    $script:RestartRequested = $true
+    return $true
+}
+
 function Invoke-SettingsExport {
     <#
         Exports the Settings block only - never the whole config.

@@ -8,7 +8,11 @@
 - Adds settings export and import. Export carries only the keys declared in `DefaultSettings`, so the bot token and the operator whitelist never reach a chat. Import refuses a foreign or malformed document, refuses an unknown key rather than dropping it, previews exactly which keys differ, and applies nothing until the same administrator confirms.
 - Adds a usage digest, on demand and weekly (`UsageDigestEnabled`, `UsageDigestDayOfWeek`): busiest templates, operation totals, and refusals.
 - Settings export now creates the log directory if it is missing rather than assuming an earlier code path made it.
-- Test suite grows from 384 to 403.
+- Adds an administrator restart (`AllowRemoteRestart`, default off). It refuses unless a supervisor is actually present - the parent process is inspected, and NSSM or Task Scheduler both restart on exit - because exiting unsupervised is an outage with no way back in through the bot that just stopped. It confirms first, warns when scenes are recorded on air, and signals the polling loop to leave rather than exiting in place, so the finally block still stops the relay, saves counters and releases the single-instance mutex.
+- Seeds the output monitor's timestamp to launch time so the first picture check lands one interval later, rather than probing the source during startup. This also stopped the test suite shelling out to ffmpeg against the example URL.
+- Gives the approval keyboard a way back to the menu, so no screen is a dead end. A phone's own back button leaves the chat entirely and cannot be intercepted by a bot; the help now says so and points at the on-screen buttons.
+- Release notes now carry a condensed summary of what version 4 brought, for operators who never saw its changelog.
+- Test suite grows from 384 to 410.
 ## 5.2.0 — 2026-08-24
 
 - Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.
@@ -17,7 +21,11 @@
 - Adds settings export and import. Export carries only the keys declared in `DefaultSettings`, so the bot token and the operator whitelist never reach a chat. Import refuses a foreign or malformed document, refuses an unknown key rather than dropping it, previews exactly which keys differ, and applies nothing until the same administrator confirms.
 - Adds a usage digest, on demand and weekly (`UsageDigestEnabled`, `UsageDigestDayOfWeek`): busiest templates, operation totals, and refusals.
 - Settings export now creates the log directory if it is missing rather than assuming an earlier code path made it.
-- Test suite grows from 384 to 403.
+- Adds an administrator restart (`AllowRemoteRestart`, default off). It refuses unless a supervisor is actually present - the parent process is inspected, and NSSM or Task Scheduler both restart on exit - because exiting unsupervised is an outage with no way back in through the bot that just stopped. It confirms first, warns when scenes are recorded on air, and signals the polling loop to leave rather than exiting in place, so the finally block still stops the relay, saves counters and releases the single-instance mutex.
+- Seeds the output monitor's timestamp to launch time so the first picture check lands one interval later, rather than probing the source during startup. This also stopped the test suite shelling out to ffmpeg against the example URL.
+- Gives the approval keyboard a way back to the menu, so no screen is a dead end. A phone's own back button leaves the chat entirely and cannot be intercepted by a bot; the help now says so and points at the on-screen buttons.
+- Release notes now carry a condensed summary of what version 4 brought, for operators who never saw its changelog.
+- Test suite grows from 384 to 410.
 ## 5.1.0 — 2026-08-23
 
 - Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.

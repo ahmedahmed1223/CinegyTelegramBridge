@@ -67,7 +67,21 @@ function Resolve-BridgeCinegyLayerState {
     $name=[string](Get-CinegyStateProperty $Status ActiveTemplateName)
     $cinegyEventName=[string](Get-CinegyStateProperty $Status ActiveName)
     if([string]::IsNullOrWhiteSpace($name)){$name=$cinegyEventName}
-    if([string]::IsNullOrWhiteSpace($name)){$name="مشهد خارجي · طبقة $Layer"}
+    # Discovery needs positive evidence, not merely "not marked empty".
+    #
+    # A spent or just-ended item stays Active on its layer, briefly with no
+    # IsEmpty attribute at all, and reports the placeholder Name "Item" with
+    # no Description - which is exactly what every genuinely empty layer
+    # reports too. A real scene always carries a describing name, e.g.
+    # "Show L band - New.CinTitle on Layer 4".
+    #
+    # Inventing "مشهد خارجي · طبقة N" for an anonymous item is what put a
+    # phantom scene into onair.json at startup: the bot claimed layer 7 was
+    # live when the screen was blank. Ambiguity must never ADD a record. It
+    # still never removes one either - that asymmetry is deliberate.
+    if([string]::IsNullOrWhiteSpace($name) -or $name -eq 'Item'){
+        return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
+    }
     $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
     if(-not [string]::IsNullOrWhiteSpace($cinegyEventName)){$record.CinegyEventName=$cinegyEventName}
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}

@@ -143,3 +143,51 @@ Describe 'Stale on-air detection' {
         @(Get-BridgeStaleOnAirLayers -OnAir $onAir -Now $script:Now -ThresholdHours 6) | Should -HaveCount 1
     }
 }
+
+Describe 'External discovery needs positive evidence' {
+    BeforeAll { $script:Now = [datetime]'2026-08-24T19:00:00' }
+
+    It 'refuses to invent a scene for an anonymous placeholder item' {
+        # Reproduces the live incident: on startup the bridge claimed layer 7
+        # was on air while the screen was blank. A spent item stays Active,
+        # briefly with no IsEmpty at all, reporting Cinegy's placeholder name.
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $true; ActiveId = '{F649F66B-9FC7-11F1-96C0-C85EA97266A8}'
+            ActiveName = 'Item'; ActiveDescription = ''; ActiveTemplateName = ''
+        }
+        $decision = Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $null -Status $status -Now $script:Now -DiscoverExternal
+        $decision.Action | Should -Be 'ignore'
+    }
+
+    It 'refuses an item with no name at all' {
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $true; ActiveId = '{F649F66B-0000-0000-0000-000000000000}'
+            ActiveName = ''; ActiveDescription = ''; ActiveTemplateName = ''
+        }
+        (Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $null -Status $status -Now $script:Now -DiscoverExternal).Action | Should -Be 'ignore'
+    }
+
+    It 'still discovers a genuinely named external scene' {
+        # A real scene always describes itself, e.g. "Show ticker.cintitle on layer 8".
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $true; ActiveId = '{BC14F2F9-9E38-11F1-96C0-C85EA97266A8}'
+            ActiveName = 'Cinegy Type Layer 8 On'; ActiveDescription = 'Show ticker.cintitle on layer 8'
+            ActiveTemplateName = 'ticker'
+        }
+        $decision = Resolve-BridgeCinegyLayerState -Layer 8 -TrackedRecord $null -Status $status -Now $script:Now -DiscoverExternal
+        $decision.Action | Should -Be 'add'
+        $decision.Record.Key | Should -Be 'ticker'
+    }
+
+    It 'never removes a tracked record just because the name went anonymous' {
+        # The asymmetry is deliberate: ambiguity must not add, and must not
+        # delete something an operator may still be able to see.
+        $tracked = @{ Key = 'lower-third'; At = $script:Now; UserId = 42; ActiveId = '{AAA}'; Source = 'bridge' }
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $true; ActiveId = '{AAA}'
+            ActiveName = 'Item'; ActiveDescription = ''; ActiveTemplateName = ''
+        }
+        $decision = Resolve-BridgeCinegyLayerState -Layer 3 -TrackedRecord $tracked -Status $status -Now $script:Now
+        $decision.Action | Should -Not -Be 'remove'
+    }
+}

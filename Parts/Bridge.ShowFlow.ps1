@@ -446,6 +446,20 @@ function Invoke-ShowTemplateResult {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
                 -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
         }
+        elseif ($layerStatus.Success -and $false -eq [bool]$layerStatus.IsOnAir) {
+            # Pushing onto a layer that was genuinely EMPTY used to leave
+            # nothing to undo, which is the commonest mistake there is: the
+            # wrong template, on a layer that had nothing on it. Undoing that
+            # means taking it back off, so the restore is a hide.
+            #
+            # Only when the layer was verifiably empty. If correlation failed -
+            # something the bridge cannot identify was on that layer - a hide
+            # would silently discard it rather than restore anything, so no
+            # undo is offered and the operator decides deliberately.
+            Set-RollbackCandidate -Layer ([int]$template.Layer) `
+                -RestoreSnapshot @{ Key = [string]$Key; Action = 'hide' } `
+                -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
+        }
         else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
@@ -819,6 +833,22 @@ function Confirm-SafeRollback {
             return
         }
         $restore = $candidate.Restore
+        # Undoing a push onto a previously empty layer means clearing it again,
+        # not restoring a scene that was never there.
+        if ([string](Get-JsonProp $restore 'Action') -eq 'hide') {
+            $hidden = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress `
+                -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+            if ($hidden.Success) {
+                Remove-OnAirRecord -Layer $Layer -Reason 'undo of show onto an empty layer' | Out-Null
+                Add-AuditEntry "↩️ تراجع: أُزيل $($restore.Key) من طبقة $Layer - user $UserId"
+                Write-BridgeLog "User $UserId undid the show of '$($restore.Key)' on layer $Layer" 'WARN'
+                Send-TelegramMessage -ChatId $ChatId -Text "↩️ أُزيل '$($restore.Key)' من الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            }
+            else {
+                Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر التراجع: $($hidden.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            }
+            return
+        }
         $result = Invoke-ShowTemplateResult -Key ([string]$restore.Key) -Variables ([hashtable]$restore.Variables) -ChatId $ChatId -UserId $UserId
         if ($result -and $result.Success) {
             Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - user $UserId"

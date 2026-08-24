@@ -345,6 +345,18 @@ Describe 'Safe in-memory layer rollback' {
         $script:LastSuccessfulLayerShows[5].Key | Should -Be 'beta'
     }
 
+    It 'offers an undo that clears a layer that was empty before the push' {
+        # The commonest daily error: the wrong template, onto a layer that
+        # had nothing on it. Before this there was nothing to press.
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$false; ActiveId=''; Error='' } }
+
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+
+        $candidate = Get-RollbackCandidate -Layer 5 -UserId 10
+        $candidate | Should -Not -BeNullOrEmpty
+        $candidate.Restore.Action | Should -Be 'hide'
+    }
+
     It 'does not offer rollback when the previous snapshot does not match Cinegy' {
         $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10 }
         Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='external-event'; Error='' } }

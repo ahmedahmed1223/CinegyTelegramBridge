@@ -344,6 +344,16 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'cancelreason:*' {
+            $pending = $script:PendingCancelReason
+            if ($pending -and [long]$pending.UserId -eq $userId) {
+                Add-CancelReason -Reason (Get-CallbackArg $data 'cancelreason:') -UserId $userId -Key ([string]$pending.Key)
+                $script:PendingCancelReason = $null
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'سُجّل، شكرًا.'
+            }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'menu:sharestatus' {
             # Sent as its own message with no keyboard, so a long-press copies just
             # the summary rather than the surrounding chrome.

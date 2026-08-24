@@ -579,6 +579,8 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 $script:RuntimeState = New-BridgeRuntimeState
 $script:RelayState = $script:RuntimeState.Relay
 
+$script:CancelReasons = @{}
+$script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0
 $script:RestartRequested = $false
@@ -866,6 +868,7 @@ if (-not $AllowMultipleInstances) {
 
 Initialize-Settings
 Import-UsageCounts
+Import-CancelReasons
 Import-NewsTickerDraft
 Import-UserFavorites
 Import-UserAliases

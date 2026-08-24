@@ -6,6 +6,24 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function Get-LayerLockNotice {
+    <#
+        Describes an editing lock held by someone else: who, and for how long.
+
+        The raw owner id told an operator nothing they could act on. Two people
+        on the same channel - one on a phone, one at the desk - hit this
+        routinely, and "المستخدم 7275359265" does not tell you whether to wait
+        or to call across the room. Returns '' when the layer is free or held
+        by the asker themselves.
+    #>
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$UserId)
+    if (-not $script:LayerLocks.ContainsKey($Layer)) { return '' }
+    $lock = $script:LayerLocks[$Layer]
+    if ([long]$lock.UserId -eq $UserId) { return '' }
+    $held = if ($lock.StartedAt -is [datetime]) { Format-Duration -Seconds ([int]((Get-Date) - $lock.StartedAt).TotalSeconds) } else { 'فترة' }
+    return "⚠️ $(Get-UserDisplayName -UserId ([long]$lock.UserId)) يجهّز '$($lock.Key)' على الطبقة $Layer منذ $held."
+}
+
 function Lock-GfxLayer {
     param(
         [Parameter(Mandatory)][int]$Layer,
@@ -548,7 +566,7 @@ function Start-ShowFlow {
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key ([string]$t.Key) -RequestedSeconds $AutoHideSeconds
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
     if (-not $lock.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "الطبقة $($t.Layer) قيد التجهيز حاليًا بواسطة المستخدم $($lock.OwnerUserId). حاول لاحقًا أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer ([int]$t.Layer) -UserId $UserId)`nانتظر أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $replacementContext = Get-LayerShowContext -Layer ([int]$t.Layer)
@@ -842,7 +860,10 @@ function Confirm-SafeRollback {
                 Remove-OnAirRecord -Layer $Layer -Reason 'undo of show onto an empty layer' | Out-Null
                 Add-AuditEntry "↩️ تراجع: أُزيل $($restore.Key) من طبقة $Layer - user $UserId"
                 Write-BridgeLog "User $UserId undid the show of '$($restore.Key)' on layer $Layer" 'WARN'
-                Send-TelegramMessage -ChatId $ChatId -Text "↩️ أُزيل '$($restore.Key)' من الطبقة $Layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+                # Asked now, not later: in ten seconds they will have moved on.
+                $script:PendingCancelReason = @{ UserId = $UserId; Key = [string]$restore.Key; At = (Get-Date) }
+                Send-TelegramMessage -ChatId $ChatId -Text "↩️ أُزيل '$($restore.Key)' من الطبقة $Layer.
+ما السبب؟ (اختياري)" -ReplyMarkup (Get-CancelReasonKeyboard)
             }
             else {
                 Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر التراجع: $($hidden.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)

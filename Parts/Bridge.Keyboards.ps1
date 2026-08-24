@@ -237,7 +237,10 @@ function Get-TemplatesKeyboard {
         }
         $matched++
         $categoryLabel = if ([string]::IsNullOrWhiteSpace([string]$t.Category)) { '' } else { " · $($t.Category)" }
-        $templateRow = @((New-Button "$($t.Key) (طبقة $($t.Layer))$categoryLabel$(Get-TemplateLastUsedLabel -Key ([string]$t.Key))" "$Prefix`:$i"))
+        # A lock badge here is the early warning: the operator sees the clash
+        # before typing a single field, instead of after.
+        $lockBadge = if ($script:LayerLocks.ContainsKey([int]$t.Layer)) { '🔒 ' } else { '' }
+        $templateRow = @((New-Button "$lockBadge$($t.Key) (طبقة $($t.Layer))$categoryLabel$(Get-TemplateLastUsedLabel -Key ([string]$t.Key))" "$Prefix`:$i"))
         if ($Prefix -eq 'tpl') { $templateRow += (New-Button 'ℹ️' "tplinfo:$i") }
         $rows += , $templateRow
         # Presets are only meaningful for an immediate show.

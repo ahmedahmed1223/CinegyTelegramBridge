@@ -115,6 +115,62 @@ function Get-OnAirShareText {
     return ($lines -join "`n")
 }
 
+function Get-CancelReasonLabel {
+    param([Parameter(Mandatory)][string]$Reason)
+    switch ($Reason) {
+        'template' { 'قالب خاطئ' }
+        'timing' { 'توقيت خاطئ' }
+        'director' { 'طلب المخرج' }
+        'other' { 'سبب آخر' }
+        default { $Reason }
+    }
+}
+
+function Get-CancelReasonKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button '🎬 قالب خاطئ' 'cancelreason:template'), (New-Button '⏱ توقيت خاطئ' 'cancelreason:timing') )
+            , @( (New-Button '🎧 طلب المخرج' 'cancelreason:director'), (New-Button '❔ سبب آخر' 'cancelreason:other') )
+            , @( (New-Button 'تخطٍّ' 'menu') )
+        ) }
+}
+
+function Save-CancelReasons {
+    $path = Join-Path $script:logDir 'cancel-reasons.json'
+    try { return (Write-BridgeValidatedJson -Path $path -Json ($script:CancelReasons | ConvertTo-Json -Depth 4)) }
+    catch { Write-BridgeLog "Could not save cancel reasons: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Import-CancelReasons {
+    $path = Join-Path $script:logDir 'cancel-reasons.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $read = Read-BridgeValidatedJson -Path $path -AsHashtable
+        if ($read -and $read.Data) { $script:CancelReasons = [hashtable]$read.Data }
+    }
+    catch { Write-BridgeLog "Could not read cancel-reasons.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Add-CancelReason {
+    <#
+        Records why an operator pulled something straight back off air.
+
+        An undo count on its own says the shift went badly; it does not say
+        what to fix. Separating "wrong template" from "wrong timing" from "the
+        director asked" is the difference between a training gap, a rundown
+        problem, and ordinary editorial change - and only the operator knows
+        which, for about ten seconds after they press undo.
+
+        Counts only. No field text, no user ids, nothing that would turn the
+        file into a second audit log.
+    #>
+    param([Parameter(Mandatory)][string]$Reason, [Parameter(Mandatory)][long]$UserId, [string]$Key = '')
+    if (-not $script:CancelReasons.ContainsKey($Reason)) { $script:CancelReasons[$Reason] = 0 }
+    $script:CancelReasons[$Reason] = [int]$script:CancelReasons[$Reason] + 1
+    Write-BridgeLog "Cancel reason '$Reason' recorded for '$Key' by user $UserId"
+    Add-AuditEntry "📝 سبب الإلغاء: $(Get-CancelReasonLabel -Reason $Reason) - user $UserId"
+    Save-CancelReasons | Out-Null
+}
+
 function Get-UsageDigestText {
     <# What the shift actually did, from counters the bridge already keeps.
        Meant to be read on a phone, so it is a handful of lines: the busiest
@@ -146,6 +202,13 @@ function Get-UsageDigestText {
     $lines.Add("✅ ناجحة $($counters.Success) · ❌ فاشلة $($counters.Failed) · ⛔ مرفوضة $($counters.Blocked)")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
         $lines.Add('راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.')
+    }
+    if ($script:CancelReasons.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('أسباب التراجع المسجّلة:')
+        foreach ($reason in ($script:CancelReasons.Keys | Sort-Object)) {
+            $lines.Add("• $(Get-CancelReasonLabel -Reason $reason): $($script:CancelReasons[$reason])")
+        }
     }
     return ($lines -join "`n")
 }

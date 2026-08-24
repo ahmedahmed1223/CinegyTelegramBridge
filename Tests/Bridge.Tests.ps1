@@ -2409,7 +2409,9 @@ Describe 'Layer preparation locks' {
         Get-PendingState -ChatId 10 | Should -Not -BeNullOrEmpty
         Get-PendingState -ChatId 11 | Should -BeNullOrEmpty
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 11 -and $Text -match 'قيد التجهيز'
+            # Asserts the notice names who holds the layer and for how long -
+            # a bare owner id told the second operator nothing they could act on.
+            $ChatId -eq 11 -and $Text -match 'يجهّز' -and $Text -match 'منذ'
         }
     }
 
@@ -4835,5 +4837,90 @@ Describe 'On-air row tools' {
         $rows = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard)
         $toolRow = @($rows | Where-Object { @($_ | ForEach-Object { $_.callback_data }) -contains 'menu:hideall' })
         @($toolRow[0] | ForEach-Object { $_.callback_data }) | Should -Contain 'menu:sharestatus'
+    }
+}
+
+Describe 'Layer lock visibility' {
+    BeforeEach {
+        $script:LayerLocks = @{}
+        Mock Get-UserDisplayName { 'أحمد' }
+    }
+    AfterAll { $script:LayerLocks = @{} }
+
+    It 'names the holder and how long they have held it' {
+        # "المستخدم 7275359265" does not tell the second operator whether to
+        # wait or to call across the room.
+        $script:LayerLocks[5] = @{ ChatId = 10; UserId = 20; Key = 'lower-third'; StartedAt = (Get-Date).AddMinutes(-2) }
+
+        $notice = Get-LayerLockNotice -Layer 5 -UserId 21
+        $notice | Should -Match 'أحمد'
+        $notice | Should -Match 'lower-third'
+        $notice | Should -Match 'منذ'
+    }
+
+    It 'says nothing to the operator who holds the lock themselves' {
+        $script:LayerLocks[5] = @{ ChatId = 10; UserId = 20; Key = 'lower-third'; StartedAt = (Get-Date) }
+        Get-LayerLockNotice -Layer 5 -UserId 20 | Should -BeNullOrEmpty
+    }
+
+    It 'says nothing about a free layer' {
+        Get-LayerLockNotice -Layer 5 -UserId 20 | Should -BeNullOrEmpty
+    }
+
+    It 'badges a locked layer in the template list, before any field is typed' {
+        $script:LayerLocks[5] = @{ ChatId = 10; UserId = 20; Key = 'lower-third'; StartedAt = (Get-Date) }
+        Mock Get-TemplateStore {
+            @{ Order = @('alpha'); Map = @{ alpha = @{ Key = 'alpha'; Layer = 5; Category = ''; Presets = @() } }; Errors = @() }
+        }
+        Mock Get-TemplateLastUsedLabel { '' }
+
+        $labels = @((Get-TemplatesKeyboard -Prefix tpl).inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.text } })
+        ($labels -join ' ') | Should -Match '🔒'
+    }
+}
+
+Describe 'Cancel reasons' {
+    BeforeEach {
+        $script:CancelReasons = @{}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Save-CancelReasons { $true }
+    }
+    AfterAll { $script:CancelReasons = @{} }
+
+    It 'counts each reason separately' {
+        Add-CancelReason -Reason 'template' -UserId 42 -Key 'alpha'
+        Add-CancelReason -Reason 'template' -UserId 42 -Key 'beta'
+        Add-CancelReason -Reason 'timing' -UserId 42 -Key 'alpha'
+
+        $script:CancelReasons['template'] | Should -Be 2
+        $script:CancelReasons['timing'] | Should -Be 1
+    }
+
+    It 'stores counts only, never field text or user ids' {
+        # It must not become a second audit log.
+        Add-CancelReason -Reason 'director' -UserId 7275359265 -Key 'الانتخابات'
+        ($script:CancelReasons.Values | ForEach-Object { $_ }) | ForEach-Object { $_ | Should -BeOfType [int] }
+        ($script:CancelReasons.Keys -join ' ') | Should -Not -Match '7275359265'
+    }
+
+    It 'labels every reason in Arabic for the digest' {
+        foreach ($code in @('template', 'timing', 'director', 'other')) {
+            Get-CancelReasonLabel -Reason $code | Should -Not -Be $code
+        }
+    }
+
+    It 'offers a skip, because an unexplained undo is still a valid undo' {
+        $flat = @((Get-CancelReasonKeyboard).inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Contain 'menu'
+        $flat | Should -Contain 'cancelreason:template'
+    }
+
+    It 'reports the breakdown in the usage digest' {
+        $script:UsageCounts = @{ 'alpha' = 1 }
+        $script:AirOperationCounters = @{ Success = 1; Failed = 0; Blocked = 0 }
+        $script:CancelReasons = @{ 'template' = 3 }
+
+        Get-UsageDigestText | Should -Match 'قالب خاطئ: 3'
     }
 }

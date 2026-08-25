@@ -5546,3 +5546,52 @@ Describe 'News list layout' {
         }
     }
 }
+
+Describe 'News list label length and column alignment' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('عنوان طويل جدًا يتجاوز أي حدّ افتراضي معقول للتسمية المختصرة', 'ثانٍ', 'ثالث')
+        }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-SettingInt { 24 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
+        Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'NewsListStackedLabelLength' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'honours a raised label length instead of a hardcoded 24' {
+        Mock Get-SettingInt { 45 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
+        $label = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[0] |
+                Where-Object { $_.callback_data -eq 'news:item:0' })[0].text
+        $label.Length | Should -Be 45
+    }
+
+    It 'never lets a label fall below a usable floor' {
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
+        $label = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[0] |
+                Where-Object { $_.callback_data -eq 'news:item:0' })[0].text
+        $label.Length | Should -BeGreaterOrEqual 8
+    }
+
+    It 'starts every row with the headline, so the column never shifts' {
+        # With the moves leading, the first row had no up-arrow and the last no
+        # down-arrow, so the text began at a different offset on those rows.
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        foreach ($index in 0..2) {
+            @($rows[$index])[0].callback_data | Should -Be "news:item:$index"
+        }
+    }
+
+    It 'still ends every row with the delete' {
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        foreach ($index in 0..2) {
+            @($rows[$index])[-1].callback_data | Should -Be "news:delask:$index"
+        }
+    }
+
+    It 'keeps the stacked label independently longer' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $label = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[0][0].text
+        $label.Length | Should -Be 60
+    }
+}

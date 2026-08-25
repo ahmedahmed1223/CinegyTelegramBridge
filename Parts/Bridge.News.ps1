@@ -339,7 +339,14 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
        that is edited in place, so indexes can never go stale. #>
     $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
     if($draft){$count=@($draft.Items).Count
-        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";$fullLabel=$label;if($fullLabel.Length-gt 60){$fullLabel=$fullLabel.Substring(0,59)+'…'};if($label.Length-gt 24){$label=$label.Substring(0,23)+'…'}
+        # Both limits are settings, not constants: how much of a headline fits
+        # depends on the phone and on how long the headlines actually are, and
+        # a number picked here is a guess about someone else's newsroom.
+        $inlineMax = [math]::Max(8, (Get-SettingInt 'NewsListLabelLength' 8))
+        $stackedMax = [math]::Max($inlineMax, (Get-SettingInt 'NewsListStackedLabelLength' 8))
+        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";$fullLabel=$label
+            if($fullLabel.Length-gt $stackedMax){$fullLabel=$fullLabel.Substring(0,$stackedMax-1)+'…'}
+            if($label.Length-gt $inlineMax){$label=$label.Substring(0,$inlineMax-1)+'…'}
             # Two layouts. Side by side fits more items on screen; stacked
             # gives the headline the full width, which matters when the
             # text is long enough that a 24-character label tells you
@@ -354,7 +361,13 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
                 $rows+=,@($controls)
                 continue
             }
-            $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
+            # Headline first, controls trailing. With the moves leading, the
+            # first item had no up-arrow and the last no down-arrow, so the
+            # text started at a different offset on those rows and the
+            # column visibly jumped while scanning the list.
+            $row=@(@{text=$label;callback_data="news:item:$i"})
+            if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}}
+            if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
             $row+=,@{text='🗑';callback_data="news:delask:$i"}
             $rows+=,@($row)}}
     else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}

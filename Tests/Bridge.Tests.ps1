@@ -5385,3 +5385,43 @@ Describe 'News item delete confirmation' {
         Show-NewsTickerDeleteConfirm -ChatId 99 -UserId 99 -Index 0 | Should -BeFalse
     }
 }
+
+Describe 'Delete from the reorder list' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر أول', 'خبر ثانٍ', 'خبر ثالث')
+        }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'offers a delete on every row' {
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        foreach ($i in 0..2) { $flat | Should -Contain "news:delask:$i" }
+    }
+
+    It 'routes through the same confirmation the item screen uses' {
+        # A second delete path would be a second place for a thumb to lose
+        # typed work.
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Not -Contain 'news:delete:0'
+    }
+
+    It 'keeps the move and edit controls alongside it' {
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        $middle = @($rows[1] | ForEach-Object { $_.callback_data })
+        $middle | Should -Contain 'news:up:1'
+        $middle | Should -Contain 'news:item:1'
+        $middle | Should -Contain 'news:down:1'
+        $middle | Should -Contain 'news:delask:1'
+    }
+
+    It 'shows nothing to delete when there is no draft' {
+        $script:NewsTickerDraft = $null
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        ($flat -join ' ') | Should -Not -Match 'delask'
+    }
+}

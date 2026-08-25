@@ -339,8 +339,12 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
        that is edited in place, so indexes can never go stale. #>
     $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
     if($draft){$count=@($draft.Items).Count
-        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 30){$label=$label.Substring(0,29)+'…'}
+        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 24){$label=$label.Substring(0,23)+'…'}
             $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
+            # Deletes straight from the list, but through the same confirmation
+            # the item screen uses - a second delete path would be a second
+            # place for a thumb to lose typed work.
+            $row+=,@{text='🗑';callback_data="news:delask:$i"}
             $rows+=,@($row)}}
     else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}
     $rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
@@ -349,7 +353,7 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
 function Get-NewsTickerReorderText { param([long]$UserId)
     $draft=Get-NewsTickerDraft -UserId $UserId
     if(-not $draft){return '📝 الترتيب والتعديل'+"`n"+'⚠️ لا توجد مسودة مملوكة لك.'}
-    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`nاضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط نص الخبر لتعديله أو حذفه."
+    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`nاضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط 🗑 لحذفه، أو نصّه لتعديله."
 }
 
 function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)

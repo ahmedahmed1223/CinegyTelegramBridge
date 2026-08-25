@@ -139,6 +139,9 @@ $script:DefaultSettings = [ordered]@{
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
     NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
+    NewsListPageSize           = 10      # items per page; Telegram refuses an over-large keyboard outright
+    NewsListLabelLength        = 24      # headline characters shown when the row also carries buttons
+    NewsListStackedLabelLength = 60      # headline characters shown when it owns the row
     NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
@@ -232,6 +235,9 @@ $script:SettingDisplayMetadata = @{
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
     NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
+    NewsListPageSize = @{ Unit = 'خبر'; Description = 'عدد الأخبار في صفحة قائمة الترتيب' }
+    NewsListLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر في الصف الأفقي (مع الأزرار)' }
+    NewsListStackedLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر حين يشغل السطر وحده' }
     RepeatWarningCount = @{ Unit = 'مرة'; Description = 'التنبيه عند تكرار القالب هذا العدد خلال النافذة (0 للتعطيل)' }
     RepeatWarningWindowMinutes = @{ Unit = 'دقيقة'; Description = 'نافذة قياس تكرار القالب' }
     MissedEventsHours = @{ Unit = 'ساعة'; Description = 'المدة التي يغطيها ملخص «ماذا فاتني»' }

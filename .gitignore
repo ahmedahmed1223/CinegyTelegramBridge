@@ -28,3 +28,5 @@ artifacts/
 
 # Cygwin/Git-Bash crash dumps.
 *.stackdump
+bridge-err.log
+bridge-run.log

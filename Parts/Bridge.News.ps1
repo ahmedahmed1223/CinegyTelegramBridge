@@ -333,44 +333,108 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
 }
 
-function Get-NewsTickerReorderKeyboard { param([long]$UserId)
-    <# One row per draft item: ⬆️ moves it up, the numbered label opens the
-       per-item editor, ⬇️ moves it down. The whole list lives in ONE message
-       that is edited in place, so indexes can never go stale. #>
-    $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
-    if($draft){$count=@($draft.Items).Count
-        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";$fullLabel=$label;if($fullLabel.Length-gt 60){$fullLabel=$fullLabel.Substring(0,59)+'…'};if($label.Length-gt 24){$label=$label.Substring(0,23)+'…'}
-            # Two layouts. Side by side fits more items on screen; stacked
-            # gives the headline the full width, which matters when the
-            # text is long enough that a 24-character label tells you
-            # nothing about which item you are moving.
-            if (Get-Setting 'NewsListStackedLayout') {
-                $rows+=,@(@{text=$fullLabel;callback_data="news:item:$i"})
-                $controls=@()
-                if($i-gt 0){$controls+=,@{text='⬆️';callback_data="news:up:$i"}}
-                if($i-lt ($count-1)){$controls+=,@{text='⬇️';callback_data="news:down:$i"}}
-                $controls+=,@{text='✏️';callback_data="news:edit:$i"}
-                $controls+=,@{text='🗑';callback_data="news:delask:$i"}
-                $rows+=,@($controls)
-                continue
-            }
-            $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
-            $row+=,@{text='🗑';callback_data="news:delask:$i"}
-            $rows+=,@($row)}}
-    else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}
-    $rows+=,@(@{text='➕ إضافة خبر';callback_data='news:add'},@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
+function Get-NewsTickerPageCount { param([long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return 1 }
+    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
+    return [math]::Max(1, [math]::Ceiling(@($draft.Items).Count / $size))
 }
 
-function Get-NewsTickerReorderText { param([long]$UserId)
-    $draft=Get-NewsTickerDraft -UserId $UserId
-    if(-not $draft){return '📝 الترتيب والتعديل'+"`n"+'⚠️ لا توجد مسودة مملوكة لك.'}
-    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`n$(if (Get-Setting 'NewsListStackedLayout') { 'أزرار كل خبر أسفله: ⬆️ ⬇️ للترتيب، ✏️ للتعديل، 🗑 للحذف.' } else { 'اضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط 🗑 لحذفه، أو نصّه لتعديله.' })"
+function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
+    <#
+        One row per item on the current page: the numbered label opens the
+        editor, arrows move it, the bin deletes it.
+
+        Paginated because Telegram refuses an over-large keyboard outright. A
+        38-item draft rendered 152 buttons; the edit was rejected, the resend
+        was rejected for the same reason, and the operator simply saw a list
+        that would not update - which reads as "the last items are missing".
+        Indexes stay absolute, so every move and delete callback is unchanged
+        by paging.
+    #>
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    $rows = @()
+    if (-not $draft) {
+        $rows += , @(@{text='لا توجد مسودة مملوكة لك'; callback_data='news:refresh'})
+        $rows += , @(@{text='⬅️ إدارة الأخبار'; callback_data='news:refresh'})
+        return @{inline_keyboard=$rows}
+    }
+
+    $count = @($draft.Items).Count
+    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
+    $pages = [math]::Max(1, [math]::Ceiling($count / $size))
+    if ($Page -lt 0) { $Page = 0 }
+    if ($Page -ge $pages) { $Page = $pages - 1 }
+    $first = $Page * $size
+    $last = [math]::Min($count - 1, $first + $size - 1)
+    $labelMax = [math]::Max(8, (Get-SettingInt 'NewsListLabelLength' 8))
+    $stackedMax = [math]::Max($labelMax, (Get-SettingInt 'NewsListStackedLabelLength' 8))
+
+    for ($i = $first; $i -le $last; $i++) {
+        $label = "$($i + 1). $($draft.Items[$i])"
+        $fullLabel = $label
+        if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
+        if ($label.Length -gt $labelMax) { $label = $label.Substring(0, $labelMax - 1) + '…' }
+
+        if (Get-Setting 'NewsListStackedLayout') {
+            $rows += , @(@{text=$fullLabel; callback_data="news:item:$i"})
+            $controls = @()
+            if ($i -gt 0) { $controls += , @{text='⬆️'; callback_data="news:up:$i"} }
+            if ($i -lt ($count - 1)) { $controls += , @{text='⬇️'; callback_data="news:down:$i"} }
+            $controls += , @{text='✏️'; callback_data="news:edit:$i"}
+            $controls += , @{text='🗑'; callback_data="news:delask:$i"}
+            $rows += , @($controls)
+            continue
+        }
+        $row = @()
+        if ($i -gt 0) { $row += , @{text='⬆️'; callback_data="news:up:$i"} }
+        $row += , @{text=$label; callback_data="news:item:$i"}
+        if ($i -lt ($count - 1)) { $row += , @{text='⬇️'; callback_data="news:down:$i"} }
+        $row += , @{text='🗑'; callback_data="news:delask:$i"}
+        $rows += , @($row)
+    }
+
+    if ($pages -gt 1) {
+        $nav = @()
+        if ($Page -gt 0) { $nav += , @{text='◀️ السابق'; callback_data="news:list:$($Page - 1)"} }
+        $nav += , @{text="صفحة $($Page + 1)/$pages"; callback_data="news:list:$Page"}
+        if ($Page -lt ($pages - 1)) { $nav += , @{text='التالي ▶️'; callback_data="news:list:$($Page + 1)"} }
+        $rows += , @($nav)
+    }
+    $rows += , @(@{text='➕ إضافة خبر'; callback_data='news:add'}, @{text='⬅️ إدارة الأخبار'; callback_data='news:refresh'})
+    return @{inline_keyboard=$rows}
 }
 
-function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)
+function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return "📝 الترتيب والتعديل`n`n⚠️ لا توجد مسودة مملوكة لك." }
+
+    $count = @($draft.Items).Count
+    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
+    $pages = [math]::Max(1, [math]::Ceiling($count / $size))
+    if ($Page -lt 0) { $Page = 0 }
+    if ($Page -ge $pages) { $Page = $pages - 1 }
+    $first = $Page * $size + 1
+    $last = [math]::Min($count, $first + $size - 1)
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('📝 ترتيب المسودة')
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("الأخبار: $count")
+    if ($pages -gt 1) { $lines.Add("المعروض: $first–$last  ·  صفحة $($Page + 1) من $pages") }
+    $lines.Add('')
+    $lines.Add($(if (Get-Setting 'NewsListStackedLayout') {
+                'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'
+            } else {
+                '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف'
+            }))
+    return ($lines -join "`n")
+}
+
+function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0,[int]$Page=0)
     <# Edits the originating message when possible so repeated ⬆️/⬇️ presses
        reuse a single message instead of flooding the chat with stale lists. #>
-    $text=Get-NewsTickerReorderText -UserId $UserId;$kb=Get-NewsTickerReorderKeyboard -UserId $UserId
+    $text=Get-NewsTickerReorderText -UserId $UserId -Page $Page;$kb=Get-NewsTickerReorderKeyboard -UserId $UserId -Page $Page
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $kb)){return}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb
 }

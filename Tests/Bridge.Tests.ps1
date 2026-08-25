@@ -5546,3 +5546,85 @@ Describe 'News list layout' {
         }
     }
 }
+
+Describe 'News list paging' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @(1..38 | ForEach-Object { "خبر رقم $_" })
+        }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'NewsListPageSize' }
+        Mock Get-SettingInt { 24 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
+        Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'NewsListStackedLabelLength' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'reaches every item across the pages, including the last' {
+        # 38 items rendered 152 buttons in one keyboard. Telegram refused it,
+        # the resend was refused too, and the list silently stopped updating -
+        # which read as the last items being missing.
+        $seen = @()
+        foreach ($page in 0..((Get-NewsTickerPageCount -UserId 42) - 1)) {
+            $seen += @((Get-NewsTickerReorderKeyboard -UserId 42 -Page $page).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } } |
+                    Where-Object { $_ -like 'news:item:*' })
+        }
+        @($seen | Sort-Object -Unique).Count | Should -Be 38
+        $seen | Should -Contain 'news:item:37'
+    }
+
+    It 'keeps every page well inside the button limit' {
+        foreach ($page in 0..3) {
+            $buttons = (@((Get-NewsTickerReorderKeyboard -UserId 42 -Page $page).inline_keyboard |
+                        ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum)
+            $buttons | Should -BeLessThan 100
+        }
+    }
+
+    It 'numbers items by their real position, not their position on the page' {
+        $labels = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 2).inline_keyboard |
+                ForEach-Object { @($_) } | Where-Object { $_.callback_data -like 'news:item:*' })
+        $labels[0].text | Should -Match '^21\.'
+        $labels[0].callback_data | Should -Be 'news:item:20'
+    }
+
+    It 'offers forward and back only where they exist' {
+        $firstPage = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 0).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $firstPage | Should -Not -Contain 'news:list:-1'
+        $firstPage | Should -Contain 'news:list:1'
+
+        $lastPage = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 3).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $lastPage | Should -Contain 'news:list:2'
+        $lastPage | Should -Not -Contain 'news:list:4'
+    }
+
+    It 'clamps a page number that is out of range instead of rendering nothing' {
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 99).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Contain 'news:item:37'
+    }
+
+    It 'shows no pager at all when everything fits on one page' {
+        $script:NewsTickerDraft.Items = @('واحد', 'اثنان')
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 0).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        ($flat -join ' ') | Should -Not -Match 'news:list:'
+    }
+
+    It 'states the range and total in the heading' {
+        $text = Get-NewsTickerReorderText -UserId 42 -Page 1
+        $text | Should -Match 'الأخبار: 38'
+        $text | Should -Match '11'
+        $text | Should -Match 'صفحة 2 من 4'
+    }
+
+    It 'keeps the move controls absolute, so paging never moves the wrong item' {
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 1).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat | Should -Contain 'news:up:10'
+        $flat | Should -Contain 'news:delask:10'
+    }
+}

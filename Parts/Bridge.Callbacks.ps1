@@ -769,7 +769,11 @@ function Invoke-CallbackQuery {
         'exitgo:*' { Invoke-ExitLayer -Layer ([int](Get-CallbackArg $data 'exitgo:')) -ChatId $chatId -UserId $userId; break }
         'hide:*' {
             $targetLayer = [int](Get-CallbackArg $data 'hide:')
-            if (Get-Setting 'ConfirmLayerRemoval') {
+            # Confirms only what is actually on air. Asking before hiding an
+            # empty layer is friction that buys nothing, and friction on a
+            # path that does not matter is how operators learn to tap through
+            # the confirmation that does.
+            if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
                 Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الإخفاء`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide)
             }
             else { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
@@ -777,7 +781,7 @@ function Invoke-CallbackQuery {
         }
         'exit:*' {
             $targetLayer = [int](Get-CallbackArg $data 'exit:')
-            if (Get-Setting 'ConfirmLayerRemoval') {
+            if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
                 Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الخروج من المشهد`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit)
             }
             else { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId }

@@ -5628,3 +5628,73 @@ Describe 'News list paging' {
         $flat | Should -Contain 'news:delask:10'
     }
 }
+
+Describe 'Confirming removal of a live graphic' {
+    BeforeEach {
+        $script:OnAir = @{}
+        Mock Send-TelegramMessage {}
+        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ExitLayer { $true }
+        Mock Test-Authorized { $true }
+        Mock Test-TelegramPrivateChat { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserLastActivity {}
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+    }
+    AfterAll { $script:OnAir = @{} }
+    BeforeAll {
+        function New-Cb { param([string]$Data)
+            [pscustomobject]@{ id = 'cb1'; data = $Data; from = [pscustomobject]@{ id = 42 }
+                message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 42; type = 'private' } } }
+        }
+    }
+
+    It 'refuses to take a live graphic off air on one tap' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تأكيد الإخفاء' -and $Text -match 'Urgent' }
+    }
+
+    It 'requires the same confirmation before an exit' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'exit:7')
+
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تأكيد الخروج' }
+    }
+
+    It 'acts once the operator confirms' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hidego:7')
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+
+    It 'does not ask about a layer with nothing on it' {
+        # Friction on a path that does not matter is how operators learn to tap
+        # straight through the confirmation that does.
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:3')
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'is on by default, so a fresh install protects the air' {
+        $defaults = $script:DefaultSettings
+        $defaults['ConfirmLayerRemoval'] | Should -BeTrue
+    }
+
+    It 'can still be turned off for a room that wants one-tap hides' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+}

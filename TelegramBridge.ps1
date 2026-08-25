@@ -138,6 +138,7 @@ $script:DefaultSettings = [ordered]@{
     NewsImportMaxBytes         = 1048576
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
+    NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
     NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
@@ -230,6 +231,7 @@ $script:SettingDisplayMetadata = @{
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
+    NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
     RepeatWarningCount = @{ Unit = 'مرة'; Description = 'التنبيه عند تكرار القالب هذا العدد خلال النافذة (0 للتعطيل)' }
     RepeatWarningWindowMinutes = @{ Unit = 'دقيقة'; Description = 'نافذة قياس تكرار القالب' }
     MissedEventsHours = @{ Unit = 'ساعة'; Description = 'المدة التي يغطيها ملخص «ماذا فاتني»' }

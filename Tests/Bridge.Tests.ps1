@@ -5483,3 +5483,66 @@ Describe 'Template device field' {
         $store | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'News list layout' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر قصير', 'خبر ثانٍ طويل جدًا يتجاوز حدّ التسمية المختصرة بكثير جدًا فعلًا', 'خبر ثالث')
+        }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'keeps everything on one row by default' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        $middle = @($rows[1] | ForEach-Object { $_.callback_data })
+        $middle | Should -Contain 'news:up:1'
+        $middle | Should -Contain 'news:item:1'
+        $middle | Should -Contain 'news:delask:1'
+    }
+
+    It 'gives the headline its own row when stacked' {
+        # A 24-character label tells you nothing about a long headline, which
+        # is the whole point of the alternative layout.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        @($rows[2]).Count | Should -Be 1
+        @($rows[2])[0].callback_data | Should -Be 'news:item:1'
+    }
+
+    It 'puts move, edit and delete on the row beneath it' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        $controls = @($rows[3] | ForEach-Object { $_.callback_data })
+        $controls | Should -Contain 'news:up:1'
+        $controls | Should -Contain 'news:down:1'
+        $controls | Should -Contain 'news:edit:1'
+        $controls | Should -Contain 'news:delask:1'
+    }
+
+    It 'omits the move it cannot make, at either end' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        @($rows[1] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:up:0'
+        @($rows[5] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:down:2'
+    }
+
+    It 'shows more of a long headline when it owns the row' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $stacked = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[2][0].text
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        $inline = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] | Where-Object { $_.callback_data -eq 'news:item:1' })[0].text
+        $stacked.Length | Should -BeGreaterThan $inline.Length
+    }
+
+    It 'still deletes through the confirmation in both layouts' {
+        foreach ($stacked in @($true, $false)) {
+            Mock Get-Setting { $stacked } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+            $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+            $flat | Should -Not -Contain 'news:delete:1'
+            $flat | Should -Contain 'news:delask:1'
+        }
+    }
+}

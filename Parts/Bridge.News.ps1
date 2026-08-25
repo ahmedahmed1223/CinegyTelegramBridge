@@ -339,11 +339,22 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
        that is edited in place, so indexes can never go stale. #>
     $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@()
     if($draft){$count=@($draft.Items).Count
-        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 24){$label=$label.Substring(0,23)+'…'}
+        for($i=0;$i-lt $count;$i++){$label="$(($i+1)). $($draft.Items[$i])";$fullLabel=$label;if($fullLabel.Length-gt 60){$fullLabel=$fullLabel.Substring(0,59)+'…'};if($label.Length-gt 24){$label=$label.Substring(0,23)+'…'}
+            # Two layouts. Side by side fits more items on screen; stacked
+            # gives the headline the full width, which matters when the
+            # text is long enough that a 24-character label tells you
+            # nothing about which item you are moving.
+            if (Get-Setting 'NewsListStackedLayout') {
+                $rows+=,@(@{text=$fullLabel;callback_data="news:item:$i"})
+                $controls=@()
+                if($i-gt 0){$controls+=,@{text='⬆️';callback_data="news:up:$i"}}
+                if($i-lt ($count-1)){$controls+=,@{text='⬇️';callback_data="news:down:$i"}}
+                $controls+=,@{text='✏️';callback_data="news:edit:$i"}
+                $controls+=,@{text='🗑';callback_data="news:delask:$i"}
+                $rows+=,@($controls)
+                continue
+            }
             $row=@();if($i-gt 0){$row+=,@{text='⬆️';callback_data="news:up:$i"}};$row+=,@{text=$label;callback_data="news:item:$i"};if($i-lt ($count-1)){$row+=,@{text='⬇️';callback_data="news:down:$i"}}
-            # Deletes straight from the list, but through the same confirmation
-            # the item screen uses - a second delete path would be a second
-            # place for a thumb to lose typed work.
             $row+=,@{text='🗑';callback_data="news:delask:$i"}
             $rows+=,@($row)}}
     else{$rows+=,@(@{text='لا توجد مسودة مملوكة لك';callback_data='news:refresh'})}
@@ -353,7 +364,7 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId)
 function Get-NewsTickerReorderText { param([long]$UserId)
     $draft=Get-NewsTickerDraft -UserId $UserId
     if(-not $draft){return '📝 الترتيب والتعديل'+"`n"+'⚠️ لا توجد مسودة مملوكة لك.'}
-    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`nاضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط 🗑 لحذفه، أو نصّه لتعديله."
+    return "📝 ترتيب المسودة ($(@($draft.Items).Count) خبرًا):`n$(if (Get-Setting 'NewsListStackedLayout') { 'أزرار كل خبر أسفله: ⬆️ ⬇️ للترتيب، ✏️ للتعديل، 🗑 للحذف.' } else { 'اضغط ⬆️ أو ⬇️ بجانب الخبر لتحريكه، واضغط 🗑 لحذفه، أو نصّه لتعديله.' })"
 }
 
 function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)

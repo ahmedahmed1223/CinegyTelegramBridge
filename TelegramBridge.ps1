@@ -150,6 +150,7 @@ $script:DefaultSettings = [ordered]@{
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
     NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
+    NewsListPaged              = $true   # off puts the whole draft on one screen, as far as Telegram allows
     NewsListPageSize           = 10      # items per page; Telegram refuses an over-large keyboard outright
     NewsListLabelLength        = 24      # headline characters shown when the row also carries buttons
     NewsListStackedLabelLength = 60      # headline characters shown when it owns the row
@@ -246,6 +247,7 @@ $script:SettingDisplayMetadata = @{
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
     NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
+    NewsListPaged = @{ Unit = ''; Description = 'قائمة الأخبار على صفحات (عند الإطفاء: قائمة واحدة طويلة)' }
     NewsListPageSize = @{ Unit = 'خبر'; Description = 'عدد الأخبار في صفحة قائمة الترتيب' }
     NewsListLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر في الصف الأفقي (مع الأزرار)' }
     NewsListStackedLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر حين يشغل السطر وحده' }

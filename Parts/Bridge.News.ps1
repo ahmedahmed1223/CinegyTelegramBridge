@@ -333,11 +333,35 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
 }
 
+function Get-NewsTickerPageSize {
+    <#
+        How many items one screen of the reorder list may carry.
+
+        NewsListPaged off means "one long list", but that is a cap and not a
+        promise: Telegram rejects an over-large keyboard outright, and a
+        rejected edit looks exactly like a list that will not update - which
+        is how a 38-item draft came to read as "the last items are missing".
+        The long list therefore runs to the button budget and still pages
+        beyond it, rather than reviving the bug paging was added to fix.
+
+        One helper rather than the same arithmetic in the keyboard, the text
+        and the page count: three copies were three chances to disagree about
+        where a page ends.
+    #>
+    # Telegram's practical ceiling is around a hundred buttons. Staying well
+    # under it leaves room for the navigation row and the add/back row.
+    $buttonBudget = 90
+    $perItem = if (Get-Setting 'NewsListStackedLayout') { 5 } else { 4 }
+    $maxItems = [math]::Max(3, [math]::Floor(($buttonBudget - 5) / $perItem))
+
+    if (-not (Get-Setting 'NewsListPaged')) { return $maxItems }
+    return [math]::Max(3, [math]::Min($maxItems, (Get-SettingInt 'NewsListPageSize' 10)))
+}
+
 function Get-NewsTickerPageCount { param([long]$UserId)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft) { return 1 }
-    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
-    return [math]::Max(1, [math]::Ceiling(@($draft.Items).Count / $size))
+    return [math]::Max(1, [math]::Ceiling(@($draft.Items).Count / (Get-NewsTickerPageSize)))
 }
 
 function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
@@ -361,7 +385,7 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     }
 
     $count = @($draft.Items).Count
-    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
+    $size = Get-NewsTickerPageSize
     $pages = [math]::Max(1, [math]::Ceiling($count / $size))
     if ($Page -lt 0) { $Page = 0 }
     if ($Page -ge $pages) { $Page = $pages - 1 }
@@ -410,7 +434,7 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     if (-not $draft) { return "📝 الترتيب والتعديل`n`n⚠️ لا توجد مسودة مملوكة لك." }
 
     $count = @($draft.Items).Count
-    $size = [math]::Max(3, (Get-SettingInt 'NewsListPageSize' 3))
+    $size = Get-NewsTickerPageSize
     $pages = [math]::Max(1, [math]::Ceiling($count / $size))
     if ($Page -lt 0) { $Page = 0 }
     if ($Page -ge $pages) { $Page = $pages - 1 }
@@ -422,6 +446,12 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     $lines.Add('━━━━━━━━━━━━━━')
     $lines.Add("الأخبار: $count")
     if ($pages -gt 1) { $lines.Add("المعروض: $first–$last  ·  صفحة $($Page + 1) من $pages") }
+    # Said plainly, because the operator asked for one long list and is
+    # getting pages anyway: the reason is Telegram's limit, not the setting
+    # being ignored.
+    if ($pages -gt 1 -and -not (Get-Setting 'NewsListPaged')) {
+        $lines.Add("القائمة الطويلة مفعّلة، لكن تيليجرام لا يقبل أكثر من $size خبرًا في شاشة واحدة.")
+    }
     $lines.Add('')
     $lines.Add($(if (Get-Setting 'NewsListStackedLayout') {
                 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'

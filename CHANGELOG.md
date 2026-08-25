@@ -9,6 +9,7 @@
 - Confirms before taking a live graphic off air, so a single tap cannot hide what is on screen.
 - Addresses the Cinegy logo by its device name (`gfx_logo`) rather than a layer number, via an optional `device` on a template. The logo layer is not numbered, so it was previously uncontrollable.
 - Pages the news reorder list. A 38-item draft rendered 152 buttons, past Telegram's keyboard cap, so the edit was rejected and the list appeared not to update - which read as "the last items are missing". Every item is now reachable.
+- Adds `NewsListPaged` (default on): turn it off for one long news list instead of small pages. It is a cap rather than a promise - Telegram rejects an over-large keyboard, and a rejected edit looks exactly like a list that will not update - so the long list runs to the button budget, pages beyond it, and says on screen why.
 - Adds delete-with-confirmation straight from the reorder list, a configurable news label length, and an optional stacked list layout (`NewsListStackedLayout`, default off).
 - Stops calling a shared template layer harmless.
 - De-duplicates the 5.1-5.5 changelog entries, each of which had been written twice during a merge.

@@ -5587,6 +5587,7 @@ Describe 'News list layout' {
             OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
             Items = @('خبر قصير', 'خبر ثانٍ طويل جدًا يتجاوز حدّ التسمية المختصرة بكثير جدًا فعلًا', 'خبر ثالث')
         }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
     }
     AfterAll { $script:NewsTickerDraft = $null }
 
@@ -5651,11 +5652,49 @@ Describe 'News list paging' {
             Items = @(1..38 | ForEach-Object { "خبر رقم $_" })
         }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
         Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'NewsListPageSize' }
         Mock Get-SettingInt { 24 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
         Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'NewsListStackedLabelLength' }
     }
     AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'puts the whole draft on one screen when paging is off and it fits' {
+        # What "one long list" is for: a normal-sized draft, no page buttons,
+        # everything reachable without flipping.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+        $script:NewsTickerDraft.Items = @(1..12 | ForEach-Object { "خبر رقم $_" })
+
+        $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        @($flat | Where-Object { $_ -like 'news:item:*' }).Count | Should -Be 12
+        $flat | Should -Not -Contain 'news:list:1'
+    }
+
+    It 'still pages a draft too big for one keyboard, and says why' {
+        # The option cannot repeal Telegram's limit. Silently truncating, or
+        # sending a keyboard that gets rejected, are both worse than paging
+        # and saying so.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+
+        $buttons = (@((Get-NewsTickerReorderKeyboard -UserId 42 -Page 0).inline_keyboard |
+                    ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum)
+
+        $buttons | Should -BeLessThan 100
+        (Get-NewsTickerPageCount -UserId 42) | Should -BeGreaterThan 1
+        Get-NewsTickerReorderText -UserId 42 | Should -Match 'القائمة الطويلة مفعّلة'
+    }
+
+    It 'fits fewer items per screen when each one owns two rows' {
+        # The stacked layout spends an extra button per item, so the same
+        # budget buys fewer of them.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+        $inline = Get-NewsTickerPageSize
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+
+        (Get-NewsTickerPageSize) | Should -BeLessThan $inline
+    }
 
     It 'reaches every item across the pages, including the last' {
         # 38 items rendered 152 buttons in one keyboard. Telegram refused it,

@@ -1,12 +1,18 @@
 # Changelog
 
-## 5.5.0 — 2026-08-24
+## 5.6.0 — 2026-08-25
 
-- **Makes the ticker usable alongside another writer.** A second system writes the same `news.txt`, so a publish conflict is the normal case rather than an accident, and refusing forever made the bot useless for the ticker. A conflict now offers two explicit choices: append the draft's items to whatever is live now, or replace it entirely. Never a silent overwrite - the other writer's work is only discarded by a deliberate choice, and the previous text is backed up either way.
-- Adds a lock hand-over request. A non-owner can ask the operator holding the draft to release it; the owner has `NewsLockRequestMinutes` (default 5) to agree or refuse, and silence hands it over - an operator who has gone home cannot answer, and the ticker cannot wait for them. Previously the only way past someone else's draft was an administrator forcing it, which is the wrong tool for two operators on one channel.
-- The owner's unpublished items are sent back to them as text before the draft is released. An unpublished draft is somebody's work: transferring it to another person, or dropping it silently, would both be worse than handing it back.
-- The lock label now names the holder instead of showing a raw user id.
-- Test suite grows from 484 to 495.
+- **The restart button now works when the bridge was started by hand.** It only ever signalled an exit and left the restarting to NSSM or the scheduled task; started from a terminal - which is how it is run during a shift, from the VS Code console - nothing brought it back, so the button refused rather than causing an outage with no way back in through the bot that just stopped. The bridge now relaunches itself into the same console with the same configuration, and refuses only when it can rebuild neither a supervisor nor its own command line. Under a supervisor it deliberately does *not* self-relaunch: two bridges long-polling one bot token means button presses vanish into whichever instance received them.
+- Template buttons carry the name alone. The label used to append the layer number and the last-used time, which overran Telegram's 32-character button limit and cut the date mid-way - `News-Ticker (طبقة 8) · 🕘 08-25…` reads as noise. Layer, device, category, fields, usage count and last use moved onto the ℹ️ preview screen, which has room for them.
+- 🕘 ماذا فاتني answers the questions asked at a handover instead of counting verbs. It used to report `SHOW 23, EXIT 12, أخرى 73`, where the largest bucket was simply every record without an action field. It now names which graphic went to air, who put it there and when, what failed and why, the notable activity notes verbatim, and the current on-air and engine state.
+- Fixes a crash in that same digest: under `StrictMode` a single audit record missing a field threw, taking down the whole screen - and that screen is what an operator opens once something has already gone wrong. Records are normalised once on read, so an absent field is empty rather than fatal.
+- Confirms before taking a live graphic off air, so a single tap cannot hide what is on screen.
+- Addresses the Cinegy logo by its device name (`gfx_logo`) rather than a layer number, via an optional `device` on a template. The logo layer is not numbered, so it was previously uncontrollable.
+- Pages the news reorder list. A 38-item draft rendered 152 buttons, past Telegram's keyboard cap, so the edit was rejected and the list appeared not to update - which read as "the last items are missing". Every item is now reachable.
+- Adds delete-with-confirmation straight from the reorder list, a configurable news label length, and an optional stacked list layout (`NewsListStackedLayout`, default off).
+- Stops calling a shared template layer harmless.
+- De-duplicates the 5.1-5.5 changelog entries, each of which had been written twice during a merge.
+- Test suite grows from 495 to 544.
 ## 5.5.0 — 2026-08-24
 
 - **Makes the ticker usable alongside another writer.** A second system writes the same `news.txt`, so a publish conflict is the normal case rather than an accident, and refusing forever made the bot useless for the ticker. A conflict now offers two explicit choices: append the draft's items to whatever is live now, or replace it entirely. Never a silent overwrite - the other writer's work is only discarded by a deliberate choice, and the previous text is backed up either way.
@@ -27,26 +33,6 @@
 - Adds one-hand mode (`OneHandMode`) for thumb-only use, and optional text shortcuts (`EnableTextShortcuts`) where a bare template name starts a show. Exact match only: a fuzzy match would put the wrong graphic on air from a typo.
 - `templates.json` is no longer tracked in git. It carries station-specific names and scene paths and belongs with `config.json`; `templates.example.json` remains for a fresh install.
 - Test suite grows from 434 to 477.
-## 5.4.0 — 2026-08-24
-
-- **Fixes a phantom on-air record.** On startup the bot reported a template on layer 7 while the screen was blank. Discovery treated "not marked empty" as evidence of a live scene, but a spent item stays Active - briefly with no `IsEmpty` at all - and reports Cinegy's placeholder name `Item` with no description, exactly as every empty layer does. Discovery now requires a real describing name. Ambiguity must never ADD a record, and still never removes one.
-- Generalises undo. A push onto a verifiably empty layer now leaves an undo that clears the layer again - the commonest mistake there is. Deliberately not offered when correlation failed, since hiding would discard whatever the bridge could not identify rather than restore it.
-- Names who holds a layer lock, what they are preparing, and for how long, instead of printing a bare user id. An optional 🔒 badge on the template list (`ShowLayerLockBadge`, default off) shows the clash before a field is typed.
-- Asks why after an undo - wrong template, wrong timing, director asked, other - and reports the counts in the usage digest. `logs\cancel-reasons.json` holds counts only: no field text, no user ids.
-- Adds `/digest` and 🕘 ماذا فاتني, and `/who <template>`. Both read `audit.jsonl` rather than a new events file, which would only drift out of sync with the audit trail.
-- Adds a repeat radar: one template pushed three times inside an hour is queried, since that is almost always a paste slip. Asked after the push, never before.
-- Adds quiet hours (`QuietHoursEnabled`, default off): non-urgent administrator notices are batched overnight and delivered as one message when the window closes. A black output or a stale on-air record is always urgent and always immediate.
-- Adds an automatic maintenance window (`MaintenanceWindowStart`/`End`, `HH:mm`). Both it and quiet hours handle windows that cross midnight. An unset or malformed window is no window - neither may fail closed and block control of a live channel. The administrator emergency override still works inside one.
-- Adds one-hand mode (`OneHandMode`) for thumb-only use, and optional text shortcuts (`EnableTextShortcuts`) where a bare template name starts a show. Exact match only: a fuzzy match would put the wrong graphic on air from a typo.
-- `templates.json` is no longer tracked in git. It carries station-specific names and scene paths and belongs with `config.json`; `templates.example.json` remains for a fresh install.
-- Test suite grows from 434 to 477.
-## 5.3.0 — 2026-08-24
-
-- Adds 📷 لقطة الآن and 📋 نسخ الحالة to the on-air row. The frame lets an operator check what the bridge claims is on air against the real output without leaving the chat - the exact gap that let an exited scene sit unnoticed for ninety minutes. The status text is deliberately plain so it survives being pasted into another app.
-- Adds `/stats` and 📈 أرقام التشغيل: uptime, air operation outcomes, Telegram and Cinegy connection states, and the last daily heartbeat. Uptime is the number that matters - a bridge up for eleven minutes has been restarting. Telegram flood limits (429) are counted separately from ordinary send failures, since a rate limit is a capacity problem rather than a bug.
-- Enables the pre-schedule warning by default at three minutes, and adds the Cinegy health line to it so the operator can decide whether to intervene. The mechanism already existed but shipped disabled.
-- Fixes another `"$layer:"` interpolation, where PowerShell reads the colon as a scope delimiter and the whole load fails.
-- Test suite grows from 427 to 434.
 ## 5.3.0 — 2026-08-24
 
 - Adds 📷 لقطة الآن and 📋 نسخ الحالة to the on-air row. The frame lets an operator check what the bridge claims is on air against the real output without leaving the chat - the exact gap that let an exited scene sit unnoticed for ninety minutes. The status text is deliberately plain so it survives being pasted into another app.
@@ -71,34 +57,6 @@
 - Both installers accept `-RunAsAccount`, and after starting they confirm the bridge actually came up by reading `logs\bridge.log` rather than trusting the service state. Repeated startup lines are reported as a crash loop.
 - `RELEASE.md` gains a first-install section covering the readiness check, the account choice, and the DPAPI trap.
 - Test suite grows from 384 to 427.
-## 5.2.0 — 2026-08-24
-
-- Surfaces an active rollback in the main menu with its remaining seconds. Undo was reachable only from the message that offered it, so navigating away lost it for the rest of its window - and the fastest human error is pressing the wrong template.
-- `ReservedLayers` now admits administrators, stating that the layer is reserved, while still refusing operators. It previously refused everyone including the administrators who reserved the layer, so touching a protected layer meant editing `config.json`. A disabled template stays blocked for everyone.
-- Warns administrators when a scheduled event is about to displace a live graphic (`NotifyOnScheduleOverwrite`, default on). The creation-time conflict check compares scheduled events only, and cannot know what an operator put up by hand.
-- Adds settings export and import. Export carries only the keys declared in `DefaultSettings`, so the bot token and the operator whitelist never reach a chat. Import refuses a foreign or malformed document, refuses an unknown key rather than dropping it, previews exactly which keys differ, and applies nothing until the same administrator confirms.
-- Adds a usage digest, on demand and weekly (`UsageDigestEnabled`, `UsageDigestDayOfWeek`): busiest templates, operation totals, and refusals.
-- Settings export now creates the log directory if it is missing rather than assuming an earlier code path made it.
-- Adds an administrator restart (`AllowRemoteRestart`, default off). It refuses unless a supervisor is actually present - the parent process is inspected, and NSSM or Task Scheduler both restart on exit - because exiting unsupervised is an outage with no way back in through the bot that just stopped. It confirms first, warns when scenes are recorded on air, and signals the polling loop to leave rather than exiting in place, so the finally block still stops the relay, saves counters and releases the single-instance mutex.
-- Seeds the output monitor's timestamp to launch time so the first picture check lands one interval later, rather than probing the source during startup. This also stopped the test suite shelling out to ffmpeg against the example URL.
-- Gives the approval keyboard a way back to the menu, so no screen is a dead end. A phone's own back button leaves the chat entirely and cannot be intercepted by a bot; the help now says so and points at the on-screen buttons.
-- Release notes now carry a condensed summary of what version 4 brought, for operators who never saw its changelog.
-- Adds `scripts\Test-BridgeReadiness.ps1` and `Modules\BridgeInstall.psm1`. Both installers now refuse to register a service over a configuration that cannot start: a supervisor wrapped around a broken config produces a bridge that crashes and is restarted for ever while `services.msc` reports it Running. It checks PowerShell 7, config.json validity, a real bot token, at least one administrator, and a parseable template registry; a missing ffmpeg warns rather than blocks.
-- Catches the DPAPI account trap by name. Secrets are protected with `DataProtectionScope::CurrentUser` while both installers run the bridge as `SYSTEM`, so protecting the token as yourself and then installing the service produced a bridge that could not decrypt its own token. `Protect-BridgeSecrets.ps1` now records `ProtectedBy` in the store, and the readiness check refuses the mismatch and names both accounts.
-- Both installers accept `-RunAsAccount`, and after starting they confirm the bridge actually came up by reading `logs\bridge.log` rather than trusting the service state. Repeated startup lines are reported as a crash loop.
-- `RELEASE.md` gains a first-install section covering the readiness check, the account choice, and the DPAPI trap.
-- Test suite grows from 384 to 427.
-## 5.1.0 — 2026-08-23
-
-- Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.
-- The main menu now states how old the on-air claim is and flags it when Cinegy could not be reached. A stale claim reading identically to a fresh one is what let an exited scene go unnoticed.
-- Adds `Invoke-BridgeSelfTest` (🧪 فحص المسار الحي): SHOW, read back, EXIT, read back, reporting what Cinegy said at each step. Refuses a layer that is busy or that production templates use, and always attempts a HIDE afterwards.
-- Adds `ConfirmLayerRemoval` (default off): a confirmation before hide and exit naming the template, how long it has been on air, and who pushed it. Off by default because it costs the emergency path a tap.
-- Deletes staged operator uploads past `UploadRetentionMinutes` (default 60). News and template registry uploads were staged, parsed, then left on the playout machine for ever.
-- Adds an output monitor that looks at the picture itself: a frame every `OutputMonitorMinutes` (default 60), and on a dark frame a confirming second capture `OutputBlackConfirmSeconds` later. Alerts only when both are black, once, then reports recovery. Administrators always hear; operators only when `NotifyOperatorsOnBlackOutput` is on.
-- Adds 🆕 ما الجديد and `/whatsnew`: operator-facing release notes describing what changed on screen rather than in the code.
-- Rewrites the help screen grouped by task rather than by menu, covering the on-air rows, the freshness warning, the removal confirmation, the admin tools screen, the self-test and the output monitor.
-- Test suite grows from 345 to 384.
 ## 5.1.0 — 2026-08-23
 
 - Alerts administrators about a bridge-pushed layer recorded on air longer than `StaleOnAirAlertHours` (default 6, 0 disables). Reports only, never removes: deleting a record the operator can still see on screen would be worse than a stale one. Cinegy-owned scenes are excluded, being legitimately up for days.

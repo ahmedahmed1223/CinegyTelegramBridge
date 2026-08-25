@@ -4726,12 +4726,59 @@ Describe 'Administrator restart' {
     }
 
     It 'refuses when nothing would bring the bridge back' {
-        # Exiting unsupervised is not a restart, it is an outage with no way
-        # back in through the bot that just stopped.
+        # Exiting unsupervised with no way to relaunch is not a restart, it is
+        # an outage with no way back in through the bot that just stopped.
         Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'explorer.exe'; Supervised = $false } }
+        Mock Get-BridgeRelaunchCommand { $null }
 
         Request-BridgeRestart -ChatId 100 -UserId 100 | Should -BeFalse
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'explorer.exe' }
+    }
+
+    It 'restarts itself when started from a terminal, rather than refusing' {
+        # How this is actually run during a shift: by hand from the VS Code
+        # console, where no service exists to bring it back. Refusing there
+        # left the only restart route as walking over to the playout machine.
+        Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'pwsh.exe'; Supervised = $false } }
+        Mock Get-BridgeRelaunchCommand { [pscustomobject]@{ FilePath = 'pwsh.exe'; Arguments = @(); WorkingDirectory = '.' } }
+
+        Request-BridgeRestart -ChatId 100 -UserId 100 | Should -BeTrue
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'الجسر نفسه' }
+    }
+
+    It 'leaves the relaunch to the supervisor when there is one' {
+        # Two bridges long-polling one bot token means button presses vanish
+        # into whichever instance happened to receive them.
+        Confirm-BridgeRestart -ChatId 100 -UserId 100 | Should -BeTrue
+
+        $script:RestartRequested | Should -BeTrue
+        $script:RestartSelfRelaunch | Should -BeFalse
+    }
+
+    It 'takes the relaunch on itself when nothing else will' {
+        Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'pwsh.exe'; Supervised = $false } }
+
+        Confirm-BridgeRestart -ChatId 100 -UserId 100 | Should -BeTrue
+
+        $script:RestartSelfRelaunch | Should -BeTrue
+    }
+
+    It 'quotes a launch path that contains a space' {
+        # Start-Process -ArgumentList joins with spaces and quotes nothing, so
+        # an unquoted "D:\cingy cg\..." reaches the replacement as
+        # "-File D:\cingy" and the restart dies before it starts.
+        $script:BridgeLaunch = @{
+            ScriptPath             = $PSCommandPath
+            ConfigPath             = 'D:\cingy cg\config.json'
+            RuntimePath            = ''
+            AllowMultipleInstances = $false
+            WorkingDirectory       = 'D:\cingy cg'
+        }
+
+        $command = Get-BridgeRelaunchCommand
+
+        $command | Should -Not -BeNullOrEmpty
+        $command.Arguments | Should -Contain '"D:\cingy cg\config.json"'
     }
 
     It 'asks before restarting rather than acting on the first tap' {

@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.5.0'
+$script:BridgeVersion = '5.6.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -94,6 +94,17 @@ foreach ($part in @(
 # Scheduled Task / service with a different working directory still works.
 if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
     $ConfigPath = Join-Path $scriptRoot ($ConfigPath -replace '^\.[\\/]+', '')
+}
+
+# Everything needed to start this bridge again, captured while it is still
+# unambiguous. Get-BridgeRelaunchCommand rebuilds the command line from these
+# so the restart button works when nothing external supervises the process.
+$script:BridgeLaunch = @{
+    ScriptPath             = $PSCommandPath
+    ConfigPath             = $ConfigPath
+    RuntimePath            = $RuntimePath
+    AllowMultipleInstances = [bool]$AllowMultipleInstances
+    WorkingDirectory       = (Get-Location).Path
 }
 
 # ============================================================================
@@ -616,11 +627,11 @@ $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
 $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
 $script:NewsLockRequest = $null
-$script:NewsLockRequest = $null
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0
 $script:RestartRequested = $false
+$script:RestartSelfRelaunch = $false
 $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
@@ -1057,5 +1068,22 @@ finally {
         try { $script:InstanceMutex.ReleaseMutex() }
         catch { Write-BridgeLog "Could not release instance mutex: $($_.Exception.Message)" "DEBUG" }
         $script:InstanceMutex.Dispose()
+    }
+
+    # Last, and only after the mutex is gone: the replacement takes the same
+    # single-instance mutex, so starting it any earlier means it finds the
+    # lock still held by a process that is on its way out, and refuses.
+    # -NoNewWindow keeps it in the console it was started from, which is the
+    # one the operator is looking at.
+    if ($script:RestartSelfRelaunch) {
+        $relaunch = Get-BridgeRelaunchCommand
+        if (-not $relaunch) { Write-BridgeLog 'Restart wanted but the launch command could not be rebuilt - not restarting' 'ERROR' }
+        else {
+            try {
+                Write-BridgeLog "Relaunching: $($relaunch.FilePath) $($relaunch.Arguments -join ' ')" 'WARN'
+                Start-Process -FilePath $relaunch.FilePath -ArgumentList $relaunch.Arguments -WorkingDirectory $relaunch.WorkingDirectory -NoNewWindow
+            }
+            catch { Write-BridgeLog "Relaunch failed: $($_.Exception.Message)" 'ERROR' }
+        }
     }
 }

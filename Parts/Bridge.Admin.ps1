@@ -505,6 +505,10 @@ function Get-BridgeSupervisor {
 
         Returns Name and Supervised; walks the parent process because that is
         the only thing that actually distinguishes the cases.
+
+        Supervised = $false is not the end of the answer any more: the bridge
+        can also put itself back (see Get-BridgeRelaunchCommand), which is the
+        only route available when it was started by hand from a terminal.
     #>
     try {
         $current = Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop
@@ -522,6 +526,61 @@ function Get-BridgeSupervisor {
     }
 }
 
+function Get-BridgeRelaunchCommand {
+    <#
+        Rebuilds the command that started this process, so the bridge can put
+        itself back without a service behind it.
+
+        Started by hand from a terminal - which is how this is run during a
+        shift, from the VS Code console - nothing external will restart it, so
+        before this the restart button simply refused. It now relaunches
+        itself and the operator gets the same bridge back in the same window.
+
+        The paths are rebuilt from known-good values rather than parsed out of
+        Win32_Process.CommandLine: re-quoting a path containing a space is the
+        one thing a command-line round trip reliably gets wrong, and this
+        bridge lives in "D:\cingy cg\". The raw command line is read only to
+        carry the host flags across, where a wrong answer costs nothing.
+
+        Returns $null when the pieces are not there - dot-sourced in the test
+        suite, for instance - so the caller can decline instead of launching
+        something that is not this bridge.
+    #>
+    $exe = [Environment]::ProcessPath
+    if ([string]::IsNullOrWhiteSpace($exe) -or -not (Test-Path -LiteralPath $exe)) { return $null }
+    if (-not $script:BridgeLaunch) { return $null }
+    $scriptPath = [string]$script:BridgeLaunch.ScriptPath
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath)) { return $null }
+
+    $raw = ''
+    try { $raw = [string](Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop).CommandLine }
+    catch { $raw = '' }
+
+    # Quoted here rather than left to Start-Process: -ArgumentList joins an
+    # array with spaces and adds no quotes of its own, so an unquoted
+    # "D:\cingy cg\...\TelegramBridge.ps1" arrives at the new process as
+    # "-File D:\cingy" and the restart dies with "not recognized as the name
+    # of a script file". Confirmed by running it, not by reading the docs.
+    $quote = { param([string]$Value)
+        if ($Value -match '[\s"]') { '"' + ($Value -replace '"', '\"') + '"' } else { $Value } }
+
+    $arguments = @()
+    foreach ($flag in @('-NoProfile', '-NonInteractive', '-NoLogo')) {
+        if ($raw -match "(?i)(^|\s)$flag\b") { $arguments += $flag }
+    }
+    $arguments += @('-File', (& $quote $scriptPath), '-ConfigPath', (& $quote ([string]$script:BridgeLaunch.ConfigPath)))
+    if (-not [string]::IsNullOrWhiteSpace([string]$script:BridgeLaunch.RuntimePath)) {
+        $arguments += @('-RuntimePath', (& $quote ([string]$script:BridgeLaunch.RuntimePath)))
+    }
+    if ($script:BridgeLaunch.AllowMultipleInstances) { $arguments += '-AllowMultipleInstances' }
+
+    return [pscustomobject]@{
+        FilePath         = $exe
+        Arguments        = $arguments
+        WorkingDirectory = [string]$script:BridgeLaunch.WorkingDirectory
+    }
+}
+
 function Request-BridgeRestart {
     <# Shows what will happen and who is expected to bring the bridge back,
        then asks. Never restarts on the first tap. #>
@@ -532,12 +591,18 @@ function Request-BridgeRestart {
         return $false
     }
     $supervisor = Get-BridgeSupervisor
-    if (-not $supervisor.Supervised) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يبدو أن هناك خدمة تعيد تشغيل الجسر (العملية الأصل: $($supervisor.Name)).`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    # Who brings it back, in order of preference: an external supervisor if
+    # there is one, otherwise the bridge relaunches itself. Only when neither
+    # is possible is the button refused, because exiting then really would be
+    # an outage with no way back in through the bot that just stopped.
+    $relaunch = if ($supervisor.Supervised) { $null } else { Get-BridgeRelaunchCommand }
+    if (-not $supervisor.Supervised -and -not $relaunch) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا توجد وسيلة لإعادة تشغيل الجسر (العملية الأصل: $($supervisor.Name))، ولا يمكن إعادة بناء أمر التشغيل.`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
+    $who = if ($supervisor.Supervised) { $supervisor.Name } else { 'الجسر نفسه' }
     $live = if ($script:OnAir.Count -gt 0) { "`n⚠️ يوجد $($script:OnAir.Count) مشهدًا مسجّلًا على الهواء. إعادة التشغيل لا تغيّر ما هو على الشاشة، لكن البوت لن يستجيب لثوانٍ." } else { '' }
-    Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $($supervisor.Name) تلقائيًا.$live") `
+    Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $who تلقائيًا.$live") `
         -ReplyMarkup @{ inline_keyboard = @(, @(
                 @{ text = '✅ نعم، أعد التشغيل'; callback_data = 'restart:confirm' },
                 @{ text = '❌ إلغاء'; callback_data = 'menu:admintools' })) }
@@ -556,6 +621,11 @@ function Confirm-BridgeRestart {
     Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
     Add-AuditEntry "♻️ إعادة تشغيل الجسر - user $UserId"
     Send-TelegramMessage -ChatId $ChatId -Text '♻️ يُعاد التشغيل الآن… أرسل /بدء بعد قليل للتأكد من عودته.'
+    # Decided here rather than at exit. Under a supervisor the bridge must NOT
+    # start its own replacement: the supervisor starts one too, and two bridges
+    # long-polling one bot token means button presses vanish into whichever
+    # instance happened to receive them.
+    $script:RestartSelfRelaunch = -not (Get-BridgeSupervisor).Supervised
     $script:RestartRequested = $true
     return $true
 }

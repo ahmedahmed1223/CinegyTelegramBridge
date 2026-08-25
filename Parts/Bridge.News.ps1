@@ -298,6 +298,24 @@ function Edit-TelegramMessageText {
     return $true
 }
 
+function Show-NewsTickerDeleteConfirm {
+    <# Deleting used to happen on the first tap. A news item is text somebody
+       typed, and the list is scrolled with a thumb, so a mis-tap silently
+       lost work. The confirmation shows the item being removed - the number
+       alone is not enough to recognise it. #>
+    param([long]$ChatId, [long]$UserId, [int]$Index, [int]$MessageId = 0)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
+    $item = [string]$draft.Items[$Index]
+    $preview = if ($item.Length -gt 200) { $item.Substring(0, 200) + '…' } else { $item }
+    $text = "🗑 تأكيد حذف الخبر $($Index + 1) من $(@($draft.Items).Count):`n`n$preview"
+    $markup = @{inline_keyboard=@(
+            , @(@{text='🗑 نعم، احذف';callback_data="news:delete:$Index"}, @{text='❌ إلغاء';callback_data="news:item:$Index"}))}
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
+    return $true
+}
+
 function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Index,[int]$MessageId=0,[string]$CallbackQueryId='')
     <# One message per news item: full text in the body, move/edit/delete
        buttons carrying the item's CURRENT index. Re-rendered in place after
@@ -305,7 +323,7 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return}
     $count=@($draft.Items).Count
     $rows=@(,@(@{text='⬆️ تحريك لأعلى';callback_data="news:iup:$Index"},@{text='⬇️ تحريك لأسفل';callback_data="news:idown:$Index"}))
-    $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$Index"},@{text='🗑 حذف';callback_data="news:delete:$Index"})
+    $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$Index"},@{text='🗑 حذف';callback_data="news:delask:$Index"})
     $rows+=,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'})
     $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){

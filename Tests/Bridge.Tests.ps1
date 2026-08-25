@@ -5337,3 +5337,51 @@ Describe 'Shared-layer templates' {
         $script:OnAir = @{}
     }
 }
+
+Describe 'News item delete confirmation' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر أول', 'خبر ثانٍ', 'خبر ثالث')
+        }
+        Mock Send-TelegramMessage {}
+        Mock Edit-TelegramMessageText { $false }
+        Mock Test-Admin { $true }
+        Mock Save-NewsTickerDraft { $true }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'shows the item text, because a number alone is not recognisable' {
+        # The list is scrolled with a thumb; a mis-tap used to lose typed work
+        # on the first press.
+        Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 1 | Should -BeTrue
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'خبر ثانٍ' -and $Text -match 'تأكيد حذف' }
+    }
+
+    It 'deletes nothing until the confirmation is answered' {
+        Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 1 | Out-Null
+        @($script:NewsTickerDraft.Items).Count | Should -Be 3
+    }
+
+    It 'removes exactly the confirmed item once accepted' {
+        Remove-NewsTickerDraftItem -ChatId 42 -UserId 42 -Index 1 | Should -BeTrue
+        @($script:NewsTickerDraft.Items) | Should -Be @('خبر أول', 'خبر ثالث')
+    }
+
+    It 'offers a cancel that returns to the item rather than the list' {
+        # Cancelling should leave the operator where they were.
+        Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 2 | Out-Null
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } }) -contains 'news:item:2'
+        }
+    }
+
+    It 'refuses an index that is not in the draft' {
+        Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 9 | Should -BeFalse
+        Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index -1 | Should -BeFalse
+    }
+
+    It 'refuses when the asker does not own the draft' {
+        Show-NewsTickerDeleteConfirm -ChatId 99 -UserId 99 -Index 0 | Should -BeFalse
+    }
+}

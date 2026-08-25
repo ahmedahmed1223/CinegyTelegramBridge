@@ -5288,3 +5288,52 @@ Describe 'News publish conflict resolution' {
         (Resolve-NewsPublishConflict -UserId 99 -Mode append).Success | Should -BeFalse
     }
 }
+
+Describe 'Shared-layer templates' {
+    BeforeEach {
+        Mock Get-TemplateStore {
+            @{ Order = @('logo', 'News-Ticker'); Errors = @(); InvalidKeys = @()
+                Map = @{ logo = @{ Key = 'logo'; Layer = 8 }; 'News-Ticker' = @{ Key = 'News-Ticker'; Layer = 8 } }
+                SharedLayers = @{ '8' = @('News-Ticker', 'logo') } }
+        }
+        Mock Get-UserDisplayName { 'أحمد' }
+    }
+
+    It 'warns at review that a shared layer cannot carry both templates' {
+        # A Cinegy GFX layer holds one scene. logo and News-Ticker both sit on
+        # layer 8, so showing either silently evicts the other - the operator
+        # has to know that before confirming, not after.
+        $state = @{ Key = 'logo'; LockLayer = 8; Fields = @(); Values = @{}; AutoHideSeconds = 0 }
+        $text = Format-ShowReviewText -State $state
+        $text | Should -Match 'News-Ticker'
+        $text | Should -Match 'لا يمكن عرضها'
+    }
+
+    It 'does not name the template against itself' {
+        $state = @{ Key = 'logo'; LockLayer = 8; Fields = @(); Values = @{}; AutoHideSeconds = 0 }
+        $text = Format-ShowReviewText -State $state
+        ([regex]::Matches($text, 'logo')).Count | Should -Be 1
+    }
+
+    It 'stays silent for a layer only one template uses' {
+        Mock Get-TemplateStore {
+            @{ Order = @('Urgent'); Errors = @(); InvalidKeys = @()
+                Map = @{ Urgent = @{ Key = 'Urgent'; Layer = 7 } }; SharedLayers = @{} }
+        }
+        $state = @{ Key = 'Urgent'; LockLayer = 7; Fields = @(); Values = @{}; AutoHideSeconds = 0 }
+        Format-ShowReviewText -State $state | Should -Not -Match 'يتشاركها'
+    }
+
+    It 'lets templates on different layers be on air together' {
+        # The capability exists and is per layer: what cannot happen is two
+        # templates on the SAME layer, which is a Cinegy constraint.
+        $script:OnAir = @{}
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+        $script:OnAir[8] = @{ Key = 'News-Ticker'; At = (Get-Date); UserId = 42; Source = 'bridge' }
+
+        $script:OnAir.Count | Should -Be 2
+        (Get-OnAirShareText) | Should -Match 'Urgent'
+        (Get-OnAirShareText) | Should -Match 'News-Ticker'
+        $script:OnAir = @{}
+    }
+}

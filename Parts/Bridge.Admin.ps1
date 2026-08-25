@@ -76,7 +76,10 @@ function Invoke-StatusCommand {
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
         $sharedText = @($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | '
-        $lines.Add("ℹ️ طبقات مشتركة بين عدة قوالب (مسموح): $sharedText")
+        # Not 'allowed' - a Cinegy GFX layer holds one scene, so templates
+        # sharing a layer can never be on air together. Calling that harmless
+        # is how a logo and a ticker end up silently evicting each other.
+        $lines.Add("⚠️ قوالب تتشارك الطبقة نفسها ولا يمكن عرضها معًا: $sharedText")
     }
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `

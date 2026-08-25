@@ -708,6 +708,16 @@ function Format-ShowReviewText {
         $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
         $lines.Add("⚠️ سيتم استبدال القالب الحالي: $currentKey ($sourceText).")
     }
+    # A structural clash, distinct from the runtime one above: these templates
+    # can never be on air together, whether or not the layer is busy right now.
+    $sharedLayers = Get-JsonProp (Get-TemplateStore) 'SharedLayers'
+    $layerKey = [string]$State.LockLayer
+    if ($sharedLayers -and $sharedLayers.Contains($layerKey)) {
+        $siblings = @(@($sharedLayers[$layerKey]) | Where-Object { $_ -ne [string]$State.Key })
+        if ($siblings.Count -gt 0) {
+            $lines.Add("⚠️ هذه الطبقة يتشاركها أيضًا: $($siblings -join '، ') — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
+        }
+    }
     if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: $($State.AutoHideSeconds) ثانية") }
     $lines.Add("")
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {

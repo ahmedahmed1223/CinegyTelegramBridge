@@ -255,11 +255,15 @@ function Get-TemplatesKeyboard {
             if ($haystack.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
         }
         $matched++
-        $categoryLabel = if ([string]::IsNullOrWhiteSpace([string]$t.Category)) { '' } else { " · $($t.Category)" }
         # A lock badge here is the early warning: the operator sees the clash
         # before typing a single field, instead of after.
         $lockBadge = if ((Get-Setting 'ShowLayerLockBadge') -and $script:LayerLocks.ContainsKey([int]$t.Layer)) { '🔒 ' } else { '' }
-        $templateRow = @((New-Button "$lockBadge$($t.Key) (طبقة $($t.Layer))$categoryLabel$(Get-TemplateLastUsedLabel -Key ([string]$t.Key))" "$Prefix`:$i"))
+        # The name only. The label used to carry the layer number and a
+        # timestamp, which pushed it past ButtonTextMaxLength and left the
+        # button reading "News-Ticker (طبقة 8) · 🕘 08-25…" - a half-cut date
+        # that looks like noise. Layer, category and last use are all on the
+        # ℹ️ screen, which has room for them.
+        $templateRow = @((New-Button "$lockBadge$($t.Key)" "$Prefix`:$i"))
         if ($Prefix -eq 'tpl') { $templateRow += (New-Button 'ℹ️' "tplinfo:$i") }
         $rows += , $templateRow
         # Presets are only meaningful for an immediate show.
@@ -297,7 +301,26 @@ function Get-TemplatePreviewText {
         ([datetime]$script:TemplateLastUsed[[string]$Template.Key]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
     }
     else { 'لم يُستخدم بعد' }
-    return "ℹ️ $($Template.Key)`nالتصنيف: $category`nالطبقة: $($Template.Layer)`nالوصف: $description`nالحقول: $fields`nآخر استخدام: $lastUsed"
+    $device = [string](Get-JsonProp $Template 'Device')
+    # A device-backed template has no meaningful layer number - the number is
+    # only the bridge's internal key - so showing it would be the same noise
+    # the button just lost.
+    $where = if ($device) { "طبقة الجهاز: $device" } else { "الطبقة: $($Template.Layer)" }
+    $uses = if ($script:UsageCounts.ContainsKey([string]$Template.Key)) { "$($script:UsageCounts[[string]$Template.Key]) مرة" } else { 'لم يُستخدم' }
+    $live = if ($script:OnAir.ContainsKey([int]$Template.Layer)) { '🔴 على الهواء الآن' } else { '⚫️ غير معروض' }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("ℹ️ $($Template.Key)")
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add($live)
+    $lines.Add($where)
+    $lines.Add("التصنيف: $category")
+    $lines.Add("الحقول: $fields")
+    $lines.Add('')
+    $lines.Add($description)
+    $lines.Add('')
+    $lines.Add("الاستخدام: $uses · آخر مرة: $lastUsed")
+    return ($lines -join "`n")
 }
 
 function Get-TemplatePreviewKeyboard {

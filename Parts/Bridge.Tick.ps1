@@ -132,43 +132,96 @@ function Get-MissedEventsText {
     <#
         What happened while nobody was looking.
 
-        After a restart, or after a night away, the operator has no idea what
-        the channel did. The audit trail holds it all but reads like a
-        machine log; this collapses it into the few sentences a human needs
-        before taking over a shift.
+        The first version counted verbs - "SHOW 23, other 73" - which tells an
+        operator taking over a shift nothing: not which graphic, not who, not
+        when, and the largest bucket was simply everything without an action
+        field. This answers what is actually asked at a handover: what went to
+        air, who did it, what failed, and what is up right now.
     #>
     param([int]$Hours = 12)
     $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
-    $records = @(Read-AuditRecords | Where-Object {
+    # Normalised up front. Audit records are written by a dozen call sites and
+    # only carry the fields each one cares about; under StrictMode a single
+    # record without an "action" key would otherwise take down the whole
+    # digest, which is exactly the screen an operator opens when something has
+    # already gone wrong.
+    $records = @(Read-AuditRecords -MaxLines 1500 | ForEach-Object {
+            $record = $_
+            $read = { param([string]$Name)
+                if ($record.PSObject.Properties[$Name]) { [string]$record.PSObject.Properties[$Name].Value } else { '' } }
             $stamp = [datetime]::MinValue
-            [datetime]::TryParse([string]$_.timestampUtc, [ref]$stamp) -and $stamp.ToUniversalTime() -ge $since
+            if (-not [datetime]::TryParse((& $read 'timestampUtc'), [ref]$stamp)) { return }
+            if ($stamp.ToUniversalTime() -lt $since) { return }
+            [pscustomobject]@{
+                When    = $stamp.ToLocalTime()
+                Action  = (& $read 'action')
+                Target  = (& $read 'target')
+                Result  = (& $read 'result')
+                Message = (& $read 'message')
+                UserId  = (& $read 'userId')
+            }
         })
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("🕘 ماذا فاتني — آخر $Hours ساعة")
+    $lines.Add('━━━━━━━━━━━━━━')
     if ($records.Count -eq 0) {
-        $lines.Add('')
         $lines.Add('لا شيء مسجّل في هذه الفترة.')
         return ($lines -join "`n")
     }
 
-    $byAction = $records | Group-Object -Property action
-    $lines.Add('')
-    foreach ($group in ($byAction | Sort-Object Count -Descending)) {
-        $label = if ([string]::IsNullOrWhiteSpace($group.Name)) { 'أخرى' } else { $group.Name }
-        $lines.Add("• $label — $($group.Count)")
-    }
 
-    $failures = @($records | Where-Object { [string]$_.result -eq 'failed' })
-    if ($failures.Count -gt 0) {
+
+    # Grouped by graphic rather than by verb: an operator cares which template
+    # moved, not that eleven HIDEs happened to something unnamed.
+    $airOps = @($records | Where-Object { $_.Action -in @('SHOW', 'HIDE', 'EXIT') })
+    $shows = @($airOps | Where-Object { $_.Action -eq 'SHOW' -and $_.Target })
+    if ($shows.Count -gt 0) {
         $lines.Add('')
-        $lines.Add("❌ عمليات فاشلة: $($failures.Count)")
-        foreach ($failure in @($failures | Select-Object -Last 3)) {
-            $lines.Add("  - $($failure.action) طبقة $($failure.layer): $($failure.message)")
+        $lines.Add('📺 ما عُرض')
+        foreach ($group in ($shows | Group-Object -Property Target | Sort-Object Count -Descending | Select-Object -First 6)) {
+            $newest = @($group.Group)[-1]
+            $who = Get-UserDisplayName -UserId ([long]$newest.UserId)
+            $stampText = $newest.When.ToString('HH:mm')
+            $times = if ($group.Count -gt 1) { "$($group.Count)× · آخرها $stampText" } else { $stampText }
+            $lines.Add("• $($group.Name) — $times — $who")
         }
     }
+
+    $removals = @($airOps | Where-Object { $_.Action -in @('HIDE', 'EXIT') })
+    if ($removals.Count -gt 0) {
+        $newest = @($removals)[-1]
+        $lines.Add("🙈 إخفاء وخروج: $($removals.Count) — آخرها $($newest.When.ToString('HH:mm'))")
+    }
+
+    # Activity lines are already written for a human, so they are shown rather
+    # than counted.
+    $activity = @($records | Where-Object { -not $_.Action -and $_.Message })
+    $notable = @($activity | Where-Object { $_.Message -match '📰|⚙️|👤|🔓|🚨|♻️' })
+    if ($notable.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('📌 أحداث تستحق الانتباه')
+        foreach ($item in @($notable | Select-Object -Last 5)) {
+            $lines.Add("• $($item.When.ToString('HH:mm')) — $($item.Message)")
+        }
+    }
+
+    $failures = @($records | Where-Object { $_.Result -eq 'failed' })
+    $blocked = @($records | Where-Object { $_.Result -eq 'blocked' })
+    if ($failures.Count -gt 0 -or $blocked.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add("⚠️ فشل: $($failures.Count) · مرفوض: $($blocked.Count)")
+        foreach ($failure in @($failures | Select-Object -Last 3)) {
+            $detail = if ($failure.Message) { $failure.Message } else { 'بلا تفصيل' }
+            $lines.Add("• $($failure.When.ToString('HH:mm')) — $($failure.Action) $($failure.Target): $detail")
+        }
+    }
+
     $lines.Add('')
-    $lines.Add("الوضع الآن: $(if ($script:OnAir.Count -eq 0) { 'لا شيء على الهواء' } else { "$($script:OnAir.Count) مشهدًا على الهواء" })")
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add($(if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
+            else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join '، ')" }))
+    $lines.Add("Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState) · Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)")
     return ($lines -join "`n")
 }
 

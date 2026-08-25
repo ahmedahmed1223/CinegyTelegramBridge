@@ -4936,7 +4936,7 @@ Describe 'Missed events and template history' {
             (@{ timestampUtc = $recent; action = 'SHOW'; result = 'success'; userId = 42; layer = 3; target = 'الانتخابات'; message = '' } | ConvertTo-Json -Compress)
             (@{ timestampUtc = $recent; action = 'HIDE'; result = 'success'; userId = 42; layer = 3; target = ''; message = '' } | ConvertTo-Json -Compress)
             (@{ timestampUtc = $recent; action = 'SHOW'; result = 'failed'; userId = 42; layer = 4; target = 'الطقس'; message = 'engine refused' } | ConvertTo-Json -Compress)
-            (@{ timestampUtc = $old; action = 'SHOW'; result = 'success'; userId = 99; layer = 3; target = 'الانتخابات'; message = '' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = $old; action = 'SHOW'; result = 'success'; userId = 99; layer = 3; target = 'قديم-جدًا'; message = '' } | ConvertTo-Json -Compress)
         )
         Mock Get-UserDisplayName { 'أحمد' }
     }
@@ -4944,21 +4944,34 @@ Describe 'Missed events and template history' {
 
     It 'summarises what happened while nobody was looking' {
         $text = Get-MissedEventsText -Hours 12
-        $text | Should -Match 'SHOW — 2'
-        $text | Should -Match 'HIDE — 1'
+        # Grouped by graphic, not by verb: which template moved is the
+        # question at a handover, and who moved it.
+        $text | Should -Match 'الانتخابات'
+        $text | Should -Match 'أحمد'
+        $text | Should -Match 'إخفاء وخروج: 1'
     }
 
     It 'calls out failures, which is the part worth reading' {
         $text = Get-MissedEventsText -Hours 12
-        $text | Should -Match 'فاشلة: 1'
+        $text | Should -Match 'فشل: 1'
         $text | Should -Match 'engine refused'
     }
 
     It 'ignores anything outside the window' {
-        # The three-day-old entry must not appear in a twelve-hour digest.
-        (Get-MissedEventsText -Hours 12) | Should -Not -Match 'أحمد'
+        # The three-day-old entry names a template the recent ones do not.
+        (Get-MissedEventsText -Hours 12) | Should -Not -Match 'قديم-جدًا'
     }
 
+    It 'passes activity notes through verbatim rather than counting them' {
+        # The old digest bucketed every message-only record as "other", which
+        # was both the largest number on screen and the least informative.
+        Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value (
+            @{ timestampUtc = (Get-Date).ToUniversalTime().AddMinutes(-10).ToString('o')
+                event        = 'activity'; message = '📰 نشر شريط الأخبار بواسطة أحمد: 39 خبرًا'
+            } | ConvertTo-Json -Compress)
+
+        Get-MissedEventsText -Hours 12 | Should -Match '39 خبرًا'
+    }
     It 'says so plainly when nothing happened' {
         Set-Content -LiteralPath $script:auditFile -Value '' -Encoding utf8
         Get-MissedEventsText -Hours 12 | Should -Match 'لا شيء مسجّل'
@@ -4979,6 +4992,43 @@ Describe 'Missed events and template history' {
     }
 }
 
+Describe 'Template button labels' {
+    BeforeEach {
+        $script:LayerLocks = @{}
+        $script:OnAir = @{}
+        Mock Get-TemplateStore {
+            @{
+                Order = @('News-Ticker')
+                Map   = @{ 'News-Ticker' = [pscustomobject]@{
+                        Key         = 'News-Ticker'; Layer = 8; Category = 'أخبار'
+                        Description = 'شريط الأخبار'; Fields = @('text'); Device = ''; Presets = @()
+                    }
+                }
+            }
+        }
+        $script:TemplateUsage = @{ 'News-Ticker' = @{ Count = 4; LastUsed = (Get-Date).ToUniversalTime().ToString('o') } }
+    }
+
+    It 'carries the name alone, with no layer number or timestamp' {
+        # Reported as "random text and numbers in the button names": the label
+        # used to append the layer and the last-used time, which overran
+        # ButtonTextMaxLength and cut the date mid-way - "News-Ticker (طبقة 8)
+        # . 08-25..." reads as noise, not as information.
+        $keyboard = Get-TemplatesKeyboard -Prefix 'tpl'
+        $label = $keyboard.inline_keyboard[0][0].text
+
+        $label | Should -Be 'News-Ticker'
+        $label | Should -Not -Match '\d'
+    }
+
+    It 'moves the detail onto the preview screen, where there is room' {
+        $preview = Get-TemplatePreviewText -Template (Get-TemplateStore).Map['News-Ticker']
+
+        $preview | Should -Match 'طبقة'
+        $preview | Should -Match 'أخبار'
+        $preview | Should -Match 'شريط الأخبار'
+    }
+}
 Describe 'Repeat radar' {
     BeforeEach {
         $script:RecentShowTimes = @{}

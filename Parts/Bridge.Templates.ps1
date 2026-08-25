@@ -202,10 +202,21 @@ function Get-TemplateStore {
             }
         }
 
+        # Optional: names the Cinegy device carrying this template, for layers
+        # Air Pro does not address by number - the logo is one. The numeric
+        # layer is still what the bridge keys its own bookkeeping on, so it
+        # must stay unique even when a device name is given.
+        $deviceName = [string](Get-JsonProp $entry 'device')
+        if ($deviceName -and $deviceName -notmatch '^[A-Za-z0-9_]{1,32}$') {
+            $errors.Add("القالب '$key' فيه اسم جهاز غير صالح '$deviceName' - تم تجاهل الاسم.")
+            $deviceName = ''
+        }
+
         $map[$key] = @{
             Key         = $key
             Path        = [string]$tplPath
             Layer       = $layer
+            Device      = $deviceName
             Fields      = $fieldNames
             FieldLabels = $fieldLabels
             FieldLimits = $fieldLimits
@@ -240,6 +251,15 @@ function Get-TemplateStore {
         InvalidKeys = $invalidKeys.ToArray()
         SharedLayers = $sharedLayers
     }
+    # Tell the Cinegy module which layers are named, so every existing call
+    # site can keep passing a plain layer number.
+    $deviceMap = @{}
+    foreach ($templateKey in $map.Keys) {
+        $deviceName = [string]$map[$templateKey].Device
+        if (-not [string]::IsNullOrWhiteSpace($deviceName)) { $deviceMap[[int]$map[$templateKey].Layer] = $deviceName }
+    }
+    Set-AirLayerDeviceMap -Map $deviceMap
+
     foreach ($e in $errors) { Write-BridgeLog "Template registry: $e" "WARN" }
     return $script:TemplateCache
 }
@@ -274,6 +294,27 @@ function Get-TemplateTestLayerConflict {
     if ($Layer -le 0) { return @() }
     $store = Get-TemplateStore
     return @($store.Map.Keys | Where-Object { [int]$store.Map[$_].Layer -eq $Layer } | Sort-Object)
+}
+
+function Get-LayerDevice {
+    <#
+        The Cinegy device name for a layer, or '' when it is addressed by
+        number like every ordinary GFX layer.
+
+        A lookup rather than a parameter threaded through every call, because
+        the layer number stays the bridge's key for on-air records, locks and
+        buttons - only the Cinegy boundary needs the device name. A template
+        declares it once with "device": "logo" and nothing else changes.
+    #>
+    param([Parameter(Mandatory)][int]$Layer)
+    $store = Get-TemplateStore
+    foreach ($key in $store.Order) {
+        $template = $store.Map[$key]
+        if ([int]$template.Layer -ne $Layer) { continue }
+        $device = [string](Get-JsonProp $template 'Device')
+        if (-not [string]::IsNullOrWhiteSpace($device)) { return $device }
+    }
+    return ''
 }
 
 function Get-KnownLayers {

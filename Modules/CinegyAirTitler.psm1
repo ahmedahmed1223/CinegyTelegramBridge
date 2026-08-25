@@ -110,6 +110,51 @@ function Send-AirCommand {
     }
 }
 
+$script:AirLayerDevices = @{}
+
+function Set-AirLayerDeviceMap {
+    <# Registers which layer numbers are addressed by a device name instead of
+       gfx_<n>. Called by the bridge whenever templates.json is parsed. #>
+    [CmdletBinding()]
+    param([hashtable]$Map = @{})
+    $script:AirLayerDevices = @{}
+    foreach ($layer in $Map.Keys) {
+        $name = [string]$Map[$layer]
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $script:AirLayerDevices[[int]$layer] = $name
+    }
+}
+
+function Resolve-AirGfxDevice {
+    <#
+        Maps a template's layer to the Cinegy device that carries it.
+
+        Almost every graphics layer is numeric: device *GFX_7, status path
+        gfx_7. The logo is not - Air Pro exposes it as a named device, and its
+        own active item describes itself as "Show logo_mov.cintitle as logo"
+        rather than "on layer N". Verified against the running engine:
+        gfx_logo answers with a live scene while gfx_9 and friends do not
+        exist at all.
+
+        A template therefore may declare `device` to name that layer instead
+        of relying on its number. The number is still what the bridge keys its
+        own bookkeeping on, so it must stay unique across templates.
+    #>
+    param([string]$Device = '', [int]$Layer = 0)
+    # Falls back to the map the bridge registers from templates.json, so the
+    # twenty existing call sites keep passing a plain layer number and only
+    # this one place knows that some layers are named.
+    if ([string]::IsNullOrWhiteSpace($Device) -and $script:AirLayerDevices.ContainsKey($Layer)) {
+        $Device = [string]$script:AirLayerDevices[$Layer]
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Device)) {
+        $clean = $Device.Trim()
+        if ($clean -notmatch '^[A-Za-z0-9_]{1,32}$') { throw "Invalid Cinegy device name '$Device'." }
+        return [pscustomobject]@{ Command = "*GFX_$($clean.ToUpperInvariant())"; StatusPath = "gfx_$($clean.ToLowerInvariant())" }
+    }
+    return [pscustomobject]@{ Command = "*GFX_$Layer"; StatusPath = "gfx_$Layer" }
+}
+
 function Show-TitlerTemplate {
     <#
         .SYNOPSIS
@@ -123,6 +168,7 @@ function Show-TitlerTemplate {
         [Parameter(Mandatory)][string]$AirServerAddress,
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][int]$Layer,
+        [string]$Device = '',
         [Parameter(Mandatory)][string]$TemplatePath,
         [hashtable]$Variables = @{},
         # Per-variable type overrides, e.g. @{ 'Score.Value' = 'Float' }.
@@ -150,7 +196,7 @@ function Show-TitlerTemplate {
 
     $eventId = "{$([guid]::NewGuid().ToString().ToUpperInvariant())}"
     $result = Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
-        -Device "*GFX_$Layer" -Cmd "SHOW" -EventId $eventId -Op1 $TemplatePath `
+        -Device (Resolve-AirGfxDevice -Device $Device -Layer $Layer).Command -Cmd "SHOW" -EventId $eventId -Op1 $TemplatePath `
         -Op2 $variableXml -TimeoutSec $TimeoutSec
     $result | Add-Member -NotePropertyName EventId -NotePropertyValue $eventId -Force
     return $result
@@ -161,10 +207,11 @@ function Hide-TitlerTemplate {
         [Parameter(Mandatory)][string]$AirServerAddress,
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][int]$Layer,
+        [string]$Device = '',
         [int]$TimeoutSec = 10
     )
     Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
-        -Device "*GFX_$Layer" -Cmd "HIDE" -TimeoutSec $TimeoutSec
+        -Device (Resolve-AirGfxDevice -Device $Device -Layer $Layer).Command -Cmd "HIDE" -TimeoutSec $TimeoutSec
 }
 
 function Exit-TitlerScene {
@@ -172,10 +219,11 @@ function Exit-TitlerScene {
         [Parameter(Mandatory)][string]$AirServerAddress,
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][int]$Layer,
+        [string]$Device = '',
         [int]$TimeoutSec = 10
     )
     Send-AirCommand -AirServerAddress $AirServerAddress -AirChannelNumber $AirChannelNumber `
-        -Device "*GFX_$Layer" -Cmd "EXIT_SCENE_LOOP" -TimeoutSec $TimeoutSec
+        -Device (Resolve-AirGfxDevice -Device $Device -Layer $Layer).Command -Cmd "EXIT_SCENE_LOOP" -TimeoutSec $TimeoutSec
 }
 
 function Send-PostboxValues {
@@ -236,10 +284,11 @@ function Get-TitlerLayerStatus {
         [Parameter(Mandatory)][string]$AirServerAddress,
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][int]$Layer,
+        [string]$Device = '',
         [int]$TimeoutSec = 10
     )
 
-    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/gfx_$Layer/status"
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/$((Resolve-AirGfxDevice -Device $Device -Layer $Layer).StatusPath)/status"
     try {
         $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
         $xml = [xml]$response.Content
@@ -393,4 +442,4 @@ function Get-AirTelemetryStatus {
 
 # Escape-XmlValue is an implementation detail. Tests exercise it inside the
 # module scope so importing the module exposes only its supported commands.
-Export-ModuleMember -Function Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus
+Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus

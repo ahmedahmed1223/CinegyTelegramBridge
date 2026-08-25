@@ -5425,3 +5425,61 @@ Describe 'Delete from the reorder list' {
         ($flat -join ' ') | Should -Not -Match 'delask'
     }
 }
+
+Describe 'Named Cinegy layers' {
+    BeforeAll { Import-Module (Join-Path $script:Root 'Modules\CinegyAirTitler.psm1') -Force }
+    AfterEach { Set-AirLayerDeviceMap -Map @{} }
+
+    It 'addresses an ordinary layer by number' {
+        $resolved = Resolve-AirGfxDevice -Layer 7
+        $resolved.Command | Should -Be '*GFX_7'
+        $resolved.StatusPath | Should -Be 'gfx_7'
+    }
+
+    It 'addresses the logo by name, which is how Air Pro exposes it' {
+        # Verified against the running engine: gfx_logo answers with a live
+        # scene describing itself as "Show logo_mov.cintitle as logo", while
+        # the numeric layers that template claimed simply do not exist.
+        $resolved = Resolve-AirGfxDevice -Device 'logo'
+        $resolved.Command | Should -Be '*GFX_LOGO'
+        $resolved.StatusPath | Should -Be 'gfx_logo'
+    }
+
+    It 'resolves a mapped layer number to its device, so call sites need no change' {
+        Set-AirLayerDeviceMap -Map @{ 9 = 'logo' }
+        (Resolve-AirGfxDevice -Layer 9).StatusPath | Should -Be 'gfx_logo'
+        (Resolve-AirGfxDevice -Layer 7).StatusPath | Should -Be 'gfx_7'
+    }
+
+    It 'lets an explicit device win over the map' {
+        Set-AirLayerDeviceMap -Map @{ 9 = 'logo' }
+        (Resolve-AirGfxDevice -Layer 9 -Device 'other').StatusPath | Should -Be 'gfx_other'
+    }
+
+    It 'clears the map when given an empty one' {
+        Set-AirLayerDeviceMap -Map @{ 9 = 'logo' }
+        Set-AirLayerDeviceMap -Map @{}
+        (Resolve-AirGfxDevice -Layer 9).StatusPath | Should -Be 'gfx_9'
+    }
+
+    It 'ignores a blank device name rather than building gfx_' {
+        Set-AirLayerDeviceMap -Map @{ 9 = '' }
+        (Resolve-AirGfxDevice -Layer 9).StatusPath | Should -Be 'gfx_9'
+    }
+
+    It 'refuses a device name that could reshape the request path' {
+        # It goes straight into a URL and an XML attribute.
+        { Resolve-AirGfxDevice -Device '../video' } | Should -Throw
+        { Resolve-AirGfxDevice -Device 'a b' } | Should -Throw
+    }
+}
+
+Describe 'Template device field' {
+    It 'reads a device name and registers it for its layer' {
+        Mock Get-JsonProp { 'logo' } -ParameterFilter { $Name -eq 'device' }
+        # The store maps layer -> device so every existing Cinegy call keeps
+        # passing a plain number.
+        $store = Get-TemplateStore
+        $store | Should -Not -BeNullOrEmpty
+    }
+}

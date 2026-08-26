@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.7.2 — 2026-08-26
+
+- **Durations on the status screens read as durations.** They counted in a single unit for ever: a ticker on air since yesterday showed "1560 دقيقة", the stale-data label showed "متأخر منذ 372741 ثانية" - four days written as a number nobody divides out at a glance - and uptime showed "26س 5د". All three go through the duration formatter now, and `Format-Duration` delegates rather than duplicating, so the on-air row, the layer-lock notice, the auto-hide confirmation and the duration picker improve together instead of four of them drifting apart.
+- "آخر فحص ناجح" leads with how long ago rather than a wall-clock stamp, because the question that line is asked is whether the reading is current. The clock time stays in brackets for anyone comparing against the log.
+- **Archives the audit trail past `AuditMaxSizeMB` (110) instead of letting it grow without bound.** `bridge.log` has rotated for a long time; `audit.jsonl` - the permanent record of who put what on air - never had a limit at all. It now rolls into `audit-<stamp>.jsonl` and keeps every archive by default. That is the deliberate difference from `bridge.log`, which drops its oldest generation: right for a diagnostic log, wrong for the record whose whole purpose is answering questions about the past. `AuditArchiveKeepFiles` exists for a disk that genuinely demands pruning and defaults to 0, meaning keep everything.
+- `Read-AuditRecords` reads back through the archives when the active file is short, so the first digest after a rotation does not report an empty morning.
+- Two faults found while building the rotation, both introduced by it: `Invoke-AuditRotation` returned a boolean into `Write-AuditRecord`'s output stream, so `Invoke-ShowTemplateResult` came back as an array and lost its `.Success` - every operation that writes an audit record was affected; and the archive glob `audit-*.jsonl` adopted anything sitting in the log folder and read it as history, now narrowed to the exact stamped shape with the active file excluded.
+- Test suite grows from 607 to 611.
 ## 5.7.1 — 2026-08-26
 
 - **Makes the Cinegy health alert answer a question worth waking up for.** An administrator was warned about "الساقط 34، الخرج 1467" - thirty-four dropped frames, which sounds alarming and is 2.3% of what actually went out. A bare count cannot tell those apart, and the sample window is not a fixed size. Frame loss now has to cross both an absolute floor (`CinegyFrameLossTolerance`, 5) and a share of output (`CinegyFrameLossTolerancePercent`, 5%) before it counts as a fault: the count stops a tiny sample raising an alarm on percentages, the percentage stops a busy minute raising one on counts.

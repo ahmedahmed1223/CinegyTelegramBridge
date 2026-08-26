@@ -553,12 +553,41 @@ function Update-CinegyHealthWatchdog {
     $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) `
         -FrameLossTolerance (Get-SettingInt 'CinegyFrameLossTolerance' 0) `
+        -FrameLossTolerancePercent ([double](Get-Setting 'CinegyFrameLossTolerancePercent')) `
         -ReadErrorRateTolerance ([double](Get-Setting 'CinegyReadErrorRateTolerance'))
-    $newState = if (-not $telemetry.Success -or $null -eq $telemetry.Healthy) { 'unreachable' }
+    $reading = if (-not $telemetry.Success -or $null -eq $telemetry.Healthy) { 'unreachable' }
     elseif ($telemetry.Healthy) { 'healthy' }
     else { 'unhealthy' }
 
     $oldState = $script:RuntimeState.Monitoring.CinegyHealthState; $history = $script:HealthHistory.Cinegy
+
+    <#
+        One reading does not change the state; several agreeing ones do.
+
+        The tolerance added in 5.6.1 filters the values, and this filters the
+        verdict - two different jobs. Even inside tolerance the channel kept
+        crossing the line and back, so the log took 332 health transitions,
+        23 of them today, on an engine that was fine every time anybody
+        looked. A monitor that changes its mind every minute is one operators
+        stop reading, which costs more than the outage it was watching for.
+
+        CinegyHealthConfirmChecks readings must agree before the state moves.
+        The first reading of a run still counts immediately, because a bridge
+        that has just started has no history to be steady about.
+    #>
+    $confirm = [math]::Max(1, (Get-SettingInt 'CinegyHealthConfirmChecks' 1))
+    if ($reading -ne $oldState -and $oldState -ne 'unknown' -and $confirm -gt 1) {
+        if ([string]$history.PendingState -eq $reading) { $history.PendingCount = [int]$history.PendingCount + 1 }
+        else { $history.PendingState = $reading; $history.PendingCount = 1 }
+
+        if ([int]$history.PendingCount -lt $confirm) {
+            Write-BridgeLog "Cinegy reported $reading ($($history.PendingCount)/$confirm) - holding at $oldState" 'DEBUG'
+            return
+        }
+    }
+    $history.PendingState = ''; $history.PendingCount = 0
+
+    $newState = $reading
     if ($newState -ne $oldState) { Write-BridgeLog "Cinegy health changed from $oldState to $newState" }
     $script:RuntimeState.Monitoring.CinegyHealthState = $newState
     if ($newState -eq 'healthy') {

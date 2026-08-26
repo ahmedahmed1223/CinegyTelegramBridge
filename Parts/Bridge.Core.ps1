@@ -240,15 +240,15 @@ function Format-DurationMinutes {
         chosen together instead of gluing an "s" on the end.
     #>
     param([int]$Minutes)
-    if ($Minutes -le 0) { return '0 دقيقة' }
-    if ($Minutes -lt 60) { return "$Minutes دقيقة" }
-
     $name = { param([int]$Count, [string]$One, [string]$Two, [string]$Few, [string]$Many)
         switch ($Count) {
             1 { $One }
             2 { $Two }
             default { if ($Count -le 10) { "$Count $Few" } else { "$Count $Many" } }
         } }
+
+    if ($Minutes -le 0) { return '0 دقيقة' }
+    if ($Minutes -lt 60) { return (& $name $Minutes 'دقيقة' 'دقيقتان' 'دقائق' 'دقيقة') }
 
     $parts = @()
     $days = [math]::Floor($Minutes / 1440)
@@ -257,8 +257,21 @@ function Format-DurationMinutes {
 
     if ($days -gt 0) { $parts += (& $name $days 'يوم' 'يومان' 'أيام' 'يومًا') }
     if ($hours -gt 0) { $parts += (& $name $hours 'ساعة' 'ساعتان' 'ساعات' 'ساعة') }
-    if ($rest -gt 0) { $parts += "$rest دقيقة" }
+    if ($rest -gt 0) { $parts += (& $name $rest 'دقيقة' 'دقيقتان' 'دقائق' 'دقيقة') }
     return ($parts -join ' و')
+}
+
+function Format-DurationSeconds {
+    <# Seconds, handed up to the minutes formatter once there are enough of
+       them. Same counting rules, so "5 ثانية" stops happening. #>
+    param([int]$Seconds)
+    if ($Seconds -le 0) { return '0 ثانية' }
+    if ($Seconds -ge 60 -and ($Seconds % 60) -eq 0) { return (Format-DurationMinutes -Minutes ([int]($Seconds / 60))) }
+    switch ($Seconds) {
+        1 { 'ثانية' }
+        2 { 'ثانيتان' }
+        default { if ($Seconds -le 10) { "$Seconds ثوانٍ" } else { "$Seconds ثانية" } }
+    }
 }
 
 function Format-SettingDisplay {

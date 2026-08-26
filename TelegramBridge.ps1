@@ -53,7 +53,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.7.0'
+$script:BridgeVersion = '5.7.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -213,6 +213,8 @@ $script:DefaultSettings = [ordered]@{
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
     CinegyFrameLossTolerance   = 5       # dropped/missing frames per minute before the channel counts as unhealthy
+    CinegyFrameLossTolerancePercent = 5  # ...and it must also exceed this share of the frames actually output
+    CinegyHealthConfirmChecks  = 3       # consecutive agreeing readings before the health state moves at all
     CinegyReadErrorRateTolerance = 0.5   # percent; below this a read error rate is noise, not an outage
     RespectCinegyItemDuration  = $true   # a graphic Cinegy scheduled for 24h is not "forgotten on air"
     TemplateBasePath           = ''      # scenes folder; lets templates.json carry a bare file name
@@ -291,6 +293,8 @@ $script:SettingDisplayMetadata = @{
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     CinegyFrameLossTolerance = @{ Unit = 'إطار'; Description = 'الإطارات المفقودة المسموح بها في الدقيقة قبل اعتبار القناة غير سليمة' }
+    CinegyFrameLossTolerancePercent = @{ Unit = '%'; Description = 'نسبة الإطارات المفقودة المسموح بها من إجمالي الخرج' }
+    CinegyHealthConfirmChecks = @{ Unit = 'فحص'; Description = 'عدد الفحوص المتتالية المتّفقة قبل تغيير حالة صحة Cinegy' }
     CinegyReadErrorRateTolerance = @{ Unit = '%'; Description = 'نسبة أخطاء القراءة المسموح بها قبل اعتبار القناة غير سليمة' }
     RespectCinegyItemDuration = @{ Unit = ''; Description = 'عدم تنبيه القِدَم لقالب حدّد Cinegy مدّته ولم تنتهِ بعد' }
     TemplateBasePath = @{ Unit = ''; Description = 'مجلد المشاهد: يسمح بكتابة اسم الملف وحده في القوالب' }
@@ -667,7 +671,10 @@ $script:LastConfigSaveFailed = $false
 $script:StaleOnAirAlerted = [System.Collections.Generic.HashSet[int]]::new()
 $script:HealthHistory = @{
     Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
-    Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
+    # PendingState/PendingCount hold a verdict that has not been confirmed by
+    # enough consecutive readings yet. Declared here because reading a key a
+    # hashtable does not have throws under StrictMode.
+    Cinegy   = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false; PendingState = ''; PendingCount = 0 }
 }
 
 # ============================================================================

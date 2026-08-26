@@ -420,6 +420,7 @@ function Get-AirTelemetryStatus {
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [int]$TimeoutSec = 10,
         [ValidateRange(0, 100000)][int]$FrameLossTolerance = 0,
+        [ValidateRange(0, 100)][double]$FrameLossTolerancePercent = 0,
         [ValidateRange(0, 100)][double]$ReadErrorRateTolerance = 0
     )
 
@@ -432,7 +433,7 @@ function Get-AirTelemetryStatus {
             return [pscustomobject]@{
                 Success = $true; Healthy = $null; SampleCount = 0
                 OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
-                AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
+                AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L; DroppedPercent = 0.0
                 Issues = @('No telemetry samples'); StatusCode = $response.StatusCode
                 Error = ''; Uri = $uri; Xml = $response.Content
             }
@@ -458,9 +459,22 @@ function Get-AirTelemetryStatus {
 
         # Counted against a tolerance, but always reported with the raw number:
         # "within tolerance" must never read as "nothing happened".
+        # A share of what actually went out, not a bare count. Thirty-four
+        # dropped frames sounds alarming and is 2.3% of 1467 - a count alone
+        # cannot tell those apart, and the window is not a fixed size. Both
+        # thresholds must be crossed: the count keeps a tiny sample from
+        # raising an alarm on percentages, the percentage keeps a busy minute
+        # from raising one on counts.
+        $droppedPercent = if ($outputCount -gt 0) { [Math]::Round((100 * $droppedCount / $outputCount), 2) } else { 0 }
+        $noInputPercent = if ($outputCount -gt 0) { [Math]::Round((100 * $noInputSignal / $outputCount), 2) } else { 0 }
+
         $issues = [System.Collections.Generic.List[string]]::new()
-        if ($droppedCount -gt $FrameLossTolerance) { $issues.Add("Dropped frames: $droppedCount") }
-        if ($noInputSignal -gt $FrameLossTolerance) { $issues.Add("Missing input frames: $noInputSignal") }
+        if ($droppedCount -gt $FrameLossTolerance -and $droppedPercent -gt $FrameLossTolerancePercent) {
+            $issues.Add("Dropped frames: $droppedCount ($droppedPercent%)")
+        }
+        if ($noInputSignal -gt $FrameLossTolerance -and $noInputPercent -gt $FrameLossTolerancePercent) {
+            $issues.Add("Missing input frames: $noInputSignal ($noInputPercent%)")
+        }
         if ($maxReadErrorRate -gt $ReadErrorRateTolerance) { $issues.Add("Read error rate: $maxReadErrorRate%") }
 
         return [pscustomobject]@{
@@ -473,6 +487,7 @@ function Get-AirTelemetryStatus {
             AverageReadTime = [Math]::Round(($readTimeTotal / $nodes.Count), 2)
             MaxReadErrorRate = $maxReadErrorRate
             MaxHeartbeat = $maxHeartbeat
+            DroppedPercent = $droppedPercent
             Issues = $issues.ToArray()
             StatusCode = $response.StatusCode
             Error = ''
@@ -484,7 +499,7 @@ function Get-AirTelemetryStatus {
         return [pscustomobject]@{
             Success = $false; Healthy = $null; SampleCount = 0
             OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
-            AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
+            AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L; DroppedPercent = 0.0
             Issues = @(); StatusCode = 0; Error = $_.Exception.Message; Uri = $uri; Xml = ''
         }
     }

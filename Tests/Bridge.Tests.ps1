@@ -2454,10 +2454,53 @@ Describe 'Get-AirTelemetryStatus' {
             }
         }
 
-        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5 -FrameLossTolerancePercent 1
 
         $result.Healthy | Should -BeFalse
-        $result.Issues | Should -Contain 'Dropped frames: 60'
+        $result.Issues | Should -Contain 'Dropped frames: 60 (4%)'
+    }
+
+    It 'stays quiet for a burst that is small against what actually went out' {
+        # The alert the operator objected to: "الساقط 34، الخرج 1467" - which
+        # sounds alarming and is 2.3%. A bare count cannot tell those apart,
+        # and the sample window is not a fixed size.
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="34" OutputCount="1467" NoInputSignal="0" AverageReadTime="2.31" ReadErrorRate="0" Heartbeat="924"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5 -FrameLossTolerancePercent 5
+
+        $result.Healthy | Should -BeTrue
+        $result.DroppedPercent | Should -Be 2.32
+    }
+
+    It 'still speaks up when the share is genuinely bad' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="300" OutputCount="1500" NoInputSignal="0" AverageReadTime="2.31" ReadErrorRate="0" Heartbeat="924"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5 -FrameLossTolerancePercent 5
+
+        $result.Healthy | Should -BeFalse
+        $result.Issues | Should -Contain 'Dropped frames: 300 (20%)'
+    }
+
+    It 'needs both thresholds crossed, not either' {
+        # A handful of drops in a tiny window is a high percentage of nothing.
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="3" OutputCount="10" NoInputSignal="0" AverageReadTime="2.31" ReadErrorRate="0" Heartbeat="924"/></Metrics>'
+            }
+        }
+
+        (Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5 -FrameLossTolerancePercent 5).Healthy | Should -BeTrue
     }
 
     It 'defaults to no tolerance, so an existing caller behaves as before' {

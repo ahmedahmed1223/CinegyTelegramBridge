@@ -1871,7 +1871,7 @@ Describe 'Simple and full status reports' {
             $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and
                 # Relative first, because the question being asked is "is this
                 # current?"; the clock time stays in brackets for log comparison.
-                $Text -match 'آخر فحص ناجح: منذ .*\(11:20:00\)' -and $Text -notmatch 'صحة الخدمات'
+                $Text -match 'آخر فحص ناجح: (منذ .+|الآن) \(11:20:00\)' -and $Text -notmatch 'صحة الخدمات'
         }
     }
 

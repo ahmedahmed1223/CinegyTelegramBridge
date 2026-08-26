@@ -91,8 +91,10 @@ function Invoke-StatusCommand {
         # which a bare timestamp leaves the reader to work out against a clock.
         # The clock time stays, in brackets, for anyone comparing with a log.
         $checkedAt = [datetime]$lastSuccessfulAt
-        $ago = Format-DurationSeconds -Seconds ([math]::Max(0, [int]($now - $checkedAt).TotalSeconds))
-        $lines.Add("🔄 آخر فحص ناجح: منذ $ago ($($checkedAt.ToString('HH:mm:ss')))")
+        $agoSeconds = [math]::Max(0, [int]($now - $checkedAt).TotalSeconds)
+        # "منذ 0 ثانية" is a strange way to say "just now".
+        $ago = if ($agoSeconds -lt 5) { 'الآن' } else { "منذ $(Format-DurationSeconds -Seconds $agoSeconds)" }
+        $lines.Add("🔄 آخر فحص ناجح: $ago ($($checkedAt.ToString('HH:mm:ss')))")
     }
     $lines.Add((Get-OnAirSummary))
     $lines.Add('')

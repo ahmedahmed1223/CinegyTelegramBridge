@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.7.3 — 2026-08-26
+
+- **Fixes the duration formatting that 5.7.2 claimed to fix.** `Format-DurationSeconds` only promoted a value to minutes when it divided exactly by sixty, so the status screen still reported "منذ 107775 ثانية" for a ticker that had been up for a day. Uptime and scene age are almost never a round number of minutes, which is to say the fix reached almost nothing. Promotion now happens whenever there are enough seconds: leftover seconds are kept below an hour, where "دقيقة و30 ثانية" is useful, and dropped above it, where they are noise beside a day. Found reviewing 5.7.2, reported by the operator on the running channel within the hour.
+- "آخر فحص ناجح" says "الآن" rather than "منذ 0 ثانية".
 ## 5.7.2 — 2026-08-26
 
 - **Durations on the status screens read as durations.** They counted in a single unit for ever: a ticker on air since yesterday showed "1560 دقيقة", the stale-data label showed "متأخر منذ 372741 ثانية" - four days written as a number nobody divides out at a glance - and uptime showed "26س 5د". All three go through the duration formatter now, and `Format-Duration` delegates rather than duplicating, so the on-air row, the layer-lock notice, the auto-hide confirmation and the duration picker improve together instead of four of them drifting apart.

@@ -928,10 +928,26 @@ Describe 'News ticker management' {
         Add-NewsTickerDraftItem -UserId 101 -Text 'خبر ثالث' | Should -BeTrue
 
         (Get-FileHash $script:NewsLivePath -Algorithm SHA256).Hash | Should -Be $before
-        (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
+        # Newest first: the item just typed leads the ticker.
+        (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر ثالث','خبر أول','خبر ثان')
         (Publish-NewsTickerDraft -UserId 101).Success | Should -BeTrue
-        (Get-NewsTickerSnapshot -Path $script:NewsLivePath -Separator '|').Items | Should -Be @('خبر أول','خبر ثان','خبر ثالث')
+        (Get-NewsTickerSnapshot -Path $script:NewsLivePath -Separator '|').Items | Should -Be @('خبر ثالث','خبر أول','خبر ثان')
         Get-NewsTickerDraft | Should -BeNullOrEmpty
+    }
+
+    It 'appends instead when NewNewsItemAtTop is turned off' {
+        # A rundown ordered by hand wants the old behaviour back. Set through
+        # the config rather than a filtered mock of Get-Setting, which would
+        # need a default mock for every other setting the flow reads.
+        $config.Settings | Add-Member -NotePropertyName 'NewNewsItemAtTop' -NotePropertyValue $false -Force
+        try {
+            Start-NewsTickerDraft -ChatId 101 -UserId 101 | Out-Null
+
+            Add-NewsTickerDraftItem -UserId 101 -Text 'خبر ثالث' | Should -BeTrue
+
+            (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر أول', 'خبر ثان', 'خبر ثالث')
+        }
+        finally { $config.Settings.PSObject.Properties.Remove('NewNewsItemAtTop') }
     }
 
     It 'imports separator or line based TXT content into the draft without publishing' {
@@ -4700,7 +4716,42 @@ Describe 'What is new and help content' {
     It 'fits Telegram message limits without relying on chunking' {
         Mock Test-Admin { $true }
         (Get-HelpText -ChatId 100 -UserId 100).Length | Should -BeLessThan 4096
-        (Get-WhatsNewText).Length | Should -BeLessThan 4096
+        # The release notes now lead with the newest versions and put the rest
+        # behind 📄 المزيد, so it is the first screen that must fit, not the
+        # whole history - which grows with every release and eventually would
+        # not.
+        @(Get-WhatsNewParts)[0].Length | Should -BeLessThan 4096
+    }
+
+    It 'leads with the newest three versions and holds the rest back' {
+        $parts = @(Get-WhatsNewParts)
+
+        $parts.Count | Should -Be 2
+        $parts[0] | Should -Match ([regex]::Escape($script:BridgeVersion))
+        # The oldest summary belongs to the part nobody has to read.
+        $parts[0] | Should -Not -Match '4\.x'
+        $parts[1] | Should -Match '4\.x'
+    }
+
+    It 'sends everything in one message when it already fits' {
+        Mock Send-TelegramMessage { }
+        Send-TelegramPagedText -ChatId 100 -Text 'قصير'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { -not $ReplyMarkup }
+    }
+
+    It 'offers المزيد for the rest, and the caller keyboard with the last part' {
+        Mock Send-TelegramMessage { }
+        Send-TelegramPagedText -ChatId 100 -Parts @('الجزء الأول', 'الجزء الثاني') -ReplyMarkup @{ inline_keyboard = @() }
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -eq 'الجزء الأول' -and ($ReplyMarkup.inline_keyboard[0][0].callback_data -eq 'more:next')
+        }
+
+        Send-TelegramPagedChunk -ChatId 100 | Should -BeTrue
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -eq 'الجزء الثاني' }
+        # Exhausted: a second tap has nothing left to give.
+        Send-TelegramPagedChunk -ChatId 100 | Should -BeFalse
     }
 }
 

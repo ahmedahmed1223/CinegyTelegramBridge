@@ -58,7 +58,13 @@ function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
     $draft = Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return $false }
     $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
     if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
-    $draft.Items = @($draft.Items) + @($parsed.Items); $draft.UpdatedAt=(Get-Date).ToString('o'); return (Save-NewsTickerDraft)
+    # Newest first, because that is what a ticker is for: the item just typed
+    # is the one that matters, and appending buried it behind however many
+    # older items the draft already held. NewNewsItemAtTop turns it back into
+    # an append for a rundown that is ordered by hand.
+    $draft.Items = if (Get-Setting 'NewNewsItemAtTop') { @($parsed.Items) + @($draft.Items) }
+    else { @($draft.Items) + @($parsed.Items) }
+    $draft.UpdatedAt = (Get-Date).ToString('o'); return (Save-NewsTickerDraft)
 }
 
 function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text)
@@ -489,7 +495,9 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
 function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]$Value)
     Clear-PendingState -ChatId $ChatId
     $ok=Add-NewsTickerDraftItem -UserId $UserId -Text $Value
-    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){'✅ أضيف الخبر إلى المسودة فقط.'}else{'❌ لم تتم الإضافة؛ تحقق من النص والحدود.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    # Says where it landed, so "first" is visible rather than assumed.
+    $where = if (Get-Setting 'NewNewsItemAtTop') { 'في أول الشريط' } else { 'في آخر الشريط' }
+    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){"✅ أضيف الخبر $where - في المسودة فقط."}else{'❌ لم تتم الإضافة؛ تحقق من النص والحدود.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Complete-NewsTickerEditText { param([long]$ChatId,[long]$UserId,[string]$Value)

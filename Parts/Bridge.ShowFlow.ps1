@@ -93,7 +93,7 @@ function Clear-PendingState {
     if ($state) { Complete-PendingStateCleanup -ChatId $ChatId -State $state }
 }
 
-function Get-WhatsNewText {
+function Get-WhatsNewSections {
     <#
         Operator-facing release notes, held here rather than parsed out of
         CHANGELOG.md on purpose: the changelog is written for whoever
@@ -102,8 +102,13 @@ function Get-WhatsNewText {
         differently. Keep the newest release first, keep it short, and only
         mention things an operator can see or act on.
     #>
-    $sections = @(
+    return @(
         @{ Version = '5.7.0'; Items = @(
+                '📰 الخبر الجديد يُضاف الآن في أول الشريط لا آخره (يمكن عكسه من الإعدادات).'
+                '➕ إضافة قالب صارت تقبل مسار المشهد الحقيقي: قرص، أو شبكة، أو %PROGRAMDATA%.'
+                'ويمكن إعطاء اسم جهاز مثل logo بدل رقم الطبقة، مع تنبيه إن كانت الطبقة مستخدَمة.'
+                'وخطوة أخيرة اختيارية للوصف والتصنيف، تُتخطّى بكلمة واحدة.'
+                '⚙️ أوامر المشرفين لم تعد تظهر في قائمة الأوامر لغير المشرفين.'
                 '👑 صلاحية المالك: هو وحده من يعيّن المشرفين أو يخفضهم، من شاشة 👥 المستخدمون.'
                 'المالك افتراضيًا أول مشرف في config، ويمكن تحديده صراحةً بـ OwnerUserIds.'
                 'الترقية والخفض بتأكيد، ويصل إشعار للمستخدم بتغيّر صلاحيته.'
@@ -184,8 +189,19 @@ function Get-WhatsNewText {
                 '🛡️ وضع الصيانة وحماية الأسرار وتقييد صلاحيات الملفات.'
             ) }
     )
+}
+
+function Get-WhatsNewText {
+    <# The whole history as one string. Get-WhatsNewParts is what the screen
+       actually sends; this stays for anything that wants the lot. #>
+    param([int]$Skip = 0, [int]$Take = 0, [switch]$NoHeading)
+    $sections = @(Get-WhatsNewSections)
+    if ($Skip -gt 0) { $sections = @($sections | Select-Object -Skip $Skip) }
+    if ($Take -gt 0) { $sections = @($sections | Select-Object -First $Take) }
+
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("🆕 ما الجديد — الإصدار الحالي $($script:BridgeVersion)")
+    if (-not $NoHeading) { $lines.Add("🆕 ما الجديد — الإصدار الحالي $($script:BridgeVersion)") }
+    else { $lines.Add('🆕 ما الجديد — الإصدارات الأقدم') }
     foreach ($section in $sections) {
         $lines.Add('')
         $lines.Add("▪️ $($section.Version)")
@@ -194,6 +210,17 @@ function Get-WhatsNewText {
     $lines.Add('')
     $lines.Add('السجل التقني الكامل في ملف CHANGELOG.md مع الإصدار.')
     return ($lines -join "`n")
+}
+
+function Get-WhatsNewParts {
+    <# The newest few releases, then everything older behind 📄 المزيد. Split
+       at a version boundary rather than at a character count, so the first
+       screen ends where a release ends instead of mid-sentence. #>
+    param([int]$LeadVersions = 3)
+    $total = @(Get-WhatsNewSections).Count
+    $parts = @((Get-WhatsNewText -Take $LeadVersions))
+    if ($total -gt $LeadVersions) { $parts += (Get-WhatsNewText -Skip $LeadVersions -NoHeading) }
+    return $parts
 }
 
 function Get-HelpText {

@@ -425,7 +425,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:whatsnew' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-WhatsNewText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramPagedText -ChatId $chatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'menu:restart' {
@@ -546,6 +546,15 @@ function Invoke-CallbackQuery {
             }
             else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" }
             Show-UsersAdminScreen -ChatId $chatId -UserId $userId
+            break
+        }
+        'more:next' {
+            # Nothing waiting is not an error: the operator tapped an old
+            # message after the bridge restarted, and saying so is kinder than
+            # silence.
+            if (-not (Send-TelegramPagedChunk -ChatId $chatId)) {
+                Send-TelegramMessage -ChatId $chatId -Text 'لم يعد هناك المزيد لعرضه - اطلب الشاشة من جديد.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            }
             break
         }
         'menu:layernames' {

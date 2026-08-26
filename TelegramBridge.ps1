@@ -150,6 +150,7 @@ $script:DefaultSettings = [ordered]@{
     NewsBackupKeepFiles        = 20
     NewsDraftTimeoutMinutes    = 30
     NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
+    NewNewsItemAtTop           = $true   # a newly added item leads the ticker instead of trailing it
     NewsListPaged              = $true   # off puts the whole draft on one screen, as far as Telegram allows
     NewsListPageSize           = 10      # items per page; Telegram refuses an over-large keyboard outright
     NewsListLabelLength        = 24      # headline characters shown when the row also carries buttons
@@ -251,6 +252,7 @@ $script:SettingDisplayMetadata = @{
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
     NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
+    NewNewsItemAtTop = @{ Unit = ''; Description = 'الخبر الجديد يُضاف في أول الشريط (عند الإطفاء: في آخره)' }
     NewsListPaged = @{ Unit = ''; Description = 'قائمة الأخبار على صفحات (عند الإطفاء: قائمة واحدة طويلة)' }
     NewsListPageSize = @{ Unit = 'خبر'; Description = 'عدد الأخبار في صفحة قائمة الترتيب' }
     NewsListLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر في الصف الأفقي (مع الأزرار)' }
@@ -645,6 +647,9 @@ $script:BridgeStartedAt = Get-Date
 $script:TelegramRateLimitHits = 0
 $script:RestartRequested = $false
 $script:RestartSelfRelaunch = $false
+# Long screens waiting behind 📄 المزيد, keyed by chat. In memory only: a
+# restart drops them, and the button says so rather than pretending.
+$script:PagedText = @{}
 $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date

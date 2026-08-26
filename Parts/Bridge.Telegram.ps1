@@ -156,6 +156,54 @@ function Update-QuietHoursQueue {
     }
 }
 
+function Send-TelegramPagedText {
+    <#
+        Sends a long screen as its first part plus a 📄 المزيد button.
+
+        Send-TelegramMessage already splits past Telegram's 4096 characters,
+        but it fires every part at once: the operator gets four messages they
+        did not ask for and has to scroll up to find the beginning. Here the
+        rest waits until it is wanted, which for the audit log and the release
+        notes is usually never.
+
+        Short text is sent untouched, so nothing gains a button it does not
+        need.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Text = '', [string[]]$Parts = @(), $ReplyMarkup = $null)
+    # -Parts lets the caller break the text where it means something - the
+    # release notes split after the third version, not mid-sentence at
+    # whatever character the limit happens to fall on. Each part is still run
+    # through the splitter, because a caller's idea of a part can itself be
+    # longer than Telegram will take.
+    $source = if ($Parts.Count -gt 0) { $Parts } else { @($Text) }
+    $chunks = @($source | Where-Object { $_ } | ForEach-Object { Split-TelegramText -Text $_ })
+    if ($chunks.Count -le 1) {
+        Send-TelegramMessage -ChatId $ChatId -Text ([string]@($chunks)[0]) -ReplyMarkup $ReplyMarkup
+        return
+    }
+    $script:PagedText[$ChatId] = @{ Chunks = $chunks; Index = 0; Markup = $ReplyMarkup }
+    Send-TelegramPagedChunk -ChatId $ChatId | Out-Null
+}
+
+function Send-TelegramPagedChunk {
+    <# Sends the part now due, and hands the caller's own keyboard back with
+       the last one so the screen ends where it would have ended anyway. #>
+    param([Parameter(Mandatory)][long]$ChatId)
+    if (-not $script:PagedText.ContainsKey($ChatId)) { return $false }
+    $state = $script:PagedText[$ChatId]
+    $chunks = @($state.Chunks)
+    $index = [int]$state.Index
+    if ($index -ge $chunks.Count) { $script:PagedText.Remove($ChatId); return $false }
+
+    $isLast = $index -eq ($chunks.Count - 1)
+    $markup = if ($isLast) { $state.Markup }
+    else { @{ inline_keyboard = @(, @((New-Button "📄 المزيد ($($index + 2)/$($chunks.Count))" 'more:next'))) } }
+
+    Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[$index]) -ReplyMarkup $markup
+    if ($isLast) { $script:PagedText.Remove($ChatId) } else { $state.Index = $index + 1 }
+    return $true
+}
+
 function Register-BotCommands {
     <# Populates Telegram's ☰ Menu button so a brand-new chat, or a user who
        lost the inline keyboard, always has a visible way in. Failures here are

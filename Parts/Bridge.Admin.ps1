@@ -233,7 +233,49 @@ function Start-TemplateCreateWizard {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_create_key'; Definition=@{}; UserId=$UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "➕ إضافة قالب (1/4)`nأرسل مفتاح القالب (أحرف إنجليزية وأرقام ونقاط/شرطات، مثل: new-template):" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "➕ إضافة قالب (1/5)`nأرسل مفتاح القالب - وهو الاسم الذي سيظهر على الزر (أحرف وأرقام ونقاط/شرطات، مثل: Lower3rd):" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Get-TemplateWizardLayerPrompt {
+    "(3/5) أرسل رقم الطبقة (مثل 4 أو 7)،`nأو اسم جهاز Cinegy إن كانت الطبقة بلا رقم (مثل: logo)."
+}
+
+function Get-TemplateWizardFieldsPrompt {
+    "(4/5) أرسل أسماء الحقول مفصولة بفواصل (مثل: Headline.Text, Subtitle.Text)`nأو أرسل: لا يوجد إذا كان القالب بلا حقول."
+}
+
+function Get-TemplateLayerUsage {
+    <# Which existing templates already sit on this layer. Said at the moment
+       the layer is chosen, not after saving, because two templates sharing a
+       layer is a real configuration - a ticker and an alert - but far more
+       often it is a typo the operator wants to know about now. #>
+    param([Parameter(Mandatory)][int]$Layer)
+    $store = Get-TemplateStore
+    return @($store.Order | Where-Object { [int]$store.Map[$_].Layer -eq $Layer })
+}
+
+function Get-TemplateWizardReviewText {
+    param([Parameter(Mandatory)][hashtable]$Definition)
+    $read = { param([string]$Name, [string]$Fallback)
+        if ($Definition.ContainsKey($Name) -and "$($Definition[$Name])".Trim()) { [string]$Definition[$Name] } else { $Fallback } }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("🔎 مراجعة القالب الجديد '$(& $read 'key' '?')'")
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("المسار: $(& $read 'path' '?')")
+    $resolved = Resolve-TemplateScenePath -Path ([string]$Definition['path'])
+    if ($resolved -ne [string]$Definition['path']) { $lines.Add("يُقرأ من: $resolved") }
+    $lines.Add($(if ($Definition.ContainsKey('device') -and [string]$Definition['device']) {
+                "الجهاز: gfx_$($Definition['device'])"
+            }
+            else { "الطبقة: $(& $read 'layer' '?')" }))
+    $fields = @($Definition['fields'])
+    $lines.Add("الحقول: $(if ($fields.Count -gt 0) { $fields -join '، ' } else { 'لا توجد حقول' })")
+    $lines.Add("الوصف: $(& $read 'description' 'بلا وصف')")
+    $lines.Add("التصنيف: $(& $read 'category' 'غير مصنف')")
+    $lines.Add('')
+    $lines.Add('لن يُحفظ شيء قبل التأكيد، وستُنشأ نسخة احتياطية من التعريفات الحالية.')
+    return ($lines -join "`n")
 }
 
 function Complete-TemplateCreateWizardStep {
@@ -251,44 +293,73 @@ function Complete-TemplateCreateWizardStep {
             if ($existing) { Send-TelegramMessage -ChatId $ChatId -Text "❌ يوجد قالب بالمفتاح '$trimmed' بالفعل. أرسل مفتاحًا آخر:" -ReplyMarkup (Get-CancelKeyboard); return }
             $definition['key'] = $trimmed
             $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text "(2/4) أرسل مسار ملف القالب نسبةً إلى مجلد المشروع، مثل:`ntitles/new.cintitle" -ReplyMarkup (Get-CancelKeyboard)
+            $baseHint = if ([string](Get-Setting 'TemplateBasePath')) { "`nأو اسم الملف وحده، فمجلد المشاهد مضبوط: $(Get-Setting 'TemplateBasePath')" } else { '' }
+            Send-TelegramMessage -ChatId $ChatId -Text ("(2/5) أرسل مسار ملف المشهد كاملًا، مثل:`nC:\Cinegy\Titler\Scenes\Lower3rd.cintitle`nويُقبل أيضًا مسار الشبكة \\nas01\scenes\... و%PROGRAMDATA%\...$baseHint") -ReplyMarkup (Get-CancelKeyboard)
         }
         'template_create_path' {
-            $trimmed = $Value.Trim().Replace('/', '\')
+            $trimmed = $Value.Trim()
             if ($trimmed -match '^(تم|ok)$') {
                 if ($definition.ContainsKey('pendingPath')) {
-                    $definition['path'] = ([string]$definition['pendingPath']).Replace('\', '/'); $definition.Remove('pendingPath')
+                    $definition['path'] = [string]$definition['pendingPath']; $definition.Remove('pendingPath')
                     $state.Mode = 'template_create_layer'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-                    Send-TelegramMessage -ChatId $ChatId -Text '(3/4) أرسل رقم الطبقة (رقم موجب، مثل 4 أو 7):' -ReplyMarkup (Get-CancelKeyboard); return
+                    Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateWizardLayerPrompt) -ReplyMarkup (Get-CancelKeyboard); return
                 }
                 Send-TelegramMessage -ChatId $ChatId -Text '❌ لا يوجد مسار معلّق للمتابعة. أرسل مسار ملف القالب أولًا:' -ReplyMarkup (Get-CancelKeyboard); return
             }
-            if ([IO.Path]::IsPathRooted($trimmed) -or [IO.Path]::GetExtension($trimmed) -ne '.cintitle') {
-                Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل مسارًا نسبيًا ينتهي بـ .cintitle، مثل:`ntitles/new.cintitle" -ReplyMarkup (Get-CancelKeyboard); return
+            <#
+                Any path Cinegy can open is accepted, because the scenes live
+                where the station keeps them - C:\Cinegy\Titler\Scenes, a
+                mapped drive, or \\nas01\scenes - and never inside this
+                project folder.
+
+                The wizard used to demand a relative path under the bridge's
+                own directory, so it could not register a single real scene:
+                the only way in was the raw JSON screen, which has always
+                accepted absolute paths. The restriction bought no safety,
+                only a dead end.
+            #>
+            if ([IO.Path]::GetExtension($trimmed) -ne '.cintitle') {
+                Send-TelegramMessage -ChatId $ChatId -Text "❌ يجب أن ينتهي المسار بـ .cintitle، مثل:`nC:\Cinegy\Titler\Scenes\Lower3rd.cintitle" -ReplyMarkup (Get-CancelKeyboard); return
             }
-            $root = [IO.Path]::GetFullPath($scriptRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-            $resolved = [IO.Path]::GetFullPath((Join-Path $scriptRoot $trimmed))
-            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-                Send-TelegramMessage -ChatId $ChatId -Text '❌ المسار يجب أن يبقى داخل مجلد المشروع. أرسل مسارًا نسبيًا:' -ReplyMarkup (Get-CancelKeyboard); return
+            $resolved = Resolve-TemplateScenePath -Path $trimmed
+            if (-not [IO.Path]::IsPathRooted($resolved)) {
+                Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل مسارًا كاملًا، أو اضبط TemplateBasePath من الإعدادات لتكتفي باسم الملف.`nمثال: C:\Cinegy\Titler\Scenes\Lower3rd.cintitle" -ReplyMarkup (Get-CancelKeyboard); return
             }
             if (-not (Test-Path -LiteralPath $resolved)) {
+                # Warned, not refused: the scene is often built after the
+                # template is registered, and on a network share the bridge
+                # may simply not see it from where it runs.
                 $definition['pendingPath'] = $trimmed
                 $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-                Send-TelegramMessage -ChatId $ChatId -Text "⚠️ الملف غير موجود بعد: $trimmed`nللمتابعة بهذا المسار أرسل: تم`nأو أرسل مسارًا آخر لإعادة الإدخال." -ReplyMarkup (Get-CancelKeyboard); return
+                Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا أرى الملف على هذا المسار:`n$resolved`n`nللمتابعة به رغم ذلك أرسل: تم`nأو أرسل مسارًا آخر." -ReplyMarkup (Get-CancelKeyboard); return
             }
             $definition.Remove('pendingPath')
-            $definition['path'] = $trimmed.Replace('\', '/')
+            $definition['path'] = $trimmed
             $state.Mode = 'template_create_layer'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text '(3/4) أرسل رقم الطبقة (رقم موجب، مثل 4 أو 7):' -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text "✅ الملف موجود.`n$(Get-TemplateWizardLayerPrompt)" -ReplyMarkup (Get-CancelKeyboard)
         }
         'template_create_layer' {
+            # A layer number, or a Cinegy device name for the layers that do
+            # not have one - the logo sits on gfx_logo, and before this the
+            # wizard had no way to say so.
+            $trimmed = $Value.Trim()
             $layer = 0
-            if (-not [int]::TryParse($Value.Trim(), [ref]$layer) -or $layer -le 0) {
-                Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل رقم طبقة موجبًا (مثل 4):' -ReplyMarkup (Get-CancelKeyboard); return
+            if ([int]::TryParse($trimmed, [ref]$layer) -and $layer -gt 0) {
+                $definition['layer'] = $layer
+                $used = @(Get-TemplateLayerUsage -Layer $layer)
+                $warning = if ($used.Count -gt 0) { "`n⚠️ الطبقة $layer يستخدمها أيضًا: $($used -join '، ')" } else { '' }
+                $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+                Send-TelegramMessage -ChatId $ChatId -Text ((Get-TemplateWizardFieldsPrompt) + $warning) -ReplyMarkup (Get-CancelKeyboard)
+                return
             }
-            $definition['layer'] = $layer
-            $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text "(4/4) أرسل أسماء الحقول مفصولة بفواصل (مثل: Headline.Text, Subtitle.Text)`nأو أرسل: لا يوجد إذا كان القالب بلا حقول." -ReplyMarkup (Get-CancelKeyboard)
+            if ($trimmed -match '^[A-Za-z0-9_]{1,32}$') {
+                $definition['device'] = $trimmed.ToLowerInvariant()
+                $definition['layer'] = 0
+                $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
+                Send-TelegramMessage -ChatId $ChatId -Text "✅ سيُستخدم الجهاز gfx_$($definition['device']).`n$(Get-TemplateWizardFieldsPrompt)" -ReplyMarkup (Get-CancelKeyboard)
+                return
+            }
+            Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل رقم طبقة موجبًا (مثل 4) أو اسم جهاز بأحرف إنجليزية (مثل logo):' -ReplyMarkup (Get-CancelKeyboard)
         }
         'template_create_fields' {
             $trimmed = $Value.Trim()
@@ -301,11 +372,26 @@ function Complete-TemplateCreateWizardStep {
                 if (@($fields | Where-Object { -not $_ }).Count -gt 0) { $fields = @($fields | Where-Object { $_ }) }
             }
             $definition['fields'] = @($fields)
+            $state.Mode = 'template_create_details'; $state.Definition = $definition
+            Set-PendingState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text ("(5/5) الوصف والتصنيف - يظهران في شاشة ℹ️ وفي بحث القوالب." +
+                "`nأرسلهما في سطر واحد مفصولين بـ | مثل:`nشريط الأخبار | أخبار`n`nأو أرسل: تخطي") -ReplyMarkup (Get-CancelKeyboard)
+        }
+        'template_create_details' {
+            # Optional, and skippable in one word: an operator adding a
+            # template under time pressure should not be blocked by metadata,
+            # but the two fields that make the ℹ️ screen and the search useful
+            # are worth one prompt.
+            $trimmed = $Value.Trim()
+            if ($trimmed -notmatch '^(تخطي|تخطى|skip)$' -and $trimmed.Length -gt 0) {
+                $parts = @($trimmed -split '\|', 2 | ForEach-Object { $_.Trim() })
+                if ($parts[0]) { $definition['description'] = $parts[0] }
+                if ($parts.Count -gt 1 -and $parts[1]) { $definition['category'] = $parts[1] }
+            }
             $state.Mode = 'template_definition_review'; $state.Action = 'create'
             $state.TemplateKey = [string]$definition['key']; $state.Definition = $definition
             Set-PendingState -ChatId $ChatId -State $state
-            $fieldsLabel = if (@($fields).Count -gt 0) { @($fields) -join '، ' } else { 'لا توجد حقول' }
-            Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة القالب الجديد '$($state.TemplateKey)'`nالمسار: $($definition['path'])`nالطبقة: $($definition['layer'])`nالحقول: $fieldsLabel`n`nلن يُحفظ شيء قبل التأكيد، وستُنشأ نسخة احتياطية من التعريفات الحالية." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateWizardReviewText -Definition $definition) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
         }
     }
 }

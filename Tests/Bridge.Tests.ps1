@@ -1495,7 +1495,10 @@ Describe 'Template create wizard' {
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'new-template'
         Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_path'
 
-        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'titles/new.cintitle'
+        # An absolute path, because that is where scenes actually live. The
+        # wizard used to demand a path inside the project folder, so it could
+        # not register a single real scene.
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'C:\Cinegy\Titler\Scenes\new.cintitle'
         Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_path'
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
         Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_layer'
@@ -1504,13 +1507,64 @@ Describe 'Template create wizard' {
         Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_fields'
 
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'Headline.Text, Subtitle.Text'
+        Get-PendingState -ChatId 77 | Select-Object -ExpandProperty Mode | Should -Be 'template_create_details'
+
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'الاسم السفلي | أسماء'
         $state = Get-PendingState -ChatId 77
         $state.Mode | Should -Be 'template_definition_review'
         $state.Action | Should -Be 'create'
         $state.TemplateKey | Should -Be 'new-template'
-        $state.Definition['path'] | Should -Be 'titles/new.cintitle'
+        $state.Definition['path'] | Should -Be 'C:\Cinegy\Titler\Scenes\new.cintitle'
         $state.Definition['layer'] | Should -Be 4
         @($state.Definition['fields']).Count | Should -Be 2
+        $state.Definition['description'] | Should -Be 'الاسم السفلي'
+        $state.Definition['category'] | Should -Be 'أسماء'
+    }
+
+    It 'takes a device name where the layer has no number' {
+        # The logo sits on gfx_logo. Before this the wizard had no way to say
+        # so, and the only route was the raw JSON screen.
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'station-logo'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'C:\Scenes\logo.cintitle'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'logo'
+
+        $state = Get-PendingState -ChatId 77
+        $state.Mode | Should -Be 'template_create_fields'
+        $state.Definition['device'] | Should -Be 'logo'
+    }
+
+    It 'lets the description and category be skipped in one word' {
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'quick'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'C:\Scenes\q.cintitle'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value '5'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'لا يوجد'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تخطي'
+
+        $state = Get-PendingState -ChatId 77
+        $state.Mode | Should -Be 'template_definition_review'
+        $state.Definition.ContainsKey('description') | Should -BeFalse
+    }
+
+    It 'refuses a path that is not a scene file' {
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'bad-path'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'C:\Scenes\notes.txt'
+
+        (Get-PendingState -ChatId 77).Mode | Should -Be 'template_create_path'
+    }
+
+    It 'refuses a bare file name when no scenes folder is configured' {
+        # Guessing from the working directory would resolve differently for a
+        # service and for a console.
+        Start-TemplateCreateWizard -ChatId 77 -UserId 77
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'relative-one'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'new.cintitle'
+
+        (Get-PendingState -ChatId 77).Mode | Should -Be 'template_create_path'
     }
 
     It 'rejects a duplicate key without leaving the step' {
@@ -1522,7 +1576,7 @@ Describe 'Template create wizard' {
     It 'accepts an empty field list via لا يوجد' {
         Start-TemplateCreateWizard -ChatId 77 -UserId 77
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'plain'
-        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'titles/plain.cintitle'
+        Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'C:\Cinegy\Titler\Scenes\plain.cintitle'
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'تم'
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value '9'
         Complete-TemplateCreateWizardStep -ChatId 77 -UserId 77 -Value 'لا يوجد'

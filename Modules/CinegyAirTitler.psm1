@@ -103,10 +103,13 @@ function Send-AirCommand {
     try {
         $response = Invoke-WebRequest -Uri $uri -Method Post -Body $xmlDoc.OuterXml `
             -ContentType "text/xml; charset=utf-8" -TimeoutSec $TimeoutSec -UseBasicParsing
-        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Uri = $uri; Xml = $xmlDoc.OuterXml }
+        # Both paths carry every field. A caller that reads .Error to log what
+        # went wrong, or .StatusCode to log what went right, must not crash
+        # under StrictMode for asking on the wrong branch.
+        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Error = ''; Uri = $uri; Xml = $xmlDoc.OuterXml }
     }
     catch {
-        return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
+        return [pscustomobject]@{ Success = $false; StatusCode = 0; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
     }
 }
 
@@ -260,10 +263,13 @@ function Send-PostboxValues {
     try {
         $response = Invoke-WebRequest -Uri $uri -Method Post -Body $xmlDoc.OuterXml `
             -ContentType "text/xml; charset=utf-8" -TimeoutSec $TimeoutSec -UseBasicParsing
-        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Uri = $uri; Xml = $xmlDoc.OuterXml }
+        # Both paths carry every field. A caller that reads .Error to log what
+        # went wrong, or .StatusCode to log what went right, must not crash
+        # under StrictMode for asking on the wrong branch.
+        return [pscustomobject]@{ Success = $true; StatusCode = $response.StatusCode; Error = ''; Uri = $uri; Xml = $xmlDoc.OuterXml }
     }
     catch {
-        return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
+        return [pscustomobject]@{ Success = $false; StatusCode = 0; Error = $_.Exception.Message; Uri = $uri; Xml = $xmlDoc.OuterXml }
     }
 }
 
@@ -365,6 +371,7 @@ function Get-TitlerLayerStatus {
             ClientConnected = $clientConnected
             ClientIdentity = $clientIdentity
             StatusCode = $response.StatusCode
+            Error       = ''
             Uri         = $uri
             Xml         = $response.Content
             ActiveXml   = $activeItemXml
@@ -387,8 +394,11 @@ function Get-TitlerLayerStatus {
             OutputState = ''
             ClientConnected = $false
             ClientIdentity = ''
+            StatusCode = 0
             Error    = $_.Exception.Message
             Uri      = $uri
+            Xml      = ''
+            ActiveXml = ''
         }
     }
 }
@@ -424,7 +434,7 @@ function Get-AirTelemetryStatus {
                 OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
                 AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
                 Issues = @('No telemetry samples'); StatusCode = $response.StatusCode
-                Uri = $uri; Xml = $response.Content
+                Error = ''; Uri = $uri; Xml = $response.Content
             }
         }
 
@@ -465,6 +475,7 @@ function Get-AirTelemetryStatus {
             MaxHeartbeat = $maxHeartbeat
             Issues = $issues.ToArray()
             StatusCode = $response.StatusCode
+            Error = ''
             Uri = $uri
             Xml = $response.Content
         }
@@ -474,7 +485,7 @@ function Get-AirTelemetryStatus {
             Success = $false; Healthy = $null; SampleCount = 0
             OutputCount = 0L; DroppedCount = 0L; NoInputSignal = 0L
             AverageReadTime = 0.0; MaxReadErrorRate = 0.0; MaxHeartbeat = 0L
-            Issues = @(); Error = $_.Exception.Message; Uri = $uri
+            Issues = @(); StatusCode = 0; Error = $_.Exception.Message; Uri = $uri; Xml = ''
         }
     }
 }

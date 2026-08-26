@@ -5184,6 +5184,62 @@ Describe 'Missed events and template history' {
     }
 }
 
+Describe 'Cinegy results keep one shape' {
+    <#
+        Four bugs this release came from the same thing: a field that exists
+        only on the success path, read by a caller on the failure path, which
+        throws under StrictMode exactly when the engine is already in trouble.
+        These pin the shapes so the class cannot come back quietly.
+    #>
+    BeforeAll { Import-Module (Join-Path $script:Root 'Modules\CinegyAirTitler.psm1') -Force }
+
+    It 'reports the same fields whether the command worked or failed' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { [pscustomobject]@{ StatusCode = 200; Content = '' } }
+        $ok = Send-AirCommand -AirServerAddress 'air' -AirChannelNumber 0 -Device '*GFX_5' -Cmd 'Show'
+
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'engine refused' }
+        $bad = Send-AirCommand -AirServerAddress 'air' -AirChannelNumber 0 -Device '*GFX_5' -Cmd 'Show'
+
+        $okFields = @($ok.PSObject.Properties.Name | Sort-Object)
+        $badFields = @($bad.PSObject.Properties.Name | Sort-Object)
+        $badFields | Should -Be $okFields
+        $bad.StatusCode | Should -Be 0
+        $ok.Error | Should -Be ''
+    }
+
+    It 'keeps one shape for a layer status too' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{ StatusCode = 200; Content = '<Status><Active Id="{00000000-0000-0000-0000-000000000000}"/><License State="Licensed"/><Output State="Normal"/><Client Connected="n" Identity=""/></Status>' }
+        }
+        $ok = Get-TitlerLayerStatus -AirServerAddress 'air' -AirChannelNumber 0 -Layer 5
+
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'connection refused' }
+        $bad = Get-TitlerLayerStatus -AirServerAddress 'air' -AirChannelNumber 0 -Layer 5
+
+        @($bad.PSObject.Properties.Name | Sort-Object) | Should -Be @($ok.PSObject.Properties.Name | Sort-Object)
+        # The field the staleness exemption reads, on the path where Cinegy
+        # could not answer.
+        $bad.ActiveDurationSeconds | Should -Be 0
+    }
+
+    It 'keeps one shape for telemetry, on all three of its exits' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{ StatusCode = 200; Content = '<Metrics><At DroppedCount="0" OutputCount="1500" NoInputSignal="0" AverageReadTime="4.5" ReadErrorRate="0" Heartbeat="900"/></Metrics>' }
+        }
+        $ok = Get-AirTelemetryStatus -AirServerAddress 'air' -AirChannelNumber 0
+
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { [pscustomobject]@{ StatusCode = 200; Content = '<Metrics></Metrics>' } }
+        $empty = Get-AirTelemetryStatus -AirServerAddress 'air' -AirChannelNumber 0
+
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'metrics timeout' }
+        $bad = Get-AirTelemetryStatus -AirServerAddress 'air' -AirChannelNumber 0
+
+        $expected = @($ok.PSObject.Properties.Name | Sort-Object)
+        @($empty.PSObject.Properties.Name | Sort-Object) | Should -Be $expected
+        @($bad.PSObject.Properties.Name | Sort-Object) | Should -Be $expected
+    }
+}
+
 Describe 'Template scene paths' {
     BeforeEach { Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'TemplateBasePath' } }
 

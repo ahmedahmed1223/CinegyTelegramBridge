@@ -435,6 +435,9 @@ function Update-StaleOnAirWatchdog {
 
     $stale = @(Get-BridgeStaleOnAirLayers -OnAir $script:OnAir -Now $now `
             -ThresholdHours $threshold -AlreadyAlerted @($script:StaleOnAirAlerted))
+    # Filtered after the time arithmetic, not before: only a candidate is worth
+    # a Cinegy round trip, and there are rarely more than one or two.
+    $stale = @($stale | Where-Object { -not (Test-LongRunningOnAir -Layer $_.Layer -Key $_.Key) })
     if ($stale.Count -eq 0) { return }
 
     foreach ($item in $stale) { $script:StaleOnAirAlerted.Add([int]$item.Layer) | Out-Null }
@@ -442,6 +445,59 @@ function Update-StaleOnAirWatchdog {
     Write-BridgeLog "Stale on-air record(s) reported to administrators: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
     Send-AdminBroadcast -Urgent -Text ("⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:`n" + ($lines -join "`n") +
         "`nإن كانت الشاشة خالية فاضغط إخفاء على الطبقة لتصفية السجل.")
+}
+
+function Test-LongRunningOnAir {
+    <#
+        Is this graphic meant to stay up, rather than forgotten up there?
+
+        The staleness alert measured elapsed time alone, so the news ticker -
+        genuinely on air, its Active Id matching the record exactly - was
+        reported to administrators as a stale record five times over two days.
+        An alert that cries wolf on correct behaviour teaches operators to
+        ignore it, which costs more than the alert ever saved.
+
+        Two independent answers, either of which is enough:
+
+          * The template says so. An operator who knows the ticker runs all
+            day can mark it LongRunning and never think about it again.
+          * Cinegy says so. The engine already carries the item's intended
+            Duration - a ticker is scheduled as 24:00:00 with ManualEnd - and
+            that is the authoritative answer, needing no configuration and
+            unable to drift out of date.
+
+        Anything Cinegy cannot answer stays stale-able: an unreachable engine
+        must never silence the alert, because "cannot check" and "fine" are
+        different things.
+    #>
+    param([Parameter(Mandatory)][int]$Layer, [string]$Key = '')
+
+    $template = $null
+    $store = Get-TemplateStore
+    if ($Key -and $store.Map.ContainsKey($Key)) {
+        $template = $store.Map[$Key]
+        if ($template.ContainsKey('LongRunning') -and [bool]$template.LongRunning) { return $true }
+    }
+    if (-not (Get-Setting 'RespectCinegyItemDuration')) { return $false }
+
+    try {
+        $device = if ($template -and $template.ContainsKey('Device')) { [string]$template.Device } else { '' }
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer $Layer -Device $device `
+            -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if (-not $status.Success -or -not $status.IsOnAir) { return $false }
+
+        $declared = [int]$status.ActiveDurationSeconds
+        if ($declared -le 0) { return $false }
+        if (-not $script:OnAir.ContainsKey($Layer)) { return $false }
+        $record = $script:OnAir[$Layer]
+        if ($record.At -isnot [datetime]) { return $false }
+        return ((Get-Date) - $record.At).TotalSeconds -lt $declared
+    }
+    catch {
+        Write-BridgeLog "Could not read the declared duration for layer ${Layer}: $($_.Exception.Message)" 'DEBUG'
+        return $false
+    }
 }
 
 function Get-CinegyStateCheckInterval {
@@ -486,7 +542,9 @@ function Update-CinegyHealthWatchdog {
     $script:RuntimeState.Monitoring.LastCinegyHealthCheck = $now
 
     $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
-        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) `
+        -FrameLossTolerance (Get-SettingInt 'CinegyFrameLossTolerance' 0) `
+        -ReadErrorRateTolerance ([double](Get-Setting 'CinegyReadErrorRateTolerance'))
     $newState = if (-not $telemetry.Success -or $null -eq $telemetry.Healthy) { 'unreachable' }
     elseif ($telemetry.Healthy) { 'healthy' }
     else { 'unhealthy' }

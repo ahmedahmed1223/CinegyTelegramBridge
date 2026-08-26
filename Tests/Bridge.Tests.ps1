@@ -2249,6 +2249,67 @@ Describe 'Get-AirTelemetryStatus' {
         $result.Healthy | Should -BeNullOrEmpty
         $result.Error | Should -Match 'metrics timeout'
     }
+
+    It 'stays healthy for frame loss inside the tolerance' {
+        # Zero tolerance is what produced 54 health transitions in one day: a
+        # single dropped frame entered the sixty-sample window, the next check
+        # the window had rolled past it, and the channel was never unwell.
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="3" OutputCount="1500" NoInputSignal="0" AverageReadTime="4.5" ReadErrorRate="0.2" Heartbeat="900"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 `
+            -FrameLossTolerance 5 -ReadErrorRateTolerance 0.5
+
+        $result.Healthy | Should -BeTrue
+        # Reported regardless: "within tolerance" is not "nothing happened".
+        $result.DroppedCount | Should -Be 3
+    }
+
+    It 'still reports frame loss past the tolerance' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="60" OutputCount="1500" NoInputSignal="0" AverageReadTime="4.5" ReadErrorRate="0" Heartbeat="900"/></Metrics>'
+            }
+        }
+
+        $result = Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -FrameLossTolerance 5
+
+        $result.Healthy | Should -BeFalse
+        $result.Issues | Should -Contain 'Dropped frames: 60'
+    }
+
+    It 'defaults to no tolerance, so an existing caller behaves as before' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{
+                StatusCode = 200
+                Content = '<Metrics><At DroppedCount="1" OutputCount="1500" NoInputSignal="0" AverageReadTime="4.5" ReadErrorRate="0" Heartbeat="900"/></Metrics>'
+            }
+        }
+
+        (Get-AirTelemetryStatus -AirServerAddress 'air-host' -AirChannelNumber 0).Healthy | Should -BeFalse
+    }
+
+    It 'reads how long Cinegy means the active item to stay up' {
+        # A ticker is scheduled as 24:00:00 with a manual end. That is the
+        # engine saying "this is meant to be up", and it is what stops the
+        # staleness alert from calling it forgotten.
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/active') {
+                return [pscustomobject]@{ StatusCode = 200; Content = '<Item Id="{4}" Name="News-Ticker" Description="Show Ticker.cintitle" Duration="24:00:00.000" ManualEnd="y"/>' }
+            }
+            [pscustomobject]@{ StatusCode = 200; Content = '<Status><Active Id="{4}"/><License State="Licensed"/><Output State="Normal"/><Client Connected="n" Identity=""/></Status>' }
+        }
+
+        $result = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 8
+
+        $result.ActiveDurationSeconds | Should -Be 86400
+        $result.ActiveManualEnd | Should -BeTrue
+    }
 }
 
 Describe 'SHOW identity tracking' {
@@ -5036,6 +5097,65 @@ Describe 'Missed events and template history' {
 
     It 'asks for a name instead of dumping everything' {
         Get-TemplateHistoryText -Query '   ' | Should -Match 'اكتب اسم القالب'
+    }
+}
+
+Describe 'Long-running graphics are not stale' {
+    BeforeEach {
+        # 21 hours on air: past any sane staleness threshold.
+        $script:OnAir = @{ 8 = @{ Key = 'News-Ticker'; At = (Get-Date).AddHours(-21); Source = 'bridge'; UserId = 42 } }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'RespectCinegyItemDuration' }
+        Mock Get-SettingInt { 3 } -ParameterFilter { $Name -eq 'CinegyMonitorTimeoutSeconds' }
+        Mock Get-TemplateStore {
+            @{ Order = @('News-Ticker'); Map = @{ 'News-Ticker' = @{ Key = 'News-Ticker'; Layer = 8; Device = ''; LongRunning = $false } } }
+        }
+        Mock Write-BridgeLog {}
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'exempts a template the operator marked as long-running' {
+        Mock Get-TemplateStore {
+            @{ Order = @('News-Ticker'); Map = @{ 'News-Ticker' = @{ Key = 'News-Ticker'; Layer = 8; Device = ''; LongRunning = $true } } }
+        }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeTrue
+    }
+
+    It 'exempts a graphic Cinegy scheduled for longer than it has been up' {
+        # The real case: the ticker's Active Id matched the record exactly, it
+        # was genuinely on screen, and administrators were told five times over
+        # two days that it was a stale record.
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 86400; ActiveManualEnd = $true } }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeTrue
+    }
+
+    It 'still calls it stale once the declared duration has run out' {
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 3600; ActiveManualEnd = $false } }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeFalse
+    }
+
+    It 'does not silence the alert when Cinegy cannot be reached' {
+        # "Cannot check" and "fine" are different things, and only one of them
+        # is a reason to stay quiet about a graphic stuck on air.
+        Mock Get-TitlerLayerStatus { throw 'connection refused' }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeFalse
+    }
+
+    It 'does not silence the alert for a layer Cinegy says is empty' {
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveDurationSeconds = 86400; ActiveManualEnd = $true } }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeFalse
+    }
+
+    It 'skips the Cinegy question when the setting is off' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'RespectCinegyItemDuration' }
+        Mock Get-TitlerLayerStatus { throw 'should not be called' }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeFalse
+        Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
     }
 }
 

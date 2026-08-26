@@ -313,6 +313,8 @@ function Get-TitlerLayerStatus {
         $activeName = ''
         $activeDescription = ''
         $activeTemplateName = ''
+        $activeDurationSeconds = 0
+        $activeManualEnd = $false
 
         if ($hasActiveItem) {
             $activeUri = "$uri/active"
@@ -328,6 +330,25 @@ function Get-TitlerLayerStatus {
             if ($activeDescription -match '(?i)^\s*(?:Show|Play|Take)\s+(?:.*[\\/])?(?<Template>.+?)\.cintitle(?:\s+on\s+layer\s+\d+)?\s*$') {
                 $activeTemplateName = [string]$Matches.Template
             }
+            # How long Cinegy intends this item to stay up. A ticker carries
+            # Duration="24:00:00.000" ManualEnd="y" - it is not a graphic
+            # somebody forgot to take down, and the staleness alert has no
+            # business calling it one.
+            # Parsed by hand rather than with TimeSpan.TryParse, which rejects
+            # the very value this exists for: a ticker reads "24:00:00.000",
+            # and TryParse requires the hour field to be 0-23, so it returned
+            # false and the duration silently read as zero.
+            if ([string]$itemNode.GetAttribute('Duration') -match
+                '^\s*(?:(?<d>\d+)\.)?(?<h>\d+):(?<m>\d{1,2}):(?<s>\d{1,2}(?:\.\d+)?)\s*$') {
+                $seconds = ([double]$Matches.h) * 3600 + ([double]$Matches.m) * 60 +
+                    [double]::Parse($Matches.s, [Globalization.CultureInfo]::InvariantCulture)
+                # ContainsKey, not $Matches.d: an optional group that did not
+                # participate is absent from the hashtable, and reading it
+                # under StrictMode throws rather than returning empty.
+                if ($Matches.ContainsKey('d')) { $seconds += ([double]$Matches.d) * 86400 }
+                $activeDurationSeconds = [int][math]::Min([int]::MaxValue, $seconds)
+            }
+            $activeManualEnd = ([string]$itemNode.GetAttribute('ManualEnd')) -match '^(?i:y|yes|true|1)$'
         }
 
         return [pscustomobject]@{
@@ -337,6 +358,8 @@ function Get-TitlerLayerStatus {
             ActiveName = $activeName
             ActiveTemplateName = $activeTemplateName
             ActiveDescription = $activeDescription
+            ActiveDurationSeconds = $activeDurationSeconds
+            ActiveManualEnd = $activeManualEnd
             LicenseState = $licenseState
             OutputState = $outputState
             ClientConnected = $clientConnected
@@ -348,6 +371,9 @@ function Get-TitlerLayerStatus {
         }
     }
     catch {
+        # Same field set as the success path. A caller reading a field that
+        # exists only when the call worked crashes under StrictMode exactly
+        # when the engine is already in trouble - the worst possible moment.
         return [pscustomobject]@{
             Success  = $false
             IsOnAir  = $null
@@ -355,6 +381,8 @@ function Get-TitlerLayerStatus {
             ActiveName = ''
             ActiveTemplateName = ''
             ActiveDescription = ''
+            ActiveDurationSeconds = 0
+            ActiveManualEnd = $false
             LicenseState = ''
             OutputState = ''
             ClientConnected = $false
@@ -369,11 +397,20 @@ function Get-AirTelemetryStatus {
     <# Reads Cinegy Air's one-minute, one-second-interval telemetry history.
        Counters are aggregated for an operator-friendly summary. A failed or
        empty response returns Healthy = $null so callers never report an
-       unavailable engine as healthy. #>
+       unavailable engine as healthy.
+
+       The tolerances exist because the counters had none. One dropped frame
+       inside the sixty-sample window turned the whole channel unhealthy, and
+       the next check - the window having rolled past it - turned it healthy
+       again: 54 health transitions in a day on a channel that was fine.
+       Playout drops the occasional frame. A threshold is what separates a
+       drop worth waking someone for from one that is just television. #>
     param(
         [Parameter(Mandatory)][string]$AirServerAddress,
         [Parameter(Mandatory)][int]$AirChannelNumber,
-        [int]$TimeoutSec = 10
+        [int]$TimeoutSec = 10,
+        [ValidateRange(0, 100000)][int]$FrameLossTolerance = 0,
+        [ValidateRange(0, 100)][double]$ReadErrorRateTolerance = 0
     )
 
     $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/metrics"
@@ -409,10 +446,12 @@ function Get-AirTelemetryStatus {
             if ($heartbeat -gt $maxHeartbeat) { $maxHeartbeat = $heartbeat }
         }
 
+        # Counted against a tolerance, but always reported with the raw number:
+        # "within tolerance" must never read as "nothing happened".
         $issues = [System.Collections.Generic.List[string]]::new()
-        if ($droppedCount -gt 0) { $issues.Add("Dropped frames: $droppedCount") }
-        if ($noInputSignal -gt 0) { $issues.Add("Missing input frames: $noInputSignal") }
-        if ($maxReadErrorRate -gt 0) { $issues.Add("Read error rate: $maxReadErrorRate%") }
+        if ($droppedCount -gt $FrameLossTolerance) { $issues.Add("Dropped frames: $droppedCount") }
+        if ($noInputSignal -gt $FrameLossTolerance) { $issues.Add("Missing input frames: $noInputSignal") }
+        if ($maxReadErrorRate -gt $ReadErrorRateTolerance) { $issues.Add("Read error rate: $maxReadErrorRate%") }
 
         return [pscustomobject]@{
             Success = $true

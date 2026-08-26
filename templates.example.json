@@ -25,6 +25,8 @@
     "fields": ["Headline.Text"]
   },
   "sponsor-bug": {
+    "_comment_longRunning": "A graphic meant to stay on air all day. Exempts it from the 'on air suspiciously long' alert, which otherwise reports a permanent logo or ticker as a stale record every few hours. Cinegy's own declared Duration is honoured too, so this is only needed when the engine does not give one.",
+    "longRunning": true,
     "description": "Sponsor bug, no editable text fields",
     "category": "شعارات",
     "path": "C:\\Cinegy\\Titler\\Scenes\\SponsorBug.cintitle",

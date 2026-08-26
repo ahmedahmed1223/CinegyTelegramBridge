@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.6.0'
+$script:BridgeVersion = '5.6.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -203,6 +203,9 @@ $script:DefaultSettings = [ordered]@{
     CinegyStateStaleSeconds    = 45      # age after which the last successful state sample is stale
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
+    CinegyFrameLossTolerance   = 5       # dropped/missing frames per minute before the channel counts as unhealthy
+    CinegyReadErrorRateTolerance = 0.5   # percent; below this a read error rate is noise, not an outage
+    RespectCinegyItemDuration  = $true   # a graphic Cinegy scheduled for 24h is not "forgotten on air"
     CinegyStateBackoffMaxSeconds = 60    # ceiling for backing off reconciliation while Air is unreachable
     StaleOnAirAlertHours      = 6       # warn admins about a bridge record on air this long; 0 disables
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
@@ -275,6 +278,9 @@ $script:SettingDisplayMetadata = @{
     CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
+    CinegyFrameLossTolerance = @{ Unit = 'إطار'; Description = 'الإطارات المفقودة المسموح بها في الدقيقة قبل اعتبار القناة غير سليمة' }
+    CinegyReadErrorRateTolerance = @{ Unit = '%'; Description = 'نسبة أخطاء القراءة المسموح بها قبل اعتبار القناة غير سليمة' }
+    RespectCinegyItemDuration = @{ Unit = ''; Description = 'عدم تنبيه القِدَم لقالب حدّد Cinegy مدّته ولم تنتهِ بعد' }
     CinegyStateBackoffMaxSeconds = @{ Unit = 'ثانية'; Description = 'أقصى تباعد لفحص طبقات Cinegy عند تعذّر الوصول' }
     StaleOnAirAlertHours = @{ Unit = 'ساعة'; Description = 'تنبيه المشرفين عن سجل على الهواء منذ هذه المدة (0 للتعطيل)' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.6.1 — 2026-08-26
+
+- **Stops the staleness alert crying wolf on graphics that are meant to stay up.** The news ticker was reported to administrators as a stale record five times over two days while it was genuinely on screen - its Cinegy `Active Id` matched the record exactly. The alert measured elapsed time alone, and an alert that fires on correct behaviour teaches operators to ignore it. Two independent exemptions now answer it: Cinegy's own declared `Duration` for the active item (a ticker is scheduled as `24:00:00` with a manual end), honoured via `RespectCinegyItemDuration`; and a `longRunning` flag on the template for engines that declare nothing useful. An unreachable engine never silences the alert - "cannot check" and "fine" are different things.
+- Gives the Cinegy health check a tolerance instead of demanding perfection. One dropped frame inside the sixty-sample window turned the whole channel unhealthy, and the next check - the window having rolled past it - turned it healthy again: 54 transitions in a single day on a channel that was fine. `CinegyFrameLossTolerance` (default 5 frames) and `CinegyReadErrorRateTolerance` (default 0.5%) set where a drop stops being television and starts being a fault. Counts are still reported in full: within tolerance never reads as nothing happened.
+- `Get-TitlerLayerStatus` exposes `ActiveDurationSeconds` and `ActiveManualEnd`, parsed from Cinegy's own format rather than with `TimeSpan.TryParse`, which rejects the one value this exists for: `24:00:00` needs an hour field of 0-23.
+- Its error path now returns the same field set as its success path. A caller reading a field that exists only when the call worked would crash under `StrictMode` exactly when the engine is already in trouble.
+- Test suite grows from 547 to 557.
 ## 5.6.0 — 2026-08-25
 
 - **The restart button now works when the bridge was started by hand.** It only ever signalled an exit and left the restarting to NSSM or the scheduled task; started from a terminal - which is how it is run during a shift, from the VS Code console - nothing brought it back, so the button refused rather than causing an outage with no way back in through the bot that just stopped. The bridge now relaunches itself into the same console with the same configuration, and refuses only when it can rebuild neither a supervisor nor its own command line. Under a supervisor it deliberately does *not* self-relaunch: two bridges long-polling one bot token means button presses vanish into whichever instance received them.

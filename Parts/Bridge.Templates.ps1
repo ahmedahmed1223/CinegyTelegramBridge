@@ -217,6 +217,9 @@ function Get-TemplateStore {
             Path        = [string]$tplPath
             Layer       = $layer
             Device      = $deviceName
+            # A ticker or a logo lives on air all day by design. Marked here,
+            # it is exempt from the "on air suspiciously long" alert.
+            LongRunning = [bool](Get-JsonProp $entry 'longRunning')
             Fields      = $fieldNames
             FieldLabels = $fieldLabels
             FieldLimits = $fieldLimits

@@ -38,6 +38,10 @@ param(
     [string]$ConfigPath = ".\config.json",
     [string]$RuntimePath = '',
     [switch]$AllowMultipleInstances,
+    # Stop whatever bridge is already running and take its place. Without it
+    # an interactive console asks first; a service or scheduled task, which
+    # has nobody to ask, refuses as before.
+    [switch]$StopExisting,
     # Dot-source the script with -LoadOnly to get every function defined
     # without contacting Telegram, taking the single-instance mutex, or
     # entering the polling loop. Used by Tests\Bridge.Tests.ps1.
@@ -919,12 +923,68 @@ if (-not $AllowMultipleInstances) {
     # Two bridges polling the same bot token make Telegram return 409 Conflict
     # and the bot behaves erratically in a way that is painful to diagnose.
     try {
-        $created = $false
-        $script:InstanceMutex = New-Object System.Threading.Mutex($true, 'Global\CinegyTelegramBridge', [ref]$created)
-        if (-not $created) {
-            Write-Host "Another CinegyTelegramBridge instance is already running. Exiting."
-            Write-BridgeLog "Startup aborted - another instance already holds the single-instance mutex." "ERROR"
-            exit 1
+        # Ask whether the lock can be TAKEN, not whether the name already
+        # exists. Those are different questions, and answering the wrong one
+        # locked the bridge out of its own machine: a named mutex outlives its
+        # creator for as long as any handle stays open, so after a crash - or
+        # a Ctrl+C in a console host that keeps running - the name was still
+        # there, createdNew came back false, and every start refused with
+        # "another instance already holds it" while nothing held anything.
+        #
+        # An abandoned mutex is the normal aftermath of a bridge that died
+        # without unwinding. AbandonedMutexException means this process now
+        # owns it, so it is a success with a warning, never a refusal. On a
+        # playout box at three in the morning, refusing to start because a
+        # previous copy crashed is the worst possible reading.
+        $script:InstanceMutex = New-Object System.Threading.Mutex($false, 'Global\CinegyTelegramBridge')
+        $acquired = $false
+        try { $acquired = $script:InstanceMutex.WaitOne(0) }
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+            Write-BridgeLog 'Took over a single-instance lock abandoned by a previous run.' 'WARN'
+        }
+        if (-not $acquired) {
+            # Something really is running. Name it before offering to end it:
+            # "another instance" is not enough to decide by, and the operator
+            # is the one who knows whether that instance is mid-shift.
+            $others = @(Get-OtherBridgeProcess)
+            foreach ($other in $others) {
+                Write-Host "  running: PID $($other.ProcessId), started $($other.StartedAt)"
+            }
+
+            $stopIt = $false
+            if ($others.Count -eq 0) {
+                Write-Host "The lock is held, but no other bridge process can be found - it is held by a console that ran one and stayed open."
+            }
+            elseif ($StopExisting) { $stopIt = $true }
+            elseif ([Environment]::UserInteractive) {
+                # Asked, never assumed: stopping the running bridge takes the
+                # bot off the air for the seconds it takes to come back, and a
+                # scheduled task or service must never sit here waiting for an
+                # answer nobody is there to give.
+                $answer = ''
+                try { $answer = Read-Host "Stop the running instance and start this one? [y/N]" } catch { $answer = '' }
+                $stopIt = $answer -match '^(?i:y|yes|ن|نعم)$'
+            }
+
+            if ($stopIt) {
+                foreach ($other in $others) {
+                    Write-Host "Stopping PID $($other.ProcessId)..."
+                    Stop-Process -Id $other.ProcessId -Force -ErrorAction SilentlyContinue
+                }
+                Start-Sleep -Milliseconds 700
+                try { $acquired = $script:InstanceMutex.WaitOne(0) }
+                catch [System.Threading.AbandonedMutexException] { $acquired = $true }
+                if ($acquired) { Write-BridgeLog "Started after stopping $($others.Count) running instance(s) on request." 'WARN' }
+            }
+
+            if (-not $acquired) {
+                Write-Host "Another CinegyTelegramBridge instance is already running. Exiting."
+                Write-Host "Start with -StopExisting to end it automatically."
+                Write-BridgeLog "Startup aborted - another instance already holds the single-instance mutex." "ERROR"
+                $script:InstanceMutex.Dispose(); $script:InstanceMutex = $null
+                exit 1
+            }
         }
     }
     catch {

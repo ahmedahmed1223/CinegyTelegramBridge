@@ -612,6 +612,32 @@ function Get-BridgeSupervisor {
     }
 }
 
+function Get-OtherBridgeProcess {
+    <#
+        Every other process running this same script.
+
+        Matched on "-File ...TelegramBridge.ps1" and never on the folder name:
+        this repository is called CinegyTelegramBridge, so a filter on the
+        name alone also matches an editor, a test run, or the very tooling
+        that went looking - and none of those is what anybody means by "stop
+        the other instance".
+
+        Own PID excluded, for the obvious reason.
+    #>
+    try {
+        return @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" -ErrorAction Stop |
+                Where-Object { [int]$_.ProcessId -ne $PID -and [string]$_.CommandLine -match '-File\s+"?[^"]*TelegramBridge\.ps1' } |
+                ForEach-Object {
+                    [pscustomobject]@{
+                        ProcessId   = [int]$_.ProcessId
+                        StartedAt   = $_.CreationDate
+                        CommandLine = [string]$_.CommandLine
+                    }
+                })
+    }
+    catch { return @() }
+}
+
 function Get-BridgeRelaunchCommand {
     <#
         Rebuilds the command that started this process, so the bridge can put

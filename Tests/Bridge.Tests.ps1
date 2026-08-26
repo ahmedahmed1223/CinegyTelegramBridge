@@ -5184,6 +5184,46 @@ Describe 'Missed events and template history' {
     }
 }
 
+Describe 'Template scene paths' {
+    BeforeEach { Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'TemplateBasePath' } }
+
+    It 'accepts a UNC share, which is how a shared scenes folder is reached' {
+        Resolve-TemplateScenePath -Path '\\nas01\scenes\Lower3rd.cintitle' | Should -Be '\\nas01\scenes\Lower3rd.cintitle'
+    }
+
+    It 'expands an environment variable before deciding the path is relative' {
+        # The check ran before expansion, and a path starting with '%' is not
+        # rooted - so %PROGRAMDATA% templates were rejected outright.
+        Resolve-TemplateScenePath -Path '%PROGRAMDATA%\Cinegy\A.cintitle' |
+            Should -Be ([Environment]::ExpandEnvironmentVariables('%PROGRAMDATA%\Cinegy\A.cintitle'))
+    }
+
+    It 'resolves a bare file name against the scenes folder' {
+        Mock Get-Setting { 'D:\Scenes' } -ParameterFilter { $Name -eq 'TemplateBasePath' }
+
+        Resolve-TemplateScenePath -Path 'Lower3rd.cintitle' | Should -Be 'D:\Scenes\Lower3rd.cintitle'
+    }
+
+    It 'leaves an absolute path alone even when a base folder is set' {
+        Mock Get-Setting { 'D:\Scenes' } -ParameterFilter { $Name -eq 'TemplateBasePath' }
+
+        Resolve-TemplateScenePath -Path 'C:\Cinegy\A.cintitle' | Should -Be 'C:\Cinegy\A.cintitle'
+    }
+
+    It 'still refuses a relative path when no base folder is configured' {
+        # Guessing from the working directory would resolve differently for a
+        # service and for a console, which is worse than refusing.
+        Resolve-TemplateScenePath -Path 'Lower3rd.cintitle' | Should -Be 'Lower3rd.cintitle'
+        [IO.Path]::IsPathRooted((Resolve-TemplateScenePath -Path 'Lower3rd.cintitle')) | Should -BeFalse
+    }
+
+    It 'ignores a base folder that is itself relative' {
+        Mock Get-Setting { 'Scenes' } -ParameterFilter { $Name -eq 'TemplateBasePath' }
+
+        Resolve-TemplateScenePath -Path 'A.cintitle' | Should -Be 'A.cintitle'
+    }
+}
+
 Describe 'The command menu is scoped to the role' {
     BeforeEach {
         Mock Write-BridgeLog {}

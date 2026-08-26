@@ -85,6 +85,42 @@ function Get-TemplateStore {
     if (-not (Test-Path $path)) {
         return @{ Map = @{}; Order = @(); Errors = @("ملف القوالب غير موجود: $path"); InvalidKeys = @(); SharedLayers = @{} }
     }
+    return Get-TemplateStoreParsed -Path $path
+}
+
+function Resolve-TemplateScenePath {
+    <#
+        Turns whatever an operator wrote into a path Cinegy can open.
+
+        Every ordinary Windows form is accepted: a drive path, a mapped drive,
+        a UNC share such as \\nas01\scenes\Lower3rd.cintitle - those already
+        worked - plus %PROGRAMDATA%-style environment variables, which did
+        not, because the check ran before expansion and a path starting with
+        '%' is not rooted.
+
+        A bare name or a relative path resolves against TemplateBasePath, so a
+        station with one scenes folder can write "Lower3rd.cintitle" and stop
+        repeating the same prefix in every entry. With that setting empty the
+        old rule stands: relative paths are refused rather than guessed at
+        from the bridge's working directory, which a service and a console
+        do not agree on.
+    #>
+    param([string]$Path = '')
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    $resolved = [Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if ([IO.Path]::IsPathRooted($resolved)) { return $resolved }
+
+    $base = [Environment]::ExpandEnvironmentVariables([string](Get-Setting 'TemplateBasePath')).Trim()
+    if ([string]::IsNullOrWhiteSpace($base) -or -not [IO.Path]::IsPathRooted($base)) { return $resolved }
+    return [IO.Path]::Combine($base, $resolved)
+}
+
+function Get-TemplateStoreParsed {
+    <# The parse and cache half of Get-TemplateStore, split out only so the
+       path resolver above could sit between them as its own function. #>
+    param([Parameter(Mandatory)][string]$Path)
+    $path = $Path
     $writeTime = (Get-Item $path).LastWriteTimeUtc
     if ($script:TemplateCache.Path -eq $path -and $script:TemplateCache.WriteTime -eq $writeTime) {
         return $script:TemplateCache
@@ -121,8 +157,9 @@ function Get-TemplateStore {
             $invalidKeys.Add($key)
             continue
         }
+        $tplPath = Resolve-TemplateScenePath -Path ([string]$tplPath)
         if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
-            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - تم تخطيه.")
+            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
             $invalidKeys.Add($key)
             continue
         }

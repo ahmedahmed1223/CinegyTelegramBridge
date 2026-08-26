@@ -533,6 +533,9 @@ function Invoke-CallbackQuery {
                 $what = if ($makeAdmin) { 'ترقية إلى مشرف' } else { 'خفض إلى مشغّل' }
                 Write-BridgeLog "Owner $userId performed '$what' on user $target" 'WARN'
                 Add-AuditEntry "👑 $what للمستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                # So the ☰ menu matches the new role straight away, rather
+                # than still offering ⚙️ الإعدادات to someone just demoted.
+                Register-BotCommands
                 Send-TelegramMessage -ChatId $chatId -Text "✅ تم $what للمستخدم $(Get-UserDisplayName -UserId $target)."
                 # Told to their face: a role change applied silently is one the
                 # person only discovers when a button stops working.

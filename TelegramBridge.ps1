@@ -423,19 +423,22 @@ $script:BotCommandList = @(
     @{ command = 'cancel'; description = '❌ إلغاء أي عملية معلّقة والبدء من جديد' }
     @{ command = 'help'; description = '❓ شرح الأزرار والأوامر' }
     @{ command = 'whatsnew'; description = '🆕 ملخص تغييرات الإصدارات الأخيرة' }
-    @{ command = 'stats'; description = '📈 مدة التشغيل وأرقام العمليات (للمشرفين)' }
+    # Admin = $true keeps the command out of the menu every operator sees.
+    # Telegram shows one global command list to everybody, so an admin-only
+    # command listed there was visible to all - refused on tap, but advertised.
+    @{ command = 'stats'; description = '📈 مدة التشغيل وأرقام العمليات'; Admin = $true }
     @{ command = 'digest'; description = '🕘 ماذا فاتني — ملخص ما حدث' }
-    @{ command = 'who'; description = '👤 من استخدم قالبًا (للمشرفين)' }
+    @{ command = 'who'; description = '👤 من استخدم قالبًا'; Admin = $true }
     @{ command = 'templates'; description = '📋 عرض القوالب المتاحة' }
     @{ command = 'status'; description = 'ℹ️ حالة النظام والبث والقوالب' }
     @{ command = 'myoperations'; description = '🧾 آخر عملياتي وإعادة المحاولة' }
     @{ command = 'snapshot'; description = '📸 التقاط صورة من البث' }
     @{ command = 'schedule'; description = '📅 جدولة عرض ومراجعة الأحداث القادمة' }
     @{ command = 'hideall'; description = '🚨 إخفاء كل الطبقات (طوارئ)' }
-    @{ command = 'settings'; description = '⚙️ الإعدادات (للمشرفين)' }
-    @{ command = 'audit'; description = '📜 سجل آخر العمليات (للمشرفين)' }
-    @{ command = 'diagnostics'; description = '🧪 تقرير التشخيص (للمشرفين)' }
-    @{ command = 'diagbundle'; description = '📦 حزمة تشخيص منقحة (للمشرفين)' }
+    @{ command = 'settings'; description = '⚙️ الإعدادات'; Admin = $true }
+    @{ command = 'audit'; description = '📜 سجل آخر العمليات'; Admin = $true }
+    @{ command = 'diagnostics'; description = '🧪 تقرير التشخيص'; Admin = $true }
+    @{ command = 'diagbundle'; description = '📦 حزمة تشخيص منقحة'; Admin = $true }
 )
 
 

@@ -160,14 +160,49 @@ function Register-BotCommands {
     <# Populates Telegram's ☰ Menu button so a brand-new chat, or a user who
        lost the inline keyboard, always has a visible way in. Failures here are
        never fatal - the bot works fine without the menu. #>
+    <#
+        Scoped, because Telegram otherwise shows one global list to everybody:
+        ⚙️ الإعدادات, 📜 سجل and the diagnostics commands were advertised to
+        every operator and refused only once tapped. The default scope now
+        carries what an operator can actually use, and each administrator's
+        own chat gets the full list. A demoted administrator has their chat
+        scope deleted, so they fall back to the operator menu instead of
+        keeping a list of commands that will now refuse them.
+    #>
     try {
-        $body = @{ commands = $script:BotCommandList } | ConvertTo-Json -Depth 5 -Compress
+        $payload = { param($Commands)
+            @($Commands | ForEach-Object { @{ command = $_.command; description = $_.description } }) }
+        # ContainsKey, not $_.Admin: reading a key a hashtable does not have
+        # throws under StrictMode, and every operator command lacks this one.
+        $operatorCommands = @($script:BotCommandList | Where-Object { -not ($_.ContainsKey('Admin') -and $_.Admin) })
+
+        $body = @{ commands = (& $payload $operatorCommands) } | ConvertTo-Json -Depth 5 -Compress
         Invoke-RestMethod -Uri "$apiBase/setMyCommands" -Method Post -Body $body -ContentType 'application/json; charset=utf-8' | Out-Null
 
         $menuBody = @{ menu_button = @{ type = 'commands' } } | ConvertTo-Json -Depth 5 -Compress
         Invoke-RestMethod -Uri "$apiBase/setChatMenuButton" -Method Post -Body $menuBody -ContentType 'application/json; charset=utf-8' | Out-Null
 
-        Write-BridgeLog "Registered $($script:BotCommandList.Count) bot commands with Telegram's menu button"
+        # One call per authorized user. Bounded by the whitelist - a handful of
+        # people on a playout channel - and it runs only at startup and after a
+        # role change.
+        $adminCount = 0
+        foreach ($user in @(Get-AuthorizedUsers)) {
+            $scope = @{ type = 'chat'; chat_id = [long]$user.UserId }
+            try {
+                if ($user.Role -in @('owner', 'admin')) {
+                    $adminCount++
+                    $scoped = @{ commands = (& $payload $script:BotCommandList); scope = $scope } | ConvertTo-Json -Depth 5 -Compress
+                    Invoke-RestMethod -Uri "$apiBase/setMyCommands" -Method Post -Body $scoped -ContentType 'application/json; charset=utf-8' | Out-Null
+                }
+                else {
+                    $scoped = @{ scope = $scope } | ConvertTo-Json -Depth 5 -Compress
+                    Invoke-RestMethod -Uri "$apiBase/deleteMyCommands" -Method Post -Body $scoped -ContentType 'application/json; charset=utf-8' | Out-Null
+                }
+            }
+            catch { Write-BridgeLog "Could not scope bot commands for $($user.UserId): $($_.Exception.Message)" 'DEBUG' }
+        }
+
+        Write-BridgeLog "Registered $($operatorCommands.Count) operator commands, and all $($script:BotCommandList.Count) for $adminCount administrator(s)"
     }
     catch {
         Write-BridgeLog "Could not register bot commands: $($_.Exception.Message)" "WARN"

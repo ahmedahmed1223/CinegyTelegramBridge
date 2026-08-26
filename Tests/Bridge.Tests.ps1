@@ -5184,6 +5184,55 @@ Describe 'Missed events and template history' {
     }
 }
 
+Describe 'The command menu is scoped to the role' {
+    BeforeEach {
+        Mock Write-BridgeLog {}
+        Mock Get-AuthorizedUsers {
+            @(
+                [pscustomobject]@{ UserId = 101; Alias = 'المالك'; Role = 'owner' }
+                [pscustomobject]@{ UserId = 202; Alias = 'مشغّل'; Role = 'operator' }
+            )
+        }
+        Mock Invoke-RestMethod { }
+    }
+
+    It 'keeps admin-only commands out of the menu every operator sees' {
+        # Telegram shows one global list unless it is scoped, so ⚙️ الإعدادات
+        # was advertised to everyone and refused only once tapped.
+        Register-BotCommands
+
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
+            $Uri -like '*setMyCommands' -and $Body -notlike '*scope*' -and
+            $Body -notlike '*settings*' -and $Body -notlike '*audit*' -and
+            $Body -notlike '*diagbundle*' -and $Body -like '*templates*'
+        }
+    }
+
+    It 'gives an administrator the full list in their own chat' {
+        Register-BotCommands
+
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
+            $Uri -like '*setMyCommands' -and $Body -like '*"chat_id":101*' -and $Body -like '*settings*'
+        }
+    }
+
+    It 'clears the scope for a user who is not an administrator' {
+        # A demoted administrator must fall back to the operator menu rather
+        # than keep a list of commands that now refuse them.
+        Register-BotCommands
+
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
+            $Uri -like '*deleteMyCommands' -and $Body -like '*"chat_id":202*'
+        }
+    }
+
+    It 'never sends the internal Admin flag to Telegram' {
+        Register-BotCommands
+
+        Should -Invoke Invoke-RestMethod -Times 0 -Exactly -ParameterFilter { $Body -like '*Admin*' }
+    }
+}
+
 Describe 'Long-running graphics are not stale' {
     BeforeEach {
         # 21 hours on air: past any sane staleness threshold.

@@ -5429,6 +5429,68 @@ Describe 'Cinegy results keep one shape' {
     }
 }
 
+Describe 'The audit trail is archived, never dropped' {
+    BeforeAll { $script:OriginalAuditFile = $script:auditFile }
+    # Restored, because $script: here is the same scope the loaded bridge uses:
+    # leaving it pointed at a TestDrive path silently broke every later suite
+    # that reads the audit trail.
+    AfterAll { $script:auditFile = $script:OriginalAuditFile }
+
+    BeforeEach {
+        Mock Write-BridgeLog {}
+        # A directory per test, so one test's archives are never another's.
+        $script:auditFile = Join-Path (New-Item -ItemType Directory -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))).FullName 'audit.jsonl'
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'AuditMaxSizeMB' }
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'AuditArchiveKeepFiles' }
+    }
+    AfterEach { $script:auditFile = $script:OriginalAuditFile }
+
+    It 'leaves the file alone below the limit, and when rotation is off' {
+        Set-Content -LiteralPath $script:auditFile -Value '{"message":"صغير"}' -Encoding utf8
+
+        Invoke-AuditRotation | Should -BeFalse
+        Test-Path -LiteralPath $script:auditFile | Should -BeTrue
+    }
+
+    It 'archives past the limit instead of deleting anything' {
+        # bridge.log drops its oldest generation, which is right for a
+        # diagnostic log and wrong for the record of who put what on air.
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'AuditMaxSizeMB' }
+        Set-Content -LiteralPath $script:auditFile -Value ('x' * 1200000) -Encoding utf8
+
+        Invoke-AuditRotation | Should -BeTrue
+
+        Test-Path -LiteralPath $script:auditFile | Should -BeFalse
+        @(Get-AuditArchiveFiles) | Should -HaveCount 1
+    }
+
+    It 'still finds the history through the archive after a rotation' {
+        # The first digest after a rotation must not report an empty morning.
+        $dir = Split-Path -Parent $script:auditFile
+        $old = '{"timestampUtc":"' + (Get-Date).ToUniversalTime().AddMinutes(-10).ToString('o') + '","message":"حدث قديم"}'
+        Set-Content -LiteralPath (Join-Path $dir 'audit-20260101-000000.jsonl') -Value $old -Encoding utf8
+        $new = '{"timestampUtc":"' + (Get-Date).ToUniversalTime().ToString('o') + '","message":"حدث جديد"}'
+        Set-Content -LiteralPath $script:auditFile -Value $new -Encoding utf8
+
+        $records = @(Read-AuditRecords -MaxLines 500)
+
+        @($records | ForEach-Object { $_.message }) | Should -Contain 'حدث قديم'
+        @($records | ForEach-Object { $_.message }) | Should -Contain 'حدث جديد'
+    }
+
+    It 'prunes only when explicitly told to keep a fixed number' {
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'AuditMaxSizeMB' }
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'AuditArchiveKeepFiles' }
+        $dir = Split-Path -Parent $script:auditFile
+        Set-Content -LiteralPath (Join-Path $dir 'audit-20260101-000000.jsonl') -Value 'قديم' -Encoding utf8
+        Set-Content -LiteralPath $script:auditFile -Value ('x' * 1200000) -Encoding utf8
+
+        Invoke-AuditRotation | Should -BeTrue
+
+        @(Get-AuditArchiveFiles) | Should -HaveCount 1
+    }
+}
+
 Describe 'Durations read like durations' {
     It 'leaves anything under an hour in minutes' {
         Format-DurationMinutes -Minutes 30 | Should -Be '30 دقيقة'

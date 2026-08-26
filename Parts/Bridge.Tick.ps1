@@ -120,8 +120,22 @@ function Read-AuditRecords {
        structured record of every control action, so /digest and /who read it
        rather than inventing a second log to drift out of sync with it. #>
     param([int]$MaxLines = 500)
-    if (-not (Test-Path -LiteralPath $script:auditFile)) { return @() }
-    $records = foreach ($line in @(Get-Content -LiteralPath $script:auditFile -Tail $MaxLines -ErrorAction SilentlyContinue)) {
+    # Reads back into the archives when the active file is short. Without
+    # this the first digest after a rotation would report an empty morning:
+    # the history did not go anywhere, it only changed file.
+    $lines = @()
+    if (Test-Path -LiteralPath $script:auditFile) {
+        $lines = @(Get-Content -LiteralPath $script:auditFile -Tail $MaxLines -ErrorAction SilentlyContinue)
+    }
+    if ($lines.Count -lt $MaxLines) {
+        foreach ($archive in @(Get-AuditArchiveFiles)) {
+            $needed = $MaxLines - $lines.Count
+            if ($needed -le 0) { break }
+            $lines = @(@(Get-Content -LiteralPath $archive.FullName -Tail $needed -ErrorAction SilentlyContinue)) + $lines
+        }
+    }
+
+    $records = foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try { $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
     }

@@ -235,6 +235,8 @@ $script:DefaultSettings = [ordered]@{
     # --- housekeeping ---
     LogMaxSizeMB               = 10
     LogKeepFiles               = 5
+    AuditMaxSizeMB             = 110     # archive audit.jsonl past this; 0 never rotates it
+    AuditArchiveKeepFiles      = 0       # 0 keeps every archive - the audit trail is the permanent record
     AuditTrailSize             = 50
     ConfigBackupKeepFiles      = 10
     DiskFreeWarningGB          = 2
@@ -313,6 +315,8 @@ $script:SettingDisplayMetadata = @{
     RecentValuesPerField = @{ Unit = 'قيم'; Description = 'عدد القيم الحديثة لكل حقل' }
     LogMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'الحجم الأقصى لملف السجل' }
     LogKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد ملفات السجل المحتفَظ بها' }
+    AuditMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'حجم سجل التدقيق قبل أرشفته في ملف جديد (0 = بلا أرشفة)' }
+    AuditArchiveKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد أرشيفات التدقيق المحتفَظ بها (0 = الاحتفاظ بالكل)' }
     AuditTrailSize = @{ Unit = 'سجل'; Description = 'عدد عناصر سجل العمليات المحتفَظ بها' }
     ConfigBackupKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد نسخ الإعدادات المحتفَظ بها' }
     DiskFreeWarningGB = @{ Unit = 'غيغابايت'; Description = 'حد تنبيه انخفاض مساحة القرص' }

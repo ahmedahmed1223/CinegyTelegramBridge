@@ -374,6 +374,62 @@ function Write-BridgeLog {
     }
 }
 
+function Get-AuditArchiveFiles {
+    <# Rotated audit files, newest first. Named by the moment they were
+       closed, so the order is the name's order and nothing has to be renamed
+       on every rotation the way bridge.N.log is. #>
+    if (-not $script:auditFile) { return @() }
+    $dir = Split-Path -Parent $script:auditFile
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    # Only the exact stamped shape this rotation writes, and never the active
+    # file. A loose audit-*.jsonl glob adopts anything that happens to sit in
+    # the log folder and reads it as history.
+    return @(Get-ChildItem -LiteralPath $dir -Filter 'audit-*.jsonl' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^audit-\d{8}-\d{6}\.jsonl$' -and $_.FullName -ne $script:auditFile } |
+            Sort-Object Name -Descending)
+}
+
+function Invoke-AuditRotation {
+    <#
+        Closes audit.jsonl once it passes AuditMaxSizeMB and starts a new one.
+
+        Archives, never deletes. bridge.log rotates through five generations
+        and drops the oldest, which is right for a diagnostic log and wrong
+        here: audit.jsonl is the permanent record of who put what on air, and
+        the one question it exists to answer is always about the past.
+        AuditArchiveKeepFiles is 0 by default, meaning keep everything; set it
+        only if the disk genuinely demands it, and know what is being traded.
+
+        The active file stays small so the digest and /who keep reading a
+        bounded tail rather than a year of history.
+    #>
+    $maxMB = Get-SettingInt 'AuditMaxSizeMB' 0
+    if ($maxMB -le 0) { return $false }
+    if (-not (Test-Path -LiteralPath $script:auditFile)) { return $false }
+    if ((Get-Item -LiteralPath $script:auditFile).Length -le ($maxMB * 1MB)) { return $false }
+
+    $dir = Split-Path -Parent $script:auditFile
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $archive = Join-Path $dir "audit-$stamp.jsonl"
+    try {
+        Move-Item -LiteralPath $script:auditFile -Destination $archive -Force -ErrorAction Stop
+        Write-BridgeLog "Audit trail reached $maxMB MB and was archived to $(Split-Path -Leaf $archive)" 'WARN'
+    }
+    catch {
+        Write-BridgeLog "Could not archive the audit trail: $($_.Exception.Message)" 'ERROR'
+        return $false
+    }
+
+    $keep = Get-SettingInt 'AuditArchiveKeepFiles' 0
+    if ($keep -gt 0) {
+        foreach ($old in @(Get-AuditArchiveFiles | Select-Object -Skip $keep)) {
+            Write-BridgeLog "Deleting audit archive $($old.Name) - AuditArchiveKeepFiles is $keep" 'WARN'
+            Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $true
+}
+
 function Write-ValidatedJsonState {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -456,6 +512,10 @@ function Write-AuditRecord {
         message      = Protect-SensitiveText (($Message -replace '[\r\n]+', ' ').Trim())
     }
     try {
+        # Out-Null, or the rotation's true/false joins this function's output
+        # and lands in whatever the caller returns - Invoke-ShowTemplateResult
+        # came back as an array and lost its .Success.
+        Invoke-AuditRotation | Out-Null
         Add-Content -LiteralPath $script:auditFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8
     }
     catch {

@@ -265,13 +265,29 @@ function Format-DurationSeconds {
     <# Seconds, handed up to the minutes formatter once there are enough of
        them. Same counting rules, so "5 ثانية" stops happening. #>
     param([int]$Seconds)
+    $second = { param([int]$Count)
+        switch ($Count) {
+            1 { 'ثانية' }
+            2 { 'ثانيتان' }
+            default { if ($Count -le 10) { "$Count ثوانٍ" } else { "$Count ثانية" } }
+        } }
+
     if ($Seconds -le 0) { return '0 ثانية' }
-    if ($Seconds -ge 60 -and ($Seconds % 60) -eq 0) { return (Format-DurationMinutes -Minutes ([int]($Seconds / 60))) }
-    switch ($Seconds) {
-        1 { 'ثانية' }
-        2 { 'ثانيتان' }
-        default { if ($Seconds -le 10) { "$Seconds ثوانٍ" } else { "$Seconds ثانية" } }
+    if ($Seconds -lt 60) { return (& $second $Seconds) }
+
+    # Promoted whenever there are enough seconds, not only when they divide
+    # exactly by sixty. That guard meant an uptime of 3661 read as "3661
+    # ثانية" - which is the very thing this was written to stop, surviving in
+    # every value that is not a round minute, and uptime almost never is.
+    if ($Seconds -ge 3600) {
+        # Leftover seconds are noise beside an hour, let alone a day.
+        return (Format-DurationMinutes -Minutes ([int][math]::Floor($Seconds / 60)))
     }
+    $minutes = [int][math]::Floor($Seconds / 60)
+    $rest = $Seconds % 60
+    $text = Format-DurationMinutes -Minutes $minutes
+    if ($rest -gt 0) { $text += " و$(& $second $rest)" }
+    return $text
 }
 
 function Format-SettingDisplay {

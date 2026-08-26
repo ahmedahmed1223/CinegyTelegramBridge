@@ -5522,6 +5522,22 @@ Describe 'Durations read like durations' {
         Format-DurationMinutes -Minutes 0 | Should -Be '0 دقيقة'
     }
 
+    It 'promotes seconds that do not divide evenly by sixty' {
+        # Caught in review: promotion only fired on exact multiples of 60, so
+        # an uptime of 3661 still read "3661 ثانية" - the very thing the
+        # formatter was written to stop, surviving in every value that is not
+        # a round minute. Uptime almost never is.
+        Format-DurationSeconds -Seconds 3661 | Should -Be 'ساعة ودقيقة'
+        Format-DurationSeconds -Seconds 90061 | Should -Be 'يوم وساعة ودقيقة'
+        Format-DurationSeconds -Seconds 3599 | Should -Be '59 دقيقة و59 ثانية'
+        Format-DurationSeconds -Seconds 61 | Should -Be 'دقيقة وثانية'
+    }
+
+    It 'drops leftover seconds once past an hour, and keeps them below it' {
+        Format-DurationSeconds -Seconds 3600 | Should -Be 'ساعة'
+        Format-DurationSeconds -Seconds 90 | Should -Be 'دقيقة و30 ثانية'
+    }
+
     It 'spells out a minute-valued setting on the settings screen' {
         Format-SettingDisplay -Name 'NewsDraftTimeoutMinutes' -Value 120 | Should -Be 'ساعتان'
     }

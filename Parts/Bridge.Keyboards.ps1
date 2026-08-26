@@ -840,10 +840,11 @@ function Get-AutoHideChoices {
 }
 
 function Format-Duration {
+    <# Kept for its callers, but it no longer counts in minutes for ever: a
+       ticker on air since yesterday read as "1560 د", a number the reader has
+       to divide twice. Format-DurationSeconds does the counting now. #>
     param([int]$Seconds)
-    if ($Seconds -ge 60 -and $Seconds % 60 -eq 0) { return "$([int]($Seconds / 60)) د" }
-    if ($Seconds -ge 60) { return "$([int]($Seconds / 60)) د $($Seconds % 60) ث" }
-    return "$Seconds ث"
+    return (Format-DurationSeconds -Seconds $Seconds)
 }
 
 function Get-DurationKeyboard {

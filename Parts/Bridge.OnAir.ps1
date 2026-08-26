@@ -310,7 +310,10 @@ function Get-CinegyStateFreshness {
     }
     $ageSeconds = [math]::Max(0, [math]::Floor(($Now - ([datetime]$LastSuccessfulAt)).TotalSeconds))
     if ($ageSeconds -gt [math]::Max(1, $StaleAfterSeconds)) {
-        return [pscustomobject]@{ State = 'stale'; Label = "🟠 متأخر منذ $ageSeconds ثانية"; AgeSeconds = $ageSeconds }
+        # Seconds are the right unit for "45 seconds behind" and a useless one
+        # for "372741 ثانية", which is four days nobody will divide out while
+        # glancing at a status screen.
+        return [pscustomobject]@{ State = 'stale'; Label = "🟠 متأخر منذ $(Format-DurationSeconds -Seconds $ageSeconds)"; AgeSeconds = $ageSeconds }
     }
     return [pscustomobject]@{ State = 'connected'; Label = '🟢 متصل'; AgeSeconds = $ageSeconds }
 }

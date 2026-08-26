@@ -1869,7 +1869,9 @@ Describe 'Simple and full status reports' {
         Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and
-                $Text -match 'آخر فحص ناجح.*2026-08-22 11:20:00' -and $Text -notmatch 'صحة الخدمات'
+                # Relative first, because the question being asked is "is this
+                # current?"; the clock time stays in brackets for log comparison.
+                $Text -match 'آخر فحص ناجح: منذ .*\(11:20:00\)' -and $Text -notmatch 'صحة الخدمات'
         }
     }
 

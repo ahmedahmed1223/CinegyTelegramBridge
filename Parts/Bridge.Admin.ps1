@@ -25,8 +25,9 @@ function Get-OnAirSummary {
     $lines.Add('📺 المشاهد النشطة')
     foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         $info = $script:OnAir[$layer]
+        # A ticker up since yesterday used to read "1560 دقيقة".
         $age = [math]::Max(0, [int]((Get-Date) - $info.At).TotalSeconds)
-        $ageText = if ($age -ge 60) { "$([int]($age / 60)) دقيقة" } else { "$age ثانية" }
+        $ageText = Format-DurationSeconds -Seconds $age
         $source = [string](Get-JsonProp $info 'Source')
         if ($source -eq 'cinegy') {
             $eventName = [string](Get-JsonProp $info 'CinegyEventName')
@@ -86,7 +87,12 @@ function Invoke-StatusCommand {
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
     $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
     if ($lastSuccessfulAt) {
-        $lines.Add("🔄 آخر فحص ناجح: $(([datetime]$lastSuccessfulAt).ToString('yyyy-MM-dd HH:mm:ss'))")
+        # "منذ 12 ثانية" answers the question being asked - is this current? -
+        # which a bare timestamp leaves the reader to work out against a clock.
+        # The clock time stays, in brackets, for anyone comparing with a log.
+        $checkedAt = [datetime]$lastSuccessfulAt
+        $ago = Format-DurationSeconds -Seconds ([math]::Max(0, [int]($now - $checkedAt).TotalSeconds))
+        $lines.Add("🔄 آخر فحص ناجح: منذ $ago ($($checkedAt.ToString('HH:mm:ss')))")
     }
     $lines.Add((Get-OnAirSummary))
     $lines.Add('')
@@ -1282,7 +1288,7 @@ function Invoke-DiagnosticsCommand {
     $text = @(
         "🧪 تشخيص Cinegy Telegram Bridge",
         "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
-        "وقت البناء: $buildText | مدة التشغيل: $([int]$uptime.TotalHours)س $($uptime.Minutes)د",
+        "وقت البناء: $buildText | مدة التشغيل: $(Format-DurationSeconds -Seconds ([int]$uptime.TotalSeconds))",
         "المعالج: $($diagnostics.Processor)",
         "الذاكرة: Working $($diagnostics.WorkingSetMB) MB | Private $($diagnostics.PrivateMemoryMB) MB",
         "مساحة القرص الحرة: $diskText",

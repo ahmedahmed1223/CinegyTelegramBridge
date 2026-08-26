@@ -296,11 +296,20 @@ function Update-NewsDraftExpiry {
     if (((Get-Date) - $updatedAt).TotalMinutes -lt $timeout) { return }
 
     $owner = [long](Get-JsonProp $draft 'OwnerChatId')
-    $count = @(Get-JsonProp $draft 'Items').Count
+    $items = @(Get-JsonProp $draft 'Items')
+    $count = $items.Count
     Remove-NewsTickerDraft
     Write-BridgeLog "Expired an abandoned news draft ($count item(s), idle for $timeout+ minutes)" 'WARN'
     if ($owner -gt 0) {
-        Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $timeout دقيقة بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي."
+        Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $(Format-DurationMinutes -Minutes $timeout) بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي."
+        # Handed back, not merely counted. An unpublished draft is somebody's
+        # work, and telling an operator how many items they just lost is worse
+        # than useless. The lock hand-over has returned the text since 5.5,
+        # and an expiry destroys exactly as much.
+        if ($count -gt 0) {
+            $numbered = @(for ($i = 0; $i -lt $count; $i++) { "$($i + 1). $($items[$i])" })
+            Send-TelegramPagedText -ChatId $owner -Text ("📝 أخبار المسودة المنتهية، انسخها إن أردت:`n" + ($numbered -join "`n"))
+        }
     }
 }
 

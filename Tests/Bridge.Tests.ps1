@@ -5384,6 +5384,46 @@ Describe 'Cinegy results keep one shape' {
     }
 }
 
+Describe 'Durations read like durations' {
+    It 'leaves anything under an hour in minutes' {
+        Format-DurationMinutes -Minutes 30 | Should -Be '30 دقيقة'
+        Format-DurationMinutes -Minutes 59 | Should -Be '59 دقيقة'
+    }
+
+    It 'counts hours the way Arabic counts them' {
+        # Dual for two, plural three to ten, singular again from eleven.
+        Format-DurationMinutes -Minutes 60 | Should -Be 'ساعة'
+        Format-DurationMinutes -Minutes 120 | Should -Be 'ساعتان'
+        Format-DurationMinutes -Minutes 300 | Should -Be '5 ساعات'
+        Format-DurationMinutes -Minutes 720 | Should -Be '12 ساعة'
+    }
+
+    It 'keeps the leftover minutes rather than rounding them away' {
+        Format-DurationMinutes -Minutes 90 | Should -Be 'ساعة و30 دقيقة'
+    }
+
+    It 'reaches for days once there are enough hours' {
+        # 1200 minutes was the complaint: twenty hours, written as a number
+        # the reader had to divide.
+        Format-DurationMinutes -Minutes 1200 | Should -Be '20 ساعة'
+        Format-DurationMinutes -Minutes 1440 | Should -Be 'يوم'
+        Format-DurationMinutes -Minutes 2880 | Should -Be 'يومان'
+        Format-DurationMinutes -Minutes 1500 | Should -Be 'يوم وساعة'
+    }
+
+    It 'says zero plainly' {
+        Format-DurationMinutes -Minutes 0 | Should -Be '0 دقيقة'
+    }
+
+    It 'spells out a minute-valued setting on the settings screen' {
+        Format-SettingDisplay -Name 'NewsDraftTimeoutMinutes' -Value 120 | Should -Be 'ساعتان'
+    }
+
+    It 'leaves a setting measured in anything else alone' {
+        Format-SettingDisplay -Name 'CinegyFrameLossTolerance' -Value 5 | Should -Be '5 إطار'
+    }
+}
+
 Describe 'Template scene paths' {
     BeforeEach { Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'TemplateBasePath' } }
 
@@ -5729,6 +5769,23 @@ Describe 'News draft expiry' {
         Update-NewsDraftExpiry
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '3 خبرًا' }
+    }
+
+    It 'hands the items back instead of only counting them' {
+        # An unpublished draft is somebody's work. Telling an operator that 28
+        # items were lost, without the text, is worse than useless - the lock
+        # hand-over has returned it since 5.5 and an expiry destroys as much.
+        Mock Send-TelegramPagedText {}
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('خبر أول', 'خبر ثان')
+            UpdatedAt = (Get-Date).AddHours(-5).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly -ParameterFilter {
+            $Text -match '1\. خبر أول' -and $Text -match '2\. خبر ثان'
+        }
     }
 
     It 'leaves a draft that is still being worked on' {

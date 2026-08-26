@@ -152,7 +152,11 @@ $script:DefaultSettings = [ordered]@{
     NewsMaxItems               = 200
     NewsImportMaxBytes         = 1048576
     NewsBackupKeepFiles        = 20
-    NewsDraftTimeoutMinutes    = 30
+    # Two hours, because writing a bulletin is not a thirty-minute errand: a
+    # 28-item draft expired mid-edit at the old default. The timeout exists to
+    # clear a draft left open overnight, not to hurry an operator who is still
+    # working on it.
+    NewsDraftTimeoutMinutes    = 120
     NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
     NewNewsItemAtTop           = $true   # a newly added item leads the ticker instead of trailing it
     NewsListPaged              = $true   # off puts the whole draft on one screen, as far as Telegram allows
@@ -256,6 +260,7 @@ $script:SettingDisplayMetadata = @{
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
     NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
+    NewsDraftTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مهلة مسودة الأخبار قبل انتهاء صلاحيتها (0 = بلا مهلة)' }
     NewNewsItemAtTop = @{ Unit = ''; Description = 'الخبر الجديد يُضاف في أول الشريط (عند الإطفاء: في آخره)' }
     NewsListPaged = @{ Unit = ''; Description = 'قائمة الأخبار على صفحات (عند الإطفاء: قائمة واحدة طويلة)' }
     NewsListPageSize = @{ Unit = 'خبر'; Description = 'عدد الأخبار في صفحة قائمة الترتيب' }

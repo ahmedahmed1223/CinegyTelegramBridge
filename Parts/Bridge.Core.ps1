@@ -226,10 +226,51 @@ function Get-LayerDisplayName {
     return "$name · طبقة $Layer"
 }
 
+function Format-DurationMinutes {
+    <#
+        Minutes as something a person reads at a glance.
+
+        "1200 دقيقة" makes the reader do arithmetic to discover it means
+        twenty hours, and a setting nobody can read is a setting nobody
+        adjusts. Only whole hours and days are named: 90 minutes stays
+        "ساعة و30 دقيقة" rather than becoming a decimal nobody wants.
+
+        Arabic counts its own way - dual for two, the plural form for three to
+        ten, the singular again from eleven - so the number and the noun are
+        chosen together instead of gluing an "s" on the end.
+    #>
+    param([int]$Minutes)
+    if ($Minutes -le 0) { return '0 دقيقة' }
+    if ($Minutes -lt 60) { return "$Minutes دقيقة" }
+
+    $name = { param([int]$Count, [string]$One, [string]$Two, [string]$Few, [string]$Many)
+        switch ($Count) {
+            1 { $One }
+            2 { $Two }
+            default { if ($Count -le 10) { "$Count $Few" } else { "$Count $Many" } }
+        } }
+
+    $parts = @()
+    $days = [math]::Floor($Minutes / 1440)
+    $hours = [math]::Floor(($Minutes % 1440) / 60)
+    $rest = $Minutes % 60
+
+    if ($days -gt 0) { $parts += (& $name $days 'يوم' 'يومان' 'أيام' 'يومًا') }
+    if ($hours -gt 0) { $parts += (& $name $hours 'ساعة' 'ساعتان' 'ساعات' 'ساعة') }
+    if ($rest -gt 0) { $parts += "$rest دقيقة" }
+    return ($parts -join ' و')
+}
+
 function Format-SettingDisplay {
     param([Parameter(Mandatory)][string]$Name, $Value)
     $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name
-    if ($metadata -and (Get-JsonProp $metadata 'Unit')) { return "$Value $((Get-JsonProp $metadata 'Unit'))" }
+    $unit = if ($metadata) { [string](Get-JsonProp $metadata 'Unit') } else { '' }
+    # A duration is spelled out; every other unit is simply appended.
+    if ($unit -eq 'دقيقة') {
+        $minutes = 0
+        if ([int]::TryParse([string]$Value, [ref]$minutes)) { return (Format-DurationMinutes -Minutes $minutes) }
+    }
+    if ($unit) { return "$Value $unit" }
     return [string]$Value
 }
 

@@ -951,6 +951,10 @@ Update-UploadCleanup -Force     # and any staged upload left behind with it
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
+# An owner who cannot use the bot leaves nobody able to appoint an
+# administrator. Said once at startup, because the failure is otherwise
+# silent: every screen simply refuses and nothing explains it.
+foreach ($ownerWarning in @(Test-OwnerConfiguration)) { Write-BridgeLog $ownerWarning 'WARN' }
 foreach ($e in $store.Errors) { Write-BridgeLog "Template warning: $e" "WARN" }
 Send-BridgeStartupNotification
 

@@ -188,6 +188,32 @@ function Test-Owner {
         -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds')
 }
 
+function Test-OwnerConfiguration {
+    <#
+        Says so at startup when OwnerUserIds names someone who cannot use the
+        bot.
+
+        Naming an owner who is not in the whitelist locks the station out of
+        the role entirely, and silently: the named owner is refused at every
+        screen because authorization is checked first, and the administrator
+        who held the role by default no longer does. Nobody can appoint
+        anyone, and nothing says why.
+
+        Reports rather than corrects. Quietly ignoring a configured owner
+        would be its own surprise, and config is meant to win.
+    #>
+    $configured = @(@(Get-JsonProp $config 'OwnerUserIds') | Where-Object { [long]$_ -gt 0 } | ForEach-Object { [long]$_ })
+    if ($configured.Count -eq 0) { return @() }
+
+    $warnings = @()
+    foreach ($id in $configured) {
+        if (-not (Test-Authorized -ChatId $id -UserId $id)) {
+            $warnings += "OwnerUserIds names $id, who is not authorized to use the bot - that owner cannot appoint anyone."
+        }
+    }
+    return @($warnings)
+}
+
 function Set-AdminRole {
     <#
         Appoints or removes an administrator. Owners only - the caller checks

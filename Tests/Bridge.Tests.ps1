@@ -522,6 +522,29 @@ Describe 'Authorized user administration' {
         $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
     }
 
+    It 'warns when the configured owner cannot use the bot at all' {
+        # Found in the pre-release audit. Naming an unauthorized owner locks
+        # the station out of the role in both directions at once: the named
+        # owner is refused at every screen, and the administrator who held it
+        # by default no longer does. Nobody can appoint anyone, silently.
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(777) -Force
+        try {
+            Test-Owner -ChatId 777 -UserId 777 | Should -BeTrue
+            Test-Authorized -ChatId 777 -UserId 777 | Should -BeFalse
+            Test-Owner -ChatId 101 -UserId 101 | Should -BeFalse
+
+            @(Test-OwnerConfiguration) | Should -Not -BeNullOrEmpty
+            @(Test-OwnerConfiguration)[0] | Should -Match '777'
+        }
+        finally { $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force }
+    }
+
+    It 'stays quiet when the owner is a real authorized user' {
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(101) -Force
+        try { @(Test-OwnerConfiguration) | Should -HaveCount 0 }
+        finally { $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force }
+    }
+
     It 'shows role buttons to the owner and to nobody else' {
         # A button that always answers "not allowed" is worse than no button.
         $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(101) -Force
@@ -4731,6 +4754,22 @@ Describe 'What is new and help content' {
         # The oldest summary belongs to the part nobody has to read.
         $parts[0] | Should -Not -Match '4\.x'
         $parts[1] | Should -Match '4\.x'
+    }
+
+    It 'says nothing rather than throwing when there is nothing to say' {
+        # Found in the pre-release audit: an empty body made Split-TelegramText
+        # return no chunks, and indexing an empty array throws under
+        # StrictMode before Telegram ever gets a chance to reject it.
+        Mock Send-TelegramMessage { }
+
+        { Send-TelegramPagedText -ChatId 100 -Text '' } | Should -Not -Throw
+        { Send-TelegramPagedText -ChatId 100 -Parts @('', '') } | Should -Not -Throw
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'routes the promote and demote callbacks to the right user id' {
+        Get-CallbackArg 'usr:promote:122238225' 'usr:promote:' | Should -Be '122238225'
+        Get-CallbackArg 'usr:demote:7275359265' 'usr:demote:' | Should -Be '7275359265'
     }
 
     It 'sends everything in one message when it already fits' {

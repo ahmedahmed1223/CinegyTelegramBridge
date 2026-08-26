@@ -177,8 +177,12 @@ function Send-TelegramPagedText {
     # longer than Telegram will take.
     $source = if ($Parts.Count -gt 0) { $Parts } else { @($Text) }
     $chunks = @($source | Where-Object { $_ } | ForEach-Object { Split-TelegramText -Text $_ })
-    if ($chunks.Count -le 1) {
-        Send-TelegramMessage -ChatId $ChatId -Text ([string]@($chunks)[0]) -ReplyMarkup $ReplyMarkup
+    # Nothing to say is not an error, and it is not a message either. Telegram
+    # rejects an empty body, and indexing an empty array throws before it even
+    # gets that far.
+    if ($chunks.Count -eq 0) { return }
+    if ($chunks.Count -eq 1) {
+        Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[0]) -ReplyMarkup $ReplyMarkup
         return
     }
     $script:PagedText[$ChatId] = @{ Chunks = $chunks; Index = 0; Markup = $ReplyMarkup }

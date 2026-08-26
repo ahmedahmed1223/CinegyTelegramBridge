@@ -136,11 +136,12 @@ function Get-AuthorizedUsers {
     $ids = @(@(Get-JsonProp $config 'AllowedUserIds') + @(Get-JsonProp $config 'AllowedChatIds') + @(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') |
             Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
     $adminIds = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Sort-Object -Unique)
+    $ownerIds = @(Get-OwnerIds)
     return @($ids | ForEach-Object {
             $id = [long]$_
             [pscustomobject]@{
                 UserId = $id; Alias = Get-UserDisplayName -UserId $id
-                Role = if ($adminIds -contains $id) { 'admin' } else { 'operator' }
+                Role = if ($ownerIds -contains $id) { 'owner' } elseif ($adminIds -contains $id) { 'admin' } else { 'operator' }
                 Disabled = Test-UserDisabled -UserId $id
                 AddedAt = if ($script:UserProfiles.ContainsKey([string]$id)) { [string]$script:UserProfiles[[string]$id].AddedAt } else { '' }
                 AddedByUserId = if ($script:UserProfiles.ContainsKey([string]$id)) { [long]$script:UserProfiles[[string]$id].AddedByUserId } else { 0L }
@@ -173,6 +174,79 @@ function Test-Admin {
     return Test-BridgeAdministrator -ChatId $ChatId -UserId $UserId `
         -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds') `
         -RequireUserLevelAuth:([bool](Get-Setting 'RequireUserLevelAuth'))
+}
+
+function Get-OwnerIds {
+    return @(Get-BridgeOwnerIds -OwnerUserIds @(Get-JsonProp $config 'OwnerUserIds') `
+            -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds'))
+}
+
+function Test-Owner {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    return Test-BridgeOwner -ChatId $ChatId -UserId $UserId `
+        -OwnerUserIds @(Get-JsonProp $config 'OwnerUserIds') `
+        -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds')
+}
+
+function Set-AdminRole {
+    <#
+        Appoints or removes an administrator. Owners only - the caller checks
+        that, because the refusal belongs in the chat rather than in here.
+
+        An administrator can restart the bridge, rewrite every setting and
+        revoke other users, so the guards below are not ceremony:
+
+          * The last administrator cannot be demoted. The revoke path has
+            refused that since long before this existed, and a demotion is
+            the same loss by another route.
+          * An owner cannot be demoted at all. Otherwise two owners could
+            strip each other and the bridge would be left with nobody able to
+            appoint anyone.
+          * Only an already-authorized user can be promoted, so promotion
+            never doubles as a way in.
+    #>
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][bool]$IsAdmin)
+    if ($TargetUserId -le 0) { return [pscustomobject]@{ Success = $false; Error = 'معرّف مستخدم غير صالح.' } }
+
+    $admins = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') |
+            Where-Object { [long]$_ -gt 0 } | ForEach-Object { [long]$_ } | Sort-Object -Unique)
+
+    if ($IsAdmin) {
+        if ($admins -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'هذا المستخدم مشرف بالفعل.' } }
+        $authorized = @(@(Get-JsonProp $config 'AllowedUserIds') + @(Get-JsonProp $config 'AllowedChatIds') |
+                Where-Object { [long]$_ -gt 0 } | ForEach-Object { [long]$_ })
+        if ($authorized -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن ترقية مستخدم غير مصرّح له.' } }
+        $updated = @($admins + $TargetUserId | Sort-Object -Unique)
+    }
+    else {
+        if ($admins -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'هذا المستخدم ليس مشرفًا.' } }
+        if ((Get-OwnerIds) -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن خفض صلاحية المالك.' } }
+        if ($admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن خفض آخر مشرف.' } }
+        $updated = @($admins | Where-Object { $_ -ne $TargetUserId })
+    }
+
+    # AdminUserIds carries the roster. AdminChatIds keeps only ids it already
+    # held, so a promotion can never quietly authorize a whole group chat.
+    $chatIds = @(@(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } |
+            ForEach-Object { [long]$_ } | Where-Object { $updated -contains $_ })
+    $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($updated) -Force
+    $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @($chatIds) -Force
+    Save-Config
+    return [pscustomobject]@{ Success = $true; Error = '' }
+}
+
+function Request-AdminRoleChange {
+    <# Never on the first tap: the role carries restart and settings control. #>
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][long]$OwnerUserId, [Parameter(Mandatory)][bool]$IsAdmin)
+    $alias = Get-UserDisplayName -UserId $TargetUserId
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'user_role'; TargetUserId = $TargetUserId; UserId = $OwnerUserId; IsAdmin = $IsAdmin }
+    $text = if ($IsAdmin) {
+        "⚠️ ترقية $alias ($TargetUserId) إلى مشرف؟`nسيستطيع تغيير كل الإعدادات وإعادة تشغيل الجسر وسحب صلاحيات المستخدمين."
+    }
+    else { "⚠️ خفض $alias ($TargetUserId) إلى مشغّل؟`nستُسحب منه أدوات الإدارة كلها." }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{ inline_keyboard = @(, @(
+                (New-Button '✅ تأكيد' 'usr:roleconfirm'), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
 }
 
 function Test-TelegramPrivateChat {

@@ -14,6 +14,16 @@ function Test-CallbackAdmin {
     return $false
 }
 
+function Test-CallbackOwner {
+    <# Guard for the owner-only branches: appointing and removing
+       administrators. Separate from Test-CallbackAdmin because being an
+       administrator is precisely what it does not entitle you to grant. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (Test-Owner -ChatId $ChatId -UserId $UserId) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text "👑 تعيين المشرفين للمالك وحده." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
 function Invoke-CallbackQuery {
     param($CallbackQuery)
 
@@ -462,7 +472,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:usersadmin' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId }
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId -UserId $userId }
             break
         }
         'usr:toggle:*' {
@@ -472,7 +482,7 @@ function Invoke-CallbackQuery {
                 $action = if ($disabled) { 'إعادة تفعيل' } else { 'تعطيل' }
                 Write-BridgeLog "Admin $userId changed user $target state: $action"
                 Add-AuditEntry "👥 $action المستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
-                Show-UsersAdminScreen -ChatId $chatId
+                Show-UsersAdminScreen -ChatId $chatId -UserId $userId
             }
             break
         }
@@ -498,6 +508,41 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text "✅ تم سحب صلاحية المستخدم $target." -ReplyMarkup (Get-UsersAdminKeyboard)
             }
             else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" -ReplyMarkup (Get-UsersAdminKeyboard) }
+            break
+        }
+        'usr:promote:*' {
+            if (-not (Test-CallbackOwner -ChatId $chatId -UserId $userId)) { break }
+            Request-AdminRoleChange -TargetUserId ([long](Get-CallbackArg $data 'usr:promote:')) -ChatId $chatId -OwnerUserId $userId -IsAdmin $true
+            break
+        }
+        'usr:demote:*' {
+            if (-not (Test-CallbackOwner -ChatId $chatId -UserId $userId)) { break }
+            Request-AdminRoleChange -TargetUserId ([long](Get-CallbackArg $data 'usr:demote:')) -ChatId $chatId -OwnerUserId $userId -IsAdmin $false
+            break
+        }
+        'usr:roleconfirm' {
+            # Re-checked here, not only when the button was drawn: ownership
+            # can have been reconfigured between the two taps.
+            if (-not (Test-CallbackOwner -ChatId $chatId -UserId $userId)) { break }
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'user_role' -or [long]$state.UserId -ne $userId) { break }
+            $target = [long]$state.TargetUserId; $makeAdmin = [bool]$state.IsAdmin
+            Clear-PendingState -ChatId $chatId
+            $result = Set-AdminRole -TargetUserId $target -IsAdmin $makeAdmin
+            if ($result.Success) {
+                $what = if ($makeAdmin) { 'ترقية إلى مشرف' } else { 'خفض إلى مشغّل' }
+                Write-BridgeLog "Owner $userId performed '$what' on user $target" 'WARN'
+                Add-AuditEntry "👑 $what للمستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Send-TelegramMessage -ChatId $chatId -Text "✅ تم $what للمستخدم $(Get-UserDisplayName -UserId $target)."
+                # Told to their face: a role change applied silently is one the
+                # person only discovers when a button stops working.
+                Send-TelegramMessage -ChatId $target -Text $(if ($makeAdmin) {
+                        '👑 تمت ترقيتك إلى مشرف. أدوات الإدارة صارت متاحة لك من القائمة.'
+                    }
+                    else { 'ℹ️ تم خفض صلاحيتك إلى مشغّل. أدوات الإدارة لم تعد متاحة.' })
+            }
+            else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" }
+            Show-UsersAdminScreen -ChatId $chatId -UserId $userId
             break
         }
         'menu:layernames' {

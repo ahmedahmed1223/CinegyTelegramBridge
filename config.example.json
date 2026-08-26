@@ -21,6 +21,8 @@
   "AdminUserIds": [
     111111111
   ],
+  "_comment_owner": "Owners are the only people who can appoint or remove an administrator, from 👥 المستخدمون in the bot. Leave OwnerUserIds empty and the owner is the first id in AdminUserIds - whoever set the bridge up. The bridge never writes this list: ownership is changed here, by hand, and nowhere else.",
+  "OwnerUserIds": [],
   "Settings": {
     "RequireUserLevelAuth": true,
     "EnableSelfServiceRequests": true,

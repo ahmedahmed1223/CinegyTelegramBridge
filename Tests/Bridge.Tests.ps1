@@ -457,6 +457,88 @@ Describe 'Authorized user administration' {
         $config.AllowedUserIds | Should -Contain 202
     }
 
+    It 'promotes an authorized operator to administrator' {
+        $result = Set-AdminRole -TargetUserId 202 -IsAdmin $true
+
+        $result.Success | Should -BeTrue -Because $result.Error
+        $config.AdminUserIds | Should -Contain 202
+        Should -Invoke Save-Config -Times 1 -Exactly
+    }
+
+    It 'refuses to promote someone who is not authorized at all' {
+        # Promotion must not double as a way in.
+        $result = Set-AdminRole -TargetUserId 909 -IsAdmin $true
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'غير مصرّح'
+        $config.AdminUserIds | Should -Not -Contain 909
+    }
+
+    It 'refuses to demote the owner' {
+        # Otherwise two owners could strip each other and nobody would be left
+        # able to appoint anyone.
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(202) -Force
+        $config.AdminUserIds = @(101, 202)
+
+        $result = Set-AdminRole -TargetUserId 202 -IsAdmin $false
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'المالك'
+        $config.AdminUserIds | Should -Contain 202
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
+    }
+
+    It 'refuses to demote the last administrator' {
+        # Reachable only when the owner is somebody other than that last
+        # administrator - an owner who appoints but does not operate. When the
+        # owner IS the last administrator the owner guard answers first, which
+        # is the same refusal by a better name.
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(202) -Force
+
+        $result = Set-AdminRole -TargetUserId 101 -IsAdmin $false
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'آخر مشرف'
+        $config.AdminUserIds | Should -Contain 101
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
+    }
+
+    It 'refuses to demote the sole administrator who is also the owner' {
+        $result = Set-AdminRole -TargetUserId 101 -IsAdmin $false
+
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'المالك'
+        $config.AdminUserIds | Should -Contain 101
+    }
+
+    It 'demotes an administrator who is neither the owner nor the last one' {
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(101) -Force
+        $config.AdminUserIds = @(101, 202)
+
+        $result = Set-AdminRole -TargetUserId 202 -IsAdmin $false
+
+        $result.Success | Should -BeTrue -Because $result.Error
+        $config.AdminUserIds | Should -Not -Contain 202
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
+    }
+
+    It 'shows role buttons to the owner and to nobody else' {
+        # A button that always answers "not allowed" is worse than no button.
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(101) -Force
+        $config.AdminUserIds = @(101, 202)
+
+        $ownerView = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $adminView = @((Get-UsersAdminKeyboard -ViewerUserId 202).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        $ownerView | Should -Contain 'usr:demote:202'
+        $adminView | Should -Not -Contain 'usr:demote:202'
+        # Nothing to promote the owner to, and demoting them is refused.
+        $ownerView | Should -Not -Contain 'usr:demote:101'
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
+    }
+
     It 'refuses to revoke the final administrator' {
         $result = Revoke-AuthorizedUser -TargetUserId 101
         $result.Success | Should -BeFalse
@@ -481,7 +563,9 @@ Describe 'Authorized user administration' {
         $script:UserAliases['202'] = 'مخرج الأخبار'; $script:DisabledUserIds['202'] = $true
         $users = @(Get-AuthorizedUsers)
         $users.Count | Should -Be 2
-        ($users | Where-Object UserId -eq 101).Role | Should -Be 'admin'
+        # 101 is the only administrator, so it is also the owner: with no
+        # OwnerUserIds configured the first administrator holds the role.
+        ($users | Where-Object UserId -eq 101).Role | Should -Be 'owner'
         ($users | Where-Object UserId -eq 202).Alias | Should -Be 'مخرج الأخبار'
         ($users | Where-Object UserId -eq 202).Disabled | Should -BeTrue
     }

@@ -385,14 +385,29 @@ function Get-ScheduleLayerConflicts {
 }
 
 function Get-UsersAdminKeyboard {
+    <# The promote/demote row is drawn only for an owner. An administrator who
+       cannot use it should not be looking at it: a button that always answers
+       "not allowed" is worse than no button at all. #>
+    param([long]$ViewerUserId = 0)
+    $isOwner = $ViewerUserId -gt 0 -and (Test-Owner -ChatId $ViewerUserId -UserId $ViewerUserId)
     $rows = @()
     foreach ($user in @(Get-AuthorizedUsers)) {
-        $role = if ($user.Role -eq 'admin') { 'مشرف' } else { 'مشغّل' }
+        $role = switch ($user.Role) { 'owner' { '👑 مالك' } 'admin' { 'مشرف' } default { 'مشغّل' } }
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
         $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
         $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
         $lastActivity = if ($user.LastActivityAt) { ([datetime]$user.LastActivityAt).ToString('MM-dd HH:mm') } else { 'غير معروف' }
         $rows += , @((New-Button "🕒 آخر نشاط: $lastActivity" "usr:revoke:$($user.UserId)"))
+        # No role button on the owner's own row: there is nothing to promote
+        # them to, and demoting them is refused anyway.
+        if ($isOwner -and $user.Role -ne 'owner') {
+            $rows += , @($(if ($user.Role -eq 'admin') {
+                        (New-Button "⬇️ خفض $($user.Alias) إلى مشغّل" "usr:demote:$($user.UserId)")
+                    }
+                    else {
+                        (New-Button "⬆️ ترقية $($user.Alias) إلى مشرف" "usr:promote:$($user.UserId)")
+                    }))
+        }
         $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
     }
     $rows += , @((New-Button '⬅️ رجوع' 'menu'))
@@ -400,8 +415,14 @@ function Get-UsersAdminKeyboard {
 }
 
 function Show-UsersAdminScreen {
-    param([Parameter(Mandatory)][long]$ChatId)
-    Send-TelegramMessage -ChatId $ChatId -Text "👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد." -ReplyMarkup (Get-UsersAdminKeyboard)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -le 0) { $UserId = $ChatId }
+    $roleLine = if (Test-Owner -ChatId $ChatId -UserId $UserId) {
+        "`n👑 بصفتك المالك يمكنك ترقية مشغّل إلى مشرف أو خفضه."
+    }
+    else { '' }
+    Send-TelegramMessage -ChatId $ChatId -Text ("👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد.$roleLine") `
+        -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId)
 }
 
 function Start-UserAliasEdit {

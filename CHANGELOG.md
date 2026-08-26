@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.7.0 — 2026-08-26
+
+- **Adds an owner role, and makes it the only one that can appoint administrators.** Until now the bot could disable, rename and revoke a user but never promote one, so adding an administrator meant hand-editing `config.json`. Promotion and demotion now live on the 👥 المستخدمون screen, behind a confirmation, and the person whose role changed is told directly rather than discovering it when a button stops working.
+- The owner is whoever set the bridge up: with `OwnerUserIds` unset it is the first id in `AdminUserIds`. Deliberately the first id and not every administrator - the point of the tier is that appointing administrators is narrower than being one. Naming ids in `OwnerUserIds` overrides that.
+- `OwnerUserIds` is never written by the bridge. It sits outside `Save-Config`'s managed keys, so ownership changes by hand in `config.json` and nowhere else - the bot cannot promote its way to controlling who controls it.
+- Ownership matches on the user id alone, with no `RequireUserLevelAuth` relaxation. Administrator rights can be granted to a whole chat; owner rights are a person, and a group must never confer them.
+- Guards: the owner cannot be demoted, the last administrator cannot be demoted, and only an already-authorized user can be promoted - so promotion never doubles as a way in. The promote/demote buttons are drawn only for an owner, because a button that always answers "not allowed" is worse than no button, and ownership is re-checked when the confirmation is tapped rather than only when it was drawn.
+- Test suite grows from 557 to 571.
 ## 5.6.1 — 2026-08-26
 
 - **Stops the staleness alert crying wolf on graphics that are meant to stay up.** The news ticker was reported to administrators as a stale record five times over two days while it was genuinely on screen - its Cinegy `Active Id` matched the record exactly. The alert measured elapsed time alone, and an alert that fires on correct behaviour teaches operators to ignore it. Two independent exemptions now answer it: Cinegy's own declared `Duration` for the active item (a ticker is scheduled as `24:00:00` with a manual end), honoured via `RespectCinegyItemDuration`; and a `longRunning` flag on the template for engines that declare nothing useful. An unreachable engine never silences the alert - "cannot check" and "fine" are different things.

@@ -1152,6 +1152,23 @@ Describe 'Template registry parsing' {
         finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'makes an explicit owner inherit administrator permissions without promoting an administrator to owner' {
+        $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(202) -Force
+        try {
+            Test-Admin -ChatId 202 -UserId 202 | Should -BeTrue
+            Test-Owner -ChatId 101 -UserId 101 | Should -BeFalse
+        }
+        finally { $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force }
+    }
+
+    It 'loads a per-template reminder duration in minutes' {
+        $file = New-TempTemplateFile -Json '{ "urgent": { "path": "C:\\x.cintitle", "layer": 3, "reminderMinutes": 15 } }'
+        try {
+            (Get-TemplateStore).Map['urgent'].ReminderMinutes | Should -Be 15
+        }
+        finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'parses required fields without making legacy string fields mandatory' {
         $file = New-TempTemplateFile -Json @'
 {
@@ -1685,8 +1702,43 @@ Describe 'Template catalogue administration' {
         Show-TemplateAdminDetail -TemplateIndex 0 -ChatId 100 -UserId 100
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $Text -match 'المسار' -and $Text -match 'الطبقة' -and $Text -match 'التحكم الكامل معطّل'
+            $Text -match 'المسار' -and $Text -match 'الطبقة' -and $Text -match 'تعديل تعريف القالب'
         }
+    }
+
+    It 'lets an explicit owner who is not an administrator open a template reminder' {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $true }
+        Mock Start-TemplateReminderMinutesPrompt { }
+        $callback = [pscustomobject]@{
+            id      = 'owner-template-reminder-1'
+            from    = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 101 } }
+            data    = 'tadm:reminder:0'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Start-TemplateReminderMinutesPrompt -Times 1 -Exactly -ParameterFilter {
+            $TemplateIndex -eq 0 -and $ChatId -eq 101 -and $UserId -eq 101
+        }
+    }
+
+    It 'does not save reminder minutes after the editor loses admin and owner roles' {
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $false }
+        Mock Save-TemplateReminderMinutes { [pscustomobject]@{ Success = $true; Error = '' } }
+        Set-PendingState -ChatId 100 -State @{
+            Mode = 'template_reminder_minutes'; TemplateIndex = 0; TemplateKey = 'urgent'; UserId = 100L
+        }
+
+        Complete-TemplateReminderMinutes -ChatId 100 -UserId 100 -Value '15'
+
+        Should -Invoke Save-TemplateReminderMinutes -Times 0 -Exactly
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'صلاحية' }
     }
 }
 
@@ -1716,7 +1768,7 @@ Describe 'Help guidance' {
         $help = Get-HelpText
 
         $help | Should -Match 'أدوات المشرف'
-        $help | Should -Match '📊 الحالة الكاملة وصحة الخدمات'
+        $help | Should -Match '📊 الحالة الكاملة: للمشرف والمالك'
     }
 }
 
@@ -1745,10 +1797,21 @@ Describe 'Role-aware status menus' {
         $callbackData | Should -Not -Contain 'menu:refreshstatus'
     }
 
+    It 'adds the full status button for the owner even when they are not an administrator' {
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $true }
+
+        $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+
+        $callbackData | Should -Contain 'menu:fullstatus'
+    }
+
     It 'rejects a forged full-status callback from a non-admin' {
         Mock Confirm-TelegramCallback { }
         Mock Test-Authorized { $true }
         Mock Test-Admin { $false }
+        Mock Test-Owner { $false }
         Mock Send-TelegramMessage { }
         Mock Invoke-FullStatusCommand { }
         $callback = [pscustomobject]@{
@@ -1762,6 +1825,25 @@ Describe 'Role-aware status menus' {
 
         Should -Invoke Invoke-FullStatusCommand -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'allows the owner to invoke the full status callback' {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $true }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-FullStatusCommand { }
+        $callback = [pscustomobject]@{
+            id      = 'owner-full-status-1'
+            from    = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 101 } }
+            data    = 'menu:fullstatus'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Invoke-FullStatusCommand -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $UserId -eq 101 }
     }
 
 }
@@ -1864,6 +1946,8 @@ Describe 'Simple and full status reports' {
             }
         }
         Mock Invoke-RestMethod { [pscustomobject]@{ ok = $true } }
+        Mock Get-MonitorFrame { $null }
+        Mock Get-FfmpegPath { 'ffmpeg.exe' }
         Mock Get-AirTelemetryStatus {
             [pscustomobject]@{
                 Success = $true; Healthy = $true; SampleCount = 60
@@ -1947,6 +2031,23 @@ Describe 'Simple and full status reports' {
             $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4' -and
                 $Text -match '📺 المشاهد النشطة' -and $Text -match '🎛 اتصال Cinegy' -and
                 $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول'
+        }
+    }
+
+    It 'includes a manual source probe and monitoring-server state in full status' {
+        Mock Test-Admin { $true }
+        Mock Get-MonitorFrame { 'monitor-frame.jpg' }
+        Mock Get-BridgeFrameLuminance { 120 }
+        Mock Remove-Item { }
+
+        Invoke-FullStatusCommand -ChatId 100 -UserId 100
+
+        Should -Invoke Get-MonitorFrame -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match '📡 مراقب المصدر' -and
+                $Text -match 'سيرفر المتابعة' -and
+                $Text -match 'المصدر الأساسي' -and
+                $Text -match 'متاح'
         }
     }
 
@@ -2674,6 +2775,168 @@ Describe 'SHOW identity tracking' {
         Get-EffectiveAutoHideSeconds -Key urgent -RequestedSeconds 10 | Should -Be 10
         Get-EffectiveAutoHideSeconds -Key urgent -RequestedSeconds 60 | Should -Be 30
         Get-EffectiveAutoHideSeconds -Key other -RequestedSeconds 60 | Should -Be 60
+    }
+}
+
+Describe 'Persistent timed-show auto-hide timers' {
+    BeforeEach {
+        $script:OriginalAutoHideFileForTest = $script:autoHideFile
+        $script:autoHideFile = Join-Path $TestDrive 'autohide.json'
+        $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-HideLayer { $true }
+    }
+
+    AfterEach {
+        $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        $script:autoHideFile = $script:OriginalAutoHideFileForTest
+    }
+
+    It 'restores a timer after restart and hides the same scene after the remaining duration' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $timer = @{
+            Layer = 7; At = $now.AddSeconds(30).ToString('o'); ChatId = 1L; UserId = 2L
+            TemplateKey = 'Urgent'; ActiveId = 'show-1'
+        }
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-1'; At = $now.DateTime; UserId = 2L }
+        $script:AutoHideQueue.Add($timer)
+        Save-AutoHideQueue | Should -BeTrue
+        $script:AutoHideQueue.Clear()
+
+        Import-AutoHideQueue
+        Update-AutoHideQueue -Now $now.AddSeconds(29)
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+
+        Update-AutoHideQueue -Now $now.AddSeconds(30)
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 -and $Quiet }
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
+
+    It 'does not hide a replacement scene when the persisted timer belongs to an older show' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $timer = @{
+            Layer = 7; At = $now.AddSeconds(-1).ToString('o'); ChatId = 1L; UserId = 2L
+            TemplateKey = 'Urgent'; ActiveId = 'show-old'
+        }
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-new'; At = $now.DateTime; UserId = 2L }
+        $script:AutoHideQueue.Add($timer)
+        Save-AutoHideQueue | Should -BeTrue
+        $script:AutoHideQueue.Clear()
+
+        Import-AutoHideQueue
+        Update-AutoHideQueue -Now $now
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        $script:AutoHideQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'لم يُنفَّذ|تغيّرت' }
+    }
+}
+
+Describe 'Persistent personal template reminders' {
+    BeforeEach {
+        $script:OriginalTemplateReminderFileForTest = $script:templateReminderFile
+        $script:templateReminderFile = Join-Path $TestDrive 'template-reminders.json'
+        $script:TemplateReminderQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        Mock Get-TemplateStore {
+            @{ Map = @{ Urgent = @{ Key = 'Urgent'; ReminderMinutes = 15; LongRunning = $false } }; Order = @('Urgent'); Errors = @() }
+        }
+    }
+
+    AfterEach {
+        $script:TemplateReminderQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        $script:templateReminderFile = $script:OriginalTemplateReminderFileForTest
+    }
+
+    It 'restores a reminder and alerts the operator who showed the same scene directly' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-1'; At = $now.DateTime; UserId = 2L }
+        $script:TemplateReminderQueue.Add(@{
+                Layer = 7; At = $now.AddMinutes(15).ToString('o'); ChatId = 2L; UserId = 2L
+                TemplateKey = 'Urgent'; ActiveId = 'show-1'; Minutes = 15
+            })
+        Save-TemplateReminderQueue | Should -BeTrue
+        $script:TemplateReminderQueue.Clear()
+
+        Import-TemplateReminderQueue
+        Update-TemplateReminderQueue -Now $now.AddMinutes(14)
+
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+
+        Update-TemplateReminderQueue -Now $now.AddMinutes(15)
+
+        $script:TemplateReminderQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 2 -and $Text -match '15' -and $Text -match 'Urgent'
+        }
+    }
+
+    It 'targets the initiating user instead of the Telegram group' {
+        Mock Save-TemplateReminderQueue { $true }
+        $template = @{ Key = 'Urgent'; Layer = 7; LongRunning = $false; ReminderMinutes = 15 }
+
+        Set-TemplateReminder -Template $template -ChatId 900 -UserId 202 -ActiveId 'show-1' | Should -BeTrue
+
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        $script:TemplateReminderQueue[0].ChatId | Should -Be 202
+        $script:TemplateReminderQueue[0].UserId | Should -Be 202
+    }
+
+    It 'does not queue a reminder for a long-running template' {
+        $template = @{ Key = 'Logo'; Layer = 2; LongRunning = $true; ReminderMinutes = 15 }
+
+        Set-TemplateReminder -Template $template -ChatId 101 -UserId 2 -ActiveId 'logo-1' | Should -BeFalse
+
+        $script:TemplateReminderQueue.Count | Should -Be 0
+    }
+
+    It 'cancels a saved reminder when its template setting is changed to disabled' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-1'; At = $now.DateTime; UserId = 2L }
+        $script:TemplateReminderQueue.Add(@{
+                Layer = 7; At = $now.AddMinutes(-1); ChatId = 101L; UserId = 2L
+                TemplateKey = 'Urgent'; ActiveId = 'show-1'; Minutes = 15
+            })
+        Mock Get-TemplateStore { @{ Map = @{ Urgent = @{ Key = 'Urgent'; ReminderMinutes = 0; LongRunning = $false } }; Order = @('Urgent'); Errors = @() } }
+
+        Update-TemplateReminderQueue -Now $now
+
+        $script:TemplateReminderQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'discards a due reminder when the layer now has a replacement scene' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-new'; At = $now.DateTime; UserId = 3L }
+        $script:TemplateReminderQueue.Add(@{
+                Layer = 7; At = $now.AddMinutes(-1); ChatId = 101L; UserId = 2L
+                TemplateKey = 'Urgent'; ActiveId = 'show-old'; Minutes = 15
+            })
+
+        Update-TemplateReminderQueue -Now $now
+
+        $script:TemplateReminderQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'Snapshot source labels' {
+    It 'labels a snapshot captured from the primary broadcast source' {
+        Get-SnapshotSourceLabel -SourceIsPrimary $true | Should -Be 'البث الأساسي'
+    }
+
+    It 'labels a snapshot captured from Cinegy backup source' {
+        Get-SnapshotSourceLabel -SourceIsPrimary $false | Should -Be 'بث Cinegy الاحتياطي'
     }
 }
 
@@ -3696,6 +3959,17 @@ Describe 'Reliable schedule store and executor' {
         Mock Write-BridgeLog { }
         Mock Add-AuditEntry { }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{
+                Map = @{
+                    urgent = [pscustomobject]@{
+                        Key = 'urgent'; Path = 'C:\Scenes\Urgent.cintitle'; Layer = 4
+                        Fields = @('Headline.Text'); FieldTypes = @{}; LongRunning = $false
+                    }
+                }
+                Order = @('urgent'); Errors = @(); InvalidKeys = @(); SharedLayers = @{}
+            }
+        }
     }
 
     AfterEach {
@@ -3720,6 +3994,49 @@ Describe 'Reliable schedule store and executor' {
         $script:ScheduleEvents.Count | Should -Be 1
         $script:ScheduleEvents[0].Id | Should -Be $id
         $script:ScheduleEvents[0].TimeZoneId | Should -Not -BeNullOrEmpty
+    }
+
+    It 'restores a pending event after a simulated restart and executes it at its timer once' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{ 'Headline.Text' = 'بعد إعادة التشغيل' } `
+            -ScheduledAt $now.AddMinutes(5) -Recurrence once -ChatId 1 -UserId 2
+        Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry | Should -BeTrue
+
+        # A fresh bridge process starts with an empty in-memory queue and imports
+        # the durable schedule before its first timer tick.
+        $script:ScheduleEvents.Clear()
+        Import-ScheduleEvents
+        Update-ScheduleQueue -Now $now.AddMinutes(4)
+
+        $script:ScheduleEvents[0].Status | Should -Be 'pending'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+        Update-ScheduleQueue -Now $now.AddMinutes(5)
+        Update-ScheduleQueue -Now $now.AddMinutes(6)
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $script:ScheduleEvents[0].Status | Should -Be 'completed'
+        $script:ScheduleEvents[0].LastTemplateCheckStatus | Should -Be 'ready'
+        $persisted = Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json
+        $persisted[0].LastTemplateCheckStatus | Should -Be 'ready'
+    }
+
+    It 'checks the current template registry at timer execution and does not SHOW a missing template' {
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{}; Order = @(); Errors = @('القالب غير موجود'); InvalidKeys = @(); SharedLayers = @{} }
+        }
+        Mock Send-TelegramMessage { }
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} `
+            -ScheduledAt $now.AddMinutes(-1) -Recurrence once -ChatId 1 -UserId 2
+        $script:ScheduleEvents.Add($scheduleEntry)
+
+        Update-ScheduleQueue -Now $now
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        $scheduleEntry.LastTemplateCheckStatus | Should -Be 'missing'
+        $scheduleEntry.Status | Should -Be 'failed'
+        $scheduleEntry.LastResult | Should -Match 'غير موجود'
     }
 
     It 'restores scheduled events from the last validated backup when the primary JSON is corrupt' {
@@ -4691,6 +5008,7 @@ Describe 'Black output watchdog' {
         Mock Get-SettingInt { 6 } -ParameterFilter { $Name -eq 'OutputBlackLuminance' }
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'OutputBlackConfirmSeconds' }
         Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NotifyOperatorsOnBlackOutput' }
     }
 

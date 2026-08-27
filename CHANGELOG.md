@@ -1,11 +1,31 @@
 # Changelog
 
+## 5.7.7 — 2026-08-27
+
+- **Enforces the role hierarchy `owner > administrator > operator`.** A configured owner inherits every administrator permission even when their id is not duplicated in `AdminUserIds`; administrators still cannot appoint or remove administrators or use other owner-only actions.
+- **Routes personal template reminders to the initiating user.** When a template is launched from a Telegram group, its elapsed-time alert is sent directly to the user who launched it instead of being posted back to the group. Scheduled launches retain their creator's user id and follow the same rule.
+- **Labels every operator snapshot with its real source.** Both the «📸 صورة من البث» and «📷 لقطة الآن» buttons use the same capture path; the sent photo now says whether its frame came from the primary broadcast or Cinegy backup. The cooldown-resend path retains the source captured with that frame rather than relabelling it based on the current failover state.
+- Adds regression coverage for the primary and backup source labels.
+
+## 5.7.6 — 2026-08-27
+
+- **Adds per-template personal on-air reminders.** An administrator or owner can set `reminderMinutes` (0–1440) from a template's details. When an operator or their scheduled event shows that exact scene, the deadline is stored in `logs/template-reminders.json`; after a restart it resumes and messages that same operator only if the scene is still visible. A replacement or hidden scene cancels the reminder quietly.
+- **Keeps permanent graphics quiet.** `longRunning: true` templates—logos and tickers intended to run 24/7—are excluded from personal reminders, even if a stale timer was saved before the template was marked long-running.
+- Adds regression coverage for persistence, delivery to the original operator, replacement safety, long-running exclusion, and parsing `reminderMinutes`.
+
+## 5.7.5 — 2026-08-27
+
+- **Persists timed-show auto-hide deadlines across restart.** The remaining deadline is stored in `logs/autohide.json` and restored after the on-air state, so a duration selected before a bot restart still ends. The saved scene identity is checked before hiding; if the layer now carries a different scene, the stale timer is discarded safely.
+- Adds regression coverage for restoring a timed-show deadline, hiding after the remaining duration, and refusing to hide a replacement scene.
+
 ## 5.7.4 — 2026-08-27
 
 - **Turns an unreachable output source into an actionable alarm.** The output watchdog previously returned quietly whenever ffmpeg could not capture a frame, deliberately avoiding a false "black" claim but leaving a stopped HLS origin invisible to Telegram. It now counts consecutive capture failures and alerts administrators at `OutputMonitorFailureAlertThreshold` (default 2) when no backup is configured, once per outage, with one recovery notice when the primary source is captured again.
 - **Adds automatic Cinegy SRT failover.** `LiveStream.BackupSourceType` and `LiveStream.BackupSourceUrl` define an optional standby source. The first failed primary probe immediately switches snapshots and the live relay to the standby; an already-running relay is restarted so ffmpeg opens the new input. The primary remains the only health probe, and a successful primary capture returns the bridge to it. A failed operator snapshot also retries once from the standby instead of returning an avoidable error.
+- **Makes source status actionable for the right roles.** The full-status report now runs a manual primary-source probe and labels the monitoring server, active source, standby configuration, periodic-monitor state, and consecutive failures. The read-only report is available to administrators and the owner; other users remain excluded.
 - The deployed configuration uses Cinegy Playout instance 0's local feedback stream, `srt://127.0.0.1:5421`, as the standby source. It was verified by capturing a real frame with ffmpeg before release.
 - Adds regression coverage for unavailable-source alerts, fallback selection, one-time switching, and restoration to the primary source.
+- **Keeps scheduled templates working across a bridge restart.** Pending events are restored from the validated schedule store before polling resumes. At the timer moment the current template registry is checked again; missing or invalid templates are recorded as a failed attempt instead of being sent, while valid templates still pass the existing live Cinegy layer verification immediately before SHOW. A regression test covers persist → simulated restart → timer execution exactly once.
 
 ## 5.7.3 — 2026-08-26
 

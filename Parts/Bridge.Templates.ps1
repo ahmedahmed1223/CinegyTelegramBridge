@@ -249,6 +249,16 @@ function Get-TemplateStoreParsed {
             $deviceName = ''
         }
 
+        $reminderMinutes = 0
+        $parsedReminderMinutes = 0
+        $rawReminderMinutes = [string](Get-JsonProp $entry 'reminderMinutes')
+        if (-not [string]::IsNullOrWhiteSpace($rawReminderMinutes)) {
+            if (-not [int]::TryParse($rawReminderMinutes, [ref]$parsedReminderMinutes) -or $parsedReminderMinutes -lt 0 -or $parsedReminderMinutes -gt 1440) {
+                $errors.Add("القالب '$key' فيه reminderMinutes غير صالح؛ استخدم 0 إلى 1440 دقيقة.")
+            }
+            else { $reminderMinutes = $parsedReminderMinutes }
+        }
+
         $map[$key] = @{
             Key         = $key
             Path        = [string]$tplPath
@@ -257,6 +267,8 @@ function Get-TemplateStoreParsed {
             # A ticker or a logo lives on air all day by design. Marked here,
             # it is exempt from the "on air suspiciously long" alert.
             LongRunning = [bool](Get-JsonProp $entry 'longRunning')
+            # 0 disables the personal elapsed-time reminder for this template.
+            ReminderMinutes = $reminderMinutes
             Fields      = $fieldNames
             FieldLabels = $fieldLabels
             FieldLimits = $fieldLimits
@@ -396,7 +408,7 @@ function Save-TemplateDefinitionChange {
             }
             if ($Action -eq 'create') { $target = [pscustomobject]@{}; $raw | Add-Member -NotePropertyName $TemplateKey -NotePropertyValue $target }
             else { $target = $existing }
-            foreach ($name in @('path', 'layer', 'order', 'description', 'category', 'fields')) {
+            foreach ($name in @('path', 'layer', 'order', 'description', 'category', 'fields', 'reminderMinutes')) {
                 if ($Definition.ContainsKey($name)) { $target | Add-Member -NotePropertyName $name -NotePropertyValue $Definition[$name] -Force }
             }
         }
@@ -404,6 +416,33 @@ function Save-TemplateDefinitionChange {
         New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
         $backupPath = Join-Path $backupDir "templates-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
         Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $temporary = "$path.tmp"
+        $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+        return [pscustomobject]@{ Success = $true; Error = ''; BackupPath = $backupPath }
+    }
+    catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' } }
+}
+
+function Save-TemplateReminderMinutes {
+    <# Updates only the per-template elapsed-time reminder setting. The
+       registry backup and atomic replacement follow the existing template
+       mutation contract so one button cannot leave a partial JSON file. #>
+    param([Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][int]$Minutes)
+    if ($Minutes -lt 0 -or $Minutes -gt 1440) {
+        return [pscustomobject]@{ Success = $false; Error = 'المدة يجب أن تكون من 0 إلى 1440 دقيقة.'; BackupPath = '' }
+    }
+    $path = Get-TemplateRegistryFilePath
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $template = Get-JsonProp $raw $TemplateKey
+        if (-not $template) { throw "القالب '$TemplateKey' غير موجود." }
+        $backupDir = "$path.backups"
+        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
+        $backupPath = Join-Path $backupDir "templates-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $template | Add-Member -NotePropertyName reminderMinutes -NotePropertyValue $Minutes -Force
         $temporary = "$path.tmp"
         $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop

@@ -55,7 +55,7 @@ function New-ScheduledShowEvent {
         CreatedAt = [datetimeoffset]::Now.ToString('o'); ExecutionKey = ''
         CompletedExecutionKey = ''; StartedAt = ''; CompletedAt = ''; LastResult = ''
         AttemptCount = 0; NextAttemptAt = ''; RecurrenceUntil = $RecurrenceUntil
-        NotificationExecutionKey = ''
+        NotificationExecutionKey = ''; LastTemplateCheckAt = ''; LastTemplateCheckStatus = ''
     }
 }
 
@@ -132,6 +132,51 @@ function Add-ScheduledShowEvent {
     return $false
 }
 
+function Get-ScheduledTemplateStatus {
+    <# Resolve the template again when the timer fires. A schedule stores the
+       stable key and captured values, not a stale copy of the template
+       definition; an operator may have edited or disabled it since creation. #>
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
+    $key = [string](Get-JsonProp $ScheduleEntry 'TemplateKey')
+    if ([string]::IsNullOrWhiteSpace($key)) {
+        return [pscustomobject]@{ Success = $false; State = 'invalid'; Key = ''; Layer = 0; Path = ''; Error = 'الحدث المجدول بلا مفتاح قالب.' }
+    }
+    try {
+        $store = Get-TemplateStore
+        $map = Get-JsonProp $store 'Map'
+        if (-not $map -or -not $map.ContainsKey($key)) {
+            $invalidKeys = @(Get-JsonProp $store 'InvalidKeys' | Where-Object { $null -ne $_ })
+            if (@($invalidKeys | Where-Object { [string]$_ -eq $key }).Count -gt 0) {
+                return [pscustomobject]@{
+                    Success = $false; State = 'invalid'; Key = $key; Layer = 0; Path = ''
+                    Error = "القالب '$key' غير صالح عند وقت التنفيذ."
+                }
+            }
+            return [pscustomobject]@{
+                Success = $false; State = 'missing'; Key = $key; Layer = 0; Path = ''
+                Error = "القالب '$key' غير موجود عند وقت التنفيذ."
+            }
+        }
+        $template = $map[$key]
+        $layer = 0
+        [int]::TryParse([string](Get-JsonProp $template 'Layer'), [ref]$layer) | Out-Null
+        $path = [string](Get-JsonProp $template 'Path')
+        if ($layer -le 0 -or [string]::IsNullOrWhiteSpace($path)) {
+            return [pscustomobject]@{
+                Success = $false; State = 'invalid'; Key = $key; Layer = $layer; Path = $path
+                Error = "القالب '$key' غير صالح عند وقت التنفيذ (المسار أو الطبقة غير مكتملة)."
+            }
+        }
+        return [pscustomobject]@{ Success = $true; State = 'ready'; Key = $key; Layer = $layer; Path = $path; Error = '' }
+    }
+    catch {
+        return [pscustomobject]@{
+            Success = $false; State = 'error'; Key = $key; Layer = 0; Path = ''
+            Error = "تعذّر فحص القالب '$key' عند وقت التنفيذ: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Update-ScheduleQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     if (Get-Setting 'MaintenanceMode') { return }
@@ -159,15 +204,14 @@ function Update-ScheduleQueue {
 
         $priorAttempts = 0
         [int]::TryParse([string](Get-JsonProp $scheduleEntry 'AttemptCount'), [ref]$priorAttempts) | Out-Null
+        $templateStatus = Get-ScheduledTemplateStatus -ScheduleEntry $scheduleEntry
+        $scheduleEntry.LastTemplateCheckAt = $Now.ToString('o')
+        $scheduleEntry.LastTemplateCheckStatus = [string]$templateStatus.State
         # Warn before a scheduled event overwrites a graphic that is live now.
         # The conflict check at creation time only compares scheduled events
         # against each other; it cannot know what an operator put up by hand
         # in the meantime, which is the case that actually loses a graphic.
-        $targetLayer = 0
-        $scheduleStore = Get-TemplateStore
-        if ($scheduleStore.Map.ContainsKey([string]$scheduleEntry.TemplateKey)) {
-            $targetLayer = [int]$scheduleStore.Map[[string]$scheduleEntry.TemplateKey].Layer
-        }
+        $targetLayer = [int]$templateStatus.Layer
         if ($targetLayer -gt 0 -and $script:OnAir.ContainsKey($targetLayer) -and (Get-Setting 'NotifyOnScheduleOverwrite')) {
             $displaced = $script:OnAir[$targetLayer]
             Send-AdminBroadcast -Text ("⚠️ حدث مجدول يستبدل مشهدًا على الهواء`n" +
@@ -176,7 +220,17 @@ function Update-ScheduleQueue {
         }
 
         $executionTimer = [System.Diagnostics.Stopwatch]::StartNew()
-        $result = Invoke-ShowTemplateResult -Key ([string]$scheduleEntry.TemplateKey) -Variables $scheduleEntry.Values -ChatId ([long]$scheduleEntry.ChatId) -UserId ([long]$scheduleEntry.UserId)
+        if ($templateStatus.Success) {
+            # Invoke-ShowTemplateResult performs the second, live Cinegy layer
+            # verification immediately before SHOW. This first check guards
+            # against a template registry that changed since scheduling.
+            $result = Invoke-ShowTemplateResult -Key ([string]$scheduleEntry.TemplateKey) -Variables $scheduleEntry.Values -ChatId ([long]$scheduleEntry.ChatId) -UserId ([long]$scheduleEntry.UserId)
+        }
+        else {
+            Write-BridgeLog "Scheduled template check failed for '$($scheduleEntry.TemplateKey)': $($templateStatus.Error)" 'WARN'
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⛔ لم يتم تشغيل الموعد: $($templateStatus.Error)"
+            $result = [pscustomobject]@{ Success = $false; Error = $templateStatus.Error }
+        }
         $executionTimer.Stop()
         $executionResult = if ($result -and $result.Success) { 'success' } else { 'failed' }
         $executionError = if ($executionResult -eq 'failed') { if ($result) { [string]$result.Error } else { 'SHOW returned no result.' } } else { '' }

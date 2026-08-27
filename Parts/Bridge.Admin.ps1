@@ -191,7 +191,7 @@ function Show-TemplateAdminDetail {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $lines = @(
@@ -203,13 +203,62 @@ function Show-TemplateAdminDetail {
         "الحقول: $(if (@($template.Fields).Count -gt 0) { $template.Fields -join '، ' } else { 'لا توجد' })",
         "النصوص الجاهزة: $(@($template.Presets).Count)"
     )
-    if (Get-Setting 'EnableFullTemplateManagement') {
+    $reminderText = if ([bool](Get-JsonProp $template 'LongRunning')) {
+        'معطّل للقالب Long run (يعمل 24/7).'
+    }
+    elseif ([int](Get-JsonProp $template 'ReminderMinutes') -gt 0) {
+        "بعد $([int](Get-JsonProp $template 'ReminderMinutes')) دقيقة للشخص الذي أظهر القالب."
+    }
+    else { 'معطّل.' }
+    $lines += "🔔 تنبيه الظهور: $reminderText"
+    if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and (Get-Setting 'EnableFullTemplateManagement')) {
         $lines += '✅ التحكم الكامل بالقوالب مفعّل. اختر عملية التعديل من الأزرار.'
     }
     else {
-        $lines += '🔒 التحكم الكامل معطّل. يمكنك القراءة وإدارة النصوص الجاهزة فقط.'
+        $lines += '🔒 تعديل تعريف القالب مخصص للمشرف. يمكنك قراءة التعريف وإدارة تنبيه الظهور.'
     }
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
+}
+
+function Start-TemplateReminderMinutesPrompt {
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (-not (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'فقدت صلاحية إدارة تنبيه القالب.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId); return }
+    if ([bool](Get-JsonProp $template 'LongRunning')) {
+        Send-TelegramMessage -ChatId $ChatId -Text "🔔 '$($template.Key)' قالب Long run يعمل 24/7، لذلك تنبيه الظهور الشخصي معطّل." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_reminder_minutes'; TemplateIndex = $TemplateIndex; TemplateKey = [string]$template.Key; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "🔔 أرسل مدة التنبيه لقالب '$($template.Key)' بالدقائق من 0 إلى 1440.`nأرسل 0 لإيقاف التنبيه." -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-TemplateReminderMinutes {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'template_reminder_minutes' -or [long]$state.UserId -ne $UserId) { return }
+    if (-not (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId)) {
+        Clear-PendingState -ChatId $ChatId
+        Send-TelegramMessage -ChatId $ChatId -Text 'فقدت صلاحية إدارة تنبيه القالب؛ لم يتم حفظ التغيير.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $minutes = -1
+    if (-not [int]::TryParse($Value.Trim(), [ref]$minutes) -or $minutes -lt 0 -or $minutes -gt 1440) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'أرسل رقمًا صحيحًا من 0 إلى 1440 دقيقة.' -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    $template = Get-TemplateByIndex -Index ([int]$state.TemplateIndex)
+    if (-not $template -or [string]$template.Key -ne [string]$state.TemplateKey) { Clear-PendingState -ChatId $ChatId; Send-TelegramMessage -ChatId $ChatId -Text 'تغيّر القالب؛ افتح تفاصيله مجددًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId); return }
+    if ([bool](Get-JsonProp $template 'LongRunning')) { Clear-PendingState -ChatId $ChatId; Send-TelegramMessage -ChatId $ChatId -Text 'القالب أصبح Long run؛ لا يمكن تفعيل تنبيه الظهور له.' -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
+    $result = Save-TemplateReminderMinutes -TemplateKey ([string]$state.TemplateKey) -Minutes $minutes
+    Clear-PendingState -ChatId $ChatId
+    if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ تنبيه القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
+    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutes دقيقة - user $UserId"
+    $message = if ($minutes -eq 0) { '✅ تم إيقاف تنبيه الظهور لهذا القالب.' } else { "✅ تم ضبط تنبيه الظهور بعد $minutes دقيقة." }
+    Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)
 }
 
 function Start-TemplateDefinitionPrompt {
@@ -452,8 +501,8 @@ function Confirm-TemplateDefinitionChange {
 function Invoke-FullStatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "هذا الأمر مخصص للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    if (-not (Test-StatusViewer -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "هذا الفحص متاح للمشرف والمالك فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -462,6 +511,7 @@ function Invoke-FullStatusCommand {
     $sync = Update-OnAirStateFromCinegy -Reason 'full-status' -LayerStatuses $layerStatuses `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
     $health = Get-HealthStatusReport
+    $outputMonitor = Get-OutputMonitorStatus -Probe
     # Overall status line derived from the live signals so a quick glance at
     # the top of the message tells the operator whether anything needs attention.
     if ($sync.Failed.Count -gt 0) {
@@ -496,9 +546,11 @@ function Invoke-FullStatusCommand {
     $lines.Add('🩺 صحة الخدمات')
     $lines.Add($health.Text)
     $lines.Add('')
+    $lines.Add($outputMonitor.Text)
+    $lines.Add('')
     $lines.Add('⚙️ التشغيل والجدولة')
     $lines.Add("📡 البث المباشر: $(Get-LiveRelayStatusText)")
-    $lines.Add("🖼 الصور المعلّقة: $($script:SnapshotJobs.Count) · مؤقتات الإخفاء: $($script:AutoHideQueue.Count)")
+    $lines.Add("🖼 الصور المعلّقة: $($script:SnapshotJobs.Count) · مؤقتات الإخفاء: $($script:AutoHideQueue.Count) · تنبيهات الظهور: $($script:TemplateReminderQueue.Count)")
     $lines.Add("🗓 الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count)")
     $lines.Add('')
     $lines.Add('👥 الوصول')
@@ -1396,4 +1448,3 @@ function Deny-UserAccess {
     Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "تم رفض طلب الوصول الخاص بك."
 }
-

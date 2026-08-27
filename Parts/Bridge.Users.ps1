@@ -171,9 +171,33 @@ function Test-Authorized {
 
 function Test-Admin {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    # Role hierarchy: owner > administrator > operator. An explicit owner
+    # inherits every administrator permission without needing a duplicate id
+    # in AdminUserIds; administrator-only users never inherit owner powers.
+    if (Test-BridgeOwner -ChatId $ChatId -UserId $UserId `
+            -OwnerUserIds @(Get-JsonProp $config 'OwnerUserIds') `
+            -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds')) {
+        return $true
+    }
     return Test-BridgeAdministrator -ChatId $ChatId -UserId $UserId `
         -AdminUserIds @(Get-JsonProp $config 'AdminUserIds') -AdminChatIds @(Get-JsonProp $config 'AdminChatIds') `
         -RequireUserLevelAuth:([bool](Get-Setting 'RequireUserLevelAuth'))
+}
+
+function Test-StatusViewer {
+    <# Full status is operationally useful to the owner as well as an
+       administrator, but it must not widen access to mutating admin tools. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    return [bool]((Test-Admin -ChatId $ChatId -UserId $UserId) -or
+        (Test-Owner -ChatId $ChatId -UserId $UserId))
+}
+
+function Test-TemplateReminderManager {
+    <# Template reminder policy is intentionally narrower than full template
+       administration: both administrators and the configured owner may set it. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    return [bool]((Test-Admin -ChatId $ChatId -UserId $UserId) -or
+        (Test-Owner -ChatId $ChatId -UserId $UserId))
 }
 
 function Get-OwnerIds {

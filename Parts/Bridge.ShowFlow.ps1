@@ -103,10 +103,24 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '5.7.7'; Items = @(
+                '📸 كل لقطة من البث توضح الآن مصدرها: الأساسي أو Cinegy الاحتياطي.'
+            ) }
+        @{ Version = '5.7.6'; Items = @(
+                '🔔 من تفاصيل كل قالب، يضبط المشرف أو المالك تنبيه الظهور بالدقائق (0 لإيقافه).'
+                '⏰ التنبيه يصل للشخص الذي أظهر القالب فقط، ويُحفظ ليستمر بعد إعادة التشغيل.'
+                '🟣 القالب Long run مثل الشعار أو الشريط 24/7 لا يأخذ تنبيه ظهور.'
+            ) }
+        @{ Version = '5.7.5'; Items = @(
+                '⏱ مؤقت العرض يُحفظ ويُستعاد بعد إعادة تشغيل الجسر، ثم يُكمل المدة المتبقية.'
+                '🛡️ إذا تغيّر المشهد على الطبقة، يُلغى المؤقت القديم حتى لا يخفي المشهد الجديد.'
+            ) }
         @{ Version = '5.7.4'; Items = @(
                 '⚠️ مراقب المخرج ينبه الآن إذا تعذّر التقاط المصدر، لا للشاشة السوداء فقط.'
                 '🔁 عند تعذّر المصدر الأساسي يتحول فورًا إلى مصدر Cinegy الاحتياطي، واللقطة تعيد المحاولة منه تلقائيًا.'
                 'مصدر الاحتياط لقناة Cinegy 0 هو معاينة SRT المحلية: srt://127.0.0.1:5421.'
+                '📡 الحالة الكاملة تفحص المصدر يدوياً وتوضح حالة سيرفر المتابعة؛ الزر متاح للمشرف والمالك.'
+                '📅 الأحداث المجدولة تبقى بعد إعادة تشغيل الجسر؛ وعند حلول المؤقت يُفحص القالب الحالي ثم طبقة Cinegy قبل SHOW.'
             ) }
         @{ Version = '5.7.3'; Items = @(
                 'إصلاح: أعمار المشاهد كانت ما تزال بالثواني — «107775 ثانية» بدل «يوم و5 ساعات و56 دقيقة».'
@@ -305,12 +319,17 @@ function Get-HelpText {
         ""
     )
 
+    if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) {
+        & $add @(
+            "📊 الحالة الكاملة: للمشرف والمالك؛ تفحص المصدر يدوياً وتوضح حالة سيرفر المتابعة."
+        )
+    }
+
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         & $add @(
             "━━━━━━━━━━━━━━━━"
             "🛡️  أدوات المشرف"
             "━━━━━━━━━━━━━━━━"
-            "📊 الحالة الكاملة وصحة الخدمات: تقرير مفصّل عن Cinegy وTelegram والبث."
             "⚙️ الإعدادات و👤 طلبات الوصول: في القائمة الرئيسية."
             "🗂 أدوات الإدارة تجمع الباقي:"
             "↳ 👥 المستخدمون، ⚡ النصوص الجاهزة، 📚 القوالب."
@@ -634,11 +653,28 @@ function Invoke-ShowTemplateResult {
 
         $suffix = ""
         if ($AutoHideSeconds -gt 0) {
-            for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
-                if ([int]$script:AutoHideQueue[$i].Layer -eq [int]$template.Layer) { $script:AutoHideQueue.RemoveAt($i) }
+            $timerSaved = Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
+                -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId ([string](Get-JsonProp $result 'EventId'))
+            $suffix = if ($timerSaved) {
+                " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
             }
-            $script:AutoHideQueue.Add(@{ Layer = $template.Layer; At = (Get-Date).AddSeconds($AutoHideSeconds); ChatId = $ChatId; UserId = $UserId })
-            $suffix = " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
+            else {
+                " ⚠️ سيعمل المؤقت داخل الجسر، لكن تعذّر حفظه لإعادة التشغيل."
+            }
+        }
+        $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
+        if (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0) {
+            if (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId ([string](Get-JsonProp $result 'EventId'))) {
+                $suffix += " سيصل إليك تنبيه شخصي بعد $reminderMinutes دقيقة إذا بقي القالب ظاهرًا."
+            }
+            else {
+                $suffix += ' ⚠️ تعذّر حفظ تنبيه ظهور القالب لإعادة التشغيل.'
+            }
+        }
+        else {
+            # A new SHOW replaces the visible scene on its layer, so any old
+            # operator reminder for that layer must never reach the wrong person.
+            Remove-TemplateRemindersForLayer -Layer ([int]$template.Layer) | Out-Null
         }
         # A one-tap hide right where the operator is looking: previously taking
         # something back off air meant going 🙈 -> pick layer, which is several
@@ -1100,13 +1136,18 @@ function Set-LayerAutoHide {
         Send-TelegramMessage -ChatId $ChatId -Text "المدة يجب أن تكون أكبر من صفر." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    foreach ($existing in @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq $Layer })) {
-        $script:AutoHideQueue.Remove($existing) | Out-Null
-    }
-    $script:AutoHideQueue.Add(@{ Layer = $Layer; At = (Get-Date).AddSeconds($Seconds); ChatId = $ChatId; UserId = $UserId })
+    $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $timerSaved = Set-AutoHideTimer -Layer $Layer -Seconds $Seconds -ChatId $ChatId -UserId $UserId `
+        -TemplateKey ([string](Get-JsonProp $current 'Key')) -ActiveId ([string](Get-JsonProp $current 'ActiveId'))
     Write-BridgeLog "User $UserId set an auto-hide timer of $Seconds s on layer $Layer"
     Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - user $UserId"
-    Send-TelegramMessage -ChatId $ChatId -Text "⏱ سيتم إخفاء الطبقة $Layer بعد $(Format-Duration -Seconds $Seconds)." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    $timerText = if ($timerSaved) {
+        "⏱ سيتم إخفاء الطبقة $Layer بعد $(Format-Duration -Seconds $Seconds)."
+    }
+    else {
+        "⚠️ ضُبط مؤقت الطبقة $Layer داخل الجسر، لكن تعذّر حفظه ليستمر بعد إعادة التشغيل."
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text $timerText -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Complete-TimedShowCustom {

@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 5.7.4
+## Version 5.7.7
 
-Version 5.7.4 detects an unreachable output source separately from a confirmed black frame. With a backup configured, the first failed primary probe immediately switches snapshots and the Telegram relay to the optional Cinegy SRT input; without a backup, administrators are alerted after the configured consecutive-failure threshold (default `2`). A relay that is already running restarts briefly so ffmpeg opens the selected source. When the primary source is captured again, it switches back and sends one recovery alert.
+Version 5.7.7 labels every sent broadcast snapshot with its actual source: the primary stream or Cinegy backup. The label is retained with the cooldown-cached image, so a resent last snapshot still identifies the source it was captured from. Access follows the hierarchy **owner > administrator > operator**: an explicit owner inherits every administrator tool, while an administrator cannot use owner-only role-management actions. Version 5.7.6 adds a personal, per-template elapsed-time reminder: administrators and the owner choose a duration in minutes for each ordinary template, and the person who puts that exact scene on air receives the reminder only if it is still visible. Reminder deadlines persist across a bridge restart. A `longRunning: true` logo or ticker is always excluded, so 24/7 graphics do not create operator noise. Version 5.7.5 keeps the output-source alarm, Cinegy SRT failover, and role-aware full-status probe from 5.7.4. It also persists timed-show auto-hide deadlines, restores them after a bridge restart, and verifies the tracked scene before hiding. Scheduled events remain in the durable schedule store across bridge restarts; at the timer moment the current template definition is checked again, then the live Cinegy layer is verified immediately before SHOW.
 
 The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
 
@@ -71,6 +71,11 @@ intentionally accepts private Telegram chats only.
 - `📅 الجدولة` supports one-time, daily, and weekly events, verifies the local
   clock/time zone, stores events atomically, lists/cancels upcoming events, and
   records execution before contacting Cinegy to avoid replay after a crash.
+  Pending events are restored before the polling loop after a bridge restart;
+  when a timer becomes due, the registry is checked again so a removed or
+  invalid template is not sent, followed by the live target-layer check in
+  Cinegy immediately before SHOW. An occurrence already marked `running` at
+  crash time is recorded as `interrupted` and is not replayed automatically.
 - Administrators can create, edit, rename, and delete template presets from
   Telegram. Every change is reviewed first, written atomically, and preceded
   by a timestamped `templates.json` backup.
@@ -418,7 +423,9 @@ menu:
 - **🔁 تكرار مع تعديل** → opens the last values as a new editable draft.
 - **📅 الجدولة** → creates reviewed one-time/daily/weekly events and lists or
   cancels upcoming events. Persistent execution keys prevent replay after a
-  restart at the critical moment.
+  restart at the critical moment. The event keeps its captured values, but the
+  template key is resolved again at execution time so edits, removals, and
+  safety policies are respected after a restart.
 - **✏️ تحديث نص** → pick a template (used only as a reference for its field
   names), then pick the field, then send the new text — pushed live via
   `/postbox` without re-showing the template.
@@ -426,18 +433,33 @@ menu:
   choosing the template a duration picker appears (⭐ marks the default), with
   **⌨️ مدة أخرى** for any other value in seconds. The bot confirms when the
   auto-hide fires, and warns you if it failed so you can hide it manually.
+  The auto-hide deadline is stored in `logs/autohide.json`, so a bridge restart
+  restores the remaining timer. Before hiding, the bridge confirms that the
+  same tracked scene is still on the layer; if Cinegy or an operator replaced
+  it, the old timer is discarded instead of hiding the replacement.
   - The quick-pick buttons come from `AutoHidePresetSeconds`
     (`5,10,15,30,60,120`) and the pre-selected one from
     `AutoHideDefaultSeconds` — both editable in ⚙️ الإعدادات.
   - A timer can also be attached to something **already on air**: every live
     layer in the 🔴 row (and the confirmation after a show) carries an
     **⏱ مؤقت** button. Setting a new timer on a layer replaces any existing
-    one rather than stacking, so a layer can never be hidden twice.
+     one rather than stacking, so a layer can never be hidden twice.
+- **🔔 تنبيه الظهور** → in **📚 القوالب والإعدادات**, the administrator or
+  owner opens a template and selects a number of minutes from 0 to 1440.
+  `0` disables it. When that template is shown—manually or by its scheduled
+  event—the bridge stores the deadline in `logs/template-reminders.json` and
+  later messages the same operator directly—even when the template was launched
+  from a group—only if the exact scene remains on air.
+  Replacing or hiding the scene silently cancels its reminder. Templates marked
+  `longRunning: true` (such as a logo or ticker working 24/7) are deliberately
+  excluded from this feature.
 - **📸 صورة من البث** → grabs a single frame from `LiveStream.SourceUrl` via
   ffmpeg and sends it back as a photo. It runs **asynchronously**, so it
   never delays anyone else's command; repeat taps within
   `SnapshotCooldownSeconds` return the last frame instead of re-running
-  ffmpeg. Works independently of the RTMP relay below — no Video Chat or
+  ffmpeg. Each photo caption names the actual source used: **البث الأساسي**
+  or **بث Cinegy الاحتياطي**; the retained cooldown frame keeps its own source
+  label. Works independently of the RTMP relay below — no Video Chat or
   `RtmpDestination` needed. If ffmpeg fails, the reply includes ffmpeg's own
   error line, not just an exit code. Snapshot files are disposable and clean
   themselves up: the previous frame is deleted on each success, failed or

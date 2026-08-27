@@ -45,6 +45,12 @@ function Get-ActiveLiveStreamConfig {
     return $primary
 }
 
+function Get-SnapshotSourceLabel {
+    param([Parameter(Mandatory)][bool]$SourceIsPrimary)
+    if ($SourceIsPrimary) { return 'البث الأساسي' }
+    return 'بث Cinegy الاحتياطي'
+}
+
 function Set-OutputMonitorFallbackActive {
     param([Parameter(Mandatory)][bool]$Active)
     if ($script:OutputMonitorFallbackActive -eq $Active) { return $false }
@@ -134,7 +140,7 @@ function Start-SnapshotJob {
     if ($cooldown -gt 0 -and $script:LastSnapshotFile -and (Test-Path $script:LastSnapshotFile) -and
         ((Get-Date) - $script:LastSnapshotAt).TotalSeconds -lt $cooldown) {
         Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
-            -Caption "📸 آخر لقطة ($([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) ثانية مضت)" `
+            -Caption "📸 آخر لقطة ($([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) ثانية مضت)`n📡 المصدر: $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)" `
             -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
@@ -230,10 +236,12 @@ function Update-SnapshotJobs {
             }
             $script:LastSnapshotFile = $job.OutPath
             $script:LastSnapshotAt = Get-Date
-            Write-BridgeLog "User $($job.UserId) captured a stream snapshot"
+            $script:LastSnapshotSourceIsPrimary = [bool]$job.SourceIsPrimary
+            $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
+            Write-BridgeLog "User $($job.UserId) captured a stream snapshot from $sourceLabel"
             Add-AuditEntry "📸 لقطة - user $($job.UserId)"
             Send-TelegramPhoto -ChatId $job.ChatId -FilePath $job.OutPath `
-                -Caption "📸 لقطة من الهواء - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" `
+                -Caption "📸 لقطة من الهواء - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n📡 المصدر: $sourceLabel" `
                 -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
         }
         Remove-Item $job.ErrLog -Force -ErrorAction SilentlyContinue
@@ -281,6 +289,90 @@ function Get-MonitorFrame {
         return $null
     }
     finally { Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue }
+}
+
+function Get-OutputMonitorStatus {
+    <# Produces the read-only source/monitor section used by full status. A
+       manual probe always checks the configured primary source; the active
+       source line still makes it clear when snapshots/relay are on Cinegy's
+       standby input. #>
+    [CmdletBinding()]
+    param([switch]$Probe)
+
+    $intervalMinutes = [math]::Max(0, (Get-SettingInt 'OutputMonitorMinutes' 0))
+    $timeout = [math]::Max(1, (Get-SettingInt 'SnapshotTimeoutSeconds' 3))
+    $primary = Get-LiveStreamConfig
+    $backup = Get-BackupLiveStreamConfig
+    $ffmpeg = Get-FfmpegPath
+    $serverName = [Environment]::MachineName
+    $serverState = if (-not $ffmpeg) {
+        'متوقف — ffmpeg غير موجود'
+    }
+    elseif ($intervalMinutes -le 0) {
+        'يعمل، والمراقبة الدورية معطلة'
+    }
+    else {
+        'يعمل'
+    }
+
+    $probeState = 'لم يُنفّذ'
+    $luminance = $null
+    if ($Probe) {
+        if (-not $ffmpeg) {
+            $probeState = 'تعذّر — ffmpeg غير موجود'
+        }
+        elseif ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceUrl'))) {
+            $probeState = 'تعذّر — رابط المصدر الأساسي غير مضبوط'
+        }
+        else {
+            $probePath = Get-MonitorFrame -TimeoutSeconds $timeout
+            if (-not $probePath) {
+                $probeState = 'غير متاح'
+            }
+            else {
+                try { $luminance = Get-BridgeFrameLuminance -Path $probePath }
+                catch { $luminance = $null }
+                finally { Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue }
+                if ($null -eq $luminance) {
+                    $probeState = 'تم التقاط الصورة (تعذّر قياس السطوع)'
+                }
+                elseif ($luminance -le (Get-SettingInt 'OutputBlackLuminance' 6)) {
+                    $probeState = "متاح لكن أسود (سطوع $luminance)"
+                }
+                else {
+                    $probeState = "متاح (سطوع $luminance)"
+                }
+            }
+        }
+    }
+
+    $activeSource = if ($script:OutputMonitorFallbackActive -and $backup) { 'Cinegy الاحتياطي' } else { 'المصدر الأساسي' }
+    $primaryType = if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceType'))) { 'غير مضبوط' } else { [string](Get-JsonProp $primary 'SourceType') }
+    $backupText = if ($backup) { "مضبوط ($([string]$backup.SourceType))" } else { 'غير مضبوط' }
+    $lastCheck = if ($script:LastOutputMonitorAt -gt [datetime]::MinValue) {
+        ([datetime]$script:LastOutputMonitorAt).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    else { 'لم يبدأ بعد' }
+    $periodic = if ($intervalMinutes -gt 0) { "كل $intervalMinutes دقيقة" } else { 'معطلة' }
+    $text = @(
+        '📡 مراقب المصدر',
+        "🖥️ سيرفر المتابعة: $serverState · $serverName",
+        "🔎 الفحص اليدوي للمصدر الأساسي: $probeState",
+        "🎚 المصدر المستخدم حالياً: $activeSource",
+        "🔗 نوع المصدر الأساسي: $primaryType",
+        "🛟 المصدر الاحتياطي: $backupText",
+        "⏱ المراقبة الدورية: $periodic · آخر دورة: $lastCheck",
+        "⚠️ فشل التقاط متتالٍ: $([int]$script:OutputMonitorFailureCount)"
+    ) -join "`n"
+    return [pscustomobject]@{
+        Text = $text
+        ServerState = $serverState
+        PrimaryState = $probeState
+        ActiveSource = $activeSource
+        BackupConfigured = [bool]$backup
+        Probed = [bool]$Probe
+        Luminance = $luminance
+    }
 }
 
 function Update-OutputBlackWatchdog {

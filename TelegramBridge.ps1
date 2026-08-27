@@ -53,7 +53,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.7.4'
+$script:BridgeVersion = '5.7.7'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -390,6 +390,8 @@ $script:userAliasesFile = Join-Path $logDir "user-aliases.json"
 $script:disabledUsersFile = Join-Path $logDir "disabled-users.json"
 $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
+$script:autoHideFile = Join-Path $logDir "autohide.json"
+$script:templateReminderFile = Join-Path $logDir "template-reminders.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
@@ -632,6 +634,7 @@ $script:OnAirDirty = $false   # set when the in-memory record changes so a sync 
 $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()
 $script:LastSnapshotAt = [datetime]::MinValue
 $script:LastSnapshotFile = ''
+$script:LastSnapshotSourceIsPrimary = $true
 $script:LastUploadSweep = [datetime]::MinValue
 # Seeded to now, not MinValue: the first output check should land one interval
 # after launch rather than during startup, when the source may not be up yet
@@ -647,6 +650,10 @@ $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.
 $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+
+# Personal, per-template elapsed-time reminders. Unlike an auto-hide timer,
+# these never change Cinegy; they only notify the operator who showed a scene.
+$script:TemplateReminderQueue = [System.Collections.Generic.List[hashtable]]::new()
 
 # Follow-up postbox writes queued just after a SHOW. Some Titler scenes ignore
 # the variables embedded in the SHOW command's Op2 entirely - Air still returns
@@ -1027,7 +1034,10 @@ Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues
 Import-ScheduleEvents
+Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s); pending timers: $(@(Get-UpcomingScheduleEvents).Count)."
 Initialize-CinegyOnAirState | Out-Null
+Import-AutoHideQueue
+Import-TemplateReminderQueue
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 Update-UploadCleanup -Force     # and any staged upload left behind with it
@@ -1119,8 +1129,9 @@ try {
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
                                 'news_add_text' { Complete-NewsTickerAddText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_edit_text' { Complete-NewsTickerEditText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
-                                'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }
-                                'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
+        'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }
+        'template_reminder_minutes' { Complete-TemplateReminderMinutes -ChatId $chatId -UserId $userId -Value $text | Out-Null }
+        'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
                                 { $_ -like 'template_create_*' } { Complete-TemplateCreateWizardStep -ChatId $chatId -UserId $userId -Value $text | Out-Null }

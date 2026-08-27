@@ -43,11 +43,120 @@ function Update-PostShowQueue {
     }
 }
 
+function Save-AutoHideQueue {
+    try {
+        $payload = @($script:AutoHideQueue | ForEach-Object {
+                $at = [datetimeoffset]$_.At
+                [ordered]@{
+                    Layer       = [int](Get-JsonProp $_ 'Layer')
+                    At          = $at.ToString('o')
+                    ChatId      = [long](Get-JsonProp $_ 'ChatId')
+                    UserId      = [long](Get-JsonProp $_ 'UserId')
+                    TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
+                    ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
+                }
+            })
+        $json = ConvertTo-Json -InputObject $payload -Depth 4
+        if (-not (Write-ValidatedJsonState -Path $script:autoHideFile -Json $json)) { throw 'validated state write failed' }
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Could not write autohide.json: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+}
+
+function Import-AutoHideQueue {
+    try {
+        $read = Read-ValidatedJsonState -Path $script:autoHideFile -AsHashtable
+        if (-not $read) { return }
+        $restored = [System.Collections.Generic.List[hashtable]]::new()
+        foreach ($raw in @($read.Data)) {
+            if (-not $raw) { continue }
+            $layer = 0
+            if (-not [int]::TryParse([string](Get-JsonProp $raw 'Layer'), [ref]$layer) -or $layer -le 0) { continue }
+            $at = [datetimeoffset]::MinValue
+            if (-not [datetimeoffset]::TryParse([string](Get-JsonProp $raw 'At'), [ref]$at)) { continue }
+            $restored.Add(@{
+                    Layer       = $layer
+                    At          = $at
+                    ChatId      = [long](Get-JsonProp $raw 'ChatId')
+                    UserId      = [long](Get-JsonProp $raw 'UserId')
+                    TemplateKey = [string](Get-JsonProp $raw 'TemplateKey')
+                    ActiveId    = [string](Get-JsonProp $raw 'ActiveId')
+                })
+        }
+        $script:AutoHideQueue = $restored
+        Write-BridgeLog "Restored $($script:AutoHideQueue.Count) auto-hide timer(s) from autohide.json."
+    }
+    catch { Write-BridgeLog "Could not read autohide.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Set-AutoHideTimer {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][int]$Seconds,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [string]$TemplateKey = '',
+        [string]$ActiveId = ''
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if ($Seconds -le 0) { return $false }
+    $previous = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })
+    for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
+        if ([int](Get-JsonProp $script:AutoHideQueue[$i] 'Layer') -eq $Layer) { $script:AutoHideQueue.RemoveAt($i) }
+    }
+    $timer = @{
+            Layer       = $Layer
+            At          = [datetimeoffset]::Now.AddSeconds($Seconds)
+            ChatId      = $ChatId
+            UserId      = $UserId
+            TemplateKey = $TemplateKey
+            ActiveId    = $ActiveId
+        }
+    $script:AutoHideQueue.Add($timer)
+    if (Save-AutoHideQueue) { return $true }
+    $script:AutoHideQueue.Remove($timer) | Out-Null
+    foreach ($oldTimer in $previous) { $script:AutoHideQueue.Add($oldTimer) }
+    return $false
+}
+
+function Get-AutoHideTargetDecision {
+    param([Parameter(Mandatory)][hashtable]$Timer)
+    $layer = [int](Get-JsonProp $Timer 'Layer')
+    if (-not $script:OnAir.ContainsKey($layer)) {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = "الطبقة $layer لم تعد مسجلة على الهواء." }
+    }
+    $current = $script:OnAir[$layer]
+    $timerId = [string](Get-JsonProp $Timer 'ActiveId')
+    $currentId = [string](Get-JsonProp $current 'ActiveId')
+    if ($timerId -and $currentId -and
+        -not $timerId.Trim().Trim('{', '}').Equals($currentId.Trim().Trim('{', '}'), [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = "الطبقة $layer تغيّرت منذ ضبط المؤقت." }
+    }
+    $timerKey = [string](Get-JsonProp $Timer 'TemplateKey')
+    $currentKey = [string](Get-JsonProp $current 'Key')
+    if ($timerKey -and $currentKey -and
+        -not $timerKey.Equals($currentKey, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = "القالب على الطبقة $layer تغيّر منذ ضبط المؤقت." }
+    }
+    return [pscustomobject]@{ ShouldHide = $true; Reason = '' }
+}
+
 function Update-AutoHideQueue {
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
     if ($script:AutoHideQueue.Count -eq 0) { return }
-    $due = @($script:AutoHideQueue | Where-Object { (Get-Date) -ge $_.At })
+    $due = @($script:AutoHideQueue | Where-Object { [datetimeoffset]$_.At -le $Now })
     foreach ($item in $due) {
         $script:AutoHideQueue.Remove($item) | Out-Null
+        Save-AutoHideQueue | Out-Null
+        $decision = Get-AutoHideTargetDecision -Timer $item
+        if (-not $decision.ShouldHide) {
+            Write-BridgeLog "Skipped stale auto-hide timer on layer $($item.Layer): $($decision.Reason)" 'WARN'
+            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ لم يُنفَّذ المؤقت للطبقة $($item.Layer): $($decision.Reason)"
+            continue
+        }
         Write-BridgeLog "Auto-hiding layer $($item.Layer) (timed show by user $($item.UserId))"
         if (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet) {
             Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏱ تم الإخفاء التلقائي للطبقة $($item.Layer)."
@@ -55,6 +164,141 @@ function Update-AutoHideQueue {
         else {
             Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ فشل الإخفاء التلقائي للطبقة $($item.Layer) - أخفها يدويًا."
         }
+    }
+}
+
+function Save-TemplateReminderQueue {
+    try {
+        $payload = @($script:TemplateReminderQueue | ForEach-Object {
+                [ordered]@{
+                    Layer       = [int](Get-JsonProp $_ 'Layer')
+                    At          = ([datetimeoffset](Get-JsonProp $_ 'At')).ToString('o')
+                    ChatId      = [long](Get-JsonProp $_ 'ChatId')
+                    UserId      = [long](Get-JsonProp $_ 'UserId')
+                    TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
+                    ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
+                    Minutes     = [int](Get-JsonProp $_ 'Minutes')
+                }
+            })
+        $json = ConvertTo-Json -InputObject $payload -Depth 4
+        if (-not (Write-ValidatedJsonState -Path $script:templateReminderFile -Json $json)) { throw 'validated state write failed' }
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Could not write template-reminders.json: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+}
+
+function Import-TemplateReminderQueue {
+    try {
+        $read = Read-ValidatedJsonState -Path $script:templateReminderFile -AsHashtable
+        if (-not $read) { return }
+        $restored = [System.Collections.Generic.List[hashtable]]::new()
+        foreach ($raw in @($read.Data)) {
+            $layer = 0; $minutes = 0; $at = [datetimeoffset]::MinValue
+            if (-not $raw -or
+                -not [int]::TryParse([string](Get-JsonProp $raw 'Layer'), [ref]$layer) -or $layer -le 0 -or
+                -not [int]::TryParse([string](Get-JsonProp $raw 'Minutes'), [ref]$minutes) -or $minutes -le 0 -or $minutes -gt 1440 -or
+                -not [datetimeoffset]::TryParse([string](Get-JsonProp $raw 'At'), [ref]$at)) { continue }
+            $restored.Add(@{
+                    Layer = $layer; At = $at; ChatId = [long](Get-JsonProp $raw 'ChatId'); UserId = [long](Get-JsonProp $raw 'UserId')
+                    TemplateKey = [string](Get-JsonProp $raw 'TemplateKey'); ActiveId = [string](Get-JsonProp $raw 'ActiveId'); Minutes = $minutes
+                })
+        }
+        $script:TemplateReminderQueue = $restored
+        Write-BridgeLog "Restored $($script:TemplateReminderQueue.Count) personal template reminder(s) from template-reminders.json."
+    }
+    catch { Write-BridgeLog "Could not read template-reminders.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Remove-TemplateRemindersForLayer {
+    param([Parameter(Mandatory)][int]$Layer)
+    $removed = $false
+    for ($i = $script:TemplateReminderQueue.Count - 1; $i -ge 0; $i--) {
+        if ([int](Get-JsonProp $script:TemplateReminderQueue[$i] 'Layer') -eq $Layer) {
+            $script:TemplateReminderQueue.RemoveAt($i)
+            $removed = $true
+        }
+    }
+    if ($removed) { Save-TemplateReminderQueue | Out-Null }
+    return $removed
+}
+
+function Set-TemplateReminder {
+    param(
+        [Parameter(Mandatory)][hashtable]$Template,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [string]$ActiveId = ''
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $layer = [int](Get-JsonProp $Template 'Layer')
+    $minutes = [int](Get-JsonProp $Template 'ReminderMinutes')
+    if ($layer -le 0) { return $false }
+    $previous = @($script:TemplateReminderQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $layer })
+    for ($i = $script:TemplateReminderQueue.Count - 1; $i -ge 0; $i--) {
+        if ([int](Get-JsonProp $script:TemplateReminderQueue[$i] 'Layer') -eq $layer) { $script:TemplateReminderQueue.RemoveAt($i) }
+    }
+    if ([bool](Get-JsonProp $Template 'LongRunning') -or $minutes -le 0) {
+        if (Save-TemplateReminderQueue) { return $false }
+        foreach ($item in $previous) { $script:TemplateReminderQueue.Add($item) }
+        return $false
+    }
+    $script:TemplateReminderQueue.Add(@{
+            # Deliver to the person who launched the template, not to the
+            # originating group. In a private chat both ids are identical.
+            Layer = $layer; At = [datetimeoffset]::Now.AddMinutes($minutes); ChatId = $UserId; UserId = $UserId
+            TemplateKey = [string](Get-JsonProp $Template 'Key'); ActiveId = $ActiveId; Minutes = $minutes
+        })
+    if (Save-TemplateReminderQueue) { return $true }
+    $script:TemplateReminderQueue.RemoveAt($script:TemplateReminderQueue.Count - 1)
+    foreach ($item in $previous) { $script:TemplateReminderQueue.Add($item) }
+    Save-TemplateReminderQueue | Out-Null
+    return $false
+}
+
+function Get-TemplateReminderTargetDecision {
+    param([Parameter(Mandatory)][hashtable]$Reminder)
+    $layer = [int](Get-JsonProp $Reminder 'Layer')
+    if (-not $script:OnAir.ContainsKey($layer)) { return [pscustomobject]@{ ShouldNotify = $false; Reason = 'لم تعد الطبقة على الهواء.' } }
+    $current = $script:OnAir[$layer]
+    $savedId = [string](Get-JsonProp $Reminder 'ActiveId')
+    $currentId = [string](Get-JsonProp $current 'ActiveId')
+    if ($savedId -and $currentId -and -not $savedId.Trim().Trim('{', '}').Equals($currentId.Trim().Trim('{', '}'), [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ ShouldNotify = $false; Reason = 'تغيّر المشهد على الطبقة.' }
+    }
+    $savedKey = [string](Get-JsonProp $Reminder 'TemplateKey')
+    $currentKey = [string](Get-JsonProp $current 'Key')
+    if ($savedKey -and $currentKey -and -not $savedKey.Equals($currentKey, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ ShouldNotify = $false; Reason = 'تغيّر القالب على الطبقة.' }
+    }
+    $store = Get-TemplateStore
+    if ($store.Map.ContainsKey($savedKey)) {
+        $template = $store.Map[$savedKey]
+        if ([bool](Get-JsonProp $template 'LongRunning')) {
+            return [pscustomobject]@{ ShouldNotify = $false; Reason = 'القالب أصبح Long run.' }
+        }
+        if ([int](Get-JsonProp $template 'ReminderMinutes') -le 0) {
+            return [pscustomobject]@{ ShouldNotify = $false; Reason = 'أُوقف تنبيه الظهور للقالب.' }
+        }
+    }
+    return [pscustomobject]@{ ShouldNotify = $true; Reason = '' }
+}
+
+function Update-TemplateReminderQueue {
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    if ($script:TemplateReminderQueue.Count -eq 0) { return }
+    foreach ($item in @($script:TemplateReminderQueue | Where-Object { [datetimeoffset](Get-JsonProp $_ 'At') -le $Now })) {
+        $script:TemplateReminderQueue.Remove($item) | Out-Null
+        Save-TemplateReminderQueue | Out-Null
+        $decision = Get-TemplateReminderTargetDecision -Reminder $item
+        if (-not $decision.ShouldNotify) {
+            Write-BridgeLog "Discarded personal reminder for '$($item.TemplateKey)' on layer $($item.Layer): $($decision.Reason)"
+            continue
+        }
+        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $($item.Minutes) دقيقة منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا."
+        Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
     }
 }
 
@@ -653,7 +897,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

@@ -5,6 +5,8 @@
     "path": "C:\\Cinegy\\Titler\\Scenes\\Lower3rd.cintitle",
     "layer": 5,
     "order": 10,
+    "_comment_reminderMinutes": "Optional personal reminder for the operator who shows this template. Minutes from 1 to 1440; 0 or absent disables it. Long-running templates never send this reminder.",
+    "reminderMinutes": 15,
     "_comment_fields": "A field is either a plain variable name, or an object with label, maxLength, required, and sensitive. sensitive=true prevents recent-value storage. Limit resolution: field maxLength -> template maxLength -> Settings.MaxFieldLength.",
     "maxLength": 120,
     "fields": [
@@ -25,7 +27,7 @@
     "fields": ["Headline.Text"]
   },
   "sponsor-bug": {
-    "_comment_longRunning": "A graphic meant to stay on air all day. Exempts it from the 'on air suspiciously long' alert, which otherwise reports a permanent logo or ticker as a stale record every few hours. Cinegy's own declared Duration is honoured too, so this is only needed when the engine does not give one.",
+    "_comment_longRunning": "A graphic meant to stay on air all day. Exempts it from the 'on air suspiciously long' alert and from personal elapsed-time reminders, which otherwise report a permanent logo or ticker. Cinegy's own declared Duration is honoured too, so this is only needed when the engine does not give one.",
     "longRunning": true,
     "description": "Sponsor bug, no editable text fields",
     "category": "شعارات",

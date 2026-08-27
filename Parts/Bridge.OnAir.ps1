@@ -99,6 +99,7 @@ function Remove-OnAirRecord {
     $script:OnAir.Remove([int]$Layer)
     $script:OnAirDirty = $true
     Save-OnAirState
+    Remove-TemplateRemindersForLayer -Layer $Layer | Out-Null
     Write-BridgeLog "Dropped on-air record for layer $Layer ($Reason)"
     return $true
 }
@@ -190,6 +191,8 @@ function Update-OnAirStateFromCinegy {
     $removed = [System.Collections.Generic.List[int]]::new()
     $failed = [System.Collections.Generic.List[int]]::new()
     $changes = [System.Collections.Generic.List[object]]::new()
+    $autoHideDirty = $false
+    $templateReminderDirty = $false
     $statusByLayer = @{}
     foreach ($item in @($LayerStatuses)) {
         $itemLayer = 0
@@ -231,6 +234,13 @@ function Update-OnAirStateFromCinegy {
             for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
                 if ([int]$script:AutoHideQueue[$i].Layer -eq [int]$layer) {
                     $script:AutoHideQueue.RemoveAt($i)
+                    $autoHideDirty = $true
+                }
+            }
+            for ($i = $script:TemplateReminderQueue.Count - 1; $i -ge 0; $i--) {
+                if ([int]$script:TemplateReminderQueue[$i].Layer -eq [int]$layer) {
+                    $script:TemplateReminderQueue.RemoveAt($i)
+                    $templateReminderDirty = $true
                 }
             }
             $removed.Add([int]$layer)
@@ -263,6 +273,8 @@ function Update-OnAirStateFromCinegy {
             Write-BridgeLog "Cinegy state sync ($Reason) removed stale layer record(s): $($removed -join ', ')"
         }
     }
+    if ($autoHideDirty) { Save-AutoHideQueue | Out-Null }
+    if ($templateReminderDirty) { Save-TemplateReminderQueue | Out-Null }
 
     $suppliedCount = @($LayerStatuses).Count
     if ($failed.Count -eq 0 -and ($checked.Count -gt 0 -or $suppliedCount -gt 0)) {

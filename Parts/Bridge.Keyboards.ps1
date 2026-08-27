@@ -82,7 +82,7 @@ function Get-MainMenuKeyboard {
 
     $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers") )
     $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
-    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+    if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) {
         $rows += , @( (New-Button "📊 الحالة الكاملة" "menu:fullstatus") )
     }
 
@@ -731,16 +731,21 @@ function Get-SettingsKeyboard {
 }
 
 function Get-TemplateAdminCatalogueKeyboard {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0 -and $ChatId -ne 0) { $UserId = $ChatId }
+    $canAdminister = ($ChatId -eq 0) -or (Test-Admin -ChatId $ChatId -UserId $UserId)
     $store = Get-TemplateStore
     $rows = @()
     for ($i = 0; $i -lt $store.Order.Count; $i++) {
         $template = $store.Map[$store.Order[$i]]
         $rows += , @( (New-Button "$($template.Key) (طبقة $($template.Layer))" "tadm:$i") )
     }
-    $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
-    if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
-    $rows += , $transferRow
-    if (Get-Setting 'EnableFullTemplateManagement') {
+    if ($canAdminister) {
+        $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
+        if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
+        $rows += , $transferRow
+    }
+    if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
         $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
         $rows += , @( (New-Button '📄 إضافة عبر JSON' 'tadm:createjson') )
     }
@@ -750,9 +755,16 @@ function Get-TemplateAdminCatalogueKeyboard {
 }
 
 function Get-TemplateAdminDetailKeyboard {
-    param([Parameter(Mandatory)][int]$TemplateIndex)
+    param([Parameter(Mandatory)][int]$TemplateIndex, [long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0 -and $ChatId -ne 0) { $UserId = $ChatId }
+    $canAdminister = ($ChatId -eq 0) -or (Test-Admin -ChatId $ChatId -UserId $UserId)
+    $canManageReminder = ($ChatId -eq 0) -or (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId)
     $rows = @()
-    if (Get-Setting 'EnableFullTemplateManagement') {
+    $template = Get-TemplateByIndex -Index $TemplateIndex
+    if ($canManageReminder -and $template -and -not [bool](Get-JsonProp $template 'LongRunning')) {
+        $rows += , @( (New-Button '🔔 تنبيه الظهور' "tadm:reminder:$TemplateIndex") )
+    }
+    if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
         $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex") )
         if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button '🧪 اختبار على طبقة التجربة' "tadm:test:$TemplateIndex")) }
     }
@@ -938,4 +950,3 @@ function Set-SettingChoice {
     Add-AuditEntry "⚙️ $Name = $($choices[$Index]) - user $UserId"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ $Name = $($choices[$Index])$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }
-

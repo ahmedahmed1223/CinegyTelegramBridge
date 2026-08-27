@@ -14,6 +14,22 @@ function Test-CallbackAdmin {
     return $false
 }
 
+function Test-CallbackStatusViewer {
+    <# The full status is read-only, so the owner may inspect it even when they
+       are not listed among the day-to-day administrators. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text "هذا الفحص متاح للمشرف والمالك فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
+function Test-CallbackTemplateReminderManager {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text 'إعداد تنبيه القالب متاح للمشرف والمالك فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
 function Test-CallbackOwner {
     <# Guard for the owner-only branches: appointing and removing
        administrators. Separate from Test-CallbackAdmin because being an
@@ -326,12 +342,12 @@ function Invoke-CallbackQuery {
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:fullstatus' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
+            if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
             break
         }
         'menu:health' {
             # Backward-compatible callback for messages created before 3.0.
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
+            if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
             break
         }
         'menu:diagnostics' {
@@ -380,7 +396,7 @@ function Invoke-CallbackQuery {
         }
         { $_ -in @('اسم', 'alias') } { Invoke-UserAliasCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         'menu:refreshstatus' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+            if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) {
                 Invoke-FullStatusCommand -ChatId $chatId -UserId $userId
             }
             break
@@ -645,10 +661,10 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:templatesadmin' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+            if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) {
                 $pendingImport = Get-PendingState -ChatId $chatId
                 if ($pendingImport -and [string]$pendingImport.Mode -like 'template_import_*') { Clear-PendingState -ChatId $chatId }
-                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -665,15 +681,24 @@ function Invoke-CallbackQuery {
             break
         }
         'tadm:*' {
-            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $token = (Get-CallbackArg $data 'tadm:')
+            $token = (Get-CallbackArg $data 'tadm:')
+            if ($token -match '^reminder:(\d+)$') {
+                if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) {
+                    Start-TemplateReminderMinutesPrompt -TemplateIndex ([int]$Matches[1]) -ChatId $chatId -UserId $userId
+                }
+            }
+            elseif ($token -match '^\d+$') {
+                if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) {
+                    Show-TemplateAdminDetail -TemplateIndex ([int]$token) -ChatId $chatId -UserId $userId
+                }
+            }
+            elseif (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 if ($token -eq 'create') { Start-TemplateCreateWizard -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'createjson') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'testconfirm') { Confirm-TemplateTest -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^test:(\d+)$') { Start-TemplateTestReview -TemplateIndex ([int]$Matches[1]) -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^(edit|delete):(\d+)$') { Start-TemplateDefinitionPrompt -Action $Matches[1] -TemplateIndex ([int]$Matches[2]) -ChatId $chatId -UserId $userId }
-                else { Show-TemplateAdminDetail -TemplateIndex ([int]$token) -ChatId $chatId -UserId $userId }
             }
             break
         }

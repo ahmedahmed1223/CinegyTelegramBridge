@@ -38,6 +38,9 @@ param(
     [string]$ConfigPath = ".\config.json",
     [string]$RuntimePath = '',
     [switch]$AllowMultipleInstances,
+    # The default remains tolerant for an on-air workstation. Specify this to
+    # refuse startup if the operating system cannot enforce the mutex.
+    [switch]$RequireSingleInstance,
     # Stop whatever bridge is already running and take its place. Without it
     # an interactive console asks first; a service or scheduled task, which
     # has nobody to ask, refuses as before.
@@ -53,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.7.7'
+$script:BridgeVersion = '5.7.9'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -108,6 +111,7 @@ $script:BridgeLaunch = @{
     ConfigPath             = $ConfigPath
     RuntimePath            = $RuntimePath
     AllowMultipleInstances = [bool]$AllowMultipleInstances
+    RequireSingleInstance  = [bool]$RequireSingleInstance
     WorkingDirectory       = (Get-Location).Path
 }
 
@@ -250,6 +254,12 @@ $script:DefaultSettings = [ordered]@{
     NotifyAdminsOnExternalChange = $true
     NotifyAdminsOnCinegyHealth = $true
 }
+
+# Upload policy for the two JSON documents that can contain a large number of
+# entries. These remain fixed safety limits; NewsImportMaxBytes is intentionally
+# configurable because its input is plain editorial text.
+$script:SettingsImportMaximumBytes = 10 * 1024 * 1024
+$script:TemplateRegistryImportMaximumBytes = 10 * 1024 * 1024
 
 $script:SettingDisplayMetadata = @{
     AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
@@ -1018,7 +1028,15 @@ if (-not $AllowMultipleInstances) {
         }
     }
     catch {
-        Write-Host "Single-instance check unavailable ($($_.Exception.Message)) - continuing."
+        $message = "Single-instance check unavailable ($($_.Exception.Message))"
+        if ($RequireSingleInstance) {
+            Write-Host "$message - refusing startup because -RequireSingleInstance was requested."
+            Write-BridgeLog "$message - startup refused because strict single-instance mode was requested." 'ERROR'
+            if ($script:InstanceMutex) { $script:InstanceMutex.Dispose(); $script:InstanceMutex = $null }
+            exit 1
+        }
+        Write-Host "$message - continuing (default tolerant mode)."
+        Write-BridgeLog "$message - continuing in default tolerant mode; use -RequireSingleInstance to refuse startup." 'WARN'
     }
 }
 

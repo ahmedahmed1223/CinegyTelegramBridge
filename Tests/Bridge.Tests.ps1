@@ -228,6 +228,22 @@ Describe 'Administrator template registry import and export' {
         (Get-Content -LiteralPath $script:ImportRegistryPath -Raw) | Should -Match 'beta'
     }
 
+    It 'accepts a large template registry upload up to the 10 MB limit' {
+        $script:CapturedTemplateImportMaximum = 0
+        Mock Receive-TelegramDocument {
+            $script:CapturedTemplateImportMaximum = $MaximumBytes
+            New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
+            Copy-Item -LiteralPath $script:IncomingPath -Destination $DestinationPath
+            return $DestinationPath
+        }
+
+        Start-TemplateRegistryImport -ChatId 100 -UserId 100
+        Receive-TemplateRegistryImport -Document ([pscustomobject]@{ file_name='templates.json'; file_size=2097152; file_id='large-id' }) -ChatId 100 -UserId 100
+
+        $script:CapturedTemplateImportMaximum | Should -Be 10485760
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'template_import_review'
+    }
+
     It 'exports only to an administrator through the existing document sender' {
         Invoke-TemplateRegistryExport -ChatId 100 -UserId 100
         Should -Invoke Send-TelegramDocument -Times 1 -Exactly -ParameterFilter { $FilePath -eq $script:ImportRegistryPath }
@@ -1043,6 +1059,14 @@ Describe 'Telegram API send reliability' {
         Mock Invoke-RestMethod { [pscustomobject]@{ ok=$true; result=[pscustomobject]@{ file_path='../config.json' } } }
         Mock Invoke-WebRequest { throw 'must not download' }
         { Receive-TelegramDocument -FileId 'abc' -DestinationPath (Join-Path $TestDrive 'x.json') } | Should -Throw '*مسار*'
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
+    }
+
+    It 'rejects an oversized Telegram document before starting its download' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ ok=$true; result=[pscustomobject]@{ file_path='documents/large.json'; file_size=101 } } }
+        Mock Invoke-WebRequest { throw 'must not download' }
+
+        { Receive-TelegramDocument -FileId 'large' -DestinationPath (Join-Path $TestDrive 'large.json') -MaximumBytes 100 } | Should -Throw '*حجم*'
         Should -Invoke Invoke-WebRequest -Times 0 -Exactly
     }
 }
@@ -4719,6 +4743,37 @@ Describe 'Administrator tools grouping' {
         $flat | Should -Not -Contain 'menu:admintools'
         $flat | Should -Not -Contain 'menu:settings'
     }
+
+    It 'shows access-request approval to administrators and the owner only' {
+        $script:DefaultSettings['EnableSelfServiceRequests'] | Should -BeTrue
+        $oldAdminUsers = @(Get-JsonProp $config 'AdminUserIds')
+        $oldAdminChats = @(Get-JsonProp $config 'AdminChatIds')
+        $oldOwners = @(Get-JsonProp $config 'OwnerUserIds')
+        try {
+            $config | Add-Member -NotePropertyName AdminUserIds -NotePropertyValue @(100) -Force
+            $config | Add-Member -NotePropertyName AdminChatIds -NotePropertyValue @(100) -Force
+            $config | Add-Member -NotePropertyName OwnerUserIds -NotePropertyValue @(101) -Force
+            $script:PendingApprovals = @{ 555 = @{ UserId = 555 } }
+
+            $adminFlat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+            $adminFlat | Should -Contain 'menu:pending'
+
+            $ownerFlat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+            $ownerFlat | Should -Contain 'menu:pending'
+
+            $operatorFlat = @((Get-MainMenuKeyboard -ChatId 200 -UserId 200).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+            $operatorFlat | Should -Not -Contain 'menu:pending'
+        }
+        finally {
+            $config | Add-Member -NotePropertyName AdminUserIds -NotePropertyValue $oldAdminUsers -Force
+            $config | Add-Member -NotePropertyName AdminChatIds -NotePropertyValue $oldAdminChats -Force
+            $config | Add-Member -NotePropertyName OwnerUserIds -NotePropertyValue $oldOwners -Force
+            $script:PendingApprovals = @{}
+        }
+    }
 }
 
 Describe 'Template test layer safety' {
@@ -5405,6 +5460,31 @@ Describe 'Settings export and import' {
         $result.Changes[0].Name | Should -Be 'MaxFieldLength'
     }
 
+    It 'refuses a string where a boolean setting is required' {
+        $path = Join-Path $TestDrive 'wrong-type.json'
+        Set-Content -LiteralPath $path -Encoding utf8 -Value '{"Kind":"CinegyTelegramBridge.Settings","Settings":{"EnableLiveRelay":"false"}}'
+
+        $result = Test-SettingsImport -Path $path
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'EnableLiveRelay'
+    }
+
+    It 'accepts a large settings import up to the 10 MB limit' {
+        $script:CapturedSettingsImportMaximum = 0
+        Mock Receive-TelegramDocument {
+            $script:CapturedSettingsImportMaximum = $MaximumBytes
+            New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
+            @{ Kind = 'CinegyTelegramBridge.Settings'; Settings = @{ MaxFieldLength = 999 } } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $DestinationPath -Encoding utf8
+            return $DestinationPath
+        }
+
+        Receive-SettingsImport -Document ([pscustomobject]@{ file_id='large-settings-id' }) -ChatId 100 -UserId 100
+
+        $script:CapturedSettingsImportMaximum | Should -Be 10485760
+        $script:PendingSettingsImport | Should -Not -BeNullOrEmpty
+    }
+
     It 'applies nothing until the administrator confirms' {
         Mock Set-Setting {}
         $script:PendingSettingsImport = @{ Path = (Join-Path $TestDrive 'p.json'); UserId = 100
@@ -5415,8 +5495,10 @@ Describe 'Settings export and import' {
         Should -Invoke Set-Setting -Times 0 -Exactly
     }
 
-    It 'applies every listed change once confirmed' {
-        Mock Set-Setting {}
+    It 'applies every listed change through one atomic configuration save once confirmed' {
+        $oldMaximum = $config.Settings.MaxFieldLength
+        $oldDelay = $config.Settings.PostShowDelayMs
+        Mock Save-Config { $script:LastConfigSaveFailed = $false }
         Mock Remove-Item {}
         $script:PendingSettingsImport = @{ Path = (Join-Path $TestDrive 'p.json'); UserId = 100
             Changes = @(
@@ -5424,7 +5506,23 @@ Describe 'Settings export and import' {
                 [pscustomobject]@{ Name = 'PostShowDelayMs'; From = 400; To = 250 }) }
 
         Confirm-SettingsImport -ChatId 100 -UserId 100 | Should -BeTrue
-        Should -Invoke Set-Setting -Times 2 -Exactly
+        $config.Settings.MaxFieldLength | Should -Be 999
+        $config.Settings.PostShowDelayMs | Should -Be 250
+        Should -Invoke Save-Config -Times 1 -Exactly
+        $config.Settings.MaxFieldLength = $oldMaximum
+        $config.Settings.PostShowDelayMs = $oldDelay
+    }
+
+    It 'rolls back the in-memory settings when the atomic save fails' {
+        $oldMaximum = $config.Settings.MaxFieldLength
+        Mock Save-Config { $script:LastConfigSaveFailed = $true }
+        Mock Remove-Item {}
+        $script:PendingSettingsImport = @{ Path = (Join-Path $TestDrive 'failed.json'); UserId = 100
+            Changes = @([pscustomobject]@{ Name = 'MaxFieldLength'; From = $oldMaximum; To = 999 }) }
+
+        Confirm-SettingsImport -ChatId 100 -UserId 100 | Should -BeFalse
+        $config.Settings.MaxFieldLength | Should -Be $oldMaximum
+        Should -Invoke Save-Config -Times 1 -Exactly
     }
 
     It 'will not let a different administrator confirm someone else review' {
@@ -5480,6 +5578,20 @@ Describe 'Administrator restart' {
     }
     AfterAll { $script:RestartRequested = $false }
 
+    It 'only identifies processes running this exact bridge script' {
+        $scriptPath = [IO.Path]::GetFullPath($script:BridgeLaunch.ScriptPath)
+        Mock Get-CimInstance {
+            @(
+                [pscustomobject]@{ ProcessId = 4101; CreationDate = 'now'; CommandLine = "pwsh -File `"$scriptPath`" -ConfigPath config.json" }
+                [pscustomobject]@{ ProcessId = 4102; CreationDate = 'now'; CommandLine = 'pwsh -File C:\OtherStation\TelegramBridge.ps1 -ConfigPath config.json' }
+            )
+        }
+
+        $processMatches = @(Get-OtherBridgeProcess)
+        @($processMatches).Count | Should -Be 1
+        $processMatches[0].ProcessId | Should -Be 4101
+    }
+
     It 'refuses while the setting is off, whatever supervises the process' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
 
@@ -5534,6 +5646,7 @@ Describe 'Administrator restart' {
             ConfigPath             = 'D:\cingy cg\config.json'
             RuntimePath            = ''
             AllowMultipleInstances = $false
+            RequireSingleInstance  = $true
             WorkingDirectory       = 'D:\cingy cg'
         }
 
@@ -5541,6 +5654,7 @@ Describe 'Administrator restart' {
 
         $command | Should -Not -BeNullOrEmpty
         $command.Arguments | Should -Contain '"D:\cingy cg\config.json"'
+        $command.Arguments | Should -Contain '-RequireSingleInstance'
     }
 
     It 'asks before restarting rather than acting on the first tap' {

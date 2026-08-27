@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 5.7.7
+## Version 5.7.9
 
-Version 5.7.7 labels every sent broadcast snapshot with its actual source: the primary stream or Cinegy backup. The label is retained with the cooldown-cached image, so a resent last snapshot still identifies the source it was captured from. Access follows the hierarchy **owner > administrator > operator**: an explicit owner inherits every administrator tool, while an administrator cannot use owner-only role-management actions. Version 5.7.6 adds a personal, per-template elapsed-time reminder: administrators and the owner choose a duration in minutes for each ordinary template, and the person who puts that exact scene on air receives the reminder only if it is still visible. Reminder deadlines persist across a bridge restart. A `longRunning: true` logo or ticker is always excluded, so 24/7 graphics do not create operator noise. Version 5.7.5 keeps the output-source alarm, Cinegy SRT failover, and role-aware full-status probe from 5.7.4. It also persists timed-show auto-hide deadlines, restores them after a bridge restart, and verifies the tracked scene before hiding. Scheduled events remain in the durable schedule store across bridge restarts; at the timer moment the current template definition is checked again, then the live Cinegy layer is verified immediately before SHOW.
+Version 5.7.9 keeps self-service access requests enabled for operators, while the request-approval button and handler remain restricted to administrators and the owner. It also makes the default single-instance check tolerant when Windows cannot enforce the mutex, with `-RequireSingleInstance` available for strict deployments; settings imports are type-checked and saved atomically, oversized Telegram documents are rejected before download, the fixed settings and template-registry JSON upload limits are now 10 MiB, and analyzer failures now fail validation. The configurable news-import limit is unchanged. Version 5.7.7 labels every sent broadcast snapshot with its actual source: the primary stream or Cinegy backup. The label is retained with the cooldown-cached image, so a resent last snapshot still identifies the source it was captured from. Access follows the hierarchy **owner > administrator > operator**: an explicit owner inherits every administrator tool, while an administrator cannot use owner-only role-management actions. Version 5.7.6 adds a personal, per-template elapsed-time reminder: administrators and the owner choose a duration in minutes for each ordinary template, and the person who puts that exact scene on air receives the reminder only if it is still visible. Reminder deadlines persist across a bridge restart. A `longRunning: true` logo or ticker is always excluded, so 24/7 graphics do not create operator noise. Version 5.7.5 keeps the output-source alarm, Cinegy SRT failover, and role-aware full-status probe from 5.7.4. It also persists timed-show auto-hide deadlines, restores them after a bridge restart, and verifies the tracked scene before hiding. Scheduled events remain in the durable schedule store across bridge restarts; at the timer moment the current template definition is checked again, then the live Cinegy layer is verified immediately before SHOW.
 
 The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
 
@@ -303,8 +303,11 @@ section) so it survives reboots and restarts itself if it ever crashes.
 Only one bridge may run at a time: a second instance would compete for
 `getUpdates` and make Telegram return 409 Conflict, so startup takes a
 global mutex and any extra instance exits immediately with a line in the
-log. **Stop the service before running manually.** (`-AllowMultipleInstances`
-overrides this if you ever genuinely need two, e.g. two different bots.)
+log. If Windows cannot create or acquire that mutex, the default is tolerant:
+the bridge logs a warning and continues. Add `-RequireSingleInstance` when a
+deployment must refuse startup unless the lock is enforceable. **Stop the
+service before running manually.** (`-AllowMultipleInstances` overrides this
+if you ever genuinely need two, e.g. two different bots.)
 
 ### 4. Make it run like a service (auto-start, auto-restart)
 

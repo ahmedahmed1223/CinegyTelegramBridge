@@ -38,6 +38,10 @@ function Receive-TelegramDocument {
     if ([string]::IsNullOrWhiteSpace($remotePath) -or $remotePath.Contains('..') -or $remotePath -notmatch '^[A-Za-z0-9_./-]+$') {
         throw 'Telegram أعاد مسار ملف غير صالح.'
     }
+    $reportedSize = Get-JsonProp $result 'file_size'
+    if ($null -ne $reportedSize -and ([long]$reportedSize -le 0 -or [long]$reportedSize -gt $MaximumBytes)) {
+        throw "حجم ملف الاستيراد غير صالح ($reportedSize بايت)."
+    }
     $directory = Split-Path -Parent $DestinationPath
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     Invoke-WebRequest -Uri "https://api.telegram.org/file/bot$($config.BotToken)/$remotePath" -OutFile $DestinationPath `

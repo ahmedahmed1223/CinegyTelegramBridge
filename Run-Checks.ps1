@@ -107,12 +107,26 @@ else {
     # PowerShell 7 reads UTF-8 without BOM correctly. The bridge also keeps one
     # private XML helper with a domain-specific verb. Exclude those intentional
     # style choices so every reported warning is actionable.
-    # dist/ and artifacts/ hold built copies of *previous* releases. Scanning
-    # them reports findings already fixed in the working tree, which is how a
-    # stale $Event kept being reported after it had been renamed here.
-    $results = @(Invoke-ScriptAnalyzer -Path $root -Recurse -Severity Error, Warning `
-            -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs |
-            Where-Object { $_.ScriptPath -notlike "$root\dist\*" -and $_.ScriptPath -notlike "$root\artifacts\*" })
+    # Scan source and test files explicitly. dist/, artifacts/, logs/, and the
+    # *.backups runtime folders can contain old builds, generated data, or
+    # ACL-protected secrets; recursively scanning the repository root lets
+    # those files hide the real analyzer result behind an access error.
+    $analyzerPaths = @(
+        @($powerShellFiles | ForEach-Object { Join-Path $root $_ })
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'Parts') -Filter '*.ps1' -File | Select-Object -ExpandProperty FullName)
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'Tests') -Filter '*.ps1' -File | Select-Object -ExpandProperty FullName)
+    )
+    $analyzerErrors = @()
+    $results = @()
+    foreach ($analyzerPath in $analyzerPaths) {
+        $results += @(Invoke-ScriptAnalyzer -Path $analyzerPath -Severity Error, Warning -ErrorVariable +analyzerErrors `
+                -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs)
+    }
+    if ($analyzerErrors.Count -gt 0) {
+        $failed = $true
+        Write-Host "  FAIL  PSScriptAnalyzer could not complete:" -ForegroundColor Red
+        foreach ($errorRecord in $analyzerErrors) { Write-Host "        $($errorRecord.Exception.Message)" -ForegroundColor Red }
+    }
     if ($results) {
         # Warnings fail the gate too. The five rules above are excluded as
         # deliberate style, so anything still reported here is actionable -
@@ -124,7 +138,7 @@ else {
             Format-Table Severity, ScriptName, Line, RuleName, Message -AutoSize -Wrap | Out-String | Write-Host
         Write-Host "  $($results.Count) finding(s), $errorCount error(s)" -ForegroundColor Red
     }
-    else {
+    elseif ($analyzerErrors.Count -eq 0) {
         Write-Host "  ok    no findings" -ForegroundColor Green
     }
 }
@@ -145,6 +159,10 @@ else {
     $cfg.Run.Path = Join-Path $root 'Tests'
     $cfg.Output.Verbosity = 'Detailed'
     $cfg.Run.PassThru = $true
+    # The bridge tests do not use Pester's registry drive. Keeping it off makes
+    # the validation command work for locked-down service identities as well
+    # as for an interactive administrator account.
+    $cfg.TestRegistry.Enabled = $false
     if (-not [string]::IsNullOrWhiteSpace($TestResultPath)) {
         $resultDirectory = Split-Path $TestResultPath -Parent
         if ($resultDirectory -and -not (Test-Path -LiteralPath $resultDirectory)) { New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null }

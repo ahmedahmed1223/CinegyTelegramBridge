@@ -676,17 +676,18 @@ function Get-OtherBridgeProcess {
     <#
         Every other process running this same script.
 
-        Matched on "-File ...TelegramBridge.ps1" and never on the folder name:
-        this repository is called CinegyTelegramBridge, so a filter on the
-        name alone also matches an editor, a test run, or the very tooling
-        that went looking - and none of those is what anybody means by "stop
-        the other instance".
+        Matched on this bridge's complete -File path. Matching only the
+        TelegramBridge.ps1 name can stop an unrelated checkout or station.
 
         Own PID excluded, for the obvious reason.
     #>
     try {
+        $scriptPath = [string]$script:BridgeLaunch.ScriptPath
+        if ([string]::IsNullOrWhiteSpace($scriptPath)) { return @() }
+        $pathPattern = [regex]::Escape([IO.Path]::GetFullPath($scriptPath))
+        $filePattern = '(?i)(?:^|\s)-File\s+(?:"' + $pathPattern + '"|' + $pathPattern + ')(?=\s|$)'
         return @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" -ErrorAction Stop |
-                Where-Object { [int]$_.ProcessId -ne $PID -and [string]$_.CommandLine -match '-File\s+"?[^"]*TelegramBridge\.ps1' } |
+                Where-Object { [int]$_.ProcessId -ne $PID -and [string]$_.CommandLine -match $filePattern } |
                 ForEach-Object {
                     [pscustomobject]@{
                         ProcessId   = [int]$_.ProcessId
@@ -745,6 +746,17 @@ function Get-BridgeRelaunchCommand {
         $arguments += @('-RuntimePath', (& $quote ([string]$script:BridgeLaunch.RuntimePath)))
     }
     if ($script:BridgeLaunch.AllowMultipleInstances) { $arguments += '-AllowMultipleInstances' }
+    $requireSingleInstance = $false
+    if ($script:BridgeLaunch -is [System.Collections.IDictionary]) {
+        if ($script:BridgeLaunch.Contains('RequireSingleInstance')) {
+            $requireSingleInstance = [bool]$script:BridgeLaunch['RequireSingleInstance']
+        }
+    }
+    else {
+        $property = $script:BridgeLaunch.PSObject.Properties['RequireSingleInstance']
+        if ($property) { $requireSingleInstance = [bool]$property.Value }
+    }
+    if ($requireSingleInstance) { $arguments += '-RequireSingleInstance' }
 
     return [pscustomobject]@{
         FilePath         = $exe
@@ -841,6 +853,50 @@ function Invoke-SettingsExport {
     return [bool]$sent
 }
 
+function ConvertTo-ImportedSettingValue {
+    <# Validate the exact JSON type before a settings import reaches the live
+       configuration. In particular, [bool]'false' is $true in PowerShell. #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)]$Value)
+    $default = $script:DefaultSettings[$Name]
+    if ($default -is [bool]) {
+        if ($Value -isnot [bool]) { throw "الخيار $Name يجب أن يكون true أو false." }
+        return [bool]$Value
+    }
+    if ($default -is [int]) {
+        if ($Value -isnot [int] -and $Value -isnot [long]) { throw "الخيار $Name يجب أن يكون رقمًا صحيحًا." }
+        if ([long]$Value -lt 0 -or [long]$Value -gt [int]::MaxValue) { throw "قيمة الخيار $Name خارج الحدود المسموحة." }
+        return [int]$Value
+    }
+    if ($default -is [double]) {
+        if ($Value -isnot [int] -and $Value -isnot [long] -and $Value -isnot [double] -and $Value -isnot [decimal]) { throw "الخيار $Name يجب أن يكون رقمًا." }
+        if ([double]$Value -lt 0) { throw "قيمة الخيار $Name خارج الحدود المسموحة." }
+        return [double]$Value
+    }
+    if ($Value -isnot [string]) { throw "الخيار $Name يجب أن يكون نصًا." }
+    if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw "قيمة الخيار $Name غير مسموحة." }
+    return [string]$Value
+}
+
+function Apply-SettingsImport {
+    param([Parameter(Mandatory)][object[]]$Changes)
+    $original = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    $updated = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    foreach ($change in $Changes) {
+        $updated | Add-Member -NotePropertyName ([string]$change.Name) -NotePropertyValue $change.To -Force
+    }
+    $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $updated -Force
+    # Save-Config communicates persistence failure through this flag rather
+    # than a return value. Clear a stale failure from an earlier operation
+    # before attempting this transaction.
+    $script:LastConfigSaveFailed = $false
+    Save-Config
+    if ($script:LastConfigSaveFailed) {
+        $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $original -Force
+        return $false
+    }
+    return $true
+}
+
 function Test-SettingsImport {
     <# Validates an exported settings document before anything is applied, and
        reports what would change. An unknown key is refused rather than
@@ -860,9 +916,11 @@ function Test-SettingsImport {
         if (-not $script:DefaultSettings.Contains($property.Name)) {
             return [pscustomobject]@{ Success = $false; Error = "خيار غير معروف في الملف: $($property.Name)"; Changes = @() }
         }
+        try { $value = ConvertTo-ImportedSettingValue -Name $property.Name -Value $property.Value }
+        catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Changes = @() } }
         $current = Get-Setting $property.Name
-        if ([string]$current -eq [string]$property.Value) { continue }
-        $changes.Add([pscustomobject]@{ Name = $property.Name; From = $current; To = $property.Value })
+        if ([string]$current -eq [string]$value) { continue }
+        $changes.Add([pscustomobject]@{ Name = $property.Name; From = $current; To = $value })
     }
     return [pscustomobject]@{ Success = $true; Error = ''; Changes = @($changes) }
 }
@@ -873,7 +931,7 @@ function Receive-SettingsImport {
     Clear-PendingState -ChatId $ChatId
     $staged = Join-Path $script:logDir "template-imports/settings-$([guid]::NewGuid().ToString('N')).json"
     try {
-        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $staged -MaximumBytes 262144 | Out-Null
+        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $staged -MaximumBytes $script:SettingsImportMaximumBytes | Out-Null
         $validation = Test-SettingsImport -Path $staged
         if (-not $validation.Success) { throw $validation.Error }
         if (@($validation.Changes).Count -eq 0) {
@@ -902,13 +960,18 @@ function Confirm-SettingsImport {
         Send-TelegramMessage -ChatId $ChatId -Text 'انتهت مراجعة الاستيراد أو تغيّرت. ابدأ من جديد.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    $script:PendingSettingsImport = $null
-    Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
     if ($Cancel) {
+        $script:PendingSettingsImport = $null
+        Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
         Send-TelegramMessage -ChatId $ChatId -Text '❌ أُلغي الاستيراد؛ لم يتغيّر شيء.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    foreach ($change in @($pending.Changes)) { Set-Setting -Name ([string]$change.Name) -Value $change.To }
+    if (-not (Apply-SettingsImport -Changes @($pending.Changes))) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ استيراد الإعدادات؛ لم يُطبّق أي تغيير.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $script:PendingSettingsImport = $null
+    Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
     Write-BridgeLog "Admin $UserId imported $(@($pending.Changes).Count) setting(s)" 'WARN'
     Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - user $UserId"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
@@ -1049,7 +1112,7 @@ function Test-TemplateRegistryImport {
     param([Parameter(Mandatory)][string]$Path)
     try {
         $rawText = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-        if ([Text.Encoding]::UTF8.GetByteCount($rawText) -gt 1048576) { throw 'الملف أكبر من 1 ميغابايت.' }
+        if ([Text.Encoding]::UTF8.GetByteCount($rawText) -gt $script:TemplateRegistryImportMaximumBytes) { throw 'الملف أكبر من 10 ميغابايت.' }
         $document = $rawText | ConvertFrom-Json -ErrorAction Stop
         $properties = @($document.PSObject.Properties)
         if ($properties.Count -eq 0 -or $properties.Count -gt 200) { throw 'يجب أن يحتوي السجل بين قالب واحد و200 قالب.' }
@@ -1097,7 +1160,7 @@ function Start-TemplateRegistryImport {
     }
     Clear-PendingState -ChatId $ChatId
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_import_upload'; UserId=$UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text '📥 أرسل ملف JSON واحدًا (بحد أقصى 1 ميغابايت). سيُفحص ويُعرض الفرق قبل أي استبدال.' -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text '📥 أرسل ملف JSON واحدًا (بحد أقصى 10 ميغابايت). سيُفحص ويُعرض الفرق قبل أي استبدال.' -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Invoke-TemplateRegistryExport {
@@ -1116,14 +1179,14 @@ function Receive-TemplateRegistryImport {
         -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
     $fileName = [string](Get-JsonProp $Document 'file_name')
     $fileSize = [long](Get-JsonProp $Document 'file_size')
-    if (-not $fileName.EndsWith('.json', [StringComparison]::OrdinalIgnoreCase) -or $fileSize -le 0 -or $fileSize -gt 1048576) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ يجب رفع ملف JSON حجمه بين 1 بايت و1 ميغابايت.' -ReplyMarkup (Get-CancelKeyboard)
+    if (-not $fileName.EndsWith('.json', [StringComparison]::OrdinalIgnoreCase) -or $fileSize -le 0 -or $fileSize -gt $script:TemplateRegistryImportMaximumBytes) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ يجب رفع ملف JSON حجمه بين 1 بايت و10 ميغابايت.' -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     $stagingDirectory = Join-Path $script:logDir 'template-imports'
     $stagedPath = Join-Path $stagingDirectory "staged-$([guid]::NewGuid().ToString('N')).json"
     try {
-        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $stagedPath -MaximumBytes 1048576 | Out-Null
+        Receive-TelegramDocument -FileId ([string](Get-JsonProp $Document 'file_id')) -DestinationPath $stagedPath -MaximumBytes $script:TemplateRegistryImportMaximumBytes | Out-Null
         $validation = Test-TemplateRegistryImport -Path $stagedPath
         if (-not $validation.Success) { throw $validation.Error }
         $current = Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json

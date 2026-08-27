@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.7.9 — 2026-08-27
+
+- **Keeps self-service access requests enabled by default while restricting approval controls to administrators and the owner.** Operators can still request access; only the authorized management roles see and can use the approval entry point.
+- **Makes single-instance startup tolerant by default.** If Windows cannot enforce the mutex, the bridge continues with a warning; `-RequireSingleInstance` is available for deployments that must refuse startup when the lock cannot be verified.
+- **Hardens settings imports.** JSON values are type-checked, all changes are saved in one transaction, and failed persistence restores the in-memory settings.
+- **Raises the fixed JSON upload limits to 10 MiB.** Settings and template-registry imports now allow larger files for installations with many templates; the configurable news-import limit is unchanged.
+- Rejects Telegram documents that already report an invalid size before downloading them, and makes analyzer execution failures fail the validation gate instead of reporting a misleading clean result.
+- Adds regression coverage for exact bridge-process matching, role-gated approval visibility, typed/atomic settings import, and pre-download size limits.
+
 ## 5.7.7 — 2026-08-27
 
 - **Enforces the role hierarchy `owner > administrator > operator`.** A configured owner inherits every administrator permission even when their id is not duplicated in `AdminUserIds`; administrators still cannot appoint or remove administrators or use other owner-only actions.

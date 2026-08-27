@@ -53,7 +53,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.7.3'
+$script:BridgeVersion = '5.7.4'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -196,6 +196,7 @@ $script:DefaultSettings = [ordered]@{
     OneHandMode                = $false  # one full-width button per row, for thumb-only use
     EnableTextShortcuts        = $false  # let a bare template name start a show
     OutputMonitorMinutes       = 60      # look at the actual picture this often; 0 disables
+    OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting administrators
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
@@ -281,6 +282,7 @@ $script:SettingDisplayMetadata = @{
     OneHandMode = @{ Unit = ''; Description = 'زر واحد بعرض الشاشة في كل صف (استخدام بيد واحدة)' }
     EnableTextShortcuts = @{ Unit = ''; Description = 'كتابة اسم القالب مباشرة لبدء عرضه' }
     OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
+    OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
@@ -636,6 +638,9 @@ $script:LastUploadSweep = [datetime]::MinValue
 # and nobody is watching for the alert anyway.
 $script:LastOutputMonitorAt = Get-Date
 $script:OutputBlackAlerted = $false
+$script:OutputMonitorFailureCount = 0
+$script:OutputMonitorFailureAlerted = $false
+$script:OutputMonitorFallbackActive = $false
 $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.

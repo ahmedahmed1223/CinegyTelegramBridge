@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.7.4 — 2026-08-27
+
+- **Turns an unreachable output source into an actionable alarm.** The output watchdog previously returned quietly whenever ffmpeg could not capture a frame, deliberately avoiding a false "black" claim but leaving a stopped HLS origin invisible to Telegram. It now counts consecutive capture failures and alerts administrators at `OutputMonitorFailureAlertThreshold` (default 2), once per outage, with one recovery notice when the primary source is captured again.
+- **Adds automatic Cinegy SRT failover.** `LiveStream.BackupSourceType` and `LiveStream.BackupSourceUrl` define an optional standby source. After the primary source reaches the failure threshold, snapshots and the live relay use the standby; an already-running relay is restarted so ffmpeg opens the new input. The primary remains the only health probe, and a successful primary capture returns the bridge to it.
+- The deployed configuration uses Cinegy Playout instance 0's local feedback stream, `srt://127.0.0.1:5421`, as the standby source. It was verified by capturing a real frame with ffmpeg before release.
+- Adds regression coverage for unavailable-source alerts, fallback selection, one-time switching, and restoration to the primary source.
+
 ## 5.7.3 — 2026-08-26
 
 - **Fixes the duration formatting that 5.7.2 claimed to fix.** `Format-DurationSeconds` only promoted a value to minutes when it divided exactly by sixty, so the status screen still reported "منذ 107775 ثانية" for a ticker that had been up for a day. Uptime and scene age are almost never a round number of minutes, which is to say the fix reached almost nothing. Promotion now happens whenever there are enough seconds: leftover seconds are kept below an hour, where "دقيقة و30 ثانية" is useful, and dropped above it, where they are noise beside a day. Found reviewing 5.7.2, reported by the operator on the running channel within the hour.

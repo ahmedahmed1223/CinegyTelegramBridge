@@ -4669,8 +4669,17 @@ Describe 'Layer removal confirmation' {
 
 Describe 'Black output watchdog' {
     BeforeEach {
+        $script:OriginalLiveStreamForWatchdog = $config.LiveStream
+        $config.LiveStream = [pscustomobject]@{
+            SourceType = 'm3u8'; SourceUrl = 'https://primary.example/stream.m3u8'
+            BackupSourceType = 'srt'; BackupSourceUrl = 'srt://127.0.0.1:5421'
+            RtmpDestination = ''; VideoBitrateKbps = 2500; CopyCodec = $false
+        }
         $script:LastOutputMonitorAt = [datetime]::MinValue
         $script:OutputBlackAlerted = $false
+        $script:OutputMonitorFailureCount = 0
+        $script:OutputMonitorFailureAlerted = $false
+        $script:OutputMonitorFallbackActive = $false
         Mock Write-BridgeLog {}
         Mock Add-AuditEntry {}
         Mock Send-AdminBroadcast {}
@@ -4683,6 +4692,10 @@ Describe 'Black output watchdog' {
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'OutputBlackConfirmSeconds' }
         Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NotifyOperatorsOnBlackOutput' }
+    }
+
+    AfterEach {
+        $config.LiveStream = $script:OriginalLiveStreamForWatchdog
     }
 
     It 'alerts only after a second capture confirms the black' {
@@ -4750,6 +4763,74 @@ Describe 'Black output watchdog' {
         Update-OutputBlackWatchdog
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'alerts administrators after the configured consecutive capture failures' {
+        # Removing the failure counter or its threshold check must make this fail:
+        # a stopped source must produce one actionable administrator alert.
+        Mock Get-MonitorFrame { $null }
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+
+        Update-OutputBlackWatchdog
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFailureAlerted | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تعذّر' }
+    }
+
+    It 'reports availability recovery when no backup source is configured' {
+        $config.LiveStream.BackupSourceUrl = ''
+        Mock Get-MonitorFrame { $null }
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+
+        Update-OutputBlackWatchdog
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        Mock Get-MonitorFrame { 'frame.jpg' }
+        Mock Get-BridgeFrameLuminance { 140 }
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFailureAlerted | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'عاد الوصول' }
+    }
+
+    It 'uses the configured Cinegy source while fallback is active' {
+        $script:OutputMonitorFallbackActive = $true
+
+        $active = Get-ActiveLiveStreamConfig
+
+        $active.SourceType | Should -Be 'srt'
+        $active.SourceUrl | Should -Be 'srt://127.0.0.1:5421'
+    }
+
+    It 'switches once to the Cinegy backup after sustained primary failure' {
+        # Removing the fallback switch leaves the relay and snapshots on a dead
+        # primary source, so this must fail when that state transition is lost.
+        Mock Get-MonitorFrame { $null }
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+
+        Update-OutputBlackWatchdog
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFallbackActive | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الاحتياطي' }
+    }
+
+    It 'returns to the primary source when it can be captured again' {
+        $script:OutputMonitorFallbackActive = $true
+        $script:OutputMonitorFailureAlerted = $true
+        $script:OutputMonitorFailureCount = 2
+        Mock Get-MonitorFrame { 'frame.jpg' }
+        Mock Get-BridgeFrameLuminance { 140 }
+
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFallbackActive | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الأساسي' }
     }
 }
 

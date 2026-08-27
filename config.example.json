@@ -61,6 +61,7 @@
     "SnapshotCooldownSeconds": 10,
     "SnapshotTimeoutSeconds": 8,
     "SnapshotRetentionMinutes": 30,
+    "OutputMonitorFailureAlertThreshold": 2,
     "AutoHideDefaultSeconds": 10,
     "AutoHidePresetSeconds": "5,10,15,30,60,120",
     "RelayAutoRestart": true,
@@ -109,6 +110,8 @@
   "LiveStream": {
     "SourceType": "m3u8",
     "SourceUrl": "https://your-source/stream.m3u8",
+    "BackupSourceType": "srt",
+    "BackupSourceUrl": "srt://127.0.0.1:5421",
     "RtmpDestination": "",
     "VideoBitrateKbps": 2500,
     "CopyCodec": false

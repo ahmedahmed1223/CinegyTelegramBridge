@@ -13,7 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 4.2.44
+## Version 5.7.4
+
+Version 5.7.4 detects an unreachable output source separately from a confirmed black frame. After the configured number of consecutive capture failures (default `2`), it alerts administrators and automatically switches the snapshots and Telegram relay to an optional Cinegy SRT backup. When the primary source is captured again, it switches back and sends one recovery alert. A relay that is already running restarts briefly so ffmpeg opens the selected source.
+
+The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
+
+## Previous release history
 
 Version 4.2.44 updates restored external on-air records in place when Cinegy later exposes the actual `.cintitle` filename, so main-menu hide buttons no longer retain a legacy generic layer-event label.
 Status now presents each active scene with its layer, source, elapsed time, operator Alias or Cinegy event metadata; full status is grouped into operational sections. Administrators can edit or delete each user's Alias directly from user management.
@@ -555,17 +561,24 @@ main menu.
    stock ffmpeg handles them natively with no extra build.
 2. **Set the source** in `config.json`'s `LiveStream` block:
    ```json
-   "LiveStream": {
-     "SourceType": "m3u8",
-     "SourceUrl": "https://your-source/stream.m3u8",
-     "RtmpDestination": "",
+    "LiveStream": {
+      "SourceType": "m3u8",
+      "SourceUrl": "https://your-source/stream.m3u8",
+      "BackupSourceType": "srt",
+      "BackupSourceUrl": "srt://127.0.0.1:5421",
+      "RtmpDestination": "",
      "VideoBitrateKbps": 2500,
      "CopyCodec": false
    }
    ```
    - `SourceType`: `m3u8` (HLS), `srt`, or `ndi`.
-   - `SourceUrl`: the HLS URL, `srt://host:port?...` URL, or NDI source
-     name, matching `SourceType`.
+    - `SourceUrl`: the HLS URL, `srt://host:port?...` URL, or NDI source
+      name, matching `SourceType`.
+    - `BackupSourceType` / `BackupSourceUrl`: optional standby input. After
+      `OutputMonitorFailureAlertThreshold` consecutive failed primary captures,
+      the bridge uses it for snapshots and the Telegram relay; it returns to the
+      primary after a successful primary capture. For Cinegy Playout instance
+      `N` on the same machine, use `srt://127.0.0.1:<5421+N>`.
    - `VideoBitrateKbps`: target bitrate when re-encoding (default 2500).
    - `CopyCodec`: set to `true` to pass the stream through with `-c copy`
      (no re-encoding — much lighter on CPU) *if* your source is already

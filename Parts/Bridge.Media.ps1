@@ -20,6 +20,59 @@ function Get-LiveStreamConfig {
     return $ls
 }
 
+function Get-BackupLiveStreamConfig {
+    <# Returns the optional standby input without changing the configured
+       primary source. An empty BackupSourceUrl explicitly disables failover. #>
+    $primary = Get-LiveStreamConfig
+    $backupUrl = [string](Get-JsonProp $primary 'BackupSourceUrl')
+    if ([string]::IsNullOrWhiteSpace($backupUrl)) { return $null }
+    $backupType = [string](Get-JsonProp $primary 'BackupSourceType')
+    if ([string]::IsNullOrWhiteSpace($backupType)) { $backupType = 'srt' }
+    return [pscustomobject]@{
+        SourceType = $backupType
+        SourceUrl = $backupUrl
+        RtmpDestination = [string](Get-JsonProp $primary 'RtmpDestination')
+        VideoBitrateKbps = Get-JsonProp $primary 'VideoBitrateKbps'
+        CopyCodec = Get-JsonProp $primary 'CopyCodec'
+    }
+}
+
+function Get-ActiveLiveStreamConfig {
+    $primary = Get-LiveStreamConfig
+    if (-not $script:OutputMonitorFallbackActive) { return $primary }
+    $backup = Get-BackupLiveStreamConfig
+    if ($backup) { return $backup }
+    return $primary
+}
+
+function Set-OutputMonitorFallbackActive {
+    param([Parameter(Mandatory)][bool]$Active)
+    if ($script:OutputMonitorFallbackActive -eq $Active) { return $false }
+    if ($Active -and -not (Get-BackupLiveStreamConfig)) { return $false }
+    $script:OutputMonitorFallbackActive = $Active
+
+    # A relay process receives its input only when it starts, so an active
+    # relay must be relaunched for the source selection to take effect.
+    if ($script:RelayState.ShouldRun) {
+        $running = Get-RunningRelayProcess
+        if ($running) { Stop-Process -Id $running.Id -Force -ErrorAction SilentlyContinue }
+        Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue
+        $script:RelayState.Process = $null
+        try {
+            Start-RelayProcess | Out-Null
+            $script:RelayState.Restarts = 0
+            $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
+            $script:RelayState.NotifyChatId = 0
+        }
+        catch {
+            $script:RelayState.ShouldRun = $false
+            Write-BridgeLog "Live relay source switch failed: $($_.Exception.Message)" 'ERROR'
+            Send-AdminBroadcast -Text '❌ تعذرت إعادة تشغيل البث بعد تبديل المصدر.' -Urgent
+        }
+    }
+    return $true
+}
+
 function Get-FfmpegPath {
     $cmd = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
@@ -86,7 +139,7 @@ function Start-SnapshotJob {
         return
     }
 
-    $ls = Get-LiveStreamConfig
+    $ls = Get-ActiveLiveStreamConfig
     $sourceUrl = [string]$ls.SourceUrl
     if ([string]::IsNullOrWhiteSpace($sourceUrl)) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ LiveStream.SourceUrl غير مضبوط في config.json." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -234,7 +287,34 @@ function Update-OutputBlackWatchdog {
     $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
 
     $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
-    if (-not $firstPath) { return }
+    if (-not $firstPath) {
+        $script:OutputMonitorFailureCount++
+        $failureThreshold = [math]::Max(1, (Get-SettingInt 'OutputMonitorFailureAlertThreshold' 2))
+        if (-not $script:OutputMonitorFailureAlerted -and $script:OutputMonitorFailureCount -ge $failureThreshold) {
+            $script:OutputMonitorFailureAlerted = $true
+            Write-BridgeLog "Output monitor source unavailable for $($script:OutputMonitorFailureCount) consecutive capture(s)" 'WARN'
+            Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $($script:OutputMonitorFailureCount) مرات متتالية"
+            if (Set-OutputMonitorFallbackActive -Active $true) {
+                Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى المصدر الأساسي بعد $($script:OutputMonitorFailureCount) محاولات متتالية.`nتم التحويل إلى مصدر Cinegy الاحتياطي." -Urgent
+            }
+            else {
+                Send-OutputMonitorFailureNotification -FailureCount $script:OutputMonitorFailureCount
+            }
+        }
+        return
+    }
+    if ($script:OutputMonitorFailureCount -gt 0) {
+        if ($script:OutputMonitorFallbackActive) {
+            if (Set-OutputMonitorFallbackActive -Active $false) {
+                Send-AdminBroadcast -Text '💡 عاد المصدر الأساسي؛ تمت العودة إليه من مصدر Cinegy الاحتياطي.' -Urgent
+            }
+        }
+        elseif ($script:OutputMonitorFailureAlerted) {
+            Send-OutputMonitorFailureNotification -Recovered
+        }
+        $script:OutputMonitorFailureCount = 0
+        $script:OutputMonitorFailureAlerted = $false
+    }
     $first = Get-BridgeFrameLuminance -Path $firstPath
     Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue
     if ($null -eq $first) { return }
@@ -264,6 +344,19 @@ function Update-OutputBlackWatchdog {
     Write-BridgeLog "Output confirmed black across two captures (luma $first then $second)" 'WARN'
     Add-AuditEntry "🖤 تأكيد شاشة سوداء على المخرج (سطوع $second)"
     Send-OutputBlackNotification -Luminance $second
+}
+
+function Send-OutputMonitorFailureNotification {
+    <# Reports a sustained inability to capture the configured output source,
+       separately from the confirmed-black picture alarm. #>
+    param([int]$FailureCount = 0, [switch]$Recovered)
+    $text = if ($Recovered) {
+        '💡 عاد الوصول إلى مخرج البث بعد تعذّر التقاطه.'
+    }
+    else {
+        "⚠️ تعذّر الوصول إلى مخرج البث بعد $FailureCount محاولات متتالية.`nتحقّق من رابط المصدر وخادم البث."
+    }
+    Send-AdminBroadcast -Text $text -Urgent
 }
 
 function Send-OutputBlackNotification {
@@ -379,7 +472,7 @@ function Get-LiveRelayStatusText {
 }
 
 function Build-RelayArguments {
-    $ls = Get-LiveStreamConfig
+    $ls = Get-ActiveLiveStreamConfig
     $rtmp = [string]$ls.RtmpDestination
     if ([string]::IsNullOrWhiteSpace($rtmp)) { throw "لم يتم ضبط رابط RTMP بعد - استخدم زر 🔗 رابط البث أولًا." }
     $sourceUrl = [string]$ls.SourceUrl

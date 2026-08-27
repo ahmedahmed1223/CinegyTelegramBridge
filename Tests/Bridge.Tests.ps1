@@ -1663,6 +1663,21 @@ Describe 'Template catalogue administration' {
     BeforeEach {
         Mock Send-TelegramMessage { }
         Mock Test-Admin { $true }
+        # The function reads the template store; do not depend on the live
+        # templates.json (it is machine-local and not committed to the repo,
+        # so it is absent on CI and the index-0 lookup returns $null there).
+        # Seed a stable fake so the assertion is deterministic everywhere.
+        Mock Get-TemplateByIndex -ParameterFilter { $Index -eq 0 } -MockWith {
+            [pscustomobject]@{
+                Key         = 'urgent'
+                Path        = 'titles/urgent.cintitle'
+                Layer       = 4
+                Order       = 1
+                Description = 'قالب عاجل للاختبار'
+                Fields      = @('Headline.Text')
+                Presets     = @()
+            }
+        }
     }
 
     It 'shows read-only template details while full management is disabled' {

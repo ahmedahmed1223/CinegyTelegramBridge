@@ -13,10 +13,10 @@ The solution adds installation, service ownership, data migration, secure local 
 ## Architecture
 
 ```text
-Desktop Window (WPF, .NET 8)
+Desktop Window (WPF, .NET 10 LTS)
     │  named-pipe JSON RPC + per-install secret
     ▼
-Windows Service (Worker Service, .NET 8)
+Windows Service (Worker Service, .NET 10 LTS)
     │  supervised local worker protocol
     ▼
 PowerShell Bridge Runtime (existing TelegramBridge.ps1 initially)
@@ -38,9 +38,9 @@ Standalone Updater (Updater.exe)
 | `CinegyBridge.Contracts` | Versioned request, response, event, error, and role contracts shared by desktop and service. |
 | `CinegyBridge.RuntimeHost` | Service-side adapter that starts and observes the existing PowerShell runtime in phase one, then hosts migrated .NET capabilities incrementally. |
 | `CinegyBridge.Updater` | Separate executable used only during updates so in-use service files can be replaced safely. |
-| `installer` | Signed setup package; installs app, service, updater, shortcuts, and migration wizard. |
+| `installer` | WiX Toolset MSI/Burn bundle; installs app, service, updater, .NET Desktop Runtime prerequisites, shortcuts, and migration wizard. |
 
-The desktop process connects only to a named pipe owned by the local service. The pipe accepts the current Windows user only when the per-install secret and Windows access policy both validate. It is never exposed on the network.
+The desktop process connects only to a named pipe owned by the local service. The pipe ACL admits only configured Windows security identifiers. A per-install secret is generated with cryptographically secure randomness, protected with Windows DPAPI, and stored in a file whose ACL grants only the service identity, local owners, and `SYSTEM`. The pipe accepts the current Windows user only when Windows identity, role policy, and the protected secret all validate. It is never exposed on the network.
 
 ## Data and migration
 
@@ -57,7 +57,7 @@ All mutable data lives below:
   runtime\
 ```
 
-The installer detects an existing project-local bridge configuration, Scheduled Task, NSSM service, and currently running bridge process. It displays the detected items and does nothing until the operator confirms migration. Migration copies state to a timestamped backup, validates JSON, writes the new data store, and leaves the legacy installation intact until the new service has passed a health check. It never automatically stops the existing bot.
+The WiX Burn bootstrapper detects an existing project-local bridge configuration, Scheduled Task, NSSM service, and currently running bridge process. It displays the detected items and does nothing until the operator confirms migration. Migration copies state to a timestamped backup, validates JSON, applies versioned and transactional data migrations, writes the new data store, and leaves the legacy installation intact until the new service has passed a health check. A failed data migration restores the previous files. It never automatically stops the existing bot.
 
 ## Service operation
 
@@ -84,11 +84,13 @@ The WPF navigation has these pages:
 
 Dashboard is deliberately action-oriented: active alerts and safe next actions are visible first. On-air controls and template administration are separate pages. Destructive or live-impacting actions use a review screen that states the target, current state, initiating Windows user, and backup consequence.
 
-## Local authorization
+## Local authorization and identity separation
 
 The service identifies the connected Windows user from the named pipe identity. Read-only monitoring is allowed to configured local viewer accounts. Live operations and configuration require local operator/admin permissions. Owner-only actions retain the existing rule: owner > administrator > operator. An owner inherits administrator capabilities; an administrator never inherits owner-only role-management capabilities.
 
-The initial setup wizard creates the first local owner from the installing Windows account. Existing Telegram owner configuration is preserved and remains authoritative for Telegram operations. Every desktop action is written to the existing audit trail with the Windows identity and, where applicable, the matching Telegram identity.
+Windows desktop roles and Telegram roles are separate authorization domains. A Windows account receives no Telegram permission merely because it can open the desktop, and a Telegram administrator receives no local Windows permission automatically. The initial setup wizard creates the first local owner from the installing Windows account. Existing Telegram owner configuration is preserved and remains authoritative for Telegram operations.
+
+An owner may explicitly link a Windows security identifier to a Telegram user id for unified audit display; linking never grants permissions across domains. Every desktop action is written to the existing audit trail with the Windows identity and, where available, the linked Telegram identity.
 
 ## Updates
 
@@ -96,7 +98,7 @@ The initial setup wizard creates the first local owner from the installing Windo
 
 GitHub Releases is the initial update source. A future private web endpoint uses the same manifest contract and is selected through configuration; the desktop is not coupled to GitHub APIs outside the release-source adapter.
 
-The update manifest contains version, release channel, published time, asset URI, SHA-256, Authenticode certificate subject/thumbprint, minimum supported database/configuration version, and release notes. The desktop compares stable releases by default; preview releases require explicit opt-in.
+The update manifest contains version, release channel, published time, asset URI, SHA-256, Authenticode certificate subject/thumbprint, signing-key id, minimum supported application and data-schema versions, and release notes. The desktop compares stable releases by default; preview releases require explicit opt-in.
 
 ### Trust and rollback
 
@@ -106,8 +108,11 @@ An update is accepted only when all checks pass:
 2. SHA-256 equals the signed manifest value.
 3. Authenticode signature chains to the configured trusted publisher.
 4. Package version and compatibility requirements are valid.
+5. The target version is newer than the installed version; downgrade requires an explicit owner-authorized recovery operation.
 
 `Updater.exe` receives a short-lived, one-use plan from the service. It takes a versioned backup, stops the service, applies the package, starts the service, and waits for a bounded health check. If the service does not report healthy, it restores binaries and state and starts the previous version. The update is refused while a live-sensitive operation is in progress unless the owner explicitly confirms it.
+
+Trusted signing keys are identified in an embedded trust store. Key rotation requires an update signed by the currently trusted key and carrying the next public certificate identity; an arbitrary manifest cannot replace the trust root. Revoked key ids are persisted and cannot be re-enabled by an older package.
 
 ## Test and CI strategy
 
@@ -123,20 +128,21 @@ An update is accepted only when all checks pass:
 
 The existing CI lifecycle script runs only with fake credentials and an isolated `ProgramData` workspace. It never reads or writes production `config.json`, logs, schedules, or templates.
 
-## Delivery phases
+## Incremental releases
 
-1. **Foundation:** .NET solution, contracts, ProgramData layout, installer skeleton, named-pipe security, service installation and readiness page.
-2. **Runtime compatibility:** service host for the current PowerShell bridge, health/events, dashboard, logs, safe service operations, data migration.
-3. **Operational desktop:** layers, templates, schedules, monitoring, users, role checks, backups, and diagnostics through the local protocol.
-4. **Updater:** GitHub release adapter, signed manifest validation, local package support, updater process, rollback, update UI.
-5. **Hardening:** staging mode, full Windows CI, migration tests, installer upgrade tests, documentation, and signed stable release.
+1. **Preview 1 — Service foundation:** .NET 10 solution, contracts, ProgramData layout, WiX installer, DPAPI/ACL-protected named pipe, service installation, readiness, and service repair. Deliverable: installable service and desktop shell with automated lifecycle tests.
+2. **Preview 2 — Runtime compatibility:** supervised host for the current PowerShell bridge, health/events, dashboard, logs, safe service operations, transactional data migration, and staging guard. Deliverable: the existing Telegram bot runs unattended under the new service and remains observable from the desktop.
+3. **Preview 3 — Operational desktop:** layers, templates, schedules, monitoring, users, separate local/Telegram role checks, backups, and diagnostics through the local protocol. Deliverable: all existing operational features are available locally while Telegram remains compatible.
+4. **Release candidate — Updates:** GitHub release adapter, signed manifest validation, key rotation, downgrade prevention, local package support, updater process, rollback, and update UI. Deliverable: signed online and offline update workflows with failure recovery tests.
+5. **Stable release:** full Windows CI, migration and installer-upgrade matrix, accessibility and localization review, documentation, signed installer, and production acceptance test. Deliverable: supported stable installation package.
 
 ## Non-negotiable constraints
 
-- Target Windows 10/11 and .NET 8 LTS.
+- Target supported Windows 10/11 editions and .NET 10 LTS (`net10.0-windows`).
+- Use WPF for the desktop and WiX Toolset MSI/Burn for installation and prerequisites.
 - The desktop window must never be required for Telegram or monitoring to remain active.
 - No service, updater, or installer action may overwrite or stop a detected legacy bridge without explicit confirmation.
 - No local RPC endpoint may listen on a network interface.
-- Every update path requires trusted signing plus SHA-256 validation.
+- Every update path requires trusted signing plus SHA-256 validation, downgrade prevention, and controlled signing-key rotation.
 - Testing mode blocks Cinegy on-air actions by default.
 - Existing Telegram commands, persisted timers, schedules, reminders, source failover, and role behavior remain compatible.

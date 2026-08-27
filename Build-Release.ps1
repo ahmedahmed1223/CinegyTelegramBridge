@@ -26,7 +26,7 @@ $allowList = @(
     'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1', 'Modules\BridgeTelegram.psm1', 'Modules\BridgeAuthorization.psm1', 'Modules\BridgeFlowState.psm1', 'Modules\BridgeCinegyState.psm1', 'Modules\BridgeSchedulePolicy.psm1', 'Modules\BridgeMedia.psm1', 'Modules\BridgeRelayPolicy.psm1', 'Modules\BridgeRuntimeState.psm1', 'Modules\BridgeNewsTicker.psm1',
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
-    'Run-Checks.ps1', 'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'Modules\BridgeInstall.psm1',
+    'Run-Checks.ps1', 'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1',
     'config.example.json', 'templates.example.json',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md'
 )

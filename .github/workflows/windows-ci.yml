@@ -18,6 +18,9 @@ jobs:
       - name: Run parser, analyzer, and tests
         shell: pwsh
         run: .\Run-Checks.ps1 -TestResultPath .\artifacts\pester-results.xml
+      - name: Verify managed service lifecycle
+        shell: pwsh
+        run: .\scripts\Test-ServiceLifecycle.ps1
       - name: Build allow-listed release package
         shell: pwsh
         run: .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release

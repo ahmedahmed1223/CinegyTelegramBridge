@@ -17,10 +17,17 @@ Describe 'Release package safety' {
         $names | Should -Contain 'config.example.json'
         $names | Should -Contain 'templates.example.json'
         $names | Should -Contain 'release-manifest.json'
+        $names | Should -Contain 'scripts/Test-ServiceLifecycle.ps1'
         foreach ($forbidden in @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json')) {
             $names | Should -Not -Contain $forbidden
         }
         @($names | Where-Object { $_ -match '(^|/)(logs|artifacts|backups?)(/|$)|\.(bak|tmp|log|jsonl)$' }).Count | Should -Be 0
+    }
+
+    It 'runs the managed-service lifecycle check in Windows CI' {
+        $workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\windows-ci.yml') -Raw
+
+        $workflow | Should -Match 'Test-ServiceLifecycle\.ps1'
     }
 
     It 'publishes a matching SHA-256 checksum and unsigned manifest when no certificate is requested' {

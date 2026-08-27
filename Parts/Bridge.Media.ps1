@@ -177,6 +177,7 @@ function Start-SnapshotJob {
 
     $script:SnapshotJobs.Add(@{
             Proc = $proc; ChatId = $ChatId; UserId = $UserId; OutPath = $outPath; ErrLog = $errLog
+            SourceIsPrimary = (-not $script:OutputMonitorFallbackActive)
             Deadline = (Get-Date).AddSeconds($timeout)
         })
     Send-TelegramMessage -ChatId $ChatId -Text "⏳ جاري التقاط صورة من البث..."
@@ -187,14 +188,17 @@ function Update-SnapshotJobs {
        ones that overran their deadline. #>
     if ($script:SnapshotJobs.Count -eq 0) { return }
     $done = @()
+    $retryRequests = @()
     foreach ($job in $script:SnapshotJobs) {
         $expired = (Get-Date) -gt $job.Deadline
         if (-not $job.Proc.HasExited -and -not $expired) { continue }
 
+        $failed = $false
         if (-not $job.Proc.HasExited) {
             Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
-            Send-TelegramMessage -ChatId $job.ChatId -Text "❌ انتهت مهلة التقاط الصورة - تأكد أن المصدر قابل للوصول." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            $failed = $true
+            $msg = "❌ انتهت مهلة التقاط الصورة - تأكد أن المصدر قابل للوصول."
         }
         elseif ($job.Proc.ExitCode -ne 0 -or -not (Test-Path $job.OutPath)) {
             $detail = Get-LastErrorLine -Path $job.ErrLog
@@ -203,7 +207,21 @@ function Update-SnapshotJobs {
             if ($detail) { $msg += "`nسبب ffmpeg: $detail" }
             # Clean up the partial/zero-byte output ffmpeg may have left behind.
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
-            Send-TelegramMessage -ChatId $job.ChatId -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            $failed = $true
+        }
+
+        if ($failed) {
+            $backup = Get-BackupLiveStreamConfig
+            if ($job.SourceIsPrimary -and $backup -and (Set-OutputMonitorFallbackActive -Active $true)) {
+                # The operator asked for a picture, so do not make them wait for
+                # the hourly watchdog. Retry this same request from Cinegy's
+                # standby input after switching the active source.
+                $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId }
+                Send-TelegramMessage -ChatId $job.ChatId -Text '⚠️ تعذّر التقاط الأساسي؛ أجرب الآن مصدر Cinegy الاحتياطي.'
+            }
+            else {
+                Send-TelegramMessage -ChatId $job.ChatId -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            }
         }
         else {
             # Retain only the newest frame for the cooldown cache.
@@ -222,6 +240,7 @@ function Update-SnapshotJobs {
         $done += $job
     }
     foreach ($job in $done) { $script:SnapshotJobs.Remove($job) | Out-Null }
+    foreach ($request in $retryRequests) { Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId }
 }
 
 function Get-MonitorFrame {
@@ -290,11 +309,17 @@ function Update-OutputBlackWatchdog {
     if (-not $firstPath) {
         $script:OutputMonitorFailureCount++
         $failureThreshold = [math]::Max(1, (Get-SettingInt 'OutputMonitorFailureAlertThreshold' 2))
-        if (-not $script:OutputMonitorFailureAlerted -and $script:OutputMonitorFailureCount -ge $failureThreshold) {
+        $backup = Get-BackupLiveStreamConfig
+        # A configured standby is actionable immediately. Waiting for the
+        # generic alert threshold would leave snapshots and an already-running
+        # relay on a dead primary for another watchdog interval.
+        $shouldSwitch = $backup -and -not $script:OutputMonitorFallbackActive -and -not $script:OutputMonitorFailureAlerted
+        $shouldAlert = -not $script:OutputMonitorFailureAlerted -and $script:OutputMonitorFailureCount -ge $failureThreshold
+        if ($shouldSwitch -or $shouldAlert) {
             $script:OutputMonitorFailureAlerted = $true
             Write-BridgeLog "Output monitor source unavailable for $($script:OutputMonitorFailureCount) consecutive capture(s)" 'WARN'
             Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $($script:OutputMonitorFailureCount) مرات متتالية"
-            if (Set-OutputMonitorFallbackActive -Active $true) {
+            if ($shouldSwitch -and (Set-OutputMonitorFallbackActive -Active $true)) {
                 Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى المصدر الأساسي بعد $($script:OutputMonitorFailureCount) محاولات متتالية.`nتم التحويل إلى مصدر Cinegy الاحتياطي." -Urgent
             }
             else {

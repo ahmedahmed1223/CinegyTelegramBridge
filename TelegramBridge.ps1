@@ -196,7 +196,7 @@ $script:DefaultSettings = [ordered]@{
     OneHandMode                = $false  # one full-width button per row, for thumb-only use
     EnableTextShortcuts        = $false  # let a bare template name start a show
     OutputMonitorMinutes       = 60      # look at the actual picture this often; 0 disables
-    OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting administrators
+    OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
@@ -282,7 +282,7 @@ $script:SettingDisplayMetadata = @{
     OneHandMode = @{ Unit = ''; Description = 'زر واحد بعرض الشاشة في كل صف (استخدام بيد واحدة)' }
     EnableTextShortcuts = @{ Unit = ''; Description = 'كتابة اسم القالب مباشرة لبدء عرضه' }
     OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
-    OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف' }
+    OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
@@ -636,7 +636,9 @@ $script:LastUploadSweep = [datetime]::MinValue
 # Seeded to now, not MinValue: the first output check should land one interval
 # after launch rather than during startup, when the source may not be up yet
 # and nobody is watching for the alert anyway.
-$script:LastOutputMonitorAt = Get-Date
+# Probe immediately after startup so a stopped primary cannot keep operator
+# snapshots on the dead source until the normal monitor interval elapses.
+$script:LastOutputMonitorAt = [datetime]::MinValue
 $script:OutputBlackAlerted = $false
 $script:OutputMonitorFailureCount = 0
 $script:OutputMonitorFailureAlerted = $false

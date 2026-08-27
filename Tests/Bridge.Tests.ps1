@@ -4758,11 +4758,25 @@ Describe 'Black output watchdog' {
     }
 
     It 'stays quiet when the capture itself failed, rather than assuming black' {
+        # Without a configured backup there is no safe source to switch to;
+        # a failed probe must remain quiet until the consecutive-failure alert.
+        $config.LiveStream.BackupSourceUrl = ''
         Mock Get-MonitorFrame { $null }
 
         Update-OutputBlackWatchdog
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'switches to the Cinegy backup after the first failed primary probe' {
+        # A stopped primary must not leave operator snapshots pointed at the
+        # dead M3U8 until the next hourly watchdog cycle.
+        Mock Get-MonitorFrame { $null }
+
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFallbackActive | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الاحتياطي' }
     }
 
     It 'alerts administrators after the configured consecutive capture failures' {

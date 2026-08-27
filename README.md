@@ -15,7 +15,7 @@ long-polling loop.
 
 ## Version 5.7.4
 
-Version 5.7.4 detects an unreachable output source separately from a confirmed black frame. After the configured number of consecutive capture failures (default `2`), it alerts administrators and automatically switches the snapshots and Telegram relay to an optional Cinegy SRT backup. When the primary source is captured again, it switches back and sends one recovery alert. A relay that is already running restarts briefly so ffmpeg opens the selected source.
+Version 5.7.4 detects an unreachable output source separately from a confirmed black frame. With a backup configured, the first failed primary probe immediately switches snapshots and the Telegram relay to the optional Cinegy SRT input; without a backup, administrators are alerted after the configured consecutive-failure threshold (default `2`). A relay that is already running restarts briefly so ffmpeg opens the selected source. When the primary source is captured again, it switches back and sends one recovery alert.
 
 The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
 
@@ -574,10 +574,9 @@ main menu.
    - `SourceType`: `m3u8` (HLS), `srt`, or `ndi`.
     - `SourceUrl`: the HLS URL, `srt://host:port?...` URL, or NDI source
       name, matching `SourceType`.
-    - `BackupSourceType` / `BackupSourceUrl`: optional standby input. After
-      `OutputMonitorFailureAlertThreshold` consecutive failed primary captures,
-      the bridge uses it for snapshots and the Telegram relay; it returns to the
-      primary after a successful primary capture. For Cinegy Playout instance
+     - `BackupSourceType` / `BackupSourceUrl`: optional standby input. The first
+       failed primary probe switches snapshots and the Telegram relay to it; the
+       bridge returns to the primary after a successful primary capture. For Cinegy Playout instance
       `N` on the same machine, use `srt://127.0.0.1:<5421+N>`.
    - `VideoBitrateKbps`: target bitrate when re-encoding (default 2500).
    - `CopyCodec`: set to `true` to pass the stream through with `-c copy`

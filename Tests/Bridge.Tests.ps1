@@ -1763,6 +1763,21 @@ Describe 'Template catalogue administration' {
         }
     }
 
+    It 'lets an administrator choose the default scene mode from constrained settings' {
+        $original = Get-Setting 'SceneMode'
+        Mock Save-Config { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+
+        try {
+            $script:SettingChoices['SceneMode'] | Should -Be @('Single', 'Multi')
+            Set-SettingChoice -Name 'SceneMode' -Index 1 -ChatId 100 -UserId 100
+            Get-Setting 'SceneMode' | Should -Be 'Multi'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'SceneMode' -NotePropertyValue $original -Force }
+    }
+
     It 'lets an explicit owner who is not an administrator open a template reminder' {
         Mock Confirm-TelegramCallback { }
         Mock Test-Authorized { $true }
@@ -2088,7 +2103,7 @@ Describe 'Simple and full status reports' {
             $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4' -and
                 $Text -match '📺 المشاهد النشطة' -and $Text -match '🎛 اتصال Cinegy' -and
                 $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول' -and
-                $Text -match 'وضع المشاهد: Single'
+                $Text -match 'وضع المشاهد المختار: Single'
         }
     }
 

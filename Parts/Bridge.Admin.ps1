@@ -537,9 +537,11 @@ function Invoke-FullStatusCommand {
     $lines.Add('')
     $lines.Add('🎛 اتصال Cinegy')
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $configuredSceneMode = [string](Get-Setting 'SceneMode')
     $sceneCapabilities = Get-CinegySceneCapabilities
-    $sceneMode = Test-BridgeSceneMode -RequestedMode ([string](Get-Setting 'SceneMode')) -Capabilities $sceneCapabilities
-    $lines.Add("🧩 وضع المشاهد: $($sceneMode.Mode) · $($(if ($sceneMode.Verified) { 'تم التحقق' } else { 'غير متاح حالياً' }))")
+    $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
+    $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
+    $lines.Add("🧩 وضع المشاهد المختار: $configuredSceneMode · $verification")
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)

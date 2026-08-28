@@ -271,6 +271,7 @@ $script:SettingsImportMaximumBytes = 10 * 1024 * 1024
 $script:TemplateRegistryImportMaximumBytes = 10 * 1024 * 1024
 
 $script:SettingDisplayMetadata = @{
+    SceneMode = @{ Unit = ''; Description = 'وضع المشاهد الافتراضي: مشهد واحد أو عدة مشاهد على الطبقة' }
     AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
     TelegramRequestTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة إرسال رسائل وملفات Telegram' }
     MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }
@@ -769,6 +770,7 @@ $script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests
 # updating, so the choice is constrained rather than free text.
 $script:SettingChoices = @{
     AirVariableType = @('Text', 'String', 'Bool', 'Float')
+    SceneMode = @('Single', 'Multi')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -795,6 +797,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
+                'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
                 'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs',
@@ -854,6 +857,7 @@ foreach ($entry in @(
 }
 
 $script:SettingNavigationLabels = @{
+    SceneMode = 'وضع المشاهد'
     RequireUserLevelAuth = 'التحقق من هوية المستخدم'
     EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
     EnableRawCommand = 'الأوامر الخام للمشرف'

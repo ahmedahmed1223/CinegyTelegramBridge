@@ -83,6 +83,9 @@ PowerShell وTelegram وCinegy وملفات `config.json` و`templates.json` ا�
 
 ## مهام Version 6 اللاحقة
 
+خطة التنفيذ الكاملة، المقسمة إلى مهام واختبارات وcommits مستقلة، موجودة في
+[`docs/superpowers/plans/2026-08-28-version-6-completion-roadmap.md`](superpowers/plans/2026-08-28-version-6-completion-roadmap.md).
+
 1. إضافة نموذج موحد لدورة العملية ورقم correlation ظاهر للمشغل.
 2. بناء طابور محدود لكل طبقة مع بقاء HIDE/EXIT في المسار الطارئ.
 3. دمج ترحيل الحالة مع النسخ الذرية والاستعادة من آخر نسخة سليمة.

@@ -139,4 +139,21 @@ function Get-BridgePrimarySceneForLayer {
     return @(Get-BridgeLiveScenesForLayer -State $State -Layer $Layer | Select-Object -First 1)[0]
 }
 
-Export-ModuleMember -Function ConvertTo-BridgeLiveSceneState, Get-BridgeLiveScenes, Get-BridgeLiveScenesForLayer, Get-BridgeLiveScene, Get-BridgePrimarySceneForLayer
+function Test-BridgeSceneMode {
+    param(
+        [ValidateSet('Single', 'Multi')][string]$RequestedMode = 'Single',
+        [Parameter(Mandatory)]$Capabilities
+    )
+    $verified = [bool](Get-BridgeLiveSceneValue -Object $Capabilities -Name 'Verified')
+    if ($RequestedMode -eq 'Multi' -and $verified) {
+        return [pscustomobject]@{ Mode = 'Multi'; Verified = $true; Error = '' }
+    }
+    $error = if ($RequestedMode -eq 'Multi') {
+        $detail = [string](Get-BridgeLiveSceneValue -Object $Capabilities -Name 'Error')
+        if ([string]::IsNullOrWhiteSpace($detail)) { 'وضع المشاهد المتعددة غير متاح حتى يثبت Cinegy الهوية والاستهداف المباشر.' } else { "وضع المشاهد المتعددة غير متاح: $detail" }
+    }
+    else { '' }
+    return [pscustomobject]@{ Mode = 'Single'; Verified = $verified; Error = $error }
+}
+
+Export-ModuleMember -Function ConvertTo-BridgeLiveSceneState, Get-BridgeLiveScenes, Get-BridgeLiveScenesForLayer, Get-BridgeLiveScene, Get-BridgePrimarySceneForLayer, Test-BridgeSceneMode

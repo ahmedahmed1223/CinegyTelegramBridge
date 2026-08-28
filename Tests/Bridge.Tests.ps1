@@ -2087,7 +2087,8 @@ Describe 'Simple and full status reports' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4' -and
                 $Text -match '📺 المشاهد النشطة' -and $Text -match '🎛 اتصال Cinegy' -and
-                $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول'
+                $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول' -and
+                $Text -match 'وضع المشاهد: Single'
         }
     }
 

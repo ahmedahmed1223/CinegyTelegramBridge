@@ -142,6 +142,7 @@ $script:DefaultSettings = [ordered]@{
     EnableLiveRelay            = $true
     EnableTimedShow            = $true
     EnableHideAll              = $true
+    SceneMode                  = 'Single' # Multi remains capability-gated and fails closed
     HideAllLayers              = 'all'  # all, or a comma-separated administrator-selected layer list
     ReservedLayers             = ''     # layers where SHOW is blocked; HIDE/EXIT remain available
     DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW

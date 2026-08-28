@@ -505,6 +505,40 @@ function Get-AirTelemetryStatus {
     }
 }
 
+function Get-CinegySceneCapabilities {
+    <#
+        Determines whether a Cinegy response is sufficient for safely enabling
+        independent scene actions. The currently documented status endpoint
+        exposes one layer-level Active item only, so callers without an
+        explicit multi-item probe receive a fail-closed result.
+    #>
+    param(
+        [object[]]$SceneItems = @(),
+        [bool]$DirectTargetSupported = $false
+    )
+    $items = @($SceneItems)
+    $identities = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $stable = $items.Count -ge 2
+    foreach ($item in $items) {
+        $property = $item.PSObject.Properties['SceneId']
+        $id = if ($null -eq $property) { '' } else { [string]$property.Value }
+        if ([string]::IsNullOrWhiteSpace($id) -or -not $identities.Add($id.Trim())) {
+            $stable = $false
+            break
+        }
+    }
+    $verified = $stable -and $DirectTargetSupported
+    $error = if ($verified) { '' }
+    elseif (-not $stable) { 'Cinegy لم يثبت قائمة مشاهد مستقلة بهويات ثابتة.' }
+    else { 'Cinegy لم يثبت إمكانية استهداف مشهد محدد مباشرة.' }
+    return [pscustomobject]@{
+        CanListScenes = $stable
+        CanTargetScene = $DirectTargetSupported
+        Verified = $verified
+        Error = $error
+    }
+}
+
 # Escape-XmlValue is an implementation detail. Tests exercise it inside the
 # module scope so importing the module exposes only its supported commands.
-Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus
+Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus, Get-CinegySceneCapabilities

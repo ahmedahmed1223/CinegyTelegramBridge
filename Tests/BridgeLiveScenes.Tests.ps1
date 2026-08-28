@@ -3,6 +3,7 @@
 BeforeAll {
     $modulePath = Join-Path $PSScriptRoot '..\Modules\BridgeLiveScenes.psm1'
     Import-Module $modulePath -Force
+    Import-Module (Join-Path $PSScriptRoot '..\Modules\CinegyAirTitler.psm1') -Force
 }
 
 Describe 'Bridge live scene state' {
@@ -69,5 +70,16 @@ Describe 'Bridge live scene state' {
         $state.Scenes[0].ChatId | Should -Be 22
         $state.Scenes[0].TemplatePath | Should -Be $templatePath
         $state.Scenes[0].LastVerifiedAtUtc | Should -Be '2026-08-28T12:00:00Z'
+    }
+
+    It 'fails closed for Multi mode until Cinegy lists stable identities and accepts direct targeting' {
+        $oneScene = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ SceneId = 'one' }) -DirectTargetSupported $false
+        $unidentified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Name = 'one' }, [pscustomobject]@{ Name = 'two' }) -DirectTargetSupported $true
+        $verified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ SceneId = 'one' }, [pscustomobject]@{ SceneId = 'two' }) -DirectTargetSupported $true
+
+        (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $oneScene).Mode | Should -Be 'Single'
+        (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $unidentified).Mode | Should -Be 'Single'
+        (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $verified).Mode | Should -Be 'Multi'
+        $verified.Verified | Should -BeTrue
     }
 }

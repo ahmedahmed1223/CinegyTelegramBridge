@@ -3678,6 +3678,18 @@ Describe 'On-air identity persistence' {
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
     }
 
+    It 'reads the canonical scene envelope through the legacy one-record layer view' {
+        @{ SchemaVersion = 1; Scenes = @(
+            @{ SceneId = 'legacy-4'; Layer = 4; Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{CANONICAL}'; Source = 'bridge' }
+        ) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:onAirFile -Encoding utf8
+
+        Import-OnAirState
+
+        $OnAir.ContainsKey(4) | Should -BeTrue
+        $OnAir[4].Key | Should -Be 'urgent'
+        $OnAir[4].ActiveId | Should -Be '{CANONICAL}'
+    }
+
     It 'restores on-air state from the last validated backup when the primary JSON is corrupt' {
         $OnAir[4] = @{ Key = 'urgent'; At = Get-Date; UserId = 20; ActiveId = '{SAFE}' }
         Save-OnAirState

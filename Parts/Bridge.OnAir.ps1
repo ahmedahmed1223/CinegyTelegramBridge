@@ -59,20 +59,26 @@ function Import-OnAirState {
         $read = Read-ValidatedJsonState -Path $onAirFile
         if (-not $read) { return }
         $raw = $read.Data
-        foreach ($prop in $raw.PSObject.Properties) {
-            $layer = 0
-            if (-not [int]::TryParse($prop.Name, [ref]$layer)) { continue }
+        $sceneState = ConvertTo-BridgeLiveSceneState -Document $raw
+        if (-not $sceneState.Success) { throw "invalid live-scene state: $($sceneState.Error)" }
+        foreach ($layer in @($sceneState.Scenes.Layer | Sort-Object -Unique)) {
+            $scene = Get-BridgePrimarySceneForLayer -State $sceneState -Layer ([int]$layer)
+            if ($null -eq $scene) { continue }
             $at = Get-Date
             $parsedAt = [datetime]::MinValue
-            if ([datetime]::TryParse([string](Get-JsonProp $prop.Value 'At'), [ref]$parsedAt)) { $at = $parsedAt }
+            if ([datetime]::TryParse([string]$scene.At, [ref]$parsedAt)) { $at = $parsedAt }
             $script:OnAir[$layer] = @{
-                Key    = [string](Get-JsonProp $prop.Value 'Key')
+                Key    = [string]$scene.Key
                 At     = $at
-                UserId = [long](Get-JsonProp $prop.Value 'UserId')
-                ActiveId = [string](Get-JsonProp $prop.Value 'ActiveId')
-                Source = if (Get-JsonProp $prop.Value 'Source') { [string](Get-JsonProp $prop.Value 'Source') } else { 'bridge' }
+                UserId = [long]$scene.UserId
+                ActiveId = [string]$scene.ActiveId
+                Source = [string]$scene.Source
             }
         }
+        # Rewrite a valid legacy file only after it was successfully converted
+        # and loaded. Write-ValidatedJsonState creates the backup before its
+        # atomic replacement, leaving the primary untouched on any failure.
+        if ($raw.PSObject.Properties.Match('Scenes').Count -eq 0) { Save-OnAirState }
         if ($script:OnAir.Count -gt 0) { Write-BridgeLog "Restored on-air record for $($script:OnAir.Count) layer(s) from the previous run" }
     }
     catch { Write-BridgeLog "Could not read onair.json: $($_.Exception.Message)" "WARN" }
@@ -124,7 +130,9 @@ function Save-OnAirState {
                 Source = if (Get-JsonProp $info 'Source') { [string](Get-JsonProp $info 'Source') } else { 'bridge' }
             }
         }
-        $json = $out | ConvertTo-Json -Depth 4
+        $canonical = ConvertTo-BridgeLiveSceneState -Document $out
+        if (-not $canonical.Success) { throw "invalid live-scene state: $($canonical.Error)" }
+        $json = [ordered]@{ SchemaVersion = 1; Scenes = @($canonical.Scenes) } | ConvertTo-Json -Depth 6
         Write-BridgeLog "Writing validated onair payload (size: $($json.Length) chars)" "DEBUG"
         if (-not (Write-ValidatedJsonState -Path $onAirFile -Json $json)) { throw 'validated state write failed' }
         # Log a successful write so operators can see when the onair.json was updated.

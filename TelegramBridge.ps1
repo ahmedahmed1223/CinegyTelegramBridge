@@ -77,6 +77,7 @@ Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeStateMigration.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeLiveScenes.psm1") -Force
 
 $script:ProcessedUpdateLedger = New-BridgeUpdateLedger -Capacity 4096
 

@@ -354,6 +354,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticsCommand -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:healthcenter' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-HealthCenterCommand -ChatId $chatId -UserId $userId }
+            break
+        }
         'diag:bundle' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticBundleCommand -ChatId $chatId -UserId $userId }
             break
@@ -503,6 +507,14 @@ function Invoke-CallbackQuery {
         }
         'menu:usersadmin' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'userspage:*' {
+            $page = 0
+            if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
+                [int]::TryParse((Get-CallbackArg $data 'userspage:'), [ref]$page) -and $page -ge 0) {
+                Show-UsersAdminScreen -ChatId $chatId -UserId $userId -Page $page
+            }
             break
         }
         'usr:toggle:*' {
@@ -682,6 +694,14 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'tadmpage:*' {
+            $page = 0
+            if ((Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) -and
+                [int]::TryParse((Get-CallbackArg $data 'tadmpage:'), [ref]$page) -and $page -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId -Page $page)
+            }
+            break
+        }
         'timport:export' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-TemplateRegistryExport -ChatId $chatId -UserId $userId }
             break
@@ -792,6 +812,14 @@ function Invoke-CallbackQuery {
         'menu:pending' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Send-TelegramMessage -ChatId $chatId -Text "طلبات الوصول المعلّقة:" -ReplyMarkup (Get-PendingKeyboard)
+            }
+            break
+        }
+        'pendingpage:*' {
+            $page = 0
+            if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
+                [int]::TryParse((Get-CallbackArg $data 'pendingpage:'), [ref]$page) -and $page -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text 'طلبات الوصول المعلّقة:' -ReplyMarkup (Get-PendingKeyboard -Page $page)
             }
             break
         }

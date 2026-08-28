@@ -216,7 +216,7 @@ function Get-AdminToolsKeyboard {
     }
 
     $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
-    $rows += , @( (New-Button "📈 أرقام التشغيل" "menu:stats") )
+    $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
     $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
     if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart") ) }
     $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
@@ -224,6 +224,14 @@ function Get-AdminToolsKeyboard {
     $rows += , $adminRow
     $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-HealthCenterKeyboard {
+    return @{ inline_keyboard = @(
+            , @((New-Button '🔄 تحديث' 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
+            , @((New-Button '🧪 التشخيص' 'menu:diagnostics'))
+            , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
+        ) }
 }
 
 function Get-TemplateCategories {
@@ -388,10 +396,18 @@ function Get-UsersAdminKeyboard {
     <# The promote/demote row is drawn only for an owner. An administrator who
        cannot use it should not be looking at it: a button that always answers
        "not allowed" is worse than no button at all. #>
-    param([long]$ViewerUserId = 0)
+    param(
+        [long]$ViewerUserId = 0,
+        [int]$Page = 0,
+        [ValidateRange(1, 15)][int]$PageSize = 10
+    )
     $isOwner = $ViewerUserId -gt 0 -and (Test-Owner -ChatId $ViewerUserId -UserId $ViewerUserId)
     $rows = @()
-    foreach ($user in @(Get-AuthorizedUsers)) {
+    $users = @(Get-AuthorizedUsers)
+    $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $user = $users[$index]
         $role = switch ($user.Role) { 'owner' { '👑 مالك' } 'admin' { 'مشرف' } default { 'مشغّل' } }
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
         $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
@@ -409,20 +425,28 @@ function Get-UsersAdminKeyboard {
                     }))
         }
         $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "userspage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "userspage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "userspage:$($window.Page + 1)") }
+        $rows += , $pager
     }
     $rows += , @((New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
 function Show-UsersAdminScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -le 0) { $UserId = $ChatId }
     $roleLine = if (Test-Owner -ChatId $ChatId -UserId $UserId) {
         "`n👑 بصفتك المالك يمكنك ترقية مشغّل إلى مشرف أو خفضه."
     }
     else { '' }
     Send-TelegramMessage -ChatId $ChatId -Text ("👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد.$roleLine") `
-        -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId)
+        -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
 }
 
 function Start-UserAliasEdit {
@@ -689,11 +713,24 @@ function Get-ApprovalKeyboard {
 }
 
 function Get-PendingKeyboard {
+    param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
     $rows = @()
-    foreach ($id in @($script:PendingApprovals.Keys)) {
+    $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
+    $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $id = $ids[$index]
         $info = $script:PendingApprovals[$id]
         $label = if ($info.Name) { "$($info.Name)" } else { "$id" }
         $rows += , @( (New-Button "✅ $label" "approve:$id"), (New-Button "❌" "reject:$id") )
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "pendingpage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "pendingpage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "pendingpage:$($window.Page + 1)") }
+        $rows += , $pager
     }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button "لا توجد طلبات معلّقة حاليًا" "menu") ) }
     else { $rows += , @( (New-Button "⬅️ رجوع" "menu") ) }
@@ -706,27 +743,15 @@ function Get-SettingCategoryDefinitions {
 
 function Get-SettingNavigationMetadata {
     param([Parameter(Mandatory)][string]$Name)
-    $category = if ($script:SettingCategoryByName.ContainsKey($Name)) {
-        [string]$script:SettingCategoryByName[$Name]
-    }
-    else { 'advanced' }
-
-    $label = if ($script:SettingNavigationLabels.ContainsKey($Name)) {
-        [string]$script:SettingNavigationLabels[$Name]
-    }
-    elseif ($script:SettingDisplayMetadata.ContainsKey($Name) -and $script:SettingDisplayMetadata[$Name].Description) {
-        [string]$script:SettingDisplayMetadata[$Name].Description
-    }
-    else { $Name }
-
-    return [pscustomobject]@{ Name = $Name; Category = $category; Label = $label }
+    $record = @($script:SettingSchema | Where-Object Name -eq $Name)
+    if ($record.Count -eq 1) { return $record[0] }
+    return [pscustomobject]@{ Name = $Name; Category = 'advanced'; Label = $Name }
 }
 
 function Get-SettingsInCategory {
     param([Parameter(Mandatory)][string]$Category)
-    foreach ($name in $script:DefaultSettings.Keys) {
-        $metadata = Get-SettingNavigationMetadata -Name $name
-        if ($metadata.Category -eq $Category) { $name }
+    foreach ($record in @($script:SettingSchema)) {
+        if ($record.Category -eq $Category) { $record.Name }
     }
 }
 
@@ -805,14 +830,22 @@ function Get-SettingsCategoryKeyboard {
 }
 
 function Get-TemplateAdminCatalogueKeyboard {
-    param([long]$ChatId = 0, [long]$UserId = 0)
+    param(
+        [long]$ChatId = 0,
+        [long]$UserId = 0,
+        [int]$Page = 0,
+        [ValidateRange(1, 40)][int]$PageSize = 20
+    )
     if ($UserId -eq 0 -and $ChatId -ne 0) { $UserId = $ChatId }
     $canAdminister = ($ChatId -eq 0) -or (Test-Admin -ChatId $ChatId -UserId $UserId)
     $store = Get-TemplateStore
     $rows = @()
-    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+    $window = Get-BridgePageWindow -ItemCount $store.Order.Count -Page $Page -PageSize $PageSize
+    if ($window.EndIndex -ge $window.StartIndex) {
+    for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
         $template = $store.Map[$store.Order[$i]]
         $rows += , @( (New-Button "$($template.Key) (طبقة $($template.Layer))" "tadm:$i") )
+    }
     }
     if ($canAdminister) {
         $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
@@ -822,6 +855,13 @@ function Get-TemplateAdminCatalogueKeyboard {
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
         $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
         $rows += , @( (New-Button '📄 إضافة عبر JSON' 'tadm:createjson') )
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "tadmpage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "tadmpage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "tadmpage:$($window.Page + 1)") }
+        $rows += , $pager
     }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد قوالب صالحة' 'menu') ) }
     $rows += , @( (New-Button '⬅️ القائمة' 'menu') )

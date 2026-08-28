@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.0.0-preview.1'
+$script:BridgeVersion = '6.0.0-preview.2'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -73,6 +73,12 @@ Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeStateMigration.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
+
+$script:ProcessedUpdateLedger = New-BridgeUpdateLedger -Capacity 4096
 
 # The bridge implementation lives in Parts/*.ps1. These are dot-sourced and
 # deliberately not modules: each part shares this script's scope and
@@ -853,6 +859,14 @@ $script:SettingNavigationLabels = @{
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
 }
 
+$script:SettingSchema = @(New-BridgeSettingSchema `
+        -Defaults $script:DefaultSettings `
+        -DisplayMetadata $script:SettingDisplayMetadata `
+        -CategoryByName $script:SettingCategoryByName `
+        -Labels $script:SettingNavigationLabels `
+        -ProtectedNames $script:ProtectedSettings `
+        -Choices $script:SettingChoices)
+
 
 
 
@@ -1172,8 +1186,16 @@ try {
             Set-TelegramConnectionState -Connected:$true
             $backoffSeconds = 1
 
-            foreach ($update in $updates) {
-                $offset = [long]$update.update_id + 1
+            if ($updates.Count -gt 0) {
+                $highestUpdateId = ($updates | Measure-Object -Property update_id -Maximum).Maximum
+                $offset = [long]$highestUpdateId + 1
+            }
+
+            foreach ($update in @(Get-BridgeUpdatesForProcessing -Updates $updates)) {
+                if (-not (Test-BridgeUpdateAdmission -Ledger $script:ProcessedUpdateLedger -UpdateId ([long]$update.update_id))) {
+                    Write-BridgeLog "Skipped duplicate Telegram update $($update.update_id)" 'DEBUG'
+                    continue
+                }
 
                 $callback = Get-JsonProp $update 'callback_query'
                 if ($callback) {

@@ -7083,9 +7083,9 @@ Describe 'Confirming removal of a live graphic' {
     }
 }
 Describe 'Version 6 settings navigation schema' {
-    It 'identifies this development line as the first Version 6 preview' {
-        $script:BridgeVersion | Should -Be '6.0.0-preview.1'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.1'
+    It 'identifies the completed roadmap line as the second Version 6 preview' {
+        $script:BridgeVersion | Should -Be '6.0.0-preview.2'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.2'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -7195,6 +7195,191 @@ Describe 'Version 6 settings navigation schema' {
             Invoke-CallbackQuery -CallbackQuery $callback
 
             Should -Invoke Show-SettingsCategoryScreen -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'Version 6 Telegram update admission integration' {
+    It 'loads the operation policy and initializes a bounded processing ledger' {
+        Get-Command Get-BridgeUpdatesForProcessing -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        $script:ProcessedUpdateLedger | Should -Not -BeNullOrEmpty
+        $script:ProcessedUpdateLedger.Capacity | Should -Be 4096
+    }
+}
+
+Describe 'Version 6 administrator health center' {
+    BeforeEach {
+        $script:RuntimeState = New-BridgeRuntimeState
+        $script:RuntimeState.Monitoring.TelegramConnectionState = 'connected'
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
+        $script:OutputMonitorFailureCount = 0
+        $script:OutputMonitorFailureAlerted = $false
+        $script:OutputBlackAlerted = $false
+        $script:ScheduleEvents = @()
+    }
+
+    It 'summarizes every operational component without running a new probe' {
+        $snapshot = [pscustomobject]@{ DiskFreeGB = 10; RuntimeStorageBytes = 0L; BackupStorageBytes = 0L }
+
+        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @()
+
+        $text | Should -Match '🟢 Telegram'
+        $text | Should -Match '🟢 Cinegy'
+        $text | Should -Match 'مراقبة المخرج'
+        $text | Should -Match 'البث المرحّل'
+        $text | Should -Match 'التخزين'
+        $text | Should -Match 'الجدولة'
+    }
+
+    It 'marks disconnected Telegram and unhealthy Cinegy as red' {
+        $script:RuntimeState.Monitoring.TelegramConnectionState = 'disconnected'
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'unhealthy'
+        $snapshot = [pscustomobject]@{ DiskFreeGB = 10; RuntimeStorageBytes = 0L; BackupStorageBytes = 0L }
+
+        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @()
+
+        $text | Should -Match '🔴 Telegram'
+        $text | Should -Match '🔴 Cinegy'
+    }
+
+    It 'offers refresh full status diagnostics and return controls' {
+        $callbacks = @((Get-HealthCenterKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+
+        $callbacks | Should -Contain 'menu:healthcenter'
+        $callbacks | Should -Contain 'menu:fullstatus'
+        $callbacks | Should -Contain 'menu:diagnostics'
+        $callbacks | Should -Contain 'menu:admintools'
+    }
+
+    Context 'administrator navigation' {
+        BeforeEach {
+            Mock Confirm-TelegramCallback {}
+            Mock Test-TelegramPrivateChat { $true }
+            Mock Test-Authorized { $true }
+            Mock Update-UserLastActivity {}
+            Mock Invoke-HealthCenterCommand {}
+        }
+
+        It 'shows the health center in administrator tools' {
+            Mock Get-RunningRelayProcess { $null }
+            $callbacks = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+
+            $callbacks | Should -Contain 'menu:healthcenter'
+        }
+
+        It 'routes the health center callback only after the admin guard succeeds' {
+            Mock Test-CallbackAdmin { $true }
+            $callback = [pscustomobject]@{
+                id = 'health-center-admin'
+                from = [pscustomobject]@{ id = 101 }
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }
+                data = 'menu:healthcenter'
+            }
+
+            Invoke-CallbackQuery -CallbackQuery $callback
+
+            Should -Invoke Invoke-HealthCenterCommand -Times 1 -Exactly -ParameterFilter { $ChatId -eq 100 -and $UserId -eq 101 }
+        }
+
+        It 'rejects a forged health center callback from an operator' {
+            Mock Test-CallbackAdmin { $false }
+            $callback = [pscustomobject]@{
+                id = 'health-center-operator'
+                from = [pscustomobject]@{ id = 101 }
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }
+                data = 'menu:healthcenter'
+            }
+
+            Invoke-CallbackQuery -CallbackQuery $callback
+
+            Should -Invoke Invoke-HealthCenterCommand -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'Version 6 bounded administrator catalogues' {
+    It 'keeps one thousand templates below the Telegram button limit with absolute indexes' {
+        $map = @{}
+        $order = @(0..999 | ForEach-Object {
+                $key = 'template-{0:d4}' -f $_
+                $map[$key] = [pscustomobject]@{ Key = $key; Layer = ($_ % 20) + 1 }
+                $key
+            })
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = $map; Order = $order; Errors = @() } }
+
+        $keyboard = Get-TemplateAdminCatalogueKeyboard -Page 1 -PageSize 20
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
+        $callbacks = @($buttons.callback_data)
+
+        $buttons.Count | Should -BeLessThan 100
+        $callbacks | Should -Contain 'tadm:20'
+        $callbacks | Should -Contain 'tadmpage:0'
+        $callbacks | Should -Contain 'tadmpage:2'
+    }
+
+    It 'keeps two hundred and fifty users bounded with absolute user ids' {
+        $users = @(0..249 | ForEach-Object {
+                [pscustomobject]@{ UserId = 1000 + $_; Alias = "User $_"; Role = 'operator'; Disabled = $false; LastActivityAt = $null }
+            })
+        Mock Get-AuthorizedUsers { $users }
+        Mock Test-Owner { $false }
+
+        $keyboard = Get-UsersAdminKeyboard -ViewerUserId 9999 -Page 1 -PageSize 10
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
+        $callbacks = @($buttons.callback_data)
+
+        $buttons.Count | Should -BeLessThan 100
+        $callbacks | Should -Contain 'usr:toggle:1010'
+        $callbacks | Should -Contain 'userspage:0'
+        $callbacks | Should -Contain 'userspage:2'
+    }
+
+    It 'keeps two hundred pending access requests bounded and sorted by id' {
+        $script:PendingApprovals = @{}
+        200..1 | ForEach-Object { $script:PendingApprovals[[long]$_] = @{ Name = "Request $_" } }
+
+        $keyboard = Get-PendingKeyboard -Page 1 -PageSize 20
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
+        $callbacks = @($buttons.callback_data)
+
+        $buttons.Count | Should -BeLessThan 100
+        $callbacks | Should -Contain 'approve:21'
+        $callbacks | Should -Contain 'pendingpage:0'
+        $callbacks | Should -Contain 'pendingpage:2'
+    }
+
+    Context 'page callback routing' {
+        BeforeEach {
+            Mock Confirm-TelegramCallback {}
+            Mock Test-TelegramPrivateChat { $true }
+            Mock Test-Authorized { $true }
+            Mock Update-UserLastActivity {}
+            Mock Test-CallbackAdmin { $true }
+            Mock Test-CallbackTemplateReminderManager { $true }
+            Mock Send-TelegramMessage {}
+            Mock Show-UsersAdminScreen {}
+            Mock Get-TemplateAdminCatalogueKeyboard { @{ inline_keyboard = @() } }
+            Mock Get-PendingKeyboard { @{ inline_keyboard = @() } }
+        }
+
+        It 'routes template user and pending page callbacks to their absolute page' {
+            foreach ($case in @(
+                    @{ Data = 'tadmpage:4'; Id = 'template-page' }
+                    @{ Data = 'userspage:3'; Id = 'users-page' }
+                    @{ Data = 'pendingpage:2'; Id = 'pending-page' }
+                )) {
+                $callback = [pscustomobject]@{
+                    id = $case.Id
+                    from = [pscustomobject]@{ id = 101 }
+                    message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }
+                    data = $case.Data
+                }
+                Invoke-CallbackQuery -CallbackQuery $callback
+            }
+
+            Should -Invoke Get-TemplateAdminCatalogueKeyboard -Times 1 -Exactly -ParameterFilter { $Page -eq 4 }
+            Should -Invoke Show-UsersAdminScreen -Times 1 -Exactly -ParameterFilter { $Page -eq 3 }
+            Should -Invoke Get-PendingKeyboard -Times 1 -Exactly -ParameterFilter { $Page -eq 2 }
         }
     }
 }

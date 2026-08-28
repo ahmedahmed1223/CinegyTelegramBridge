@@ -622,6 +622,78 @@ function Get-BridgeDiagnosticsSnapshot {
     }
 }
 
+function Get-BridgeHealthCenterText {
+    param(
+        $DiagnosticsSnapshot = $null,
+        [AllowNull()][object[]]$Warnings = $null
+    )
+    if ($null -eq $DiagnosticsSnapshot) { $DiagnosticsSnapshot = Get-BridgeDiagnosticsSnapshot }
+    if (-not $PSBoundParameters.ContainsKey('Warnings')) {
+        $Warnings = @(Get-DiagnosticWarnings -Snapshot $DiagnosticsSnapshot `
+                -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
+                -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
+                -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
+    }
+    $Warnings = @($Warnings)
+
+    $telegramState = [string]$script:RuntimeState.Monitoring.TelegramConnectionState
+    $telegramLine = switch ($telegramState) {
+        'connected' { '🟢 Telegram: متصل' }
+        'disconnected' { '🔴 Telegram: غير متصل' }
+        default { '🟠 Telegram: لم تُحسم الحالة' }
+    }
+    $cinegyState = [string]$script:RuntimeState.Monitoring.CinegyHealthState
+    $cinegyLine = switch ($cinegyState) {
+        'healthy' { '🟢 Cinegy: سليم' }
+        'unhealthy' { '🔴 Cinegy: غير سليم' }
+        default { '🟠 Cinegy: الحالة غير معروفة' }
+    }
+
+    $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
+    $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
+    $monitorLine = if ($monitorDisabled) { '🟢 مراقبة المخرج: معطلة باختيار المشرف' }
+    elseif ($monitorFault) { "🔴 مراقبة المخرج: إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" }
+    else { '🟢 مراقبة المخرج: سليمة' }
+
+    $relay = $script:RuntimeState.Relay
+    $relayLine = if (-not [bool]$relay.ShouldRun) { '🟢 البث المرحّل: غير مطلوب' }
+    elseif ($relay.Process -and -not $relay.Process.HasExited) { '🟢 البث المرحّل: يعمل' }
+    else { '🔴 البث المرحّل: مطلوب لكنه متوقف' }
+
+    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
+    $storageLine = if ($Warnings.Count -gt 0) { "🟠 التخزين: $diskText — $($Warnings.Count) تحذير" } else { "🟢 التخزين: $diskText" }
+    $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
+    $scheduleLine = if (Get-Setting 'SchedulePaused') { "🟠 الجدولة: متوقفة مؤقتًا — $upcomingCount حدث قادم" } else { "🟢 الجدولة: $upcomingCount حدث قادم" }
+
+    $recentErrors = @()
+    foreach ($service in @('Telegram', 'Cinegy')) {
+        $history = $script:HealthHistory[$service]
+        if ($history.LastErrorAt -and $history.LastError) {
+            $recentErrors += "${service}: $(Protect-SensitiveText ([string]$history.LastError))"
+        }
+    }
+    $errorLine = if ($recentErrors.Count -gt 0) { "🟠 آخر الأخطاء: $($recentErrors -join ' | ')" } else { '🟢 آخر الأخطاء: لا توجد أخطاء مسجلة' }
+
+    return @(
+        '🩺 مركز صحة النظام'
+        "Bridge v$script:BridgeVersion"
+        ''
+        $telegramLine
+        $cinegyLine
+        $monitorLine
+        $relayLine
+        $storageLine
+        $scheduleLine
+        $errorLine
+    ) -join "`n"
+}
+
+function Invoke-HealthCenterCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeHealthCenterText) -ReplyMarkup (Get-HealthCenterKeyboard)
+}
+
 function Start-TemplateTestReview {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -or -not (Get-Setting 'EnableFullTemplateManagement')) { return }

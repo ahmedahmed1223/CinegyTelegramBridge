@@ -25,10 +25,10 @@
 
 **Interfaces:** Produces `Get-BridgePageWindow -ItemCount <int> -Page <int> -PageSize <int>` returning `Page`, `PageCount`, `StartIndex`, `EndIndex`, `HasPrevious`, and `HasNext`.
 
-- [ ] Test empty, first, middle, last, negative, and excessive pages using literal expected boundaries.
-- [ ] Run focused tests and verify RED.
-- [ ] Implement clamping and zero-item behavior without slicing data.
-- [ ] Run focused tests and verify GREEN.
+- [x] Test empty, first, middle, last, negative, and excessive pages using literal expected boundaries.
+- [x] Run focused tests and verify RED.
+- [x] Implement clamping and zero-item behavior without slicing data.
+- [x] Run focused tests and verify GREEN.
 
 ### Task 2: Bounded administrator catalogues
 
@@ -36,7 +36,7 @@
 
 **Interfaces:** Extends `Get-TemplateAdminCatalogueKeyboard`, `Get-UsersAdminKeyboard`, and `Get-PendingKeyboard` with optional `Page` and `PageSize`; adds `tadmpage:`, `userspage:`, and `pendingpage:` routes.
 
-- [ ] Test 1,000 templates, 250 users, and 200 requests: each first page is below 100 buttons, has a next callback, and item callbacks retain absolute identities.
-- [ ] Run focused tests and verify RED against the unbounded keyboards.
-- [ ] Slice through `Get-BridgePageWindow`, add previous/next rows, and route page callbacks through existing role guards.
-- [ ] Run focused and full tests, then update README, CHANGELOG, and `Get-WhatsNewSections` for `6.0.0-preview.2`.
+- [x] Test 1,000 templates, 250 users, and 200 requests: each first page is below 100 buttons, has a next callback, and item callbacks retain absolute identities.
+- [x] Run focused tests and verify RED against the unbounded keyboards.
+- [x] Slice through `Get-BridgePageWindow`, add previous/next rows, and route page callbacks through existing role guards.
+- [x] Run focused and full tests, then update README, CHANGELOG, and `Get-WhatsNewSections` for `6.0.0-preview.2`.

@@ -25,10 +25,10 @@
 
 **Interfaces:** Produces `New-BridgeSettingSchema` returning records with `Name`, `Default`, `ValueType`, `Category`, `Label`, `Unit`, `Description`, `Protected`, and `Choices`.
 
-- [ ] Test a protected boolean, constrained string, numeric setting, and unknown metadata fallback with literal expected records.
-- [ ] Run the focused test and verify missing-command failures.
-- [ ] Implement schema composition from explicit input maps, then initialize `$script:SettingSchema` after current metadata and make navigation helpers read it.
-- [ ] Test that schema names equal `$script:DefaultSettings.Keys` exactly and run the focused suite.
+- [x] Test a protected boolean, constrained string, numeric setting, and unknown metadata fallback with literal expected records.
+- [x] Run the focused test and verify missing-command failures.
+- [x] Implement schema composition from explicit input maps, then initialize `$script:SettingSchema` after current metadata and make navigation helpers read it.
+- [x] Test that schema names equal `$script:DefaultSettings.Keys` exactly and run the focused suite.
 
 ### Task 2: Versioned state migration primitives
 
@@ -36,7 +36,7 @@
 
 **Interfaces:** Produces `ConvertTo-BridgeStateEnvelope -Data <object> -Version <int>` and `Invoke-BridgeStateMigration -Document <object> -TargetVersion <int> -Migrations <hashtable>`.
 
-- [ ] Test legacy data as version zero, a two-step `0→1→2` migration, rejection of a missing step, and rejection of a document newer than the target.
-- [ ] Run the test and verify RED.
-- [ ] Implement an envelope `{ SchemaVersion; Data }`, sequential migration lookup by current integer version, and structured `{ Success; Version; Data; Error }` results.
-- [ ] Register new files in checks/releases and run focused tests.
+- [x] Test legacy data as version zero, a two-step `0→1→2` migration, rejection of a missing step, and rejection of a document newer than the target.
+- [x] Run the test and verify RED.
+- [x] Implement an envelope `{ SchemaVersion; Data }`, sequential migration lookup by current integer version, and structured `{ Success; Version; Data; Error }` results.
+- [x] Register new files in checks/releases and run focused tests.

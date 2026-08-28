@@ -25,10 +25,10 @@
 
 **Interfaces:** Produces `New-BridgeUpdateLedger -Capacity <int>`, `Test-BridgeUpdateAdmission -Ledger <hashtable> -UpdateId <long>`, and `Get-BridgeUpdatesForProcessing -Updates <object[]>`.
 
-- [ ] Write tests proving ids `10,10,11` admit `true,false,true`, capacity two evicts the oldest id, and callback data `hide:7` sorts before `tpl:2` without reordering equal-priority ids.
-- [ ] Run `Invoke-Pester ./Tests/BridgeOperationPolicy.Tests.ps1 -Output Detailed`; expect missing-command failures.
-- [ ] Implement the bounded ledger and a stable sort on `{ Priority; OriginalIndex }`, using priority 0 for `hide:`, `hidego:`, `exit:`, `exitgo:`, and `menu:hideall`, priority 1 for other on-air callbacks, and priority 2 otherwise.
-- [ ] Re-run the focused test; expect all policy tests to pass.
+- [x] Write tests proving ids `10,10,11` admit `true,false,true`, capacity two evicts the oldest id, and callback data `hide:7` sorts before `tpl:2` without reordering equal-priority ids.
+- [x] Run `Invoke-Pester ./Tests/BridgeOperationPolicy.Tests.ps1 -Output Detailed`; expect missing-command failures.
+- [x] Implement the bounded ledger and a stable sort on `{ Priority; OriginalIndex }`, using priority 0 for `hide:`, `hidego:`, `exit:`, `exitgo:`, and `menu:hideall`, priority 1 for other on-air callbacks, and priority 2 otherwise.
+- [x] Re-run the focused test; expect all policy tests to pass.
 
 ### Task 2: Poll-loop integration
 
@@ -36,7 +36,7 @@
 
 **Interfaces:** Consumes the Task 1 module. Produces one bounded `$script:ProcessedUpdateLedger` and a sorted/admitted update loop.
 
-- [ ] Add a test that passes a fetched batch containing admin, SHOW, then HIDE updates through the real sorter and asserts the literal id order `3,2,1`.
-- [ ] Run the test and verify it fails before module import/integration.
-- [ ] Import the module, initialize a 4096-id ledger, sort each fetched batch, and skip an update when `Test-BridgeUpdateAdmission` returns false.
-- [ ] Add the module and test to required-file, syntax, analyzer, and release allow-lists; run the focused tests.
+- [x] Add a test that passes a fetched batch containing admin, SHOW, then HIDE updates through the real sorter and asserts the literal id order `3,2,1`.
+- [x] Run the test and verify it fails before module import/integration.
+- [x] Import the module, initialize a 4096-id ledger, sort each fetched batch, and skip an update when `Test-BridgeUpdateAdmission` returns false.
+- [x] Add the module and test to required-file, syntax, analyzer, and release allow-lists; run the focused tests.

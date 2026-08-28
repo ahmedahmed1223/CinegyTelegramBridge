@@ -2,6 +2,8 @@
 
 ## 6.0.0-preview.2 — 2026-08-28
 
+The complete Version 6 delivery record and merge gate are documented in [`docs/VERSION-6.md`](docs/VERSION-6.md).
+
 - **Prioritizes emergency removal inside each Telegram update batch.** HIDE, EXIT, and hide-all callbacks run before SHOW and administration while equal-priority actions retain Telegram order. The bridge remains deliberately single-worker so shared PowerShell state is not exposed to unsafe runspace concurrency.
 - **Rejects duplicate Telegram update ids through a bounded 4,096-entry in-memory ledger.** The polling offset advances from the highest fetched id before priority ordering, avoiding offset regression when processing order changes.
 - **Adds an administrator health center.** One non-blocking screen summarizes cached Telegram and Cinegy health, output monitoring, relay state, storage warnings, pending schedules, and recent errors, with refresh, full-status, and diagnostic controls.

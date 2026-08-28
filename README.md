@@ -23,6 +23,8 @@ The 5.7.9 safety behavior remains included: self-service access requests stay en
 
 The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
 
+The complete Version 6 delivery record, compatibility promise, validation evidence, merge gate, and follow-up backlog are documented in [`docs/VERSION-6.md`](docs/VERSION-6.md).
+
 ## Previous release history
 
 Version 4.2.44 updates restored external on-air records in place when Cinegy later exposes the actual `.cintitle` filename, so main-menu hide buttons no longer retain a legacy generic layer-event label.

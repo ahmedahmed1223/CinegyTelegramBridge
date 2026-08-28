@@ -24,10 +24,10 @@
 
 **Interfaces:** Produces `Get-BridgeHealthCenterText` and `Get-HealthCenterKeyboard`.
 
-- [ ] Test literal component headings and that stale/unavailable Telegram or Cinegy data produces a non-green marker without making external calls.
-- [ ] Run the focused test and verify RED.
-- [ ] Build the summary from `$script:RuntimeState`, on-air/schedule counts, relay state, and `Get-DiagnosticWarnings`; build refresh/full-status/diagnostics/back buttons.
-- [ ] Run focused tests and verify GREEN.
+- [x] Test literal component headings and that stale/unavailable Telegram or Cinegy data produces a non-green marker without making external calls.
+- [x] Run the focused test and verify RED.
+- [x] Build the summary from `$script:RuntimeState`, on-air/schedule counts, relay state, and `Get-DiagnosticWarnings`; build refresh/full-status/diagnostics/back buttons.
+- [x] Run focused tests and verify GREEN.
 
 ### Task 2: Administrator navigation
 
@@ -35,7 +35,7 @@
 
 **Interfaces:** Produces `Invoke-HealthCenterCommand -ChatId <long> -UserId <long>` and `menu:healthcenter` routing.
 
-- [ ] Test that Admin Tools contains the health-center callback, an administrator receives the screen, and an operator cannot invoke it.
-- [ ] Run tests and verify RED.
-- [ ] Add the button, command, and guarded callback using `Test-CallbackAdmin`.
-- [ ] Run focused tests and verify GREEN.
+- [x] Test that Admin Tools contains the health-center callback, an administrator receives the screen, and an operator cannot invoke it.
+- [x] Run tests and verify RED.
+- [x] Add the button, command, and guarded callback using `Test-CallbackAdmin`.
+- [x] Run focused tests and verify GREEN.

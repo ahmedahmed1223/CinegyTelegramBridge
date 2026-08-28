@@ -14,7 +14,9 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     if (-not $versionLine) { throw 'Could not determine BridgeVersion.' }
     $Version = $versionLine.Matches[0].Groups[1].Value
 }
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version '$Version'." }
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+    throw "Invalid release version '$Version'."
+}
 
 if (-not $SkipChecks) {
     & (Join-Path $root 'Run-Checks.ps1')

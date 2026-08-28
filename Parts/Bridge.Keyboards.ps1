@@ -700,33 +700,107 @@ function Get-PendingKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
-function Get-SettingsKeyboard {
-    <# One row per setting. Booleans toggle in place (cfg:t:), numbers open a
-       "send me a value" prompt (cfg:v:). Setting names are ASCII and short, so
-       they stay well inside the 64-byte callback_data budget. #>
-    $rows = @()
+function Get-SettingCategoryDefinitions {
+    return @($script:SettingCategoryDefinitions)
+}
+
+function Get-SettingNavigationMetadata {
+    param([Parameter(Mandatory)][string]$Name)
+    $category = if ($script:SettingCategoryByName.ContainsKey($Name)) {
+        [string]$script:SettingCategoryByName[$Name]
+    }
+    else { 'advanced' }
+
+    $label = if ($script:SettingNavigationLabels.ContainsKey($Name)) {
+        [string]$script:SettingNavigationLabels[$Name]
+    }
+    elseif ($script:SettingDisplayMetadata.ContainsKey($Name) -and $script:SettingDisplayMetadata[$Name].Description) {
+        [string]$script:SettingDisplayMetadata[$Name].Description
+    }
+    else { $Name }
+
+    return [pscustomobject]@{ Name = $Name; Category = $category; Label = $label }
+}
+
+function Get-SettingsInCategory {
+    param([Parameter(Mandatory)][string]$Category)
     foreach ($name in $script:DefaultSettings.Keys) {
-        if ($name -in @('HideAllLayers', 'LayerNames')) { continue }
-        $value = Get-Setting $name
-        if ($script:DefaultSettings[$name] -is [bool]) {
-            $mark = if ($value) { "✅" } else { "❌" }
-            $lock = if ($script:ProtectedSettings -contains $name) { "🔒 " } else { "" }
-            $rows += , @( (New-Button "$mark $lock$name" "cfg:t:$name") )
-        }
-        elseif ($script:DefaultSettings[$name] -is [string]) {
-            $label = if ($name -eq 'NewsFilePath') { "📰 ملف الأخبار = $value" } else { "🔤 $name = $value" }
-            $rows += , @( (New-Button $label "cfg:s:$name") )
-        }
-        else {
-            $rows += , @( (New-Button "🔢 $name = $(Format-SettingDisplay -Name $name -Value $value)" "cfg:v:$name") )
+        $metadata = Get-SettingNavigationMetadata -Name $name
+        if ($metadata.Category -eq $Category) { $name }
+    }
+}
+
+function Get-SettingsKeyboard {
+    $rows = @()
+    $categoryRow = @()
+    foreach ($category in @(Get-SettingCategoryDefinitions)) {
+        $categoryRow += (New-Button "$($category.Icon) $($category.Label)" "cfgcat:$($category.Key):0")
+        if ($categoryRow.Count -eq 2) {
+            $rows += , $categoryRow
+            $categoryRow = @()
         }
     }
+    if ($categoryRow.Count -gt 0) { $rows += , $categoryRow }
+
     $scope = [string](Get-Setting 'HideAllLayers')
     $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
     $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
     $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-SettingsCategoryKeyboard {
+    param(
+        [Parameter(Mandatory)][string]$Category,
+        [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
+        [ValidateRange(1, 20)][int]$PageSize = 8
+    )
+    $definition = @($script:SettingCategoryDefinitions | Where-Object { $_.Key -eq $Category })
+    if ($definition.Count -ne 1) { return (Get-SettingsKeyboard) }
+
+    $names = @(Get-SettingsInCategory -Category $Category)
+    $pageCount = [math]::Max(1, [int][math]::Ceiling($names.Count / [double]$PageSize))
+    $safePage = [math]::Min($Page, $pageCount - 1)
+    $start = $safePage * $PageSize
+    $end = [math]::Min($start + $PageSize - 1, $names.Count - 1)
+    $rows = @()
+
+    if ($names.Count -gt 0) {
+        foreach ($name in @($names[$start..$end])) {
+            $value = Get-Setting $name
+            $metadata = Get-SettingNavigationMetadata -Name $name
+            if ($name -eq 'HideAllLayers') {
+                $rows += , @( (New-Button "🚨 $($metadata.Label)" 'menu:hideallsettings') )
+            }
+            elseif ($name -eq 'LayerNames') {
+                $rows += , @( (New-Button "🏷️ $($metadata.Label)" 'menu:layernames') )
+            }
+            elseif ($script:DefaultSettings[$name] -is [bool]) {
+                $mark = if ($value) { '✅' } else { '❌' }
+                $lock = if ($script:ProtectedSettings -contains $name) { '🔒 ' } else { '' }
+                $rows += , @( (New-Button "$mark $lock$($metadata.Label)" "cfg:t:$name") )
+            }
+            elseif ($script:DefaultSettings[$name] -is [string]) {
+                $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
+                $rows += , @( (New-Button "$prefix = $value" "cfg:s:$name") )
+            }
+            else {
+                $display = Format-SettingDisplay -Name $name -Value $value
+                $rows += , @( (New-Button "🔢 $($metadata.Label) = $display" "cfg:v:$name") )
+            }
+        }
+    }
+
+    if ($pageCount -gt 1) {
+        $navigation = @()
+        if ($safePage -gt 0) { $navigation += (New-Button '⬅️ السابق' "cfgcat:$Category`:$($safePage - 1)") }
+        $navigation += (New-Button "$($safePage + 1)/$pageCount" "cfgcat:$Category`:$safePage")
+        if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button 'التالي ➡️' "cfgcat:$Category`:$($safePage + 1)") }
+        $rows += , $navigation
+    }
+    $rows += , @( (New-Button '⬅️ أقسام الإعدادات' 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 

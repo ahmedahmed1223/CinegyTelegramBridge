@@ -1115,7 +1115,8 @@ function Test-TemplateRegistryImport {
         if ([Text.Encoding]::UTF8.GetByteCount($rawText) -gt $script:TemplateRegistryImportMaximumBytes) { throw 'الملف أكبر من 10 ميغابايت.' }
         $document = $rawText | ConvertFrom-Json -ErrorAction Stop
         $properties = @($document.PSObject.Properties)
-        if ($properties.Count -eq 0 -or $properties.Count -gt 200) { throw 'يجب أن يحتوي السجل بين قالب واحد و200 قالب.' }
+        $maximumTemplates = Get-SettingInt 'TemplateRegistryImportMaxTemplates' 1
+        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw "يجب أن يحتوي السجل بين قالب واحد و$maximumTemplates قالب." }
         foreach ($property in $properties) {
             if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw "مفتاح القالب '$($property.Name)' غير صالح." }
             $entry = $property.Value

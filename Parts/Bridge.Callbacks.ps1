@@ -413,6 +413,20 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'cfgcat:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $category = ''
+                $page = 0
+                if ($data -match '^cfgcat:([a-z]+):(\d+)$' -and [int]::TryParse($Matches[2], [ref]$page)) {
+                    $category = $Matches[1]
+                    Show-SettingsCategoryScreen -Category $category -Page $page -ChatId $chatId -UserId $userId
+                }
+                else {
+                    Show-SettingsScreen -ChatId $chatId -UserId $userId
+                }
+            }
+            break
+        }
         'cancelreason:*' {
             $pending = $script:PendingCancelReason
             if ($pending -and [long]$pending.UserId -eq $userId) {

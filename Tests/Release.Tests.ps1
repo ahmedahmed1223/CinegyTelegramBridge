@@ -1,5 +1,15 @@
 #requires -Version 7
 
+Describe 'Release version format' {
+    It 'packages a safe semantic-version prerelease identifier' {
+        $root = Split-Path -Parent $PSScriptRoot
+        $build = & (Join-Path $root 'Build-Release.ps1') -Version '6.0.0-preview.1' -SkipChecks -OutputDirectory $TestDrive
+
+        $build.Version | Should -Be '6.0.0-preview.1'
+        [IO.Path]::GetFileName($build.ZipPath) | Should -Be 'CinegyTelegramBridge-6.0.0-preview.1.zip'
+    }
+}
+
 Describe 'Release package safety' {
     BeforeAll {
         $root = Split-Path -Parent $PSScriptRoot
@@ -43,6 +53,6 @@ Describe 'Release package safety' {
         }
         finally { $archive.Dispose() }
         $manifest.AuthenticodeSigned | Should -BeFalse
-        $manifest.Version | Should -Match '^\d+\.\d+\.\d+$'
+        $manifest.Version | Should -Match '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
     }
 }

@@ -24,7 +24,24 @@ function Resolve-TemplateShortcut {
 function Show-SettingsScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات - اضغط على أي خيار لتبديله أو تغيير قيمته:" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات`nاختر قسمًا. تظهر الخيارات الشائعة أولًا، وتبقى الإعدادات التقنية في «خيارات متقدمة»." -ReplyMarkup (Get-SettingsKeyboard)
+}
+
+function Show-SettingsCategoryScreen {
+    param(
+        [Parameter(Mandatory)][string]$Category,
+        [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $definition = @($script:SettingCategoryDefinitions | Where-Object { $_.Key -eq $Category })
+    if ($definition.Count -ne 1) {
+        Show-SettingsScreen -ChatId $ChatId -UserId $UserId
+        return
+    }
+    $title = "$($definition[0].Icon) $($definition[0].Label)"
+    Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات ← $title`nاضغط خيارًا لتبديله أو تغيير قيمته." -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page)
 }
 
 function Show-HideAllLayerSettings {
@@ -406,4 +423,3 @@ function Invoke-BridgeCommand {
         }
     }
 }
-

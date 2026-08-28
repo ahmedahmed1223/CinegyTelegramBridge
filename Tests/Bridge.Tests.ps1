@@ -188,6 +188,32 @@ Describe 'Administrator template registry import and export' {
         $invalid.Error | Should -Match 'مسار|طبقة'
     }
 
+    It 'accepts more than 200 templates when the configured import limit allows them' {
+        $hadLimit = $config.Settings.PSObject.Properties.Match('TemplateRegistryImportMaxTemplates').Count -gt 0
+        $previousLimit = if ($hadLimit) { $config.Settings.TemplateRegistryImportMaxTemplates } else { $null }
+        try {
+            $config.Settings | Add-Member -NotePropertyName 'TemplateRegistryImportMaxTemplates' -NotePropertyValue 250 -Force
+            $largeRegistry = [ordered]@{}
+            foreach ($index in 1..201) {
+                $largeRegistry["template$index"] = [ordered]@{ path="C:\Scenes\Template$index.cintitle"; layer=$index; fields=@() }
+            }
+            $path = Join-Path $TestDrive 'over-200-templates.json'
+            $largeRegistry | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding utf8
+
+            $result = Test-TemplateRegistryImport -Path $path
+            $result.Success | Should -BeTrue -Because $result.Error
+            $result.Count | Should -Be 201
+        }
+        finally {
+            if ($hadLimit) {
+                $config.Settings | Add-Member -NotePropertyName 'TemplateRegistryImportMaxTemplates' -NotePropertyValue $previousLimit -Force
+            }
+            else {
+                [void]$config.Settings.PSObject.Properties.Remove('TemplateRegistryImportMaxTemplates')
+            }
+        }
+    }
+
     It 'computes additions removals changes and unchanged definitions' {
         $comparison = Get-TemplateRegistryImportComparison -Current ($script:CurrentRegistry | ConvertTo-Json -Depth 10 | ConvertFrom-Json) `
             -Imported ($script:ImportedRegistry | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
@@ -230,6 +256,13 @@ Describe 'Administrator template registry import and export' {
 
     It 'accepts a large template registry upload up to the 10 MB limit' {
         $script:CapturedTemplateImportMaximum = 0
+        $largeRegistry = [ordered]@{
+            alpha = [ordered]@{ path='C:\Scenes\Alpha.cintitle'; layer=1; fields=@('Title'); description=[string]::new([char]'x', 1100000) }
+            gamma = [ordered]@{ path='C:\Scenes\Gamma.cintitle'; layer=3; category='أخبار'; fields=@() }
+        }
+        $largeRegistry | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $script:IncomingPath -Encoding utf8
+        $actualBytes = (Get-Item -LiteralPath $script:IncomingPath).Length
+        $actualBytes | Should -BeGreaterThan 1048576
         Mock Receive-TelegramDocument {
             $script:CapturedTemplateImportMaximum = $MaximumBytes
             New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
@@ -238,7 +271,7 @@ Describe 'Administrator template registry import and export' {
         }
 
         Start-TemplateRegistryImport -ChatId 100 -UserId 100
-        Receive-TemplateRegistryImport -Document ([pscustomobject]@{ file_name='templates.json'; file_size=2097152; file_id='large-id' }) -ChatId 100 -UserId 100
+        Receive-TemplateRegistryImport -Document ([pscustomobject]@{ file_name='templates.json'; file_size=$actualBytes; file_id='large-id' }) -ChatId 100 -UserId 100
 
         $script:CapturedTemplateImportMaximum | Should -Be 10485760
         (Get-PendingState -ChatId 100).Mode | Should -Be 'template_import_review'
@@ -929,7 +962,7 @@ Describe 'News ticker management' {
     }
 
     It 'shows the current news file as a clearly named administrator setting' {
-        $keyboard = Get-SettingsKeyboard
+        $keyboard = Get-SettingsCategoryKeyboard -Category 'news' -Page 0
         $labels = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.text } })
         @($labels | Where-Object { $_ -like '📰 ملف الأخبار*' }).Count | Should -Be 1
     }
@@ -7047,5 +7080,121 @@ Describe 'Confirming removal of a live graphic' {
         Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
 
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+}
+Describe 'Version 6 settings navigation schema' {
+    It 'identifies this development line as the first Version 6 preview' {
+        $script:BridgeVersion | Should -Be '6.0.0-preview.1'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.1'
+    }
+
+    It 'presents the operational setting categories in a stable order' {
+        $definitions = @(Get-SettingCategoryDefinitions)
+
+        @($definitions.Key) | Should -Be @(
+            'security', 'onair', 'templates', 'news',
+            'schedule', 'monitoring', 'storage', 'advanced'
+        )
+    }
+
+    It 'gives protected authentication settings an Arabic operational identity' {
+        $metadata = Get-SettingNavigationMetadata -Name 'RequireUserLevelAuth'
+
+        $metadata.Category | Should -Be 'security'
+        $metadata.Label | Should -Be 'التحقق من هوية المستخدم'
+    }
+
+    It 'keeps every default setting reachable from exactly one category' {
+        $allSettings = foreach ($category in @(Get-SettingCategoryDefinitions)) {
+            @(Get-SettingsInCategory -Category $category.Key)
+        }
+
+        @($allSettings).Count | Should -Be $script:DefaultSettings.Count
+        @($allSettings | Sort-Object -Unique).Count | Should -Be $script:DefaultSettings.Count
+        foreach ($name in $script:DefaultSettings.Keys) {
+            @($allSettings) | Should -Contain $name
+        }
+    }
+
+    It 'opens settings on category choices instead of every technical setting' {
+        $keyboard = Get-SettingsKeyboard
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_.callback_data })
+
+        $callbacks | Should -Contain 'cfgcat:security:0'
+        $callbacks | Should -Contain 'cfgcat:monitoring:0'
+        $callbacks | Should -Not -Contain 'cfg:t:RequireUserLevelAuth'
+    }
+
+    It 'limits a category page to eight setting actions and provides paging' {
+        $keyboard = Get-SettingsCategoryKeyboard -Category 'monitoring' -Page 0 -PageSize 8
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_.callback_data })
+        $settingCallbacks = @($callbacks | Where-Object { $_ -match '^cfg:(t|v|s):' })
+
+        $settingCallbacks.Count | Should -Be 8
+        $callbacks | Should -Contain 'cfgcat:monitoring:1'
+        $callbacks | Should -Contain 'menu:settings'
+    }
+
+    It 'uses the existing protected toggle callback behind an Arabic label' {
+        $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Page 0
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
+        $button = @($buttons | Where-Object { $_.callback_data -eq 'cfg:t:RequireUserLevelAuth' })[0]
+
+        $button.text | Should -Match 'التحقق من هوية المستخدم'
+        $button.text | Should -Match '🔒'
+    }
+
+    It 'shows a named category page with its requested page number' {
+        Mock Send-TelegramMessage {}
+        Mock Get-SettingsCategoryKeyboard { @{ inline_keyboard = @() } }
+
+        Show-SettingsCategoryScreen -Category 'monitoring' -Page 2 -ChatId 100 -UserId 101
+
+        Should -Invoke Get-SettingsCategoryKeyboard -Times 1 -Exactly -ParameterFilter {
+            $Category -eq 'monitoring' -and $Page -eq 2
+        }
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 100 -and $Text -match 'المراقبة والتنبيهات'
+        }
+    }
+
+    Context 'category callbacks' {
+        BeforeEach {
+            Mock Confirm-TelegramCallback {}
+            Mock Test-TelegramPrivateChat { $true }
+            Mock Test-Authorized { $true }
+            Mock Update-UserLastActivity {}
+            Mock Show-SettingsCategoryScreen {}
+        }
+
+        It 'routes a valid category page callback for an administrator' {
+            Mock Test-CallbackAdmin { $true }
+            $callback = [pscustomobject]@{
+                id = 'settings-category-admin'
+                from = [pscustomobject]@{ id = 101 }
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }
+                data = 'cfgcat:monitoring:2'
+            }
+
+            Invoke-CallbackQuery -CallbackQuery $callback
+
+            Should -Invoke Show-SettingsCategoryScreen -Times 1 -Exactly -ParameterFilter {
+                $Category -eq 'monitoring' -and $Page -eq 2 -and $ChatId -eq 100 -and $UserId -eq 101
+            }
+        }
+
+        It 'does not open a category page for a non-administrator' {
+            Mock Test-CallbackAdmin { $false }
+            $callback = [pscustomobject]@{
+                id = 'settings-category-operator'
+                from = [pscustomobject]@{ id = 101 }
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }
+                data = 'cfgcat:security:0'
+            }
+
+            Invoke-CallbackQuery -CallbackQuery $callback
+
+            Should -Invoke Show-SettingsCategoryScreen -Times 0 -Exactly
+        }
     }
 }

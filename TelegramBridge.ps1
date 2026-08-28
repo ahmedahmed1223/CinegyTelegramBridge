@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '5.7.9'
+$script:BridgeVersion = '6.0.0-preview.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -128,6 +128,7 @@ $script:DefaultSettings = [ordered]@{
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
     EnableRawCommand           = $true   # allow the admin /أمر Device Cmd escape hatch
     EnableFullTemplateManagement = $false # permits structural template edits from Telegram
+    TemplateRegistryImportMaxTemplates = 1000 # upper bound for one administrator template-registry import
     EnableDpapiSecrets        = $false  # opt-in; current plaintext config behavior remains the default
     # --- features ---
     EnableSnapshot             = $true
@@ -317,6 +318,7 @@ $script:SettingDisplayMetadata = @{
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
+    TemplateRegistryImportMaxTemplates = @{ Unit = 'قالب'; Description = 'الحد الأقصى لعدد القوالب في ملف استيراد سجل القوالب' }
     EnableSafeRollback = @{ Unit = ''; Description = 'تفعيل التراجع الآمن قصير العمر (معطل افتراضيًا)' }
     RollbackWindowSeconds = @{ Unit = 'ثانية'; Description = 'مدة صلاحية التراجع الآمن داخل الذاكرة' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
@@ -759,6 +761,96 @@ $script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests
 # updating, so the choice is constrained rather than free text.
 $script:SettingChoices = @{
     AirVariableType = @('Text', 'String', 'Bool', 'Float')
+}
+
+# Version 6 settings navigation. Defaults remain the authoritative setting
+# schema for compatibility; this map only controls how administrators discover
+# them in Telegram. Any future key omitted here is deliberately shown under
+# Advanced rather than becoming unreachable.
+$script:SettingCategoryDefinitions = @(
+    [pscustomobject]@{ Key = 'security';   Label = 'الأمان والصلاحيات';       Icon = '🔐' }
+    [pscustomobject]@{ Key = 'onair';      Label = 'التشغيل على الهواء';      Icon = '🔴' }
+    [pscustomobject]@{ Key = 'templates';  Label = 'القوالب والطبقات';        Icon = '📚' }
+    [pscustomobject]@{ Key = 'news';       Label = 'شريط الأخبار';            Icon = '📰' }
+    [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅' }
+    [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊' }
+    [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️' }
+    [pscustomobject]@{ Key = 'advanced';   Label = 'خيارات متقدمة';           Icon = '🛠️' }
+)
+
+$script:SettingCategoryByName = @{}
+foreach ($entry in @(
+        @{ Category = 'security'; Names = @(
+                'RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand',
+                'EnableFullTemplateManagement', 'EnableDpapiSecrets', 'MaxPendingApprovals',
+                'PendingApprovalExpiryHours'
+            ) },
+        @{ Category = 'onair'; Names = @(
+                'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
+                'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
+                'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
+                'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs',
+                'ConfirmLayerRemoval', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
+                'RelayAutoRestart', 'RelayMaxRestarts', 'RelayWatchdogSeconds',
+                'AllowRemoteRestart'
+            ) },
+        @{ Category = 'templates'; Names = @(
+                'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
+                'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
+                'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
+                'LayerNames', 'EnableFavorites', 'SharedFavoritesEnabled', 'FavoritesCount',
+                'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
+                'ShowLayerLockBadge', 'ButtonTextMaxLength'
+            ) },
+        @{ Category = 'news'; Names = @(
+                'EnableNewsTickerManagement', 'NewsFilePath', 'NewsItemSeparator',
+                'NewsMaxItemLength', 'NewsMaxItems', 'NewsImportMaxBytes',
+                'NewsDraftTimeoutMinutes', 'NewsListStackedLayout', 'NewNewsItemAtTop',
+                'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength',
+                'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
+                'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
+                'AllowOperatorsClearAllNews'
+            ) },
+        @{ Category = 'schedule'; Names = @(
+                'ScheduleConflictWindowMinutes', 'SchedulePaused', 'SchedulePreNotifyMinutes',
+                'ScheduleMaxRetries', 'ScheduleRetryDelaySeconds', 'ScheduleRetryBackoffFactor',
+                'ScheduleRetryMaxDelaySeconds', 'NotifyOnScheduleOverwrite'
+            ) },
+        @{ Category = 'monitoring'; Names = @(
+                'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
+                'OutputMonitorFailureAlertThreshold', 'OutputBlackLuminance',
+                'OutputBlackConfirmSeconds', 'NotifyOperatorsOnBlackOutput',
+                'CinegyStateCheckSeconds', 'CinegyStateStaleSeconds',
+                'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds',
+                'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent',
+                'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance',
+                'CinegyStateBackoffMaxSeconds', 'StaleOnAirAlertHours',
+                'HealthFailureAlertThreshold', 'MissedEventsHours', 'QuietHoursEnabled',
+                'QuietHoursStart', 'QuietHoursEnd', 'HeartbeatEnabled', 'HeartbeatHour',
+                'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
+                'NotifyAdminsOnCinegyHealth', 'UsageDigestEnabled', 'UsageDigestDayOfWeek'
+            ) },
+        @{ Category = 'storage'; Names = @(
+                'SnapshotRetentionMinutes', 'UploadRetentionMinutes', 'NewsBackupKeepFiles',
+                'LogMaxSizeMB', 'LogKeepFiles', 'AuditMaxSizeMB', 'AuditArchiveKeepFiles',
+                'AuditTrailSize', 'ConfigBackupKeepFiles', 'DiskFreeWarningGB',
+                'RuntimeStorageWarningMB', 'BackupStorageWarningMB'
+            ) },
+        @{ Category = 'advanced'; Names = @(
+                'LogAirXml', 'AirVariableType', 'PendingStateTimeoutMinutes',
+                'RepeatWarningCount', 'RepeatWarningWindowMinutes', 'MaintenanceWindowStart',
+                'MaintenanceWindowEnd', 'OneHandMode', 'EnableTextShortcuts'
+            ) }
+    )) {
+    foreach ($name in $entry.Names) { $script:SettingCategoryByName[$name] = $entry.Category }
+}
+
+$script:SettingNavigationLabels = @{
+    RequireUserLevelAuth = 'التحقق من هوية المستخدم'
+    EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
+    EnableRawCommand = 'الأوامر الخام للمشرف'
+    EnableFullTemplateManagement = 'الإدارة الكاملة للقوالب'
+    EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
 }
 
 

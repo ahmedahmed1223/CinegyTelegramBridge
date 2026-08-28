@@ -13,9 +13,11 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 5.7.9
+## Version 6.0.0-preview.1
 
-Version 5.7.9 keeps self-service access requests enabled for operators, while the request-approval button and handler remain restricted to administrators and the owner. It also makes the default single-instance check tolerant when Windows cannot enforce the mutex, with `-RequireSingleInstance` available for strict deployments; settings imports are type-checked and saved atomically, oversized Telegram documents are rejected before download, the fixed settings and template-registry JSON upload limits are now 10 MiB, and analyzer failures now fail validation. The configurable news-import limit is unchanged. Version 5.7.7 labels every sent broadcast snapshot with its actual source: the primary stream or Cinegy backup. The label is retained with the cooldown-cached image, so a resent last snapshot still identifies the source it was captured from. Access follows the hierarchy **owner > administrator > operator**: an explicit owner inherits every administrator tool, while an administrator cannot use owner-only role-management actions. Version 5.7.6 adds a personal, per-template elapsed-time reminder: administrators and the owner choose a duration in minutes for each ordinary template, and the person who puts that exact scene on air receives the reminder only if it is still visible. Reminder deadlines persist across a bridge restart. A `longRunning: true` logo or ticker is always excluded, so 24/7 graphics do not create operator noise. Version 5.7.5 keeps the output-source alarm, Cinegy SRT failover, and role-aware full-status probe from 5.7.4. It also persists timed-show auto-hide deadlines, restores them after a bridge restart, and verifies the tracked scene before hiding. Scheduled events remain in the durable schedule store across bridge restarts; at the timer moment the current template definition is checked again, then the live Cinegy layer is verified immediately before SHOW.
+Version 6 improves the existing PowerShell and Telegram product without changing its configuration or template formats. The first preview replaces the single, very long administrator settings keyboard with eight Arabic operational categories. Each category is paged at eight settings, keeps the existing toggle and value editors, and falls back safely to **خيارات متقدمة** for any future setting that has not yet received navigation metadata. Existing `cfg:*` callbacks, typed commands, `config.json`, and `templates.json` remain compatible.
+
+The 5.7.9 safety behavior remains included: self-service access requests stay enabled by default while approvals remain restricted to administrators and the owner; single-instance startup is tolerant by default with `-RequireSingleInstance` available for strict deployments; settings and template-registry JSON uploads allow up to 10 MiB; and `TemplateRegistryImportMaxTemplates` defaults to 1000.
 
 The default backup example is Cinegy Playout instance 0's local feedback stream: `srt://127.0.0.1:5421`. Change or clear `BackupSourceUrl` for a different instance or to disable automatic failover.
 
@@ -474,7 +476,9 @@ menu:
 
 **Admins only**
 
-- **⚙️ الإعدادات** → the full settings screen. Booleans toggle in place with
+- **⚙️ الإعدادات** → eight Arabic sections: security, on-air operation,
+  templates/layers, news, scheduling, monitoring, storage, and advanced.
+  Each page contains at most eight settings. Booleans toggle in place with
   ✅/❌; numbers open a "send me the new value" prompt. Every change is saved
   to `config.json` immediately and recorded in the audit trail, and
   **♻️ استعادة الافتراضي** resets everything. Full option table in

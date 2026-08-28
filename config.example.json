@@ -8,7 +8,7 @@
   "LogPath": ".\\logs\\bridge.log",
   "PollTimeoutSeconds": 30,
   "_comment_livestream": "SourceType: m3u8 | hls | srt | ndi. RtmpDestination is filled in from the bot's 'stream link' button. CopyCodec true = pass through without re-encoding (much lighter CPU, requires an H.264/AAC source).",
-  "_comment_settings": "Every key below is editable live from the bot's admin Settings screen; missing keys are auto-filled with defaults on first run.",
+  "_comment_settings": "Every key below is editable live from the bot's categorized, paged admin Settings screen; missing keys are auto-filled with defaults on first run.",
   "AllowedChatIds": [
     111111111
   ],
@@ -28,6 +28,7 @@
     "EnableSelfServiceRequests": true,
     "EnableRawCommand": true,
     "EnableFullTemplateManagement": false,
+    "TemplateRegistryImportMaxTemplates": 1000,
     "EnableDpapiSecrets": false,
     "EnableSnapshot": true,
     "EnableLiveRelay": true,

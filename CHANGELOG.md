@@ -1,11 +1,20 @@
 # Changelog
 
+## 6.0.0-preview.1 — 2026-08-28
+
+- **Replaces the unbounded administrator settings keyboard with eight Arabic operational categories.** Security, on-air operation, templates/layers, news, scheduling, monitoring, storage, and advanced settings are now discoverable without scrolling through every technical key.
+- **Pages large setting categories at eight options.** Previous/next controls preserve deterministic default-setting order while existing toggle, numeric, string, protected-setting, backup, layer-name, emergency-scope, and reset paths remain compatible.
+- **Keeps every setting reachable.** A centralized navigation map assigns current settings to one category, and unknown future keys automatically fall back to Advanced rather than disappearing from Telegram administration.
+- Adds administrator-gated `cfgcat:<category>:<page>` navigation and regression coverage for schema completeness, pagination, Arabic labels, callback routing, and role enforcement.
+- Begins the Version 6 current-architecture program; no desktop application, service rewrite, or configuration migration is introduced in this preview.
+
 ## 5.7.9 — 2026-08-27
 
 - **Keeps self-service access requests enabled by default while restricting approval controls to administrators and the owner.** Operators can still request access; only the authorized management roles see and can use the approval entry point.
 - **Makes single-instance startup tolerant by default.** If Windows cannot enforce the mutex, the bridge continues with a warning; `-RequireSingleInstance` is available for deployments that must refuse startup when the lock cannot be verified.
 - **Hardens settings imports.** JSON values are type-checked, all changes are saved in one transaction, and failed persistence restores the in-memory settings.
 - **Raises the fixed JSON upload limits to 10 MiB.** Settings and template-registry imports now allow larger files for installations with many templates; the configurable news-import limit is unchanged.
+- **Makes the template-registry count limit configurable.** `TemplateRegistryImportMaxTemplates` defaults to 1000, so the previous fixed 200-template ceiling no longer blocks larger catalogues.
 - Rejects Telegram documents that already report an invalid size before downloading them, and makes analyzer execution failures fail the validation gate instead of reporting a misleading clean result.
 - Adds regression coverage for exact bridge-process matching, role-gated approval visibility, typed/atomic settings import, and pre-download size limits.
 

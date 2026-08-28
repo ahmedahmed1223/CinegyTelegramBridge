@@ -46,32 +46,32 @@ JSON, Pester 6, PSScriptAnalyzer.
 `Get-BridgeLiveScenes`, `Get-BridgeLiveScenesForLayer`,
 `Get-BridgeLiveScene`, and `Get-BridgePrimarySceneForLayer`.
 
-- [ ] **Step 1: Write failing state tests**
+- [x] **Step 1: Write failing state tests**
 
 Test that a legacy `{ "7": { "Key": "lower-third" } }` document becomes one
 scene whose `Layer` is `7`, that two records may share `Layer = 7`, and that
 duplicate or blank `SceneId` values are rejected.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/BridgeLiveScenes.Tests.ps1 -Output Detailed`
 
 Expected: missing live-scene helper commands.
 
-- [ ] **Step 3: Implement pure canonical state conversion**
+- [x] **Step 3: Implement pure canonical state conversion**
 
 Create scene records with `SceneId`, `Layer`, `Key`, `ActiveId`, `At`,
 `UserId`, `ChatId`, `Source`, `TemplatePath`, and `LastVerifiedAtUtc`.
 Legacy layer-keyed input creates exactly one generated legacy SceneId per
 layer; canonical input validates every record before returning it.
 
-- [ ] **Step 4: Add atomic runtime integration**
+- [x] **Step 4: Add atomic runtime integration**
 
 Load the legacy state through `ConvertTo-BridgeLiveSceneState`, keep the
 current `$script:OnAir` view populated through `Get-BridgePrimarySceneForLayer`,
 and write the canonical envelope only after backup and validation succeed.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/BridgeLiveScenes.Tests.ps1 -Output Detailed`
 
@@ -89,26 +89,26 @@ Commit: `feat(v6): add compatible live scene state`
 **Interfaces:** Produces `Get-CinegySceneCapabilities` and
 `Test-BridgeSceneMode`. Consumes canonical scene records from Task 1.
 
-- [ ] **Step 1: Write failing capability tests**
+- [x] **Step 1: Write failing capability tests**
 
 Mock Cinegy responses that expose one layer item, multiple items without
 identities, and multiple items with stable SceneId values plus direct-target
 support. Assert only the final response permits `Multi` mode.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/BridgeLiveScenes.Tests.ps1 -Output Detailed`
 
 Expected: capability functions do not exist.
 
-- [ ] **Step 3: Implement fail-closed mode selection**
+- [x] **Step 3: Implement fail-closed mode selection**
 
 Return `{ Mode; CanListScenes; CanTargetScene; Verified; Error }`. The default
 mode is `Single`; selecting `Multi` returns an Arabic error unless both
 capabilities are true. Add the selected mode and verification state to the
 health-center text.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/BridgeLiveScenes.Tests.ps1,./Tests/Bridge.Tests.ps1 -Output Detailed`
 

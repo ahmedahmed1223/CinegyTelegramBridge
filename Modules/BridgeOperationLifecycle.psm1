@@ -30,4 +30,11 @@ function Resolve-BridgeSceneCallbackToken {
     return $entry
 }
 
-Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken
+function Get-BridgeOperationScope {
+    param([Parameter(Mandatory)][string]$Action)
+    $normalized = $Action.Trim().ToLowerInvariant()
+    $scope = if ($normalized -in @('scene-hide', 'scene-exit', 'scene-update')) { 'SceneSpecific' } else { 'LayerExclusive' }
+    return [pscustomobject]@{ Action = $normalized; Scope = $scope; SerializedByLayer = $true }
+}
+
+Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope

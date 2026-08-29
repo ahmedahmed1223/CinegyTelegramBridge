@@ -20,4 +20,9 @@ Describe 'Bridge operation lifecycle' {
         (Resolve-BridgeSceneCallbackToken -Store $store -Token $token -Layer 7 -Now ([datetime]'2026-08-28T12:01:00Z')).SceneId | Should -Be 'scene-a'
         (Resolve-BridgeSceneCallbackToken -Store $store -Token $token -Layer 8 -Now ([datetime]'2026-08-28T12:01:00Z')) | Should -BeNullOrEmpty
     }
+
+    It 'classifies scene actions as serialized while preserving layer emergency priority' {
+        (Get-BridgeOperationScope -Action 'scene-hide').Scope | Should -Be 'SceneSpecific'
+        (Get-BridgeOperationScope -Action 'hide-layer').Scope | Should -Be 'LayerExclusive'
+    }
 }

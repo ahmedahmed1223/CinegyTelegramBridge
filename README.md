@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 6.0.0-preview.3
+## Version 6.0.0
 
-Version 6 improves the existing PowerShell and Telegram product without changing its configuration or template formats. Preview 3 fixes Cinegy auto-hide identity correlation, adds an acknowledged personal reminder with one configurable follow-up, and shows administrators approximate user activity from the last bot interaction. It includes Preview 2's emergency-first Telegram admission, duplicate-update ledger, health center, unified setting schema, state migration, and bounded administrator pages.
+Version 6 is the official release of the existing PowerShell and Telegram product without changing its configuration or template formats. Template-operation records are readable: wherever an administrator has configured an Alias, the logs retain both that Alias and the immutable user ID (for example, `محرر الأخبار (12345)`). It also includes Cinegy auto-hide identity correlation, an acknowledged personal reminder with one configurable follow-up, approximate user activity, emergency-first Telegram admission, the health center, unified settings schema, state migration, bounded administrator pages, and the documented side-by-side upgrade/rollback path.
 
 `SceneMode` remains `Single` by default. Administrators may choose `Multi` for a catalogue where several named templates target the same Cinegy layer; one item is active on that layer at a time and the documented HIDE/EXIT controls remain layer-wide. The bridge enables that mode only when an active item identity and layer control are verified.
 

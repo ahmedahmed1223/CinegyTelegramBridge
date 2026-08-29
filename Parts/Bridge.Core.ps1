@@ -507,6 +507,7 @@ function Write-AuditRecord {
         [Parameter(Mandatory)][string]$EventName,
         [Parameter(Mandatory)][string]$Result,
         [long]$UserId = 0,
+        [string]$UserName = '',
         [long]$ChatId = 0,
         [string]$Action = '',
         [int]$Layer = 0,
@@ -520,6 +521,7 @@ function Write-AuditRecord {
         event        = Protect-SensitiveText (($EventName -replace '[\r\n]+', ' ').Trim())
         result       = Protect-SensitiveText (($Result -replace '[\r\n]+', ' ').Trim())
         userId       = $UserId
+        userName     = Protect-SensitiveText (($UserName -replace '[\r\n]+', ' ').Trim())
         chatId       = $ChatId
         action       = Protect-SensitiveText (($Action -replace '[\r\n]+', ' ').Trim())
         layer        = $Layer

@@ -422,6 +422,25 @@ Describe 'Safe in-memory layer rollback' {
         (Get-RollbackCandidate -Layer 5 -UserId 10).ExpectedState | Should -Be 'hidden'
     }
 
+    It 'records the configured operator name with its ID in the visible template-operation audit' {
+        $previousAlias = if ($script:UserAliases.ContainsKey('10')) { [string]$script:UserAliases['10'] } else { $null }
+        try {
+            $script:UserAliases['10'] = 'محرر الأخبار'
+            $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10 }
+            Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
+            Mock Hide-TitlerTemplate { [pscustomobject]@{ Success=$true; Error='' } }
+            Mock Sync-LayerAfterOperatorAction { }
+
+            Invoke-HideLayer -Layer 5 -ChatId 10 -UserId 10 | Should -BeTrue
+
+            Should -Invoke Add-AuditEntry -Times 1 -Exactly -ParameterFilter { $Message -match 'محرر الأخبار \(10\)' }
+        }
+        finally {
+            if ($null -eq $previousAlias) { $script:UserAliases.Remove('10') | Out-Null }
+            else { $script:UserAliases['10'] = $previousAlias }
+        }
+    }
+
     It 'restores only after review when the expected current scene still matches' {
         Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old' } `
             -ExpectedState replace -ExpectedActiveId 'event-current' -ActorUserId 10
@@ -717,6 +736,26 @@ Describe 'Air operation result logging' {
                 $Message -match 'action=SHOW' -and $Message -match 'result=success' -and
                 $Message -match 'durationMs=27' -and $Message -match 'layer=4' -and
                 $Message -match 'target="urgent"'
+        }
+    }
+
+    It 'records the configured operator name alongside the immutable user id' {
+        $previousAlias = if ($script:UserAliases.ContainsKey('20')) { [string]$script:UserAliases['20'] } else { $null }
+        try {
+            $script:UserAliases['20'] = 'محرر الأخبار'
+
+            Write-AirOperationResult -OperationId 'op-user-name' -Action SHOW -Result success -DurationMs 27 -UserId 20 -ChatId 10 -Layer 4 -Target urgent
+
+            Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+                $Message -match 'user=20' -and $Message -match 'userName="محرر الأخبار"'
+            }
+            $record = Get-Content -LiteralPath $script:auditFile | Select-Object -Last 1 | ConvertFrom-Json
+            $record.userId | Should -Be 20
+            $record.userName | Should -Be 'محرر الأخبار'
+        }
+        finally {
+            if ($null -eq $previousAlias) { $script:UserAliases.Remove('20') | Out-Null }
+            else { $script:UserAliases['20'] = $previousAlias }
         }
     }
 
@@ -7416,9 +7455,9 @@ Describe 'Confirming removal of a live graphic' {
     }
 }
 Describe 'Version 6 settings navigation schema' {
-    It 'identifies the completed roadmap line as the third Version 6 preview' {
-        $script:BridgeVersion | Should -Be '6.0.0-preview.3'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.3'
+    It 'identifies the operator-audit improvement as the official Version 6 release' {
+        $script:BridgeVersion | Should -Be '6.0.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

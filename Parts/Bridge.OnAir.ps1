@@ -429,6 +429,16 @@ function Get-UserDisplayName {
     return $id
 }
 
+function Format-UserAuditActor {
+    param([Parameter(Mandatory)][long]$UserId)
+    $id = [string]$UserId
+    $displayName = [string](Get-UserDisplayName -UserId $UserId)
+    if ([string]::IsNullOrWhiteSpace($displayName) -or $displayName -eq $id) { return $id }
+    $cleanName = Protect-SensitiveText (($displayName -replace '[\r\n]+', ' ').Trim())
+    if ([string]::IsNullOrWhiteSpace($cleanName)) { return $id }
+    return "$cleanName ($id)"
+}
+
 function Get-FavoriteTemplateKeys {
     param([long]$UserId = 0)
     $count = Get-SettingInt 'FavoritesCount' 0

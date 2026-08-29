@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.0.0 — 2026-08-29
+
+- **Version 6 official release.** The visible administrator audit trail and durable `AIR_OP` records retain the immutable numeric user id and, when configured, the corresponding administrator Alias. Template SHOW, HIDE, EXIT, undo, hide-all, live-value updates, and auto-hide timer actions use the same safe `Alias (ID)` representation; users without an Alias retain their numeric id only. The release keeps the existing configuration and template formats and may be merged into `main` through the documented side-by-side upgrade path.
+
 ## 6.0.0-preview.3 — 2026-08-29
 
 - **Fixes timed auto-hide being discarded for the original operator without weakening replacement safety.** Cinegy can expose a different engine active id than the client EventId sent with `SHOW`; the bridge now resolves and persists that identity synchronously inside the successful SHOW using a positive exact template-name match. A missing or ambiguous identity does not arm a destructive timer, and a later watchdog observation can never transfer old work to a replacement—even one using the same template name. Attaching a timer to an existing scene performs the same live identity check.

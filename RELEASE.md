@@ -52,6 +52,27 @@ certificate installed in `Cert:\CurrentUser\My`:
 The package is allow-listed and never contains `config.json`, `templates.json`,
 `logs/`, backups, snapshots, audit history, or on-air state.
 
+## Version 6 merge handoff
+
+The `codex/v6-current-experience` branch is the release handoff branch for
+Version 6. Merge it into `main` only after the following checks are recorded:
+
+1. Confirm the branch version in `TelegramBridge.ps1` matches the ZIP and its
+   `release-manifest.json`.
+2. Verify the checksum and run `.\Run-Checks.ps1` from a clean checkout.
+3. Keep the existing `config.json`, `templates.json`, and `logs` outside Git;
+   Version 6 keeps their formats compatible and does not require copying a
+   generated runtime directory from the branch.
+4. Deploy the extracted ZIP beside the current installation, run the readiness
+   check, then switch the task/service during an approved change window.
+5. Retain the previous installation directory and the verified ZIP until the
+   first operational review is complete. Use the rollback procedure below if
+   readiness or startup validation fails.
+
+The package is intentionally unsigned when no certificate is supplied to
+`Build-Release.ps1`; record that fact in the change ticket and sign the same
+allow-listed package through the site's certificate process when required.
+
 ## Upgrade
 
 1. Keep the current installation directory as the rollback copy.

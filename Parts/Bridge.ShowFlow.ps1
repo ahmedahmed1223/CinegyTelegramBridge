@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.0.0'; Items = @(
+                '🧾 سجل عمليات القوالب يعرض Alias المشغّل مع معرّفه الثابت، لتتبع أوضح دون تغيير الصلاحيات.'
+            ) }
         @{ Version = '6.0.0-preview.3'; Items = @(
                 '⏱ مؤقت الإخفاء يتابع معرّف Cinegy الصحيح لنفس القالب ولا يلغي نفسه بعد العرض.'
                 '🔔 تنبيه القالب يتيح تأكيد المعالجة، ويرسل متابعة واحدة إذا لم يؤكده المستخدم.'
@@ -424,13 +427,18 @@ function Write-AirOperationResult {
     )
     $cleanTarget = ($Target -replace '[\r\n]+', ' ').Replace('"', "'")
     $cleanError = ($ErrorText -replace '[\r\n]+', ' ').Replace('"', "'")
+    $displayName = [string](Get-UserDisplayName -UserId $UserId)
+    $cleanUserName = if ($displayName -eq [string]$UserId) { '' } else {
+        Protect-SensitiveText ((($displayName -replace '[\r\n]+', ' ').Trim()).Replace('"', "'"))
+    }
     $message = "AIR_OP id=$OperationId action=$Action result=$Result durationMs=$DurationMs user=$UserId chat=$ChatId layer=$Layer target=`"$cleanTarget`""
+    if ($cleanUserName) { $message += " userName=`"$cleanUserName`"" }
     if (-not [string]::IsNullOrWhiteSpace($cleanError)) { $message += " error=`"$cleanError`"" }
     $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
     Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
-    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
+    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level
 }
 
@@ -716,8 +724,9 @@ function Invoke-ShowTemplateResult {
         }
         Save-OnAirState
         Add-UsageCount -Key $Key
-        Write-BridgeLog "User $UserId (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
-        Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - user $UserId"
+        $actor = Format-UserAuditActor -UserId $UserId
+        Write-BridgeLog "User $actor (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
+        Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - user $actor"
 
         # Belt and braces: also write the values through the postbox, which is
         # the channel this scene actually honours.
@@ -766,7 +775,7 @@ function Invoke-ShowTemplateResult {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key
     }
     else {
-        Write-BridgeLog "User $UserId failed to push template '$Key': $($result.Error)" "ERROR"
+        Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$result.Error)
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
@@ -1018,8 +1027,9 @@ function Invoke-HideLayer {
     if ($result.Success) {
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
-        Write-BridgeLog "User $UserId hid layer $Layer"
-        Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $UserId"
+        $actor = Format-UserAuditActor -UserId $UserId
+        Write-BridgeLog "User $actor hid layer $Layer"
+        Add-AuditEntry "🙈 إخفاء طبقة $Layer - user $actor"
         if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
@@ -1054,8 +1064,9 @@ function Invoke-ExitLayer {
         # an exited scene from a live one and would preserve the record for
         # ever. See Remove-OnAirRecord.
         Remove-OnAirRecord -Layer $Layer -Reason 'after-exit' | Out-Null
-        Write-BridgeLog "User $UserId exited scene on layer $Layer"
-        Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $UserId"
+        $actor = Format-UserAuditActor -UserId $UserId
+        Write-BridgeLog "User $actor exited scene on layer $Layer"
+        Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - user $actor"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
     }
@@ -1117,8 +1128,9 @@ function Confirm-SafeRollback {
                 -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
             if ($hidden.Success) {
                 Remove-OnAirRecord -Layer $Layer -Reason 'undo of show onto an empty layer' | Out-Null
-                Add-AuditEntry "↩️ تراجع: أُزيل $($restore.Key) من طبقة $Layer - user $UserId"
-                Write-BridgeLog "User $UserId undid the show of '$($restore.Key)' on layer $Layer" 'WARN'
+                $actor = Format-UserAuditActor -UserId $UserId
+                Add-AuditEntry "↩️ تراجع: أُزيل $($restore.Key) من طبقة $Layer - user $actor"
+                Write-BridgeLog "User $actor undid the show of '$($restore.Key)' on layer $Layer" 'WARN'
                 # Asked now, not later: in ten seconds they will have moved on.
                 $script:PendingCancelReason = @{ UserId = $UserId; Key = [string]$restore.Key; At = (Get-Date) }
                 Send-TelegramMessage -ChatId $ChatId -Text "↩️ أُزيل '$($restore.Key)' من الطبقة $Layer.
@@ -1131,8 +1143,9 @@ function Confirm-SafeRollback {
         }
         $result = Invoke-ShowTemplateResult -Key ([string]$restore.Key) -Variables ([hashtable]$restore.Variables) -ChatId $ChatId -UserId $UserId
         if ($result -and $result.Success) {
-            Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - user $UserId"
-            Write-BridgeLog "User $UserId safely rolled layer $Layer back to '$($restore.Key)'" 'WARN'
+            $actor = Format-UserAuditActor -UserId $UserId
+            Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - user $actor"
+            Write-BridgeLog "User $actor safely rolled layer $Layer back to '$($restore.Key)'" 'WARN'
         }
     }
     finally { Unlock-GfxLayer -ChatId $ChatId -Layer $Layer }
@@ -1154,8 +1167,9 @@ function Invoke-HideAllLayers {
         if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
     }
     $script:AutoHideQueue.Clear()
-    Write-BridgeLog "User $UserId triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','))" "WARN"
-    Add-AuditEntry "🚨 إخفاء الكل - user $UserId"
+    $actor = Format-UserAuditActor -UserId $UserId
+    Write-BridgeLog "User $actor triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','))" "WARN"
+    Add-AuditEntry "🚨 إخفاء الكل - user $actor"
     $text = "🚨 تم إخفاء الطبقات: $($ok -join ', ')"
     if ($failed.Count -gt 0) { $text += "`n❌ فشلت: $($failed -join ', ')" }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -1172,8 +1186,9 @@ function Invoke-SetValues {
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
     if ($result.Success) {
-        Write-BridgeLog "User $UserId set values: $($Values.Keys -join ', ')"
-        Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - user $UserId"
+        $actor = Format-UserAuditActor -UserId $UserId
+        Write-BridgeLog "User $actor set values: $($Values.Keys -join ', ')"
+        Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - user $actor"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم التحديث: $($Values.Keys -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',')
     }
@@ -1238,8 +1253,9 @@ function Set-LayerAutoHide {
     Save-OnAirState
     $timerSaved = Set-AutoHideTimer -Layer $Layer -Seconds $Seconds -ChatId $ChatId -UserId $UserId `
         -TemplateKey $currentKey -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true
-    Write-BridgeLog "User $UserId set an auto-hide timer of $Seconds s on layer $Layer"
-    Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - user $UserId"
+    $actor = Format-UserAuditActor -UserId $UserId
+    Write-BridgeLog "User $actor set an auto-hide timer of $Seconds s on layer $Layer"
+    Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - user $actor"
     $timerText = if ($timerSaved) {
         "⏱ سيتم إخفاء الطبقة $Layer بعد $(Format-Duration -Seconds $Seconds)."
     }

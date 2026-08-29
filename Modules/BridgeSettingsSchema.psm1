@@ -42,4 +42,15 @@ function New-BridgeSettingSchema {
     }
 }
 
-Export-ModuleMember -Function New-BridgeSettingSchema
+function Find-BridgeSettings {
+    param([Parameter(Mandatory)][object[]]$Schema, [Parameter(Mandatory)][string]$Query)
+    $needle = $Query.Trim()
+    return @($Schema | Where-Object { $_.Name -like "*$needle*" -or $_.Label -like "*$needle*" -or $_.Description -like "*$needle*" })
+}
+
+function Get-ModifiedBridgeSettings {
+    param([Parameter(Mandatory)][object[]]$Schema, [Parameter(Mandatory)][hashtable]$Values)
+    return @($Schema | Where-Object { $Values.ContainsKey($_.Name) -and $Values[$_.Name] -ne $_.Default })
+}
+
+Export-ModuleMember -Function New-BridgeSettingSchema, Find-BridgeSettings, Get-ModifiedBridgeSettings

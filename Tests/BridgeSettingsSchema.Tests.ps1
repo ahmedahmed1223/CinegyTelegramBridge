@@ -45,4 +45,9 @@ Describe 'Unified bridge setting schema' {
         $record.Label | Should -Be 'FutureSetting'
         $record.ValueType | Should -Be 'Int32'
     }
+
+    It 'finds Arabic labels and returns only modified values' {
+        (Find-BridgeSettings -Schema $script:Schema -Query 'هوية').Name | Should -Be 'RequireUserLevelAuth'
+        (Get-ModifiedBridgeSettings -Schema $script:Schema -Values @{ MaxFieldLength = 250 }).Name | Should -Be 'MaxFieldLength'
+    }
 }

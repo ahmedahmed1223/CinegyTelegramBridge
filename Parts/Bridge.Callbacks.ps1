@@ -833,6 +833,12 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'menu:userpresence' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivitySummaryText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'pendingpage:*' {
             $page = 0
             if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
@@ -902,6 +908,12 @@ function Invoke-CallbackQuery {
             break
         }
         'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }
+        'remack:*' {
+            $acknowledged = Confirm-TemplateReminder -ReminderId (Get-CallbackArg $data 'remack:') -UserId $userId
+            $message = if ($acknowledged) { '✅ تم تسجيل المعالجة وإلغاء تنبيه المتابعة.' } else { 'انتهى التنبيه أو أنه مخصص لمستخدم آخر.' }
+            Send-TelegramMessage -ChatId $chatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'rollback:*' { Start-SafeRollbackReview -Layer ([int](Get-CallbackArg $data 'rollback:')) -ChatId $chatId -UserId $userId; break }
         # A confirmed removal names the template, not just the layer number:
         # a layer number is not something an operator can check against the

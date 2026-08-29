@@ -2963,6 +2963,7 @@ Describe 'Persistent personal template reminders' {
         Mock Get-TemplateStore {
             @{ Map = @{ Urgent = @{ Key = 'Urgent'; ReminderMinutes = 15; LongRunning = $false } }; Order = @('Urgent'); Errors = @() }
         }
+        $config.Settings | Add-Member -NotePropertyName 'TemplateReminderFollowUpMinutes' -NotePropertyValue 5 -Force
     }
 
     AfterEach {
@@ -2989,10 +2990,68 @@ Describe 'Persistent personal template reminders' {
 
         Update-TemplateReminderQueue -Now $now.AddMinutes(15)
 
-        $script:TemplateReminderQueue.Count | Should -Be 0
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        $script:TemplateReminderQueue[0].Stage | Should -Be 'followup'
+        [datetimeoffset]$script:TemplateReminderQueue[0].At | Should -Be $now.AddMinutes(20)
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 2 -and $Text -match '15' -and $Text -match 'Urgent'
+            $ChatId -eq 2 -and $Text -match '15' -and $Text -match 'Urgent' -and
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) -match '^remack:'
         }
+    }
+
+    It 'sends one follow-up only when the owner did not acknowledge' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-1'; At = $now.DateTime; UserId = 2L }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='initial'; Layer=7; At=$now; ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='show-1'; Minutes=15 })
+
+        Update-TemplateReminderQueue -Now $now
+        Update-TemplateReminderQueue -Now $now.AddMinutes(5)
+        Update-TemplateReminderQueue -Now $now.AddMinutes(10)
+
+        Should -Invoke Send-TelegramMessage -Times 2 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'متابعة' }
+        $script:TemplateReminderQueue.Count | Should -Be 0
+    }
+
+    It 'restores a pending follow-up with its acknowledgement identity after restart' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:TemplateReminderQueue.Add(@{
+                ReminderId='abc123'; Stage='followup'; Layer=7; At=$now.AddMinutes(5)
+                ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='engine-1'
+                ActiveIdConfirmed=$true; Minutes=15; FollowUpMinutes=5
+            })
+
+        Save-TemplateReminderQueue | Should -BeTrue
+        $script:TemplateReminderQueue.Clear()
+        Import-TemplateReminderQueue
+
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        $script:TemplateReminderQueue[0].ReminderId | Should -Be 'abc123'
+        $script:TemplateReminderQueue[0].Stage | Should -Be 'followup'
+        $script:TemplateReminderQueue[0].ActiveIdConfirmed | Should -BeTrue
+        $script:TemplateReminderQueue[0].FollowUpMinutes | Should -Be 5
+    }
+
+    It 'allows only the notified user to acknowledge and cancel the follow-up' {
+        Mock Save-TemplateReminderQueue { $true }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='followup'; Layer=7; At=[datetimeoffset]::Now.AddMinutes(5); ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='show-1'; Minutes=15 })
+
+        Confirm-TemplateReminder -ReminderId 'abc123' -UserId 3 | Should -BeFalse
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        Confirm-TemplateReminder -ReminderId 'abc123' -UserId 2 | Should -BeTrue
+        $script:TemplateReminderQueue.Count | Should -Be 0
+    }
+
+    It 'does not retain a follow-up when the administrator disables it' {
+        $config.Settings.TemplateReminderFollowUpMinutes = 0
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-1'; At = $now.DateTime; UserId = 2L }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='initial'; Layer=7; At=$now; ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='show-1'; Minutes=15 })
+
+        Update-TemplateReminderQueue -Now $now
+
+        $script:TemplateReminderQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 
     It 'targets the initiating user instead of the Telegram group' {
@@ -3041,6 +3100,43 @@ Describe 'Persistent personal template reminders' {
 
         $script:TemplateReminderQueue.Count | Should -Be 0
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'Administrative user activity status' {
+    It 'labels recent stale and unknown activity without claiming Telegram presence' {
+        $now = [datetime]'2099-08-21T10:00:00Z'
+        (Get-UserActivityStatus -LastActivityAt $now.AddMinutes(-4).ToString('o') -Now $now -ActiveWithinMinutes 5).State | Should -Be 'recent'
+        (Get-UserActivityStatus -LastActivityAt $now.AddMinutes(-6).ToString('o') -Now $now -ActiveWithinMinutes 5).State | Should -Be 'idle'
+        (Get-UserActivityStatus -LastActivityAt '' -Now $now -ActiveWithinMinutes 5).State | Should -Be 'unknown'
+    }
+
+    It 'shows the approximate activity state in administrator user rows' {
+        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId=202L; Alias='مخرج'; Role='operator'; Disabled=$false; LastActivityAt=(Get-Date).AddMinutes(-1).ToString('o') }) }
+        Mock Test-Owner { $false }
+        $buttons = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard | ForEach-Object { @($_) })
+        @($buttons.text) -join ' ' | Should -Match 'نشط حديثًا'
+    }
+
+    It 'adds a user activity summary to administrator tools' {
+        Mock Get-RunningRelayProcess { $null }
+        $callbacks = @((Get-AdminToolsKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'menu:userpresence'
+    }
+
+    It 'summarizes recent idle and unknown users from cached activity only' {
+        $now = Get-Date
+        Mock Get-AuthorizedUsers {
+            @(
+                [pscustomobject]@{ UserId=1L; Alias='أحمد'; LastActivityAt=$now.AddMinutes(-1).ToString('o') },
+                [pscustomobject]@{ UserId=2L; Alias='سارة'; LastActivityAt=$now.AddMinutes(-9).ToString('o') },
+                [pscustomobject]@{ UserId=3L; Alias='جديد'; LastActivityAt='' }
+            )
+        }
+        $text = Get-UserActivitySummaryText -Now $now
+        $text | Should -Match 'أحمد.*نشط حديثًا'
+        $text | Should -Match 'سارة.*خامل'
+        $text | Should -Match 'جديد.*غير معروف'
     }
 }
 
@@ -3941,6 +4037,65 @@ Describe 'Update-OnAirStateFromCinegy' {
         $OnAir.ContainsKey(4) | Should -BeTrue
         $OnAir[4].ActiveId | Should -Be '{CINEGY-ENGINE-GUID}'
         @($result.Removed).Count | Should -Be 0
+    }
+
+    It 'rebinds a pending auto-hide once to the Cinegy engine id for the same template' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $originalQueue = $script:AutoHideQueue
+        try {
+            $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+            $script:AutoHideQueue.Add(@{
+                    Layer = 4; At = $now.AddSeconds(30); ChatId = 1L; UserId = 10L
+                    TemplateKey = 'lower-third'; ActiveId = '{COMMAND-GUID}'
+                })
+            $OnAir[4] = @{ Key = 'lower-third'; At = $now.DateTime; UserId = 10; ActiveId = '{COMMAND-GUID}'; Source = 'bridge' }
+            Mock Save-AutoHideQueue { $true }
+            Mock Send-TelegramMessage { }
+            Mock Invoke-HideLayer { $true }
+            Mock Get-TitlerLayerStatus {
+                [pscustomobject]@{
+                    Success = $true; IsOnAir = $true; ActiveId = '{CINEGY-ENGINE-GUID}'
+                    ActiveName = 'Show lower-third.cintitle on layer 4'; ActiveTemplateName = 'lower-third'
+                }
+            }
+
+            Update-OnAirStateFromCinegy | Out-Null
+            $script:AutoHideQueue[0].ActiveId | Should -Be '{CINEGY-ENGINE-GUID}'
+            $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
+
+            Update-AutoHideQueue -Now $now.AddSeconds(30)
+            Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 4 -and $Quiet }
+        }
+        finally { $script:AutoHideQueue = $originalQueue }
+    }
+
+    It 'does not rebind a confirmed auto-hide to a later replacement even when the template name matches' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $originalQueue = $script:AutoHideQueue
+        try {
+            $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+            $script:AutoHideQueue.Add(@{
+                    Layer = 4; At = $now.AddSeconds(30); ChatId = 1L; UserId = 10L
+                    TemplateKey = 'lower-third'; ActiveId = '{CINEGY-ENGINE-GUID}'; ActiveIdConfirmed = $true
+                })
+            $OnAir[4] = @{ Key = 'lower-third'; At = $now.DateTime; UserId = 10; ActiveId = '{CINEGY-ENGINE-GUID}'; Source = 'bridge' }
+            Mock Save-AutoHideQueue { $true }
+            Mock Send-TelegramMessage { }
+            Mock Invoke-HideLayer { $true }
+            Mock Get-TitlerLayerStatus {
+                [pscustomobject]@{
+                    Success = $true; IsOnAir = $true; ActiveId = '{LATER-REPLACEMENT-GUID}'
+                    ActiveName = 'Show lower-third.cintitle on layer 4'; ActiveTemplateName = 'lower-third'
+                }
+            }
+
+            Update-OnAirStateFromCinegy | Out-Null
+
+            $script:AutoHideQueue[0].ActiveId | Should -Be '{CINEGY-ENGINE-GUID}'
+            Update-AutoHideQueue -Now $now.AddSeconds(30)
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        }
+        finally { $script:AutoHideQueue = $originalQueue }
     }
 
     It 'reuses a supplied dashboard sample instead of querying the layer again' {

@@ -43,7 +43,13 @@ try {
     $example.LogPath = '.\logs\bridge.log'
     $example.Settings.EnableSnapshot = $false
     $example.Settings.EnableLiveRelay = $false
-    $example.Settings.OutputMonitorMinutes = 0
+    # v6 settings schema: OutputMonitorMinutes was removed (output monitoring
+    # is now event-driven). Use the surviving threshold to silence alerts.
+    $example.Settings.EnableTimedShow = $false
+    $example.Settings.EnableNewsTickerManagement = $false
+    $example.Settings.MaintenanceMode = $true
+    $example.Settings.HideAllLayers = @()
+    $example.Settings.OutputMonitorFailureAlertThreshold = 99999
     $configPath = Join-Path $root 'config.json'
     $example | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding utf8
     $mockTemplates = [ordered]@{

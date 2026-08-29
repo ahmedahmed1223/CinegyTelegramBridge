@@ -188,6 +188,32 @@ function Test-Admin {
         -RequireUserLevelAuth:([bool](Get-Setting 'RequireUserLevelAuth'))
 }
 
+function Get-UserActivityStatus {
+    param([AllowEmptyString()][string]$LastActivityAt = '', [datetime]$Now = (Get-Date), [ValidateRange(1, 1440)][int]$ActiveWithinMinutes = 5)
+    $last = [datetime]::MinValue
+    if ([string]::IsNullOrWhiteSpace($LastActivityAt) -or -not [datetime]::TryParse($LastActivityAt, [ref]$last)) {
+        return [pscustomobject]@{ State = 'unknown'; Label = '⚪ النشاط غير معروف'; AgeMinutes = $null }
+    }
+    $ageMinutes = [math]::Max(0, [int][math]::Floor(($Now - $last).TotalMinutes))
+    if ($ageMinutes -lt $ActiveWithinMinutes) {
+        return [pscustomobject]@{ State = 'recent'; Label = "🟢 نشط حديثًا · منذ $ageMinutes د"; AgeMinutes = $ageMinutes }
+    }
+    return [pscustomobject]@{ State = 'idle'; Label = "🟠 خامل · منذ $ageMinutes د"; AgeMinutes = $ageMinutes }
+}
+
+function Get-UserActivitySummaryText {
+    param([datetime]$Now = (Get-Date))
+    $windowMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("👥 نشاط المستخدمين التقريبي · النافذة $windowMinutes د")
+    $lines.Add('Telegram لا يوفّر حالة اتصال لحظية؛ الحالة مبنية على آخر تفاعل مع البوت.')
+    foreach ($user in @(Get-AuthorizedUsers)) {
+        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
+        $lines.Add("• $($user.Alias): $($activity.Label)")
+    }
+    return ($lines -join "`n")
+}
+
 function Test-StatusViewer {
     <# Full status is operationally useful to the owner as well as an
        administrator, but it must not widen access to mutating admin tools. #>

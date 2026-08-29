@@ -243,6 +243,8 @@ $script:DefaultSettings = [ordered]@{
     ScheduleRetryBackoffFactor  = 2       # exponential multiplier per failed attempt
     ScheduleRetryMaxDelaySeconds = 300    # cap retry delay even with many attempts
     HealthFailureAlertThreshold = 3      # consecutive failures before one outage alert
+    UserActivityRecentMinutes   = 5      # approximate recent activity; Telegram does not expose true online presence
+    TemplateReminderFollowUpMinutes = 5 # one follow-up after the first personal template reminder; 0 disables
     MaxPendingApprovals        = 20
     PendingApprovalExpiryHours = 24
     FavoritesCount             = 3
@@ -332,6 +334,8 @@ $script:SettingDisplayMetadata = @{
     EnableSafeRollback = @{ Unit = ''; Description = 'تفعيل التراجع الآمن قصير العمر (معطل افتراضيًا)' }
     RollbackWindowSeconds = @{ Unit = 'ثانية'; Description = 'مدة صلاحية التراجع الآمن داخل الذاكرة' }
     HealthFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد حالات الفشل المتتالية قبل تنبيه المشرف' }
+    UserActivityRecentMinutes = @{ Unit = 'دقيقة'; Description = 'مدة اعتبار المستخدم نشطًا حديثًا حسب آخر تفاعل مع البوت' }
+    TemplateReminderFollowUpMinutes = @{ Unit = 'دقيقة'; Description = 'مهلة تنبيه المتابعة عند عدم تأكيد معالجة تنبيه القالب (0 للتعطيل)' }
     SchedulePreNotifyMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الإشعار المسبق للحدث المجدول (0 للتعطيل)' }
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
     PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
@@ -794,7 +798,7 @@ foreach ($entry in @(
         @{ Category = 'security'; Names = @(
                 'RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand',
                 'EnableFullTemplateManagement', 'EnableDpapiSecrets', 'MaxPendingApprovals',
-                'PendingApprovalExpiryHours'
+                'PendingApprovalExpiryHours', 'UserActivityRecentMinutes'
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
@@ -810,6 +814,7 @@ foreach ($entry in @(
                 'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
                 'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
+                'TemplateReminderFollowUpMinutes',
                 'LayerNames', 'EnableFavorites', 'SharedFavoritesEnabled', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
                 'ShowLayerLockBadge', 'ButtonTextMaxLength'
@@ -863,6 +868,8 @@ $script:SettingNavigationLabels = @{
     EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
     EnableRawCommand = 'الأوامر الخام للمشرف'
     EnableFullTemplateManagement = 'الإدارة الكاملة للقوالب'
+    UserActivityRecentMinutes = 'نافذة النشاط الحديث للمستخدم'
+    TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
 }
 

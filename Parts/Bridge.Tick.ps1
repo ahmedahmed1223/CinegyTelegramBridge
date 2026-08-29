@@ -54,6 +54,7 @@ function Save-AutoHideQueue {
                     UserId      = [long](Get-JsonProp $_ 'UserId')
                     TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
+                    ActiveIdConfirmed = [bool](Get-JsonProp $_ 'ActiveIdConfirmed')
                 }
             })
         $json = ConvertTo-Json -InputObject $payload -Depth 4
@@ -84,6 +85,7 @@ function Import-AutoHideQueue {
                     UserId      = [long](Get-JsonProp $raw 'UserId')
                     TemplateKey = [string](Get-JsonProp $raw 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $raw 'ActiveId')
+                    ActiveIdConfirmed = [bool](Get-JsonProp $raw 'ActiveIdConfirmed')
                 })
         }
         $script:AutoHideQueue = $restored
@@ -114,12 +116,68 @@ function Set-AutoHideTimer {
             UserId      = $UserId
             TemplateKey = $TemplateKey
             ActiveId    = $ActiveId
+            # SHOW supplies a client event id. Cinegy may expose a different
+            # engine item id on the first status read; that one transition is
+            # correlated and consumed by Confirm-PendingLayerActiveId below.
+            ActiveIdConfirmed = $false
         }
     $script:AutoHideQueue.Add($timer)
     if (Save-AutoHideQueue) { return $true }
     $script:AutoHideQueue.Remove($timer) | Out-Null
     foreach ($oldTimer in $previous) { $script:AutoHideQueue.Add($oldTimer) }
     return $false
+}
+
+function Confirm-PendingLayerActiveId {
+    <#
+        Cinegy accepts the EventId sent with SHOW, but installations can expose
+        a different Active/Id for that same scene on the status endpoint. The
+        first healthy status read is therefore allowed to rebind pending work
+        once, and only when the reported template still matches. Consuming the
+        transition prevents a later same-template replacement from inheriting
+        and executing the old timer.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$TrackedActiveId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CinegyActiveId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$TemplateKey,
+        [string]$ActiveName = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($TrackedActiveId) -or
+        [string]::IsNullOrWhiteSpace($CinegyActiveId) -or
+        -not (Test-OnAirTemplateMatch -TemplateKey $TemplateKey -ActiveName $ActiveName -HasTrackedId $true)) {
+        return $false
+    }
+
+    $oldId = $TrackedActiveId.Trim().Trim('{', '}')
+    $newId = $CinegyActiveId.Trim().Trim('{', '}')
+    $autoHideChanged = $false
+    $reminderChanged = $false
+    foreach ($item in @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })) {
+        $itemId = ([string](Get-JsonProp $item 'ActiveId')).Trim().Trim('{', '}')
+        if (-not [bool](Get-JsonProp $item 'ActiveIdConfirmed') -and
+            $itemId.Equals($oldId, [StringComparison]::OrdinalIgnoreCase)) {
+            $item.ActiveId = $CinegyActiveId
+            $item.ActiveIdConfirmed = $true
+            $autoHideChanged = $true
+        }
+    }
+    foreach ($item in @($script:TemplateReminderQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })) {
+        $itemId = ([string](Get-JsonProp $item 'ActiveId')).Trim().Trim('{', '}')
+        if (-not [bool](Get-JsonProp $item 'ActiveIdConfirmed') -and
+            $itemId.Equals($oldId, [StringComparison]::OrdinalIgnoreCase)) {
+            $item.ActiveId = $CinegyActiveId
+            $item.ActiveIdConfirmed = $true
+            $reminderChanged = $true
+        }
+    }
+    if ($autoHideChanged) { Save-AutoHideQueue | Out-Null }
+    if ($reminderChanged) { Save-TemplateReminderQueue | Out-Null }
+    if (($autoHideChanged -or $reminderChanged) -and -not $oldId.Equals($newId, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-BridgeLog "Correlated pending layer $Layer work with Cinegy engine active id for '$TemplateKey'."
+    }
+    return ($autoHideChanged -or $reminderChanged)
 }
 
 function Get-AutoHideTargetDecision {
@@ -171,13 +229,17 @@ function Save-TemplateReminderQueue {
     try {
         $payload = @($script:TemplateReminderQueue | ForEach-Object {
                 [ordered]@{
+                    ReminderId  = [string](Get-JsonProp $_ 'ReminderId')
+                    Stage       = [string](Get-JsonProp $_ 'Stage')
                     Layer       = [int](Get-JsonProp $_ 'Layer')
                     At          = ([datetimeoffset](Get-JsonProp $_ 'At')).ToString('o')
                     ChatId      = [long](Get-JsonProp $_ 'ChatId')
                     UserId      = [long](Get-JsonProp $_ 'UserId')
                     TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
+                    ActiveIdConfirmed = [bool](Get-JsonProp $_ 'ActiveIdConfirmed')
                     Minutes     = [int](Get-JsonProp $_ 'Minutes')
+                    FollowUpMinutes = [int](Get-JsonProp $_ 'FollowUpMinutes')
                 }
             })
         $json = ConvertTo-Json -InputObject $payload -Depth 4
@@ -201,9 +263,16 @@ function Import-TemplateReminderQueue {
                 -not [int]::TryParse([string](Get-JsonProp $raw 'Layer'), [ref]$layer) -or $layer -le 0 -or
                 -not [int]::TryParse([string](Get-JsonProp $raw 'Minutes'), [ref]$minutes) -or $minutes -le 0 -or $minutes -gt 1440 -or
                 -not [datetimeoffset]::TryParse([string](Get-JsonProp $raw 'At'), [ref]$at)) { continue }
+            $reminderId = [string](Get-JsonProp $raw 'ReminderId')
+            if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12) }
+            $stage = [string](Get-JsonProp $raw 'Stage')
+            if ($stage -notin @('initial', 'followup')) { $stage = 'initial' }
             $restored.Add(@{
+                    ReminderId = $reminderId; Stage = $stage
                     Layer = $layer; At = $at; ChatId = [long](Get-JsonProp $raw 'ChatId'); UserId = [long](Get-JsonProp $raw 'UserId')
                     TemplateKey = [string](Get-JsonProp $raw 'TemplateKey'); ActiveId = [string](Get-JsonProp $raw 'ActiveId'); Minutes = $minutes
+                    ActiveIdConfirmed = [bool](Get-JsonProp $raw 'ActiveIdConfirmed')
+                    FollowUpMinutes = [int](Get-JsonProp $raw 'FollowUpMinutes')
                 })
         }
         $script:TemplateReminderQueue = $restored
@@ -248,8 +317,10 @@ function Set-TemplateReminder {
     $script:TemplateReminderQueue.Add(@{
             # Deliver to the person who launched the template, not to the
             # originating group. In a private chat both ids are identical.
+            ReminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); Stage = 'initial'
             Layer = $layer; At = [datetimeoffset]::Now.AddMinutes($minutes); ChatId = $UserId; UserId = $UserId
             TemplateKey = [string](Get-JsonProp $Template 'Key'); ActiveId = $ActiveId; Minutes = $minutes
+            ActiveIdConfirmed = $false; FollowUpMinutes = 0
         })
     if (Save-TemplateReminderQueue) { return $true }
     $script:TemplateReminderQueue.RemoveAt($script:TemplateReminderQueue.Count - 1)
@@ -297,9 +368,38 @@ function Update-TemplateReminderQueue {
             Write-BridgeLog "Discarded personal reminder for '$($item.TemplateKey)' on layer $($item.Layer): $($decision.Reason)"
             continue
         }
-        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $($item.Minutes) دقيقة منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا."
+        $stage = [string](Get-JsonProp $item 'Stage')
+        if ($stage -eq 'followup') {
+            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "🔔 متابعة: لم يتم تأكيد معالجة تنبيه '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا."
+            Write-BridgeLog "Sent personal reminder follow-up for '$($item.TemplateKey)' to user $($item.UserId)."
+            continue
+        }
+        $reminderId = [string](Get-JsonProp $item 'ReminderId')
+        if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); $item.ReminderId = $reminderId }
+        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '✅ تمت المعالجة' "remack:$reminderId"))) }
+        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $($item.Minutes) دقيقة منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا." -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
+        $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
+        if ($followUpMinutes -gt 0) {
+            $item.Stage = 'followup'
+            $item.FollowUpMinutes = $followUpMinutes
+            $item.At = $Now.AddMinutes($followUpMinutes)
+            $script:TemplateReminderQueue.Add($item)
+            Save-TemplateReminderQueue | Out-Null
+        }
     }
+}
+
+function Confirm-TemplateReminder {
+    param([Parameter(Mandatory)][string]$ReminderId, [Parameter(Mandatory)][long]$UserId)
+    $item = @($script:TemplateReminderQueue | Where-Object {
+            [string](Get-JsonProp $_ 'ReminderId') -eq $ReminderId -and [long](Get-JsonProp $_ 'UserId') -eq $UserId
+        } | Select-Object -First 1)
+    if ($item.Count -eq 0) { return $false }
+    $script:TemplateReminderQueue.Remove($item[0]) | Out-Null
+    Save-TemplateReminderQueue | Out-Null
+    Write-BridgeLog "User $UserId acknowledged personal template reminder '$ReminderId'."
+    return $true
 }
 
 function Update-Heartbeat {

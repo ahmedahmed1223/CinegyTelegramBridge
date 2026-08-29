@@ -230,6 +230,7 @@ function Get-AdminToolsKeyboard {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
     $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
+    $rows += , @( (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
     $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
     $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
 
@@ -437,8 +438,9 @@ function Get-UsersAdminKeyboard {
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
         $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
         $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
-        $lastActivity = if ($user.LastActivityAt) { ([datetime]$user.LastActivityAt).ToString('MM-dd HH:mm') } else { 'غير معروف' }
-        $rows += , @((New-Button "🕒 آخر نشاط: $lastActivity" "usr:revoke:$($user.UserId)"))
+        $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
+        $rows += , @((New-Button $activity.Label "usr:revoke:$($user.UserId)"))
         # No role button on the owner's own row: there is nothing to promote
         # them to, and demoting them is refused anyway.
         if ($isOwner -and $user.Role -ne 'owner') {

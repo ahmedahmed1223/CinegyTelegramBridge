@@ -101,7 +101,8 @@ function Set-AutoHideTimer {
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
         [string]$TemplateKey = '',
-        [string]$ActiveId = ''
+        [string]$ActiveId = '',
+        [bool]$ActiveIdConfirmed = $false
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($Seconds -le 0) { return $false }
@@ -116,68 +117,13 @@ function Set-AutoHideTimer {
             UserId      = $UserId
             TemplateKey = $TemplateKey
             ActiveId    = $ActiveId
-            # SHOW supplies a client event id. Cinegy may expose a different
-            # engine item id on the first status read; that one transition is
-            # correlated and consumed by Confirm-PendingLayerActiveId below.
-            ActiveIdConfirmed = $false
+            ActiveIdConfirmed = $ActiveIdConfirmed
         }
     $script:AutoHideQueue.Add($timer)
     if (Save-AutoHideQueue) { return $true }
     $script:AutoHideQueue.Remove($timer) | Out-Null
     foreach ($oldTimer in $previous) { $script:AutoHideQueue.Add($oldTimer) }
     return $false
-}
-
-function Confirm-PendingLayerActiveId {
-    <#
-        Cinegy accepts the EventId sent with SHOW, but installations can expose
-        a different Active/Id for that same scene on the status endpoint. The
-        first healthy status read is therefore allowed to rebind pending work
-        once, and only when the reported template still matches. Consuming the
-        transition prevents a later same-template replacement from inheriting
-        and executing the old timer.
-    #>
-    param(
-        [Parameter(Mandatory)][int]$Layer,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$TrackedActiveId,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$CinegyActiveId,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$TemplateKey,
-        [string]$ActiveName = ''
-    )
-    if ([string]::IsNullOrWhiteSpace($TrackedActiveId) -or
-        [string]::IsNullOrWhiteSpace($CinegyActiveId) -or
-        -not (Test-OnAirTemplateMatch -TemplateKey $TemplateKey -ActiveName $ActiveName -HasTrackedId $true)) {
-        return $false
-    }
-
-    $oldId = $TrackedActiveId.Trim().Trim('{', '}')
-    $newId = $CinegyActiveId.Trim().Trim('{', '}')
-    $autoHideChanged = $false
-    $reminderChanged = $false
-    foreach ($item in @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })) {
-        $itemId = ([string](Get-JsonProp $item 'ActiveId')).Trim().Trim('{', '}')
-        if (-not [bool](Get-JsonProp $item 'ActiveIdConfirmed') -and
-            $itemId.Equals($oldId, [StringComparison]::OrdinalIgnoreCase)) {
-            $item.ActiveId = $CinegyActiveId
-            $item.ActiveIdConfirmed = $true
-            $autoHideChanged = $true
-        }
-    }
-    foreach ($item in @($script:TemplateReminderQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })) {
-        $itemId = ([string](Get-JsonProp $item 'ActiveId')).Trim().Trim('{', '}')
-        if (-not [bool](Get-JsonProp $item 'ActiveIdConfirmed') -and
-            $itemId.Equals($oldId, [StringComparison]::OrdinalIgnoreCase)) {
-            $item.ActiveId = $CinegyActiveId
-            $item.ActiveIdConfirmed = $true
-            $reminderChanged = $true
-        }
-    }
-    if ($autoHideChanged) { Save-AutoHideQueue | Out-Null }
-    if ($reminderChanged) { Save-TemplateReminderQueue | Out-Null }
-    if (($autoHideChanged -or $reminderChanged) -and -not $oldId.Equals($newId, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-BridgeLog "Correlated pending layer $Layer work with Cinegy engine active id for '$TemplateKey'."
-    }
-    return ($autoHideChanged -or $reminderChanged)
 }
 
 function Get-AutoHideTargetDecision {
@@ -207,8 +153,13 @@ function Update-AutoHideQueue {
     if ($script:AutoHideQueue.Count -eq 0) { return }
     $due = @($script:AutoHideQueue | Where-Object { [datetimeoffset]$_.At -le $Now })
     foreach ($item in $due) {
-        $script:AutoHideQueue.Remove($item) | Out-Null
-        Save-AutoHideQueue | Out-Null
+        $index = $script:AutoHideQueue.IndexOf($item)
+        $script:AutoHideQueue.RemoveAt($index)
+        if (-not (Save-AutoHideQueue)) {
+            $script:AutoHideQueue.Insert($index, $item)
+            Write-BridgeLog "Deferred due auto-hide on layer $($item.Layer): could not persist timer consumption." 'WARN'
+            continue
+        }
         $decision = Get-AutoHideTargetDecision -Timer $item
         if (-not $decision.ShouldHide) {
             Write-BridgeLog "Skipped stale auto-hide timer on layer $($item.Layer): $($decision.Reason)" 'WARN'
@@ -299,7 +250,8 @@ function Set-TemplateReminder {
         [Parameter(Mandatory)][hashtable]$Template,
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [string]$ActiveId = ''
+        [string]$ActiveId = '',
+        [bool]$ActiveIdConfirmed = $false
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layer = [int](Get-JsonProp $Template 'Layer')
@@ -320,7 +272,7 @@ function Set-TemplateReminder {
             ReminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); Stage = 'initial'
             Layer = $layer; At = [datetimeoffset]::Now.AddMinutes($minutes); ChatId = $UserId; UserId = $UserId
             TemplateKey = [string](Get-JsonProp $Template 'Key'); ActiveId = $ActiveId; Minutes = $minutes
-            ActiveIdConfirmed = $false; FollowUpMinutes = 0
+            ActiveIdConfirmed = $ActiveIdConfirmed; FollowUpMinutes = 0
         })
     if (Save-TemplateReminderQueue) { return $true }
     $script:TemplateReminderQueue.RemoveAt($script:TemplateReminderQueue.Count - 1)
@@ -361,8 +313,13 @@ function Update-TemplateReminderQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     if ($script:TemplateReminderQueue.Count -eq 0) { return }
     foreach ($item in @($script:TemplateReminderQueue | Where-Object { [datetimeoffset](Get-JsonProp $_ 'At') -le $Now })) {
-        $script:TemplateReminderQueue.Remove($item) | Out-Null
-        Save-TemplateReminderQueue | Out-Null
+        $index = $script:TemplateReminderQueue.IndexOf($item)
+        $script:TemplateReminderQueue.RemoveAt($index)
+        if (-not (Save-TemplateReminderQueue)) {
+            $script:TemplateReminderQueue.Insert($index, $item)
+            Write-BridgeLog "Deferred due personal reminder '$([string](Get-JsonProp $item 'ReminderId'))': could not persist queue consumption." 'WARN'
+            continue
+        }
         $decision = Get-TemplateReminderTargetDecision -Reminder $item
         if (-not $decision.ShouldNotify) {
             Write-BridgeLog "Discarded personal reminder for '$($item.TemplateKey)' on layer $($item.Layer): $($decision.Reason)"
@@ -391,13 +348,27 @@ function Update-TemplateReminderQueue {
 }
 
 function Confirm-TemplateReminder {
-    param([Parameter(Mandatory)][string]$ReminderId, [Parameter(Mandatory)][long]$UserId)
+    param(
+        [Parameter(Mandatory)][string]$ReminderId,
+        [Parameter(Mandatory)][long]$UserId,
+        [ref]$FailureReason
+    )
+    if ($null -ne $FailureReason) { $FailureReason.Value = '' }
     $item = @($script:TemplateReminderQueue | Where-Object {
             [string](Get-JsonProp $_ 'ReminderId') -eq $ReminderId -and [long](Get-JsonProp $_ 'UserId') -eq $UserId
         } | Select-Object -First 1)
-    if ($item.Count -eq 0) { return $false }
-    $script:TemplateReminderQueue.Remove($item[0]) | Out-Null
-    Save-TemplateReminderQueue | Out-Null
+    if ($item.Count -eq 0) {
+        if ($null -ne $FailureReason) { $FailureReason.Value = 'not_found' }
+        return $false
+    }
+    $index = $script:TemplateReminderQueue.IndexOf($item[0])
+    $script:TemplateReminderQueue.RemoveAt($index)
+    if (-not (Save-TemplateReminderQueue)) {
+        $script:TemplateReminderQueue.Insert($index, $item[0])
+        if ($null -ne $FailureReason) { $FailureReason.Value = 'persistence' }
+        Write-BridgeLog "Could not persist acknowledgement for personal template reminder '$ReminderId'; restored pending follow-up." 'WARN'
+        return $false
+    }
     Write-BridgeLog "User $UserId acknowledged personal template reminder '$ReminderId'."
     return $true
 }

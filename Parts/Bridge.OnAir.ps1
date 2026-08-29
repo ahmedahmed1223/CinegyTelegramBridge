@@ -216,17 +216,6 @@ function Update-OnAirStateFromCinegy {
                 -AirChannelNumber $config.AirChannelNumber -Layer ([int]$layer) -TimeoutSec $TimeoutSec
         }
         $record = $script:OnAir[$layer]
-        $recordSource = [string](Get-JsonProp $record 'Source')
-        if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
-        if ($recordSource -eq 'bridge' -and [bool](Get-JsonProp $status 'Success') -and
-            [bool](Get-JsonProp $status 'IsOnAir')) {
-            $activeName = [string](Get-JsonProp $status 'ActiveTemplateName')
-            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = [string](Get-JsonProp $status 'ActiveName') }
-            Confirm-PendingLayerActiveId -Layer ([int]$layer) `
-                -TrackedActiveId ([string](Get-JsonProp $record 'ActiveId')) `
-                -CinegyActiveId ([string](Get-JsonProp $status 'ActiveId')) `
-                -TemplateKey ([string](Get-JsonProp $record 'Key')) -ActiveName $activeName | Out-Null
-        }
         $decision = Resolve-BridgeCinegyLayerState -Layer ([int]$layer) -TrackedRecord $record -Status $status
         if ($decision.Action -eq 'failed') {
             $failed.Add([int]$layer)

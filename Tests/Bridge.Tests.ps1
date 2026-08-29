@@ -2872,15 +2872,45 @@ Describe 'SHOW identity tracking' {
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 
-    It 'always schedules automatic hide for a configured sensitive template' {
+    It 'schedules automatic hide against the exact Cinegy engine identity' {
         $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue 'urgent, breaking' -Force
         $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue 30 -Force
+        $script:IdentityStatusCall = 0
+        Mock Get-TitlerLayerStatus {
+            $script:IdentityStatusCall++
+            if ($script:IdentityStatusCall -eq 1) {
+                return [pscustomobject]@{ Success=$true; IsOnAir=$false; ActiveId=''; ActiveName=''; ActiveTemplateName=''; Error='' }
+            }
+            return [pscustomobject]@{
+                Success=$true; IsOnAir=$true; ActiveId='{ENGINE-GUID}'
+                ActiveName='Show urgent.cintitle on layer 4'; ActiveTemplateName='urgent'; Error=''
+            }
+        }
 
         Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
 
         $script:AutoHideQueue.Count | Should -Be 1
         $script:AutoHideQueue[0].Layer | Should -Be 4
+        $script:AutoHideQueue[0].ActiveId | Should -Be '{ENGINE-GUID}'
+        $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
         [math]::Round(($script:AutoHideQueue[0].At - (Get-Date)).TotalSeconds) | Should -BeIn @(29, 30)
+    }
+
+    It 'does not arm a destructive timer without positive exact post-show identity' {
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue 'urgent' -Force
+        $script:IdentityStatusCall = 0
+        Mock Get-TitlerLayerStatus {
+            $script:IdentityStatusCall++
+            if ($script:IdentityStatusCall -eq 1) {
+                return [pscustomobject]@{ Success=$true; IsOnAir=$false; ActiveId=''; ActiveName=''; ActiveTemplateName=''; Error='' }
+            }
+            return [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='{OTHER}'; ActiveName=''; ActiveTemplateName=''; Error='' }
+        }
+
+        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+
+        $script:AutoHideQueue.Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'ربط|يدوي' }
     }
 
     It 'keeps a shorter operator timer for a sensitive template' {
@@ -2950,6 +2980,36 @@ Describe 'Persistent timed-show auto-hide timers' {
         $script:AutoHideQueue.Count | Should -Be 0
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'لم يُنفَّذ|تغيّرت' }
     }
+
+    It 'verifies and stores the engine identity when attaching a timer to an existing scene' {
+        $script:OnAir[7] = @{ Key='Urgent'; ActiveId='{COMMAND-GUID}'; At=Get-Date; UserId=2L; Source='bridge' }
+        Mock Get-TemplateStore { [pscustomobject]@{ Map=@{ Urgent=@{ Key='Urgent'; Path='D:\CG\Urgent.cintitle' } }; Order=@('Urgent') } }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='{ENGINE-GUID}'; ActiveTemplateName='Urgent'; ActiveName='Urgent'; Error='' }
+        }
+        Mock Save-OnAirState { }
+        Mock Add-AuditEntry { }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard=@() } }
+
+        Set-LayerAutoHide -Layer 7 -Seconds 30 -ChatId 2 -UserId 2
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        $script:AutoHideQueue[0].ActiveId | Should -Be '{ENGINE-GUID}'
+        $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
+        $script:OnAir[7].ActiveId | Should -Be '{ENGINE-GUID}'
+    }
+
+    It 'does not hide or lose a due timer when consuming it cannot be persisted' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key='Urgent'; ActiveId='engine-1'; At=$now.DateTime; UserId=2L }
+        $script:AutoHideQueue.Add(@{ Layer=7; At=$now; ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='engine-1'; ActiveIdConfirmed=$true })
+        Mock Save-AutoHideQueue { $false }
+
+        Update-AutoHideQueue -Now $now
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+    }
 }
 
 Describe 'Persistent personal template reminders' {
@@ -3013,6 +3073,18 @@ Describe 'Persistent personal template reminders' {
         $script:TemplateReminderQueue.Count | Should -Be 0
     }
 
+    It 'does not send or lose a due reminder when consuming it cannot be persisted' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key='Urgent'; ActiveId='engine-1'; At=$now.DateTime; UserId=2L }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='initial'; Layer=7; At=$now; ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='engine-1'; ActiveIdConfirmed=$true; Minutes=15 })
+        Mock Save-TemplateReminderQueue { $false }
+
+        Update-TemplateReminderQueue -Now $now
+
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
     It 'restores a pending follow-up with its acknowledgement identity after restart' {
         $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
         $script:TemplateReminderQueue.Add(@{
@@ -3039,6 +3111,33 @@ Describe 'Persistent personal template reminders' {
         Confirm-TemplateReminder -ReminderId 'abc123' -UserId 3 | Should -BeFalse
         $script:TemplateReminderQueue.Count | Should -Be 1
         Confirm-TemplateReminder -ReminderId 'abc123' -UserId 2 | Should -BeTrue
+        $script:TemplateReminderQueue.Count | Should -Be 0
+    }
+
+    It 'rolls back acknowledgement when the cancellation cannot be persisted' {
+        Mock Save-TemplateReminderQueue { $false }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='followup'; Layer=7; At=[datetimeoffset]::Now.AddMinutes(5); ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='show-1'; Minutes=15 })
+
+        Confirm-TemplateReminder -ReminderId 'abc123' -UserId 2 | Should -BeFalse
+
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        $script:TemplateReminderQueue[0].ReminderId | Should -Be 'abc123'
+    }
+
+    It 'enforces reminder ownership through the Telegram callback dispatcher' {
+        Mock Save-TemplateReminderQueue { $true }
+        Mock Test-Authorized { $true }
+        Mock Test-TelegramPrivateChat { $true }
+        Mock Confirm-TelegramCallback { }
+        Mock Update-UserLastActivity { }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard=@() } }
+        $script:TemplateReminderQueue.Add(@{ ReminderId='abc123'; Stage='followup'; Layer=7; At=[datetimeoffset]::Now.AddMinutes(5); ChatId=2L; UserId=2L; TemplateKey='Urgent'; ActiveId='show-1'; Minutes=15 })
+        $foreign = [pscustomobject]@{ id='cb-foreign'; data='remack:abc123'; from=[pscustomobject]@{ id=3L }; message=[pscustomobject]@{ message_id=1; chat=[pscustomobject]@{ id=3L; type='private' } } }
+        $owner = [pscustomobject]@{ id='cb-owner'; data='remack:abc123'; from=[pscustomobject]@{ id=2L }; message=[pscustomobject]@{ message_id=2; chat=[pscustomobject]@{ id=2L; type='private' } } }
+
+        Invoke-CallbackQuery -CallbackQuery $foreign
+        $script:TemplateReminderQueue.Count | Should -Be 1
+        Invoke-CallbackQuery -CallbackQuery $owner
         $script:TemplateReminderQueue.Count | Should -Be 0
     }
 
@@ -3116,6 +3215,17 @@ Describe 'Administrative user activity status' {
         Mock Test-Owner { $false }
         $buttons = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard | ForEach-Object { @($_) })
         @($buttons.text) -join ' ' | Should -Match 'نشط حديثًا'
+        @($buttons | Where-Object text -Match 'نشط حديثًا').callback_data | Should -Be 'usr:activity:202'
+    }
+
+    It 'discloses that the user-management activity labels are approximate' {
+        Mock Send-TelegramMessage { }
+        Mock Get-AuthorizedUsers { @() }
+        Mock Test-Owner { $false }
+
+        Show-UsersAdminScreen -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تقريبي|لحظية' }
     }
 
     It 'adds a user activity summary to administrator tools' {
@@ -4039,7 +4149,7 @@ Describe 'Update-OnAirStateFromCinegy' {
         @($result.Removed).Count | Should -Be 0
     }
 
-    It 'rebinds a pending auto-hide once to the Cinegy engine id for the same template' {
+    It 'does not let a later watchdog observation adopt a replacement for pending auto-hide' {
         $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
         $originalQueue = $script:AutoHideQueue
         try {
@@ -4060,11 +4170,10 @@ Describe 'Update-OnAirStateFromCinegy' {
             }
 
             Update-OnAirStateFromCinegy | Out-Null
-            $script:AutoHideQueue[0].ActiveId | Should -Be '{CINEGY-ENGINE-GUID}'
-            $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
+            $script:AutoHideQueue[0].ActiveId | Should -Be '{COMMAND-GUID}'
 
             Update-AutoHideQueue -Now $now.AddSeconds(30)
-            Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 4 -and $Quiet }
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
         }
         finally { $script:AutoHideQueue = $originalQueue }
     }
@@ -7307,9 +7416,9 @@ Describe 'Confirming removal of a live graphic' {
     }
 }
 Describe 'Version 6 settings navigation schema' {
-    It 'identifies the completed roadmap line as the second Version 6 preview' {
-        $script:BridgeVersion | Should -Be '6.0.0-preview.2'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.2'
+    It 'identifies the completed roadmap line as the third Version 6 preview' {
+        $script:BridgeVersion | Should -Be '6.0.0-preview.3'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0-preview.3'
     }
 
     It 'presents the operational setting categories in a stable order' {

@@ -103,6 +103,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.0.0-preview.3'; Items = @(
+                '⏱ مؤقت الإخفاء يتابع معرّف Cinegy الصحيح لنفس القالب ولا يلغي نفسه بعد العرض.'
+                '🔔 تنبيه القالب يتيح تأكيد المعالجة، ويرسل متابعة واحدة إذا لم يؤكده المستخدم.'
+                '👥 المشرف يرى نشاط المستخدمين التقريبي حسب آخر تفاعل، دون ادعاء حالة اتصال لحظية.'
+            ) }
         @{ Version = '6.0.0-preview.2'; Items = @(
                 '🚨 أوامر الإخفاء والخروج تتقدم داخل دفعة Telegram، والتحديث المكرر لا يُنفذ مرتين.'
                 '🩺 مركز صحة جديد يجمع Telegram وCinegy والمخرج والبث والتخزين والجدولة للمشرف.'
@@ -537,6 +542,52 @@ function Get-CorrelatedLayerSnapshot {
     return $snapshot
 }
 
+function Get-VerifiedCinegyShowIdentity {
+    <#
+        Resolve the engine's active item while the successful SHOW operation is
+        still in hand. This is the only safe moment to translate Cinegy's
+        client EventId into its engine ActiveId: a later watchdog observation
+        may already describe a replacement and must never inherit old work.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [AllowEmptyString()][string]$TemplatePath = '',
+        [Parameter(Mandatory)][int]$Layer
+    )
+    $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not [bool](Get-JsonProp $status 'Success') -or -not [bool](Get-JsonProp $status 'IsOnAir')) {
+        return (& $failed 'لم يؤكد Cinegy أن المشهد على الهواء بعد SHOW.')
+    }
+    $activeId = [string](Get-JsonProp $status 'ActiveId')
+    $normalizedId = $activeId.Trim().Trim('{', '}')
+    if ([string]::IsNullOrWhiteSpace($normalizedId) -or $normalizedId -eq '00000000-0000-0000-0000-000000000000') {
+        return (& $failed 'لم يعرض Cinegy معرّفًا نشطًا صالحًا.')
+    }
+
+    # Prefer the filename parsed from Cinegy's active-item description. Falling
+    # back to ActiveName is allowed only as an exact name, never a substring.
+    $reported = [string](Get-JsonProp $status 'ActiveTemplateName')
+    if ([string]::IsNullOrWhiteSpace($reported)) { $reported = [string](Get-JsonProp $status 'ActiveName') }
+    if ([string]::IsNullOrWhiteSpace($reported)) {
+        return (& $failed 'لم يعرض Cinegy اسم قالب يمكن مطابقته.')
+    }
+    $reported = $reported.Trim()
+    $reportedWithoutExtension = [IO.Path]::GetFileNameWithoutExtension($reported)
+    $expected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $expected.Add($Key.Trim()) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $expected.Add([IO.Path]::GetFileName($TemplatePath).Trim()) | Out-Null
+        $expected.Add([IO.Path]::GetFileNameWithoutExtension($TemplatePath).Trim()) | Out-Null
+    }
+    if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
+        return (& $failed "اسم المشهد الذي أعاده Cinegy لا يطابق '$Key'.")
+    }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error='' }
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -619,9 +670,20 @@ function Invoke-ShowTemplateResult {
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
 
     if ($result.Success) {
+        $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
+        $needsPersistentIdentity = $AutoHideSeconds -gt 0 -or
+            (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0)
+        $activeId = [string]$result.EventId
+        $activeIdConfirmed = $false
+        $identity = $null
+        if ($needsPersistentIdentity) {
+            $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
+                -Layer ([int]$template.Layer)
+            if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
+        }
         if ($previousSnapshot) {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
-                -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
+                -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
         }
         elseif ($layerStatus.Success -and $false -eq [bool]$layerStatus.IsOnAir) {
             # Pushing onto a layer that was genuinely EMPTY used to leave
@@ -635,7 +697,7 @@ function Invoke-ShowTemplateResult {
             # undo is offered and the operator decides deliberately.
             Set-RollbackCandidate -Layer ([int]$template.Layer) `
                 -RestoreSnapshot @{ Key = [string]$Key; Action = 'hide' } `
-                -ExpectedState replace -ExpectedActiveId ([string]$result.EventId) -ActorUserId $UserId
+                -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
         }
         else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
         # Three of the same graphic in an hour is almost always a paste slip or
@@ -646,11 +708,11 @@ function Invoke-ShowTemplateResult {
         }
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
-            ActiveId=[string]$result.EventId; At=(Get-Date)
+            ActiveId=$activeId; At=(Get-Date)
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
         $script:OnAir[[int]$template.Layer] = @{
-            Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = [string]$result.EventId
+            Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
         }
         Save-OnAirState
         Add-UsageCount -Key $Key
@@ -669,18 +731,23 @@ function Invoke-ShowTemplateResult {
 
         $suffix = ""
         if ($AutoHideSeconds -gt 0) {
-            $timerSaved = Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
-                -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId ([string](Get-JsonProp $result 'EventId'))
-            $suffix = if ($timerSaved) {
+            $timerSaved = $activeIdConfirmed -and (Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
+                    -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId $activeId -ActiveIdConfirmed $true)
+            $suffix = if (-not $activeIdConfirmed) {
+                " ⚠️ لم يُضبط الإخفاء التلقائي لأن Cinegy لم يؤكد هوية المشهد؛ أخفه يدويًا."
+            }
+            elseif ($timerSaved) {
                 " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
             }
             else {
-                " ⚠️ سيعمل المؤقت داخل الجسر، لكن تعذّر حفظه لإعادة التشغيل."
+                " ⚠️ تعذّر حفظ مؤقت الإخفاء؛ أخفه يدويًا."
             }
         }
-        $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
         if (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0) {
-            if (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId ([string](Get-JsonProp $result 'EventId'))) {
+            if (-not $activeIdConfirmed) {
+                $suffix += ' ⚠️ لم يُضبط تنبيه الظهور لأن Cinegy لم يؤكد هوية المشهد.'
+            }
+            elseif (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId $activeId -ActiveIdConfirmed $true) {
                 $suffix += " سيصل إليك تنبيه شخصي بعد $reminderMinutes دقيقة إذا بقي القالب ظاهرًا."
             }
             else {
@@ -1153,8 +1220,24 @@ function Set-LayerAutoHide {
         return
     }
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    if ($null -eq $current) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا يوجد مشهد مسجّل على الطبقة $Layer؛ لم يُضبط المؤقت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $currentKey = [string](Get-JsonProp $current 'Key')
+    $templatePath = ''
+    $store = Get-TemplateStore
+    if ($store.Map.ContainsKey($currentKey)) { $templatePath = [string](Get-JsonProp $store.Map[$currentKey] 'Path') }
+    $identity = Get-VerifiedCinegyShowIdentity -Key $currentKey -TemplatePath $templatePath -Layer $Layer
+    if (-not $identity.Success) {
+        Write-BridgeLog "Refused auto-hide timer on layer $Layer because live identity could not be verified: $($identity.Error)" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لم يُضبط المؤقت: تعذّر ربط المشهد الحالي بهوية Cinegy مؤكدة. أخفه يدويًا عند الحاجة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $current.ActiveId = [string]$identity.ActiveId
+    Save-OnAirState
     $timerSaved = Set-AutoHideTimer -Layer $Layer -Seconds $Seconds -ChatId $ChatId -UserId $UserId `
-        -TemplateKey ([string](Get-JsonProp $current 'Key')) -ActiveId ([string](Get-JsonProp $current 'ActiveId'))
+        -TemplateKey $currentKey -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true
     Write-BridgeLog "User $UserId set an auto-hide timer of $Seconds s on layer $Layer"
     Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - user $UserId"
     $timerText = if ($timerSaved) {

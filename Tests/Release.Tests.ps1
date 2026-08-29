@@ -56,4 +56,20 @@ Describe 'Release package safety' {
         $manifest.AuthenticodeSigned | Should -BeFalse
         $manifest.Version | Should -Match '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
     }
+
+    It 'identifies the packaged README with the same version as the manifest' {
+        $archive = [IO.Compression.ZipFile]::OpenRead($script:ReleaseZip)
+        try {
+            $manifestReader = [IO.StreamReader]::new($archive.GetEntry('release-manifest.json').Open())
+            $readmeReader = [IO.StreamReader]::new($archive.GetEntry('README.md').Open())
+            try {
+                $manifest = $manifestReader.ReadToEnd() | ConvertFrom-Json
+                $readme = $readmeReader.ReadToEnd()
+            }
+            finally { $manifestReader.Dispose(); $readmeReader.Dispose() }
+        }
+        finally { $archive.Dispose() }
+
+        $readme | Should -Match ([regex]::Escape("## Version $($manifest.Version)"))
+    }
 }

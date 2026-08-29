@@ -214,6 +214,15 @@ function Get-UserActivitySummaryText {
     return ($lines -join "`n")
 }
 
+function Get-UserActivityDetailText {
+    param([Parameter(Mandatory)][long]$TargetUserId, [datetime]$Now = (Get-Date))
+    $user = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
+    if ($user.Count -eq 0) { return 'المستخدم لم يعد ضمن قائمة المصرح لهم.' }
+    $windowMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+    $activity = Get-UserActivityStatus -LastActivityAt ([string]$user[0].LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
+    return "👤 $($user[0].Alias)`n$($activity.Label)`nالحالة تقريبية حسب آخر تفاعل مع البوت؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت."
+}
+
 function Test-StatusViewer {
     <# Full status is operationally useful to the owner as well as an
        administrator, but it must not widen access to mutating admin tools. #>

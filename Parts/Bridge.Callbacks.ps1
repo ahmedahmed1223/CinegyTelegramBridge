@@ -535,6 +535,14 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'usr:activity:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $targetUserId = [long](Get-CallbackArg $data 'usr:activity:')
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivityDetailText -TargetUserId $targetUserId) `
+                    -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $userId)
+            }
+            break
+        }
         'usr:toggle:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
             $target = [long](Get-CallbackArg $data 'usr:toggle:'); $disabled = Test-UserDisabled -UserId $target
@@ -909,8 +917,11 @@ function Invoke-CallbackQuery {
         }
         'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }
         'remack:*' {
-            $acknowledged = Confirm-TemplateReminder -ReminderId (Get-CallbackArg $data 'remack:') -UserId $userId
-            $message = if ($acknowledged) { '✅ تم تسجيل المعالجة وإلغاء تنبيه المتابعة.' } else { 'انتهى التنبيه أو أنه مخصص لمستخدم آخر.' }
+            $failureReason = ''
+            $acknowledged = Confirm-TemplateReminder -ReminderId (Get-CallbackArg $data 'remack:') -UserId $userId -FailureReason ([ref]$failureReason)
+            $message = if ($acknowledged) { '✅ تم تسجيل المعالجة وإلغاء تنبيه المتابعة.' }
+            elseif ($failureReason -eq 'persistence') { '⚠️ تعذّر حفظ إلغاء المتابعة؛ ما زال التنبيه قائمًا. حاول مجددًا.' }
+            else { 'انتهى التنبيه أو أنه مخصص لمستخدم آخر.' }
             Send-TelegramMessage -ChatId $chatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }

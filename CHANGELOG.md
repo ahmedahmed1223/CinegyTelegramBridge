@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.0.0-preview.3 — 2026-08-29
+
+- **Fixes timed auto-hide being discarded for the original operator without weakening replacement safety.** Cinegy can expose a different engine active id than the client EventId sent with `SHOW`; the bridge now resolves and persists that identity synchronously inside the successful SHOW using a positive exact template-name match. A missing or ambiguous identity does not arm a destructive timer, and a later watchdog observation can never transfer old work to a replacement—even one using the same template name. Attaching a timer to an existing scene performs the same live identity check.
+- **Adds an explicit personal-reminder acknowledgement and one optional follow-up.** The notified operator gets a «تمت المعالجة» button; only that user can acknowledge it. If it remains unacknowledged and the same scene is still live, one follow-up is sent after `TemplateReminderFollowUpMinutes` (default 5 minutes, 0 disables). The acknowledgement identity and follow-up stage survive restart.
+- **Adds approximate user activity to administrator tools.** Users are labelled recent, idle, or unknown from their cached last interaction. `UserActivityRecentMinutes` controls the window (default 5 minutes), and the UI states clearly that Telegram bots do not receive true online presence.
+- Makes queue consumption transactional: if persisting removal fails, a due auto-hide or reminder remains pending and is not executed in a way that could repeat after restart.
+- Adds regression coverage for exact SHOW identity, later-replacement safety, persistence failures, follow-up persistence and ownership, disabled follow-ups, and recent/idle/unknown user activity.
+
 ## 6.0.0-preview.2 — 2026-08-28
 
 The complete Version 6 delivery record and merge gate are documented in [`docs/VERSION-6.md`](docs/VERSION-6.md).

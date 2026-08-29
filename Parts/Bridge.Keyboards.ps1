@@ -440,7 +440,7 @@ function Get-UsersAdminKeyboard {
         $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
         $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
         $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
-        $rows += , @((New-Button $activity.Label "usr:revoke:$($user.UserId)"))
+        $rows += , @((New-Button $activity.Label "usr:activity:$($user.UserId)"))
         # No role button on the owner's own row: there is nothing to promote
         # them to, and demoting them is refused anyway.
         if ($isOwner -and $user.Role -ne 'owner') {
@@ -472,7 +472,7 @@ function Show-UsersAdminScreen {
         "`n👑 بصفتك المالك يمكنك ترقية مشغّل إلى مشرف أو خفضه."
     }
     else { '' }
-    Send-TelegramMessage -ChatId $ChatId -Text ("👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد.$roleLine") `
+    Send-TelegramMessage -ChatId $ChatId -Text ("👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد.`nحالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.$roleLine") `
         -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
 }
 

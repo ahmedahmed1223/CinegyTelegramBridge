@@ -13,9 +13,9 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 6.0.0-preview.2
+## Version 6.0.0-preview.3
 
-Version 6 improves the existing PowerShell and Telegram product without changing its configuration or template formats. Preview 2 adds stable emergency-first processing inside each fetched Telegram batch and a bounded duplicate-update ledger. It also introduces an administrator health center, a consumable unified setting schema, tested state-migration primitives, and bounded pages for template administration, users, and pending access requests. A 1,000-template catalogue no longer produces an invalid Telegram keyboard.
+Version 6 improves the existing PowerShell and Telegram product without changing its configuration or template formats. Preview 3 fixes Cinegy auto-hide identity correlation, adds an acknowledged personal reminder with one configurable follow-up, and shows administrators approximate user activity from the last bot interaction. It includes Preview 2's emergency-first Telegram admission, duplicate-update ledger, health center, unified setting schema, state migration, and bounded administrator pages.
 
 `SceneMode` remains `Single` by default. Administrators may choose `Multi` for a catalogue where several named templates target the same Cinegy layer; one item is active on that layer at a time and the documented HIDE/EXIT controls remain layer-wide. The bridge enables that mode only when an active item identity and layer control are verified.
 
@@ -448,6 +448,11 @@ menu:
   restores the remaining timer. Before hiding, the bridge confirms that the
   same tracked scene is still on the layer; if Cinegy or an operator replaced
   it, the old timer is discarded instead of hiding the replacement.
+  Some Cinegy installations replace the client `SHOW` event id with an engine
+  active id for the same scene. The bridge resolves that identity synchronously
+  inside `SHOW` using an exact template-name match, before arming the timer.
+  A missing or ambiguous identity leaves no destructive timer behind; every
+  later id change is treated as a replacement for safety.
   - The quick-pick buttons come from `AutoHidePresetSeconds`
     (`5,10,15,30,60,120`) and the pre-selected one from
     `AutoHideDefaultSeconds` — both editable in ⚙️ الإعدادات.
@@ -461,9 +466,17 @@ menu:
   event—the bridge stores the deadline in `logs/template-reminders.json` and
   later messages the same operator directly—even when the template was launched
   from a group—only if the exact scene remains on air.
+  The message includes **✅ تمت المعالجة**. If that operator does not press it,
+  one follow-up is sent after `TemplateReminderFollowUpMinutes` (default 5;
+  `0` disables the follow-up). The pending acknowledgement survives restart.
   Replacing or hiding the scene silently cancels its reminder. Templates marked
   `longRunning: true` (such as a logo or ticker working 24/7) are deliberately
   excluded from this feature.
+- **👥 نشاط المستخدمين** → administrator tools classify each authorized user
+  as recently active, idle, or unknown from the last interaction cached by the
+  bot. `UserActivityRecentMinutes` controls the recent window (default 5).
+  This is deliberately labelled approximate: Telegram bots do not receive a
+  real-time online/offline presence signal.
 - **📸 صورة من البث** → grabs a single frame from `LiveStream.SourceUrl` via
   ffmpeg and sends it back as a photo. It runs **asynchronously**, so it
   never delays anyone else's command; repeat taps within

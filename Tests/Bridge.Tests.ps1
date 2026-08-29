@@ -1104,6 +1104,30 @@ Describe 'Telegram API send reliability' {
     }
 }
 
+Describe 'Version 6 role navigation contracts' {
+    It 'preserves page filter and return callback in navigation context' {
+        $context = Get-BridgeNavigationContext -Page 3 -Filter 'news' -ReturnCallback 'menu:templates'
+        $context.Page | Should -Be 3
+        $context.Filter | Should -Be 'news'
+        $context.ReturnCallback | Should -Be 'menu:templates'
+    }
+
+    It 'builds the role main keyboard through the compatible menu' {
+        Mock Test-Admin { $false }
+        $callbacks = @((Get-RoleMainKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'menu:templates'
+        $callbacks | Should -Contain 'menu:update'
+        $callbacks | Should -Contain 'menu:schedule'
+        $callbacks | Should -Not -Contain 'menu:settings'
+    }
+
+    It 'summarizes cached readiness without performing probes' {
+        $summary = Get-BridgeReadinessSummary -Snapshot @{ Telegram = 'connected'; Cinegy = 'healthy'; DiskFreeGB = 8; LastError = '' }
+        $summary.Ready | Should -BeTrue
+        $summary.Text | Should -Match 'جاهز'
+    }
+}
+
 Describe 'ConvertTo-ProcessArgumentLine' {
     It 'quotes a path containing spaces' {
         # The ffmpeg exit -22 regression: "D:\cingy cg\..." was split at the space.

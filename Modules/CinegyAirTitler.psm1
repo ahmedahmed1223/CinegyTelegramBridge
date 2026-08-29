@@ -507,35 +507,37 @@ function Get-AirTelemetryStatus {
 
 function Get-CinegySceneCapabilities {
     <#
-        Determines whether a Cinegy response is sufficient for safely enabling
-        independent scene actions. The currently documented status endpoint
-        exposes one layer-level Active item only, so callers without an
-        explicit multi-item probe receive a fail-closed result.
+        Verifies the documented Cinegy layer-catalog model: many named
+        templates/items may target one layer, while control and status remain
+        layer-scoped and expose one active item identity at a time.
     #>
     param(
         [object[]]$SceneItems = @(),
+        [bool]$LayerTargetSupported = $false,
         [bool]$DirectTargetSupported = $false
     )
     $items = @($SceneItems)
-    $identities = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $stable = $items.Count -ge 2
+    $canIdentifyActiveItem = $items.Count -gt 0
     foreach ($item in $items) {
-        $property = $item.PSObject.Properties['SceneId']
-        $id = if ($null -eq $property) { '' } else { [string]$property.Value }
-        if ([string]::IsNullOrWhiteSpace($id) -or -not $identities.Add($id.Trim())) {
-            $stable = $false
+        $activeIdProperty = $item.PSObject.Properties['ActiveId']
+        $sceneIdProperty = $item.PSObject.Properties['SceneId']
+        if ($null -eq $activeIdProperty -and $null -eq $sceneIdProperty) {
+            $canIdentifyActiveItem = $false
             break
         }
     }
-    $verified = $stable -and $DirectTargetSupported
-    $error = if ($verified) { '' }
-    elseif (-not $stable) { 'Cinegy لم يثبت قائمة مشاهد مستقلة بهويات ثابتة.' }
-    else { 'Cinegy لم يثبت إمكانية استهداف مشهد محدد مباشرة.' }
+    $verified = $canIdentifyActiveItem -and $LayerTargetSupported
+    $capabilityError = if ($verified) { '' }
+    elseif (-not $canIdentifyActiveItem) { 'Cinegy لم يثبت هوية العنصر النشط على الطبقة.' }
+    else { 'Cinegy لم يثبت أوامر التحكم المباشر بالطبقة.' }
     return [pscustomobject]@{
-        CanListScenes = $stable
+        Semantics = 'LayerCatalog'
+        CanListScenes = $canIdentifyActiveItem
+        CanIdentifyActiveItem = $canIdentifyActiveItem
+        CanTargetLayer = $LayerTargetSupported
         CanTargetScene = $DirectTargetSupported
         Verified = $verified
-        Error = $error
+        Error = $capabilityError
     }
 }
 

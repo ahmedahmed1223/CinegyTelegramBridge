@@ -20,7 +20,9 @@ Describe 'Unified bridge setting schema' {
                 -CategoryByName @{ RequireUserLevelAuth = 'security'; AirVariableType = 'advanced'; MaxFieldLength = 'onair' } `
                 -Labels @{ RequireUserLevelAuth = 'التحقق من هوية المستخدم' } `
                 -ProtectedNames @('RequireUserLevelAuth') `
-                -Choices @{ AirVariableType = @('Text', 'String') })
+                -Choices @{ AirVariableType = @('Text', 'String') } `
+                -Constraints @{ MaxFieldLength = @{ Minimum = 1; Maximum = 1000 } } `
+                -AdvancedNames @('FutureSetting'))
     }
 
     It 'describes a protected boolean through one complete record' {
@@ -49,5 +51,14 @@ Describe 'Unified bridge setting schema' {
     It 'finds Arabic labels and returns only modified values' {
         (Find-BridgeSettings -Schema $script:Schema -Query 'هوية').Name | Should -Be 'RequireUserLevelAuth'
         (Get-ModifiedBridgeSettings -Schema $script:Schema -Values @{ MaxFieldLength = 250 }).Name | Should -Be 'MaxFieldLength'
+    }
+
+    It 'validates ranges, supports simple mode, and resets one value only' {
+        (Test-BridgeSettingValue -Schema $script:Schema -Name 'MaxFieldLength' -Value 1001).Valid | Should -BeFalse
+        @(Get-BridgeSettingsForMode -Schema $script:Schema -Advanced:$false).Name | Should -Not -Contain 'FutureSetting'
+        $values = @{ MaxFieldLength = 250; FutureSetting = 9 }
+        $updated = Reset-BridgeSettingToDefault -Schema $script:Schema -Values $values -Name 'MaxFieldLength'
+        $updated.MaxFieldLength | Should -Be 200
+        $updated.FutureSetting | Should -Be 9
     }
 }

@@ -23,8 +23,9 @@ JSON, Pester 6, PSScriptAnalyzer.
 - Preserve `config.json`, `templates.json`, existing typed commands, and
   existing `hide:<layer>` / `exit:<layer>` callbacks in `Single` mode.
 - A configured shared template layer does not prove simultaneous active scenes.
-- `Multi` scene mode remains disabled until Cinegy supports stable scene listing
-  and direct scene targeting; failure to verify capabilities fails closed.
+- `Multi` scene mode means multiple named catalog items per layer with one
+  active item at a time. It remains disabled until active-item identity and
+  layer control are verified; failure to verify capabilities fails closed.
 - HIDE, EXIT, and hide-all remain higher priority than SHOW and administration.
 - SHOW keeps its existing review and layer-verification safety gates.
 - New mutable state is validated and atomically persisted with a backup before
@@ -91,9 +92,8 @@ Commit: `feat(v6): add compatible live scene state`
 
 - [x] **Step 1: Write failing capability tests**
 
-Mock Cinegy responses that expose one layer item, multiple items without
-identities, and multiple items with stable SceneId values plus direct-target
-support. Assert only the final response permits `Multi` mode.
+Mock Cinegy responses without an active identity and with a stable ActiveId
+plus layer-target support. Assert only the latter permits `Multi` mode.
 
 - [x] **Step 2: Verify RED**
 
@@ -114,7 +114,7 @@ Run: `Invoke-Pester ./Tests/BridgeLiveScenes.Tests.ps1,./Tests/Bridge.Tests.ps1 
 
 Commit: `feat(v6): gate multi-scene mode on Cinegy capability`
 
-### Task 3: Operation lifecycle, priority admission, and scene-safe routing
+### Task 3: Operation lifecycle, priority admission, and layer-safe routing
 
 **Files:**
 - Create: `Modules/BridgeOperationLifecycle.psm1`
@@ -125,36 +125,35 @@ Commit: `feat(v6): gate multi-scene mode on Cinegy capability`
 
 **Interfaces:** Produces `New-BridgeOperationRecord`,
 `Set-BridgeOperationState`, `Get-BridgeOperationStatusText`, and
-`New-BridgeSceneCallbackToken` / `Resolve-BridgeSceneCallbackToken`.
+`Get-BridgeOperationScope`.
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Assert a new operation receives a short id and state `queued`, legal states
 are `queued`, `running`, `succeeded`, `warning`, and `failed`, and an invalid
-state transition is rejected. Assert expired, unknown, and cross-layer scene
-tokens cannot resolve.
+state transition is rejected. Assert every supported Cinegy mutation is
+layer-exclusive and unsupported scene-target operations are rejected.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/BridgeOperationLifecycle.Tests.ps1 -Output Detailed`
 
 Expected: lifecycle and token commands do not exist.
 
-- [ ] **Step 3: Implement lifecycle records and callback tokens**
+- [x] **Step 3: Implement lifecycle records and layer scopes**
 
 Store no editorial values in a record. Include operation id, action, target
-scope, layer, optional SceneId, actor, queued/start/end times, result, and
-error. Use random bounded tokens mapped in memory to a verified SceneId;
-preserve legacy callbacks in `Single` mode.
+scope, layer, optional local record id, actor, queued/start/end times, result,
+and error. Preserve legacy callbacks in both modes.
 
-- [ ] **Step 4: Route Multi actions safely**
+- [x] **Step 4: Route Multi actions safely**
 
-Classify SHOW, hide-layer, exit-layer, replace, and clear as `LayerExclusive`.
-Classify scene HIDE, EXIT, and UPDATE as `SceneSpecific`, but serialize both
-through the existing layer lock until Cinegy concurrency is proven. Render
-separate scene rows and scene-specific controls only in verified `Multi` mode.
+Classify SHOW, HIDE, EXIT, replace, and clear as `LayerExclusive`. Reject
+scene-specific mutation names because Cinegy documents these controls at layer
+scope. In verified `Multi` mode, render several catalog items assigned to the
+same layer while reporting only the item currently active on that layer.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/BridgeOperationLifecycle.Tests.ps1,./Tests/Bridge.Tests.ps1 -Output Detailed`
 
@@ -173,14 +172,14 @@ Commit: `feat(v6): add scene-safe operation lifecycle`
 `Find-BridgeSettings`, `Get-ModifiedBridgeSettings`, and
 `Reset-BridgeSettingToDefault`.
 
-- [ ] **Step 1: Write failing settings tests**
+- [x] **Step 1: Write failing settings tests**
 
 Assert a numeric setting rejects values outside its schema range, an advanced
 setting is hidden in simple mode, Arabic search finds the matching label or
 description, and resetting one changed setting saves only that setting's
 default value.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/BridgeSettingsSchema.Tests.ps1,./Tests/Bridge.Tests.ps1 -Output Detailed`
 
@@ -210,27 +209,27 @@ Commit: `feat(v6): add advanced settings discovery and recovery`
 **Interfaces:** Produces `Invoke-BridgeStateFileMigration` and
 `Get-BridgeRuntimeFileHealth`.
 
-- [ ] **Step 1: Write failing file-migration tests**
+- [x] **Step 1: Write failing file-migration tests**
 
 Use isolated TestDrive files for `onair.json`, `schedule.json`, and
 `autohide.json`. Assert legacy input receives an envelope, a failed migration
 does not replace the primary file, and a corrupt primary restores only a
 validated backup.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/BridgeRuntimeMigration.Tests.ps1 -Output Detailed`
 
 Expected: missing migration and runtime-health helpers.
 
-- [ ] **Step 3: Implement transactional file migration**
+- [x] **Step 3: Implement transactional file migration**
 
 Validate JSON, transform with `Invoke-BridgeStateMigration`, write a sibling
 temporary file, validate it again, create a timestamped backup, and atomically
 replace the primary file. Return file path, size, last write time, schema
 version, and backup health for the administrative screen.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/BridgeRuntimeMigration.Tests.ps1,./Tests/BridgeStorage.Tests.ps1 -Output Detailed`
 
@@ -246,20 +245,20 @@ Commit: `feat(v6): migrate and report runtime state safely`
 **Interfaces:** Produces `Get-RoleMainKeyboard`, `Get-BridgeNavigationContext`,
 and `Get-BridgeReadinessSummary`.
 
-- [ ] **Step 1: Write failing navigation tests**
+- [x] **Step 1: Write failing navigation tests**
 
 Assert an operator receives on-air, templates, update, and schedule actions;
 an administrator receives users, requests, settings, health, and diagnostics;
 and emergency actions remain at the top for authorized roles. Assert return
 actions preserve page and filter context.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `Invoke-Pester ./Tests/Bridge.Tests.ps1 -Output Detailed`
 
 Expected: role keyboard and navigation-context helpers do not exist.
 
-- [ ] **Step 3: Implement navigation and cached readiness**
+- [x] **Step 3: Implement navigation and cached readiness**
 
 Move uncommon administrative controls behind `more` screens, add Arabic
 breadcrumb text, and retain `Page`, `Filter`, and `ReturnCallback` in pending
@@ -267,7 +266,7 @@ navigation state. Health uses cached Telegram, Cinegy, output, relay, disk,
 schedule, last-success, and last-error data; opening the screen does not make
 a new network request.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/Bridge.Tests.ps1 -Output Detailed`
 
@@ -283,33 +282,33 @@ Commit: `feat(v6): add role-focused navigation and readiness`
 **Interfaces:** Consumes all Version 6 helpers and produces measured,
 repeatable load acceptance results.
 
-- [ ] **Step 1: Write failing load acceptance tests**
+- [x] **Step 1: Write load acceptance tests**
 
 Generate 1,000 templates, 250 users, 200 requests, and multiple scene records
 on a shared layer. Assert every keyboard remains below 100 buttons, legacy
 single-mode callbacks remain present, and priority admission preserves an
 emergency action before normal work.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify acceptance coverage**
 
 Run: `Invoke-Pester ./Tests/BridgeVersion6Load.Tests.ps1 -Output Detailed`
 
 Expected: required load and multi-scene assertions are absent.
 
-- [ ] **Step 3: Add measured acceptance thresholds**
+- [x] **Step 3: Add measured acceptance thresholds**
 
 Use `Measure-Command` around pure keyboard, scene lookup, and operation
 admission helpers. Require each 1,000-template operation to complete in less
 than one second on the test machine; report the measured milliseconds in the
 test failure text.
 
-- [ ] **Step 4: Update release gate and documentation**
+- [x] **Step 4: Update release gate and documentation**
 
 Add the test to `Run-Checks.ps1`, add Version 6 capability/mode documentation,
 and retain the final operational gates: dedicated non-production Cinegy
 SHOW/HIDE/EXIT smoke test and Authenticode signing.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run: `./Run-Checks.ps1`
 

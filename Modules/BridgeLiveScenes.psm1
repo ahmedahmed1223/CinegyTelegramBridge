@@ -148,12 +148,12 @@ function Test-BridgeSceneMode {
     if ($RequestedMode -eq 'Multi' -and $verified) {
         return [pscustomobject]@{ Mode = 'Multi'; Verified = $true; Error = '' }
     }
-    $error = if ($RequestedMode -eq 'Multi') {
+    $modeError = if ($RequestedMode -eq 'Multi') {
         $detail = [string](Get-BridgeLiveSceneValue -Object $Capabilities -Name 'Error')
-        if ([string]::IsNullOrWhiteSpace($detail)) { 'وضع المشاهد المتعددة غير متاح حتى يثبت Cinegy الهوية والاستهداف المباشر.' } else { "وضع المشاهد المتعددة غير متاح: $detail" }
+        if ([string]::IsNullOrWhiteSpace($detail)) { 'وضع المشاهد المتعددة غير متاح حتى يثبت Cinegy هوية العنصر النشط والتحكم بالطبقة.' } else { "وضع المشاهد المتعددة غير متاح: $detail" }
     }
     else { '' }
-    return [pscustomobject]@{ Mode = 'Single'; Verified = $verified; Error = $error }
+    return [pscustomobject]@{ Mode = 'Single'; Verified = $verified; Error = $modeError }
 }
 
 Export-ModuleMember -Function ConvertTo-BridgeLiveSceneState, Get-BridgeLiveScenes, Get-BridgeLiveScenesForLayer, Get-BridgeLiveScene, Get-BridgePrimarySceneForLayer, Test-BridgeSceneMode

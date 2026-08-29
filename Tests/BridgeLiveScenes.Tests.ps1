@@ -72,14 +72,14 @@ Describe 'Bridge live scene state' {
         $state.Scenes[0].LastVerifiedAtUtc | Should -Be '2026-08-28T12:00:00Z'
     }
 
-    It 'fails closed for Multi mode until Cinegy lists stable identities and accepts direct targeting' {
-        $oneScene = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ SceneId = 'one' }) -DirectTargetSupported $false
-        $unidentified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Name = 'one' }, [pscustomobject]@{ Name = 'two' }) -DirectTargetSupported $true
-        $verified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ SceneId = 'one' }, [pscustomobject]@{ SceneId = 'two' }) -DirectTargetSupported $true
+    It 'enables Multi catalog mode when Cinegy exposes layer control and active item identity' {
+        $unidentified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Success = $true; Name = 'one' }) -LayerTargetSupported $true
+        $verified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Success = $true; ActiveId = 'item-one' }) -LayerTargetSupported $true
 
-        (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $oneScene).Mode | Should -Be 'Single'
         (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $unidentified).Mode | Should -Be 'Single'
         (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $verified).Mode | Should -Be 'Multi'
+        $verified.Semantics | Should -Be 'LayerCatalog'
+        $verified.CanTargetScene | Should -BeFalse
         $verified.Verified | Should -BeTrue
     }
 }

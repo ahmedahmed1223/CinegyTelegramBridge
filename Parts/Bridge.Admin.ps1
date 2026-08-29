@@ -538,7 +538,7 @@ function Invoke-FullStatusCommand {
     $lines.Add('🎛 اتصال Cinegy')
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
     $configuredSceneMode = [string](Get-Setting 'SceneMode')
-    $sceneCapabilities = Get-CinegySceneCapabilities
+    $sceneCapabilities = Get-CinegySceneCapabilities -SceneItems $layerStatuses -LayerTargetSupported $true
     $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
     $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
     $lines.Add("🧩 وضع المشاهد المختار: $configuredSceneMode · $verification")

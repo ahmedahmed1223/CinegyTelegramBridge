@@ -21,8 +21,17 @@ Describe 'Bridge operation lifecycle' {
         (Resolve-BridgeSceneCallbackToken -Store $store -Token $token -Layer 8 -Now ([datetime]'2026-08-28T12:01:00Z')) | Should -BeNullOrEmpty
     }
 
-    It 'classifies scene actions as serialized while preserving layer emergency priority' {
-        (Get-BridgeOperationScope -Action 'scene-hide').Scope | Should -Be 'SceneSpecific'
+    It 'classifies every supported Cinegy mutation as layer exclusive' {
+        (Get-BridgeOperationScope -Action 'show').Scope | Should -Be 'LayerExclusive'
         (Get-BridgeOperationScope -Action 'hide-layer').Scope | Should -Be 'LayerExclusive'
+        (Get-BridgeOperationScope -Action 'exit-layer').Scope | Should -Be 'LayerExclusive'
+        { Get-BridgeOperationScope -Action 'scene-hide' } | Should -Throw
+    }
+
+    It 'formats a concise Arabic status with its correlation id' {
+        $operation = New-BridgeOperationRecord -Action SHOW -Layer 7 -ActorId 10
+        $text = Get-BridgeOperationStatusText -Operation $operation
+        $text | Should -Match ([regex]::Escape($operation.OperationId))
+        $text | Should -Match 'قيد الانتظار'
     }
 }

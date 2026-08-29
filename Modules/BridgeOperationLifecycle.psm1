@@ -3,7 +3,8 @@ Set-StrictMode -Version Latest
 
 function New-BridgeOperationRecord {
     param([Parameter(Mandatory)][string]$Action, [Parameter(Mandatory)][int]$Layer, [long]$ActorId = 0, [string]$SceneId = '')
-    [pscustomobject]@{ OperationId = "op-$(([guid]::NewGuid().ToString('N')).Substring(0,12))"; Action = $Action; Layer = $Layer; SceneId = $SceneId; ActorId = $ActorId; State = 'queued'; QueuedAtUtc = [datetime]::UtcNow; StartedAtUtc = $null; EndedAtUtc = $null; Error = '' }
+    $scope = Get-BridgeOperationScope -Action $Action
+    [pscustomobject]@{ OperationId = "op-$(([guid]::NewGuid().ToString('N')).Substring(0,12))"; Action = $scope.Action; TargetScope = $scope.Scope; Layer = $Layer; SceneId = $SceneId; ActorId = $ActorId; State = 'queued'; QueuedAtUtc = [datetime]::UtcNow; StartedAtUtc = $null; EndedAtUtc = $null; Result = ''; Error = '' }
 }
 
 function Set-BridgeOperationState {
@@ -33,8 +34,16 @@ function Resolve-BridgeSceneCallbackToken {
 function Get-BridgeOperationScope {
     param([Parameter(Mandatory)][string]$Action)
     $normalized = $Action.Trim().ToLowerInvariant()
-    $scope = if ($normalized -in @('scene-hide', 'scene-exit', 'scene-update')) { 'SceneSpecific' } else { 'LayerExclusive' }
-    return [pscustomobject]@{ Action = $normalized; Scope = $scope; SerializedByLayer = $true }
+    $supported = @('show', 'hide', 'hide-layer', 'exit', 'exit-layer', 'replace', 'clear', 'hide-all')
+    if ($normalized -notin $supported) { throw "Unsupported Cinegy operation '$Action'." }
+    return [pscustomobject]@{ Action = $normalized; Scope = 'LayerExclusive'; SerializedByLayer = $true }
 }
 
-Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope
+function Get-BridgeOperationStatusText {
+    param([Parameter(Mandatory)]$Operation)
+    $labels = @{ queued = 'قيد الانتظار'; running = 'قيد التنفيذ'; succeeded = 'اكتملت'; warning = 'اكتملت بتحذير'; failed = 'فشلت' }
+    $label = if ($labels.ContainsKey([string]$Operation.State)) { $labels[[string]$Operation.State] } else { [string]$Operation.State }
+    return "🔖 $($Operation.OperationId) · الطبقة $($Operation.Layer) · $label"
+}
+
+Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText

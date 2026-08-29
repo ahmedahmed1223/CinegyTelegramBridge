@@ -10,6 +10,8 @@ The complete Version 6 delivery record and merge gate are documented in [`docs/V
 - **Introduces a unified setting-schema record.** Every existing default now composes into a record containing type, category, Arabic label, unit, description, protection flag, and constrained choices; future settings still fall back to Advanced.
 - **Adds explicit state-migration primitives.** Legacy unwrapped data is version zero, ordered migration steps produce a current envelope, and missing or future schema versions fail with structured results.
 - **Bounds large administrator catalogues.** Template administration, user administration, and pending access requests use absolute-index pages and remain below Telegram's 100-button keyboard limit. Stress coverage includes 1,000 templates, 250 users, and 200 requests.
+- **Defines Cinegy shared-layer `Multi` mode without inventing unsupported scene targeting.** Several named template definitions may share a layer while Cinegy reports one active item; HIDE and EXIT remain layer-scoped and `Single` remains the default.
+- **Adds Version 6 operation, settings-validation, migration-health, and readiness contracts.** Operation correlation states, numeric setting ranges, simple/advanced schema filtering, single-setting reset, timestamped state backups, cached readiness, and measured 1,000-item acceptance are covered by the release gate.
 
 ## 6.0.0-preview.1 — 2026-08-28
 

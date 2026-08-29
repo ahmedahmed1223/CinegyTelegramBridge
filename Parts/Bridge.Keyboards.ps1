@@ -143,6 +143,31 @@ function Get-MainMenuKeyboard {
     return (ConvertTo-OneHandLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
+function Get-RoleMainKeyboard {
+    <# Stable Version 6 entry point; authorization remains in the compatible
+       menu builder so existing role and owner rules stay authoritative. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    return Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+}
+
+function Get-BridgeNavigationContext {
+    param([int]$Page = 0, [string]$Filter = '', [string]$ReturnCallback = 'menu')
+    return [pscustomobject]@{ Page = [math]::Max(0, $Page); Filter = $Filter; ReturnCallback = $ReturnCallback }
+}
+
+function Get-BridgeReadinessSummary {
+    <# Summarizes an already captured snapshot. This function intentionally
+       performs no Telegram, Cinegy, disk, or relay probe. #>
+    param([Parameter(Mandatory)]$Snapshot)
+    $telegram = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('Telegram')) { [string]$Snapshot['Telegram'] } elseif ($Snapshot.PSObject.Properties['Telegram']) { [string]$Snapshot.Telegram } else { 'unknown' }
+    $cinegy = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('Cinegy')) { [string]$Snapshot['Cinegy'] } elseif ($Snapshot.PSObject.Properties['Cinegy']) { [string]$Snapshot.Cinegy } else { 'unknown' }
+    $diskFree = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('DiskFreeGB')) { [double]$Snapshot['DiskFreeGB'] } elseif ($Snapshot.PSObject.Properties['DiskFreeGB']) { [double]$Snapshot.DiskFreeGB } else { 0 }
+    $lastError = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('LastError')) { [string]$Snapshot['LastError'] } elseif ($Snapshot.PSObject.Properties['LastError']) { [string]$Snapshot.LastError } else { '' }
+    $ready = $telegram -eq 'connected' -and $cinegy -eq 'healthy' -and $diskFree -gt 1 -and [string]::IsNullOrWhiteSpace($lastError)
+    $label = if ($ready) { '🟢 جاهز للتشغيل' } else { '🟠 يحتاج مراجعة' }
+    return [pscustomobject]@{ Ready = $ready; Text = "$label · Telegram: $telegram · Cinegy: $cinegy · القرص: $diskFree GB" }
+}
+
 function Get-MainMenuIntro {
     <# The line above the main menu. It used to read "اختر من القائمة:", which
        tells the operator nothing they cannot already see. Saying what is on

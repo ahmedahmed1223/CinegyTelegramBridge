@@ -17,6 +17,8 @@ long-polling loop.
 
 Version 6 improves the existing PowerShell and Telegram product without changing its configuration or template formats. Preview 2 adds stable emergency-first processing inside each fetched Telegram batch and a bounded duplicate-update ledger. It also introduces an administrator health center, a consumable unified setting schema, tested state-migration primitives, and bounded pages for template administration, users, and pending access requests. A 1,000-template catalogue no longer produces an invalid Telegram keyboard.
 
+`SceneMode` remains `Single` by default. Administrators may choose `Multi` for a catalogue where several named templates target the same Cinegy layer; one item is active on that layer at a time and the documented HIDE/EXIT controls remain layer-wide. The bridge enables that mode only when an active item identity and layer control are verified.
+
 The settings experience from Preview 1 remains: the former long administrator keyboard is split into eight Arabic operational categories, each paged at eight settings. Existing `cfg:*` callbacks, typed commands, `config.json`, and `templates.json` remain compatible.
 
 The 5.7.9 safety behavior remains included: self-service access requests stay enabled by default while approvals remain restricted to administrators and the owner; single-instance startup is tolerant by default with `-RequireSingleInstance` available for strict deployments; settings and template-registry JSON uploads allow up to 10 MiB; and `TemplateRegistryImportMaxTemplates` defaults to 1000.

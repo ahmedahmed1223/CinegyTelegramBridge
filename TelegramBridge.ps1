@@ -272,7 +272,7 @@ $script:SettingsImportMaximumBytes = 10 * 1024 * 1024
 $script:TemplateRegistryImportMaximumBytes = 10 * 1024 * 1024
 
 $script:SettingDisplayMetadata = @{
-    SceneMode = @{ Unit = ''; Description = 'وضع المشاهد الافتراضي: مشهد واحد أو عدة مشاهد على الطبقة' }
+    SceneMode = @{ Unit = ''; Description = 'Single للتوافق الحالي؛ Multi يسمح بعدة قوالب على الطبقة مع قالب نشط واحد في اللحظة نفسها' }
     AirCommandTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة انتظار أمر Cinegy' }
     TelegramRequestTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة إرسال رسائل وملفات Telegram' }
     MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }

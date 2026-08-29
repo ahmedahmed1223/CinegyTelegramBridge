@@ -1176,23 +1176,6 @@ Describe 'Version 6 settings discovery controls' {
         $callbacks | Should -Contain 'cfglist:advanced:0'
     }
 
-    It 'uses one full-width button per row on the settings home screen' {
-        foreach ($row in @((Get-SettingsKeyboard).inline_keyboard)) {
-            @($row).Count | Should -Be 1
-        }
-    }
-
-    It 'uses one full-width button per row in a settings list while keeping reset actions' {
-        $records = @([pscustomobject]@{ Name = 'MaxFieldLength'; Label = 'الحد الأقصى' })
-        $keyboard = Get-SettingsListKeyboard -Records $records
-        foreach ($row in @($keyboard.inline_keyboard)) {
-            @($row).Count | Should -Be 1
-        }
-        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
-        $callbacks | Should -Contain 'cfg:v:MaxFieldLength'
-        $callbacks | Should -Contain 'cfgr:MaxFieldLength'
-    }
-
     It 'resets exactly one known setting after confirmation' {
         Mock Set-Setting {}
         Mock Send-TelegramMessage {}

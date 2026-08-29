@@ -305,8 +305,11 @@ test failure text.
 - [x] **Step 4: Update release gate and documentation**
 
 Add the test to `Run-Checks.ps1`, add Version 6 capability/mode documentation,
-and retain the final operational gates: dedicated non-production Cinegy
-SHOW/HIDE/EXIT smoke test and Authenticode signing.
+and retain the final operational controls: a fail-closed dedicated-layer Cinegy
+SHOW/HIDE/EXIT self-test and Authenticode signing metadata. On 2026-08-29 the
+owner explicitly waived the live smoke run because this checkout operates in a
+working broadcast environment without a designated test layer. The waiver is a
+safety decision, not a successful smoke-test result.
 
 - [x] **Step 5: Verify GREEN and commit**
 
@@ -318,5 +321,8 @@ Commit: `test(v6): verify Version 6 scale and release acceptance`
 
 Version 6 is complete when every task above is checked, `Single` mode remains
 fully backward compatible, `Multi` mode is capability-gated, all automated
-checks pass, the dedicated Cinegy smoke test succeeds, and the final package
-is signed or explicitly documented as an unsigned preview.
+checks pass, and the final package is signed or explicitly documented as an
+unsigned preview. The live Cinegy gate is completed by either a successful test
+on a dedicated non-production layer or an explicit production-safety waiver
+recorded without claiming that live validation occurred. This delivery uses the
+documented waiver path.

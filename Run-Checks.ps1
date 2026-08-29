@@ -180,5 +180,6 @@ if ($failed) {
     exit 1
 }
 Write-Host "  All checks passed." -ForegroundColor Green
-Write-Host "  Static checks only - still run a smoke test in Telegram before going on air." -ForegroundColor DarkGray
+Write-Host "  Static checks only - use a dedicated non-production layer for live smoke testing." -ForegroundColor DarkGray
+Write-Host "  Do not send test SHOW/HIDE/EXIT commands in a working environment without an approved change window." -ForegroundColor DarkGray
 exit 0

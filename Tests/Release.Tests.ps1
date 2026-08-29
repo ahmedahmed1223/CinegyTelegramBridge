@@ -41,6 +41,15 @@ Describe 'Release package safety' {
         $workflow | Should -Match 'Test-ServiceLifecycle\.ps1'
     }
 
+    It 'does not require destructive smoke commands in a live working environment' {
+        $gate = Get-Content -LiteralPath (Join-Path $root 'Run-Checks.ps1') -Raw
+        $readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
+
+        $gate | Should -Match 'dedicated non-production layer'
+        $gate | Should -Match 'Do not send test SHOW/HIDE/EXIT commands in a working environment'
+        $readme | Should -Match 'do \*\*not\*\* send test SHOW/HIDE/EXIT'
+    }
+
     It 'publishes a matching SHA-256 checksum and unsigned manifest when no certificate is requested' {
         $expected = ((Get-Content -LiteralPath $script:ReleaseChecksum -Raw).Trim() -split '\s+')[0]
         (Get-FileHash -LiteralPath $script:ReleaseZip -Algorithm SHA256).Hash | Should -Be $expected

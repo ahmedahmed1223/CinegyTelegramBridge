@@ -299,10 +299,12 @@ Then start it:
 pwsh -File .\TelegramBridge.ps1 -ConfigPath .\config.json
 ```
 
-> Passing checks are necessary, not sufficient. Always follow with a quick
-> smoke test in Telegram — `/بدء` → a template with required fields → review
-> → confirm → hide the layer → 🚨 إخفاء الكل → confirm — before relying on a
-> build during a live programme.
+> In a lab or on a dedicated non-production Cinegy layer, follow the checks with
+> a quick Telegram smoke test: `/بدء` → a template with required fields → review
+> → confirm → hide the layer → 🚨 إخفاء الكل → confirm. If the only available
+> system is a live working environment, do **not** send test SHOW/HIDE/EXIT
+> commands merely to satisfy a release checklist. Record the operational waiver,
+> keep a rollback copy, and use the readiness and automated checks instead.
 
 Leave it running — it long-polls Telegram in a loop. Good for a first test;
 for anything beyond that, install it as a persistent background task (next

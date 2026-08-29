@@ -64,10 +64,13 @@ The package is allow-listed and never contains `config.json`, `templates.json`,
 6. Copy the existing `config.json`, `templates.json`, and `logs` directory into
    the new directory.
 7. Run `.\scripts\Test-BridgeReadiness.ps1` against the new directory, then
-   `.\Run-Checks.ps1`, then start the bridge and perform the Telegram/Cinegy
-   smoke test described in the development plan.
-8. Switch the scheduled task or service to the new directory only after the
-   smoke test succeeds.
+   `.\Run-Checks.ps1`. Perform the Telegram/Cinegy smoke test only in a lab, on
+   a dedicated non-production layer, or during an explicitly approved change
+   window.
+8. If the only target is a live working environment without an isolated layer,
+   do not send test SHOW/HIDE/EXIT commands. Record the production-safety waiver,
+   retain the rollback directory, and switch the task or service through the
+   site's controlled deployment procedure.
 
 ## Rollback
 

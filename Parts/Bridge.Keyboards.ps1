@@ -6,6 +6,18 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function ConvertTo-FullWidthLayout {
+    <# Telegram has no CSS width property. A single button row is the
+       portable way to let clients render an action across the available
+       keyboard width. #>
+    param([Parameter(Mandatory)][hashtable]$Keyboard)
+    $rows = @()
+    foreach ($row in @($Keyboard.inline_keyboard)) {
+        foreach ($button in @($row)) { $rows += , @($button) }
+    }
+    return @{ inline_keyboard = $rows }
+}
+
 function ConvertTo-OneHandLayout {
     <#
         Splits every row into single, full-width buttons.
@@ -18,11 +30,7 @@ function ConvertTo-OneHandLayout {
     #>
     param([Parameter(Mandatory)][hashtable]$Keyboard)
     if (-not (Get-Setting 'OneHandMode')) { return $Keyboard }
-    $rows = @()
-    foreach ($row in @($Keyboard.inline_keyboard)) {
-        foreach ($button in @($row)) { $rows += , @($button) }
-    }
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-FullWidthLayout -Keyboard $Keyboard)
 }
 
 function New-Button {
@@ -803,7 +811,7 @@ function Get-SettingsKeyboard {
     $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
 function Get-SettingsListKeyboard {
@@ -828,12 +836,12 @@ function Get-SettingsListKeyboard {
     }
     if ($items.Count -eq 0) { $rows += , @((New-Button 'لا توجد نتائج' 'menu:settings')) }
     $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
 function Get-SingleSettingResetConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name"), (New-Button '❌ إلغاء' 'menu:settings'))) }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name"), (New-Button '❌ إلغاء' 'menu:settings'))) })
 }
 
 function Get-SettingsCategoryKeyboard {
@@ -886,7 +894,7 @@ function Get-SettingsCategoryKeyboard {
         $rows += , $navigation
     }
     $rows += , @( (New-Button '⬅️ أقسام الإعدادات' 'menu:settings') )
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
 function Get-TemplateAdminCatalogueKeyboard {
@@ -962,7 +970,7 @@ function Get-HideAllLayerSettingsKeyboard {
     }
     $rows += , @( (New-Button "☑️ اختيار كل الطبقات" 'hideallcfg:all'), (New-Button "🚫 إلغاء اختيار الكل" 'hideallcfg:none') )
     $rows += , @( (New-Button "⬅️ الإعدادات" 'menu:settings') )
-    return @{ inline_keyboard = $rows }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = $rows })
 }
 
 function Get-LayerNamesKeyboard {
@@ -977,10 +985,10 @@ function Get-LayerNamesKeyboard {
 
 function Get-LayerNameEditKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
-    return @{ inline_keyboard = @(
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = @(
             , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer") )
             , @( (New-Button '⬅️ أسماء الطبقات' 'menu:layernames'), (New-Button '❌ إلغاء' 'menu:settings') )
-        ) }
+        ) })
 }
 
 function Get-ConfigBackupsKeyboard {
@@ -1001,14 +1009,14 @@ function Get-ConfigBackupsKeyboard {
 }
 
 function Get-ConfigRestoreConfirmKeyboard {
-    return @{ inline_keyboard = @(
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = @(
             , @( (New-Button "⚠️ نعم، استعادة النسخة" 'cfg:restoreconfirm'), (New-Button "❌ إلغاء" 'menu:backups') )
-        ) }
+        ) })
 }
 
 function Get-SettingConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @( , @( (New-Button "⚠️ نعم، عطّل الحماية" "cfgc:$Name"), (New-Button "❌ إلغاء" "menu:settings") ) ) }
+    return (ConvertTo-FullWidthLayout -Keyboard @{ inline_keyboard = @( , @( (New-Button "⚠️ نعم، عطّل الحماية" "cfgc:$Name"), (New-Button "❌ إلغاء" "menu:settings") ) ) })
 }
 
 function Get-AutoHideChoices {

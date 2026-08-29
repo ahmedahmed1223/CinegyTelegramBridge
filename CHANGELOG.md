@@ -3,6 +3,7 @@
 ## 6.0.0 — 2026-08-29
 
 - **Version 6 official release.** The visible administrator audit trail and durable `AIR_OP` records retain the immutable numeric user id and, when configured, the corresponding administrator Alias. Template SHOW, HIDE, EXIT, undo, hide-all, live-value updates, and auto-hide timer actions use the same safe `Alias (ID)` representation; users without an Alias retain their numeric id only. The release keeps the existing configuration and template formats and may be merged into `main` through the documented side-by-side upgrade path.
+- **Improves settings navigation readability.** Settings categories, setting actions, reset controls, confirmation actions, and layer-setting controls now use one full-width button per row. Callback data and the existing compact layout options remain compatible.
 
 ## 6.0.0-preview.3 — 2026-08-29
 

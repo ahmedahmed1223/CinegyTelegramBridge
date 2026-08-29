@@ -46,7 +46,7 @@ function New-BridgeSettingSchema {
             Choices = $settingChoices
             Minimum = Get-BridgeMapValue -Map $constraint -Name 'Minimum'
             Maximum = Get-BridgeMapValue -Map $constraint -Name 'Maximum'
-            Advanced = $AdvancedNames -contains [string]$name
+            Advanced = ($AdvancedNames -contains [string]$name) -or $category -eq 'advanced'
             Sensitive = $SensitiveNames -contains [string]$name
             RequiresConfirmation = $ConfirmationNames -contains [string]$name
             RequiresRestart = $RestartNames -contains [string]$name

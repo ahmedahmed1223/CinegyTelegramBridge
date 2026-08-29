@@ -185,14 +185,14 @@ Run: `Invoke-Pester ./Tests/BridgeSettingsSchema.Tests.ps1,./Tests/Bridge.Tests.
 
 Expected: the new schema fields and helpers are missing.
 
-- [ ] **Step 3: Extend schema and editors**
+- [x] **Step 3: Extend schema and editors**
 
 Compose constraints from existing setting metadata. Add settings-home actions
 for search, modified-only, simple/advanced mode, and single-setting reset;
 retain reset-all behind its existing confirmation path. Every imported value
 is validated against the same schema before persistence.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `Invoke-Pester ./Tests/BridgeSettingsSchema.Tests.ps1,./Tests/Bridge.Tests.ps1 -Output Detailed`
 

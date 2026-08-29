@@ -1128,6 +1128,23 @@ Describe 'Version 6 role navigation contracts' {
     }
 }
 
+Describe 'Version 6 settings discovery controls' {
+    It 'exposes search modified simple and advanced views from settings home' {
+        $callbacks = @((Get-SettingsKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'cfg:search'
+        $callbacks | Should -Contain 'cfglist:modified:0'
+        $callbacks | Should -Contain 'cfglist:simple:0'
+        $callbacks | Should -Contain 'cfglist:advanced:0'
+    }
+
+    It 'resets exactly one known setting after confirmation' {
+        Mock Set-Setting {}
+        Mock Send-TelegramMessage {}
+        Reset-SingleSettingToDefault -Name 'MaxFieldLength' -ChatId 100 -UserId 101 -Confirmed
+        Should -Invoke Set-Setting -Times 1 -Exactly -ParameterFilter { $Name -eq 'MaxFieldLength' -and $Value -eq $script:DefaultSettings['MaxFieldLength'] }
+    }
+}
+
 Describe 'ConvertTo-ProcessArgumentLine' {
     It 'quotes a path containing spaces' {
         # The ffmpeg exit -22 regression: "D:\cingy cg\..." was split at the space.

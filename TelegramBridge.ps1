@@ -1264,6 +1264,7 @@ try {
                                 'stream_url' { Complete-StreamUrl -ChatId $chatId -Value $text | Out-Null }
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
+                                'settings_search' { Complete-SettingsSearch -ChatId $chatId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
                                 'news_add_text' { Complete-NewsTickerAddText -ChatId $chatId -UserId $userId -Value $text | Out-Null }

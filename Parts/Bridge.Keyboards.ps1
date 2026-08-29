@@ -792,6 +792,9 @@ function Get-SettingsKeyboard {
     }
     if ($categoryRow.Count -gt 0) { $rows += , $categoryRow }
 
+    $rows += , @((New-Button '🔎 بحث' 'cfg:search'), (New-Button '📝 المعدّل فقط' 'cfglist:modified:0'))
+    $rows += , @((New-Button '🧭 مبسّط' 'cfglist:simple:0'), (New-Button '🛠 متقدم' 'cfglist:advanced:0'))
+
     $scope = [string](Get-Setting 'HideAllLayers')
     $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
     $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
@@ -799,6 +802,36 @@ function Get-SettingsKeyboard {
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-SettingsListKeyboard {
+    param([AllowEmptyCollection()][object[]]$Records = @(), [string]$Mode = 'simple', [int]$Page = 0, [int]$PageSize = 8)
+    $items = @($Records)
+    $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize $PageSize
+    $rows = @()
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $record = $items[$index]
+            $name = [string]$record.Name
+            $value = Get-Setting $name
+            $action = if ($script:DefaultSettings[$name] -is [bool]) { "cfg:t:$name" } elseif ($script:DefaultSettings[$name] -is [string]) { "cfg:s:$name" } else { "cfg:v:$name" }
+            $rows += , @((New-Button "$($record.Label) = $value" $action), (New-Button '↩️' "cfgr:$name"))
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️' "cfglist:${Mode}:$($window.Page - 1)") }
+        if ($window.HasNext) { $pager += (New-Button '➡️' "cfglist:${Mode}:$($window.Page + 1)") }
+        $rows += , $pager
+    }
+    if ($items.Count -eq 0) { $rows += , @((New-Button 'لا توجد نتائج' 'menu:settings')) }
+    $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-SingleSettingResetConfirmKeyboard {
+    param([Parameter(Mandatory)][string]$Name)
+    return @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name"), (New-Button '❌ إلغاء' 'menu:settings'))) }
 }
 
 function Get-SettingsCategoryKeyboard {

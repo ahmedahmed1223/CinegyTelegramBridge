@@ -12,6 +12,7 @@ The complete Version 6 delivery record and merge gate are documented in [`docs/V
 - **Bounds large administrator catalogues.** Template administration, user administration, and pending access requests use absolute-index pages and remain below Telegram's 100-button keyboard limit. Stress coverage includes 1,000 templates, 250 users, and 200 requests.
 - **Defines Cinegy shared-layer `Multi` mode without inventing unsupported scene targeting.** Several named template definitions may share a layer while Cinegy reports one active item; HIDE and EXIT remain layer-scoped and `Single` remains the default.
 - **Adds Version 6 operation, settings-validation, migration-health, and readiness contracts.** Operation correlation states, numeric setting ranges, simple/advanced schema filtering, single-setting reset, timestamped state backups, cached readiness, and measured 1,000-item acceptance are covered by the release gate.
+- **Completes the administrator settings discovery surface.** Search accepts Arabic labels/descriptions, modified-only and simple/advanced views are paged, and each setting can be reset independently after confirmation without resetting unrelated configuration.
 
 ## 6.0.0-preview.1 — 2026-08-28
 

@@ -220,6 +220,50 @@ function Reset-SettingsToDefault {
     Send-TelegramMessage -ChatId $ChatId -Text "♻️ تمت استعادة جميع الإعدادات الافتراضية." -ReplyMarkup (Get-SettingsKeyboard)
 }
 
+function Show-SettingsListScreen {
+    param([Parameter(Mandatory)][ValidateSet('simple','advanced','modified','search')][string]$Mode, [int]$Page = 0, [string]$Query = '', [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $records = switch ($Mode) {
+        'simple' { @(Get-BridgeSettingsForMode -Schema $script:SettingSchema) }
+        'advanced' { @($script:SettingSchema) }
+        'modified' {
+            $values = @{}; foreach ($name in $script:DefaultSettings.Keys) { $values[$name] = Get-Setting $name }
+            @(Get-ModifiedBridgeSettings -Schema $script:SettingSchema -Values $values)
+        }
+        'search' { @(Find-BridgeSettings -Schema $script:SettingSchema -Query $Query) }
+    }
+    $title = switch ($Mode) { 'simple' { '🧭 الإعدادات المبسطة' }; 'advanced' { '🛠 كل الإعدادات' }; 'modified' { '📝 الإعدادات المعدّلة' }; default { "🔎 نتائج: $Query" } }
+    Send-TelegramMessage -ChatId $ChatId -Text $title -ReplyMarkup (Get-SettingsListKeyboard -Records $records -Mode $Mode -Page $Page)
+}
+
+function Start-SettingsSearch {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'settings_search'; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text 'أرسل اسم الإعداد أو وصفه بالعربية:' -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-SettingsSearch {
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'settings_search') { return }
+    Clear-PendingState -ChatId $ChatId
+    Show-SettingsListScreen -Mode search -Query $Value.Trim() -ChatId $ChatId -UserId ([long]$state.UserId)
+}
+
+function Reset-SingleSettingToDefault {
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Confirmed)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not $script:DefaultSettings.Contains($Name)) { return }
+    if (-not $Confirmed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "إعادة '$Name' فقط إلى قيمته الافتراضية؟" -ReplyMarkup (Get-SingleSettingResetConfirmKeyboard -Name $Name)
+        return
+    }
+    Set-Setting -Name $Name -Value $script:DefaultSettings[$Name]
+    Add-AuditEntry "↩️ إعادة إعداد $Name - user $UserId"
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ أُعيد $Name فقط إلى القيمة الافتراضية.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+}
+
 function Invoke-AdminRawCommand {
     <# /أمر <Device> <Cmd> [Op1 ...] - admin-only escape hatch for Device/Cmd
        pairs not wrapped by a dedicated command. Typed only, since Device/Cmd

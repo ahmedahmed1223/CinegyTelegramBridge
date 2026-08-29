@@ -431,6 +431,24 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'cfg:search' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-SettingsSearch -ChatId $chatId -UserId $userId }
+            break
+        }
+        'cfglist:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                if ($data -match '^cfglist:(simple|advanced|modified):(\d+)$') { Show-SettingsListScreen -Mode $Matches[1] -Page ([int]$Matches[2]) -ChatId $chatId -UserId $userId }
+            }
+            break
+        }
+        'cfgrgo:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Reset-SingleSettingToDefault -Name (Get-CallbackArg $data 'cfgrgo:') -ChatId $chatId -UserId $userId -Confirmed }
+            break
+        }
+        'cfgr:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Reset-SingleSettingToDefault -Name (Get-CallbackArg $data 'cfgr:') -ChatId $chatId -UserId $userId }
+            break
+        }
         'cancelreason:*' {
             $pending = $script:PendingCancelReason
             if ($pending -and [long]$pending.UserId -eq $userId) {

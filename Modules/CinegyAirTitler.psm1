@@ -38,7 +38,7 @@
 
 Set-StrictMode -Version Latest
 
-function Escape-XmlValue {
+function ConvertTo-XmlSafeValue {
     <#
         Minimal XML-attribute/text escaping for values coming from chat input.
 
@@ -189,10 +189,10 @@ function Show-TitlerTemplate {
 
     $variableXml = "<Variables>"
     foreach ($key in $Variables.Keys) {
-        $safeName = Escape-XmlValue -Value $key
-        $safeValue = Escape-XmlValue -Value ([string]$Variables[$key])
+        $safeName = ConvertTo-XmlSafeValue -Value $key
+        $safeValue = ConvertTo-XmlSafeValue -Value ([string]$Variables[$key])
         $type = if ($Types.ContainsKey($key)) { [string]$Types[$key] } else { $DefaultType }
-        $safeType = Escape-XmlValue -Value $type
+        $safeType = ConvertTo-XmlSafeValue -Value $type
         $variableXml += "<Var Name=""$safeName"" Type=""$safeType"" Value=""$safeValue"" />"
     }
     $variableXml += "</Variables>"
@@ -549,6 +549,6 @@ function Get-CinegySceneCapabilities {
     }
 }
 
-# Escape-XmlValue is an implementation detail. Tests exercise it inside the
+# ConvertTo-XmlSafeValue is an implementation detail. Tests exercise it inside the
 # module scope so importing the module exposes only its supported commands.
 Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus, Get-CinegySceneCapabilities

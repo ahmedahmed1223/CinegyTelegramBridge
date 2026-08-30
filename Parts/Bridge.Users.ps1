@@ -68,7 +68,7 @@ function Save-UserProfiles {
     catch { Write-BridgeLog "Could not write user-profiles.json: $($_.Exception.Message)" 'WARN'; return $false }
 }
 
-function Record-UserApprovalMetadata {
+function Write-UserApprovalMetadata {
     param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ApprovedByUserId)
     $script:UserProfiles[[string]$TargetUserId] = @{ AddedAt = (Get-Date).ToString('o'); AddedByUserId = $ApprovedByUserId; LastActivityAt = $null }
     $script:UserProfilesDirty = $true

@@ -9,7 +9,7 @@
         appeared as the text of every message.
       * Get-FavoriteTemplateKeys returning an empty array -> the caller got
         $null and $null.Count threw under Set-StrictMode.
-      * Escape-XmlValue rejecting '' -> pressing ⏭ تخطي crashed the command.
+      * ConvertTo-XmlSafeValue rejecting '' -> pressing ⏭ تخطي crashed the command.
 
     None of these are visible to static analysis; all three fail loudly here.
 
@@ -224,7 +224,7 @@ Describe 'Administrator template registry import and export' {
     }
 
     It 'applies atomically with a backup only after validation' {
-        $result = Apply-TemplateRegistryImport -StagedPath $script:IncomingPath
+        $result = Set-ImportedTemplateRegistry -StagedPath $script:IncomingPath
         $result.Success | Should -BeTrue -Because $result.Error
         Test-Path -LiteralPath $result.BackupPath | Should -BeTrue
         $saved = Get-Content -LiteralPath $script:ImportRegistryPath -Raw | ConvertFrom-Json
@@ -234,7 +234,7 @@ Describe 'Administrator template registry import and export' {
 
     It 'blocks changing or removing a template that is live or scheduled' {
         $script:OnAir[2] = @{ Key='beta'; UserId=10 }
-        $result = Apply-TemplateRegistryImport -StagedPath $script:IncomingPath
+        $result = Set-ImportedTemplateRegistry -StagedPath $script:IncomingPath
         $result.Success | Should -BeFalse
         $result.Error | Should -Match 'الهواء|جدولة'
         Test-Path -LiteralPath "$($script:ImportRegistryPath).backups" | Should -BeFalse
@@ -670,7 +670,7 @@ Describe 'Authorized user administration' {
     }
 
     It 'records who approved a user and when they were added' {
-        Record-UserApprovalMetadata -TargetUserId 202 -ApprovedByUserId 101 | Should -BeTrue
+        Write-UserApprovalMetadata -TargetUserId 202 -ApprovedByUserId 101 | Should -BeTrue
         $script:UserProfiles['202'].AddedByUserId | Should -Be 101
         $script:UserProfiles['202'].AddedAt | Should -Not -BeNullOrEmpty
     }
@@ -2519,26 +2519,26 @@ Describe 'Admin configuration backup menu' {
 
 Describe 'CinegyAirTitler public commands' {
     It 'is not exported as a public module command' {
-        Get-Command -Module CinegyAirTitler -Name Escape-XmlValue -ErrorAction SilentlyContinue |
+        Get-Command -Module CinegyAirTitler -Name ConvertTo-XmlSafeValue -ErrorAction SilentlyContinue |
             Should -BeNullOrEmpty
     }
 }
 
 InModuleScope CinegyAirTitler {
-    Describe 'Escape-XmlValue' {
+    Describe 'ConvertTo-XmlSafeValue' {
         It 'accepts an empty string' {
             # The ⏭ تخطي regression: a Mandatory [string] rejects ''.
-            { Escape-XmlValue -Value '' } | Should -Not -Throw
-            Escape-XmlValue -Value '' | Should -Be ''
+            { ConvertTo-XmlSafeValue -Value '' } | Should -Not -Throw
+            ConvertTo-XmlSafeValue -Value '' | Should -Be ''
         }
 
         It 'escapes XML metacharacters' {
-            Escape-XmlValue -Value '<b>&"' | Should -Match '&lt;'
-            Escape-XmlValue -Value '<b>&"' | Should -Not -Match '<b>'
+            ConvertTo-XmlSafeValue -Value '<b>&"' | Should -Match '&lt;'
+            ConvertTo-XmlSafeValue -Value '<b>&"' | Should -Not -Match '<b>'
         }
 
         It 'leaves Arabic text intact' {
-            Escape-XmlValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
+            ConvertTo-XmlSafeValue -Value 'خبر عاجل' | Should -Be 'خبر عاجل'
         }
     }
 

@@ -954,7 +954,7 @@ function ConvertTo-ImportedSettingValue {
     return [string]$Value
 }
 
-function Apply-SettingsImport {
+function Set-ImportedSettings {
     param([Parameter(Mandatory)][object[]]$Changes)
     $original = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     $updated = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
@@ -1043,7 +1043,7 @@ function Confirm-SettingsImport {
         Send-TelegramMessage -ChatId $ChatId -Text '❌ أُلغي الاستيراد؛ لم يتغيّر شيء.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    if (-not (Apply-SettingsImport -Changes @($pending.Changes))) {
+    if (-not (Set-ImportedSettings -Changes @($pending.Changes))) {
         Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ استيراد الإعدادات؛ لم يُطبّق أي تغيير.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
@@ -1282,7 +1282,7 @@ function Receive-TemplateRegistryImport {
     }
 }
 
-function Apply-TemplateRegistryImport {
+function Set-ImportedTemplateRegistry {
     param([Parameter(Mandatory)][string]$StagedPath)
     $path = Get-TemplateRegistryFilePath
     $temporary = "$path.import.tmp"
@@ -1314,7 +1314,7 @@ function Confirm-TemplateRegistryImport {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'template_import_review' -or [long]$state.UserId -ne $UserId) { return }
     $stagedPath = [string]$state.ImportStagedPath
-    $result = Apply-TemplateRegistryImport -StagedPath $stagedPath
+    $result = Set-ImportedTemplateRegistry -StagedPath $stagedPath
     Clear-PendingState -ChatId $ChatId
     if ($result.Success) {
         Add-AuditEntry "📥 استيراد تعريفات القوالب مع نسخة احتياطية - user $UserId"
@@ -1573,7 +1573,7 @@ function Grant-UserAccess {
         $changed = $true
     }
     if ($changed) { Save-Config }
-    Record-UserApprovalMetadata -TargetUserId $targetUserId -ApprovedByUserId $ApproverUserId | Out-Null
+    Write-UserApprovalMetadata -TargetUserId $targetUserId -ApprovedByUserId $ApproverUserId | Out-Null
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"

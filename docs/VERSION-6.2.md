@@ -29,7 +29,7 @@
 **خطر:** منخفض جدًا. لا مستدعي في الإنتاج (مُتحقَّق منه بمسح كل ملفات `Parts/`
 و`TelegramBridge.ps1`).
 
-### 6.2.2 — قياس `PSUseApprovedVerbs` ثم إعادته للبوابة
+### 6.2.2 — قياس `PSUseApprovedVerbs` ثم إعادته للبوابة ✅ مُنجَز
 
 القاعدة مستثناة في [`Run-Checks.ps1`](../Run-Checks.ps1) ضمن `-ExcludeRule`،
 ولهذا مرّ `Queue-BridgeOperation` (فعل غير معتمد) حتى اكتُشف يدويًا لاحقًا.
@@ -48,10 +48,19 @@
    الأخيرة وحدها هي «مساعد XML الخاص» الذي يذكره تعليق `Run-Checks.ps1` كاستثناء
    متعمَّد؛ الثلاث الأخرى تسلّلت خلف الاستثناء نفسه.
 
-2. **إصلاح ثم إعادة القاعدة** — أسماء الدوال داخلية، فإعادة التسمية لا تمسّ
-   مشغّلًا ولا ملف إعدادات. المقترح: `Set-ImportedSettings`،
-   `Set-ImportedTemplateRegistry`، `Write-UserApprovalMetadata`،
-   `ConvertTo-XmlSafeValue`.
+2. **إصلاح ثم إعادة القاعدة** ✅ — أُعيدت التسمية والقاعدة مفعّلة في البوابة:
+
+   | القديم | الجديد |
+   |---|---|
+   | `Apply-SettingsImport` | `Set-ImportedSettings` |
+   | `Apply-TemplateRegistryImport` | `Set-ImportedTemplateRegistry` |
+   | `Record-UserApprovalMetadata` | `Write-UserApprovalMetadata` |
+   | `Escape-XmlValue` | `ConvertTo-XmlSafeValue` |
+   | `Fail-Step` | `Stop-Step` |
+
+   **درس:** القياس اليدوي أحصى أربعًا لأنه مسح `Parts/` و`Modules/` فقط؛ القاعدة
+   نفسها كشفت خامسة في `scripts/Test-ServiceLifecycle.ps1`. تفعيل القاعدة أدق من
+   أي مسح يدوي — وهذا هو سبب إعادتها لا مجرد إصلاح ما وجدناه.
 
 ### 6.2.3 — توحيد `cfg:reset` و`cfg:search`
 

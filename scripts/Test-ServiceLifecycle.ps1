@@ -27,7 +27,7 @@ $workspace = Join-Path $env:ProgramData "CinegyTelegramBridge-CI-$([guid]::NewGu
 $taskRegistered = $false
 
 function Write-Step { param([string]$t) Write-Host "`n=== $t ===" -ForegroundColor Cyan }
-function Fail-Step { param([string]$Message) throw $Message }
+function Stop-Step { param([string]$Message) throw $Message }
 
 try {
     # ---- 1. isolate a full disposable bridge workspace ---------------------
@@ -60,7 +60,7 @@ try {
     # ---- 2. readiness gate -------------------------------------------------
     Write-Step "2/6  Run readiness gate"
     & (Join-Path $root 'scripts\Test-BridgeReadiness.ps1') -RunAsAccount 'SYSTEM' -Quiet
-    if ($LASTEXITCODE -ne 0) { Fail-Step 'Readiness aborted the install.' }
+    if ($LASTEXITCODE -ne 0) { Stop-Step 'Readiness aborted the install.' }
     Write-Host '  ok    readiness passed' -ForegroundColor Green
 
     # ---- 3. install as a Scheduled Task ------------------------------------
@@ -94,7 +94,7 @@ try {
     }
     Import-Module (Join-Path $root 'Modules\BridgeInstall.psm1') -Force
     $verdict = Get-BridgeStartVerdict -State $state -StartupLinesSinceLaunch $starts
-    if (-not $verdict.Healthy) { Fail-Step $verdict.Reason }
+    if (-not $verdict.Healthy) { Stop-Step $verdict.Reason }
     Write-Host "  ok    $($verdict.Reason)" -ForegroundColor Green
 
     # ---- 5. stop -----------------------------------------------------------
@@ -102,7 +102,7 @@ try {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
     Start-Sleep -Seconds 2
     $state = [string](Get-ScheduledTask -TaskName $TaskName).State
-    if ($state -eq 'Running') { Fail-Step 'Task is still running after Stop-ScheduledTask.' }
+    if ($state -eq 'Running') { Stop-Step 'Task is still running after Stop-ScheduledTask.' }
     Write-Host '  ok    task stopped' -ForegroundColor Green
 
     Write-Host "`nService lifecycle check passed." -ForegroundColor Green

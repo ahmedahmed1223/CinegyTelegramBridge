@@ -104,9 +104,13 @@ elseif (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
 }
 else {
     Import-Module PSScriptAnalyzer -ErrorAction Stop
-    # PowerShell 7 reads UTF-8 without BOM correctly. The bridge also keeps one
-    # private XML helper with a domain-specific verb. Exclude those intentional
+    # PowerShell 7 reads UTF-8 without BOM correctly. Exclude those intentional
     # style choices so every reported warning is actionable.
+    #
+    # PSUseApprovedVerbs used to be excluded here for "one private XML helper".
+    # It was covering three more that had drifted in unnoticed, and later let
+    # Queue-BridgeOperation through until somebody caught it by hand. All four
+    # were renamed and the rule is enforced again.
     # Scan source and test files explicitly. dist/, artifacts/, logs/, and the
     # *.backups runtime folders can contain old builds, generated data, or
     # ACL-protected secrets; recursively scanning the repository root lets
@@ -120,7 +124,7 @@ else {
     $results = @()
     foreach ($analyzerPath in $analyzerPaths) {
         $results += @(Invoke-ScriptAnalyzer -Path $analyzerPath -Severity Error, Warning -ErrorVariable +analyzerErrors `
-                -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile, PSUseApprovedVerbs)
+                -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns, PSUseBOMForUnicodeEncodedFile)
     }
     if ($analyzerErrors.Count -gt 0) {
         $failed = $true

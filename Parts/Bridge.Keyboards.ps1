@@ -867,25 +867,25 @@ function Get-SettingsCategoryKeyboard {
                 }
                 elseif ($scope.Trim()) { "طبقات: $scope" }
                 else { 'لا توجد طبقات محددة' }
-                $rows += , @( (New-Button "🚨 $($metadata.Label) · $scopeLabel" 'menu:hideallsettings' -MaxTextLength 0) )
+                $rows += , @( (New-Button "🚨 $($metadata.Label) · $scopeLabel" 'menu:hideallsettings' -MaxTextLength 64) )
             }
             elseif ($name -eq 'LayerNames') {
                 $namedLayers = @([string]$value -split ';' | Where-Object { $_.Trim() -match '^\d+\s*=\s*.+$' }).Count
-                $rows += , @( (New-Button "🏷️ $($metadata.Label) · $namedLayers تسمية" 'menu:layernames' -MaxTextLength 0) )
+                $rows += , @( (New-Button "🏷️ $($metadata.Label) · $namedLayers تسمية" 'menu:layernames' -MaxTextLength 64) )
             }
             elseif ($script:DefaultSettings[$name] -is [bool]) {
                 $mark = if ($value) { '✅' } else { '❌' }
                 $state = if ($value) { 'مفعّل' } else { 'معطّل' }
                 $lock = if ($script:ProtectedSettings -contains $name) { '🔒 ' } else { '' }
-                $rows += , @( (New-Button "$mark $lock$($metadata.Label) · $state" "cfg:t:$name" -MaxTextLength 0) )
+                $rows += , @( (New-Button "$mark $lock$($metadata.Label) · $state" "cfg:t:$name" -MaxTextLength 64) )
             }
             elseif ($script:DefaultSettings[$name] -is [string]) {
                 $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
-                $rows += , @( (New-Button "$prefix · $value" "cfg:s:$name" -MaxTextLength 0) )
+                $rows += , @( (New-Button "$prefix · $value" "cfg:s:$name" -MaxTextLength 64) )
             }
             else {
                 $display = Format-SettingDisplay -Name $name -Value $value
-                $rows += , @( (New-Button "🔢 $($metadata.Label) · $display" "cfg:v:$name" -MaxTextLength 0) )
+                $rows += , @( (New-Button "🔢 $($metadata.Label) · $display" "cfg:v:$name" -MaxTextLength 64) )
             }
         }
     }
@@ -1130,6 +1130,21 @@ function Set-SettingChoice {
     if ($Index -lt 0 -or $Index -ge $choices.Count) {
         Send-TelegramMessage -ChatId $ChatId -Text "خيار غير صالح." -ReplyMarkup (Get-SettingsKeyboard)
         return
+    }
+    if ($Name -eq 'SceneMode' -and [string]$choices[$Index] -eq 'Multi') {
+        try {
+            $statuses = @(Get-CinegyLayerDashboard)
+            $capabilities = Get-CinegySceneCapabilities -SceneItems $statuses -LayerTargetSupported $true
+            $mode = Test-BridgeSceneMode -RequestedMode Multi -Capabilities $capabilities
+            if ($mode.Mode -ne 'Multi') {
+                Send-TelegramMessage -ChatId $ChatId -Text "⛔ $($mode.Error)" -ReplyMarkup (Get-SettingsKeyboard)
+                return
+            }
+        }
+        catch {
+            Send-TelegramMessage -ChatId $ChatId -Text "⛔ وضع المشاهد المتعددة غير متاح: تعذّر التحقق من Cinegy." -ReplyMarkup (Get-SettingsKeyboard)
+            return
+        }
     }
     Set-Setting -Name $Name -Value $choices[$Index]
     Write-BridgeLog "User $UserId set $Name = $($choices[$Index])"

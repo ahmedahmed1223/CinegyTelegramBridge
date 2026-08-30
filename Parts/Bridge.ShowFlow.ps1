@@ -733,7 +733,7 @@ function Invoke-ShowTemplateResult {
             ActiveId=$activeId; At=(Get-Date)
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
-        Set-OnAirLayerRecord -Layer ([int]$template.Layer) -Record @{
+        Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
         }
         Save-OnAirState

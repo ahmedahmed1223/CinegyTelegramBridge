@@ -517,15 +517,23 @@ function Get-CinegySceneCapabilities {
         [bool]$DirectTargetSupported = $false
     )
     $items = @($SceneItems)
+    $identifiedActiveItems = 0
     $canIdentifyActiveItem = $items.Count -gt 0
     foreach ($item in $items) {
+        $isOnAirProperty = $item.PSObject.Properties['IsOnAir']
+        if ($null -ne $isOnAirProperty -and -not [bool]$isOnAirProperty.Value) { continue }
         $activeIdProperty = $item.PSObject.Properties['ActiveId']
         $sceneIdProperty = $item.PSObject.Properties['SceneId']
-        if ($null -eq $activeIdProperty -and $null -eq $sceneIdProperty) {
+        $identity = if ($null -ne $activeIdProperty) { [string]$activeIdProperty.Value } elseif ($null -ne $sceneIdProperty) { [string]$sceneIdProperty.Value } else { '' }
+        $normalizedIdentity = $identity.Trim().Trim('{', '}')
+        if ([string]::IsNullOrWhiteSpace($normalizedIdentity) -or
+            $normalizedIdentity -eq '00000000-0000-0000-0000-000000000000') {
             $canIdentifyActiveItem = $false
             break
         }
+        $identifiedActiveItems++
     }
+    if ($identifiedActiveItems -eq 0) { $canIdentifyActiveItem = $false }
     $verified = $canIdentifyActiveItem -and $LayerTargetSupported
     $capabilityError = if ($verified) { '' }
     elseif (-not $canIdentifyActiveItem) { 'Cinegy لم يثبت هوية العنصر النشط على الطبقة.' }

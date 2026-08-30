@@ -56,7 +56,6 @@ function Start-BridgeOperation {
         if ($SceneId) { $operation.SceneId = $SceneId }
     }
     Set-BridgeOperationState -Operation $operation -State running | Out-Null
-    $Ledger.Records.Add($operation)
     return $operation
 }
 

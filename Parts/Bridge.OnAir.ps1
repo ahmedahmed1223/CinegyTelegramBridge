@@ -105,7 +105,24 @@ function Update-OnAirLayerRecord {
             $scene.$name = $value
         }
     }
+    foreach ($candidate in @($script:OnAirScenes | Where-Object { [int]$_.Layer -eq $Layer })) {
+        if (-not [object]::ReferenceEquals($candidate, $scene)) { $candidate.ActiveId = '' }
+    }
     $script:OnAir[$Layer] = $Record
+}
+
+function Set-OnAirShownRecord {
+    <# A SHOW replaces the active projection. Single mode deliberately keeps
+       one record; Multi keeps the same-layer catalogue but clears stale
+       ActiveIds so only the new primary represents Cinegy's current item. #>
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)]$Record)
+    $hasLayerCatalogue = $null -ne $script:OnAirScenes -and
+        @($script:OnAirScenes | Where-Object { [int]$_.Layer -eq $Layer }).Count -gt 0
+    if ([string](Get-Setting 'SceneMode') -eq 'Multi' -and $hasLayerCatalogue) {
+        Update-OnAirLayerRecord -Layer $Layer -Record $Record
+        return
+    }
+    Set-OnAirLayerRecord -Layer $Layer -Record $Record
 }
 
 function Remove-OnAirLayerScenes {

@@ -74,9 +74,11 @@ Describe 'Bridge live scene state' {
 
     It 'enables Multi catalog mode when Cinegy exposes layer control and active item identity' {
         $unidentified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Success = $true; Name = 'one' }) -LayerTargetSupported $true
+        $emptyIdentity = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Success = $true; ActiveId = '' }) -LayerTargetSupported $true
         $verified = Get-CinegySceneCapabilities -SceneItems @([pscustomobject]@{ Success = $true; ActiveId = 'item-one' }) -LayerTargetSupported $true
 
         (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $unidentified).Mode | Should -Be 'Single'
+        (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $emptyIdentity).Mode | Should -Be 'Single'
         (Test-BridgeSceneMode -RequestedMode Multi -Capabilities $verified).Mode | Should -Be 'Multi'
         $verified.Semantics | Should -Be 'LayerCatalog'
         $verified.CanTargetScene | Should -BeFalse

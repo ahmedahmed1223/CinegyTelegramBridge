@@ -1849,6 +1849,7 @@ Describe 'Template catalogue administration' {
         Mock Write-BridgeLog { }
         Mock Add-AuditEntry { }
         Mock Send-TelegramMessage { }
+        Mock Get-CinegyLayerDashboard { @([pscustomobject]@{ Success = $true; ActiveId = '{ACTIVE}' }) }
 
         try {
             $script:SettingChoices['SceneMode'] | Should -Be @('Single', 'Multi')
@@ -3993,6 +3994,24 @@ Describe 'On-air identity persistence' {
         $OnAir[4].ActiveId | Should -Be '{CANONICAL}'
     }
 
+    It 'rejects Multi mode when Cinegy has not proved a non-empty active identity' {
+        $original = Get-Setting 'SceneMode'
+        Mock Save-Config { }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Get-CinegyLayerDashboard { @([pscustomobject]@{ Success = $true; ActiveId = '' }) }
+
+        try {
+            Set-SettingChoice -Name 'SceneMode' -Index 1 -ChatId 100 -UserId 100
+
+            Get-Setting 'SceneMode' | Should -Be $original
+            Should -Invoke Save-Config -Times 0 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'غير متاح' }
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'SceneMode' -NotePropertyValue $original -Force }
+    }
+
     It 'preserves every canonical same-layer scene when the state is re-saved' {
         @{ SchemaVersion = 1; Scenes = @(
             @{ SceneId = 'scene-a'; Layer = 4; Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{A}'; Source = 'bridge' }
@@ -4018,7 +4037,28 @@ Describe 'On-air identity persistence' {
 
         @($script:OnAirScenes | Where-Object { $_.Layer -eq 4 }).Count | Should -Be 2
         ($script:OnAirScenes | Where-Object { $_.SceneId -eq 'scene-a' }).ActiveId | Should -Be '{A2}'
-        ($script:OnAirScenes | Where-Object { $_.SceneId -eq 'scene-b' }).ActiveId | Should -Be '{B}'
+        ($script:OnAirScenes | Where-Object { $_.SceneId -eq 'scene-b' }).ActiveId | Should -BeNullOrEmpty
+    }
+
+    It 'preserves the same-layer catalogue on Multi SHOW and collapses it on Single SHOW' {
+        $originalMode = Get-Setting 'SceneMode'
+        try {
+            Set-OnAirCanonicalScenes -Scenes @(
+                [pscustomobject]@{ SceneId = 'scene-a'; Layer = 4; Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{A}'; Source = 'bridge' }
+                [pscustomobject]@{ SceneId = 'scene-b'; Layer = 4; Key = 'ticker'; At = '2026-08-28T12:01:00Z'; UserId = 21; ActiveId = '{B}'; Source = 'bridge' }
+            )
+            $config.Settings | Add-Member -NotePropertyName SceneMode -NotePropertyValue 'Multi' -Force
+            Set-OnAirShownRecord -Layer 4 -Record @{ Key = 'breaking'; At = Get-Date; UserId = 22; ActiveId = '{NEW}' }
+            @($script:OnAirScenes | Where-Object Layer -eq 4).Count | Should -Be 2
+            $script:OnAirScenes[0].Key | Should -Be 'breaking'
+            $script:OnAirScenes[1].ActiveId | Should -BeNullOrEmpty
+
+            $config.Settings | Add-Member -NotePropertyName SceneMode -NotePropertyValue 'Single' -Force
+            Set-OnAirShownRecord -Layer 4 -Record @{ Key = 'single'; At = Get-Date; UserId = 23; ActiveId = '{SINGLE}' }
+            @($script:OnAirScenes | Where-Object Layer -eq 4).Count | Should -Be 1
+            $script:OnAirScenes[0].Key | Should -Be 'single'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName SceneMode -NotePropertyValue $originalMode -Force }
     }
 
     It 'restores on-air state from the last validated backup when the primary JSON is corrupt' {
@@ -7545,6 +7585,14 @@ Describe 'Version 6 settings navigation schema' {
         $button.text | Should -Match '🔒'
     }
 
+    It 'gives every setting in every category a real Arabic label' {
+        $unlabelled = @($script:SettingSchema | Where-Object {
+                $_.Label -eq $_.Name -or $_.Label -notmatch '[\u0600-\u06FF]'
+            })
+
+        @($unlabelled | ForEach-Object Name) | Should -Be @()
+    }
+
     It 'uses a full row and a readable current value for every setting inside a category' {
         $original = Get-Setting 'RequireUserLevelAuth'
         try {
@@ -7584,6 +7632,20 @@ Describe 'Version 6 settings navigation schema' {
             $config.Settings | Add-Member -NotePropertyName CinegyMonitorTimeoutSeconds -NotePropertyValue $originalTimeout -Force
             $config.Settings | Add-Member -NotePropertyName HideAllLayers -NotePropertyValue $originalLayers -Force
         }
+    }
+
+    It 'caps a long full-row setting value instead of creating an unbounded button' {
+        $original = Get-Setting 'TemplateBasePath'
+        try {
+            $config.Settings | Add-Member -NotePropertyName TemplateBasePath -NotePropertyValue ('D:\' + ('very-long-folder\' * 10)) -Force
+            $keyboard = Get-SettingsCategoryKeyboard -Category 'templates' -Page 1 -PageSize 8
+            $button = @($keyboard.inline_keyboard | ForEach-Object { @($_) } |
+                    Where-Object callback_data -eq 'cfg:s:TemplateBasePath')[0]
+
+            (Get-TextElementCount -Text $button.text) | Should -BeLessOrEqual 64
+            $button.text | Should -Match '…$'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName TemplateBasePath -NotePropertyValue $original -Force }
     }
 
     It 'shows a named category page with its requested page number' {

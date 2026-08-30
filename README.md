@@ -15,9 +15,9 @@ long-polling loop.
 
 ## Version 6.0.0
 
-Version 6 is the official release of the existing PowerShell and Telegram product without changing its configuration or template formats. Template-operation records are readable: wherever an administrator has configured an Alias, the logs retain both that Alias and the immutable user ID (for example, `محرر الأخبار (12345)`). Settings inside each Arabic category use a full row and show their current state or formatted value without changing category distribution or callbacks. It also includes Cinegy auto-hide identity correlation, an acknowledged personal reminder with one configurable follow-up, approximate user activity, emergency-first Telegram admission, the health center, unified settings schema, state migration, bounded administrator pages, and the documented side-by-side upgrade/rollback path.
+Version 6 is the official release of the existing PowerShell and Telegram product without changing its configuration or template formats. Template-operation records are readable: wherever an administrator has configured an Alias, the logs retain both that Alias and the immutable user ID (for example, `محرر الأخبار (12345)`). Settings inside each Arabic category use a full row, every current key has an Arabic label, and the row shows its current state or formatted value within a safe 64-character display cap without changing category distribution or callbacks. It also includes Cinegy auto-hide identity correlation, an acknowledged personal reminder with one configurable follow-up, approximate user activity, emergency-first Telegram admission, the health center, unified settings schema, state migration, bounded administrator pages, and the documented side-by-side upgrade/rollback path.
 
-`SceneMode` remains `Single` by default. Administrators may choose `Multi` for a catalogue where several named templates target the same Cinegy layer; one item is active on that layer at a time and the documented HIDE/EXIT controls remain layer-wide. The bridge enables that mode only when an active item identity and layer control are verified.
+`SceneMode` remains `Single` by default. Administrators may choose `Multi` for a catalogue where several named templates target the same Cinegy layer; one item is active on that layer at a time and the documented HIDE/EXIT controls remain layer-wide. The bridge enables that mode only when a non-empty active item identity and layer control are verified. A successful Multi SHOW preserves the layer's canonical catalogue while updating only the represented active item; Single SHOW keeps one record.
 
 The settings experience from Preview 1 remains: the former long administrator keyboard is split into eight Arabic operational categories, each paged at eight settings. Existing `cfg:*` callbacks, typed commands, `config.json`, and `templates.json` remain compatible.
 
@@ -509,6 +509,8 @@ menu:
 - Settings now show their real units and Arabic purpose, for example seconds,
   minutes, files, characters, and megabytes, while retaining the technical
   key for support.
+- Full-row values are bounded to 64 visible characters so long paths and lists
+  remain readable and safe inside Telegram inline buttons.
 - **🏷️ أسماء الطبقات** lets an administrator choose a layer and enter one
   operational label at a time. The bot stores the format internally, so the
   administrator never has to type a compound value such as `7=عاجل`. The label

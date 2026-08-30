@@ -57,6 +57,8 @@ Describe 'Bridge operation lifecycle' {
         $started.State | Should -Be 'running'
         $started.Layer | Should -Be 7
         $started.StartedAtUtc | Should -Not -BeNullOrEmpty
+        @($ledger.Records | Where-Object OperationId -eq 'air-queued-2').Count | Should -Be 1
+        $ledger.Records.Count | Should -BeLessOrEqual $ledger.Capacity
     }
 
     It 'bounds retained lifecycle records without changing terminal results' {

@@ -16,6 +16,71 @@ function Set-BridgeOperationState {
     return $Operation
 }
 
+function New-BridgeOperationLedger {
+    param([ValidateRange(1, 4096)][int]$Capacity = 4096)
+    return @{ Capacity = $Capacity; Records = [System.Collections.Generic.List[object]]::new() }
+}
+
+function Queue-BridgeOperation {
+    param(
+        [Parameter(Mandatory)][hashtable]$Ledger,
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][string]$Action,
+        [Parameter(Mandatory)][int]$Layer,
+        [long]$ActorId = 0,
+        [string]$SceneId = ''
+    )
+    while ($Ledger.Records.Count -ge [int]$Ledger.Capacity) { $Ledger.Records.RemoveAt(0) }
+    $operation = New-BridgeOperationRecord -Action $Action -Layer $Layer -ActorId $ActorId -SceneId $SceneId
+    $operation.OperationId = $OperationId
+    $Ledger.Records.Add($operation)
+    return $operation
+}
+
+function Start-BridgeOperation {
+    param(
+        [Parameter(Mandatory)][hashtable]$Ledger,
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][string]$Action,
+        [Parameter(Mandatory)][int]$Layer,
+        [long]$ActorId = 0,
+        [string]$SceneId = ''
+    )
+    $operation = Get-BridgeOperationRecord -Ledger $Ledger -OperationId $OperationId
+    if ($null -eq $operation) {
+        $operation = Queue-BridgeOperation -Ledger $Ledger -OperationId $OperationId -Action $Action -Layer $Layer -ActorId $ActorId -SceneId $SceneId
+    }
+    else {
+        $operation.Layer = $Layer
+        $operation.ActorId = $ActorId
+        if ($SceneId) { $operation.SceneId = $SceneId }
+    }
+    Set-BridgeOperationState -Operation $operation -State running | Out-Null
+    $Ledger.Records.Add($operation)
+    return $operation
+}
+
+function Complete-BridgeOperation {
+    param(
+        [Parameter(Mandatory)][hashtable]$Ledger,
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][ValidateSet('success','failed','blocked','warning')][string]$Result,
+        [string]$ErrorText = ''
+    )
+    $operation = $Ledger.Records | Where-Object { $_.OperationId -eq $OperationId } | Select-Object -Last 1
+    if ($null -eq $operation) { return $null }
+    $terminal = switch ($Result) { 'success' { 'succeeded' }; 'warning' { 'warning' }; default { 'failed' } }
+    Set-BridgeOperationState -Operation $operation -State $terminal | Out-Null
+    $operation.Result = $Result
+    $operation.Error = $ErrorText
+    return $operation
+}
+
+function Get-BridgeOperationRecord {
+    param([Parameter(Mandatory)][hashtable]$Ledger, [Parameter(Mandatory)][string]$OperationId)
+    return $Ledger.Records | Where-Object { $_.OperationId -eq $OperationId } | Select-Object -Last 1
+}
+
 function New-BridgeSceneCallbackToken {
     param([Parameter(Mandatory)][hashtable]$Store, [Parameter(Mandatory)][string]$SceneId, [Parameter(Mandatory)][int]$Layer, [datetime]$Now = [datetime]::UtcNow, [int]$LifetimeSeconds = 300)
     $token = ([guid]::NewGuid().ToString('N')).Substring(0,12)
@@ -34,7 +99,7 @@ function Resolve-BridgeSceneCallbackToken {
 function Get-BridgeOperationScope {
     param([Parameter(Mandatory)][string]$Action)
     $normalized = $Action.Trim().ToLowerInvariant()
-    $supported = @('show', 'hide', 'hide-layer', 'exit', 'exit-layer', 'replace', 'clear', 'hide-all')
+    $supported = @('show', 'hide', 'hide-layer', 'exit', 'exit-layer', 'replace', 'clear', 'hide-all', 'update')
     if ($normalized -notin $supported) { throw "Unsupported Cinegy operation '$Action'." }
     return [pscustomobject]@{ Action = $normalized; Scope = 'LayerExclusive'; SerializedByLayer = $true }
 }
@@ -46,4 +111,4 @@ function Get-BridgeOperationStatusText {
     return "🔖 $($Operation.OperationId) · الطبقة $($Operation.Layer) · $label"
 }
 
-Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText
+Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeOperationLedger, Queue-BridgeOperation, Start-BridgeOperation, Complete-BridgeOperation, Get-BridgeOperationRecord, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText

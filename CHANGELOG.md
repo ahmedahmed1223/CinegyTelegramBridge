@@ -2,6 +2,10 @@
 
 ## 6.0.0 — 2026-08-29
 
+- يحافظ قبول دفعات Telegram على ترتيب الأوامر التابعة للطبقة نفسها؛ لا يمكن أن يتحول SHOW ثم HIDE إلى HIDE ثم SHOW.
+- يحفظ `onair.json` جميع سجلات المشاهد canonical على الطبقة المشتركة عند الاستيراد وإعادة الحفظ، ويحدّث المشهد المُمثَّل فقط عند تغير هوية Cinegy بدل حذف بقية كتالوج Multi.
+- ربط سجل دورة العمليات المحدود بنتائج SHOW/HIDE/EXIT/UPDATE الفعلية باستخدام معرّف `AIR_OP` نفسه؛ تبقى العملية `queued` خلال التحقق والصلاحيات ولا تدخل `running` إلا قبل أول استدعاء إلى Cinegy.
+
 - **Version 6 official release.** The visible administrator audit trail and durable `AIR_OP` records retain the immutable numeric user id and, when configured, the corresponding administrator Alias. Template SHOW, HIDE, EXIT, undo, hide-all, live-value updates, and auto-hide timer actions use the same safe `Alias (ID)` representation; users without an Alias retain their numeric id only. The release keeps the existing configuration and template formats and may be merged into `main` through the documented side-by-side upgrade path.
 
 ## 6.0.0-preview.3 — 2026-08-29

@@ -51,6 +51,88 @@ function Save-UsageCounts {
     catch { Write-BridgeLog "Could not write usage.json: $($_.Exception.Message)" "WARN" }
 }
 
+function Sync-OnAirProjection {
+    $script:OnAir.Clear()
+    foreach ($layer in @($script:OnAirScenes | ForEach-Object { [int]$_.Layer } | Sort-Object -Unique)) {
+        $scene = $script:OnAirScenes | Where-Object { [int]$_.Layer -eq $layer } | Select-Object -First 1
+        if ($null -eq $scene) { continue }
+        $at = Get-Date
+        $parsedAt = [datetime]::MinValue
+        if ([datetime]::TryParse([string]$scene.At, [ref]$parsedAt)) { $at = $parsedAt }
+        $script:OnAir[$layer] = @{ Key = [string]$scene.Key; At = $at; UserId = [long]$scene.UserId; ActiveId = [string]$scene.ActiveId; Source = [string]$scene.Source }
+    }
+}
+
+function Set-OnAirCanonicalScenes {
+    param([Parameter(Mandatory)][object[]]$Scenes)
+    $script:OnAirScenes = [System.Collections.Generic.List[object]]::new()
+    foreach ($scene in $Scenes) { $script:OnAirScenes.Add($scene) }
+    Sync-OnAirProjection
+}
+
+function Set-OnAirLayerRecord {
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)]$Record)
+    if ($null -eq $script:OnAirScenes) { $script:OnAirScenes = [System.Collections.Generic.List[object]]::new() }
+    for ($i = $script:OnAirScenes.Count - 1; $i -ge 0; $i--) {
+        if ([int]$script:OnAirScenes[$i].Layer -eq $Layer) { $script:OnAirScenes.RemoveAt($i) }
+    }
+    $atValue = Get-JsonProp $Record 'At'
+    $at = if ($atValue -is [datetime]) { $atValue.ToString('o') } elseif ($atValue) { [string]$atValue } else { (Get-Date).ToString('o') }
+    $script:OnAirScenes.Add([pscustomobject]@{
+            SceneId = "scene-$([guid]::NewGuid().ToString('N'))"; Layer = $Layer; Key = [string](Get-JsonProp $Record 'Key')
+            At = $at; UserId = [long](Get-JsonProp $Record 'UserId'); ChatId = [long](Get-JsonProp $Record 'ChatId')
+            ActiveId = [string](Get-JsonProp $Record 'ActiveId'); Source = if (Get-JsonProp $Record 'Source') { [string](Get-JsonProp $Record 'Source') } else { 'bridge' }
+            TemplatePath = [string](Get-JsonProp $Record 'TemplatePath'); LastVerifiedAtUtc = [string](Get-JsonProp $Record 'LastVerifiedAtUtc')
+        })
+    $script:OnAir[$Layer] = $Record
+}
+
+function Update-OnAirLayerRecord {
+    <# Reconciliation changes Cinegy metadata for the scene represented by the
+       compatibility projection. It must never erase other canonical scenes on
+       the same Multi layer. #>
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)]$Record)
+    if ($null -eq $script:OnAirScenes) { $script:OnAirScenes = [System.Collections.Generic.List[object]]::new() }
+    $scene = $script:OnAirScenes | Where-Object { [int]$_.Layer -eq $Layer } | Select-Object -First 1
+    if ($null -eq $scene) {
+        Set-OnAirLayerRecord -Layer $Layer -Record $Record
+        return
+    }
+    foreach ($name in @('Key', 'At', 'UserId', 'ChatId', 'ActiveId', 'Source', 'TemplatePath', 'LastVerifiedAtUtc')) {
+        $value = Get-JsonProp $Record $name
+        if ($null -ne $value) {
+            if ($name -eq 'At' -and $value -is [datetime]) { $value = $value.ToString('o') }
+            $scene.$name = $value
+        }
+    }
+    $script:OnAir[$Layer] = $Record
+}
+
+function Remove-OnAirLayerScenes {
+    param([Parameter(Mandatory)][int]$Layer)
+    if ($null -ne $script:OnAirScenes) {
+        for ($i = $script:OnAirScenes.Count - 1; $i -ge 0; $i--) {
+            if ([int]$script:OnAirScenes[$i].Layer -eq $Layer) { $script:OnAirScenes.RemoveAt($i) }
+        }
+    }
+    [void]$script:OnAir.Remove($Layer)
+}
+
+function Sync-OnAirCanonicalFromProjection {
+    if ($null -eq $script:OnAirScenes) { $script:OnAirScenes = [System.Collections.Generic.List[object]]::new() }
+    foreach ($layer in @($script:OnAirScenes | ForEach-Object { [int]$_.Layer } | Sort-Object -Unique)) {
+        if (-not $script:OnAir.ContainsKey($layer)) { Remove-OnAirLayerScenes -Layer $layer }
+    }
+    foreach ($layer in @($script:OnAir.Keys)) {
+        $record = $script:OnAir[$layer]
+        $primary = $script:OnAirScenes | Where-Object { [int]$_.Layer -eq [int]$layer } | Select-Object -First 1
+        $sameIdentity = $primary -and
+            [string]$primary.ActiveId -eq [string](Get-JsonProp $record 'ActiveId') -and
+            [string]$primary.Key -eq [string](Get-JsonProp $record 'Key')
+        if (-not $sameIdentity) { Update-OnAirLayerRecord -Layer ([int]$layer) -Record $record }
+    }
+}
+
 function Import-OnAirState {
     <# Restores what the bridge believed was live before a restart, so the
        🔴 row and one-tap hide survive a service bounce. Treated as advisory:
@@ -61,20 +143,7 @@ function Import-OnAirState {
         $raw = $read.Data
         $sceneState = ConvertTo-BridgeLiveSceneState -Document $raw
         if (-not $sceneState.Success) { throw "invalid live-scene state: $($sceneState.Error)" }
-        foreach ($layer in @($sceneState.Scenes.Layer | Sort-Object -Unique)) {
-            $scene = Get-BridgePrimarySceneForLayer -State $sceneState -Layer ([int]$layer)
-            if ($null -eq $scene) { continue }
-            $at = Get-Date
-            $parsedAt = [datetime]::MinValue
-            if ([datetime]::TryParse([string]$scene.At, [ref]$parsedAt)) { $at = $parsedAt }
-            $script:OnAir[$layer] = @{
-                Key    = [string]$scene.Key
-                At     = $at
-                UserId = [long]$scene.UserId
-                ActiveId = [string]$scene.ActiveId
-                Source = [string]$scene.Source
-            }
-        }
+        Set-OnAirCanonicalScenes -Scenes @($sceneState.Scenes)
         # Rewrite a valid legacy file only after it was successfully converted
         # and loaded. Write-ValidatedJsonState creates the backup before its
         # atomic replacement, leaving the primary untouched on any failure.
@@ -102,7 +171,7 @@ function Remove-OnAirRecord {
     #>
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$Reason)
     if (-not $script:OnAir.ContainsKey([int]$Layer)) { return $false }
-    $script:OnAir.Remove([int]$Layer)
+    Remove-OnAirLayerScenes -Layer $Layer
     $script:OnAirDirty = $true
     Save-OnAirState
     Remove-TemplateRemindersForLayer -Layer $Layer | Out-Null
@@ -117,26 +186,13 @@ function Save-OnAirState {
         if (-not (Test-Path -LiteralPath $parentDir)) {
             New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction SilentlyContinue | Out-Null
         }
-        $out = @{}
-        foreach ($layer in $script:OnAir.Keys) {
-            $info = $script:OnAir[$layer]
-            $atVal = Get-JsonProp $info 'At'
-            $atStr = if ($atVal -is [datetime]) { $atVal.ToString('o') } elseif ($atVal) { [string]$atVal } else { (Get-Date).ToString('o') }
-            $out["$layer"] = @{
-                Key = [string](Get-JsonProp $info 'Key')
-                At = $atStr
-                UserId = [long](Get-JsonProp $info 'UserId')
-                ActiveId = [string](Get-JsonProp $info 'ActiveId')
-                Source = if (Get-JsonProp $info 'Source') { [string](Get-JsonProp $info 'Source') } else { 'bridge' }
-            }
-        }
-        $canonical = ConvertTo-BridgeLiveSceneState -Document $out
+        Sync-OnAirCanonicalFromProjection
+        $canonical = ConvertTo-BridgeLiveSceneState -Document ([pscustomobject]@{ Scenes = @($script:OnAirScenes) })
         if (-not $canonical.Success) { throw "invalid live-scene state: $($canonical.Error)" }
         $json = [ordered]@{ SchemaVersion = 1; Scenes = @($canonical.Scenes) } | ConvertTo-Json -Depth 6
         Write-BridgeLog "Writing validated onair payload (size: $($json.Length) chars)" "DEBUG"
         if (-not (Write-ValidatedJsonState -Path $onAirFile -Json $json)) { throw 'validated state write failed' }
-        # Log a successful write so operators can see when the onair.json was updated.
-        Write-BridgeLog "Wrote onair.json ($($out.Keys.Count) layer(s)) to $onAirFile" "INFO"
+        Write-BridgeLog "Wrote onair.json ($($canonical.Scenes.Count) scene(s)) to $onAirFile" "INFO"
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
@@ -226,14 +282,14 @@ function Update-OnAirStateFromCinegy {
 
         $checked.Add([int]$layer)
         if ($decision.Action -eq 'update') {
-            $script:OnAir[$layer] = $decision.Record
+            Update-OnAirLayerRecord -Layer ([int]$layer) -Record $decision.Record
             $script:OnAirDirty = $true
         }
         elseif ($decision.Action -eq 'remove') {
             # Genuinely hidden (IsEmpty) or replaced off air: drop from the
             # on-air record so onair.json reflects what is live now.
             $changes.Add($decision.Change)
-            $script:OnAir.Remove([int]$layer)
+            Remove-OnAirLayerScenes -Layer ([int]$layer)
             $recordSource = [string](Get-JsonProp $record 'Source')
             if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
             Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy confirmed hidden; template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId'))" "INFO"
@@ -267,7 +323,7 @@ function Update-OnAirStateFromCinegy {
                 continue
             }
             if ($decision.Action -ne 'add') { continue }
-            $script:OnAir[$layer] = $decision.Record
+            Set-OnAirLayerRecord -Layer $layer -Record $decision.Record
             $added.Add($layer)
             $script:OnAirDirty = $true
             Write-BridgeLog "Cinegy state comparison ($Reason) discovered external on-air scene '$([string]$decision.Record.Key)' on layer $layer; added to onair.json for operator hide/exit" "INFO"

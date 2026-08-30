@@ -401,10 +401,18 @@ function Get-HelpText {
 }
 
 function New-AirOperationContext {
+    param([Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
+    $id = "air-$([guid]::NewGuid().ToString('N'))"
+    Queue-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
     return [pscustomobject]@{
-        Id        = "air-$([guid]::NewGuid().ToString('N'))"
+        Id        = $id
         Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     }
+}
+
+function Start-AirOperation {
+    param([Parameter(Mandatory)]$Operation, [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
+    Start-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $Operation.Id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
 }
 
 function Get-TemplateTestReviewKeyboard {
@@ -437,6 +445,7 @@ function Write-AirOperationResult {
     $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
+    Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $OperationId -Result $Result -ErrorText $ErrorText | Out-Null
     Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
     Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level
@@ -606,7 +615,7 @@ function Invoke-ShowTemplateResult {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
-    $operation = New-AirOperationContext
+    $operation = New-AirOperationContext -Action SHOW -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
         return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
@@ -653,7 +662,10 @@ function Invoke-ShowTemplateResult {
     # Taking the layer down first forces the scene to initialise with the new
     # variables. (To change text without re-firing the animation, use the
     # ✏️ تحديث نص button, which writes to the live postbox instead.)
+    $operationStarted = $false
     if ((Get-Setting 'ReshowClearsLayer') -and $script:OnAir.ContainsKey([int]$template.Layer)) {
+        Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId
+        $operationStarted = $true
         $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $template.Layer -TimeoutSec (Get-AirTimeout)
         if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show HIDE on layer $($template.Layer): success=$($clear.Success)" }
@@ -668,6 +680,7 @@ function Invoke-ShowTemplateResult {
     $defaultType = [string](Get-Setting 'AirVariableType')
     if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
 
+    if (-not $operationStarted) { Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId }
     $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
@@ -719,7 +732,7 @@ function Invoke-ShowTemplateResult {
             ActiveId=$activeId; At=(Get-Date)
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
-        $script:OnAir[[int]$template.Layer] = @{
+        Set-OnAirLayerRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
         }
         Save-OnAirState
@@ -1012,7 +1025,7 @@ function Invoke-HideLayer {
         [switch]$MaintenanceOverride
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $operation = New-AirOperationContext
+    $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
         return $false
@@ -1023,6 +1036,7 @@ function Invoke-HideLayer {
             -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
         $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preHideStatus
     }
+    Start-AirOperation -Operation $operation -Action HIDE -Layer $Layer -UserId $UserId
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
@@ -1045,7 +1059,7 @@ function Invoke-HideLayer {
 function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $operation = New-AirOperationContext
+    $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
         return $false
@@ -1056,6 +1070,7 @@ function Invoke-ExitLayer {
             -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
         $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preExitStatus
     }
+    Start-AirOperation -Operation $operation -Action EXIT -Layer $Layer -UserId $UserId
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
@@ -1178,11 +1193,12 @@ function Invoke-HideAllLayers {
 function Invoke-SetValues {
     param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $operation = New-AirOperationContext
+    $operation = New-AirOperationContext -Action UPDATE -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText 'maintenance mode'
         return $false
     }
+    Start-AirOperation -Operation $operation -Action UPDATE -UserId $UserId
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
     if ($result.Success) {

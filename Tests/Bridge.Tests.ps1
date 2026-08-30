@@ -3957,6 +3957,7 @@ Describe 'On-air identity persistence' {
         $script:OriginalOnAirFileForTest = $script:onAirFile
         $script:onAirFile = Join-Path $TestDrive 'onair.json'
         $OnAir.Clear()
+        $script:OnAirScenes = [System.Collections.Generic.List[object]]::new()
         Mock Write-BridgeLog { }
     }
 
@@ -3990,6 +3991,34 @@ Describe 'On-air identity persistence' {
         $OnAir.ContainsKey(4) | Should -BeTrue
         $OnAir[4].Key | Should -Be 'urgent'
         $OnAir[4].ActiveId | Should -Be '{CANONICAL}'
+    }
+
+    It 'preserves every canonical same-layer scene when the state is re-saved' {
+        @{ SchemaVersion = 1; Scenes = @(
+            @{ SceneId = 'scene-a'; Layer = 4; Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{A}'; Source = 'bridge' }
+            @{ SceneId = 'scene-b'; Layer = 4; Key = 'ticker'; At = '2026-08-28T12:01:00Z'; UserId = 21; ActiveId = '{B}'; Source = 'bridge' }
+        ) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:onAirFile -Encoding utf8
+
+        Import-OnAirState
+        Save-OnAirState
+        $saved = Get-Content -LiteralPath $script:onAirFile -Raw | ConvertFrom-Json
+
+        @($saved.Scenes | Where-Object { $_.Layer -eq 4 }).Count | Should -Be 2
+        @($saved.Scenes.SceneId) | Should -Contain 'scene-a'
+        @($saved.Scenes.SceneId) | Should -Contain 'scene-b'
+    }
+
+    It 'updates only the projected canonical scene when Cinegy changes its identity' {
+        Set-OnAirCanonicalScenes -Scenes @(
+            [pscustomobject]@{ SceneId = 'scene-a'; Layer = 4; Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{A}'; Source = 'bridge' }
+            [pscustomobject]@{ SceneId = 'scene-b'; Layer = 4; Key = 'ticker'; At = '2026-08-28T12:01:00Z'; UserId = 21; ActiveId = '{B}'; Source = 'bridge' }
+        )
+
+        Update-OnAirLayerRecord -Layer 4 -Record @{ Key = 'urgent'; At = '2026-08-28T12:00:00Z'; UserId = 20; ActiveId = '{A2}'; Source = 'bridge' }
+
+        @($script:OnAirScenes | Where-Object { $_.Layer -eq 4 }).Count | Should -Be 2
+        ($script:OnAirScenes | Where-Object { $_.SceneId -eq 'scene-a' }).ActiveId | Should -Be '{A2}'
+        ($script:OnAirScenes | Where-Object { $_.SceneId -eq 'scene-b' }).ActiveId | Should -Be '{B}'
     }
 
     It 'restores on-air state from the last validated backup when the primary JSON is corrupt' {

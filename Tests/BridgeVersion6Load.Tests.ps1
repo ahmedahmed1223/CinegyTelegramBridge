@@ -20,9 +20,9 @@ Describe 'Version 6 measured scale acceptance' {
         @(Get-BridgeLiveScenesForLayer -State $state -Layer 7).Count | Should -Be 50
     }
 
-    It 'admits emergency layer actions before normal work' {
+    It 'admits emergency layer actions before independent known-layer work' {
         $updates = @(
-            [pscustomobject]@{ update_id = 1; callback_query = [pscustomobject]@{ data = 'tpl:20' } },
+            [pscustomobject]@{ update_id = 1; callback_query = [pscustomobject]@{ data = 'showgo:8' } },
             [pscustomobject]@{ update_id = 2; callback_query = [pscustomobject]@{ data = 'hide:7' } },
             [pscustomobject]@{ update_id = 3; callback_query = [pscustomobject]@{ data = 'menu:settings' } }
         )

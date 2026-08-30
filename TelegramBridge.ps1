@@ -436,6 +436,7 @@ $script:NewsTickerDraft = $null
 
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
+$script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
 $script:UserOperationHistory = @{}
 $script:LastShowAttempts = @{}
 
@@ -654,6 +655,7 @@ $script:RollbackCandidates = @{}
 # this is a best-effort record of the bot's own actions - graphics triggered
 # from the Air Pro UI itself will not appear here.
 $script:OnAir = @{}
+$script:OnAirScenes = [System.Collections.Generic.List[object]]::new()
 $script:OnAirDirty = $false   # set when the in-memory record changes so a sync flushes it
 
 # Async ffmpeg snapshot jobs, polled by Invoke-BridgeTick.

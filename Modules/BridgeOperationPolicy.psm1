@@ -42,18 +42,56 @@ function Get-BridgeUpdatePriority {
     return 2
 }
 
+function Get-BridgeUpdateScope {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Update)
+
+    $callback = $Update.PSObject.Properties['callback_query']
+    if (-not $callback -or -not $callback.Value) {
+        return [pscustomobject]@{ Kind = 'unknown'; Layer = $null }
+    }
+    $dataProperty = $callback.Value.PSObject.Properties['data']
+    $data = if ($dataProperty) { [string]$dataProperty.Value } else { '' }
+    if ($data -match '^(menu:hideall|hideall:)$') {
+        return [pscustomobject]@{ Kind = 'global'; Layer = $null }
+    }
+    if ($data -match '^(?:hide|hidego|exit|exitgo|showgo):(?<layer>\d+)$') {
+        return [pscustomobject]@{ Kind = 'layer'; Layer = [int]$Matches.layer }
+    }
+    return [pscustomobject]@{ Kind = 'unknown'; Layer = $null }
+}
+
+function Test-BridgeIndependentUpdateScopes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Left,
+        [Parameter(Mandatory)]$Right
+    )
+    return $Left.Kind -eq 'layer' -and $Right.Kind -eq 'layer' -and [int]$Left.Layer -ne [int]$Right.Layer
+}
+
 function Get-BridgeUpdatesForProcessing {
     [CmdletBinding()]
     param([AllowEmptyCollection()][object[]]$Updates = @())
 
-    $index = 0
-    return @($Updates | ForEach-Object {
-            [pscustomobject]@{
-                Update = $_
-                Priority = Get-BridgeUpdatePriority -Update $_
-                OriginalIndex = $index++
+    $ordered = [System.Collections.Generic.List[object]]::new()
+    foreach ($update in $Updates) {
+        $candidate = [pscustomobject]@{
+            Update = $update
+            Priority = Get-BridgeUpdatePriority -Update $update
+            Scope = Get-BridgeUpdateScope -Update $update
+        }
+        $insertAt = $ordered.Count
+        if ($candidate.Priority -eq 0) {
+            while ($insertAt -gt 0) {
+                $previous = $ordered[$insertAt - 1]
+                if ($previous.Priority -eq 0 -or -not (Test-BridgeIndependentUpdateScopes -Left $candidate.Scope -Right $previous.Scope)) { break }
+                $insertAt--
             }
-        } | Sort-Object Priority, OriginalIndex | ForEach-Object Update)
+        }
+        $ordered.Insert($insertAt, $candidate)
+    }
+    return @($ordered | ForEach-Object Update)
 }
 
-Export-ModuleMember -Function New-BridgeUpdateLedger, Test-BridgeUpdateAdmission, Get-BridgeUpdatesForProcessing
+Export-ModuleMember -Function New-BridgeUpdateLedger, Test-BridgeUpdateAdmission, Get-BridgeUpdateScope, Get-BridgeUpdatesForProcessing

@@ -34,4 +34,38 @@ Describe 'Bridge operation lifecycle' {
         $text | Should -Match ([regex]::Escape($operation.OperationId))
         $text | Should -Match 'قيد الانتظار'
     }
+
+    It 'retains a real correlation id through running and terminal lifecycle states' {
+        $ledger = New-BridgeOperationLedger -Capacity 2
+
+        $operation = Start-BridgeOperation -Ledger $ledger -OperationId 'air-correlation-1' -Action SHOW -Layer 7 -ActorId 10
+        $operation.State | Should -Be 'running'
+        (Complete-BridgeOperation -Ledger $ledger -OperationId 'air-correlation-1' -Result success).State | Should -Be 'succeeded'
+        (Get-BridgeOperationRecord -Ledger $ledger -OperationId 'air-correlation-1').ActorId | Should -Be 10
+    }
+
+    It 'keeps a blocked queued operation unstarted and records its eventual layer' {
+        $ledger = New-BridgeOperationLedger
+
+        Queue-BridgeOperation -Ledger $ledger -OperationId 'air-queued-1' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
+        (Complete-BridgeOperation -Ledger $ledger -OperationId 'air-queued-1' -Result blocked -ErrorText 'maintenance mode').State | Should -Be 'failed'
+        $blocked = Get-BridgeOperationRecord -Ledger $ledger -OperationId 'air-queued-1'
+        $blocked.StartedAtUtc | Should -BeNullOrEmpty
+
+        Queue-BridgeOperation -Ledger $ledger -OperationId 'air-queued-2' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
+        $started = Start-BridgeOperation -Ledger $ledger -OperationId 'air-queued-2' -Action SHOW -Layer 7 -ActorId 10
+        $started.State | Should -Be 'running'
+        $started.Layer | Should -Be 7
+        $started.StartedAtUtc | Should -Not -BeNullOrEmpty
+    }
+
+    It 'bounds retained lifecycle records without changing terminal results' {
+        $ledger = New-BridgeOperationLedger -Capacity 1
+        Start-BridgeOperation -Ledger $ledger -OperationId 'air-old' -Action HIDE -Layer 7 | Out-Null
+        Complete-BridgeOperation -Ledger $ledger -OperationId 'air-old' -Result failed -ErrorText 'network' | Out-Null
+        Start-BridgeOperation -Ledger $ledger -OperationId 'air-new' -Action EXIT -Layer 7 | Out-Null
+
+        Get-BridgeOperationRecord -Ledger $ledger -OperationId 'air-old' | Should -BeNullOrEmpty
+        (Get-BridgeOperationRecord -Ledger $ledger -OperationId 'air-new').State | Should -Be 'running'
+    }
 }

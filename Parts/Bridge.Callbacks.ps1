@@ -125,24 +125,24 @@ function Invoke-CallbackQuery {
         }
         'news:delete:*' { $i=[int](Get-CallbackArg $data 'news:delete:');$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
         'news:up:*' {
-            $i=[int](Get-CallbackArg $data 'news:up:');$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "الموضع ${i} من $total"}
-            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
+            $i=[int](Get-CallbackArg $data 'news:up:')
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
+            else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:down:*' {
-            $i=[int](Get-CallbackArg $data 'news:down:');$total=@((Get-NewsTickerDraft -UserId $userId).Items).Count
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text "الموضع $(($i+1)+1) من $total"}
-            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
+            $i=[int](Get-CallbackArg $data 'news:down:')
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
+            else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
         'news:iup:*' {
             $i=[int](Get-CallbackArg $data 'news:iup:')
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i-1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
-            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في أول القائمة بالفعل.'};break
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i-1) -MessageId ([int]$msgObj.message_id)}
+            else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الخبر في أول القائمة بالفعل.'};break
         }
         'news:idown:*' {
             $i=[int](Get-CallbackArg $data 'news:idown:')
-            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id) -CallbackQueryId $CallbackQuery.id}
-            else{Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
+            if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id)}
+            else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الخبر في آخر القائمة بالفعل.'};break
         }
         'news:rebaseappend' {
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode append

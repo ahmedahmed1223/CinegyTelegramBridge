@@ -322,7 +322,7 @@ function Show-NewsTickerDeleteConfirm {
     return $true
 }
 
-function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Index,[int]$MessageId=0,[string]$CallbackQueryId='')
+function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Index,[int]$MessageId=0)
     <# One message per news item: full text in the body, move/edit/delete
        buttons carrying the item's CURRENT index. Re-rendered in place after
        every move so the buttons can never point at a stale index. #>
@@ -332,10 +332,7 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$Index"},@{text='🗑 حذف';callback_data="news:delask:$Index"})
     $rows+=,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'})
     $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
-    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){
-        if($CallbackQueryId){Confirm-TelegramCallback -CallbackQueryId $CallbackQueryId -Text "الموضع $($Index+1) من $count"}
-        return
-    }
+    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
 }
 

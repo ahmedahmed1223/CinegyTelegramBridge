@@ -5088,6 +5088,80 @@ Describe 'Get-CallbackArg' {
     }
 }
 
+Describe 'News reorder callback acknowledgement' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity { }
+        Mock Get-NewsTickerDraft { [pscustomobject]@{ Items = @('one', 'two', 'three') } }
+        Mock Show-NewsTickerReorderScreen { }
+        Mock Show-NewsTickerItemScreen { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'acknowledges a successful reorder button exactly once' {
+        Mock Move-NewsTickerDraftItem { $true }
+        $callback = [pscustomobject]@{
+            id = 'news-reorder-success'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:up:1'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $CallbackQueryId -eq 'news-reorder-success' }
+        Should -Invoke Show-NewsTickerReorderScreen -Times 1 -Exactly
+    }
+
+    It 'acknowledges a reorder boundary button exactly once' {
+        Mock Move-NewsTickerDraftItem { $false }
+        $callback = [pscustomobject]@{
+            id = 'news-reorder-boundary'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 56; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:up:0'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $CallbackQueryId -eq 'news-reorder-boundary' }
+        Should -Invoke Show-NewsTickerReorderScreen -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $Text -match 'أول القائمة' }
+    }
+
+    It 'acknowledges a successful item-screen reorder exactly once' {
+        Mock Move-NewsTickerDraftItem { $true }
+        $callback = [pscustomobject]@{
+            id = 'news-item-reorder-success'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 57; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:idown:1'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $CallbackQueryId -eq 'news-item-reorder-success' }
+        Should -Invoke Show-NewsTickerItemScreen -Times 1 -Exactly -ParameterFilter { $Index -eq 2 -and -not $CallbackQueryId }
+    }
+
+    It 'acknowledges an item-screen reorder boundary exactly once' {
+        Mock Move-NewsTickerDraftItem { $false }
+        $callback = [pscustomobject]@{
+            id = 'news-item-reorder-boundary'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 58; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:iup:0'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $CallbackQueryId -eq 'news-item-reorder-boundary' }
+        Should -Invoke Show-NewsTickerItemScreen -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $Text -match 'أول القائمة' }
+    }
+}
+
 Describe 'Callback prefix wiring' {
     BeforeAll {
         $script:CallbackSource = Get-Content -LiteralPath (Join-Path $script:Root 'Parts\Bridge.Callbacks.ps1') -Raw -Encoding utf8

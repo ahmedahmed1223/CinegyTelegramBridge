@@ -142,7 +142,7 @@ host that can reach the engine's control port.
 | `scripts/Install-BridgeTask.ps1` / `scripts/Uninstall-BridgeTask.ps1` | Registers/removes a Windows Scheduled Task so the bridge auto-starts at boot and auto-restarts on crash — see "Make it run like a service" below. |
 | `scripts/Install-BridgeService-NSSM.ps1` / `scripts/Uninstall-BridgeService-NSSM.ps1` | Alternative to the above: registers/removes a real Windows Service via [NSSM](https://nssm.cc/), with its own stdout/stderr logs. |
 | `Run-Checks.ps1` | Required-file and JSON validation + syntax check + PSScriptAnalyzer + Pester in one command. Run it after every change; it touches nothing live. |
-| `Tests\Bridge.Tests.ps1` | Unit tests for safety gates, Cinegy state/health, persistence, presets, scheduling, configuration recovery, and core helpers. |
+| `Tests\` | Pester suites, one file per subject (`Bridge.Templates`, `Bridge.OnAir`, `Bridge.Admin`, `Bridge.Cinegy`, `Bridge.NewsScreens`, `Bridge.SettingsScreens`, `Bridge.Users`, `Bridge.Schedule`, plus `Bridge.Tests.ps1` for the pure helpers). The shared bridge load lives in `Tests\Bridge.TestContext.ps1` and is dot-sourced by each of them. |
 | `docs/archive/` | Archived technical reviews and historical implementation logs retained for traceability. |
 
 ## Setup

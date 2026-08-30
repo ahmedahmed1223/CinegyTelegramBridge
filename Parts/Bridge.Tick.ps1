@@ -520,25 +520,22 @@ function Get-MissedEventsText {
     #>
     param([int]$Hours = 12)
     $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
-    # Normalised up front. Audit records are written by a dozen call sites and
-    # only carry the fields each one cares about; under StrictMode a single
-    # record without an "action" key would otherwise take down the whole
-    # digest, which is exactly the screen an operator opens when something has
-    # already gone wrong.
+    # Normalised up front through the shared audit readers. Records are
+    # written by a dozen call sites and only carry the fields each one cares
+    # about; under StrictMode a single record without an "action" key would
+    # otherwise take down the whole digest, which is exactly the screen an
+    # operator opens when something has already gone wrong.
     $records = @(Read-AuditRecords -MaxLines 1500 | ForEach-Object {
             $record = $_
-            $read = { param([string]$Name)
-                if ($record.PSObject.Properties[$Name]) { [string]$record.PSObject.Properties[$Name].Value } else { '' } }
-            $stamp = [datetime]::MinValue
-            if (-not [datetime]::TryParse((& $read 'timestampUtc'), [ref]$stamp)) { return }
-            if ($stamp.ToUniversalTime() -lt $since) { return }
+            $when = Read-AuditRecordStamp -Record $record
+            if (-not $when -or $when.ToUniversalTime() -lt $since) { return }
             [pscustomobject]@{
-                When    = $stamp.ToLocalTime()
-                Action  = (& $read 'action')
-                Target  = (& $read 'target')
-                Result  = (& $read 'result')
-                Message = (& $read 'message')
-                UserId  = (& $read 'userId')
+                When    = $when
+                Action  = (Get-AuditRecordField -Record $record -Name 'action')
+                Target  = (Get-AuditRecordField -Record $record -Name 'target')
+                Result  = (Get-AuditRecordField -Record $record -Name 'result')
+                Message = (Get-AuditRecordField -Record $record -Name 'message')
+                UserId  = (Get-AuditRecordField -Record $record -Name 'userId')
             }
         })
 

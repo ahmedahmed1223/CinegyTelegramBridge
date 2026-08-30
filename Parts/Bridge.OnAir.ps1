@@ -59,7 +59,7 @@ function Sync-OnAirProjection {
         $at = Get-Date
         $parsedAt = [datetime]::MinValue
         if ([datetime]::TryParse([string]$scene.At, [ref]$parsedAt)) { $at = $parsedAt }
-        $script:OnAir[$layer] = @{ Key = [string]$scene.Key; At = $at; UserId = [long]$scene.UserId; ActiveId = [string]$scene.ActiveId; Source = [string]$scene.Source }
+        $script:OnAir[$layer] = @{ Key = [string]$scene.Key; At = $at; UserId = [long]$scene.UserId; ActiveId = [string]$scene.ActiveId; ActiveIdConfirmed = [bool](Get-JsonProp $scene 'ActiveIdConfirmed'); Source = [string]$scene.Source }
     }
 }
 
@@ -81,7 +81,7 @@ function Set-OnAirLayerRecord {
     $script:OnAirScenes.Add([pscustomobject]@{
             SceneId = "scene-$([guid]::NewGuid().ToString('N'))"; Layer = $Layer; Key = [string](Get-JsonProp $Record 'Key')
             At = $at; UserId = [long](Get-JsonProp $Record 'UserId'); ChatId = [long](Get-JsonProp $Record 'ChatId')
-            ActiveId = [string](Get-JsonProp $Record 'ActiveId'); Source = if (Get-JsonProp $Record 'Source') { [string](Get-JsonProp $Record 'Source') } else { 'bridge' }
+            ActiveId = [string](Get-JsonProp $Record 'ActiveId'); ActiveIdConfirmed = [bool](Get-JsonProp $Record 'ActiveIdConfirmed'); Source = if (Get-JsonProp $Record 'Source') { [string](Get-JsonProp $Record 'Source') } else { 'bridge' }
             TemplatePath = [string](Get-JsonProp $Record 'TemplatePath'); LastVerifiedAtUtc = [string](Get-JsonProp $Record 'LastVerifiedAtUtc')
         })
     $script:OnAir[$Layer] = $Record
@@ -98,7 +98,7 @@ function Update-OnAirLayerRecord {
         Set-OnAirLayerRecord -Layer $Layer -Record $Record
         return
     }
-    foreach ($name in @('Key', 'At', 'UserId', 'ChatId', 'ActiveId', 'Source', 'TemplatePath', 'LastVerifiedAtUtc')) {
+    foreach ($name in @('Key', 'At', 'UserId', 'ChatId', 'ActiveId', 'ActiveIdConfirmed', 'Source', 'TemplatePath', 'LastVerifiedAtUtc')) {
         $value = Get-JsonProp $Record $name
         if ($null -ne $value) {
             if ($name -eq 'At' -and $value -is [datetime]) { $value = $value.ToString('o') }
@@ -145,7 +145,8 @@ function Sync-OnAirCanonicalFromProjection {
         $primary = $script:OnAirScenes | Where-Object { [int]$_.Layer -eq [int]$layer } | Select-Object -First 1
         $sameIdentity = $primary -and
             [string]$primary.ActiveId -eq [string](Get-JsonProp $record 'ActiveId') -and
-            [string]$primary.Key -eq [string](Get-JsonProp $record 'Key')
+            [string]$primary.Key -eq [string](Get-JsonProp $record 'Key') -and
+            [bool](Get-JsonProp $primary 'ActiveIdConfirmed') -eq [bool](Get-JsonProp $record 'ActiveIdConfirmed')
         if (-not $sameIdentity) { Update-OnAirLayerRecord -Layer ([int]$layer) -Record $record }
     }
 }

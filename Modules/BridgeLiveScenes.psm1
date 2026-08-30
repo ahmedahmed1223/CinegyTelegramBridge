@@ -53,6 +53,7 @@ function New-BridgeLiveSceneRecord {
         UserId   = [long](Get-BridgeLiveSceneValue -Object $Record -Name 'UserId')
         ChatId   = [long](Get-BridgeLiveSceneValue -Object $Record -Name 'ChatId')
         ActiveId = [string](Get-BridgeLiveSceneValue -Object $Record -Name 'ActiveId')
+        ActiveIdConfirmed = [bool](Get-BridgeLiveSceneValue -Object $Record -Name 'ActiveIdConfirmed')
         Source   = if ([string]::IsNullOrWhiteSpace([string](Get-BridgeLiveSceneValue -Object $Record -Name 'Source'))) { 'bridge' } else { [string](Get-BridgeLiveSceneValue -Object $Record -Name 'Source') }
         TemplatePath = [string](Get-BridgeLiveSceneValue -Object $Record -Name 'TemplatePath')
         LastVerifiedAtUtc = [string](Get-BridgeLiveSceneValue -Object $Record -Name 'LastVerifiedAtUtc')

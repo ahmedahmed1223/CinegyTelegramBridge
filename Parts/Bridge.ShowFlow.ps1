@@ -570,7 +570,10 @@ function Get-VerifiedCinegyShowIdentity {
     param(
         [Parameter(Mandatory)][string]$Key,
         [AllowEmptyString()][string]$TemplatePath = '',
-        [Parameter(Mandatory)][int]$Layer
+        [Parameter(Mandatory)][int]$Layer,
+        [AllowEmptyString()][string]$ExpectedPreviousActiveId = '',
+        [AllowEmptyString()][string]$ExpectedActiveId = '',
+        [switch]$AllowAnonymousActiveId
     )
     $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
     $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
@@ -585,11 +588,25 @@ function Get-VerifiedCinegyShowIdentity {
         return (& $failed 'لم يعرض Cinegy معرّفًا نشطًا صالحًا.')
     }
 
+    $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
+    $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
+
     # Prefer the filename parsed from Cinegy's active-item description. Falling
     # back to ActiveName is allowed only as an exact name, never a substring.
     $reported = [string](Get-JsonProp $status 'ActiveTemplateName')
     if ([string]::IsNullOrWhiteSpace($reported)) { $reported = [string](Get-JsonProp $status 'ActiveName') }
     if ([string]::IsNullOrWhiteSpace($reported)) {
+        # Some Cinegy items expose a valid engine identity but no Name or
+        # Description. Accept that shape only when the id itself proves the
+        # relation: it is either the already-confirmed id for a manual timer,
+        # or a new id observed immediately after this bridge's SHOW.
+        if ($AllowAnonymousActiveId -and
+            ((-not [string]::IsNullOrWhiteSpace($expectedCurrentId) -and
+              $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) -or
+             (-not [string]::IsNullOrWhiteSpace($expectedPreviousId) -and
+              -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation' }
+        }
         return (& $failed 'لم يعرض Cinegy اسم قالب يمكن مطابقته.')
     }
     $reported = $reported.Trim()
@@ -603,7 +620,7 @@ function Get-VerifiedCinegyShowIdentity {
     if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
         return (& $failed "اسم المشهد الذي أعاده Cinegy لا يطابق '$Key'.")
     }
-    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error='' }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
 }
 
 function Invoke-ShowTemplateResult {
@@ -693,16 +710,16 @@ function Invoke-ShowTemplateResult {
 
     if ($result.Success) {
         $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
-        $needsPersistentIdentity = $AutoHideSeconds -gt 0 -or
-            (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0)
         $activeId = [string]$result.EventId
         $activeIdConfirmed = $false
-        $identity = $null
-        if ($needsPersistentIdentity) {
-            $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
-                -Layer ([int]$template.Layer)
-            if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
-        }
+        # Capture Cinegy's engine id for every successful SHOW. The old bridge
+        # kept the client EventId, which happened to work until Cinegy returned
+        # a different identity. An anonymous active item is accepted only when
+        # its engine id changed from the pre-SHOW item.
+        $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
+            -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
+            -AllowAnonymousActiveId
+        if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         if ($previousSnapshot) {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
                 -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
@@ -730,11 +747,12 @@ function Invoke-ShowTemplateResult {
         }
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
-            ActiveId=$activeId; At=(Get-Date)
+            ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
         Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
+            ActiveIdConfirmed = $activeIdConfirmed
         }
         Save-OnAirState
         Add-UsageCount -Key $Key
@@ -1260,13 +1278,27 @@ function Set-LayerAutoHide {
     $templatePath = ''
     $store = Get-TemplateStore
     if ($store.Map.ContainsKey($currentKey)) { $templatePath = [string](Get-JsonProp $store.Map[$currentKey] 'Path') }
-    $identity = Get-VerifiedCinegyShowIdentity -Key $currentKey -TemplatePath $templatePath -Layer $Layer
+    $expectedActiveId = ''
+    if ($script:LastSuccessfulLayerShows.ContainsKey($Layer)) {
+        $lastShow = $script:LastSuccessfulLayerShows[$Layer]
+        if ([string](Get-JsonProp $lastShow 'Key') -ieq $currentKey -and
+            [bool](Get-JsonProp $lastShow 'ActiveIdConfirmed')) {
+            $expectedActiveId = [string](Get-JsonProp $lastShow 'ActiveId')
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($expectedActiveId) -and
+        [bool](Get-JsonProp $current 'ActiveIdConfirmed')) {
+        $expectedActiveId = [string](Get-JsonProp $current 'ActiveId')
+    }
+    $identity = Get-VerifiedCinegyShowIdentity -Key $currentKey -TemplatePath $templatePath -Layer $Layer `
+        -ExpectedActiveId $expectedActiveId -AllowAnonymousActiveId
     if (-not $identity.Success) {
         Write-BridgeLog "Refused auto-hide timer on layer $Layer because live identity could not be verified: $($identity.Error)" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لم يُضبط المؤقت: تعذّر ربط المشهد الحالي بهوية Cinegy مؤكدة. أخفه يدويًا عند الحاجة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $current.ActiveId = [string]$identity.ActiveId
+    $current.ActiveIdConfirmed = $true
     Save-OnAirState
     $timerSaved = Set-AutoHideTimer -Layer $Layer -Seconds $Seconds -ChatId $ChatId -UserId $UserId `
         -TemplateKey $currentKey -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true

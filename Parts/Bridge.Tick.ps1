@@ -127,7 +127,10 @@ function Set-AutoHideTimer {
 }
 
 function Get-AutoHideTargetDecision {
-    param([Parameter(Mandatory)][hashtable]$Timer)
+    param(
+        [Parameter(Mandatory)][hashtable]$Timer,
+        [AllowNull()]$LiveStatus = $null
+    )
     $layer = [int](Get-JsonProp $Timer 'Layer')
     if (-not $script:OnAir.ContainsKey($layer)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = "الطبقة $layer لم تعد مسجلة على الهواء." }
@@ -145,6 +148,21 @@ function Get-AutoHideTargetDecision {
         -not $timerKey.Equals($currentKey, [StringComparison]::OrdinalIgnoreCase)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = "القالب على الطبقة $layer تغيّر منذ ضبط المؤقت." }
     }
+    if ($null -ne $LiveStatus) {
+        if (-not [bool](Get-JsonProp $LiveStatus 'Success')) {
+            return [pscustomobject]@{ ShouldHide = $false; Reason = "تعذّر التحقق من حالة Cinegy للطبقة $layer." }
+        }
+        if ($LiveStatus.IsOnAir -ne $true) {
+            return [pscustomobject]@{ ShouldHide = $false; Reason = "الطبقة $layer لم تعد على الهواء." }
+        }
+        $liveId = ([string](Get-JsonProp $LiveStatus 'ActiveId')).Trim().Trim('{', '}')
+        $savedId = $timerId.Trim().Trim('{', '}')
+        if ([string]::IsNullOrWhiteSpace($liveId) -or
+            [string]::IsNullOrWhiteSpace($savedId) -or
+            -not $liveId.Equals($savedId, [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ ShouldHide = $false; Reason = "الطبقة $layer تغيّرت منذ ضبط المؤقت." }
+        }
+    }
     return [pscustomobject]@{ ShouldHide = $true; Reason = '' }
 }
 
@@ -161,6 +179,12 @@ function Update-AutoHideQueue {
             continue
         }
         $decision = Get-AutoHideTargetDecision -Timer $item
+        if ($decision.ShouldHide -and [bool](Get-JsonProp $item 'ActiveIdConfirmed')) {
+            $liveStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+                -AirChannelNumber $config.AirChannelNumber -Layer ([int]$item.Layer) `
+                -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+            $decision = Get-AutoHideTargetDecision -Timer $item -LiveStatus $liveStatus
+        }
         if (-not $decision.ShouldHide) {
             Write-BridgeLog "Skipped stale auto-hide timer on layer $($item.Layer): $($decision.Reason)" 'WARN'
             Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ لم يُنفَّذ المؤقت للطبقة $($item.Layer): $($decision.Reason)"

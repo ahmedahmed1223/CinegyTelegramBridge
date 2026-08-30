@@ -2816,6 +2816,7 @@ Describe 'SHOW identity tracking' {
         $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue 30 -Force
         $OnAir.Clear()
         $LastShow.Clear()
+        $LastSuccessfulLayerShows.Clear()
         $script:AutoHideQueue.Clear()
         Mock Get-TemplateStore {
             [pscustomobject]@{
@@ -2856,6 +2857,7 @@ Describe 'SHOW identity tracking' {
         $config.Settings | Add-Member -NotePropertyName SensitiveTemplateAutoHideSeconds -NotePropertyValue $script:OriginalSensitiveTemplateAutoHideSeconds -Force
         $OnAir.Clear()
         $LastShow.Clear()
+        $LastSuccessfulLayerShows.Clear()
         $script:AutoHideQueue.Clear()
     }
 
@@ -2951,6 +2953,44 @@ Describe 'SHOW identity tracking' {
 
         $script:AutoHideQueue.Count | Should -Be 0
         Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'ربط|يدوي' }
+    }
+
+    It 'arms a timer for an anonymous Cinegy item when its ActiveId changed after SHOW' {
+        $config.Settings | Add-Member -NotePropertyName SensitiveTemplateKeys -NotePropertyValue 'urgent' -Force
+        $script:IdentityStatusCall = 0
+        Mock Get-TitlerLayerStatus {
+            $script:IdentityStatusCall++
+            if ($script:IdentityStatusCall -eq 1) {
+                return [pscustomobject]@{ Success=$true; IsOnAir=$false; ActiveId='{OLD-ITEM}'; ActiveName=''; ActiveTemplateName=''; Error='' }
+            }
+            return [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='{ENGINE-ITEM}'; ActiveName=''; ActiveTemplateName=''; Error='' }
+        }
+
+        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20 -AutoHideSeconds 30
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        $OnAir[4].ActiveId | Should -Be '{ENGINE-ITEM}'
+        $script:AutoHideQueue[0].ActiveId | Should -Be '{ENGINE-ITEM}'
+        $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
+    }
+
+    It 'allows a later manual timer for the anonymous item captured by SHOW' {
+        $script:IdentityStatusCall = 0
+        Mock Get-TitlerLayerStatus {
+            $script:IdentityStatusCall++
+            if ($script:IdentityStatusCall -eq 1) {
+                return [pscustomobject]@{ Success=$true; IsOnAir=$false; ActiveId='{OLD-ITEM}'; ActiveName=''; ActiveTemplateName=''; Error='' }
+            }
+            return [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='{ENGINE-ITEM}'; ActiveName=''; ActiveTemplateName=''; Error='' }
+        }
+        Mock Save-AutoHideQueue { $true }
+
+        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+        Set-LayerAutoHide -Layer 4 -Seconds 30 -ChatId 10 -UserId 20
+
+        $script:AutoHideQueue.Count | Should -Be 1
+        $script:AutoHideQueue[0].ActiveId | Should -Be '{ENGINE-ITEM}'
+        $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
     }
 
     It 'keeps a shorter operator timer for a sensitive template' {
@@ -3049,6 +3089,24 @@ Describe 'Persistent timed-show auto-hide timers' {
 
         $script:AutoHideQueue.Count | Should -Be 1
         Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+    }
+
+    It 'rechecks the live Cinegy ActiveId before hiding a confirmed timer' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key='Urgent'; ActiveId='{ENGINE-1}'; At=$now.DateTime; UserId=2L }
+        $script:AutoHideQueue.Add(@{
+                Layer=7; At=$now; ChatId=2L; UserId=2L; TemplateKey='Urgent'
+                ActiveId='{ENGINE-1}'; ActiveIdConfirmed=$true
+            })
+        Mock Save-AutoHideQueue { $true }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='{REPLACEMENT}'; ActiveName=''; ActiveTemplateName='' }
+        }
+
+        Update-AutoHideQueue -Now $now
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تغيّرت|تغيّر|لم يُنفَّذ' }
     }
 }
 
@@ -3973,6 +4031,7 @@ Describe 'On-air identity persistence' {
             At = Get-Date
             UserId = 20
             ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+            ActiveIdConfirmed = $true
         }
         Save-OnAirState
         $OnAir.Clear()
@@ -3980,6 +4039,7 @@ Describe 'On-air identity persistence' {
         Import-OnAirState
 
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
+        Get-JsonProp $OnAir[4] 'ActiveIdConfirmed' | Should -BeTrue
     }
 
     It 'reads the canonical scene envelope through the legacy one-record layer view' {

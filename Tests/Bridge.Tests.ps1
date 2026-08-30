@@ -3110,6 +3110,57 @@ Describe 'Persistent timed-show auto-hide timers' {
     }
 }
 
+Describe 'Persistent AIR_OP operation ledger' {
+    BeforeEach {
+        $script:OriginalOperationLedgerFileForTest = $script:operationLedgerFile
+        $script:operationLedgerFile = Join-Path $TestDrive 'operations.json'
+        $script:OriginalBridgeOperationLedgerForTest = $script:BridgeOperationLedger
+        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $script:BridgeOperationLedger = $script:OriginalBridgeOperationLedgerForTest
+        $script:operationLedgerFile = $script:OriginalOperationLedgerFileForTest
+    }
+
+    It 'restores a queued operation record after a restart' {
+        Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-1' -Action SHOW -Layer 7 -ActorId 20L | Out-Null
+        Save-BridgeOperationLedger
+
+        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
+        Import-BridgeOperationLedger
+
+        $restored = Get-BridgeOperationRecord -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-1'
+        $restored | Should -Not -BeNullOrEmpty
+        $restored.State | Should -Be 'queued'
+        $restored.Layer | Should -Be 7
+        $restored.ActorId | Should -Be 20L
+    }
+
+    It 'restores a completed operation with its result and timestamps' {
+        Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Action HIDE -Layer 3 -ActorId 5L | Out-Null
+        Start-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Action HIDE -Layer 3 -ActorId 5L | Out-Null
+        Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Result success | Out-Null
+        Save-BridgeOperationLedger
+
+        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
+        Import-BridgeOperationLedger
+
+        $restored = Get-BridgeOperationRecord -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2'
+        $restored.State | Should -Be 'succeeded'
+        $restored.Result | Should -Be 'success'
+        $restored.StartedAtUtc | Should -Not -BeNullOrEmpty
+        $restored.EndedAtUtc | Should -Not -BeNullOrEmpty
+    }
+
+    It 'leaves an empty ledger when no file exists yet' {
+        $script:operationLedgerFile = Join-Path $TestDrive 'operations-none.json'
+        Import-BridgeOperationLedger
+        $script:BridgeOperationLedger.Records.Count | Should -Be 0
+    }
+}
+
 Describe 'Persistent personal template reminders' {
     BeforeEach {
         $script:OriginalTemplateReminderFileForTest = $script:templateReminderFile

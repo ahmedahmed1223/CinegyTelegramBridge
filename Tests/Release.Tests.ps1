@@ -29,7 +29,7 @@ Describe 'Release package safety' {
         $names | Should -Contain 'docs/VERSION-6.md'
         $names | Should -Contain 'release-manifest.json'
         $names | Should -Contain 'scripts/Test-ServiceLifecycle.ps1'
-        foreach ($forbidden in @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json')) {
+        foreach ($forbidden in @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json', 'autohide.json', 'template-reminders.json', 'operations.json')) {
             $names | Should -Not -Contain $forbidden
         }
         @($names | Where-Object { $_ -match '(^|/)(logs|artifacts|backups?)(/|$)|\.(bak|tmp|log|jsonl)$' }).Count | Should -Be 0

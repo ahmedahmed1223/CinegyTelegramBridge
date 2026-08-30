@@ -405,6 +405,7 @@ function New-AirOperationContext {
     param([Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
     $id = "air-$([guid]::NewGuid().ToString('N'))"
     Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
+    Save-BridgeOperationLedger
     return [pscustomobject]@{
         Id        = $id
         Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -414,6 +415,76 @@ function New-AirOperationContext {
 function Start-AirOperation {
     param([Parameter(Mandatory)]$Operation, [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
     Start-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $Operation.Id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
+    Save-BridgeOperationLedger
+}
+
+function Save-BridgeOperationLedger {
+    <# Persists the AIR_OP correlation ledger so a restart mid-flight (or a
+       reminder/health lookup right after) can still find recent operations
+       instead of every record vanishing with the process. Best-effort: a
+       write failure is logged and the in-memory ledger keeps working. #>
+    try {
+        $payload = @($script:BridgeOperationLedger.Records | ForEach-Object {
+                [ordered]@{
+                    OperationId  = [string]$_.OperationId
+                    Action       = [string]$_.Action
+                    TargetScope  = [string]$_.TargetScope
+                    Layer        = [int]$_.Layer
+                    SceneId      = [string]$_.SceneId
+                    ActorId      = [long]$_.ActorId
+                    State        = [string]$_.State
+                    QueuedAtUtc  = ([datetime]$_.QueuedAtUtc).ToString('o')
+                    StartedAtUtc = if ($_.StartedAtUtc) { ([datetime]$_.StartedAtUtc).ToString('o') } else { '' }
+                    EndedAtUtc   = if ($_.EndedAtUtc) { ([datetime]$_.EndedAtUtc).ToString('o') } else { '' }
+                    Result       = [string]$_.Result
+                    Error        = [string]$_.Error
+                }
+            })
+        $json = ConvertTo-Json -InputObject $payload -Depth 4
+        if (-not (Write-ValidatedJsonState -Path $script:operationLedgerFile -Json $json)) { throw 'validated state write failed' }
+    }
+    catch { Write-BridgeLog "Could not write operations.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Import-BridgeOperationLedger {
+    <# Restores the AIR_OP ledger from the previous run so operation lookups
+       and the health center do not start empty after a restart. Advisory
+       only: a missing or unreadable file just leaves an empty ledger. #>
+    try {
+        $read = Read-ValidatedJsonState -Path $script:operationLedgerFile -AsHashtable
+        if (-not $read) { return }
+        $restored = [System.Collections.Generic.List[object]]::new()
+        foreach ($raw in @($read.Data)) {
+            if (-not $raw) { continue }
+            $operationId = [string](Get-JsonProp $raw 'OperationId')
+            if ([string]::IsNullOrWhiteSpace($operationId)) { continue }
+            $queued = [datetime]::UtcNow
+            $parsed = [datetime]::MinValue
+            if ([datetime]::TryParse([string](Get-JsonProp $raw 'QueuedAtUtc'), [ref]$parsed)) { $queued = $parsed }
+            $started = $null
+            if ([datetime]::TryParse([string](Get-JsonProp $raw 'StartedAtUtc'), [ref]$parsed)) { $started = $parsed }
+            $ended = $null
+            if ([datetime]::TryParse([string](Get-JsonProp $raw 'EndedAtUtc'), [ref]$parsed)) { $ended = $parsed }
+            $restored.Add([pscustomobject]@{
+                    OperationId  = $operationId
+                    Action       = [string](Get-JsonProp $raw 'Action')
+                    TargetScope  = [string](Get-JsonProp $raw 'TargetScope')
+                    Layer        = [int](Get-JsonProp $raw 'Layer')
+                    SceneId      = [string](Get-JsonProp $raw 'SceneId')
+                    ActorId      = [long](Get-JsonProp $raw 'ActorId')
+                    State        = [string](Get-JsonProp $raw 'State')
+                    QueuedAtUtc  = $queued
+                    StartedAtUtc = $started
+                    EndedAtUtc   = $ended
+                    Result       = [string](Get-JsonProp $raw 'Result')
+                    Error        = [string](Get-JsonProp $raw 'Error')
+                })
+        }
+        while ($restored.Count -gt [int]$script:BridgeOperationLedger.Capacity) { $restored.RemoveAt(0) }
+        $script:BridgeOperationLedger.Records = $restored
+        if ($restored.Count -gt 0) { Write-BridgeLog "Restored $($restored.Count) operation record(s) from operations.json." }
+    }
+    catch { Write-BridgeLog "Could not read operations.json: $($_.Exception.Message)" 'WARN' }
 }
 
 function Get-TemplateTestReviewKeyboard {
@@ -447,6 +518,7 @@ function Write-AirOperationResult {
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
     Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $OperationId -Result $Result -ErrorText $ErrorText | Out-Null
+    Save-BridgeOperationLedger
     Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
     Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
     Write-BridgeLog $message $level

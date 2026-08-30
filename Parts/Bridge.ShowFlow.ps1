@@ -404,7 +404,7 @@ function Get-HelpText {
 function New-AirOperationContext {
     param([Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
     $id = "air-$([guid]::NewGuid().ToString('N'))"
-    Queue-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
+    Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
     return [pscustomobject]@{
         Id        = $id
         Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()

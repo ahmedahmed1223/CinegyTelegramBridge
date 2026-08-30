@@ -47,12 +47,12 @@ Describe 'Bridge operation lifecycle' {
     It 'keeps a blocked queued operation unstarted and records its eventual layer' {
         $ledger = New-BridgeOperationLedger
 
-        Queue-BridgeOperation -Ledger $ledger -OperationId 'air-queued-1' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
+        Add-BridgeOperation -Ledger $ledger -OperationId 'air-queued-1' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
         (Complete-BridgeOperation -Ledger $ledger -OperationId 'air-queued-1' -Result blocked -ErrorText 'maintenance mode').State | Should -Be 'failed'
         $blocked = Get-BridgeOperationRecord -Ledger $ledger -OperationId 'air-queued-1'
         $blocked.StartedAtUtc | Should -BeNullOrEmpty
 
-        Queue-BridgeOperation -Ledger $ledger -OperationId 'air-queued-2' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
+        Add-BridgeOperation -Ledger $ledger -OperationId 'air-queued-2' -Action SHOW -Layer 0 -ActorId 10 | Out-Null
         $started = Start-BridgeOperation -Ledger $ledger -OperationId 'air-queued-2' -Action SHOW -Layer 7 -ActorId 10
         $started.State | Should -Be 'running'
         $started.Layer | Should -Be 7

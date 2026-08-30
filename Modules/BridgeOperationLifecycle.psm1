@@ -21,7 +21,7 @@ function New-BridgeOperationLedger {
     return @{ Capacity = $Capacity; Records = [System.Collections.Generic.List[object]]::new() }
 }
 
-function Queue-BridgeOperation {
+function Add-BridgeOperation {
     param(
         [Parameter(Mandatory)][hashtable]$Ledger,
         [Parameter(Mandatory)][string]$OperationId,
@@ -48,7 +48,7 @@ function Start-BridgeOperation {
     )
     $operation = Get-BridgeOperationRecord -Ledger $Ledger -OperationId $OperationId
     if ($null -eq $operation) {
-        $operation = Queue-BridgeOperation -Ledger $Ledger -OperationId $OperationId -Action $Action -Layer $Layer -ActorId $ActorId -SceneId $SceneId
+        $operation = Add-BridgeOperation -Ledger $Ledger -OperationId $OperationId -Action $Action -Layer $Layer -ActorId $ActorId -SceneId $SceneId
     }
     else {
         $operation.Layer = $Layer
@@ -110,4 +110,4 @@ function Get-BridgeOperationStatusText {
     return "🔖 $($Operation.OperationId) · الطبقة $($Operation.Layer) · $label"
 }
 
-Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeOperationLedger, Queue-BridgeOperation, Start-BridgeOperation, Complete-BridgeOperation, Get-BridgeOperationRecord, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText
+Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeOperationLedger, Add-BridgeOperation, Start-BridgeOperation, Complete-BridgeOperation, Get-BridgeOperationRecord, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText

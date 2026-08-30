@@ -856,6 +856,30 @@ Describe 'Per-user operation history and safe retry' {
         }
     }
 
+    It 'shows the text that actually reached the screen' {
+        # The template key alone does not tell an operator which of five
+        # breaking-news straps they ran; the copy does.
+        Add-UserOperationHistory -OperationId one -Action SHOW -Result success -DurationMs 10 `
+            -UserId 101 -Layer 6 -Target 'breaking-news' -Values 'Headline.Text: انطلاق القمة'
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'انطلاق القمة' -and $Text -match 'breaking-news'
+        }
+    }
+
+    It 'stays quiet about copy it never recorded' {
+        # Entries written before the values field existed must not render an empty
+        # line that reads as "this banner was blank".
+        Add-UserOperationHistory -OperationId two -Action HIDE -Result success -DurationMs 10 `
+            -UserId 101 -Layer 6 -Target 'breaking-news'
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -notmatch '📝' }
+    }
+
     It 'no longer blames a restart for an empty operations screen' {
         Invoke-MyOperationsCommand -ChatId 303 -UserId 303
 

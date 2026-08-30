@@ -123,6 +123,7 @@ function Get-MainMenuKeyboard {
     $rows += , $fourthRow
     $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
     $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops'), (New-Button "🕘 ماذا فاتني" 'menu:digest') )
+    $rows += , @( (New-Button "📊 تقارير" 'menu:reports') )
     if (Get-Setting 'EnableNewsTickerManagement') {
         $rows += , @( (New-Button "📰 إدارة شريط الأخبار" 'menu:news') )
     }

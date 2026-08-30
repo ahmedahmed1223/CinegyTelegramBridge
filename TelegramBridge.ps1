@@ -254,6 +254,8 @@ $script:DefaultSettings = [ordered]@{
     AuditMaxSizeMB             = 110     # archive audit.jsonl past this; 0 never rotates it
     AuditArchiveKeepFiles      = 0       # 0 keeps every archive - the audit trail is the permanent record
     AuditTrailSize             = 50
+    AuditTemplateValues        = $true   # record the text that went on air, so reports can show it
+    AuditTemplateValuesMaxChars = 500    # audit.jsonl is permanent: cap what each record may add
     ConfigBackupKeepFiles      = 10
     DiskFreeWarningGB          = 2
     RuntimeStorageWarningMB    = 100
@@ -345,6 +347,8 @@ $script:SettingDisplayMetadata = @{
     AuditMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'حجم سجل التدقيق قبل أرشفته في ملف جديد (0 = بلا أرشفة)' }
     AuditArchiveKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد أرشيفات التدقيق المحتفَظ بها (0 = الاحتفاظ بالكل)' }
     AuditTrailSize = @{ Unit = 'سجل'; Description = 'عدد عناصر سجل العمليات المحتفَظ بها' }
+    AuditTemplateValues = @{ Unit = ''; Description = 'تسجيل نص القالب الذي ظهر على الهواء لعرضه في التقارير' }
+    AuditTemplateValuesMaxChars = @{ Unit = 'محرف'; Description = 'أقصى طول لنص القالب المسجَّل في كل عملية' }
     ConfigBackupKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد نسخ الإعدادات المحتفَظ بها' }
     DiskFreeWarningGB = @{ Unit = 'غيغابايت'; Description = 'حد تنبيه انخفاض مساحة القرص' }
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }

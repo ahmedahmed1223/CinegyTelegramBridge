@@ -476,7 +476,8 @@ function Add-UserOperationHistory {
         [Parameter(Mandatory)][long]$DurationMs,
         [Parameter(Mandatory)][long]$UserId,
         [int]$Layer = 0,
-        [string]$Target = ''
+        [string]$Target = '',
+        [string]$Values = ''
     )
     $key = [string]$UserId
     $history = [System.Collections.Generic.List[object]]::new()
@@ -485,7 +486,7 @@ function Add-UserOperationHistory {
     }
     $history.Add([pscustomobject]@{
         At = Get-Date; OperationId = $OperationId; Action = $Action; Result = $Result
-        DurationMs = $DurationMs; Layer = $Layer; Target = $Target
+        DurationMs = $DurationMs; Layer = $Layer; Target = $Target; Values = $Values
     })
     while ($history.Count -gt 20) { $history.RemoveAt(0) }
     $script:UserOperationHistory[$key] = $history.ToArray()
@@ -513,7 +514,9 @@ function Write-AuditRecord {
         [int]$Layer = 0,
         [string]$Target = '',
         [long]$DurationMs = 0,
-        [string]$Message = ''
+        [string]$Message = '',
+        [string]$Values = '',
+        [int]$Count = 0
     )
     $record = [ordered]@{
         timestampUtc = [DateTime]::UtcNow.ToString('o')
@@ -529,6 +532,12 @@ function Write-AuditRecord {
         durationMs   = $DurationMs
         message      = Protect-SensitiveText (($Message -replace '[\r\n]+', ' ').Trim())
     }
+    # Only carried when there is something to carry: audit.jsonl is permanent
+    # and archived, so an empty key on every record is pure growth.
+    if (-not [string]::IsNullOrWhiteSpace($Values)) {
+        $record.values = Protect-SensitiveText (($Values -replace '[\r\n]+', ' ').Trim())
+    }
+    if ($Count -gt 0) { $record.count = $Count }
     try {
         # Out-Null, or the rotation's true/false joins this function's output
         # and lands in whatever the caller returns - Invoke-ShowTemplateResult
@@ -619,6 +628,7 @@ function Import-UserOperationHistory {
                     At = $at; OperationId = (Get-AuditRecordField $record 'operationId')
                     Action = (Get-AuditRecordField $record 'action'); Result = (Get-AuditRecordField $record 'result')
                     DurationMs = $duration; Layer = $layer; Target = (Get-AuditRecordField $record 'target')
+                    Values = (Get-AuditRecordField $record 'values')
                 })
         }
         $total = 0

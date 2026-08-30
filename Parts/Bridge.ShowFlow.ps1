@@ -419,6 +419,26 @@ function Get-TemplateTestReviewKeyboard {
     ) }
 }
 
+function Format-AuditTemplateValues {
+    <# The text that actually reached the screen, folded into one short line
+       for the audit record. Without it a report can only say which template
+       ran, never what it said - and audit.jsonl is the only permanent record.
+
+       Capped and switchable: this file is archived and never deleted, so the
+       operator decides whether on-air copy belongs in it forever. #>
+    param([hashtable]$Variables = @{})
+    if (-not (Get-Setting 'AuditTemplateValues')) { return '' }
+    if ($null -eq $Variables -or $Variables.Count -eq 0) { return '' }
+    $parts = foreach ($name in @($Variables.Keys | Sort-Object)) {
+        $value = ([string]$Variables[$name] -replace '[\r\n]+', ' ').Trim()
+        if ($value) { "${name}: $value" }
+    }
+    $text = (@($parts) -join ' | ')
+    $max = Get-SettingInt 'AuditTemplateValuesMaxChars' 1
+    if ($text.Length -gt $max) { $text = $text.Substring(0, $max) + '…' }
+    return $text
+}
+
 function Write-AirOperationResult {
     param(
         [Parameter(Mandatory)][string]$OperationId,
@@ -429,7 +449,8 @@ function Write-AirOperationResult {
         [Parameter(Mandatory)][long]$ChatId,
         [int]$Layer = 0,
         [string]$Target = '',
-        [string]$ErrorText = ''
+        [string]$ErrorText = '',
+        [string]$Values = ''
     )
     $cleanTarget = ($Target -replace '[\r\n]+', ' ').Replace('"', "'")
     $cleanError = ($ErrorText -replace '[\r\n]+', ' ').Replace('"', "'")
@@ -444,8 +465,8 @@ function Write-AirOperationResult {
     $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
     $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
     Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $OperationId -Result $Result -ErrorText $ErrorText | Out-Null
-    Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target
-    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText
+    Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target -Values $Values
+    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText -Values $Values
     Write-BridgeLog $message $level
 }
 
@@ -801,7 +822,7 @@ function Invoke-ShowTemplateResult {
         # something back off air meant going 🙈 -> pick layer, which is several
         # taps too many when a wrong graphic is live.
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إظهار '$Key' على الهواء (طبقة $($template.Layer)).$suffix" -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables)
     }
     else {
         Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
@@ -1222,7 +1243,7 @@ function Invoke-SetValues {
         Write-BridgeLog "User $actor set values: $($Values.Keys -join ', ')"
         Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - user $actor"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم التحديث: $($Values.Keys -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',')
+        Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -Values (Format-AuditTemplateValues -Variables $Values)
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل التحديث: $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -1370,6 +1391,18 @@ function Test-NewsTickerFilePathSetting {
     try { [void][IO.Path]::GetFullPath($Path); return $true } catch { return $false }
 }
 
+function Get-TemplateCategoryLabel {
+    <# The template's own category, when it still exists. A history entry can
+       outlive the template it names, so a missing one is normal and silent. #>
+    param([string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return '' }
+    $index = Get-TemplateIndex -Key $Key
+    if ($index -lt 0) { return '' }
+    $template = Get-TemplateByIndex -Index $index
+    if (-not $template) { return '' }
+    return [string](Get-JsonProp $template 'Category')
+}
+
 function Get-OperationSentence {
     <# Operator-facing wording for one control action. This screen is read by
        the people pressing the buttons, not by whoever opens bridge.log, so it
@@ -1413,6 +1446,14 @@ function Invoke-MyOperationsCommand {
         }
         $stamp = ([datetime]$item.At).ToString('HH:mm')
         $lines.Add("$icon $stamp — $(Get-OperationSentence -Action ([string]$item.Action) -Result ([string]$item.Result) -Target ([string]$item.Target) -Layer ([int]$item.Layer))")
+
+        # What the operator can recognise the graphic by: its category, and
+        # above all the text that actually reached the screen.
+        $category = Get-TemplateCategoryLabel -Key ([string]$item.Target)
+        if ($category) { $lines.Add("      🏷 $category") }
+        $onAirText = [string](Get-JsonProp $item 'Values')
+        if ($onAirText) { $lines.Add("      📝 $onAirText") }
+
         $advice = switch ([string]$item.Result) {
             'failed' { 'افحص الاتصال ثم أعد المحاولة' }
             'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }

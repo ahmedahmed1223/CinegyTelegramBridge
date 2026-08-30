@@ -132,9 +132,20 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
         Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا"
+        Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count)
         Remove-NewsTickerDraft
     }
     return $result
+}
+
+function Write-NewsPublishRecord {
+    <# A structured sibling to the human audit line above. The reports screen
+       needs a count per day per operator, and parsing that back out of an
+       Arabic sentence would break the first time someone rewords it. #>
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount)
+    Write-AuditRecord -OperationId "news-$([guid]::NewGuid().ToString('N'))" -EventName news_publish `
+        -Result success -UserId $UserId -Action PUBLISH -Count $ItemCount `
+        -Message "نشر شريط الأخبار"
 }
 
 function Resolve-NewsPublishConflict {

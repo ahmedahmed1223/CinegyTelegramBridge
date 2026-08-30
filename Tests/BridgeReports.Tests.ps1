@@ -1,5 +1,10 @@
 #requires -Version 7
 BeforeAll {
+    # The bridge runs under StrictMode, and without it here these tests pass
+    # on code that throws in production: reading .Sum off an empty
+    # Measure-Object result is silently $null under the default mode.
+    Set-StrictMode -Version Latest
+
     $script:Root = Split-Path -Parent $PSScriptRoot
     . (Join-Path $script:Root 'Parts\Bridge.Reports.ps1')
 
@@ -134,6 +139,51 @@ Describe 'News report' {
     It 'says plainly when nothing was published' {
         Mock Read-AuditRecords { @() }
         Get-NewsReportText -Period today | Should -Match 'لم يُنشر'
+    }
+}
+
+Describe 'HTML export' {
+    BeforeEach {
+        $script:BridgeVersion = '6.1.0'
+        $stamp = (Get-Date).ToUniversalTime().AddHours(-1).ToString('o')
+        Mock Read-AuditRecords {
+            @(
+                [pscustomobject]@{ timestampUtc = $stamp; event = 'air_control'; action = 'SHOW'; result = 'success'
+                    userId = '42'; target = 'breaking-news'; layer = '4'; values = 'Headline: <b>عاجل</b> & "اقتباس"' }
+            )
+        }
+    }
+
+    It 'escapes operator copy instead of letting it become markup' {
+        $html = Get-BannerReportHtml -Period today
+
+        # The copy is operator input: it must never reach the document as tags.
+        $html | Should -Match '&lt;b&gt;'
+        $html | Should -Match '&amp;'
+        $html | Should -Not -Match '<b>عاجل</b>'
+    }
+
+    It 'builds a self-contained right-to-left page' {
+        $html = Get-BannerReportHtml -Period today
+
+        $html | Should -Match 'dir="rtl"'
+        $html | Should -Match 'lang="ar"'
+        $html | Should -Match '@media print'
+        # No internet on a playout machine: nothing may be fetched.
+        $html | Should -Not -Match '<script'
+        $html | Should -Not -Match 'https?://'
+    }
+
+    It 'carries the truncation warning into the file too' {
+        $stamp = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('o')
+        Mock Read-AuditRecords {
+            @(1..$script:ReportMaxRecords | ForEach-Object {
+                    [pscustomobject]@{ timestampUtc = $stamp; event = 'news_publish'; action = 'PUBLISH'
+                        result = 'success'; userId = '42'; count = '1' }
+                })
+        }
+
+        Get-NewsReportHtml -Period today | Should -Match 'عُرض أحدث'
     }
 }
 

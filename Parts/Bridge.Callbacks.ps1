@@ -337,6 +337,8 @@ function Invoke-CallbackQuery {
         'menu:reports' { Show-ReportsMenu -ChatId $chatId -UserId $userId; break }
         'rep:banners:*' { Show-Report -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'rep:banners:'); break }
         'rep:news:*' { Show-Report -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'rep:news:'); break }
+        'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
+        'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
         'menu:update' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl')

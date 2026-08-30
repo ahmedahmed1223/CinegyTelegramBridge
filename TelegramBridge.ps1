@@ -418,7 +418,6 @@ $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
-$script:operationLedgerFile = Join-Path $logDir "operations.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
@@ -1221,7 +1220,8 @@ Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s);
 Initialize-CinegyOnAirState | Out-Null
 Import-AutoHideQueue
 Import-TemplateReminderQueue
-Import-BridgeOperationLedger
+Import-AuditTrail
+Import-UserOperationHistory
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 Update-UploadCleanup -Force     # and any staged upload left behind with it

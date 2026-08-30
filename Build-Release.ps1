@@ -32,7 +32,7 @@ $allowList = @(
     'config.example.json', 'templates.example.json',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md', 'docs\VERSION-6.md'
 )
-$forbiddenNames = @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json', 'autohide.json', 'template-reminders.json', 'operations.json')
+$forbiddenNames = @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json', 'autohide.json', 'template-reminders.json')
 $releaseRoot = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version"
 $zipPath = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version.zip"
 $checksumPath = "$zipPath.sha256"

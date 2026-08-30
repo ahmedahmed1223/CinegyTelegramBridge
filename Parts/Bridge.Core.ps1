@@ -551,6 +551,89 @@ function Add-AuditEntry {
     Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -EventName activity -Result success -Message $Message
 }
 
+function Get-AuditRecordField {
+    <# Audit records are written by a dozen call sites and only carry the
+       fields each one cares about, so under StrictMode a direct read of a
+       missing key would take down a whole restore. #>
+    param($Record, [Parameter(Mandatory)][string]$Name)
+    if ($Record -and $Record.PSObject.Properties[$Name]) { return [string]$Record.PSObject.Properties[$Name].Value }
+    return ''
+}
+
+function Read-AuditRecordStamp {
+    <# RoundtripKind, or a 'Z' stamp parses as Local and ToLocalTime() then
+       shifts it a second time. #>
+    param($Record)
+    $at = [datetime]::MinValue
+    if ([datetime]::TryParse((Get-AuditRecordField $Record 'timestampUtc'), $null,
+            [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$at)) {
+        return $at.ToLocalTime()
+    }
+    return $null
+}
+
+function Import-AuditTrail {
+    <# Rehydrates the 📜 screen's in-memory history from audit.jsonl, which
+       already holds every entry Add-AuditEntry ever wrote - only the display
+       cache was lost with the process.
+
+       Restored lines carry the redacted message that was persisted, which is
+       never less safe than the live in-memory one. #>
+    try {
+        $max = Get-SettingInt 'AuditTrailSize' 1
+        $restored = [System.Collections.Generic.List[string]]::new()
+        # Over-read: air_control records interleave with the activity ones
+        # this screen shows, so $max lines would rarely yield $max entries.
+        foreach ($record in @(Read-AuditRecords -MaxLines ($max * 10))) {
+            if ((Get-AuditRecordField $record 'event') -ne 'activity') { continue }
+            $at = Read-AuditRecordStamp -Record $record
+            $stamp = if ($at) { $at.ToString('HH:mm:ss') } else { '--:--:--' }
+            $restored.Add("$stamp $(Get-AuditRecordField $record 'message')")
+        }
+        while ($restored.Count -gt $max) { $restored.RemoveAt(0) }
+        $script:AuditTrail = $restored
+        if ($restored.Count -gt 0) { Write-BridgeLog "Restored $($restored.Count) audit entry(ies) for the 📜 screen." }
+    }
+    catch { Write-BridgeLog "Could not restore the audit trail display: $($_.Exception.Message)" 'WARN' }
+}
+
+function Import-UserOperationHistory {
+    <# Rebuilds 🧾 عملياتي from the same permanent audit file, so an operator
+       whose shift outlives a restart still sees their own recent control
+       actions instead of an empty screen. #>
+    try {
+        $perUser = @{}
+        foreach ($record in @(Read-AuditRecords -MaxLines 1500)) {
+            if ((Get-AuditRecordField $record 'event') -ne 'air_control') { continue }
+            $userId = 0L
+            if (-not [long]::TryParse((Get-AuditRecordField $record 'userId'), [ref]$userId) -or $userId -eq 0) { continue }
+            $at = Read-AuditRecordStamp -Record $record
+            if (-not $at) { continue }
+            $duration = 0L
+            [void][long]::TryParse((Get-AuditRecordField $record 'durationMs'), [ref]$duration)
+            $layer = 0
+            [void][int]::TryParse((Get-AuditRecordField $record 'layer'), [ref]$layer)
+            $key = [string]$userId
+            if (-not $perUser.ContainsKey($key)) { $perUser[$key] = [System.Collections.Generic.List[object]]::new() }
+            $perUser[$key].Add([pscustomobject]@{
+                    At = $at; OperationId = (Get-AuditRecordField $record 'operationId')
+                    Action = (Get-AuditRecordField $record 'action'); Result = (Get-AuditRecordField $record 'result')
+                    DurationMs = $duration; Layer = $layer; Target = (Get-AuditRecordField $record 'target')
+                })
+        }
+        $total = 0
+        foreach ($key in @($perUser.Keys)) {
+            $list = $perUser[$key]
+            # Same 20-entry ceiling Add-UserOperationHistory keeps.
+            while ($list.Count -gt 20) { $list.RemoveAt(0) }
+            $script:UserOperationHistory[$key] = $list.ToArray()
+            $total += $list.Count
+        }
+        if ($total -gt 0) { Write-BridgeLog "Restored $total operation(s) for $($perUser.Count) user(s) on the 🧾 screen." }
+    }
+    catch { Write-BridgeLog "Could not restore per-user operation history: $($_.Exception.Message)" 'WARN' }
+}
+
 function Get-TextElementCount {
     param([AllowEmptyString()][string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return 0 }

@@ -3110,54 +3110,75 @@ Describe 'Persistent timed-show auto-hide timers' {
     }
 }
 
-Describe 'Persistent AIR_OP operation ledger' {
+Describe 'Operator log screens survive a restart' {
     BeforeEach {
-        $script:OriginalOperationLedgerFileForTest = $script:operationLedgerFile
-        $script:operationLedgerFile = Join-Path $TestDrive 'operations.json'
-        $script:OriginalBridgeOperationLedgerForTest = $script:BridgeOperationLedger
-        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
+        $script:OriginalAuditFileForRestoreTest = $script:auditFile
+        $script:auditFile = Join-Path $TestDrive "audit-restore-$([guid]::NewGuid().ToString('N')).jsonl"
+        $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
+        $script:UserOperationHistory = @{}
         Mock Write-BridgeLog { }
+        Mock Get-AuditArchiveFiles { @() }
     }
 
     AfterEach {
-        $script:BridgeOperationLedger = $script:OriginalBridgeOperationLedgerForTest
-        $script:operationLedgerFile = $script:OriginalOperationLedgerFileForTest
+        $script:auditFile = $script:OriginalAuditFileForRestoreTest
+        $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
+        $script:UserOperationHistory = @{}
     }
 
-    It 'restores a queued operation record after a restart' {
-        Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-1' -Action SHOW -Layer 7 -ActorId 20L | Out-Null
-        Save-BridgeOperationLedger
+    It 'rebuilds the 📜 screen from the activity records on disk' {
+        Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value @(
+            (@{ timestampUtc = '2099-08-21T07:00:00.0000000Z'; event = 'activity'; message = 'عرض القالب urgent' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = '2099-08-21T07:05:00.0000000Z'; event = 'air_control'; action = 'SHOW'; userId = 20; result = 'success' } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = '2099-08-21T07:10:00.0000000Z'; event = 'activity'; message = 'إخفاء الطبقة 4' } | ConvertTo-Json -Compress)
+        )
 
-        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
-        Import-BridgeOperationLedger
+        Import-AuditTrail
 
-        $restored = Get-BridgeOperationRecord -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-1'
-        $restored | Should -Not -BeNullOrEmpty
-        $restored.State | Should -Be 'queued'
-        $restored.Layer | Should -Be 7
-        $restored.ActorId | Should -Be 20L
+        $script:AuditTrail.Count | Should -Be 2
+        $script:AuditTrail[0] | Should -Match 'عرض القالب urgent'
+        $script:AuditTrail[1] | Should -Match 'إخفاء الطبقة 4'
+        # air_control belongs to the 🧾 screen, not this one.
+        ($script:AuditTrail -join "`n") | Should -Not -Match 'SHOW'
     }
 
-    It 'restores a completed operation with its result and timestamps' {
-        Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Action HIDE -Layer 3 -ActorId 5L | Out-Null
-        Start-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Action HIDE -Layer 3 -ActorId 5L | Out-Null
-        Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2' -Result success | Out-Null
-        Save-BridgeOperationLedger
+    It 'rebuilds 🧾 عملياتي per user with the fields the screen prints' {
+        Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value @(
+            (@{ timestampUtc = '2099-08-21T07:00:00.0000000Z'; event = 'air_control'; operationId = 'air-1'; action = 'SHOW'; result = 'success'; userId = 101; layer = 4; target = 'urgent'; durationMs = 120 } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = '2099-08-21T07:01:00.0000000Z'; event = 'air_control'; operationId = 'air-2'; action = 'HIDE'; result = 'failed'; userId = 202; layer = 7; target = 'lower'; durationMs = 90 } | ConvertTo-Json -Compress)
+            (@{ timestampUtc = '2099-08-21T07:02:00.0000000Z'; event = 'activity'; message = 'ليست عملية تحكم' } | ConvertTo-Json -Compress)
+        )
 
-        $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
-        Import-BridgeOperationLedger
+        Import-UserOperationHistory
 
-        $restored = Get-BridgeOperationRecord -Ledger $script:BridgeOperationLedger -OperationId 'air-restart-2'
-        $restored.State | Should -Be 'succeeded'
-        $restored.Result | Should -Be 'success'
-        $restored.StartedAtUtc | Should -Not -BeNullOrEmpty
-        $restored.EndedAtUtc | Should -Not -BeNullOrEmpty
+        $first = @(Get-UserOperationHistory -UserId 101)
+        $first.Count | Should -Be 1
+        $first[0].Action | Should -Be 'SHOW'
+        $first[0].Target | Should -Be 'urgent'
+        $first[0].Layer | Should -Be 4
+        $first[0].DurationMs | Should -Be 120
+        $first[0].Result | Should -Be 'success'
+
+        @(Get-UserOperationHistory -UserId 202).Count | Should -Be 1
+        @(Get-UserOperationHistory -UserId 999).Count | Should -Be 0
     }
 
-    It 'leaves an empty ledger when no file exists yet' {
-        $script:operationLedgerFile = Join-Path $TestDrive 'operations-none.json'
-        Import-BridgeOperationLedger
-        $script:BridgeOperationLedger.Records.Count | Should -Be 0
+    It 'keeps a UTC stamp from drifting when it is restored for display' {
+        Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value (
+            @{ timestampUtc = '2099-08-21T07:00:00.0000000Z'; event = 'air_control'; action = 'SHOW'; result = 'success'; userId = 101; layer = 4; target = 'urgent'; durationMs = 10 } | ConvertTo-Json -Compress)
+
+        Import-UserOperationHistory
+
+        $expected = ([datetime]'2099-08-21T07:00:00Z').ToLocalTime()
+        (@(Get-UserOperationHistory -UserId 101)[0].At) | Should -Be $expected
+    }
+
+    It 'leaves both screens empty when no audit file exists yet' {
+        Import-AuditTrail
+        Import-UserOperationHistory
+
+        $script:AuditTrail.Count | Should -Be 0
+        $script:UserOperationHistory.Keys.Count | Should -Be 0
     }
 }
 

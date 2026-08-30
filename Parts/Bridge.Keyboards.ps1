@@ -26,8 +26,12 @@ function ConvertTo-OneHandLayout {
 }
 
 function New-Button {
-    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][string]$Data)
-    $maxLength = Get-SettingInt 'ButtonTextMaxLength'
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string]$Data,
+        [int]$MaxTextLength = -1
+    )
+    $maxLength = if ($MaxTextLength -ge 0) { $MaxTextLength } else { Get-SettingInt 'ButtonTextMaxLength' }
     $displayText = $Text
     if ($maxLength -gt 1 -and (Get-TextElementCount -Text $Text) -gt $maxLength) {
         $info = [Globalization.StringInfo]::new($Text)
@@ -857,23 +861,31 @@ function Get-SettingsCategoryKeyboard {
             $value = Get-Setting $name
             $metadata = Get-SettingNavigationMetadata -Name $name
             if ($name -eq 'HideAllLayers') {
-                $rows += , @( (New-Button "🚨 $($metadata.Label)" 'menu:hideallsettings') )
+                $scope = [string]$value
+                $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    'كل الطبقات المعروفة'
+                }
+                elseif ($scope.Trim()) { "طبقات: $scope" }
+                else { 'لا توجد طبقات محددة' }
+                $rows += , @( (New-Button "🚨 $($metadata.Label) · $scopeLabel" 'menu:hideallsettings' -MaxTextLength 0) )
             }
             elseif ($name -eq 'LayerNames') {
-                $rows += , @( (New-Button "🏷️ $($metadata.Label)" 'menu:layernames') )
+                $namedLayers = @([string]$value -split ';' | Where-Object { $_.Trim() -match '^\d+\s*=\s*.+$' }).Count
+                $rows += , @( (New-Button "🏷️ $($metadata.Label) · $namedLayers تسمية" 'menu:layernames' -MaxTextLength 0) )
             }
             elseif ($script:DefaultSettings[$name] -is [bool]) {
                 $mark = if ($value) { '✅' } else { '❌' }
+                $state = if ($value) { 'مفعّل' } else { 'معطّل' }
                 $lock = if ($script:ProtectedSettings -contains $name) { '🔒 ' } else { '' }
-                $rows += , @( (New-Button "$mark $lock$($metadata.Label)" "cfg:t:$name") )
+                $rows += , @( (New-Button "$mark $lock$($metadata.Label) · $state" "cfg:t:$name" -MaxTextLength 0) )
             }
             elseif ($script:DefaultSettings[$name] -is [string]) {
                 $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
-                $rows += , @( (New-Button "$prefix = $value" "cfg:s:$name") )
+                $rows += , @( (New-Button "$prefix · $value" "cfg:s:$name" -MaxTextLength 0) )
             }
             else {
                 $display = Format-SettingDisplay -Name $name -Value $value
-                $rows += , @( (New-Button "🔢 $($metadata.Label) = $display" "cfg:v:$name") )
+                $rows += , @( (New-Button "🔢 $($metadata.Label) · $display" "cfg:v:$name" -MaxTextLength 0) )
             }
         }
     }

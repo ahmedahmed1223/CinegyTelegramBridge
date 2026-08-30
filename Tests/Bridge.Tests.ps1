@@ -7545,6 +7545,47 @@ Describe 'Version 6 settings navigation schema' {
         $button.text | Should -Match '🔒'
     }
 
+    It 'uses a full row and a readable current value for every setting inside a category' {
+        $original = Get-Setting 'RequireUserLevelAuth'
+        try {
+            $config.Settings | Add-Member -NotePropertyName RequireUserLevelAuth -NotePropertyValue $false -Force
+            $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Page 0
+            $row = @($keyboard.inline_keyboard | Where-Object {
+                    @($_ | Where-Object callback_data -eq 'cfg:t:RequireUserLevelAuth').Count -gt 0
+                })[0]
+            $button = @($row)[0]
+
+            @($row).Count | Should -Be 1
+            $button.text | Should -Be '❌ 🔒 التحقق من هوية المستخدم · معطّل'
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName RequireUserLevelAuth -NotePropertyValue $original -Force
+        }
+    }
+
+    It 'shows formatted units and summaries for special settings inside categories' {
+        $originalTimeout = Get-Setting 'CinegyMonitorTimeoutSeconds'
+        $originalLayers = Get-Setting 'HideAllLayers'
+        try {
+            $config.Settings | Add-Member -NotePropertyName CinegyMonitorTimeoutSeconds -NotePropertyValue 3 -Force
+            $config.Settings | Add-Member -NotePropertyName HideAllLayers -NotePropertyValue '2,4,7' -Force
+
+            $monitoring = Get-SettingsCategoryKeyboard -Category 'monitoring' -Page 0 -PageSize 20
+            $timeout = @($monitoring.inline_keyboard | ForEach-Object { @($_) } |
+                    Where-Object callback_data -eq 'cfg:v:CinegyMonitorTimeoutSeconds')[0]
+            $onAir = Get-SettingsCategoryKeyboard -Category 'onair' -Page 0 -PageSize 20
+            $hideAll = @($onAir.inline_keyboard | ForEach-Object { @($_) } |
+                    Where-Object callback_data -eq 'menu:hideallsettings')[0]
+
+            $timeout.text | Should -Match '· 3 ثانية'
+            $hideAll.text | Should -Match '· طبقات: 2,4,7'
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName CinegyMonitorTimeoutSeconds -NotePropertyValue $originalTimeout -Force
+            $config.Settings | Add-Member -NotePropertyName HideAllLayers -NotePropertyValue $originalLayers -Force
+        }
+    }
+
     It 'shows a named category page with its requested page number' {
         Mock Send-TelegramMessage {}
         Mock Get-SettingsCategoryKeyboard { @{ inline_keyboard = @() } }

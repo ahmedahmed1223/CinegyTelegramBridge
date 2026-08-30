@@ -1366,21 +1366,55 @@ function Test-NewsTickerFilePathSetting {
     try { [void][IO.Path]::GetFullPath($Path); return $true } catch { return $false }
 }
 
+function Get-OperationSentence {
+    <# Operator-facing wording for one control action. This screen is read by
+       the people pressing the buttons, not by whoever opens bridge.log, so it
+       says «عرض» rather than SHOW and never prints a millisecond count. #>
+    param([string]$Action, [string]$Result, [string]$Target, [int]$Layer)
+    $verb = switch ($Action) {
+        'SHOW' { 'عرض' }
+        'HIDE' { 'إخفاء' }
+        'EXIT' { 'خروج' }
+        'UPDATE' { 'تحديث' }
+        default { $Action }
+    }
+    $phrase = switch ($Result) {
+        'success' { $verb }
+        'blocked' { "رُفض $verb" }
+        default { "فشل $verb" }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { $phrase += " «$Target»" }
+    if ($Layer -gt 0) { $phrase += " على الطبقة $Layer" }
+    return $phrase
+}
+
 function Invoke-MyOperationsCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
     if ($history.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد عمليات تحكم مسجلة لك منذ آخر تشغيل.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        # Not "منذ آخر تشغيل" any more: the history is rebuilt from audit.jsonl
+        # at startup, so an empty screen now genuinely means nothing was done.
+        Send-TelegramMessage -ChatId $ChatId -Text "🧾 آخر عملياتك`n━━━━━━━━━━━━━━`nلم تُسجَّل لك أي عملية بعد." -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
         return
     }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('🧾 آخر عملياتك:')
+    $lines.Add('🧾 آخر عملياتك')
+    $lines.Add('━━━━━━━━━━━━━━')
     foreach ($item in $history) {
-        $icon = switch ([string]$item.Result) { 'success' { '✅' }; 'blocked' { '⛔' }; default { '❌' } }
-        $target = if ([string]::IsNullOrWhiteSpace([string]$item.Target)) { '-' } else { [string]$item.Target }
-        $advice = if ([string]$item.Result -eq 'failed') { ' — افحص الاتصال ثم أعد المحاولة' } elseif ([string]$item.Result -eq 'blocked') { ' — راجع السياسة أو حالة Cinegy' } else { '' }
-        $lines.Add("$icon $(([datetime]$item.At).ToString('HH:mm:ss')) $($item.Action) · $target · طبقة $($item.Layer) · $($item.DurationMs)ms$advice")
+        $icon = switch ([string]$item.Result) {
+            'success' { '✅' }
+            'blocked' { '⛔' }
+            default { '❌' }
+        }
+        $stamp = ([datetime]$item.At).ToString('HH:mm')
+        $lines.Add("$icon $stamp — $(Get-OperationSentence -Action ([string]$item.Action) -Result ([string]$item.Result) -Target ([string]$item.Target) -Layer ([int]$item.Layer))")
+        $advice = switch ([string]$item.Result) {
+            'failed' { 'افحص الاتصال ثم أعد المحاولة' }
+            'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
+            default { '' }
+        }
+        if ($advice) { $lines.Add("      ↳ $advice") }
     }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
 }

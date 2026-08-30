@@ -75,7 +75,6 @@ Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
-Import-Module (Join-Path $moduleRoot "BridgeStateMigration.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeLiveScenes.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationLifecycle.psm1") -Force

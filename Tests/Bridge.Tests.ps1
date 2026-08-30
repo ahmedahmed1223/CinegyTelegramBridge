@@ -840,6 +840,29 @@ Describe 'Per-user operation history and safe retry' {
                 @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text }) -contains '🔁 إعادة محاولة آمنة'
         }
     }
+
+    It 'speaks Arabic to the operator instead of leaking the wire verbs' {
+        Add-UserOperationHistory -OperationId one -Action SHOW -Result success -DurationMs 120 -UserId 101 -Layer 4 -Target urgent
+        Add-UserOperationHistory -OperationId two -Action HIDE -Result failed -DurationMs 90 -UserId 101 -Layer 7 -Target lower
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            # Arabic wording, not SHOW/HIDE, and no millisecond counter.
+            $Text -match 'عرض «urgent» على الطبقة 4' -and
+                $Text -match 'فشل إخفاء «lower» على الطبقة 7' -and
+                $Text -notmatch 'SHOW' -and $Text -notmatch 'HIDE' -and $Text -notmatch 'ms' -and
+                $Text -match 'افحص الاتصال ثم أعد المحاولة'
+        }
+    }
+
+    It 'no longer blames a restart for an empty operations screen' {
+        Invoke-MyOperationsCommand -ChatId 303 -UserId 303
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -notmatch 'منذ آخر تشغيل' -and $Text -match 'لم تُسجَّل لك أي عملية بعد'
+        }
+    }
 }
 
 Describe 'Quiet runtime orchestration' {

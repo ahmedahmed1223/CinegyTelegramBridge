@@ -1507,10 +1507,12 @@ function Invoke-AuditCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:AuditTrail.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "لا توجد عمليات مسجّلة منذ آخر تشغيل." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        # Rebuilt from audit.jsonl at startup, so empty no longer means
+        # "the process restarted" - it means nothing has happened yet.
+        Send-TelegramMessage -ChatId $ChatId -Text "📜 آخر العمليات`n━━━━━━━━━━━━━━`nلا توجد عمليات مسجّلة بعد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $text = "📜 آخر العمليات:`n" + (($script:AuditTrail | Select-Object -Last 20) -join "`n")
+    $text = "📜 آخر العمليات`n━━━━━━━━━━━━━━`n" + (($script:AuditTrail | Select-Object -Last 20) -join "`n")
     Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

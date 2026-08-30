@@ -13,7 +13,7 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 6.0.0
+## Version 6.1.0
 
 Version 6 is the official release of the existing PowerShell and Telegram product without changing its configuration or template formats. Template-operation records are readable: wherever an administrator has configured an Alias, the logs retain both that Alias and the immutable user ID (for example, `محرر الأخبار (12345)`). Settings inside each Arabic category use a full row, every current key has an Arabic label, and the row shows its current state or formatted value within a safe 64-character display cap without changing category distribution or callbacks. It also includes Cinegy auto-hide identity correlation, an acknowledged personal reminder with one configurable follow-up, approximate user activity, emergency-first Telegram admission, the health center, unified settings schema, state migration, bounded administrator pages, and the documented side-by-side upgrade/rollback path.
 

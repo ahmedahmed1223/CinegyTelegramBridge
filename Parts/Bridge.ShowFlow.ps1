@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.1.0'; Items = @(
+                '🧾 «عملياتي» صارت تُكتب بالعربية: «عرض «عاجل» على الطبقة 4» بدل رموز تقنية وأرقام مللي ثانية.'
+                '📜 «السجل» و«عملياتي» لم تعودا تفرغان بعد إعادة تشغيل الجسر؛ تُستعادان من سجل التدقيق الدائم.'
+            ) }
         # One entry per shipped release. The -preview.N milestones were internal
         # steps toward 6.0.0 and never reached an operator, so they are folded
         # in here rather than listed as four near-identical versions.

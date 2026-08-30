@@ -7753,9 +7753,9 @@ Describe 'Confirming removal of a live graphic' {
     }
 }
 Describe 'Version 6 settings navigation schema' {
-    It 'identifies the operator-audit improvement as the official Version 6 release' {
-        $script:BridgeVersion | Should -Be '6.0.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '6.0.0'
+    It 'leads the release notes with the version actually running' {
+        $script:BridgeVersion | Should -Be '6.1.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '6.1.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

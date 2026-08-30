@@ -6588,6 +6588,38 @@ Describe 'Missed events and template history' {
         (Get-MissedEventsText -Hours 12) | Should -Not -Match 'قديم-جدًا'
     }
 
+    It 'splits a shared graphic between the operators who ran it' {
+        # The question at a handover is not "20 times" but "by whom": one busy
+        # operator and four colliding on the same layer read identically
+        # without the breakdown.
+        $recent = (Get-Date).ToUniversalTime().AddMinutes(-20).ToString('o')
+        $rows = foreach ($n in 1..2) {
+            @{ timestampUtc = $recent; action = 'SHOW'; result = 'success'; userId = 42; layer = 3; target = 'عاجل'; message = '' } | ConvertTo-Json -Compress
+        }
+        $rows += foreach ($n in 1..3) {
+            @{ timestampUtc = $recent; action = 'SHOW'; result = 'success'; userId = 77; layer = 3; target = 'عاجل'; message = '' } | ConvertTo-Json -Compress
+        }
+        Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value $rows
+        Mock Get-UserDisplayName { if ($UserId -eq 77) { 'محمد' } else { 'أحمد' } }
+
+        $text = Get-MissedEventsText -Hours 12
+
+        $text | Should -Match 'محمد 3'
+        $text | Should -Match 'أحمد 2'
+        $text | Should -Match 'مشغّلين'
+    }
+
+    It 'names one operator inline rather than tallying a single person' {
+        $text = Get-MissedEventsText -Hours 12
+
+        $text | Should -Match 'الانتخابات .* أحمد'
+        $text | Should -Not -Match 'أحمد 1'
+    }
+
+    It 'reports the total number of shows, not just the top graphics' {
+        (Get-MissedEventsText -Hours 12) | Should -Match 'ما عُرض — 2 عرضًا'
+    }
+
     It 'passes activity notes through verbatim rather than counting them' {
         # The old digest bucketed every message-only record as "other", which
         # was both the largest number on screen and the least informative.

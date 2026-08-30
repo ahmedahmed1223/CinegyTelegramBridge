@@ -481,6 +481,33 @@ function Read-AuditRecords {
     return @($records)
 }
 
+function Get-AuditOperatorName {
+    <# Audit user ids arrive as strings and are sometimes absent. Returns an
+       empty string rather than a misleading "0" so callers can omit the name
+       instead of naming nobody. #>
+    param([string]$UserId)
+    $parsed = 0L
+    if (-not [long]::TryParse($UserId, [ref]$parsed) -or $parsed -eq 0) { return '' }
+    return [string](Get-UserDisplayName -UserId $parsed)
+}
+
+function Get-OperatorTally {
+    <# Who did it, and how many each. One operator is named inline; several are
+       broken down, because "20×" alone does not tell a supervisor taking over
+       whether one person was busy or four collided on the same graphic. #>
+    param([object[]]$Records)
+    $byUser = @(@($Records) | Group-Object -Property UserId | Sort-Object Count -Descending)
+    $named = @($byUser | Where-Object { Get-AuditOperatorName -UserId ([string]$_.Name) })
+    if ($named.Count -eq 0) { return @{ Single = ''; Breakdown = '' } }
+    if ($named.Count -eq 1) {
+        return @{ Single = (Get-AuditOperatorName -UserId ([string]$named[0].Name)); Breakdown = '' }
+    }
+    $parts = foreach ($entry in $named) {
+        "$(Get-AuditOperatorName -UserId ([string]$entry.Name)) $($entry.Count)"
+    }
+    return @{ Single = ''; Breakdown = ($parts -join ' · ') }
+}
+
 function Get-MissedEventsText {
     <#
         What happened while nobody was looking.
@@ -530,21 +557,37 @@ function Get-MissedEventsText {
     $airOps = @($records | Where-Object { $_.Action -in @('SHOW', 'HIDE', 'EXIT') })
     $shows = @($airOps | Where-Object { $_.Action -eq 'SHOW' -and $_.Target })
     if ($shows.Count -gt 0) {
+        $operatorCount = @($shows | Group-Object -Property UserId).Count
         $lines.Add('')
-        $lines.Add('📺 ما عُرض')
+        $header = "📺 ما عُرض — $($shows.Count) عرضًا"
+        if ($operatorCount -gt 1) { $header += " · $operatorCount مشغّلين" }
+        $lines.Add($header)
         foreach ($group in ($shows | Group-Object -Property Target | Sort-Object Count -Descending | Select-Object -First 6)) {
             $newest = @($group.Group)[-1]
-            $who = Get-UserDisplayName -UserId ([long]$newest.UserId)
             $stampText = $newest.When.ToString('HH:mm')
             $times = if ($group.Count -gt 1) { "$($group.Count)× · آخرها $stampText" } else { $stampText }
-            $lines.Add("• $($group.Name) — $times — $who")
+            $tally = Get-OperatorTally -Records @($group.Group)
+            if ($tally.Breakdown) {
+                # Several people touched the same graphic: "20×" alone hides
+                # whether one operator was busy or four collided on it.
+                $lines.Add("• $($group.Name) — $times")
+                $lines.Add("   ↳ $($tally.Breakdown)")
+            }
+            else {
+                $lines.Add("• $($group.Name) — $times — $($tally.Single)")
+            }
         }
     }
 
     $removals = @($airOps | Where-Object { $_.Action -in @('HIDE', 'EXIT') })
     if ($removals.Count -gt 0) {
         $newest = @($removals)[-1]
-        $lines.Add("🙈 إخفاء وخروج: $($removals.Count) — آخرها $($newest.When.ToString('HH:mm'))")
+        $lastWho = Get-AuditOperatorName -UserId $newest.UserId
+        $line = "🙈 إخفاء وخروج: $($removals.Count) — آخرها $($newest.When.ToString('HH:mm'))"
+        if ($lastWho) { $line += " — $lastWho" }
+        $lines.Add($line)
+        $removalTally = Get-OperatorTally -Records $removals
+        if ($removalTally.Breakdown) { $lines.Add("   ↳ $($removalTally.Breakdown)") }
     }
 
     # Activity lines are already written for a human, so they are shown rather

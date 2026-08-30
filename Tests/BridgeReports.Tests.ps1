@@ -1,0 +1,152 @@
+#requires -Version 7
+BeforeAll {
+    $script:Root = Split-Path -Parent $PSScriptRoot
+    . (Join-Path $script:Root 'Parts\Bridge.Reports.ps1')
+
+    # The report functions read through Read-AuditRecords and the two audit
+    # field helpers; defining those here keeps this file independent of the
+    # whole bridge while still exercising the real grouping and pairing logic.
+    # Replaced by a Mock in every Describe that needs records; the real
+    # signature is kept so the Mock's ParameterFilter would still bind.
+    function Read-AuditRecords {
+        param([int]$MaxLines = 0)
+        Write-Verbose "stub asked for $MaxLines records"
+        @()
+    }
+    function Get-AuditRecordField {
+        param($Record, [string]$Name)
+        if ($Record -and $Record.PSObject.Properties[$Name]) { return [string]$Record.PSObject.Properties[$Name].Value }
+        return ''
+    }
+    function Read-AuditRecordStamp {
+        param($Record)
+        $at = [datetime]::MinValue
+        if ([datetime]::TryParse((Get-AuditRecordField $Record 'timestampUtc'), $null,
+                [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$at)) { return $at.ToLocalTime() }
+        return $null
+    }
+    function Get-AuditOperatorName {
+        param([string]$UserId)
+        if ($UserId -eq '77') { return 'محمد' }
+        if ($UserId) { return 'أحمد' }
+        return ''
+    }
+    function Get-OperatorTally {
+        param([object[]]$Records)
+        $byUser = @(@($Records) | Group-Object -Property UserId | Sort-Object Count -Descending)
+        if ($byUser.Count -le 1) { return @{ Single = (Get-AuditOperatorName -UserId ([string]$byUser[0].Name)); Breakdown = '' } }
+        $parts = foreach ($e in $byUser) { "$(Get-AuditOperatorName -UserId ([string]$e.Name)) $($e.Count)" }
+        return @{ Single = ''; Breakdown = ($parts -join ' · ') }
+    }
+
+    function New-Rec {
+        param([string]$Action, [int]$Layer, [string]$Target, [int]$MinutesAgo, [string]$UserId = '42', [string]$Values = '')
+        [pscustomobject]@{
+            When = (Get-Date).AddMinutes(-$MinutesAgo); Action = $Action; Result = 'success'
+            Target = $Target; UserId = $UserId; Values = $Values; Count = 0; Layer = $Layer
+        }
+    }
+}
+
+Describe 'Banner session pairing' {
+    It 'closes a session at the hide that took it off air' {
+        $sessions = @(Get-BannerSessions -Records @(
+                (New-Rec -Action SHOW -Layer 4 -Target 'عاجل' -MinutesAgo 30 -Values 'نص')
+                (New-Rec -Action HIDE -Layer 4 -Target '' -MinutesAgo 10)
+            ))
+
+        $sessions.Count | Should -Be 1
+        $sessions[0].Target | Should -Be 'عاجل'
+        $sessions[0].EndedBy | Should -Be 'إخفاء'
+        [int][math]::Round(($sessions[0].EndedAt - $sessions[0].StartedAt).TotalMinutes) | Should -Be 20
+    }
+
+    It 'treats a second show on the same layer as a replacement, not a second live banner' {
+        $sessions = @(Get-BannerSessions -Records @(
+                (New-Rec -Action SHOW -Layer 4 -Target 'أول' -MinutesAgo 30)
+                (New-Rec -Action SHOW -Layer 4 -Target 'ثانٍ' -MinutesAgo 20)
+            ))
+
+        $sessions.Count | Should -Be 2
+        (@($sessions | Where-Object { $_.Target -eq 'أول' })[0]).EndedBy | Should -Be 'استبدال'
+        # The replacement is still live: it has no end, and must not be given one.
+        (@($sessions | Where-Object { $_.Target -eq 'ثانٍ' })[0]).EndedAt | Should -BeNullOrEmpty
+    }
+
+    It 'keeps layers independent' {
+        $sessions = @(Get-BannerSessions -Records @(
+                (New-Rec -Action SHOW -Layer 4 -Target 'عاجل' -MinutesAgo 30)
+                (New-Rec -Action SHOW -Layer 7 -Target 'شعار' -MinutesAgo 25)
+                (New-Rec -Action HIDE -Layer 4 -Target '' -MinutesAgo 10)
+            ))
+
+        (@($sessions | Where-Object { $_.Target -eq 'عاجل' })[0]).EndedAt | Should -Not -BeNullOrEmpty
+        (@($sessions | Where-Object { $_.Target -eq 'شعار' })[0]).EndedAt | Should -BeNullOrEmpty
+    }
+
+    It 'ignores failed operations, which never reached the screen' {
+        $failed = New-Rec -Action SHOW -Layer 4 -Target 'فاشل' -MinutesAgo 30
+        $failed.Result = 'failed'
+
+        @(Get-BannerSessions -Records @($failed)).Count | Should -Be 0
+    }
+
+    It 'survives an unmatched hide with no show before it' {
+        # A restart, or a hide of something shown before the window opened.
+        $orphan = @((New-Rec -Action HIDE -Layer 4 -Target '' -MinutesAgo 5))
+        { Get-BannerSessions -Records $orphan } | Should -Not -Throw
+        @(Get-BannerSessions -Records $orphan).Count | Should -Be 0
+    }
+}
+
+Describe 'Report windows' {
+    It 'labels each period in Arabic and starts it where it should' {
+        (Get-ReportPeriod -Period today).Label | Should -Be 'اليوم'
+        (Get-ReportPeriod -Period today).From | Should -Be (Get-Date).Date
+        (Get-ReportPeriod -Period week).From | Should -Be (Get-Date).Date.AddDays(-6)
+        (Get-ReportPeriod -Period month).Label | Should -Be 'آخر 30 يومًا'
+    }
+}
+
+Describe 'News report' {
+    BeforeEach {
+        $stamp = (Get-Date).ToUniversalTime().AddHours(-2).ToString('o')
+        Mock Read-AuditRecords {
+            @(
+                [pscustomobject]@{ timestampUtc = $stamp; event = 'news_publish'; action = 'PUBLISH'; result = 'success'; userId = '42'; count = '10' }
+                [pscustomobject]@{ timestampUtc = $stamp; event = 'news_publish'; action = 'PUBLISH'; result = 'success'; userId = '77'; count = '10' }
+                [pscustomobject]@{ timestampUtc = $stamp; event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+            )
+        }
+    }
+
+    It 'totals the items and splits the day between its publishers' {
+        $text = Get-NewsReportText -Period today
+
+        $text | Should -Match '20 خبرًا'
+        $text | Should -Match '2 نشرة'
+        $text | Should -Match 'أحمد 1'
+        $text | Should -Match 'محمد 1'
+        # An air_control record is not a news publish.
+        $text | Should -Not -Match 'عاجل'
+    }
+
+    It 'says plainly when nothing was published' {
+        Mock Read-AuditRecords { @() }
+        Get-NewsReportText -Period today | Should -Match 'لم يُنشر'
+    }
+}
+
+Describe 'Report truncation honesty' {
+    It 'announces that it showed only the newest records' {
+        $stamp = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('o')
+        Mock Read-AuditRecords {
+            @(1..$script:ReportMaxRecords | ForEach-Object {
+                    [pscustomobject]@{ timestampUtc = $stamp; event = 'news_publish'; action = 'PUBLISH'; result = 'success'; userId = '42'; count = '1' }
+                })
+        }
+
+        # A report that silently drops records reads as a complete one.
+        Get-NewsReportText -Period today | Should -Match 'عُرض أحدث'
+    }
+}

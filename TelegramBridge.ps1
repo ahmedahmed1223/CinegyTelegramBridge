@@ -100,6 +100,7 @@ foreach ($part in @(
         'Bridge.Commands'
         'Bridge.Callbacks'
         'Bridge.Tick'
+        'Bridge.Reports'
     )) {
     . (Join-Path $scriptRoot "Parts/$part.ps1")
 }

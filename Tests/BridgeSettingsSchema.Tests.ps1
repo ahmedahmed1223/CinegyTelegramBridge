@@ -53,12 +53,8 @@ Describe 'Unified bridge setting schema' {
         (Get-ModifiedBridgeSettings -Schema $script:Schema -Values @{ MaxFieldLength = 250 }).Name | Should -Be 'MaxFieldLength'
     }
 
-    It 'validates ranges, supports simple mode, and resets one value only' {
-        (Test-BridgeSettingValue -Schema $script:Schema -Name 'MaxFieldLength' -Value 1001).Valid | Should -BeFalse
+    It 'keeps an unknown future setting out of simple mode' {
         @(Get-BridgeSettingsForMode -Schema $script:Schema -Advanced:$false).Name | Should -Not -Contain 'FutureSetting'
-        $values = @{ MaxFieldLength = 250; FutureSetting = 9 }
-        $updated = Reset-BridgeSettingToDefault -Schema $script:Schema -Values $values -Name 'MaxFieldLength'
-        $updated.MaxFieldLength | Should -Be 200
-        $updated.FutureSetting | Should -Be 9
+        @(Get-BridgeSettingsForMode -Schema $script:Schema -Advanced).Name | Should -Contain 'FutureSetting'
     }
 }

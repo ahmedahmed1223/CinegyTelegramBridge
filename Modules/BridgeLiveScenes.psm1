@@ -124,22 +124,6 @@ function Get-BridgeLiveScenes {
     return @(Get-BridgeLiveSceneValue -Object $State -Name 'Scenes')
 }
 
-function Get-BridgeLiveScene {
-    param(
-        [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)][string]$SceneId
-    )
-    return @(Get-BridgeLiveScenes -State $State | Where-Object { $_.SceneId -ieq $SceneId } | Select-Object -First 1)[0]
-}
-
-function Get-BridgePrimarySceneForLayer {
-    param(
-        [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)][int]$Layer
-    )
-    return @(Get-BridgeLiveScenesForLayer -State $State -Layer $Layer | Select-Object -First 1)[0]
-}
-
 function Test-BridgeSceneMode {
     param(
         [ValidateSet('Single', 'Multi')][string]$RequestedMode = 'Single',
@@ -157,4 +141,4 @@ function Test-BridgeSceneMode {
     return [pscustomobject]@{ Mode = 'Single'; Verified = $verified; Error = $modeError }
 }
 
-Export-ModuleMember -Function ConvertTo-BridgeLiveSceneState, Get-BridgeLiveScenes, Get-BridgeLiveScenesForLayer, Get-BridgeLiveScene, Get-BridgePrimarySceneForLayer, Test-BridgeSceneMode
+Export-ModuleMember -Function ConvertTo-BridgeLiveSceneState, Get-BridgeLiveScenes, Get-BridgeLiveScenesForLayer, Test-BridgeSceneMode

@@ -65,31 +65,10 @@ function Get-ModifiedBridgeSettings {
     return @($Schema | Where-Object { $Values.ContainsKey($_.Name) -and $Values[$_.Name] -ne $_.Default })
 }
 
-function Test-BridgeSettingValue {
-    param([Parameter(Mandatory)][object[]]$Schema, [Parameter(Mandatory)][string]$Name, [AllowNull()]$Value)
-    $record = @($Schema | Where-Object Name -eq $Name | Select-Object -First 1)
-    if ($record.Count -eq 0) { return [pscustomobject]@{ Valid = $false; Error = "Unknown setting '$Name'." } }
-    $setting = $record[0]
-    if ($null -ne $setting.Minimum -and [double]$Value -lt [double]$setting.Minimum) { return [pscustomobject]@{ Valid = $false; Error = "Value is below minimum $($setting.Minimum)." } }
-    if ($null -ne $setting.Maximum -and [double]$Value -gt [double]$setting.Maximum) { return [pscustomobject]@{ Valid = $false; Error = "Value exceeds maximum $($setting.Maximum)." } }
-    if (@($setting.Choices).Count -gt 0 -and $setting.Choices -notcontains $Value) { return [pscustomobject]@{ Valid = $false; Error = 'Value is not one of the supported choices.' } }
-    return [pscustomobject]@{ Valid = $true; Error = '' }
-}
-
 function Get-BridgeSettingsForMode {
     param([Parameter(Mandatory)][object[]]$Schema, [switch]$Advanced)
     if ($Advanced) { return @($Schema) }
     return @($Schema | Where-Object { -not $_.Advanced })
 }
 
-function Reset-BridgeSettingToDefault {
-    param([Parameter(Mandatory)][object[]]$Schema, [Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][string]$Name)
-    $record = @($Schema | Where-Object Name -eq $Name | Select-Object -First 1)
-    if ($record.Count -eq 0) { throw "Unknown setting '$Name'." }
-    $copy = @{}
-    foreach ($key in $Values.Keys) { $copy[$key] = $Values[$key] }
-    $copy[$Name] = $record[0].Default
-    return $copy
-}
-
-Export-ModuleMember -Function New-BridgeSettingSchema, Find-BridgeSettings, Get-ModifiedBridgeSettings, Test-BridgeSettingValue, Get-BridgeSettingsForMode, Reset-BridgeSettingToDefault
+Export-ModuleMember -Function New-BridgeSettingSchema, Find-BridgeSettings, Get-ModifiedBridgeSettings, Get-BridgeSettingsForMode

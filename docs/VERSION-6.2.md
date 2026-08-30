@@ -14,7 +14,7 @@
 
 ## المهام
 
-### 6.2.1 — حذف الدوال السبع غير المستخدمة
+### 6.2.1 — حذف الدوال السبع غير المستخدمة ✅ مُنجَز
 
 | الوحدة | الدوال |
 |---|---|
@@ -36,9 +36,22 @@
 
 خطوتان منفصلتان:
 
-1. **قياس فقط** — تشغيل Analyzer بلا الاستثناء وعدّ المخالفات. لا تعديل.
-2. **إصلاح ثم إعادة القاعدة** — بحسب ما يكشفه القياس. أسماء الدوال داخلية،
-   فإعادة التسمية لا تمسّ مشغّلًا ولا ملف إعدادات.
+1. **قياس فقط** ✅ — أربع مخالفات لا غير:
+
+   | الدالة | الملف |
+   |---|---|
+   | `Apply-SettingsImport` | `Parts/Bridge.Admin.ps1:957` |
+   | `Apply-TemplateRegistryImport` | `Parts/Bridge.Admin.ps1:1285` |
+   | `Record-UserApprovalMetadata` | `Parts/Bridge.Users.ps1:71` |
+   | `Escape-XmlValue` | `Modules/CinegyAirTitler.psm1:41` |
+
+   الأخيرة وحدها هي «مساعد XML الخاص» الذي يذكره تعليق `Run-Checks.ps1` كاستثناء
+   متعمَّد؛ الثلاث الأخرى تسلّلت خلف الاستثناء نفسه.
+
+2. **إصلاح ثم إعادة القاعدة** — أسماء الدوال داخلية، فإعادة التسمية لا تمسّ
+   مشغّلًا ولا ملف إعدادات. المقترح: `Set-ImportedSettings`،
+   `Set-ImportedTemplateRegistry`، `Write-UserApprovalMetadata`،
+   `ConvertTo-XmlSafeValue`.
 
 ### 6.2.3 — توحيد `cfg:reset` و`cfg:search`
 

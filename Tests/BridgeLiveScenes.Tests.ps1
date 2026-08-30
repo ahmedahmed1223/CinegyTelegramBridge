@@ -43,8 +43,6 @@ Describe 'Bridge live scene state' {
         $layerScenes.Count | Should -Be 2
         @($layerScenes.SceneId) | Should -Be @('scene-a', 'scene-b')
         (Get-BridgeLiveScenes -State $state).Count | Should -Be 2
-        (Get-BridgeLiveScene -State $state -SceneId 'scene-b').Key | Should -Be 'ticker'
-        (Get-BridgePrimarySceneForLayer -State $state -Layer 7).SceneId | Should -Be 'scene-a'
     }
 
     It 'rejects canonical state with duplicate or blank scene identities' {

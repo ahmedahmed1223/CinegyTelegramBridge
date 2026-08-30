@@ -80,21 +80,6 @@ function Get-BridgeOperationRecord {
     return $Ledger.Records | Where-Object { $_.OperationId -eq $OperationId } | Select-Object -Last 1
 }
 
-function New-BridgeSceneCallbackToken {
-    param([Parameter(Mandatory)][hashtable]$Store, [Parameter(Mandatory)][string]$SceneId, [Parameter(Mandatory)][int]$Layer, [datetime]$Now = [datetime]::UtcNow, [int]$LifetimeSeconds = 300)
-    $token = ([guid]::NewGuid().ToString('N')).Substring(0,12)
-    $Store[$token] = [pscustomobject]@{ SceneId = $SceneId; Layer = $Layer; ExpiresAtUtc = $Now.ToUniversalTime().AddSeconds($LifetimeSeconds) }
-    return $token
-}
-
-function Resolve-BridgeSceneCallbackToken {
-    param([Parameter(Mandatory)][hashtable]$Store, [Parameter(Mandatory)][string]$Token, [Parameter(Mandatory)][int]$Layer, [datetime]$Now = [datetime]::UtcNow)
-    if (-not $Store.ContainsKey($Token)) { return $null }
-    $entry = $Store[$Token]
-    if ($entry.Layer -ne $Layer -or $entry.ExpiresAtUtc -le $Now.ToUniversalTime()) { return $null }
-    return $entry
-}
-
 function Get-BridgeOperationScope {
     param([Parameter(Mandatory)][string]$Action)
     $normalized = $Action.Trim().ToLowerInvariant()
@@ -103,11 +88,4 @@ function Get-BridgeOperationScope {
     return [pscustomobject]@{ Action = $normalized; Scope = 'LayerExclusive'; SerializedByLayer = $true }
 }
 
-function Get-BridgeOperationStatusText {
-    param([Parameter(Mandatory)]$Operation)
-    $labels = @{ queued = 'قيد الانتظار'; running = 'قيد التنفيذ'; succeeded = 'اكتملت'; warning = 'اكتملت بتحذير'; failed = 'فشلت' }
-    $label = if ($labels.ContainsKey([string]$Operation.State)) { $labels[[string]$Operation.State] } else { [string]$Operation.State }
-    return "🔖 $($Operation.OperationId) · الطبقة $($Operation.Layer) · $label"
-}
-
-Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeOperationLedger, Add-BridgeOperation, Start-BridgeOperation, Complete-BridgeOperation, Get-BridgeOperationRecord, New-BridgeSceneCallbackToken, Resolve-BridgeSceneCallbackToken, Get-BridgeOperationScope, Get-BridgeOperationStatusText
+Export-ModuleMember -Function New-BridgeOperationRecord, Set-BridgeOperationState, New-BridgeOperationLedger, Add-BridgeOperation, Start-BridgeOperation, Complete-BridgeOperation, Get-BridgeOperationRecord, Get-BridgeOperationScope

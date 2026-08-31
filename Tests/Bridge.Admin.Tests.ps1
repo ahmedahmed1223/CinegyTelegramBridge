@@ -1513,3 +1513,49 @@ Describe 'The health screen can be read down its state column' {
         }
     }
 }
+
+Describe 'The status screens lead with the verdict and table what is on air' {
+    BeforeEach {
+        Mock Get-AuditOperatorName { 'سامي' }
+        $script:OnAir.Clear()
+    }
+    AfterEach { $script:OnAir.Clear() }
+
+    It 'says the screen is empty rather than drawing a table of nothing' {
+        $blocks = @(Get-OnAirTableBlocks)
+
+        @($blocks | Where-Object { $_.type -eq 'table' }).Count | Should -Be 0
+        $blocks[0].text | Should -Match 'لا شيء على الهواء'
+    }
+
+    It 'gives each live layer a row, four columns wide like every other table' {
+        $script:OnAir[7] = @{ Key = 'urgent'; At = (Get-Date).AddMinutes(-5); UserId = 10 }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddSeconds(-2); UserId = 10 }
+
+        $table = @(@(Get-OnAirTableBlocks) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells).Count | Should -Be 3
+        @($table.cells[0]).Count | Should -Be 4
+        @($table.cells[1])[1].text | Should -Be 'urgent'
+        # A layer that went up two seconds ago reads better than "منذ 0 ثانية".
+        @($table.cells[2])[2].text | Should -Be 'الآن'
+    }
+
+    It 'puts the verdict above everything and folds the machine detail' {
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟠 طبقات على الهواء' `
+                -DetailLines @('🌐 127.0.0.1', '', '📶 حالة بيانات Cinegy: حديثة'))
+
+        $blocks[0].type | Should -Be 'heading'
+        $blocks[1].text | Should -Be '🟠 طبقات على الهواء'
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+        # A blank separator is a text-screen device; as a block it renders as
+        # a gap that looks like something failed to load.
+        @($folded.blocks).Count | Should -Be 2
+    }
+
+    It 'folds nothing when there is no detail to fold' {
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' -DetailLines @())
+
+        @($blocks | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
+    }
+}

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.13.0
+
+Status and full status become blocks: the verdict as a heading, the layers
+on air as a table, and the machine detail folded underneath. What is on air
+is the one genuinely tabular thing on a status screen and it was a run-on
+sentence. Both screens pass their existing lines through rather than
+rebuilding them, so the text and the blocks cannot disagree.
+
 ## Version 7.12.0
 
 The health centre becomes a table whose state column can be read straight

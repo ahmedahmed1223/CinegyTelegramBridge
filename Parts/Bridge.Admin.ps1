@@ -45,6 +45,77 @@ function Get-OnAirSummary {
     return ($lines -join "`n")
 }
 
+function Get-OnAirTableBlocks {
+    <#
+        What is on air, as a table.
+
+        This is the one genuinely tabular thing on a status screen - a layer,
+        what is on it, since when - and it was a run-on sentence. Four
+        columns, like every other table here, because Telegram divides the
+        width evenly and a fifth would take a fifth of the phone.
+    #>
+    param([datetime]$Now = (Get-Date))
+    if ($script:OnAir.Count -eq 0) {
+        return @(@{ type = 'paragraph'; text = '⚫️ لا شيء على الهواء' })
+    }
+    $cells = @(, @(
+            @{ text = 'الطبقة'; is_header = $true }
+            @{ text = 'القالب'; is_header = $true }
+            @{ text = 'منذ'; is_header = $true }
+            @{ text = 'المشغّل'; is_header = $true }
+        ))
+    foreach ($layer in @($script:OnAir.Keys | Sort-Object)) {
+        $record = $script:OnAir[$layer]
+        $atValue = Get-JsonProp $record 'At'
+        $since = if ($atValue) {
+            $at = [datetime]$atValue
+            $seconds = [math]::Max(0, [int]($Now - $at).TotalSeconds)
+            # "منذ 0 ثانية" is a strange way to say it just went up.
+            if ($seconds -lt 5) { 'الآن' } else { Format-DurationSeconds -Seconds $seconds }
+        }
+        else { '—' }
+        $who = Get-AuditOperatorName -UserId ([string](Get-JsonProp $record 'UserId'))
+        $cells += , @(
+            @{ text = [string]$layer }
+            @{ text = [string](Get-JsonProp $record 'Key') }
+            @{ text = $since }
+            @{ text = $(if ($who) { $who } else { '—' }) }
+        )
+    }
+    return @(@{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true })
+}
+
+function Get-StatusRichBlocks {
+    <#
+        A status screen as blocks: the verdict, what is on air, and the
+        machine detail folded under it.
+
+        The lines are passed in rather than rebuilt, so the block screen and
+        the text screen cannot disagree - they are the same strings. Only the
+        shape differs: the verdict gets a heading, the on-air layers get a
+        table, and the rest becomes the detail nobody reads unless the
+        verdict says to.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][string]$Overall,
+        [AllowNull()][object[]]$DetailLines = $null,
+        [string]$DetailSummary = '🔍 التفاصيل'
+    )
+    $blocks = @(@{ type = 'heading'; text = "$Title — v$($script:BridgeVersion)"; size = 3 })
+    $blocks += @{ type = 'paragraph'; text = $Overall }
+    $blocks += @{ type = 'divider' }
+    $blocks += @(Get-OnAirTableBlocks)
+    # Blank separators are a text-screen device; as blocks they would be empty
+    # paragraphs, which render as gaps that look like something failed.
+    $detail = @(@($DetailLines) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
+    if ($detail.Count -gt 0) {
+        $blocks += @{ type = 'details'; summary = $DetailSummary; blocks = $detail }
+    }
+    return $blocks
+}
+
 function Invoke-StatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -109,7 +180,14 @@ function Invoke-StatusCommand {
         $lines.Add("✅ الحالة متزامنة مع Cinegy.")
     }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    # The same lines, reshaped: the verdict as a heading, what is on air
+    # as a table, and the machine detail folded under it. The leading
+    # lines are skipped because the blocks already carry them.
+    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall `
+        -DetailLines @($lines | Select-Object -Skip 3) -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
 }
 
 function Request-HideAllConfirmation {
@@ -570,7 +648,14 @@ function Invoke-FullStatusCommand {
     }
     else { $lines.Add("✅ حالة Cinegy متزامنة.") }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    # The same lines, reshaped: the verdict as a heading, what is on air
+    # as a table, and the machine detail folded under it. The leading
+    # lines are skipped because the blocks already carry them.
+    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
+        -DetailLines @($lines | Select-Object -Skip 5) -DetailSummary '🔍 التفاصيل الكاملة'
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
 }
 
 function Invoke-HealthCommand {

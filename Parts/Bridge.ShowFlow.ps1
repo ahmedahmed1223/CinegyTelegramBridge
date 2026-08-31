@@ -103,6 +103,12 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.8.0'; Items = @(
+                '🚀 «بداية سريعة»: بطاقة واحدة تأخذ من لم يستخدم البوت قط إلى أول قالب على الهواء في ست خطوات.'
+                '📖 المساعدة صارت فهرس أبواب: اضغط الباب الذي يخصّك بدل قراءة دليل كامل بحثًا عن سطر.'
+                '⬅️➡️ داخل كل باب أزرار السابق والتالي والفهرس، ومن يريد الدليل كاملًا يجده كما كان.'
+                '🔒 سحب الشيت صار يحترم قفل المسودة: لا يستطيع مشغّل محو مسودة زميله، بل يطلب فكّ القفل كبقية الشاشات.'
+            ) }
         @{ Version = '6.7.0'; Items = @(
                 '⚠️ زرّا سحب الشيت صارا يطلبان تأكيدًا دائمًا قبل التنفيذ، فلا تعيد نقرة عابرة كتابة الشريط.'
                 '🔎 رسالة التأكيد تقول ماذا سيحدث بالضبط: كم خبرًا سيُستبدل، ومَن يحرّر المسودة الآن إن وُجد.'
@@ -313,6 +319,221 @@ function Get-WhatsNewParts {
     $parts = @((Get-WhatsNewText -Take $LeadVersions))
     if ($total -gt $LeadVersions) { $parts += (Get-WhatsNewText -Skip $LeadVersions -NoHeading) }
     return $parts
+}
+
+function Get-QuickStartText {
+    <# The shortest path from "I was handed this bot" to "a graphic is on
+       air". Deliberately not a feature list: a new operator on shift needs
+       the six presses that work, and can find everything else in the index. #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $lines = @(
+        '🚀 بداية سريعة'
+        '━━━━━━━━━━━━━━'
+        'أول قالب لك على الهواء في ست خطوات:'
+        ''
+        '1️⃣ اضغط 📋 القوالب.'
+        '2️⃣ اختر القالب الذي تريده.'
+        '3️⃣ اكتب نص كل حقل يطلبه، أو ⏭ تخطِّ ما لا تحتاجه.'
+        '4️⃣ تظهر شاشة مراجعة بما ستعرضه — اقرأها.'
+        '5️⃣ اضغط ✅ تأكيد. الآن هو على الهواء.'
+        '6️⃣ لإخفائه: الصف الأحمر أعلى القائمة الرئيسية، اضغطه.'
+        ''
+        '━━━━━━━━━━━━━━'
+        'ثلاث قواعد تريحك:'
+        '• كل قالب يمر بمراجعة قبل الهواء، فلا شيء يُنشر بضغطة واحدة.'
+        '• 🏠 القائمة يعيدك للرئيسية في أي لحظة، حتى وأنت تكتب.'
+        '• الصفوف الحمراء أعلى القائمة هي ما يراه الجسر على الهواء الآن.'
+        ''
+        '📖 للتفصيل: افتح فهرس المساعدة واختر ما يخصّك.'
+    )
+    return ($lines -join "`n")
+}
+
+function Get-HelpChapters {
+    <# The manual as chapters instead of one long screen. An operator asking
+       "how do I hide this" wants that answer, not to scroll past scheduling
+       to reach it. Each chapter is a screen; the index is the map.
+
+       Content is the same material the full guide carries, regrouped. Admin
+       chapters are filtered out for everyone else rather than shown locked. #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+
+    $chapters = @(
+        @{ Key = 'show'; Title = '▶️ نشر قالب'; AdminOnly = $false; Body = @(
+                '📋 القوالب ← اختر القالب ← أدخل نص كل حقل ← راجع ← تأكيد.'
+                '↳ كل قالب يمر بشاشة مراجعة قبل الهواء، حتى بلا حقول.'
+                '↳ ⭐ المفضّلة تظهر في أعلى القائمة للوصول بنقرة.'
+                ''
+                '⏭ تخطِّ أي حقل لا تريد تعبئته؛ يبقى فارغًا على الشاشة.'
+                '🔖 بعد كل عملية يظهر لها مرجع قصير في 🧾 عملياتي — اذكره'
+                '   للمشرف إن احتجت أن يجد أثرها في السجل.'
+            ) }
+        @{ Key = 'edit'; Title = '✏️ التعديل أثناء العرض'; AdminOnly = $false; Body = @(
+                '✏️ تحديث نص ← القالب ← الحقل ← النص الجديد.'
+                '↳ يغيّر النص دون إعادة تشغيل حركة القالب.'
+                '🔁 تكرار مع تعديل: يعيد آخر قالب بقيمه لتغيّر ما تريد.'
+                '↩️ تراجع: يظهر في القائمة بعد أي عملية ويعيد الحالة السابقة'
+                '   خلال مهلته.'
+            ) }
+        @{ Key = 'stop'; Title = '🛑 الإنهاء والطوارئ'; AdminOnly = $false; Body = @(
+                '🔴 صفوف أعلى القائمة هي ما يراه الجسر على الهواء الآن.'
+                '↳ اضغط الصف لإخفاء تلك الطبقة مباشرة.'
+                '🚨 إخفاء الكل: يعرض الطبقات ثم يطلب تأكيدًا قبل التنفيذ.'
+                '🚪 خروج من المشهد: يشغّل نهاية المشهد بدل القطع الفوري.'
+                '↳ عند تفعيل التأكيد يظهر اسم القالب ومدّته ومَن أرسله قبل التنفيذ.'
+                ''
+                '⚡ الإخفاء والخروج لهما أولوية على العرض داخل الدفعة نفسها،'
+                '   فأمر الطوارئ لا ينتظر خلف عملية عرض.'
+            ) }
+        @{ Key = 'time'; Title = '⏱ التوقيت والجدولة'; AdminOnly = $false; Body = @(
+                '⏱ عرض مؤقّت: يعرض القالب ويخفيه تلقائيًا بعد المدة.'
+                '↳ يمكن ربط مؤقّت بقالب موجود على الهواء من زر ⏱ بجانبه.'
+                '📅 الجدولة: القالب والقيم والموعد، ثم مرة واحدة أو يومي أو أسبوعي.'
+                ''
+                '🔔 إن بقي قالب على الهواء طويلًا يصلك تنبيه ومعه زر'
+                '   «تمت المعالجة». إن لم تؤكد تصلك متابعة واحدة بعدها.'
+                '↳ المؤقتات والتنبيهات تُحفظ، فتستمر بعد إعادة تشغيل الجسر.'
+            ) }
+        @{ Key = 'news'; Title = '📰 شريط الأخبار'; AdminOnly = $false; Body = @(
+                'الشريط يُحرَّر كمسودة، ولا يصل الهواء إلا بالنشر.'
+                ''
+                '✏️ بدء التحرير: يفتح مسودة ويقفلها باسمك حتى لا يعدّلها اثنان معًا.'
+                '➕ إضافة خبر · 📝 تعديل وترتيب · 👁 معاينة.'
+                '✅ مراجعة ونشر: يعرض ما سيتغيّر ثم ينشر.'
+                '📥 استيراد TXT: ملف نصي يحل محل المسودة أو يُضاف إليها.'
+                '🕘 النسخ والاستعادة: كل نشر يحفظ نسخة يمكن الرجوع إليها.'
+                ''
+                '📊 من Google Sheets (إن ضُبط الرابط):'
+                '↳ ⬇️ سحب ونشر: يجلب الشيت ويضعه على الهواء.'
+                '↳ 📝 سحب إلى المسودة: يجلبه للمراجعة، ولا يصل الهواء شيء'
+                '   حتى تضغط «مراجعة ونشر».'
+                '↳ الزرّان يطلبان تأكيدًا ويخبرانك كم خبرًا سيُستبدل.'
+                '↳ الشيت الفارغ يُرفض ولا يمسح الشريط.'
+                ''
+                '🔒 إن كانت المسودة بيد زميل: 🔓 طلب فكّ القفل يرسل له طلبًا.'
+            ) }
+        @{ Key = 'track'; Title = '🔍 المتابعة والتحقق'; AdminOnly = $false; Body = @(
+                'ℹ️ الحالة: ملخص سريع لخادم Air والقناة والقوالب المتابعة.'
+                '🎚 الطبقات: يفحص Cinegy مباشرة ويقارنه بسجل الجسر.'
+                '↳ لكل طبقة: ظاهر أو خارجي أو مخفي أو غير معروف.'
+                '📸 صورة من البث: لقطة حديثة من خرج القناة.'
+                '🧾 عملياتي: آخر عملياتك مع إعادة المحاولة ومرجع كل عملية.'
+                '🕘 ماذا فاتني: ما جرى أثناء غيابك ومَن نفّذه.'
+                '📊 تقارير: البنرات والأخبار خلال فترة، مع تحميل ملف.'
+                '🆕 ما الجديد: ملخص تغييرات الإصدارات الأخيرة.'
+                ''
+                '⚠️ السطر أعلى القائمة يذكر متى تحقّق الجسر آخر مرة.'
+                '↳ إن ظهر تحذير هناك فالمعلومة قد لا تطابق الشاشة — تأكد بلقطة.'
+            ) }
+        @{ Key = 'admin'; Title = '🛡️ أدوات المشرف'; AdminOnly = $true; Body = @(
+                '⚙️ الإعدادات و👤 طلبات الوصول: في القائمة الرئيسية.'
+                '🗂 أدوات الإدارة تجمع الباقي:'
+                '↳ 👥 المستخدمون، ⚡ النصوص الجاهزة، 📚 القوالب.'
+                '↳ ▶️ البث المباشر و🔗 رابط البث.'
+                '↳ 📜 السجل و🧪 التشخيص و🛠 الأمر الخام.'
+                '🩺 مركز الصحة: Telegram وCinegy والمخرج والتخزين والجدولة'
+                '   في شاشة واحدة، ومعها 🗂 ملفات التشغيل وسطر الاستخدام.'
+                '🧪 فحص المسار الحي: دورة عرض وإخفاء كاملة على طبقة التجربة'
+                '   تُبلّغ بنتيجة كل خطوة. تحتاج TemplateTestLayer غير مستخدمة.'
+                '📤/📥 الإعدادات: نقل التهيئة بين الأجهزة. التصدير بلا توكن'
+                '   ولا قائمة مستخدمين، والاستيراد يعرض ما سيتغيّر قبل تطبيقه.'
+                '♻️ إعادة تشغيل الجسر: بتأكيد، وبعد التحقق من وجود خدمة تعيده.'
+            ) }
+        @{ Key = 'trouble'; Title = '🆘 حين يحدث خطأ'; AdminOnly = $false; Body = @(
+                'الشاشة تقول «فشل» ولا تعرف السبب:'
+                '↳ 🧾 عملياتي يذكر سبب الفشل والإرشاد المناسب لكل حالة.'
+                '↳ انسخ 🔖 المرجع وأرسله للمشرف؛ يجد به سطر العملية في السجل.'
+                ''
+                'قالب ظاهر على الشاشة والجسر لا يعرفه، أو العكس:'
+                '↳ 🎚 الطبقات يفحص Cinegy مباشرة ويقارن — «خارجي» تعني أن'
+                '   شيئًا عُرض من خارج الجسر.'
+                '↳ 📸 صورة من البث تحسم الأمر بالنظر.'
+                ''
+                'لا شيء يستجيب:'
+                '↳ ℹ️ الحالة تبيّن إن كان Air غير متصل.'
+                '↳ أبلغ المشرف؛ مركز الصحة عنده يوضح أين الخلل.'
+            ) }
+        @{ Key = 'back'; Title = '↩️ الرجوع والإلغاء'; AdminOnly = $false; Body = @(
+                '• ⬅️ رجوع في أسفل كل شاشة يعود خطوة للخلف.'
+                '• 🏠 القائمة يرجعك للرئيسية في أي وقت، حتى أثناء إدخال نص.'
+                '  زر الرجوع في الجوال يخرج من المحادثة كلها ولا يمكن للبوت'
+                '  اعتراضه، لذلك استخدم أزرار الشاشة بدلًا منه.'
+                '• ☰ بجانب مربع الكتابة يعرض كل الأوامر.'
+                '• /الغاء يلغي العملية الحالية، و/قائمة يفتح القائمة.'
+            ) }
+    )
+
+    $isAdmin = Test-Admin -ChatId $ChatId -UserId $UserId
+    return @($chapters | Where-Object { -not $_.AdminOnly -or $isAdmin })
+}
+
+function Get-HelpChapterIndex {
+    param([AllowNull()][object[]]$Chapters, [string]$Key)
+    $list = @($Chapters)
+    for ($i = 0; $i -lt $list.Count; $i++) {
+        if ([string]$list[$i].Key -eq $Key) { return $i }
+    }
+    return -1
+}
+
+function Get-HelpChapterText {
+    param([Parameter(Mandatory)][string]$Key, [long]$ChatId = 0, [long]$UserId = 0)
+    $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
+    $index = Get-HelpChapterIndex -Chapters $chapters -Key $Key
+    if ($index -lt 0) { return '' }
+    $chapter = $chapters[$index]
+    $lines = @("📖 $($chapter.Title)", '━━━━━━━━━━━━━━') + @($chapter.Body) +
+        @('', "الباب $($index + 1) من $($chapters.Count)")
+    return ($lines -join "`n")
+}
+
+function Get-HelpChapterKeyboard {
+    <# Previous and next keep sequential reading possible for anyone who wants
+       the whole manual in order, while the index button means nobody has to. #>
+    param([Parameter(Mandatory)][string]$Key, [long]$ChatId = 0, [long]$UserId = 0)
+    $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
+    $index = Get-HelpChapterIndex -Chapters $chapters -Key $Key
+    $navigation = @()
+    if ($index -gt 0) { $navigation += @{ text = '⬅️ السابق'; callback_data = "help:ch:$($chapters[$index - 1].Key)" } }
+    $navigation += @{ text = '📖 الفهرس'; callback_data = 'help:home' }
+    if ($index -ge 0 -and $index -lt ($chapters.Count - 1)) { $navigation += @{ text = '➡️ التالي'; callback_data = "help:ch:$($chapters[$index + 1].Key)" } }
+    $rows = @()
+    $rows += , @($navigation)
+    $rows += , @(@{ text = '🏠 القائمة'; callback_data = 'menu:main' })
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-HelpHomeText {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
+    $lines = @(
+        '📘 دليل بوت Cinegy Air'
+        "الإصدار $($script:BridgeVersion)"
+        ''
+        'اختر ما تريد معرفته:'
+        ''
+    )
+    foreach ($chapter in $chapters) { $lines += "• $($chapter.Title)" }
+    $lines += @('', '🚀 جديد على البوت؟ ابدأ بـ«بداية سريعة».')
+    return ($lines -join "`n")
+}
+
+function Get-HelpHomeKeyboard {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    $rows = @()
+    $rows += , @(@{ text = '🚀 بداية سريعة'; callback_data = 'help:quickstart' })
+    $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
+    # Two chapters per row: the titles are short enough to stay readable, and a
+    # nine-row column would push the menu button off a phone screen.
+    for ($i = 0; $i -lt $chapters.Count; $i += 2) {
+        $row = @(@{ text = $chapters[$i].Title; callback_data = "help:ch:$($chapters[$i].Key)" })
+        if ($i + 1 -lt $chapters.Count) { $row += @{ text = $chapters[$i + 1].Title; callback_data = "help:ch:$($chapters[$i + 1].Key)" } }
+        $rows += , $row
+    }
+    $rows += , @(@{ text = '📄 الدليل كاملًا'; callback_data = 'help:full' }, @{ text = '🏠 القائمة'; callback_data = 'menu:main' })
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-HelpText {

@@ -99,6 +99,7 @@ Describe 'News sheet sync rules' {
     }
 
     It 'lets a manual sync proceed once the administrator confirmed it' {
+        Mock Test-Admin { $true }
         $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
         $result = Invoke-NewsSheetSync -Trigger manual -UserId 101 -Confirmed
         $result.Success | Should -BeTrue
@@ -106,6 +107,7 @@ Describe 'News sheet sync rules' {
     }
 
     It 'asks before a manual sync would discard another operator draft' {
+        Mock Test-Admin { $true }
         $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
         $result = Invoke-NewsSheetSync -Trigger manual -UserId 101
         $result.Success | Should -BeFalse
@@ -199,6 +201,7 @@ Describe 'News sheet pulled into the draft for review' {
     }
 
     It 'asks before taking over another operator draft' {
+        Mock Test-Admin { $true }
         $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
         $result = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101
         $result.NeedsConfirmation | Should -BeTrue
@@ -231,6 +234,68 @@ Describe 'News sheet notice audience' {
         $audience = @(Get-NewsSheetNoticeAudience -Scope 'all')
         $audience | Should -Be @(11, 22, 33)
         @($audience | Where-Object { $_ -eq 11 }).Count | Should -Be 1
+    }
+}
+
+Describe 'The draft lock binds the sheet pull too' {
+    BeforeEach {
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $true }
+                'NewsItemSeparator' { '|' }
+                'NewsFilePath' { Join-Path $TestDrive 'news.txt' }
+                default { '' }
+            }
+        }
+        Mock Get-NewsSheetCsvText { [pscustomobject]@{ Success = $true; Csv = "خبر"; Error = '' } }
+        Mock Publish-NewsTickerFile { [pscustomobject]@{ Success = $true; Conflict = $false; BackupPath = ''; Hash = 'h2'; Error = '' } }
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('قديم'); Hash = 'h1'; Error = '' } }
+        Mock Get-UserDisplayName { "مستخدم $UserId" }
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
+    }
+
+    It 'refuses an operator who would destroy another operator draft' {
+        # Breaking a lock is an administrator action everywhere else in the
+        # news screens; a sheet pull must not be the way around that.
+        Mock Test-Admin { $false }
+        $result = Invoke-NewsSheetSync -Trigger manual -Target air -UserId 101 -ChatId 101 -Confirmed
+        $result.Success | Should -BeFalse
+        $result.NeedsConfirmation | Should -BeFalse
+        $result.Error | Should -Match 'طلب فكّ القفل'
+        Should -Invoke Publish-NewsTickerFile -Times 0 -Exactly
+    }
+
+    It 'refuses the review pull to that operator as well' {
+        Mock Test-Admin { $false }
+        (Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101 -Confirmed).Success | Should -BeFalse
+    }
+
+    It 'still lets the owner pull over their own draft' {
+        Mock Test-Admin { $false }
+        (Invoke-NewsSheetSync -Trigger manual -Target air -UserId 202 -ChatId 202 -Confirmed).Success | Should -BeTrue
+    }
+
+    It 'lets an administrator override, as the unlock button does' {
+        Mock Test-Admin { $true }
+        (Invoke-NewsSheetSync -Trigger manual -Target air -UserId 101 -ChatId 101 -Confirmed).Success | Should -BeTrue
+    }
+
+    It 'hides the pull buttons from an operator while somebody else holds the draft' {
+        Mock Test-Admin { $false }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Not -Contain 'news:sheet'
+        $callbacks | Should -Not -Contain 'news:sheetdraft'
+        $callbacks | Should -Contain 'news:lockrequest'
+    }
+
+    It 'keeps the pull buttons for an administrator' {
+        Mock Test-Admin { $true }
+        @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
+            Should -Contain 'news:sheet'
     }
 }
 

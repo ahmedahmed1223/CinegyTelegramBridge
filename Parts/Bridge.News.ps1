@@ -428,8 +428,17 @@ function Invoke-NewsSheetSync {
             Write-BridgeLog "News sheet sync skipped: draft held by user $owner" 'WARN'
             return (& $stop 'مسودة الأخبار قيد التحرير؛ تُخطّيت هذه الدورة.' $true $false)
         }
-        if ($owner -ne $UserId -and -not $Confirmed) {
-            return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). التأكيد يستبدلها بمحتوى الشيت." $false $true)
+        if ($owner -ne $UserId) {
+            # Breaking somebody else's lock is an administrator action
+            # everywhere else in the news screens, and a sheet pull destroys
+            # that draft just as surely as 🔓 إلغاء القفل does. An operator is
+            # pointed at the request instead, which the owner answers.
+            if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+                return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). استخدم «🔓 طلب فكّ القفل» أو اطلب من مشرف.")
+            }
+            if (-not $Confirmed) {
+                return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). التأكيد يستبدلها بمحتوى الشيت." $false $true)
+            }
         }
     }
 
@@ -517,7 +526,8 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsRestoreNews')) {
         $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
     }
-    if ((Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
+    $lockedByOther = $draft -and [long]$draft.OwnerUserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)
+    if (-not $lockedByOther -and (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
         $rows += , @(@{text='⬇️ سحب ونشر';callback_data='news:sheet'}, @{text='📝 سحب إلى المسودة';callback_data='news:sheetdraft'})
     }
     $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})

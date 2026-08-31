@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.8.0
+
+Help is now a quick-start card plus a chapter index rather than one long
+screen: eight operator chapters and one administrator chapter, each a single
+message, with previous/index/next inside each and the full guide still one
+button away. Sheet pulls now respect the news draft lock - an operator can no
+longer erase a colleague's draft through them, and is pointed at the unlock
+request instead, matching every other news screen.
+
 ## Version 6.7.0
 
 Both sheet pulls now always confirm before acting, not only on a draft

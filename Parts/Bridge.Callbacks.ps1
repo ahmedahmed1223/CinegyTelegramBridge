@@ -442,8 +442,26 @@ function Invoke-CallbackQuery {
             }
             break
         }
-        'menu:help' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+        { $_ -in @('menu:help', 'help:home') } {
+            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'help:quickstart' {
+            Send-TelegramMessage -ChatId $chatId -Text (Get-QuickStartText -ChatId $chatId -UserId $userId) -ReplyMarkup @{inline_keyboard=@(,@(@{text='📖 فهرس المساعدة';callback_data='help:home'},@{text='🏠 القائمة';callback_data='menu:main'}))}
+            break
+        }
+        'help:full' {
+            Send-TelegramPagedText -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'help:ch:*' {
+            $chapterKey = Get-CallbackArg $data 'help:ch:'
+            $chapterText = Get-HelpChapterText -Key $chapterKey -ChatId $chatId -UserId $userId
+            if ([string]::IsNullOrWhiteSpace($chapterText)) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            Send-TelegramMessage -ChatId $chatId -Text $chapterText -ReplyMarkup (Get-HelpChapterKeyboard -Key $chapterKey -ChatId $chatId -UserId $userId)
             break
         }
         'menu:audit' {

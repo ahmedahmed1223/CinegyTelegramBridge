@@ -205,7 +205,7 @@ function Invoke-CallbackQuery {
         'news:restoreconfirm:*' {
             if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restoreconfirm:');$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10);if($i-ge $files.Count){break}
             $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $files[$i].FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:cancel' { if(Get-NewsTickerDraft -UserId $userId){Remove-NewsTickerDraft};Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break }
         'news:import' {
@@ -339,7 +339,7 @@ function Invoke-CallbackQuery {
             $selected = @(Get-FavoriteTemplateKeys -UserId $userId) -contains [string]$template.Key
             if (Set-UserFavorite -UserId $userId -TemplateKey ([string]$template.Key) -Enabled (-not $selected)) {
                 $action = if ($selected) { 'أزيل من' } else { 'أضيف إلى' }
-                Add-AuditEntry "⭐ $($template.Key) $action مفضلة $(Get-UserDisplayName -UserId $userId)"
+                Add-AuditEntry "⭐ $($template.Key) $action مفضلة - بواسطة $(Format-UserAuditActor -UserId $userId)"
                 Send-TelegramMessage -ChatId $chatId -Text "✅ $($template.Key): $action المفضلة." -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
             }
             break
@@ -604,7 +604,7 @@ function Invoke-CallbackQuery {
             if (Set-UserDisabled -TargetUserId $target -Disabled (-not $disabled)) {
                 $action = if ($disabled) { 'إعادة تفعيل' } else { 'تعطيل' }
                 Write-BridgeLog "Admin $userId changed user $target state: $action"
-                Add-AuditEntry "👥 $action المستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Add-AuditEntry "👥 $action المستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
                 Show-UsersAdminScreen -ChatId $chatId -UserId $userId
             }
             break
@@ -627,7 +627,7 @@ function Invoke-CallbackQuery {
             $result = Revoke-AuthorizedUser -TargetUserId $target
             if ($result.Success) {
                 Write-BridgeLog "Admin $userId revoked user $target" 'WARN'
-                Add-AuditEntry "👥 سحب صلاحية المستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Add-AuditEntry "👥 سحب صلاحية المستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
                 Send-TelegramMessage -ChatId $chatId -Text "✅ تم سحب صلاحية المستخدم $target." -ReplyMarkup (Get-UsersAdminKeyboard)
             }
             else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" -ReplyMarkup (Get-UsersAdminKeyboard) }
@@ -655,7 +655,7 @@ function Invoke-CallbackQuery {
             if ($result.Success) {
                 $what = if ($makeAdmin) { 'ترقية إلى مشرف' } else { 'خفض إلى مشغّل' }
                 Write-BridgeLog "Owner $userId performed '$what' on user $target" 'WARN'
-                Add-AuditEntry "👑 $what للمستخدم $target - by $(Get-UserDisplayName -UserId $userId)"
+                Add-AuditEntry "👑 $what للمستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
                 # So the ☰ menu matches the new role straight away, rather
                 # than still offering ⚙️ الإعدادات to someone just demoted.
                 Register-BotCommands
@@ -1056,7 +1056,7 @@ function Invoke-CallbackQuery {
                 $restore = Restore-ConfigBackup -BackupPath $backupPath
                 if ($restore.Success) {
                     Write-BridgeLog "Admin user $userId restored configuration backup '$([System.IO.Path]::GetFileName($backupPath))'" "WARN"
-                    Add-AuditEntry "🗄 استعادة نسخة إعدادات - user $userId"
+                    Add-AuditEntry "🗄 استعادة نسخة إعدادات - بواسطة $(Format-UserAuditActor -UserId $userId)"
                     Send-TelegramMessage -ChatId $chatId -Text "✅ تمت استعادة نسخة الإعدادات. أعد تشغيل البوت لتطبيقها بالكامل." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                 }
                 else {

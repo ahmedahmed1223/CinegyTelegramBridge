@@ -479,7 +479,8 @@ function Confirm-ScheduledShow {
     Clear-PendingState -ChatId $ChatId
     if ($saved) {
         $auditAction = if ($state.ContainsKey('MutationAction')) { [string]$state.MutationAction } else { 'created' }
-        Add-AuditEntry "📅 schedule $auditAction $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - user $UserId"
+        $auditLabel = switch ($auditAction) { 'updated' { 'تعديل' } 'deleted' { 'حذف' } default { 'إنشاء' } }
+        Add-AuditEntry "📅 جدولة: $auditLabel $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ الجدولة.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }
     else {

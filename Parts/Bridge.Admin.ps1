@@ -256,7 +256,7 @@ function Complete-TemplateReminderMinutes {
     $result = Save-TemplateReminderMinutes -TemplateKey ([string]$state.TemplateKey) -Minutes $minutes
     Clear-PendingState -ChatId $ChatId
     if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ تنبيه القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
-    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutes دقيقة - user $UserId"
+    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutes دقيقة - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     $message = if ($minutes -eq 0) { '✅ تم إيقاف تنبيه الظهور لهذا القالب.' } else { "✅ تم ضبط تنبيه الظهور بعد $minutes دقيقة." }
     Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)
 }
@@ -494,7 +494,7 @@ function Confirm-TemplateDefinitionChange {
     if (-not $state -or $state.Mode -ne 'template_definition_review' -or [long]$state.UserId -ne $UserId) { return }
     Clear-PendingState -ChatId $ChatId
     $result = Save-TemplateDefinitionChange -TemplateKey ([string]$state.TemplateKey) -Action ([string]$state.Action) -Definition ([hashtable]$state.Definition)
-    if ($result.Success) { Add-AuditEntry "📚 $($state.Action) قالب $($state.TemplateKey) - user $UserId"; Send-TelegramMessage -ChatId $ChatId -Text '✅ تم حفظ تعريف القالب مع نسخة احتياطية.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
+    if ($result.Success) { Add-AuditEntry "📚 $($state.Action) قالب $($state.TemplateKey) - بواسطة $(Format-UserAuditActor -UserId $UserId)"; Send-TelegramMessage -ChatId $ChatId -Text '✅ تم حفظ تعريف القالب مع نسخة احتياطية.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
     else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }
 
@@ -1011,7 +1011,7 @@ function Confirm-BridgeRestart {
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     if (-not (Get-Setting 'AllowRemoteRestart')) { return $false }
     Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
-    Add-AuditEntry "♻️ إعادة تشغيل الجسر - user $UserId"
+    Add-AuditEntry "♻️ إعادة تشغيل الجسر - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text '♻️ يُعاد التشغيل الآن… أرسل /بدء بعد قليل للتأكد من عودته.'
     # Decided here rather than at exit. Under a supervisor the bridge must NOT
     # start its own replacement: the supervisor starts one too, and two bridges
@@ -1057,7 +1057,7 @@ function Invoke-SettingsExport {
     }
     $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "📤 نسخة الإعدادات ($($payload.Count) خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين."
     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-    if ($sent) { Add-AuditEntry "📤 تصدير الإعدادات - user $UserId" }
+    if ($sent) { Add-AuditEntry "📤 تصدير الإعدادات - بواسطة $(Format-UserAuditActor -UserId $UserId)" }
     return [bool]$sent
 }
 
@@ -1181,7 +1181,7 @@ function Confirm-SettingsImport {
     $script:PendingSettingsImport = $null
     Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
     Write-BridgeLog "Admin $UserId imported $(@($pending.Changes).Count) setting(s)" 'WARN'
-    Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - user $UserId"
+    Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
@@ -1268,7 +1268,7 @@ function Invoke-BridgeSelfTest {
     $failed = [bool]$script:BridgeSelfTestFailed
     $header = if ($failed) { '🧪 فحص المسار الحي — فشل' } else { '🧪 فحص المسار الحي — نجح' }
     Write-BridgeLog "Live self-test on layer $layer by user ${UserId}: $(if ($failed) { 'FAILED' } else { 'passed' })" $(if ($failed) { 'WARN' } else { 'INFO' })
-    Add-AuditEntry "🧪 فحص المسار الحي على طبقة $layer - $(if ($failed) { 'فشل' } else { 'نجح' }) - user $UserId"
+    Add-AuditEntry "🧪 فحص المسار الحي على طبقة $layer - $(if ($failed) { 'فشل' } else { 'نجح' }) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text ("$header`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
     return (-not $failed)
 }
@@ -1312,7 +1312,7 @@ function Confirm-TemplateTest {
     $seconds = [math]::Max(3, [math]::Min(300, [int]$state.AutoHideSeconds))
     $script:AutoHideQueue.Add(@{ Layer=$testLayer; At=(Get-Date).AddSeconds($seconds); ChatId=$ChatId; UserId=$UserId })
     Write-BridgeLog "Admin $UserId tested template '$($template.Key)' on isolated layer $testLayer for $seconds seconds" 'WARN'
-    Add-AuditEntry "🧪 اختبار قالب $($template.Key) على طبقة $testLayer - user $UserId"
+    Add-AuditEntry "🧪 اختبار قالب $($template.Key) على طبقة $testLayer - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ بدأ اختبار '$($template.Key)' على طبقة التجربة $testLayer وسيُخفى خلال $seconds ثانية." -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
 }
 
@@ -1377,7 +1377,7 @@ function Invoke-TemplateRegistryExport {
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
     $path = Get-TemplateRegistryFilePath
     if (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption '📤 نسخة تعريفات القوالب. لا تحتوي حالة الهواء أو قيم النصوص المستخدمة.') {
-        Add-AuditEntry "📤 تصدير تعريفات القوالب - user $UserId"
+        Add-AuditEntry "📤 تصدير تعريفات القوالب - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     }
 }
 
@@ -1448,7 +1448,7 @@ function Confirm-TemplateRegistryImport {
     $result = Set-ImportedTemplateRegistry -StagedPath $stagedPath
     Clear-PendingState -ChatId $ChatId
     if ($result.Success) {
-        Add-AuditEntry "📥 استيراد تعريفات القوالب مع نسخة احتياطية - user $UserId"
+        Add-AuditEntry "📥 استيراد تعريفات القوالب مع نسخة احتياطية - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text '✅ تم استيراد تعريفات القوالب وحفظ نسخة من السجل السابق.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
     }
     else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر اعتماد الاستيراد: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
@@ -1535,7 +1535,7 @@ function Invoke-DiagnosticBundleCommand {
     try {
         $bundlePath = New-DiagnosticBundle
         if (Send-TelegramDocument -ChatId $ChatId -FilePath $bundlePath -Caption '📦 حزمة تشخيص منقحة: لا تحتوي الإعدادات أو حالة الهواء أو معرفات المستخدمين.') {
-            Add-AuditEntry "📦 تنزيل حزمة تشخيص منقحة - user $UserId"
+            Add-AuditEntry "📦 تنزيل حزمة تشخيص منقحة - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         }
         else {
             Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر إرسال حزمة التشخيص.' -ReplyMarkup (Get-DiagnosticsKeyboard)
@@ -1708,7 +1708,7 @@ function Grant-UserAccess {
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"
-    Add-AuditEntry "👤 موافقة على $targetUserId - by $ApproverUserId"
+    Add-AuditEntry "👤 موافقة على $(Format-UserAuditActor -UserId ([long]$targetUserId)) - بواسطة $(Format-UserAuditActor -UserId $ApproverUserId)"
     Send-TelegramMessage -ChatId $ApprovedBy -Text "✅ تمت الموافقة على $TargetChatId وأُضيف إلى المستخدمين المصرح لهم.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "✅ تمت الموافقة على طلبك، يمكنك الآن استخدام البوت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)
 }
@@ -1718,7 +1718,7 @@ function Deny-UserAccess {
     if ($RejecterUserId -eq 0) { $RejecterUserId = $RejectedBy }
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $RejecterUserId rejected access request from $TargetChatId"
-    Add-AuditEntry "👤 رفض طلب $TargetChatId - by $RejecterUserId"
+    Add-AuditEntry "👤 رفض طلب $TargetChatId - بواسطة $(Format-UserAuditActor -UserId $RejecterUserId)"
     Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "تم رفض طلب الوصول الخاص بك."
 }

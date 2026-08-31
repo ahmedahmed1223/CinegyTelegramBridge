@@ -514,9 +514,9 @@ function Complete-UserAliasEdit {
         return $false
     }
     Clear-PendingState -ChatId $ChatId
-    $action = if ($alias) { "تعيين Alias '$alias'" } else { 'حذف Alias' }
+    $action = if ($alias) { "تعيين اسم بديل '$alias'" } else { 'حذف الاسم البديل' }
     Write-BridgeLog "Admin $AdminUserId updated alias for user ${target}: $action"
-    Add-AuditEntry "👤 $action للمستخدم $target - by $(Get-UserDisplayName -UserId $AdminUserId)"
+    Add-AuditEntry "👤 $action للمستخدم $(Format-UserAuditActor -UserId ([long]$target)) - بواسطة $(Format-UserAuditActor -UserId $AdminUserId)"
     Show-UsersAdminScreen -ChatId $ChatId
     return $true
 }
@@ -1120,7 +1120,7 @@ function Complete-SettingText {
     Clear-PendingState -ChatId $ChatId
     Set-Setting -Name $state.Name -Value $trimmed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $trimmed"
-    Add-AuditEntry "⚙️ $($state.Name) = $trimmed - user $($state.UserId)"
+    Add-AuditEntry "⚙️ $($state.Name) = $trimmed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ $($state.Name) = $trimmed$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -1149,6 +1149,6 @@ function Set-SettingChoice {
     }
     Set-Setting -Name $Name -Value $choices[$Index]
     Write-BridgeLog "User $UserId set $Name = $($choices[$Index])"
-    Add-AuditEntry "⚙️ $Name = $($choices[$Index]) - user $UserId"
+    Add-AuditEntry "⚙️ $Name = $($choices[$Index]) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ $Name = $($choices[$Index])$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }

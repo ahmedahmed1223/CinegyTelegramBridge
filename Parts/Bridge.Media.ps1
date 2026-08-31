@@ -239,7 +239,7 @@ function Update-SnapshotJobs {
             $script:LastSnapshotSourceIsPrimary = [bool]$job.SourceIsPrimary
             $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
             Write-BridgeLog "User $($job.UserId) captured a stream snapshot from $sourceLabel"
-            Add-AuditEntry "📸 لقطة - user $($job.UserId)"
+            Add-AuditEntry "📸 لقطة - بواسطة $(Format-UserAuditActor -UserId ([long]$job.UserId))"
             Send-TelegramPhoto -ChatId $job.ChatId -FilePath $job.OutPath `
                 -Caption "📸 لقطة من الهواء - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n📡 المصدر: $sourceLabel" `
                 -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
@@ -654,7 +654,7 @@ function Start-LiveRelay {
     $script:RelayState.NotifyChatId = $ChatId
     $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
     Write-BridgeLog "User $UserId started live relay (PID $($script:RelayState.Process.Id))"
-    Add-AuditEntry "▶️ بدء البث - user $UserId"
+    Add-AuditEntry "▶️ بدء البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "⏳ جاري بدء البث..." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
@@ -671,7 +671,7 @@ function Stop-LiveRelay {
     try {
         Stop-Process -Id $proc.Id -Force -ErrorAction Stop
         Write-BridgeLog "User $UserId stopped live relay (PID $($proc.Id))"
-        Add-AuditEntry "⏹ إيقاف البث - user $UserId"
+        Add-AuditEntry "⏹ إيقاف البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text "⏹ تم إيقاف البث." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     catch {

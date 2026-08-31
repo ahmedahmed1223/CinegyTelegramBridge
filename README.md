@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.1
+
+`/help` and the 🆘 button opened the old one-screen manual instead of the
+chapter index added in 6.8.0, and the full guide had drifted behind the
+chapters - it was missing the news ticker entirely. It is now built from the
+chapters themselves. Audit lines carry the operator's name beside the id
+everywhere, with the id pinned left-to-right so Arabic lines stop mirroring
+its brackets, and a 400 from `answerCallbackQuery` - a stale button - is no
+longer logged as an error.
+
 ## Version 6.9.0
 
 Publishing the ticker from Telegram now writes it back to the Google Sheet, so

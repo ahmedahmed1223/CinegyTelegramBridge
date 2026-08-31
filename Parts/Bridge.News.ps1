@@ -178,7 +178,7 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error='لا توجد مسودة مملوكة لك.'} }
     $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
-        Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا"
+        Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $UserId): $(@($draft.Items).Count) خبرًا"
         Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count)
         # Mirror to the sheet after the ticker is safely on air, never before.
         # A sheet that refuses the write must not undo a publish that already
@@ -270,7 +270,7 @@ function Request-NewsLockRelease {
         RequestedAt = (Get-Date)
     }
     Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
-    Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Get-UserDisplayName -UserId $UserId)"
+    Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Format-UserAuditActor -UserId $UserId)"
 
     if ([long]$draft.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `

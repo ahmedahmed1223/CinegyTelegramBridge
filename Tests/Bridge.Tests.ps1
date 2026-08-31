@@ -156,6 +156,28 @@ Describe 'Telegram API send reliability' {
     }
 }
 
+Describe 'Callback acknowledgement logging' {
+    BeforeEach { Mock Write-BridgeLog { } }
+
+    It 'keeps a stale button out of the error log' {
+        # 400 is Telegram saying the query is too old or already answered -
+        # the operator tapped a button from an earlier screen.
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Error = 'Response status code does not indicate success: 400 (Bad Request).' } }
+
+        Confirm-TelegramCallback -CallbackQueryId 'q-1'
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $args[0] -eq 'WARN' -or $Level -eq 'WARN' }
+    }
+
+    It 'still reports a failure that is the bridge to answer for' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Error = 'Response status code does not indicate success: 500 (Server Error).' } }
+
+        Confirm-TelegramCallback -CallbackQueryId 'q-2'
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $args[0] -eq 'ERROR' -or $Level -eq 'ERROR' }
+    }
+}
+
 Describe 'Version 6 role navigation contracts' {
     It 'preserves page filter and return callback in navigation context' {
         $context = Get-BridgeNavigationContext -Page 3 -Filter 'news' -ReturnCallback 'menu:templates'

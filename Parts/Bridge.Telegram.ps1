@@ -62,7 +62,11 @@ function Confirm-TelegramCallback {
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerCallbackQuery" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
     if (-not $request.Success) {
-        Write-BridgeLog "Failed to answer callback query $CallbackQueryId : $($request.Error)" "ERROR"
+        # A 400 here is Telegram saying the query is too old or already
+        # answered - the operator tapped a stale button. Logging that as an
+        # error buries the failures that are actually the bridge's.
+        $level = if ([string]$request.Error -like '*400 (Bad Request)*') { 'WARN' } else { 'ERROR' }
+        Write-BridgeLog "Failed to answer callback query $CallbackQueryId : $($request.Error)" $level
     }
 }
 

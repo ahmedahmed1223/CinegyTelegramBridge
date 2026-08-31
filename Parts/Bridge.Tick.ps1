@@ -758,7 +758,7 @@ function Add-CancelReason {
     if (-not $script:CancelReasons.ContainsKey($Reason)) { $script:CancelReasons[$Reason] = 0 }
     $script:CancelReasons[$Reason] = [int]$script:CancelReasons[$Reason] + 1
     Write-BridgeLog "Cancel reason '$Reason' recorded for '$Key' by user $UserId"
-    Add-AuditEntry "📝 سبب الإلغاء: $(Get-CancelReasonLabel -Reason $Reason) - user $UserId"
+    Add-AuditEntry "📝 سبب الإلغاء: $(Get-CancelReasonLabel -Reason $Reason) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Save-CancelReasons | Out-Null
 }
 

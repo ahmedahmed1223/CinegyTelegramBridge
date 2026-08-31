@@ -91,7 +91,7 @@ function Set-LayerName {
     Set-Setting -Name 'LayerNames' -Value $stored
     $action = if ([string]::IsNullOrWhiteSpace($trimmed)) { 'cleared' } else { "set to '$trimmed'" }
     Write-BridgeLog "User $UserId $action layer $Layer name"
-    Add-AuditEntry "🏷️ اسم طبقة $Layer $action - user $UserId"
+    Add-AuditEntry "🏷️ اسم طبقة $Layer $action - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     $message = if ([string]::IsNullOrWhiteSpace($trimmed)) { "✅ تم مسح اسم طبقة $Layer." } else { "✅ تم حفظ الاسم: $(Get-LayerDisplayName -Layer $Layer)" }
     Send-TelegramMessage -ChatId $ChatId -Text "$message$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-LayerNamesKeyboard)
     return $true
@@ -143,7 +143,7 @@ function Set-HideAllLayerSelection {
     }
     Set-Setting -Name 'HideAllLayers' -Value $value
     Write-BridgeLog "User $UserId changed HideAllLayers to '$value'" "WARN"
-    Add-AuditEntry "🚨 طبقات إخفاء الكل = $value - user $UserId"
+    Add-AuditEntry "🚨 طبقات إخفاء الكل = $value - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-HideAllLayerSettings -ChatId $ChatId -UserId $UserId
 }
 
@@ -164,7 +164,7 @@ function Invoke-SettingToggle {
     }
     Set-Setting -Name $Name -Value $new
     Write-BridgeLog "User $UserId set $Name = $new"
-    Add-AuditEntry "⚙️ $Name = $new - user $UserId"
+    Add-AuditEntry "⚙️ $Name = $new - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ $Name = $(if ($new) { 'مفعّل' } else { 'معطّل' })$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -202,7 +202,7 @@ function Complete-SettingValue {
     }
     Set-Setting -Name $state.Name -Value $parsed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $parsed"
-    Add-AuditEntry "⚙️ $($state.Name) = $parsed - user $($state.UserId)"
+    Add-AuditEntry "⚙️ $($state.Name) = $parsed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ $($state.Name) = $parsed$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -216,7 +216,7 @@ function Reset-SettingsToDefault {
     $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $settings -Force
     Save-Config
     Write-BridgeLog "User $UserId reset all settings to defaults" "WARN"
-    Add-AuditEntry "♻️ استعادة الإعدادات الافتراضية - user $UserId"
+    Add-AuditEntry "♻️ استعادة الإعدادات الافتراضية - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "♻️ تمت استعادة جميع الإعدادات الافتراضية." -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -260,7 +260,7 @@ function Reset-SingleSettingToDefault {
         return
     }
     Set-Setting -Name $Name -Value $script:DefaultSettings[$Name]
-    Add-AuditEntry "↩️ إعادة إعداد $Name - user $UserId"
+    Add-AuditEntry "↩️ إعادة إعداد $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ أُعيد $Name فقط إلى القيمة الافتراضية.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -288,7 +288,7 @@ function Invoke-AdminRawCommand {
     $result = Send-AirCommand -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Device $device -Cmd $cmd -Op1 $op1 -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Write-BridgeLog "User $UserId (admin) sent raw command Device=$device Cmd=$cmd"
-        Add-AuditEntry "🛠 أمر خام $device/$cmd - user $UserId"
+        Add-AuditEntry "🛠 أمر خام $device/$cmd - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text "تم الإرسال: Device=$device Cmd=$cmd" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     else {
@@ -385,7 +385,7 @@ function Invoke-UserAliasCommand {
     if (Set-UserAlias -TargetUserId $targetUserId -Alias $alias) {
         $result = if ($alias) { "✅ تم تعيين اسم المستخدم $targetUserId إلى: $alias" } else { "✅ تم حذف الاسم المستعار للمستخدم $targetUserId" }
         Write-BridgeLog "Admin $(Get-UserDisplayName -UserId $UserId) updated alias for user $targetUserId"
-        Add-AuditEntry "👤 Alias للمستخدم $targetUserId عُدّل بواسطة $(Get-UserDisplayName -UserId $UserId)"
+        Add-AuditEntry "👤 اسم بديل للمستخدم $(Format-UserAuditActor -UserId ([long]$targetUserId)) عُدّل بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text $result -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     else { Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر حفظ الاسم المستعار.' }

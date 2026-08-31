@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.3.0
+
+The copy-reference button gets the half that was missing: an administrator
+can paste a reference into the diagnostics screen and see the operation
+line, instead of going to the playout machine to grep the log by hand. It is
+a lookup, not a log search - the input must be exactly the eight hex
+characters of a reference, and only structured AIR_OP records come back,
+because the runtime log is the least redacted thing the bridge writes.
+
 ## Version 7.2.0
 
 Everyday refusals answer on the button. A gate decides them above the

@@ -1366,3 +1366,60 @@ Describe 'Version 6 bounded administrator catalogues' {
         }
     }
 }
+
+Describe 'Operation reference lookup' {
+    BeforeAll {
+        $script:RefLog = Join-Path $TestDrive 'ref-bridge.log'
+        @(
+            '2026-08-31 21:40:01 [WARN] AIR_OP id=air-5023333b032c476eb48204ca08032a98 action=SHOW result=blocked user=10 layer=7'
+            '2026-08-31 21:40:02 [INFO] Some unrelated line mentioning 5023333b in passing'
+            '2026-08-31 21:41:00 [INFO] AIR_OP id=air-8a07c90f7f7145fc9222a681f8c58699 action=HIDE result=ok user=10 layer=4'
+        ) | Set-Content -LiteralPath $script:RefLog -Encoding utf8
+    }
+
+    It 'returns the operation record for a reference' {
+        $lines = Find-OperationByReference -Reference '5023333b' -Path $script:RefLog
+
+        @($lines).Count | Should -Be 1
+        @($lines)[0] | Should -Match 'result=blocked'
+    }
+
+    It 'ignores a line that merely mentions the reference' {
+        # This is a lookup, not a log search: only structured AIR_OP records
+        # come back, or the screen becomes a way to read the least redacted
+        # file the bridge writes, a keyword at a time.
+        $lines = Find-OperationByReference -Reference '5023333b' -Path $script:RefLog
+
+        @($lines | Where-Object { $_ -match 'unrelated' }).Count | Should -Be 0
+    }
+
+    It 'refuses anything that is not eight hex characters' {
+        foreach ($bad in 'AIR_OP', 'result=ok', '502333', '5023333bb', 'zzzzzzzz', '') {
+            Find-OperationByReference -Reference $bad -Path $script:RefLog | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'accepts the reference in either case, as it is pasted' {
+        @(Find-OperationByReference -Reference '5023333B' -Path $script:RefLog).Count | Should -Be 1
+    }
+
+    It 'returns nothing rather than throwing when the log has rotated away' {
+        @(Find-OperationByReference -Reference '5023333b' -Path (Join-Path $TestDrive 'gone.log')).Count | Should -Be 0
+    }
+
+    It 'offers the lookup from the diagnostics screen' {
+        $callbacks = @((Get-DiagnosticsKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Contain 'diag:findref'
+    }
+
+    It 'refuses a non-administrator who reaches the prompt anyway' {
+        Mock Test-Admin { $false }
+        Mock Send-TelegramMessage { }
+        Set-PendingState -ChatId 555 -State @{ Mode = 'operation_reference'; UserId = 555 }
+
+        Complete-OperationReferenceLookup -ChatId 555 -UserId 555 -Value '5023333b'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'للمشرف وحده' }
+    }
+}

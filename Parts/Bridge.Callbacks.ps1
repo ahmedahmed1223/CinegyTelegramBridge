@@ -448,6 +448,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-RuntimeFileHealthCommand -ChatId $chatId -UserId $userId }
             break
         }
+        'diag:findref' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-OperationReferenceLookup -ChatId $chatId -UserId $userId }
+            break
+        }
         'diag:bundle' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticBundleCommand -ChatId $chatId -UserId $userId }
             break

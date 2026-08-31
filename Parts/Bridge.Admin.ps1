@@ -1474,8 +1474,70 @@ function Get-DiagnosticWarnings {
     return $warnings.ToArray()
 }
 
+function Find-OperationByReference {
+    <#
+        The AIR_OP lines whose correlation id starts with Reference.
+
+        This is deliberately NOT a log search. The runtime log is the least
+        redacted thing the bridge writes - that is why the diagnostic bundle
+        exists as a separate, scrubbed export - so a screen that returned
+        arbitrary matching lines would be a way to read it a keyword at a
+        time. Reference must therefore be exactly the eight hex characters
+        Get-OperationReference produces, and only structured AIR_OP records
+        are ever returned.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Reference, [string]$Path = '', [int]$MaxLines = 20)
+    $wanted = $Reference.Trim().ToLowerInvariant()
+    if ($wanted -notmatch '^[0-9a-f]{8}$') { return $null }
+    $file = if ($Path) { $Path } else { $script:logPath }
+    if (-not $file -or -not (Test-Path -LiteralPath $file)) { return @() }
+    try {
+        return @(Get-Content -LiteralPath $file -ErrorAction Stop |
+                Where-Object { $_ -like "*AIR_OP id=air-$wanted*" } |
+                Select-Object -Last $MaxLines)
+    }
+    catch {
+        Write-BridgeLog "Could not read the runtime log for a reference lookup: $($_.Exception.Message)" 'WARN'
+        return @()
+    }
+}
+
+function Start-OperationReferenceLookup {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'operation_reference'; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "أرسل مرجع العملية — ثمانية أحرف، مثل 5023333b.`nينسخه المشغّل من 🧾 عملياتي." -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-OperationReferenceLookup {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Value = '')
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'operation_reference') { return }
+    Clear-PendingState -ChatId $ChatId
+    # Checked again here, not only when the button was drawn: this reads the
+    # runtime log, and the screen may have been opened before a role changed.
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🔎 البحث بالمرجع للمشرف وحده.'
+        return
+    }
+    $lines = Find-OperationByReference -Reference $Value
+    if ($null -eq $lines) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ ليس مرجعًا: يتكوّن من ثمانية أحرف من 0-9 و a-f.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+        return
+    }
+    $text = if ($lines.Count -eq 0) {
+        "🔎 لا سجل بالمرجع $($Value.Trim()).`nقد يكون السجل دُوِّر أو مُسح."
+    }
+    else {
+        "🔎 المرجع $($Value.Trim()) — $($lines.Count) سطرًا:`n`n" + ($lines -join "`n")
+    }
+    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup (Get-DiagnosticsKeyboard)
+}
+
 function Get-DiagnosticsKeyboard {
     return @{ inline_keyboard = @(
+        , @((New-Button '🔎 ابحث بمرجع عملية' 'diag:findref'))
         , @((New-Button '📦 حزمة تشخيص منقحة' 'diag:bundle'))
         , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime'), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit'))
         , @((New-Button '🏠 القائمة' 'menu:main'))

@@ -561,7 +561,7 @@ function Get-MissedEventsBlocks {
                 @{ text = $who }
             )
         }
-        $blocks += (New-BridgeTableBlock -Cells $cells)
+        $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
     }
 
     $removals = @($airOps | Where-Object { $_.Action -in @('HIDE', 'EXIT') })

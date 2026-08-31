@@ -22,22 +22,6 @@ BeforeAll {
     $script:onAirFile = $onAirFile
     $script:ConfigPath = $ConfigPath
 
-    function Get-TableCell {
-        <# A cell by its column's name, not its index.
-
-           The builder reverses a row so the important column lands at the
-           right edge, and wraps every cell in bidi isolates. Assertions
-           written against positions broke on both and would break again on
-           the next reordering; a name does not move. #>
-        param($Table, [int]$Row, [Parameter(Mandatory)][string]$Column)
-        $strip = { param($t) ([string]$t).Trim([char]0x2068, [char]0x2069) }
-        $headers = @(@($Table.cells)[0] | ForEach-Object { & $strip $_.text })
-        $index = [array]::IndexOf($headers, $Column)
-        if ($index -lt 0) { return $null }
-        return (& $strip (@(@($Table.cells)[$Row])[$index].text))
-    }
-
-
     function New-TempTemplateFile {
         <# Unique name per call: Get-TemplateStore caches on path + write time,
            so a fresh path guarantees a fresh parse. The file is created next

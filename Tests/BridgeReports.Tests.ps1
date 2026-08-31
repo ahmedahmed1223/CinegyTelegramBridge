@@ -7,27 +7,6 @@ BeforeAll {
 
     $script:Root = Split-Path -Parent $PSScriptRoot
     . (Join-Path $script:Root 'Parts\Bridge.Reports.ps1')
-    # The report renderers build their tables through the shared builder,
-    # which is a declaration in this file - dot-sourcing it defines the
-    # functions without running anything, so the tests still exercise the
-    # real bidi isolation rather than a stub of it.
-    . (Join-Path $script:Root 'Parts\Bridge.Telegram.ps1')
-
-    function Get-TableCell {
-        <# A cell by its column's name, not its index.
-
-           The builder reverses a row so the important column lands at the
-           right edge, and wraps every cell in bidi isolates. Assertions
-           written against positions broke on both and would break again on
-           the next reordering; a name does not move. #>
-        param($Table, [int]$Row, [Parameter(Mandatory)][string]$Column)
-        $strip = { param($t) ([string]$t).Trim([char]0x2068, [char]0x2069) }
-        $headers = @(@($Table.cells)[0] | ForEach-Object { & $strip $_.text })
-        $index = [array]::IndexOf($headers, $Column)
-        if ($index -lt 0) { return $null }
-        return (& $strip (@(@($Table.cells)[$Row])[$index].text))
-    }
-
 
     # The report functions read through Read-AuditRecords and the two audit
     # field helpers; defining those here keeps this file independent of the
@@ -245,8 +224,8 @@ Describe 'Banner report as rich blocks' {
         $table | Should -Not -BeNullOrEmpty
         @($table.cells).Count | Should -Be 2
         @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
-        Get-TableCell -Table $table -Row 1 -Column 'البنر' | Should -Be 'urgent · ط7'
-        Get-TableCell -Table $table -Row 1 -Column 'المدة' | Should -Be '5 د'
+        @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
+        @($table.cells[1])[3].text | Should -Be '5 د'
     }
 
     It 'says a banner is still up rather than reporting a duration it does not have' {
@@ -259,7 +238,7 @@ Describe 'Banner report as rich blocks' {
 
         $table = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
-        Get-TableCell -Table $table -Row 1 -Column 'المدة' | Should -Match 'على الهواء'
+        @($table.cells[1])[3].text | Should -Match 'على الهواء'
     }
 
     It 'draws no empty table for a period with nothing in it' {
@@ -294,11 +273,11 @@ Describe 'News report as rich blocks' {
         $blocks[0].type | Should -Be 'heading'
         @($table.cells).Count | Should -Be 3
         @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
-        Get-TableCell -Table $table -Row 1 -Column 'على الهواء' | Should -Be '12'
-        Get-TableCell -Table $table -Row 2 -Column 'على الهواء' | Should -Be '14'
+        @($table.cells[1])[2].text | Should -Be '12'
+        @($table.cells[2])[2].text | Should -Be '14'
         # The range replaces the trail in the table; the trail itself, the
         # span and the operators moved to the details block below it.
-        Get-TableCell -Table $table -Row 2 -Column 'المدى' | Should -Be '14–15'
+        @($table.cells[2])[3].text | Should -Be '14–15'
         $detail = @($blocks | Where-Object { $_.type -eq 'details' })[0]
         $texts = @($detail.blocks | ForEach-Object { $_.text })
         @($texts | Where-Object { $_ -match '07:10 ← 21:40' }).Count | Should -Be 1
@@ -326,7 +305,7 @@ Describe 'News report as rich blocks' {
 
         $table = @(@(Get-NewsReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
-        Get-TableCell -Table $table -Row 1 -Column 'المدى' | Should -Be '5'
+        @($table.cells[1])[3].text | Should -Be '5'
     }
 }
 
@@ -422,11 +401,7 @@ Describe 'A ten-edit day has to stay readable' {
 
         @($table.cells[0]).Count | Should -Be 4
         foreach ($row in @($table.cells)) { @($row).Count | Should -Be 4 }
-        # Measured without the bidi isolates, which are two invisible
-        # characters the reader never sees.
-        foreach ($cell in @($table.cells[1])) {
-            $cell.text.Trim([char]0x2068, [char]0x2069).Length | Should -BeLessOrEqual 12
-        }
+        foreach ($cell in @($table.cells[1])) { $cell.text.Length | Should -BeLessOrEqual 12 }
     }
 
     It 'holds ten readings in a range rather than a column of numbers' {
@@ -474,7 +449,7 @@ Describe 'The banner table gives its width to the name' {
         $table = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
         @($table.cells[0]).Count | Should -Be 4
-        Get-TableCell -Table $table -Row 1 -Column 'البنر' | Should -Be 'urgent · ط7'
+        @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
     }
 }
 

@@ -13,22 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
-## Version 7.14.1
+## Version 7.15.0
 
-Table columns are ordered for an Arabic reader. Telegram lays a row's cells
-out left to right whatever the message direction, so the column written
-first landed at the far left - where the eye arrives last. Rows are reversed
-in the one builder they all pass through. On the status screen the operator
-now leads, with the layer number furthest from the eye.
-
-## Version 7.14.0
-
-Fixes the direction of table cells. Every table here is Arabic with Latin
-and numeric cells in it, and inside a right-to-left message the digits and
-the neutrals between them take their direction from their surroundings - so
-"07:10 ← 21:40" could render with its ends swapped and "12–18" as "18–12".
-Each cell is now isolated, through the single builder all five tables go
-through. Full status splits into named sections instead of one long fold.
+Withdraws the table-direction changes from 7.14.0 and 7.14.1. Both were
+built on a description of what appeared on screen rather than on anything
+the documentation says about how Telegram lays a table out, and testing on
+the device showed the tables were not reversed to begin with. Tables return
+to what 7.13.0 sent.
 
 ## Version 7.13.0
 

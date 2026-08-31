@@ -352,8 +352,8 @@ function Get-NewsSheetConfirmPrompt {
 
 function Get-NewsSheetConfirmKeyboard {
     param([ValidateSet('air', 'draft')][string]$Target = 'air')
-    $go = if ($Target -eq 'air') { @{text='✅ نعم، انشر';callback_data='news:sheetconfirm'} }
-    else { @{text='✅ نعم، حمّل المسودة';callback_data='news:sheetdraftconfirm'} }
+    $go = if ($Target -eq 'air') { @{text='✅ نعم، انشر';callback_data='news:sheetconfirm';style='danger'} }
+    else { @{text='✅ نعم، حمّل المسودة';callback_data='news:sheetdraftconfirm';style='success'} }
     return @{inline_keyboard=@(,@($go, @{text='❌ إلغاء';callback_data='news:refresh'}))}
 }
 

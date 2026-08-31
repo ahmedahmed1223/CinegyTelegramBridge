@@ -50,15 +50,27 @@ function Invoke-CallbackQuery {
     $msgObj = Get-JsonProp $CallbackQuery 'message'
     $chatId = if ($msgObj) { [long]$msgObj.chat.id } else { $userId }
     $data = [string](Get-JsonProp $CallbackQuery 'data')
-    Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
 
+    # The guards run BEFORE the acknowledgement, and every one of them still
+    # answers the query on its way out.
+    #
+    # Telegram accepts exactly one answerCallbackQuery per press. Answering
+    # first - as this did - spent that one answer on an empty acknowledgement,
+    # which left a refusal no way to reach the button and forced it to arrive
+    # as a new chat message instead: the keyboard scrolls away and the
+    # operator has to find it again. These checks are in-memory and cost
+    # nothing, so running them first loses none of the reason the
+    # acknowledgement came first, which is that the spinner must not sit
+    # through a slow air operation.
     if ($chatId -eq 0) {
         Write-BridgeLog "Ignoring callback with neither a message nor a sender" "WARN"
+        Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
         return
     }
 
     if ($msgObj -and -not (Test-TelegramPrivateChat -Chat $msgObj.chat)) {
         Write-BridgeLog "Ignoring callback from non-private chat $chatId" "WARN"
+        Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
         return
     }
 
@@ -67,9 +79,13 @@ function Invoke-CallbackQuery {
         $queued = Request-Approval -ChatId $chatId -UserId $userId -From $fromObj
         $msg = if ($queued) { "غير مصرح لك باستخدام هذا البوت بعد. تم إرسال طلب وصول إلى المشرف." }
         else { "غير مصرح لك باستخدام هذا البوت. تواصل مع المشرف مباشرة." }
-        Send-TelegramMessage -ChatId $chatId -Text $msg
+        # On the button, not as a message: an unauthorised press should not
+        # leave anything behind in a chat its sender may not read again.
+        Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text $msg -Alert
         return
     }
+
+    Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
     Update-UserLastActivity -UserId $userId | Out-Null
 
     switch -Wildcard ($data) {
@@ -753,7 +769,7 @@ function Invoke-CallbackQuery {
             $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
             if (-not $scheduleEntry) { break }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
-            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "✅ نعم، إلغاء" 'schedule:cancelconfirm'), (New-Button "❌ رجوع" 'schedule:list'))) }
+            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "✅ نعم، إلغاء" 'schedule:cancelconfirm' -Style danger), (New-Button "❌ رجوع" 'schedule:list'))) }
             break
         }
         'schedule:cancelconfirm' {

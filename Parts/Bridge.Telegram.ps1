@@ -141,9 +141,15 @@ function Send-TelegramPhoto {
 function Confirm-TelegramCallback {
     <# Acknowledges a button press so Telegram stops showing the loading
        spinner on the client. Optional Text shows a small toast. #>
-    param([Parameter(Mandatory)][string]$CallbackQueryId, [string]$Text)
+    param([Parameter(Mandatory)][string]$CallbackQueryId, [string]$Text, [switch]$Alert)
     $body = @{ callback_query_id = $CallbackQueryId }
-    if ($Text) { $body.text = $Text }
+    # Telegram truncates past 200 characters; cutting it here keeps the end of
+    # the sentence rather than letting the client drop it mid-word.
+    if ($Text) { $body.text = if ($Text.Length -gt 200) { $Text.Substring(0, 199) + '…' } else { $Text } }
+    # A toast fades in about three seconds and is easy to miss on a phone held
+    # at arm's length in a gallery. A refusal has to be read to be acted on,
+    # so it gets a dialog the operator dismisses.
+    if ($Alert) { $body.show_alert = $true }
     # Routed through the shared request wrapper like every other send, so a
     # flood-limited acknowledgement honours retry_after instead of being
     # dropped and leaving the operator's button spinning.

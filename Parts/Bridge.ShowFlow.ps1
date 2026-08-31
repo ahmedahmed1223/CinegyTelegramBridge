@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.1.0'; Items = @(
+                '🔔 الرفض صار نافذة تظهر على الزر نفسه وتنتظر إغلاقك، بدل رسالة جديدة تدفع اللوحة خارج الشاشة.'
+            ) }
         @{ Version = '7.0.1'; Items = @(
                 '🎨 اللون وصل بقية الشاشات: الإخفاء والخروج من المشهد وحذف القالب وسحب الصلاحية بالأحمر، و«تأكيد الإرسال» و«تأكيد الجدولة» و«حفظ التغيير» بالأخضر.'
                 '🧭 زر القائمة الذي يفتح شاشة يبقى بلا لون — الأحمر على الضغطة التي تُنفّذ فعلًا، لا على الطريق إليها.'
@@ -665,7 +668,7 @@ function Start-AirOperation {
 
 function Get-TemplateTestReviewKeyboard {
     return @{ inline_keyboard = @(
-        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
     ) }
 }
 

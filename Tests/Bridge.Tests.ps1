@@ -630,3 +630,74 @@ Describe 'Button colour policy' {
         }
     }
 }
+
+Describe 'Callback refusal reaches the button, not the chat' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        Mock Request-Approval { $false }
+        Mock Update-UserLastActivity { }
+    }
+
+    It 'answers an unauthorised press with a dialog instead of a new message' {
+        # Telegram allows one answer per press. Spending it on an empty
+        # acknowledgement is what forced refusals to arrive as chat messages,
+        # which scroll the keyboard away.
+        Mock Test-Authorized { $false }
+        $callback = [pscustomobject]@{
+            id = 'refused'
+            from = [pscustomobject]@{ id = 909 }
+            message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 909; type = 'private' } }
+            data = 'menu'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $Alert -and $Text -match 'غير مصرح' }
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'still answers a press it ignores, so the spinner cannot hang' {
+        Mock Test-Authorized { $true }
+        $callback = [pscustomobject]@{
+            id = 'group-press'
+            from = [pscustomobject]@{ id = 5 }
+            message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = -100999; type = 'supergroup' } }
+            data = 'menu'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly
+    }
+
+    It 'keeps the plain acknowledgement first for a press it will act on' {
+        # The reason it came first at all: the spinner must not sit through a
+        # slow air operation.
+        Mock Test-Authorized { $true }
+        Mock Show-NewsTickerManagementScreen { }
+        $callback = [pscustomobject]@{
+            id = 'allowed'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'menu:news'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { -not $Alert }
+    }
+}
+
+Describe 'Callback answer text' {
+    It 'trims to what Telegram will show rather than losing the end mid-word' {
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+
+        Confirm-TelegramCallback -CallbackQueryId 'x' -Text ('ط' * 400) -Alert
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
+            $Body.text.Length -le 200 -and $Body.text.EndsWith('…') -and $Body.show_alert -eq $true
+        }
+    }
+}

@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.1.0
+
+A refused press now answers on the button instead of arriving as a new chat
+message that scrolls the keyboard away. Telegram allows one answer per press
+and the bridge was spending it on an empty acknowledgement before the guards
+ran; the guards moved ahead of it, each answering on its way out. The reason
+the acknowledgement came first is preserved - they are in-memory checks, and
+an allowed press is still acknowledged before anything slow starts.
+
 ## Version 7.0.1
 
 Button colour reaches the rest of the screens, under a policy written above

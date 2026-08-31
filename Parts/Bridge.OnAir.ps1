@@ -510,7 +510,12 @@ function Format-UserAuditActor {
     if ([string]::IsNullOrWhiteSpace($displayName) -or $displayName -eq $id) { return $id }
     $cleanName = Protect-SensitiveText (($displayName -replace '[\r\n]+', ' ').Trim())
     if ([string]::IsNullOrWhiteSpace($cleanName)) { return $id }
-    return "$cleanName ($id)"
+    # A bare "(id)" after an Arabic name sits between an RTL run and digits,
+    # so bidi resolves the brackets themselves as RTL and mirrors them: the
+    # audit line for a hide read ")8201739556(". The marks pin the bracketed
+    # id to LTR wherever the line lands - log file, 📜 screen, or audit.jsonl.
+    $lrm = [char]0x200E
+    return "$cleanName $lrm($id)$lrm"
 }
 
 function Get-FavoriteTemplateKeys {

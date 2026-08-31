@@ -93,7 +93,7 @@ Describe 'Safe in-memory layer rollback' {
 
             Invoke-HideLayer -Layer 5 -ChatId 10 -UserId 10 | Should -BeTrue
 
-            Should -Invoke Add-AuditEntry -Times 1 -Exactly -ParameterFilter { $Message -match 'محرر الأخبار \(10\)' }
+            Should -Invoke Add-AuditEntry -Times 1 -Exactly -ParameterFilter { $Message -match "محرر الأخبار $([char]0x200E)\(10\)" }
         }
         finally {
             if ($null -eq $previousAlias) { $script:UserAliases.Remove('10') | Out-Null }
@@ -1618,5 +1618,23 @@ Describe 'Confirming removal of a live graphic' {
         Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
 
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+}
+
+Describe 'Audit actor label' {
+    It 'keeps the bracketed id left-to-right beside an Arabic name' {
+        Mock Get-UserDisplayName { 'الغازي' }
+
+        $label = Format-UserAuditActor -UserId 8201739556
+
+        # Without the marks the brackets render mirrored on the 📜 screen,
+        # because the line around them reads right-to-left.
+        $label | Should -Be "الغازي $([char]0x200E)(8201739556)$([char]0x200E)"
+    }
+
+    It 'falls back to the bare id when there is no name to show' {
+        Mock Get-UserDisplayName { '' }
+
+        Format-UserAuditActor -UserId 8201739556 | Should -Be '8201739556'
     }
 }

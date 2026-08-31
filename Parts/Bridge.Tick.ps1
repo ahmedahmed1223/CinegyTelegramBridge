@@ -1028,11 +1028,30 @@ function Send-BridgeStartupNotification {
     Send-AdminBroadcast -Text "🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion`nAir: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)"
 }
 
+function Update-NewsSheetSync {
+    <# Automatic mode only. The interval is measured from the last attempt, not
+       the last success, so an unreachable sheet is retried on the same cadence
+       instead of hammering the network every tick. #>
+    if ([string](Get-Setting 'NewsSheetSyncMode') -ne 'auto') { return }
+    if ([string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) { return }
+    $minutes = Get-SettingInt 'NewsSheetSyncMinutes' 1
+    if ($minutes -le 0) { return }
+    if ($script:NewsSheetLastSyncAt -and ((Get-Date) - $script:NewsSheetLastSyncAt).TotalMinutes -lt $minutes) { return }
+    $script:NewsSheetLastSyncAt = Get-Date
+    $result = Invoke-NewsSheetSync -Trigger auto
+    if ($result.Success) {
+        Write-BridgeLog "News sheet sync published $(@($result.Items).Count) item(s)"
+    }
+    elseif (-not $result.Unchanged -and -not $result.Skipped) {
+        Write-BridgeLog "News sheet sync did not publish: $($result.Error)" 'WARN'
+    }
+}
+
 function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

@@ -58,6 +58,28 @@ function ConvertTo-NewsTickerText {
     return (@($Items | ForEach-Object { "$(([string]$_).Trim()) $Separator" }) -join "`r`n") + "`r`n"
 }
 
+function ConvertFrom-NewsSheetCsv {
+    <# One ticker item per sheet row, taken from the first column.
+
+       Parsed as real CSV rather than as lines of text. A Google Sheets export
+       quotes any cell containing a comma, so the previous line-based approach
+       put the quotes themselves on air; it also split a cell that the sheet
+       had wrapped across lines into two half-headlines. Columns after the
+       first are the editor's own notes and never reach the ticker. #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Csv = '')
+    if ([string]::IsNullOrWhiteSpace($Csv)) { return @() }
+    $rows = @()
+    try { $rows = @($Csv | ConvertFrom-Csv -Header 'Item' -ErrorAction Stop) }
+    catch { return @() }
+    $items = [Collections.Generic.List[string]]::new()
+    foreach ($row in $rows) {
+        $item = ([string]$row.Item).Trim()
+        if ($item.Length -gt 0) { $items.Add($item) }
+    }
+    return @($items)
+}
+
 function Get-NewsTickerFileHash {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
@@ -175,4 +197,4 @@ function Restore-NewsTickerBackup {
         -BackupDirectory $BackupDirectory -BackupKeepFiles $BackupKeepFiles -MaxItemLength $MaxItemLength -MaxItems $MaxItems
 }
 
-Export-ModuleMember -Function ConvertFrom-NewsTickerText,ConvertTo-NewsTickerText,Get-NewsTickerSnapshot,Publish-NewsTickerFile,Restore-NewsTickerBackup
+Export-ModuleMember -Function ConvertFrom-NewsSheetCsv,ConvertFrom-NewsTickerText,ConvertTo-NewsTickerText,Get-NewsTickerSnapshot,Publish-NewsTickerFile,Restore-NewsTickerBackup

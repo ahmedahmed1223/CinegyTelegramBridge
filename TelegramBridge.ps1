@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.3.0'
+$script:BridgeVersion = '6.4.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -178,6 +178,15 @@ $script:DefaultSettings = [ordered]@{
     NewsListLabelLength        = 24      # headline characters shown when the row also carries buttons
     NewsListStackedLabelLength = 60      # headline characters shown when it owns the row
     NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
+    # Google Sheets as the ticker source. Empty URL disables the whole path, so
+    # a bridge that never configures it behaves exactly as before. The default
+    # mode is manual on purpose: an unattended job that rewrites what is on air
+    # should be something an administrator switches on knowingly.
+    NewsSheetCsvUrl            = ''
+    NewsSheetSyncMode          = 'manual' # manual = a button; auto = every NewsSheetSyncMinutes
+    NewsSheetSyncMinutes       = 5
+    NewsSheetTimeoutSeconds    = 30
+    NewsSheetNotifyAdmins      = $true    # a Telegram summary after each automatic publish
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
@@ -707,6 +716,8 @@ $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
 $script:NewsLockRequest = $null
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
+# Last attempt (not last success) of the Google Sheets ticker sync.
+$script:NewsSheetLastSyncAt = $null
 $script:TelegramRateLimitHits = 0
 $script:RestartRequested = $false
 $script:RestartSelfRelaunch = $false
@@ -782,6 +793,7 @@ $script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests
 $script:SettingChoices = @{
     AirVariableType = @('Text', 'String', 'Bool', 'Float')
     SceneMode = @('Single', 'Multi')
+    NewsSheetSyncMode = @('manual', 'auto')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -832,7 +844,8 @@ foreach ($entry in @(
                 'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength',
                 'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
-                'AllowOperatorsClearAllNews'
+                'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
+                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyAdmins'
             ) },
         @{ Category = 'schedule'; Names = @(
                 'ScheduleConflictWindowMinutes', 'SchedulePaused', 'SchedulePreNotifyMinutes',
@@ -885,6 +898,11 @@ $script:SettingNavigationLabels = @{
     EnableNewsTickerManagement = 'إدارة شريط الأخبار'
     NewsFilePath = 'ملف الأخبار'
     NewsItemSeparator = 'فاصل الأخبار'
+    NewsSheetCsvUrl = 'رابط Google Sheets (CSV)'
+    NewsSheetSyncMode = 'وضع مزامنة الشيت'
+    NewsSheetSyncMinutes = 'كل كم دقيقة تُزامن الشيت'
+    NewsSheetTimeoutSeconds = 'مهلة تنزيل الشيت'
+    NewsSheetNotifyAdmins = 'تنبيه المشرفين بعد مزامنة الشيت'
     NewsMaxItemLength = 'الحد الأقصى لطول الخبر'
     NewsMaxItems = 'الحد الأقصى لعدد الأخبار'
     NewsImportMaxBytes = 'حد استيراد الأخبار'

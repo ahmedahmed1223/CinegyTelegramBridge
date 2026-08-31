@@ -273,6 +273,151 @@ function Update-NewsLockRequest {
     Complete-NewsLockRelease -Reason 'no reply within the window' | Out-Null
 }
 
+function Get-NewsSheetCsvText {
+    <# Downloads the sheet's CSV export. The content ends up on air, so this is
+       a trust boundary: https only, a byte cap so a runaway document cannot
+       exhaust memory, and a bounded timeout so a hung request cannot stall
+       the tick. #>
+    param(
+        [AllowEmptyString()][string]$Url = '',
+        [int]$TimeoutSeconds = 30,
+        [int]$MaxBytes = 1048576
+    )
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return [pscustomobject]@{ Success = $false; Csv = ''; Error = 'لم يُضبط رابط الشيت.' }
+    }
+    if ($Url -notmatch '^https://') {
+        return [pscustomobject]@{ Success = $false; Csv = ''; Error = 'يجب أن يبدأ رابط الشيت بـ https.' }
+    }
+    try {
+        $response = Invoke-WebRequest -Uri $Url -TimeoutSec ([math]::Max(1, $TimeoutSeconds)) `
+            -MaximumRedirection 5 -UseBasicParsing -ErrorAction Stop
+        $bytes = $response.Content -as [byte[]]
+        if ($null -eq $bytes) { $bytes = [Text.Encoding]::UTF8.GetBytes([string]$response.Content) }
+        if ($bytes.Length -gt $MaxBytes) {
+            return [pscustomobject]@{ Success = $false; Csv = ''; Error = "حجم الشيت يتجاوز الحد المسموح ($MaxBytes بايت)." }
+        }
+        # Sheets serves UTF-8; decoding explicitly keeps Arabic intact whatever
+        # the response headers claim.
+        $csv = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        return [pscustomobject]@{ Success = $true; Csv = $csv; Error = '' }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Csv = ''; Error = $_.Exception.Message }
+    }
+}
+
+function Get-NewsSheetChangeSummary {
+    <# Order counts: the ticker reads in sequence, so moving the lead story is
+       a real change even when the set of headlines is identical. #>
+    param([AllowNull()][string[]]$Before = @(), [AllowNull()][string[]]$After = @())
+    $previous = @($Before)
+    $current = @($After)
+    $previousSet = [Collections.Generic.HashSet[string]]::new([string[]]$previous, [StringComparer]::Ordinal)
+    $currentSet = [Collections.Generic.HashSet[string]]::new([string[]]$current, [StringComparer]::Ordinal)
+    $added = @($current | Where-Object { -not $previousSet.Contains($_) }).Count
+    $removed = @($previous | Where-Object { -not $currentSet.Contains($_) }).Count
+    $changed = ($previous -join [char]0x001F) -cne ($current -join [char]0x001F)
+    return [pscustomobject]@{ Added = $added; Removed = $removed; Changed = $changed; Total = $current.Count }
+}
+
+function Get-NewsSheetNoticeText {
+    param($Summary, [string]$Trigger = 'auto', [long]$UserId = 0)
+    $source = if ($Trigger -eq 'manual' -and $UserId) { "يدويًا بواسطة $(Get-UserDisplayName -UserId $UserId)" } else { 'تلقائيًا' }
+    $lines = @(
+        "📰 حُدِّث الشريط من الشيت $source"
+        "الآن على الهواء: $($Summary.Total) خبرًا"
+    )
+    if ($Summary.Added -gt 0) { $lines += "جديد: $($Summary.Added)" }
+    if ($Summary.Removed -gt 0) { $lines += "أُزيل: $($Summary.Removed)" }
+    if ($Summary.Added -eq 0 -and $Summary.Removed -eq 0) { $lines += 'تغيّر الترتيب فقط' }
+    return ($lines -join "`n")
+}
+
+function Send-NewsSheetNotice {
+    param([Parameter(Mandatory)][string]$Text)
+    if (-not (Get-Setting 'NewsSheetNotifyAdmins')) { return }
+    foreach ($admin in @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })) {
+        Send-TelegramMessage -ChatId $admin -Text $Text
+    }
+}
+
+function Invoke-NewsSheetSync {
+    <# Pulls the sheet and publishes it through the same validated, atomic
+       writer the Telegram screens use, so the sheet cannot race a person:
+       one publisher, one backup trail, one hash check.
+
+       An automatic run yields to anyone holding the draft. Overwriting a
+       half-typed draft destroys work the operator cannot get back and gives
+       them no clue why. A manual run is a deliberate act, so it proceeds -
+       but it still names the current owner and asks first. #>
+    param(
+        [ValidateSet('auto', 'manual')][string]$Trigger = 'manual',
+        [long]$UserId = 0,
+        [switch]$Confirmed
+    )
+    $stop = { param([string]$Message, [bool]$Skip = $false, [bool]$Ask = $false)
+        [pscustomobject]@{ Success = $false; Skipped = $Skip; Unchanged = $false
+            NeedsConfirmation = $Ask; Items = @(); Summary = $null; Error = $Message } }
+
+    $url = [string](Get-Setting 'NewsSheetCsvUrl')
+    if ([string]::IsNullOrWhiteSpace($url)) { return (& $stop 'لم يُضبط رابط Google Sheets في الإعدادات.') }
+
+    $draft = Get-NewsTickerDraft
+    if ($draft) {
+        $owner = [long]$draft.OwnerUserId
+        if ($Trigger -eq 'auto') {
+            Write-BridgeLog "News sheet sync skipped: draft held by user $owner" 'WARN'
+            return (& $stop 'مسودة الأخبار قيد التحرير؛ تُخطّيت هذه الدورة.' $true $false)
+        }
+        if ($owner -ne $UserId -and -not $Confirmed) {
+            return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). التأكيد يستبدلها بمحتوى الشيت." $false $true)
+        }
+    }
+
+    $download = Get-NewsSheetCsvText -Url $url `
+        -TimeoutSeconds (Get-SettingInt 'NewsSheetTimeoutSeconds' 1) `
+        -MaxBytes (Get-SettingInt 'NewsImportMaxBytes' 1)
+    if (-not $download.Success) {
+        Write-BridgeLog "News sheet download failed: $($download.Error)" 'ERROR'
+        return (& $stop "تعذّر تنزيل الشيت: $($download.Error)")
+    }
+
+    $items = @(ConvertFrom-NewsSheetCsv -Csv $download.Csv)
+    if ($items.Count -eq 0) {
+        # A sheet that failed to render, or one somebody cleared by accident,
+        # must not take the ticker off air with it. Clearing stays a manual,
+        # confirmed action on the news screen.
+        return (& $stop 'الشيت فارغ؛ لن يُمسح الشريط تلقائيًا. امسحه يدويًا إن كان هذا مقصودًا.')
+    }
+
+    $snapshot = Get-NewsTickerConfiguredSnapshot
+    $current = if ($snapshot.Success) { @($snapshot.Items) } else { @() }
+    $summary = Get-NewsSheetChangeSummary -Before $current -After $items
+    if (-not $summary.Changed) {
+        return [pscustomobject]@{ Success = $false; Skipped = $false; Unchanged = $true
+            NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
+    }
+
+    $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items $items `
+        -ExpectedHash ([string]$snapshot.Hash) -Separator ([string](Get-Setting 'NewsItemSeparator')) `
+        -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) `
+        -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if (-not $result.Success) {
+        Write-BridgeLog "News sheet publish failed: $($result.Error)" 'ERROR'
+        return (& $stop "تعذّر نشر الشيت: $($result.Error)")
+    }
+
+    if ($draft) { Remove-NewsTickerDraft }
+    $who = if ($Trigger -eq 'manual' -and $UserId) { Get-UserDisplayName -UserId $UserId } else { 'المزامنة التلقائية' }
+    Add-AuditEntry "📰 نشر شريط الأخبار من الشيت ($who): $($items.Count) خبرًا"
+    Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count
+    Send-NewsSheetNotice -Text (Get-NewsSheetNoticeText -Summary $summary -Trigger $Trigger -UserId $UserId)
+
+    return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false
+        NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
+}
+
 function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     $rows = @()
     $draft = Get-NewsTickerDraft
@@ -296,6 +441,9 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     }
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsRestoreNews')) {
         $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
+    }
+    if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
+        $rows += , @(@{text='⬇️ سحب من الشيت';callback_data='news:sheet'})
     }
     $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})
     return @{inline_keyboard=$rows}

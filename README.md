@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.4.0
+
+The news ticker can be driven from a Google Sheets CSV export. Set
+`NewsSheetCsvUrl` and the bridge fetches, parses, and publishes it through the
+same validated atomic writer the Telegram screens use - which also ends the race
+on `news.txt` between the bridge and any external converter script. Mode is
+`manual` by default (an administrator button on the news screen) or `auto` on an
+interval. An automatic sync yields to an operator holding the draft; an empty
+sheet is refused rather than clearing the ticker.
+
 ## Version 6.3.0
 
 Operations on the 🧾 screen now carry a short reference taken from the `AIR_OP`

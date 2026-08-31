@@ -23,6 +23,23 @@ function ConvertTo-TelegramHtmlText {
     return $Text.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
 }
 
+function ConvertFrom-TelegramHtmlText {
+    <# The readable text inside a message the bridge built as HTML.
+
+       Used only when an HTML message turns out to be too long for one send
+       and has to degrade: without it the operator got '<b>' and '<blockquote
+       expandable>' as visible text, which is the same failure the escaping
+       was added to prevent, arriving from the other direction.
+
+       Stripping tags before unescaping entities is the whole trick. Doing it
+       the other way round would turn an escaped '&lt;b&gt;' - a headline that
+       genuinely contains '<b>' - into a tag and then delete it. #>
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $stripped = [regex]::Replace($Text, '<[^>]+>', '')
+    return $stripped.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&quot;', '"').Replace('&amp;', '&')
+}
+
 function New-BridgeButton {
     <#
         One inline-keyboard button.
@@ -91,15 +108,20 @@ function Send-TelegramMessage {
         [hashtable]$ReplyMarkup,
         [ValidateSet('', 'HTML')][string]$ParseMode = ''
     )
-    [string[]]$chunks = @(Split-TelegramText -Text $Text)
     # A split lands wherever the budget runs out, which for HTML can be the
     # middle of a tag - and Telegram rejects that outright. Callers asking for
-    # HTML build one message deliberately; if one ever overflows, degrade to
-    # plain text rather than lose the whole message to a 400.
-    $mode = if ($ParseMode -and $chunks.Count -eq 1) { $ParseMode } else { '' }
-    if ($ParseMode -and $chunks.Count -gt 1) {
-        Write-BridgeLog "HTML message to $ChatId exceeded one chunk; sent as plain text" "WARN"
+    # HTML build one message deliberately; if one ever overflows, the markup
+    # is taken back out and the text is sent plain. Sending it with the tags
+    # still in would show the operator '<b>' and '<blockquote expandable>',
+    # which is exactly what the escaping exists to prevent.
+    $body_text = $Text
+    $mode = $ParseMode
+    if ($ParseMode -and @(Split-TelegramText -Text $Text).Count -gt 1) {
+        $body_text = ConvertFrom-TelegramHtmlText -Text $Text
+        $mode = ''
+        Write-BridgeLog "HTML message to $ChatId exceeded one chunk; markup removed and sent as text" "WARN"
     }
+    [string[]]$chunks = @(Split-TelegramText -Text $body_text)
     for ($i = 0; $i -lt $chunks.Count; $i++) {
         # [string] cast is deliberate belt-and-braces against anything
         # array-shaped ever reaching the body again.

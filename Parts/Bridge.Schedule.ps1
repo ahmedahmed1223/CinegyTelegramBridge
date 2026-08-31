@@ -308,6 +308,38 @@ function Stop-ScheduledShowEvent {
     return (Save-ScheduleEvents)
 }
 
+function Format-ScheduleEventHtml {
+    <#
+        One upcoming event, for a message sent with parse_mode=HTML.
+
+        A tg-time entity (Bot API 9.5) carries the instant rather than a
+        rendering of it, so every reader sees the weekday, date and time in
+        their own timezone and language. The station's zone stays alongside
+        it because a playout schedule is written in station time and an
+        operator reading from elsewhere needs both, not a silent conversion.
+
+        Separate from Format-ScheduleEvent rather than replacing it: that one
+        has four other callers that send plain text, and turning them all
+        into HTML at once is how a template key with a '<' in it takes down a
+        screen.
+
+        'wdt' is weekday + short date + short time, from the documented
+        format grammar r|w?[dD]?[tT]?. TemplateKey is typed by an
+        administrator, so it is escaped like any other human text.
+    #>
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
+    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
+    $zone = [string](Get-JsonProp $ScheduleEntry 'TimeZoneId')
+    if ([string]::IsNullOrWhiteSpace($zone)) { $zone = [System.TimeZoneInfo]::Local.Id }
+    $key = ConvertTo-TelegramHtmlText -Text ([string]$ScheduleEntry.TemplateKey)
+    # The element's own text is what a client too old for tg-time shows, so it
+    # has to read correctly on its own.
+    $fallback = ConvertTo-TelegramHtmlText -Text ($at.ToString('yyyy-MM-dd HH:mm'))
+    $stamp = "<tg-time unix=`"$($at.ToUnixTimeSeconds())`" format=`"wdt`">$fallback</tg-time>"
+    return "<b>$key</b> — $stamp — $(ConvertTo-TelegramHtmlText -Text $zone) — $recurrence"
+}
+
 function Format-ScheduleEvent {
     param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
     $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }

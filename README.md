@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.5.0
+
+Upcoming events carry a tg-time entity rather than a rendering of the time,
+so each reader sees the weekday, date and time in their own timezone and
+language, with the station's zone kept alongside. Also fixes a latent flaw
+from 7.0.0: an HTML message too long for one send was going out with its
+tags visible - the markup is now taken back out instead.
+
 ## Version 7.4.1
 
 Fixes a crash in the reference lookup on its most likely result: PowerShell

@@ -454,3 +454,43 @@ Describe 'Quiet hours delivery' {
         $script:QuietHoursQueue.Count | Should -Be 1
     }
 }
+
+Describe 'Upcoming events carry the instant, not a rendering of it' {
+    BeforeAll {
+        $script:Entry = @{
+            TemplateKey = 'urgent'; Recurrence = 'daily'
+            ScheduledAt = '2026-09-01T21:45:00+03:00'; TimeZoneId = 'Arab Standard Time'
+        }
+    }
+
+    It 'emits a tg-time entity with the unix instant and the documented format' {
+        # 'wdt' is weekday + short date + short time, from the grammar
+        # r|w?[dD]?[tT]? - so each reader gets their own timezone and language.
+        $html = Format-ScheduleEventHtml -ScheduleEntry $script:Entry
+        $expected = ([datetimeoffset]'2026-09-01T21:45:00+03:00').ToUnixTimeSeconds()
+
+        $html | Should -Match ([regex]::Escape("<tg-time unix=`"$expected`" format=`"wdt`">"))
+        $html | Should -Match ([regex]::Escape('</tg-time>'))
+    }
+
+    It 'keeps a readable time inside the element for a client that ignores it' {
+        Format-ScheduleEventHtml -ScheduleEntry $script:Entry | Should -Match '2026-09-01 21:45'
+    }
+
+    It 'keeps the station zone beside it rather than converting silently' {
+        Format-ScheduleEventHtml -ScheduleEntry $script:Entry | Should -Match 'Arab Standard Time'
+    }
+
+    It 'escapes a template key an administrator typed with markup in it' {
+        $entry = $script:Entry.Clone()
+        $entry.TemplateKey = 'a<b>&c'
+
+        $html = Format-ScheduleEventHtml -ScheduleEntry $entry
+
+        $html | Should -Match ([regex]::Escape('a&lt;b&gt;&amp;c'))
+    }
+
+    It 'leaves the plain formatter alone, because four callers still send text' {
+        Format-ScheduleEvent -ScheduleEntry $script:Entry | Should -Not -Match '<'
+    }
+}

@@ -861,3 +861,36 @@ Describe 'Rich sending never becomes a dependency' {
         }
     }
 }
+
+Describe 'An overlong HTML message loses its markup, not its meaning' {
+    It 'strips the tags instead of showing them when it will not fit one send' {
+        # The 7.0.0 fallback sent the raw text, so the operator got '<b>' and
+        # '<blockquote expandable>' on screen - the very thing the escaping
+        # exists to prevent, arriving from the other side.
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        Mock Write-BridgeLog { }
+        $long = '<b>عنوان</b> ' + ('<blockquote expandable>' + ('ط' * 4000) + '</blockquote>')
+
+        Send-TelegramMessage -ChatId 101 -Text $long -ParseMode 'HTML'
+
+        Should -Invoke Invoke-BridgeTelegramRequest -ParameterFilter { $Body.text -notmatch '<b>|<blockquote' }
+        Should -Invoke Invoke-BridgeTelegramRequest -ParameterFilter { -not $Body.ContainsKey('parse_mode') }
+    }
+
+    It 'gives an escaped angle bracket back as the character the operator typed' {
+        # Tags out first, entities back second. The other order would turn an
+        # escaped '&lt;b&gt;' into a tag and then delete the headline's text.
+        ConvertFrom-TelegramHtmlText -Text '<b>خبر &lt;عاجل&gt; &amp; مهم</b>' |
+            Should -Be 'خبر <عاجل> & مهم'
+    }
+
+    It 'keeps the markup when the message does fit' {
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+
+        Send-TelegramMessage -ChatId 101 -Text '<b>قصير</b>' -ParseMode 'HTML'
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
+            $Body.parse_mode -eq 'HTML' -and $Body.text -eq '<b>قصير</b>'
+        }
+    }
+}

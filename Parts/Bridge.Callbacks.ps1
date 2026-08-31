@@ -760,8 +760,12 @@ function Invoke-CallbackQuery {
         }
         'schedule:list' {
             $events = @(Get-UpcomingScheduleEvents)
-            $text = if ($events.Count -eq 0) { 'لا توجد أحداث قادمة.' } else { "📋 الأحداث القادمة:`n" + (@($events | ForEach-Object { "• $(Format-ScheduleEvent -ScheduleEntry $_)" }) -join "`n") }
-            Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-UpcomingScheduleKeyboard)
+            # HTML so each event carries a tg-time entity: the reader sees the
+            # weekday, date and time in their own timezone rather than in the
+            # bridge's. An overlong list is de-marked-up by Send-TelegramMessage
+            # rather than showing its tags.
+            $text = if ($events.Count -eq 0) { 'لا توجد أحداث قادمة.' } else { "📋 الأحداث القادمة:`n" + (@($events | ForEach-Object { "• $(Format-ScheduleEventHtml -ScheduleEntry $_)" }) -join "`n") }
+            Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-UpcomingScheduleKeyboard) -ParseMode 'HTML'
             break
         }
         'schtpl:*' {

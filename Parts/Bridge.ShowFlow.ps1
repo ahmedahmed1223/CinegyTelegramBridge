@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.2.0'; Items = @(
+                '🔔 «سحب الشيت غير مسموح لك» و«الاستعادة للمشرف» صارا نافذة على الزر. والاستعادة كانت ترفض بصمت تام قبل ذلك.'
+                '📋 «نسخ مرجع» في 🧾 عملياتي: انسخ المرجع بنقرة بدل كتابته حرفًا حرفًا للمشرف.'
+            ) }
         @{ Version = '7.1.1'; Items = @(
                 '🔴 تأكيد الإخفاء والخروج صار أحمر أيضًا: تفعيل التأكيد كان يعطي شاشة أضعف إشارة من تركه مطفأً.'
             ) }
@@ -1633,6 +1637,19 @@ function Invoke-RepeatLastShow {
 function Get-MyOperationsKeyboard {
     param([Parameter(Mandatory)][long]$UserId)
     $rows = @()
+    # The reference is eight hex characters an operator quotes to an
+    # administrator so one grep finds the line. It was printed in the message
+    # and had to be retyped off a phone, one character wrong being one grep
+    # that finds nothing; copy_text (Bot API 7.11) puts it on the clipboard.
+    # Only the newest one gets a button - ten of them would bury the two
+    # controls under a wall of hex.
+    $latest = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 1)
+    if ($latest.Count -gt 0) {
+        $reference = Get-OperationReference -OperationId ([string]$latest[0].OperationId)
+        if ($reference) {
+            $rows += , @(@{ text = "📋 نسخ مرجع $reference"; copy_text = @{ text = $reference } })
+        }
+    }
     if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
         $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
     }

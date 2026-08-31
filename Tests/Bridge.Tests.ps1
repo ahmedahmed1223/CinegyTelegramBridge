@@ -724,3 +724,83 @@ Describe 'Colour survives the safer configuration' {
         $yes.style | Should -Be 'danger'
     }
 }
+
+Describe 'Callback refusal gate' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity { }
+    }
+
+    It 'refuses a restore an operator may not run, instead of doing nothing at all' {
+        # Both restore branches used to refuse with a bare break: the press
+        # was answered, nothing happened, and nothing said why - which is
+        # indistinguishable from a bridge that dropped it.
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+
+        Get-CallbackRefusal -Data 'news:restore:0' -ChatId 101 -UserId 101 | Should -Match 'مشرف'
+        Get-CallbackRefusal -Data 'news:restoreconfirm:0' -ChatId 101 -UserId 101 | Should -Match 'مشرف'
+    }
+
+    It 'allows the same restore once the operator setting is on' {
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+
+        Get-CallbackRefusal -Data 'news:restore:0' -ChatId 101 -UserId 101 | Should -BeNullOrEmpty
+    }
+
+    It 'covers every sheet callback, not only the two that draw buttons' {
+        Mock Test-NewsSheetPullAccess { $false }
+
+        foreach ($data in 'news:sheet', 'news:sheetdraft', 'news:sheetconfirm', 'news:sheetdraftconfirm') {
+            Get-CallbackRefusal -Data $data -ChatId 101 -UserId 101 |
+                Should -Not -BeNullOrEmpty -Because "$data reaches the pull"
+        }
+    }
+
+    It 'says nothing about a press it does not govern' {
+        Mock Test-NewsSheetPullAccess { $false }
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+
+        Get-CallbackRefusal -Data 'menu:news' -ChatId 101 -UserId 101 | Should -BeNullOrEmpty
+    }
+
+    It 'answers the refused press on the button and leaves the chat alone' {
+        Mock Test-NewsSheetPullAccess { $false }
+        $callback = [pscustomobject]@{
+            id = 'sheet-refused'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:sheet'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $Alert -and $Text -match 'سحب الشيت' }
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'Copy the operation reference' {
+    It 'offers the newest reference as a clipboard button rather than something to retype' {
+        Mock Get-UserOperationHistory { @([pscustomobject]@{ OperationId = 'air-5023333b032c476eb48204ca08032a98' }) }
+
+        $rows = @((Get-MyOperationsKeyboard -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+        $copy = @($rows | Where-Object { $_.ContainsKey('copy_text') })[0]
+
+        $copy.copy_text.text | Should -Be '5023333b'
+        $copy.ContainsKey('callback_data') | Should -BeFalse
+    }
+
+    It 'offers nothing to copy when the operator has no history yet' {
+        Mock Get-UserOperationHistory { @() }
+
+        $rows = @((Get-MyOperationsKeyboard -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+
+        @($rows | Where-Object { $_.ContainsKey('copy_text') }).Count | Should -Be 0
+    }
+}

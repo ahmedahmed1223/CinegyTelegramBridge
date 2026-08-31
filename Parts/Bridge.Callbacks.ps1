@@ -40,6 +40,33 @@ function Test-CallbackOwner {
     return $false
 }
 
+function Get-CallbackRefusal {
+    <#
+        The reason a press is refused, or '' when it is allowed.
+
+        It lives above the acknowledgement because Telegram accepts one answer
+        per press: a refusal decided further down, after the acknowledgement
+        has been spent, can only arrive as a new chat message - and the two
+        restore branches did not even manage that, refusing with a bare break
+        so the press did nothing visible at all. Every check here is a
+        settings or role lookup already held in memory.
+
+        The handlers keep their own copies of these checks. Telegram leaves
+        buttons live in messages it has already delivered, so a screen drawn
+        before a permission changed can still be pressed, and the rule has
+        always been that a button is both not drawn and not honoured.
+    #>
+    param([string]$Data, [long]$ChatId, [long]$UserId)
+    if ($Data -like 'news:sheet*' -and -not (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId)) {
+        return 'سحب الشيت غير مسموح لك. اطلب من المشرف تفعيله.'
+    }
+    if ($Data -like 'news:restore*' -and -not (Test-Admin -ChatId $ChatId -UserId $UserId) `
+            -and -not (Get-Setting 'AllowOperatorsRestoreNews')) {
+        return 'استعادة نسخ الأخبار للمشرف وحده.'
+    }
+    return ''
+}
+
 function Invoke-CallbackQuery {
     param($CallbackQuery)
 
@@ -82,6 +109,12 @@ function Invoke-CallbackQuery {
         # On the button, not as a message: an unauthorised press should not
         # leave anything behind in a chat its sender may not read again.
         Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text $msg -Alert
+        return
+    }
+
+    $refusal = Get-CallbackRefusal -Data $data -ChatId $chatId -UserId $userId
+    if ($refusal) {
+        Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text $refusal -Alert
         return
     }
 

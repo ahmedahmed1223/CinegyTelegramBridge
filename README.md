@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.2.0
+
+Everyday refusals answer on the button. A gate decides them above the
+acknowledgement, because Telegram allows one answer per press - and the two
+news-restore branches were refusing with a bare break, so the press did
+nothing visible at all. The operation reference gets a copy button instead of
+eight hex characters to retype off a phone.
+
 ## Version 7.1.1
 
 Fixes a colouring rule that inverted itself: the direct hide button was red,

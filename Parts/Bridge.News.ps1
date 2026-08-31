@@ -124,6 +124,53 @@ function Clear-NewsTickerDraftItems { param([long]$ChatId,[long]$UserId)
     return (Save-NewsTickerDraft)
 }
 
+function Test-NewsSheetWriteConfigured {
+    <# Write-back lives in config.json rather than in Settings, next to
+       BotToken. The URL and its token together are the permission to rewrite
+       the sheet, and Invoke-SettingsExport only ever writes the keys the
+       bridge declares in DefaultSettings, so keeping them out of Settings is
+       what keeps them out of an exported file forwarded into a chat. #>
+    return -not [string]::IsNullOrWhiteSpace([string](Get-JsonProp $config 'NewsSheetWriteUrl'))
+}
+
+function Save-NewsSheetItems {
+    <# Writes the published ticker back to the sheet, so the sheet stays the
+       readable record even when the editing happened in Telegram.
+
+       Posted to a Google Apps Script web app rather than the Sheets API on
+       purpose: the API needs OAuth or a service-account key and RS256 JWT
+       signing, none of which PowerShell does without dragging in a library.
+       A deployed script is one HTTPS POST with a shared secret. #>
+    param([AllowNull()][string[]]$Items = @())
+    if (-not (Test-NewsSheetWriteConfigured)) {
+        return [pscustomobject]@{ Success = $false; Attempted = $false; Error = '' }
+    }
+    $url = [string](Get-JsonProp $config 'NewsSheetWriteUrl')
+    if ($url -notmatch '^https://') {
+        return [pscustomobject]@{ Success = $false; Attempted = $false; Error = 'يجب أن يبدأ رابط الكتابة بـ https.' }
+    }
+    $payload = @{
+        token = [string](Get-JsonProp $config 'NewsSheetWriteToken')
+        items = @($Items | ForEach-Object { [string]$_ })
+    } | ConvertTo-Json -Depth 4 -Compress
+    try {
+        $response = Invoke-WebRequest -Uri $url -Method Post -Body $payload `
+            -ContentType 'application/json; charset=utf-8' `
+            -TimeoutSec (Get-SettingInt 'NewsSheetTimeoutSeconds' 1) `
+            -MaximumRedirection 5 -UseBasicParsing -ErrorAction Stop
+        # Apps Script answers 200 for a rejected token too, so the body is the
+        # only honest signal that the write actually happened.
+        $body = [string]$response.Content
+        if ($body -notmatch '"ok"\s*:\s*true') {
+            return [pscustomobject]@{ Success = $false; Attempted = $true; Error = "رفض الشيت الكتابة: $(Protect-SensitiveText $body)" }
+        }
+        return [pscustomobject]@{ Success = $true; Attempted = $true; Error = '' }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Attempted = $true; Error = $_.Exception.Message }
+    }
+}
+
 function Publish-NewsTickerDraft { param([long]$UserId)
     $draft = Get-NewsTickerDraft -UserId $UserId
     # Carries Conflict so every caller can branch on it uniformly; without it
@@ -133,6 +180,15 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     if ($result.Success) {
         Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Get-UserDisplayName -UserId $UserId): $(@($draft.Items).Count) خبرًا"
         Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count)
+        # Mirror to the sheet after the ticker is safely on air, never before.
+        # A sheet that refuses the write must not undo a publish that already
+        # succeeded, so this reports and rolls nothing back.
+        $mirror = Save-NewsSheetItems -Items @($draft.Items)
+        $result | Add-Member -NotePropertyName 'SheetSaved' -NotePropertyValue ([bool]$mirror.Success) -Force
+        $result | Add-Member -NotePropertyName 'SheetError' -NotePropertyValue ([string]$mirror.Error) -Force
+        if ($mirror.Attempted -and -not $mirror.Success) {
+            Write-BridgeLog "News published but the sheet write-back failed: $($mirror.Error)" 'WARN'
+        }
         Remove-NewsTickerDraft
     }
     return $result

@@ -340,6 +340,88 @@ Describe 'News sheet pull confirmation' {
     }
 }
 
+Describe 'Publishing writes the ticker back to the sheet' {
+    BeforeEach {
+        $config | Add-Member -NotePropertyName 'NewsSheetWriteUrl' -NotePropertyValue 'https://script.google.com/macros/s/x/exec' -Force
+        $config | Add-Member -NotePropertyName 'NewsSheetWriteToken' -NotePropertyValue 'secret' -Force
+        Mock Get-SettingInt { 30 }
+    }
+
+    It 'posts the published items and reports success' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = '{"ok":true,"written":2}' } }
+        $result = Save-NewsSheetItems -Items @('خبر أول', 'خبر ثانٍ')
+        $result.Success | Should -BeTrue
+        $result.Attempted | Should -BeTrue
+        Should -Invoke Invoke-WebRequest -Times 1 -Exactly -ParameterFilter {
+            $Method -eq 'Post' -and $Body -match 'خبر أول' -and $Body -match 'secret'
+        }
+    }
+
+    It 'treats a rejected token as a failure even though Apps Script answers 200' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = '{"ok":false,"error":"bad token"}' } }
+        $result = Save-NewsSheetItems -Items @('خبر')
+        $result.Success | Should -BeFalse
+        $result.Attempted | Should -BeTrue
+    }
+
+    It 'reports a transport failure without throwing' {
+        Mock Invoke-WebRequest { throw 'network down' }
+        $result = Save-NewsSheetItems -Items @('خبر')
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Match 'network down'
+    }
+
+    It 'does nothing at all when no write url is configured' {
+        $config | Add-Member -NotePropertyName 'NewsSheetWriteUrl' -NotePropertyValue '' -Force
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = '{"ok":true}' } }
+        $result = Save-NewsSheetItems -Items @('خبر')
+        $result.Attempted | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
+    }
+
+    It 'refuses a write url that is not https' {
+        $config | Add-Member -NotePropertyName 'NewsSheetWriteUrl' -NotePropertyValue 'http://script.google.com/x' -Force
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = '{"ok":true}' } }
+        (Save-NewsSheetItems -Items @('خبر')).Success | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
+    }
+
+    It 'keeps the write credentials out of an exported settings file' {
+        # Invoke-SettingsExport writes only DefaultSettings keys, which is what
+        # keeps the bot token out of a forwarded export. The write token rides
+        # the same boundary.
+        $script:DefaultSettings.Contains('NewsSheetWriteUrl') | Should -BeFalse
+        $script:DefaultSettings.Contains('NewsSheetWriteToken') | Should -BeFalse
+    }
+
+    It 'mirrors to the sheet after a Telegram publish succeeds' {
+        Mock Publish-NewsTickerFile { [pscustomobject]@{ Success = $true; Conflict = $false; BackupPath = ''; Hash = 'h'; Error = '' } }
+        Mock Save-NewsSheetItems { [pscustomobject]@{ Success = $true; Attempted = $true; Error = '' } }
+        Mock Add-AuditEntry {}; Mock Write-NewsPublishRecord {}; Mock Get-UserDisplayName { 'محرر' }
+        Mock Get-Setting { if ($Name -eq 'NewsFilePath') { Join-Path $TestDrive 'n.txt' } elseif ($Name -eq 'NewsItemSeparator') { '|' } else { '' } }
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 101; BaseHash = 'h'; Items = @('خبر') }
+        $result = Publish-NewsTickerDraft -UserId 101
+        $result.Success | Should -BeTrue
+        $result.SheetSaved | Should -BeTrue
+        Should -Invoke Save-NewsSheetItems -Times 1 -Exactly
+    }
+
+    It 'does not undo a publish when the sheet write fails' {
+        # The ticker is already on air. A refused mirror is reported, never
+        # rolled back into taking the news off screen.
+        Mock Publish-NewsTickerFile { [pscustomobject]@{ Success = $true; Conflict = $false; BackupPath = ''; Hash = 'h'; Error = '' } }
+        Mock Save-NewsSheetItems { [pscustomobject]@{ Success = $false; Attempted = $true; Error = 'رفض' } }
+        Mock Add-AuditEntry {}; Mock Write-NewsPublishRecord {}; Mock Get-UserDisplayName { 'محرر' }
+        Mock Write-BridgeLog {}
+        Mock Get-Setting { if ($Name -eq 'NewsFilePath') { Join-Path $TestDrive 'n.txt' } elseif ($Name -eq 'NewsItemSeparator') { '|' } else { '' } }
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 101; BaseHash = 'h'; Items = @('خبر') }
+        $result = Publish-NewsTickerDraft -UserId 101
+        $result.Success | Should -BeTrue
+        $result.SheetSaved | Should -BeFalse
+        $result.SheetError | Should -Be 'رفض'
+    }
+}
+
 Describe 'News sheet download guard' {
     It 'rejects a url that is not https' {
         $result = Get-NewsSheetCsvText -Url 'http://docs.google.com/x' -TimeoutSeconds 5 -MaxBytes 1024

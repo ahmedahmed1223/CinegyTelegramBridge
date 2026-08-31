@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.0
+
+Publishing the ticker from Telegram now writes it back to the Google Sheet, so
+the sync runs both ways and the sheet stays the readable record wherever the
+editing happened. The write goes through a deployed Apps Script web app - see
+`docs/news-sheet-writeback.gs` - because the Sheets API would need OAuth or a
+service-account key and RS256 JWT signing. `NewsSheetWriteUrl` and
+`NewsSheetWriteToken` live at the top level of `config.json` beside `BotToken`,
+never in `Settings`, so a settings export cannot carry them. A failed write is
+reported and never undoes a publish that already reached air.
+
 ## Version 6.8.0
 
 Help is now a quick-start card plus a chapter index rather than one long

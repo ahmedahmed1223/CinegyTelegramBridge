@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.9.0
+
+Redesigns the reports for the day they actually have to survive: an editor
+touching the strip ten times. Telegram divides a table's width evenly, so
+six columns give each a sixth of a phone screen - the same mistake the news
+list fixed in 6.9.3. Four short columns now, with the range the strip moved
+through standing in for the trail, and the readings, the working span and
+the operators folded into a details block that has the whole width. The
+banner table drops to four as well, carrying the layer on the name.
+
 ## Version 7.8.0
 
 Corrects a wrong number in the news report. The ticker is one running strip

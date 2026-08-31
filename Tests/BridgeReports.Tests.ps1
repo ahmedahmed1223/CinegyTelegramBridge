@@ -223,9 +223,9 @@ Describe 'Banner report as rich blocks' {
         $blocks[0].type | Should -Be 'heading'
         $table | Should -Not -BeNullOrEmpty
         @($table.cells).Count | Should -Be 2
-        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 5
-        @($table.cells[1])[0].text | Should -Be 'urgent'
-        @($table.cells[1])[4].text | Should -Be '5 د'
+        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
+        @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
+        @($table.cells[1])[3].text | Should -Be '5 د'
     }
 
     It 'says a banner is still up rather than reporting a duration it does not have' {
@@ -238,7 +238,7 @@ Describe 'Banner report as rich blocks' {
 
         $table = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
-        @($table.cells[1])[4].text | Should -Match 'على الهواء'
+        @($table.cells[1])[3].text | Should -Match 'على الهواء'
     }
 
     It 'draws no empty table for a period with nothing in it' {
@@ -272,15 +272,16 @@ Describe 'News report as rich blocks' {
 
         $blocks[0].type | Should -Be 'heading'
         @($table.cells).Count | Should -Be 3
-        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 6
+        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
         @($table.cells[1])[2].text | Should -Be '12'
-        @($table.cells[1])[5].text | Should -Be 'سامي 1'
         @($table.cells[2])[2].text | Should -Be '14'
-        # The edit trail and the span are what the review added: how big each
-        # edit was, and whether the day was worked or touched once at handover.
-        @($table.cells[2])[3].text | Should -Be '15 ← 14'
-        @($table.cells[2])[4].text | Should -Be '07:10 ← 21:40'
-        @($table.cells[2])[5].text | Should -Be 'ليلى'
+        # The range replaces the trail in the table; the trail itself, the
+        # span and the operators moved to the details block below it.
+        @($table.cells[2])[3].text | Should -Be '14–15'
+        $detail = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+        $texts = @($detail.blocks | ForEach-Object { $_.text })
+        @($texts | Where-Object { $_ -match '07:10 ← 21:40' }).Count | Should -Be 1
+        @($texts | Where-Object { $_ -match 'ليلى' }).Count | Should -Be 1
     }
 
     It 'draws no table for a period nothing was published in' {
@@ -304,7 +305,7 @@ Describe 'News report as rich blocks' {
 
         $table = @(@(Get-NewsReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
-        @($table.cells[1])[5].text | Should -Be '—'
+        @($table.cells[1])[3].text | Should -Be '5'
     }
 }
 
@@ -374,5 +375,80 @@ Describe 'A day with no edit is a row, not an absence' {
     It 'says nothing was published rather than pretending to a last time' {
         @(Get-NewsReportHighlights -Data @{ LastPublishedAt = $null; SilentDays = 7 })[0] |
             Should -Match 'لم تُنشر'
+    }
+}
+
+Describe 'A ten-edit day has to stay readable' {
+    BeforeAll {
+        $script:BusyDay = @{
+            Label = 'اليوم'; Publishes = 10; Items = 16; Truncated = $false; SilentDays = 0
+            LastPublishedAt = [datetime]'2026-08-31T22:10'
+            Days = @(@{
+                    Date = [datetime]'2026-08-31'; Publishes = 10; Items = 16
+                    Counts = @(12, 13, 15, 14, 16, 15, 17, 18, 17, 16)
+                    First = [datetime]'2026-08-31T06:00'; Last = [datetime]'2026-08-31T22:10'
+                    Tally = @{ Breakdown = 'سامي 6 · ليلى 4'; Single = '' }
+                })
+        }
+    }
+
+    It 'keeps the table to four short columns whatever the day did' {
+        # Telegram divides a table's width evenly, so a sixth column gets a
+        # sixth of a phone screen - the same mistake as a row of six buttons.
+        Mock Get-NewsReportDays { $script:BusyDay }
+
+        $table = @(@(Get-NewsReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[0]).Count | Should -Be 4
+        foreach ($row in @($table.cells)) { @($row).Count | Should -Be 4 }
+        foreach ($cell in @($table.cells[1])) { $cell.text.Length | Should -BeLessOrEqual 12 }
+    }
+
+    It 'holds ten readings in a range rather than a column of numbers' {
+        Get-NewsCountRange -Counts @(12, 13, 15, 14, 16, 15, 17, 18, 17, 16) | Should -Be '12–18'
+        Get-NewsCountRange -Counts @(9, 9, 9) | Should -Be '9'
+        Get-NewsCountRange -Counts @() | Should -Be '—'
+    }
+
+    It 'puts the readings, the span and the operators where the width is' {
+        Mock Get-NewsReportDays { $script:BusyDay }
+
+        $blocks = @(Get-NewsReportBlocks -Period today)
+        $details = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+        $texts = @($details.blocks | ForEach-Object { $_.text })
+
+        $details.summary | Should -Match 'تفاصيل'
+        @($texts | Where-Object { $_ -match '06:00 ← 22:10' }).Count | Should -Be 1
+        @($texts | Where-Object { $_ -match 'سامي 6' }).Count | Should -Be 1
+        @($texts | Where-Object { $_ -match '12 ← 13 ← 15' }).Count | Should -Be 1
+    }
+
+    It 'shows every one of the ten readings, not the first six' {
+        # The trail is capped for the table's sake, not the detail's.
+        Get-NewsEditTrail -Counts @(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) -Max 24 |
+            Should -Be '1 ← 2 ← 3 ← 4 ← 5 ← 6 ← 7 ← 8 ← 9 ← 10'
+    }
+
+    It 'folds nothing away for a period with no edits at all' {
+        Mock Get-NewsReportDays { @{ Label = 'أمس'; Publishes = 0; Items = 0; Truncated = $false; SilentDays = 1; LastPublishedAt = $null; Days = @() } }
+
+        @(@(Get-NewsReportBlocks -Period yesterday) | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
+    }
+}
+
+Describe 'The banner table gives its width to the name' {
+    It 'carries the layer on the banner cell instead of spending a column on one digit' {
+        Mock Get-BannerReportData {
+            @{ Label = 'اليوم'; Operators = 1; Truncated = $false; Sessions = @(
+                    @{ UserId = 10; Layer = 7; Target = 'urgent'; Values = 'نص'
+                        StartedAt = '2026-08-31T21:00:00'; EndedAt = '2026-08-31T21:05:00' }
+                ) }
+        }
+        Mock Get-AuditOperatorName { 'سامي' }
+
+        $table = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[0]).Count | Should -Be 4
+        @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
     }
 }

@@ -221,14 +221,67 @@ function Get-BannerReportData {
     }
 }
 
+function Get-NewsCountRange {
+    <# Where the strip sat across the day: '12–18', or a single number when
+       it never moved. Two numbers and a dash hold what a ten-step trail was
+       spending a whole column to say. #>
+    param([AllowNull()][object[]]$Counts)
+    $list = @($Counts | ForEach-Object { [int]$_ })
+    if ($list.Count -eq 0) { return '—' }
+    $low = ($list | Measure-Object -Minimum).Minimum
+    $high = ($list | Measure-Object -Maximum).Maximum
+    if ($low -eq $high) { return [string]$low }
+    return "$low–$high"
+}
+
+function Get-NewsDayDetailBlocks {
+    <#
+        The per-day detail, for the collapsible block under the table.
+
+        This is where the ten-edit day goes. A column cannot hold ten
+        readings on a phone - Telegram divides a table's width evenly, so a
+        sixth column gets a sixth of the screen, which is the same mistake as
+        a row of six buttons - but a block under it has the whole width and
+        can spend a line per day.
+    #>
+    param([Parameter(Mandatory)][object[]]$Days)
+    $blocks = @()
+    foreach ($day in @($Days)) {
+        if ([int]$day.Publishes -eq 0) { continue }
+        $who = if ($day.Tally.Breakdown) { [string]$day.Tally.Breakdown }
+        elseif ($day.Tally.Single) { [string]$day.Tally.Single }
+        else { '' }
+        $span = if ($day.First -and $day.Last -and $day.First -ne $day.Last) {
+            "$(([datetime]$day.First).ToString('HH:mm')) ← $(([datetime]$day.Last).ToString('HH:mm'))"
+        }
+        elseif ($day.Last) { ([datetime]$day.Last).ToString('HH:mm') }
+        else { '' }
+        $head = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)"
+        $parts = @("🕒 $span")
+        if ($who) { $parts += "👤 $who" }
+        $blocks += @{ type = 'paragraph'; text = "$head — $($parts -join ' · ')" }
+        $blocks += @{ type = 'paragraph'; text = (Get-NewsEditTrail -Counts $day.Counts -Max 24) }
+    }
+    return $blocks
+}
+
 function Get-NewsReportBlocks {
     <#
-        The news report as rich blocks: a day per row, four columns.
+        The news report: a narrow table anyone can scan, and the detail
+        folded underneath it.
 
-        Four numbers per day lined up with '·' separators is the shape a
-        table is for, and the text version has to spend a second indented
-        line on the operator tally because there is nowhere else to put it.
-        Here it is simply the fourth column.
+        Telegram divides a table's width evenly between its columns, so the
+        six-column version gave each of them a sixth of a phone screen - the
+        same mistake as a row of six buttons, and the reason the news list
+        moved its headline out of the buttons in 6.9.3. An editor who touches
+        the strip ten times a day made that unreadable rather than merely
+        tight.
+
+        Four columns, therefore, all of them short and of predictable width:
+        the day, how many edits, what stayed on air, and the range the strip
+        moved through. The readings themselves, the working span and the
+        operators go into a details block, where the width is the whole
+        message.
     #>
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
@@ -246,36 +299,21 @@ function Get-NewsReportBlocks {
             @{ text = 'اليوم'; is_header = $true }
             @{ text = 'تعديلات'; is_header = $true }
             @{ text = 'على الهواء'; is_header = $true }
-            @{ text = 'حجم التعديل'; is_header = $true }
-            @{ text = 'من ← إلى'; is_header = $true }
-            @{ text = 'المشغّلون'; is_header = $true }
+            @{ text = 'المدى'; is_header = $true }
         ))
     foreach ($day in $days) {
-        # A silent day says so in every column rather than showing zeros that
+        $label = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)"
+        # A silent day says so across the row rather than showing zeros that
         # read like a rendering fault.
-        if ($day.Publishes -eq 0) {
-            $cells += , @(
-                @{ text = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)" }
-                @{ text = '—' }; @{ text = '—' }; @{ text = '—' }; @{ text = '—' }
-                @{ text = 'بلا تعديل' }
-            )
+        if ([int]$day.Publishes -eq 0) {
+            $cells += , @(@{ text = $label }, @{ text = '—' }, @{ text = '—' }, @{ text = 'بلا تعديل' })
             continue
         }
-        $who = if ($day.Tally.Breakdown) { [string]$day.Tally.Breakdown }
-        elseif ($day.Tally.Single) { [string]$day.Tally.Single }
-        else { '—' }
-        $span = if ($day.First -and $day.Last -and $day.First -ne $day.Last) {
-            "$(([datetime]$day.First).ToString('HH:mm')) ← $(([datetime]$day.Last).ToString('HH:mm'))"
-        }
-        elseif ($day.Last) { ([datetime]$day.Last).ToString('HH:mm') }
-        else { '—' }
         $cells += , @(
-            @{ text = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)" }
+            @{ text = $label }
             @{ text = [string]$day.Publishes }
             @{ text = [string]$day.Items }
-            @{ text = (Get-NewsEditTrail -Counts $day.Counts) }
-            @{ text = $span }
-            @{ text = $who }
+            @{ text = (Get-NewsCountRange -Counts $day.Counts) }
         )
     }
 
@@ -283,6 +321,10 @@ function Get-NewsReportBlocks {
     $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا" }
     foreach ($line in @(Get-NewsReportHighlights -Data $data)) {
         $blocks += @{ type = 'paragraph'; text = $line }
+    }
+    $detail = @(Get-NewsDayDetailBlocks -Days $days)
+    if ($detail.Count -gt 0) {
+        $blocks += @{ type = 'details'; summary = '🔍 تفاصيل كل يوم'; blocks = $detail }
     }
     if ($data.Truncated) {
         $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
@@ -437,9 +479,11 @@ function Get-BannerReportBlocks {
         return $blocks
     }
 
+    # Four columns, not five. Telegram splits a table's width evenly, so the
+    # layer - a single digit - was taking as much of a phone screen as the
+    # banner name. It rides on the name instead.
     $cells = @(, @(
             @{ text = 'البنر'; is_header = $true }
-            @{ text = 'الطبقة'; is_header = $true }
             @{ text = 'المشغّل'; is_header = $true }
             @{ text = 'الوقت'; is_header = $true }
             @{ text = 'المدة'; is_header = $true }
@@ -453,8 +497,7 @@ function Get-BannerReportBlocks {
         else { $span = '🔴 على الهواء' }
         $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
         $cells += , @(
-            @{ text = [string]$session.Target }
-            @{ text = [string]$session.Layer }
+            @{ text = "$([string]$session.Target) · ط$([string]$session.Layer)" }
             @{ text = $(if ($who) { $who } else { '—' }) }
             @{ text = $start }
             @{ text = $span }

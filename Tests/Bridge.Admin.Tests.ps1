@@ -725,7 +725,9 @@ Describe 'What is new and help content' {
 
     It 'fits Telegram message limits without relying on chunking' {
         Mock Test-Admin { $true }
-        (Get-HelpText -ChatId 100 -UserId 100).Length | Should -BeLessThan 4096
+        # The full guide is every chapter end to end and outgrew one message,
+        # so its button pages it; the screen an operator actually opens is a
+        # chapter, and Bridge.Help.Tests keeps those inside the limit.
         # The release notes now lead with the newest versions and put the rest
         # behind 📄 المزيد, so it is the first screen that must fit, not the
         # whole history - which grows with every release and eventually would

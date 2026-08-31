@@ -1328,7 +1328,7 @@ try {
                         }
                         elseif ($trimmed -eq $script:HelpHotword) {
                             Clear-PendingState -ChatId $chatId
-                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
                         }
                         else {
                             Show-MainMenu -ChatId $chatId -UserId $userId

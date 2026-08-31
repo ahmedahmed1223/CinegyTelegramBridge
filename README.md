@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.1.1
+
+Fixes a colouring rule that inverted itself: the direct hide button was red,
+but the confirmation's "yes" was not - so turning ConfirmLayerRemoval on, the
+safer setting, handed the operator the weaker screen. Resetting one setting
+is now red like resetting them all.
+
 ## Version 7.1.0
 
 A refused press now answers on the button instead of arriving as a new chat

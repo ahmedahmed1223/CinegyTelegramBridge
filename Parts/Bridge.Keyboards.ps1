@@ -247,7 +247,9 @@ function Get-LayerRemovalConfirmKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][ValidateSet('hide', 'exit')][string]$Action)
     $label = if ($Action -eq 'hide') { '✅ نعم، أخفِ' } else { '✅ نعم، اخرج' }
     return @{ inline_keyboard = @(
-            , @( (New-Button $label "${Action}go:$Layer"), (New-Button '❌ إلغاء' 'menu') )
+            # Red here too, or turning ConfirmLayerRemoval ON - the safer
+            # setting - would hand the operator the weaker screen.
+            , @( (New-Button $label "${Action}go:$Layer" -Style danger), (New-Button '❌ إلغاء' 'menu') )
         ) }
 }
 
@@ -762,7 +764,7 @@ function Get-HideAllConfirmKeyboard {
 function Get-ApprovalKeyboard {
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
-            , @( (New-Button "✅ موافقة" "approve:$TargetChatId"), (New-Button "❌ رفض" "reject:$TargetChatId") )
+            , @( (New-Button "✅ موافقة" "approve:$TargetChatId" -Style success), (New-Button "❌ رفض" "reject:$TargetChatId") )
             , @( (New-Button "⬅️ الرئيسية" "menu") )
         ) }
 }
@@ -861,7 +863,7 @@ function Get-SettingsListKeyboard {
 
 function Get-SingleSettingResetConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name"), (New-Button '❌ إلغاء' 'menu:settings'))) }
+    return @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name" -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))) }
 }
 
 function Get-SettingsCategoryKeyboard {

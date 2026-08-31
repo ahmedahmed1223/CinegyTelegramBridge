@@ -701,3 +701,26 @@ Describe 'Callback answer text' {
         }
     }
 }
+
+Describe 'Colour survives the safer configuration' {
+    It 'colours the hide confirmation, so turning the confirmation on does not weaken the screen' {
+        # ConfirmLayerRemoval exists to make hiding harder. If its yes button
+        # were plain while the direct hide button is red, the safer setting
+        # would hand the operator the weaker screen.
+        foreach ($action in 'hide', 'exit') {
+            $rows = @((Get-LayerRemovalConfirmKeyboard -Layer 7 -Action $action).inline_keyboard | ForEach-Object { @($_) })
+            $yes = @($rows | Where-Object { $_['callback_data'] -eq "${action}go:7" })[0]
+            $cancel = @($rows | Where-Object { $_['callback_data'] -eq 'menu' })[0]
+
+            $yes.style | Should -Be 'danger' -Because "the $action confirmation performs the removal"
+            $cancel.ContainsKey('style') | Should -BeFalse
+        }
+    }
+
+    It 'treats resetting one setting exactly as it treats resetting them all' {
+        $rows = @((Get-SingleSettingResetConfirmKeyboard -Name 'MaxFieldLength').inline_keyboard | ForEach-Object { @($_) })
+        $yes = @($rows | Where-Object { $_['callback_data'] -eq 'cfgrgo:MaxFieldLength' })[0]
+
+        $yes.style | Should -Be 'danger'
+    }
+}

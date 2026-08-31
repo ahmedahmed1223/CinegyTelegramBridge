@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.1.1'; Items = @(
+                '🔴 تأكيد الإخفاء والخروج صار أحمر أيضًا: تفعيل التأكيد كان يعطي شاشة أضعف إشارة من تركه مطفأً.'
+            ) }
         @{ Version = '7.1.0'; Items = @(
                 '🔔 الرفض صار نافذة تظهر على الزر نفسه وتنتظر إغلاقك، بدل رسالة جديدة تدفع اللوحة خارج الشاشة.'
             ) }

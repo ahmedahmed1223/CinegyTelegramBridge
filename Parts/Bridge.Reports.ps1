@@ -63,13 +63,22 @@ function Show-Report {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $onlyUser = if (Test-Admin -ChatId $ChatId -UserId $UserId) { 0 } else { $UserId }
+    $markup = Get-ReportPeriodKeyboard -Kind $Kind -Period $Period
+    # The banner report is the one with columns, so it is the one that gains
+    # from a real table. Tried first and never depended on: an API without
+    # sendRichMessage, or a shape it will not take, falls through to exactly
+    # the text this screen has always sent.
+    if ($Kind -eq 'banners') {
+        $blocks = Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser
+        if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $markup) { return }
+    }
     $text = if ($Kind -eq 'news') {
         Get-NewsReportText -Period $Period -OnlyUserId $onlyUser
     }
     else {
         Get-BannerReportText -Period $Period -OnlyUserId $onlyUser
     }
-    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup (Get-ReportPeriodKeyboard -Kind $Kind -Period $Period)
+    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup $markup
 }
 
 function Get-ReportPeriod {
@@ -231,6 +240,62 @@ function Get-BannerSessions {
     }
     foreach ($layer in @($open.Keys)) { $sessions.Add($open[$layer]) }
     return @($sessions | Sort-Object StartedAt)
+}
+
+function Get-BannerReportBlocks {
+    <#
+        The banner report as rich blocks: a heading, a real table, a total.
+
+        The text version below lines its columns up with spaces and leading
+        emoji, which a proportional font on a phone does not line up at all -
+        every row wraps differently and the report reads as a list rather than
+        a table. Telegram lays this one out itself.
+
+        The banner copy stays out of the table on purpose. It is a whole
+        sentence of on-air text, and a column wide enough for it squeezes the
+        other four into nothing; it goes underneath its own row instead, the
+        way the text version already shows it.
+    #>
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-BannerReportData -Period $Period -OnlyUserId $OnlyUserId
+    $sessions = @($data.Sessions)
+
+    $blocks = @(@{ type = 'heading'; text = "🖼 تقرير البنرات — $($data.Label)"; size = 3 })
+    if ($sessions.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لم يُعرض أي بنر في هذه الفترة.' }
+        return $blocks
+    }
+
+    $cells = @(, @(
+            @{ text = 'البنر'; is_header = $true }
+            @{ text = 'الطبقة'; is_header = $true }
+            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = 'الوقت'; is_header = $true }
+            @{ text = 'المدة'; is_header = $true }
+        ))
+    foreach ($session in $sessions) {
+        $start = ([datetime]$session.StartedAt).ToString('HH:mm')
+        if ($session.EndedAt) {
+            $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
+            $span = "$minutes د"
+        }
+        else { $span = '🔴 على الهواء' }
+        $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
+        $cells += , @(
+            @{ text = [string]$session.Target }
+            @{ text = [string]$session.Layer }
+            @{ text = $(if ($who) { $who } else { '—' }) }
+            @{ text = $start }
+            @{ text = $span }
+        )
+    }
+
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($sessions.Count) بنرًا · $($data.Operators) مشغّلين" }
+    if ($data.Truncated) {
+        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+    }
+    return $blocks
 }
 
 function Get-BannerReportText {

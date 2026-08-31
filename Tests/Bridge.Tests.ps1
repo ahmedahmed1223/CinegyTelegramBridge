@@ -804,3 +804,60 @@ Describe 'Copy the operation reference' {
         @($rows | Where-Object { $_.ContainsKey('copy_text') }).Count | Should -Be 0
     }
 }
+
+Describe 'Rich sending never becomes a dependency' {
+    BeforeEach {
+        Mock Send-TelegramPagedText { }
+        Mock Test-Admin { $true }
+        Mock Get-BannerReportData { @{ Label = 'اليوم'; Operators = 0; Truncated = $false; Sessions = @() } }
+        $script:RichMessagesUnavailable = $false
+    }
+
+    It 'falls back to the text report the screen has always sent' {
+        Mock Send-TelegramRichMessage { $false }
+
+        Show-Report -ChatId 101 -UserId 101 -Kind banners -Period today
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
+    }
+
+    It 'does not also send the text version when the rich one worked' {
+        Mock Send-TelegramRichMessage { $true }
+
+        Show-Report -ChatId 101 -UserId 101 -Kind banners -Period today
+
+        Should -Invoke Send-TelegramPagedText -Times 0 -Exactly
+    }
+
+    It 'leaves the news report on text, because it has no columns to gain' {
+        Mock Send-TelegramRichMessage { $true }
+        Mock Get-NewsReportText { 'تقرير' }
+
+        Show-Report -ChatId 101 -UserId 101 -Kind news -Period today
+
+        Should -Invoke Send-TelegramRichMessage -Times 0 -Exactly
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
+    }
+
+    It 'stops trying once the method itself has been refused' {
+        # Otherwise every report pays two round trips to rediscover it.
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = 'Response status code does not indicate success: 400 (Bad Request).' } }
+        Mock Write-BridgeLog { }
+
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeFalse
+        $script:RichMessagesUnavailable | Should -BeTrue
+
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeFalse
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly
+    }
+
+    It 'asks Telegram to lay the table out right-to-left' {
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeTrue
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
+            $Uri -like '*/sendRichMessage' -and $Body.rich_message -match '"is_rtl":true'
+        }
+    }
+}

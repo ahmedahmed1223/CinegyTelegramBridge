@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 BeforeAll {
     # The bridge runs under StrictMode, and without it here these tests pass
     # on code that throws in production: reading .Sum off an empty
@@ -198,5 +198,53 @@ Describe 'Report truncation honesty' {
 
         # A report that silently drops records reads as a complete one.
         Get-NewsReportText -Period today | Should -Match 'عُرض أحدث'
+    }
+}
+
+Describe 'Banner report as rich blocks' {
+    BeforeEach {
+        Mock Get-AuditOperatorName { 'مخرج الأخبار' }
+        $script:RichMessagesUnavailable = $false
+    }
+
+    It 'leads with a heading and lays the sessions out as a table' {
+        Mock Get-BannerReportData {
+            @{ Label = 'اليوم'; Operators = 2; Truncated = $false; Sessions = @(
+                    @{ UserId = 10; Layer = 7; Target = 'urgent'; Values = 'نص'
+                        StartedAt = '2026-08-31T21:00:00'; EndedAt = '2026-08-31T21:05:00' }
+                ) }
+        }
+
+        $blocks = @(Get-BannerReportBlocks -Period today)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+
+        $blocks[0].type | Should -Be 'heading'
+        $table | Should -Not -BeNullOrEmpty
+        @($table.cells).Count | Should -Be 2
+        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 5
+        @($table.cells[1])[0].text | Should -Be 'urgent'
+        @($table.cells[1])[4].text | Should -Be '5 د'
+    }
+
+    It 'says a banner is still up rather than reporting a duration it does not have' {
+        Mock Get-BannerReportData {
+            @{ Label = 'اليوم'; Operators = 1; Truncated = $false; Sessions = @(
+                    @{ UserId = 10; Layer = 7; Target = 'urgent'; Values = ''
+                        StartedAt = '2026-08-31T21:00:00'; EndedAt = $null }
+                ) }
+        }
+
+        $table = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[1])[4].text | Should -Match 'على الهواء'
+    }
+
+    It 'draws no empty table for a period with nothing in it' {
+        Mock Get-BannerReportData { @{ Label = 'أمس'; Operators = 0; Truncated = $false; Sessions = @() } }
+
+        $blocks = @(Get-BannerReportBlocks -Period yesterday)
+
+        @($blocks | Where-Object { $_.type -eq 'table' }).Count | Should -Be 0
+        @($blocks | Where-Object { $_.type -eq 'paragraph' })[0].text | Should -Match 'لم يُعرض'
     }
 }

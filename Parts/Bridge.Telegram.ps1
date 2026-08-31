@@ -120,6 +120,47 @@ function Send-TelegramMessage {
     }
 }
 
+function Send-TelegramRichMessage {
+    <#
+        A message built from blocks (Bot API 10.1) rather than from text with
+        tags in it: a real table, with a header row Telegram lays out, instead
+        of columns lined up by hand with spaces that a proportional font on a
+        phone then fails to line up at all.
+
+        is_rtl is passed because every screen in this bridge is Arabic, and a
+        table laid out left-to-right puts the first column where the reader's
+        eye arrives last.
+
+        Returns $false rather than throwing, so every caller keeps its
+        existing text version as the fallback. A refusal of the method itself
+        - the shape being wrong, or an API that does not have it - disables
+        rich sending for the rest of the session: without that, every report
+        would pay two round trips to discover the same thing again.
+    #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][array]$Blocks,
+        [hashtable]$ReplyMarkup
+    )
+    if ($script:RichMessagesUnavailable) { return $false }
+    $body = @{
+        chat_id = $ChatId
+        rich_message = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    }
+    if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendRichMessage" -Method Post -Body $body `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if ($request.Success) { return $true }
+    if ([string]$request.Error -match '400|404') {
+        $script:RichMessagesUnavailable = $true
+        Write-BridgeLog "sendRichMessage was refused; using text for the rest of this session: $($request.Error)" 'WARN'
+    }
+    else {
+        Write-BridgeLog "Failed to send a rich message to $ChatId : $($request.Error)" 'WARN'
+    }
+    return $false
+}
+
 function Send-TelegramPhoto {
     param(
         [Parameter(Mandatory)][long]$ChatId,

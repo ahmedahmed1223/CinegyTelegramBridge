@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.4.0
+
+The banner report is a real table now, sent with sendRichMessage: a header
+row and five columns Telegram lays out itself, right-to-left. The text
+version aligned its columns with spaces, which a proportional font on a
+phone does not align at all. It is tried and never depended on - any refusal
+falls through to exactly the text this screen has always sent, and the first
+refusal of the method disables the attempt for the rest of the session.
+
 ## Version 7.3.0
 
 The copy-reference button gets the half that was missing: an administrator

@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.4.1
+
+Fixes a crash in the reference lookup on its most likely result: PowerShell
+unwraps a one-item array on return, so a single matching log line came back
+as a string and .Count on it threw under StrictMode. Also separates the
+shape check from the search - an empty array returns as $null just as an
+absent value does, so a rotated-away log was being reported as a malformed
+reference.
+
 ## Version 7.4.0
 
 The banner report is a real table now, sent with sendRichMessage: a header

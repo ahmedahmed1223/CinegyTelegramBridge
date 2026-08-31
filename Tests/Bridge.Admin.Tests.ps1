@@ -1423,3 +1423,51 @@ Describe 'Operation reference lookup' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'للمشرف وحده' }
     }
 }
+
+Describe 'Reference lookup with exactly one hit' {
+    BeforeEach {
+        Mock Test-Admin { $true }
+        Mock Send-TelegramPagedText { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'reports a single match instead of throwing on it' {
+        # PowerShell unwraps a one-item array on return, so a lookup that hit
+        # exactly one AIR_OP line came back as a [string] - and .Count on a
+        # string throws under StrictMode. It reached production as
+        # "Unhandled error processing message ... property 'Count' cannot be
+        # found", which is the one shape a lookup is most likely to have.
+        Mock Find-OperationByReference { 'AIR_OP id=air-5023333b032c476eb48204ca08032a98 action=SHOW result=blocked' }
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        { Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value '5023333b' } | Should -Not -Throw
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly -ParameterFilter { $Text -match '1 سطرًا' -and $Text -match 'result=blocked' }
+    }
+
+    It 'says the log has nothing rather than counting an empty result wrong' {
+        Mock Find-OperationByReference { @() }
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value '5023333b'
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly -ParameterFilter { $Text -match 'لا سجل' }
+    }
+
+    It 'tells a bad reference apart from a log that simply has no such line' {
+        # One function could not report both: an empty array comes back from
+        # PowerShell as $null, exactly as an absent value does, so a rotated
+        # log read as a malformed reference. The shape check is its own now.
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value 'AIR_OP'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'ليس مرجعًا' }
+    }
+
+    It 'accepts the shape without touching the log' {
+        Test-OperationReference -Reference '5023333B' | Should -BeTrue
+        Test-OperationReference -Reference 'AIR_OP' | Should -BeFalse
+        Test-OperationReference -Reference '' | Should -BeFalse
+    }
+}

@@ -1474,6 +1474,18 @@ function Get-DiagnosticWarnings {
     return $warnings.ToArray()
 }
 
+function Test-OperationReference {
+    <# Whether Value is shaped like what Get-OperationReference produces.
+
+       Separate from the lookup because a single function cannot report both
+       "not a reference" and "no such operation": PowerShell collapses an
+       empty array to $null on return exactly as it does an absent value, so
+       the two answers arrived indistinguishable and a rotated-away log was
+       reported as a malformed reference. #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Reference)
+    return ([string]$Reference).Trim().ToLowerInvariant() -match '^[0-9a-f]{8}$'
+}
+
 function Find-OperationByReference {
     <#
         The AIR_OP lines whose correlation id starts with Reference.
@@ -1487,8 +1499,8 @@ function Find-OperationByReference {
         are ever returned.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Reference, [string]$Path = '', [int]$MaxLines = 20)
+    if (-not (Test-OperationReference -Reference $Reference)) { return @() }
     $wanted = $Reference.Trim().ToLowerInvariant()
-    if ($wanted -notmatch '^[0-9a-f]{8}$') { return $null }
     $file = if ($Path) { $Path } else { $script:logPath }
     if (-not $file -or -not (Test-Path -LiteralPath $file)) { return @() }
     try {
@@ -1521,11 +1533,18 @@ function Complete-OperationReferenceLookup {
         Send-TelegramMessage -ChatId $ChatId -Text '🔎 البحث بالمرجع للمشرف وحده.'
         return
     }
-    $lines = Find-OperationByReference -Reference $Value
-    if ($null -eq $lines) {
+    # The null check has to come before the @() wrap - @($null) is a one-item
+    # array holding $null, which would read as a hit - and the wrap has to
+    # come before .Count, because PowerShell unwraps a one-item array on
+    # return: exactly one matching AIR_OP line made this a [string], and
+    # .Count on a string throws under StrictMode. Which is what it did.
+    if (-not (Test-OperationReference -Reference $Value)) {
         Send-TelegramMessage -ChatId $ChatId -Text '❌ ليس مرجعًا: يتكوّن من ثمانية أحرف من 0-9 و a-f.' -ReplyMarkup (Get-DiagnosticsKeyboard)
         return
     }
+    # @() because PowerShell unwraps a one-item array on return, and .Count on
+    # the [string] that produced is what threw in production.
+    $lines = @(Find-OperationByReference -Reference $Value)
     $text = if ($lines.Count -eq 0) {
         "🔎 لا سجل بالمرجع $($Value.Trim()).`nقد يكون السجل دُوِّر أو مُسح."
     }

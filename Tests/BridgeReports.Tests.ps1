@@ -7,6 +7,11 @@ BeforeAll {
 
     $script:Root = Split-Path -Parent $PSScriptRoot
     . (Join-Path $script:Root 'Parts\Bridge.Reports.ps1')
+    # The report renderers build their tables through the shared builder,
+    # which is a declaration in this file - dot-sourcing it defines the
+    # functions without running anything, so the tests still exercise the
+    # real bidi isolation rather than a stub of it.
+    . (Join-Path $script:Root 'Parts\Bridge.Telegram.ps1')
 
     # The report functions read through Read-AuditRecords and the two audit
     # field helpers; defining those here keeps this file independent of the
@@ -401,7 +406,11 @@ Describe 'A ten-edit day has to stay readable' {
 
         @($table.cells[0]).Count | Should -Be 4
         foreach ($row in @($table.cells)) { @($row).Count | Should -Be 4 }
-        foreach ($cell in @($table.cells[1])) { $cell.text.Length | Should -BeLessOrEqual 12 }
+        # Measured without the bidi isolates, which are two invisible
+        # characters the reader never sees.
+        foreach ($cell in @($table.cells[1])) {
+            $cell.text.Trim([char]0x2068, [char]0x2069).Length | Should -BeLessOrEqual 12
+        }
     }
 
     It 'holds ten readings in a range rather than a column of numbers' {

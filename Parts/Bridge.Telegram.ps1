@@ -40,6 +40,49 @@ function ConvertFrom-TelegramHtmlText {
     return $stripped.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&quot;', '"').Replace('&amp;', '&')
 }
 
+function Format-BridgeCellText {
+    <#
+        One table cell, isolated from its neighbours for bidi purposes.
+
+        Every table on these screens is Arabic with Latin and numeric cells
+        in it - a template key, 12–18, 07:10 ← 21:40, ط7. Inside a
+        right-to-left message the digits and the neutral characters between
+        them (dash, arrow, colon, middle dot) take their direction from what
+        surrounds them, so "07:10 ← 21:40" can render with its ends swapped
+        and "12–18" as "18–12". It is the same failure that mirrored the
+        brackets in the audit line, one column over.
+
+        FSI…PDI rather than the LRM pair used there: a cell has no fixed
+        direction to pin it to, and a first-strong isolate lets each one
+        decide for itself while stopping it from reordering anything else.
+    #>
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $fsi = [char]0x2068
+    $pdi = [char]0x2069
+    return "$fsi$Text$pdi"
+}
+
+function New-BridgeTableBlock {
+    <#
+        The one place a rich table is built.
+
+        Every cell goes through the bidi isolate, and the table always gets
+        the same striping and borders, so the five screens that draw one
+        cannot end up differing in either.
+    #>
+    param([Parameter(Mandatory)][object[]]$Cells)
+    $rows = @(foreach ($row in @($Cells)) {
+            , @(foreach ($cell in @($row)) {
+                    $copy = @{}
+                    foreach ($key in $cell.Keys) { $copy[$key] = $cell[$key] }
+                    $copy.text = Format-BridgeCellText -Text ([string]$cell.text)
+                    $copy
+                })
+        })
+    return @{ type = 'table'; cells = $rows; is_striped = $true; is_compact = $true; is_bordered = $true }
+}
+
 function New-BridgeButton {
     <#
         One inline-keyboard button.

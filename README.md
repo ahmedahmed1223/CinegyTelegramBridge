@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.14.0
+
+Fixes the direction of table cells. Every table here is Arabic with Latin
+and numeric cells in it, and inside a right-to-left message the digits and
+the neutrals between them take their direction from their surroundings - so
+"07:10 ← 21:40" could render with its ends swapped and "12–18" as "18–12".
+Each cell is now isolated, through the single builder all five tables go
+through. Full status splits into named sections instead of one long fold.
+
 ## Version 7.13.0
 
 Status and full status become blocks: the verdict as a heading, the layers

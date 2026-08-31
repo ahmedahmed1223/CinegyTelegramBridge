@@ -1046,3 +1046,72 @@ Describe 'The operation history says what happened before it says what was done'
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 }
+
+Describe 'Table cells cannot be reordered by their neighbours' {
+    It 'isolates a cell so its own content decides its direction' {
+        # Inside a right-to-left message the digits and the neutrals between
+        # them take direction from what surrounds them, so "07:10 ← 21:40"
+        # can render with its ends swapped and "12–18" as "18–12".
+        $fsi = [char]0x2068
+        $pdi = [char]0x2069
+
+        Format-BridgeCellText -Text '12–18' | Should -Be "${fsi}12–18$pdi"
+        Format-BridgeCellText -Text 'أخبار' | Should -Be "${fsi}أخبار$pdi"
+    }
+
+    It 'leaves an empty cell empty rather than filling it with invisible marks' {
+        Format-BridgeCellText -Text '' | Should -Be ''
+        Format-BridgeCellText -Text $null | Should -Be ''
+    }
+
+    It 'isolates every cell of a table, headers included' {
+        $table = New-BridgeTableBlock -Cells @(
+            , @(@{ text = 'اليوم'; is_header = $true }, @{ text = 'المدى'; is_header = $true })
+            , @(@{ text = '08/31' }, @{ text = '12–18' })
+        )
+
+        foreach ($row in @($table.cells)) {
+            foreach ($cell in @($row)) {
+                $cell.text | Should -Match "^$([regex]::Escape([string][char]0x2068))"
+                $cell.text | Should -Match "$([regex]::Escape([string][char]0x2069))$"
+            }
+        }
+        # The header flag has to survive the rewrite, or the top row stops
+        # being a header.
+        @($table.cells[0])[0].is_header | Should -BeTrue
+        $table.is_bordered | Should -BeTrue
+    }
+
+    It 'does not touch the caller cells, which are rendered again on refresh' {
+        $cells = @(, @(@{ text = 'اليوم' }))
+
+        New-BridgeTableBlock -Cells $cells | Out-Null
+
+        @($cells[0])[0].text | Should -Be 'اليوم'
+    }
+}
+
+Describe 'Full status splits into the subjects it covers' {
+    It 'gives each named section its own control' {
+        # Four subjects - Cinegy, the services, the running work, access - and
+        # a reader chasing one should not open the other three to reach it.
+        $lines = @('🌐 127.0.0.1', '🎛 اتصال Cinegy', '📶 حديثة', '🩺 صحة الخدمات', '🟢 Telegram', '👥 الوصول', '🔐 6 محادثات')
+
+        $blocks = @(Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall '🟢 سليم' `
+                -DetailLines $lines -DetailSummary '🎛 عام' `
+                -SectionHeadings @('🎛 اتصال Cinegy', '🩺 صحة الخدمات', '👥 الوصول'))
+
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })
+        @($folded).Count | Should -Be 4
+        $folded[0].summary | Should -Be '🎛 عام'
+        $folded[1].summary | Should -Be '🎛 اتصال Cinegy'
+        $folded[3].summary | Should -Be '👥 الوصول'
+        @($folded[3].blocks)[0].text | Should -Be '🔐 6 محادثات'
+    }
+
+    It 'keeps one fold when no sections are named, as the short screen wants' {
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 سليم' -DetailLines @('أ', 'ب'))
+
+        @($blocks | Where-Object { $_.type -eq 'details' }).Count | Should -Be 1
+    }
+}

@@ -317,7 +317,7 @@ function Get-NewsReportBlocks {
         )
     }
 
-    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += (New-BridgeTableBlock -Cells $cells)
     $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا" }
     foreach ($line in @(Get-NewsReportHighlights -Data $data)) {
         $blocks += @{ type = 'paragraph'; text = $line }
@@ -504,7 +504,7 @@ function Get-BannerReportBlocks {
         )
     }
 
-    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += (New-BridgeTableBlock -Cells $cells)
     $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($sessions.Count) بنرًا · $($data.Operators) مشغّلين" }
     # The copy that actually reached the screen is what an operator
     # recognises a banner by, and no column in a four-column table is wide

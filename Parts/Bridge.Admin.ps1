@@ -82,7 +82,7 @@ function Get-OnAirTableBlocks {
             @{ text = $(if ($who) { $who } else { '—' }) }
         )
     }
-    return @(@{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true })
+    return @((New-BridgeTableBlock -Cells $cells))
 }
 
 function Get-StatusRichBlocks {
@@ -100,7 +100,8 @@ function Get-StatusRichBlocks {
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Overall,
         [AllowNull()][object[]]$DetailLines = $null,
-        [string]$DetailSummary = '🔍 التفاصيل'
+        [string]$DetailSummary = '🔍 التفاصيل',
+        [AllowNull()][string[]]$SectionHeadings = $null
     )
     $blocks = @(@{ type = 'heading'; text = "$Title — v$($script:BridgeVersion)"; size = 3 })
     $blocks += @{ type = 'paragraph'; text = $Overall }
@@ -108,11 +109,41 @@ function Get-StatusRichBlocks {
     $blocks += @(Get-OnAirTableBlocks)
     # Blank separators are a text-screen device; as blocks they would be empty
     # paragraphs, which render as gaps that look like something failed.
-    $detail = @(@($DetailLines) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-            ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
-    if ($detail.Count -gt 0) {
-        $blocks += @{ type = 'details'; summary = $DetailSummary; blocks = $detail }
+    $clean = @(@($DetailLines) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
+    if ($clean.Count -eq 0) { return $blocks }
+
+    # Named sections rather than one long fold, when the caller says where
+    # they start. Full status is four subjects - Cinegy, the services, the
+    # running work, access - and a reader chasing one of them should not have
+    # to open the other three to reach it.
+    $headings = @($SectionHeadings)
+    if ($headings.Count -eq 0) {
+        $blocks += @{ type = 'details'; summary = $DetailSummary
+            blocks = @($clean | ForEach-Object { @{ type = 'paragraph'; text = $_ } }) }
+        return $blocks
     }
+
+    $title = $DetailSummary
+    $body = @()
+    $flush = {
+        if ($body.Count -gt 0) {
+            $script:StatusSectionBlocks += @{ type = 'details'; summary = $title
+                blocks = @($body | ForEach-Object { @{ type = 'paragraph'; text = $_ } }) }
+        }
+    }
+    $script:StatusSectionBlocks = @()
+    foreach ($line in $clean) {
+        if ($headings -contains $line) {
+            & $flush
+            $title = $line
+            $body = @()
+            continue
+        }
+        $body += $line
+    }
+    & $flush
+    $blocks += $script:StatusSectionBlocks
+    $script:StatusSectionBlocks = @()
     return $blocks
 }
 
@@ -653,7 +684,8 @@ function Invoke-FullStatusCommand {
     # as a table, and the machine detail folded under it. The leading
     # lines are skipped because the blocks already carry them.
     $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
-        -DetailLines @($lines | Select-Object -Skip 5) -DetailSummary '🔍 التفاصيل الكاملة'
+        -DetailLines @($lines | Select-Object -Skip 5) -DetailSummary '🎛 حالة Cinegy' `
+        -SectionHeadings @('🎛 اتصال Cinegy', '🩺 صحة الخدمات', '⚙️ التشغيل والجدولة', '👥 الوصول')
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
 }
@@ -935,7 +967,7 @@ function Get-BridgeHealthCenterBlocks {
     foreach ($row in ($faults + $healthy)) {
         $cells += , @(@{ text = [string]$row.Name }, @{ text = [string]$row.Icon }, @{ text = [string]$row.Detail })
     }
-    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += (New-BridgeTableBlock -Cells $cells)
 
     $usage = Get-BridgeUsageMetrics
     $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء" }

@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.NewsScreens.Tests.ps1 - News ticker screens, drafts, locks, and publishing.
 
@@ -43,7 +43,7 @@ Describe 'News ticker management' {
 
     It 'shows news management inside the main inline menu' {
         $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101
-        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $callbacks | Should -Contain 'menu:news'
     }
 
@@ -435,7 +435,7 @@ Describe 'News item delete confirmation' {
         # Cancelling should leave the operator where they were.
         Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 2 | Out-Null
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } }) -contains 'news:item:2'
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } }) -contains 'news:item:2'
         }
     }
 
@@ -460,7 +460,7 @@ Describe 'Delete from the reorder list' {
 
     It 'offers a delete on every row' {
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         foreach ($i in 0..2) { $flat | Should -Contain "news:delask:$i" }
     }
 
@@ -468,13 +468,13 @@ Describe 'Delete from the reorder list' {
         # A second delete path would be a second place for a thumb to lose
         # typed work.
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Not -Contain 'news:delete:0'
     }
 
     It 'keeps the move and edit controls alongside it' {
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
-        $middle = @($rows[1] | ForEach-Object { $_.callback_data })
+        $middle = @($rows[1] | ForEach-Object { $_['callback_data'] })
         $middle | Should -Contain 'news:up:1'
         $middle | Should -Contain 'news:item:1'
         $middle | Should -Contain 'news:down:1'
@@ -484,7 +484,7 @@ Describe 'Delete from the reorder list' {
     It 'shows nothing to delete when there is no draft' {
         $script:NewsTickerDraft = $null
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         ($flat -join ' ') | Should -Not -Match 'delask'
     }
 }
@@ -502,7 +502,7 @@ Describe 'News list layout' {
     It 'keeps everything on one row by default' {
         Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
-        $middle = @($rows[1] | ForEach-Object { $_.callback_data })
+        $middle = @($rows[1] | ForEach-Object { $_['callback_data'] })
         $middle | Should -Contain 'news:up:1'
         $middle | Should -Contain 'news:item:1'
         $middle | Should -Contain 'news:delask:1'
@@ -520,7 +520,7 @@ Describe 'News list layout' {
     It 'puts move, edit and delete on the row beneath it' {
         Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
-        $controls = @($rows[3] | ForEach-Object { $_.callback_data })
+        $controls = @($rows[3] | ForEach-Object { $_['callback_data'] })
         $controls | Should -Contain 'news:up:1'
         $controls | Should -Contain 'news:down:1'
         $controls | Should -Contain 'news:edit:1'
@@ -530,15 +530,15 @@ Describe 'News list layout' {
     It 'omits the move it cannot make, at either end' {
         Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
-        @($rows[1] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:up:0'
-        @($rows[5] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:down:2'
+        @($rows[1] | ForEach-Object { $_['callback_data'] }) | Should -Not -Contain 'news:up:0'
+        @($rows[5] | ForEach-Object { $_['callback_data'] }) | Should -Not -Contain 'news:down:2'
     }
 
     It 'shows more of a long headline when it owns the row' {
         Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $stacked = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[2][0].text
         Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
-        $inline = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] | Where-Object { $_.callback_data -eq 'news:item:1' })[0].text
+        $inline = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] | Where-Object { $_['callback_data'] -eq 'news:item:1' })[0].text
         $stacked.Length | Should -BeGreaterThan $inline.Length
     }
 
@@ -546,7 +546,7 @@ Describe 'News list layout' {
         foreach ($layout in @('text', 'stacked', 'inline')) {
             Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
             $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
             $flat | Should -Not -Contain 'news:delete:1'
             $flat | Should -Contain 'news:delask:1'
         }
@@ -570,23 +570,75 @@ Describe 'News list row geometry' {
         # last items look bigger than the rest.
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
         foreach ($index in 0..2) { @($rows[$index]).Count | Should -Be 4 }
-        @($rows[0] | ForEach-Object { $_.callback_data }) | Should -Contain 'news:noop'
-        @($rows[2] | ForEach-Object { $_.callback_data }) | Should -Contain 'news:noop'
+    }
+
+    It 'makes the two end placeholders inert instead of merely pointless' {
+        # They used to carry a live callback into a no-op handler: pressable,
+        # acknowledged, and doing nothing - which reads exactly like a press
+        # the bridge dropped. Bot API 10.3 lets a button say it is disabled.
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        $first = @($rows[0] | Where-Object { $_.text -eq '▫️' })
+        $last = @($rows[2] | Where-Object { $_.text -eq '▫️' })
+
+        @($first).Count | Should -Be 1
+        @($last).Count | Should -Be 1
+        $first[0].ContainsKey('disabled') | Should -BeTrue
+        $first[0].ContainsKey('callback_data') | Should -BeFalse
+        $last[0].ContainsKey('disabled') | Should -BeTrue
     }
 
     It 'carries the headline in the message text, uncut, instead of a button' {
         $text = Get-NewsTickerReorderText -UserId 42
 
-        $text | Should -Match ([regex]::Escape('2. خبر ثانٍ طويل جدًا يتجاوز أي حدّ كان يُقصّ عنده في زر ضيق'))
+        $text | Should -Match ([regex]::Escape('<b>2.</b> خبر ثانٍ طويل جدًا يتجاوز أي حدّ كان يُقصّ عنده في زر ضيق'))
         @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] |
-            Where-Object { $_.callback_data -eq 'news:item:1' })[0].text | Should -Be '2'
+            Where-Object { $_['callback_data'] -eq 'news:item:1' })[0].text | Should -Be '2'
     }
 
     It 'keeps the listing inside one Telegram message for a full page' {
+        # Against the limit the bridge actually sends at, not Telegram's 4096:
+        # everything between the two used to pass here and split on the wire.
         $script:NewsTickerDraft.Items = @(1..21 | ForEach-Object { "خبر رقم $_ " + ('ط' * 400) })
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
 
-        (Get-NewsTickerReorderText -UserId 42).Length | Should -BeLessThan 4096
+        @(Split-TelegramText -Text (Get-NewsTickerReorderText -UserId 42)).Count | Should -Be 1
+    }
+
+    It 'still fits when escaping expands every headline it lists' {
+        # Escaping only grows text: one '&' becomes five characters. Measuring
+        # the budget before escaping put a page of "AT&T" headlines at 6000
+        # characters against a 3500 limit, which split the message and dropped
+        # its parse mode - so the operator saw the raw <b> and <blockquote>
+        # tags instead of a list.
+        $script:NewsTickerDraft.Items = @(1..21 | ForEach-Object { 'AT&T ' * 120 })
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+
+        @(Split-TelegramText -Text (Get-NewsTickerReorderText -UserId 42)).Count | Should -Be 1
+    }
+}
+
+Describe 'News listing line escaping' {
+    It 'measures its length after escaping, not before' {
+        $line = Get-NewsListEscapedLine -Item ('&' * 200) -MaxLength 60
+
+        $line.Length | Should -BeLessOrEqual 60
+    }
+
+    It 'never cuts an entity in half, which would void the whole message' {
+        foreach ($max in 41..60) {
+            $line = Get-NewsListEscapedLine -Item ('&' * 500) -MaxLength $max
+            # A trailing '&am' or '&amp' is not an entity; Telegram rejects it.
+            $line.TrimEnd('…') | Should -Match '^(&amp;)*$'
+        }
+    }
+
+    It 'leaves a short headline exactly as typed, apart from escaping' {
+        Get-NewsListEscapedLine -Item 'خبر <عاجل> & مهم' -MaxLength 120 |
+            Should -Be 'خبر &lt;عاجل&gt; &amp; مهم'
+    }
+
+    It 'handles an empty headline rather than throwing' {
+        Get-NewsListEscapedLine -Item '' -MaxLength 40 | Should -Be ''
     }
 }
 
@@ -611,7 +663,7 @@ Describe 'News list paging' {
         $script:NewsTickerDraft.Items = @(1..12 | ForEach-Object { "خبر رقم $_" })
 
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         @($flat | Where-Object { $_ -like 'news:item:*' }).Count | Should -Be 12
         $flat | Should -Not -Contain 'news:list:1'
@@ -648,7 +700,7 @@ Describe 'News list paging' {
         $seen = @()
         foreach ($page in 0..((Get-NewsTickerPageCount -UserId 42) - 1)) {
             $seen += @((Get-NewsTickerReorderKeyboard -UserId 42 -Page $page).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } } |
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } } |
                     Where-Object { $_ -like 'news:item:*' })
         }
         @($seen | Sort-Object -Unique).Count | Should -Be 38
@@ -665,46 +717,46 @@ Describe 'News list paging' {
 
     It 'numbers items by their real position, not their position on the page' {
         $labels = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 2).inline_keyboard |
-                ForEach-Object { @($_) } | Where-Object { $_.callback_data -like 'news:item:*' })
+                ForEach-Object { @($_) } | Where-Object { $_['callback_data'] -like 'news:item:*' })
         $labels[0].text | Should -Be '21'
         $labels[0].callback_data | Should -Be 'news:item:20'
     }
 
     It 'offers forward and back only where they exist' {
         $firstPage = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 0).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $firstPage | Should -Not -Contain 'news:list:-1'
         $firstPage | Should -Contain 'news:list:1'
 
         $lastPage = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 3).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $lastPage | Should -Contain 'news:list:2'
         $lastPage | Should -Not -Contain 'news:list:4'
     }
 
     It 'clamps a page number that is out of range instead of rendering nothing' {
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 99).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Contain 'news:item:37'
     }
 
     It 'shows no pager at all when everything fits on one page' {
         $script:NewsTickerDraft.Items = @('واحد', 'اثنان')
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 0).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         ($flat -join ' ') | Should -Not -Match 'news:list:'
     }
 
     It 'states the range and total in the heading' {
         $text = Get-NewsTickerReorderText -UserId 42 -Page 1
-        $text | Should -Match 'الأخبار: 38'
+        $text | Should -Match ([regex]::Escape('الأخبار: <b>38</b>'))
         $text | Should -Match '11'
         $text | Should -Match 'صفحة 2 من 4'
     }
 
     It 'keeps the move controls absolute, so paging never moves the wrong item' {
         $flat = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 1).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Contain 'news:up:10'
         $flat | Should -Contain 'news:delask:10'
     }
@@ -734,7 +786,7 @@ Describe 'News list layout choice' {
         Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'NewsListStackedLabelLength' }
 
         $label = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] |
-            Where-Object { $_.callback_data -eq 'news:item:1' })[0].text
+            Where-Object { $_['callback_data'] -eq 'news:item:1' })[0].text
 
         $label | Should -Match 'خبر ثانٍ'
         Get-NewsTickerReorderText -UserId 42 | Should -Not -Match '2\. خبر ثانٍ'
@@ -744,7 +796,7 @@ Describe 'News list layout choice' {
         foreach ($layout in @('text', 'stacked', 'inline', 'compact')) {
             Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
             $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
             foreach ($i in 0..2) { $flat | Should -Contain "news:item:$i" }
         }
     }
@@ -764,7 +816,7 @@ Describe 'Compact and stacked shapes' {
         Mock Get-Setting { 'compact' } -ParameterFilter { $Name -eq 'NewsListLayout' }
 
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
-        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         foreach ($i in 0..29) { $flat | Should -Contain "news:item:$i" }
         $flat | Should -Not -Contain 'news:list:1'
@@ -789,5 +841,42 @@ Describe 'Compact and stacked shapes' {
         foreach ($button in @($rows[3])) { $button.text | Should -Match '2$' }
         @($rows[2])[0].text | Should -Match '^▫️ 2\.'
         @($rows[0])[0].text | Should -Match '^▪️ 1\.'
+    }
+}
+
+Describe 'News reorder screen as HTML' {
+    BeforeAll {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('شركة AT&T <b>عاجل</b>', 'خبر عادي')
+        }
+        Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'escapes a headline that contains markup, instead of losing the whole send to a 400' {
+        # A headline is typed by a person and goes on air. One stray '<' used
+        # to be harmless; under parse_mode=HTML it makes Telegram reject the
+        # message, which on this screen reads as a list that will not update.
+        $text = Get-NewsTickerReorderText -UserId 42
+
+        $text | Should -Match ([regex]::Escape('AT&amp;T &lt;b&gt;عاجل&lt;/b&gt;'))
+        $text | Should -Not -Match ([regex]::Escape('<b>عاجل'))
+    }
+
+    It 'wraps the listing in an expandable quotation so a long page keeps its keyboard on screen' {
+        $text = Get-NewsTickerReorderText -UserId 42
+
+        $text | Should -Match ([regex]::Escape('<blockquote expandable>'))
+        $text | Should -Match ([regex]::Escape('</blockquote>'))
+    }
+
+    It 'sends the screen as HTML, not as text that merely looks like it' {
+        Mock Edit-TelegramMessageText { $true }
+
+        Show-NewsTickerReorderScreen -ChatId 42 -UserId 42 -MessageId 7
+
+        Should -Invoke Edit-TelegramMessageText -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' }
     }
 }

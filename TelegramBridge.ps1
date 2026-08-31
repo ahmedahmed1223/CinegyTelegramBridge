@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     TelegramBridge.ps1
 
@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.9.5'
+$script:BridgeVersion = '7.0.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -159,6 +159,10 @@ $script:DefaultSettings = [ordered]@{
     MaintenanceMode           = $false  # blocks playout mutations while monitoring remains available
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     ButtonTextMaxLength        = 32      # visual text elements; 0 disables shortening
+    # Bot API 9.4's button colours (danger/success/primary). On by default:
+    # every label still reads the same without them - a client too old for the
+    # field simply ignores it - and off for anyone who finds a red bin loud.
+    EnableButtonStyles         = $true
     EnableNewsTickerManagement = $true
     NewsFilePath               = 'D:\cingy cg\ticker msg\news.txt'
     NewsItemSeparator          = '|'
@@ -291,6 +295,7 @@ $script:SettingDisplayMetadata = @{
     TelegramRequestTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة إرسال رسائل وملفات Telegram' }
     MaxFieldLength = @{ Unit = 'حرفًا'; Description = 'الحد الأقصى لطول نص الحقل' }
     ButtonTextMaxLength = @{ Unit = 'حرفًا'; Description = 'الحد البصري لنص أزرار Telegram (0 للتعطيل)' }
+    EnableButtonStyles = @{ Unit = ''; Description = 'تلوين الأزرار: أحمر للحذف · أخضر للنشر · أزرق للأساسي (تتجاهله التطبيقات القديمة)' }
     PostShowDelayMs = @{ Unit = 'مللي ثانية'; Description = 'تأخير إعادة إرسال النص بعد العرض' }
     PendingStateTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مدة صلاحية عملية الإدخال غير المكتملة' }
     SnapshotCooldownSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل قبل التقاط صورة بث جديدة' }
@@ -838,7 +843,7 @@ foreach ($entry in @(
                 'TemplateReminderFollowUpMinutes',
                 'LayerNames', 'EnableFavorites', 'SharedFavoritesEnabled', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
-                'ShowLayerLockBadge', 'ButtonTextMaxLength'
+                'ShowLayerLockBadge', 'ButtonTextMaxLength', 'EnableButtonStyles'
             ) },
         @{ Category = 'news'; Names = @(
                 'EnableNewsTickerManagement', 'NewsFilePath', 'NewsItemSeparator',

@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -6,20 +6,108 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function ConvertTo-TelegramHtmlText {
+    <# Escapes text that will be sent with parse_mode=HTML.
+
+       Every news headline, template name and operator display name is typed
+       by a person. An unescaped '<' turns the rest of that message into an
+       unclosed tag and Telegram rejects the whole send with a 400 - which on
+       the reorder screen reads as "the list will not update", the exact
+       failure paging was added to fix.
+
+       '&' goes first: escaping it after '<' would turn the '&lt;' just
+       produced into '&amp;lt;'. Telegram names only four supported entities
+       (&lt; &gt; &amp; &quot;), so nothing else may be emitted. #>
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    return $Text.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;')
+}
+
+function New-BridgeButton {
+    <#
+        One inline-keyboard button.
+
+        Exists because Bot API 9.4 added 'style' and 10.3 added 'disabled',
+        and both are worth applying in one place rather than at the ~40 sites
+        that build a button by hand.
+
+        Style is one of Telegram's three documented values - danger (red),
+        success (green), primary (blue) - and needs no Premium. Clients older
+        than the field ignore it, so the label must still carry the meaning on
+        its own: style sharpens a screen, it never explains it.
+
+        -Disabled renders a button that does nothing. Telegram counts
+        'disabled' as the button's type, so it replaces callback_data rather
+        than joining it - which is the point: the placeholder it succeeds
+        carried a real callback ('news:noop') and was therefore pressable.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [string]$CallbackData,
+        [ValidateSet('', 'danger', 'success', 'primary')][string]$Style = '',
+        [switch]$Disabled
+    )
+    $button = @{ text = $Text }
+    if ($Disabled) { $button.disabled = @{} }
+    elseif ($CallbackData) { $button.callback_data = $CallbackData }
+    if ($Style) { $button.style = $Style }
+    return $button
+}
+
+function ConvertTo-TelegramReplyMarkupJson {
+    <# The single place a keyboard becomes wire JSON.
+
+       EnableButtonStyles is honoured here rather than in New-BridgeButton so
+       that building a keyboard stays a pure function of the draft - a button
+       constructor that reads settings makes every keyboard test depend on a
+       setting it does not care about - and so the setting is read once per
+       message instead of once per button.
+
+       Styled buttons are rebuilt without the field rather than edited: the
+       caller's keyboard is theirs, and stripping it in place would change
+       what a re-render sends next time. #>
+    param([Parameter(Mandatory)][hashtable]$ReplyMarkup)
+    $markup = $ReplyMarkup
+    if ($markup.ContainsKey('inline_keyboard') -and -not (Get-Setting 'EnableButtonStyles')) {
+        $rows = @(foreach ($row in @($markup.inline_keyboard)) {
+                , @(foreach ($button in @($row)) {
+                        if ($button -is [hashtable] -and $button.ContainsKey('style')) {
+                            $plain = @{}
+                            foreach ($key in $button.Keys) { if ($key -ne 'style') { $plain[$key] = $button[$key] } }
+                            $plain
+                        }
+                        else { $button }
+                    })
+            })
+        $markup = @{ inline_keyboard = $rows }
+    }
+    return ($markup | ConvertTo-Json -Depth 10 -Compress)
+}
+
 function Send-TelegramMessage {
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [Parameter(Mandatory)][string]$Text,
-        [hashtable]$ReplyMarkup
+        [hashtable]$ReplyMarkup,
+        [ValidateSet('', 'HTML')][string]$ParseMode = ''
     )
     [string[]]$chunks = @(Split-TelegramText -Text $Text)
+    # A split lands wherever the budget runs out, which for HTML can be the
+    # middle of a tag - and Telegram rejects that outright. Callers asking for
+    # HTML build one message deliberately; if one ever overflows, degrade to
+    # plain text rather than lose the whole message to a 400.
+    $mode = if ($ParseMode -and $chunks.Count -eq 1) { $ParseMode } else { '' }
+    if ($ParseMode -and $chunks.Count -gt 1) {
+        Write-BridgeLog "HTML message to $ChatId exceeded one chunk; sent as plain text" "WARN"
+    }
     for ($i = 0; $i -lt $chunks.Count; $i++) {
         # [string] cast is deliberate belt-and-braces against anything
         # array-shaped ever reaching the body again.
         $body = @{ chat_id = $ChatId; text = [string]$chunks[$i] }
+        if ($mode) { $body.parse_mode = $mode }
         # Only the final chunk carries the keyboard.
         if ($ReplyMarkup -and $i -eq ($chunks.Count - 1)) {
-            $body.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress)
+            $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup)
         }
         $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $body `
             -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
@@ -41,7 +129,7 @@ function Send-TelegramPhoto {
     )
     $form = @{ chat_id = "$ChatId"; photo = Get-Item -Path $FilePath }
     if ($Caption) { $form.caption = $Caption }
-    if ($ReplyMarkup) { $form.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
+    if ($ReplyMarkup) { $form.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendPhoto" -Method Post -Form $form `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
     if (-not $request.Success) {

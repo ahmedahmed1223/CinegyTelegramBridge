@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -568,9 +568,12 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         $rows += , @(@{text='➕ إضافة خبر';callback_data='news:add'}, @{text='📝 تعديل وترتيب';callback_data='news:list'})
         $rows += , @(@{text='📥 استيراد TXT';callback_data='news:import'}, @{text='👁 معاينة';callback_data='news:preview'})
         if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsClearAllNews')) {
-            $rows += , @(@{text='🧹 مسح الكل';callback_data='news:clear'})
+            $rows += , @((New-BridgeButton -Text '🧹 مسح الكل' -CallbackData 'news:clear' -Style 'danger'))
         }
-        $rows += , @(@{text='✅ مراجعة ونشر';callback_data='news:publish'}, @{text='🗑 إلغاء المسودة';callback_data='news:cancel'})
+        # The publish/discard row is the one place on this screen where a
+        # mis-tap costs work, so it is the one place colour earns its keep.
+        $rows += , @((New-BridgeButton -Text '✅ مراجعة ونشر' -CallbackData 'news:publish' -Style 'success'),
+            (New-BridgeButton -Text '🗑 إلغاء المسودة' -CallbackData 'news:cancel' -Style 'danger'))
     }
     else {
         $rows += , @(@{text="🔒 لدى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))";callback_data='news:refresh'})
@@ -595,9 +598,11 @@ function Edit-TelegramMessageText {
        news reorder list) never pile up duplicate messages with stale
        buttons. Falls back to returning $false so callers can resend. #>
     param([Parameter(Mandatory)][long]$ChatId,[Parameter(Mandatory)][int]$MessageId,
-        [Parameter(Mandatory)][string]$Text,[hashtable]$ReplyMarkup)
+        [Parameter(Mandatory)][string]$Text,[hashtable]$ReplyMarkup,
+        [ValidateSet('', 'HTML')][string]$ParseMode = '')
     $body = @{ chat_id = $ChatId; message_id = $MessageId; text = $Text }
-    if ($ReplyMarkup) { $body.reply_markup = ($ReplyMarkup | ConvertTo-Json -Depth 10 -Compress) }
+    if ($ParseMode) { $body.parse_mode = $ParseMode }
+    if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
     if (-not $request.Success) { Write-BridgeLog "Failed to edit Telegram message ${MessageId}: $($request.Error)" "WARN"; return $false }
@@ -616,7 +621,8 @@ function Show-NewsTickerDeleteConfirm {
     $preview = if ($item.Length -gt 200) { $item.Substring(0, 200) + '…' } else { $item }
     $text = "🗑 تأكيد حذف الخبر $($Index + 1) من $(@($draft.Items).Count):`n`n$preview"
     $markup = @{inline_keyboard=@(
-            , @(@{text='🗑 نعم، احذف';callback_data="news:delete:$Index"}, @{text='❌ إلغاء';callback_data="news:item:$Index"}))}
+            , @((New-BridgeButton -Text '🗑 نعم، احذف' -CallbackData "news:delete:$Index" -Style 'danger'),
+                (New-BridgeButton -Text '❌ إلغاء' -CallbackData "news:item:$Index")))}
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return $true }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
     return $true
@@ -628,8 +634,16 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
        every move so the buttons can never point at a stale index. #>
     $draft=Get-NewsTickerDraft -UserId $UserId;if(-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count){return}
     $count=@($draft.Items).Count
-    $rows=@(,@(@{text='⬆️ تحريك لأعلى';callback_data="news:iup:$Index"},@{text='⬇️ تحريك لأسفل';callback_data="news:idown:$Index"}))
-    $rows+=,@(@{text='✏️ تعديل';callback_data="news:edit:$Index"},@{text='🗑 حذف';callback_data="news:delask:$Index"})
+    # The arrows are disabled rather than hidden at the ends: a row that loses
+    # a button changes width, and the screen appears to shift under the thumb
+    # between one item and the next.
+    $up = if ($Index -gt 0) { New-BridgeButton -Text '⬆️ تحريك لأعلى' -CallbackData "news:iup:$Index" }
+          else { New-BridgeButton -Text '⬆️ تحريك لأعلى' -Disabled }
+    $down = if ($Index -lt ($count - 1)) { New-BridgeButton -Text '⬇️ تحريك لأسفل' -CallbackData "news:idown:$Index" }
+            else { New-BridgeButton -Text '⬇️ تحريك لأسفل' -Disabled }
+    $rows=@(,@($up,$down))
+    $rows+=,@((New-BridgeButton -Text '✏️ تعديل' -CallbackData "news:edit:$Index"),
+        (New-BridgeButton -Text '🗑 حذف' -CallbackData "news:delask:$Index" -Style 'danger'))
     $rows+=,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'})
     $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}
@@ -730,10 +744,10 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
             if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
             $rows += , @(@{text=$fullLabel; callback_data="news:item:$i"})
             $controls = @()
-            if ($i -gt 0) { $controls += , @{text="⬆️ $number"; callback_data="news:up:$i"} }
-            if ($i -lt ($count - 1)) { $controls += , @{text="⬇️ $number"; callback_data="news:down:$i"} }
-            $controls += , @{text="✏️ $number"; callback_data="news:edit:$i"}
-            $controls += , @{text="🗑 $number"; callback_data="news:delask:$i"}
+            if ($i -gt 0) { $controls += , (New-BridgeButton -Text "⬆️ $number" -CallbackData "news:up:$i") }
+            if ($i -lt ($count - 1)) { $controls += , (New-BridgeButton -Text "⬇️ $number" -CallbackData "news:down:$i") }
+            $controls += , (New-BridgeButton -Text "✏️ $number" -CallbackData "news:edit:$i")
+            $controls += , (New-BridgeButton -Text "🗑 $number" -CallbackData "news:delask:$i" -Style 'danger')
             $rows += , @($controls)
             continue
         }
@@ -749,10 +763,10 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
             $label = "$($i + 1). $($draft.Items[$i])"
             if ($label.Length -gt $inlineMax) { $label = $label.Substring(0, $inlineMax - 1) + '…' }
             $row = @()
-            if ($i -gt 0) { $row += , @{text='⬆️'; callback_data="news:up:$i"} }
-            $row += , @{text=$label; callback_data="news:item:$i"}
-            if ($i -lt ($count - 1)) { $row += , @{text='⬇️'; callback_data="news:down:$i"} }
-            $row += , @{text='🗑'; callback_data="news:delask:$i"}
+            if ($i -gt 0) { $row += , (New-BridgeButton -Text '⬆️' -CallbackData "news:up:$i") }
+            $row += , (New-BridgeButton -Text $label -CallbackData "news:item:$i")
+            if ($i -lt ($count - 1)) { $row += , (New-BridgeButton -Text '⬇️' -CallbackData "news:down:$i") }
+            $row += , (New-BridgeButton -Text '🗑' -CallbackData "news:delask:$i" -Style 'danger')
             $rows += , @($row)
             continue
         }
@@ -764,13 +778,20 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
         # fixed four buttons: dropping the arrow at either end gave those two
         # rows a third of the width each and made them render taller than the
         # rest, which is what read as items of different sizes.
+        #
+        # The two end placeholders are real disabled buttons now (Bot API
+        # 10.3) instead of a live callback pointing at a no-op handler: the
+        # first item's ⬆️ and the last item's ⬇️ were pressable, answered,
+        # and did nothing, which is indistinguishable from a bridge that
+        # dropped the press. 'news:noop' is still routed - buttons live on in
+        # messages Telegram already delivered.
         $row = @()
-        $row += , @{text="$($i + 1)"; callback_data="news:item:$i"}
-        if ($i -gt 0) { $row += , @{text='⬆️'; callback_data="news:up:$i"} }
-        else { $row += , @{text='▫️'; callback_data='news:noop'} }
-        if ($i -lt ($count - 1)) { $row += , @{text='⬇️'; callback_data="news:down:$i"} }
-        else { $row += , @{text='▫️'; callback_data='news:noop'} }
-        $row += , @{text='🗑'; callback_data="news:delask:$i"}
+        $row += , (New-BridgeButton -Text "$($i + 1)" -CallbackData "news:item:$i")
+        if ($i -gt 0) { $row += , (New-BridgeButton -Text '⬆️' -CallbackData "news:up:$i") }
+        else { $row += , (New-BridgeButton -Text '▫️' -Disabled) }
+        if ($i -lt ($count - 1)) { $row += , (New-BridgeButton -Text '⬇️' -CallbackData "news:down:$i") }
+        else { $row += , (New-BridgeButton -Text '▫️' -Disabled) }
+        $row += , (New-BridgeButton -Text '🗑' -CallbackData "news:delask:$i" -Style 'danger')
         $rows += , @($row)
     }
 
@@ -787,6 +808,33 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     return @{inline_keyboard=$rows}
 }
 
+function Get-NewsListEscapedLine {
+    <#
+        One listing line, escaped, guaranteed to fit MaxLength AFTER escaping.
+
+        Shortening the raw headline and escaping the result - rather than
+        escaping and then cutting - is the whole point: cutting escaped text
+        can land inside '&amp;' and leave '&am', which is not an entity, and
+        Telegram rejects the entire message rather than the one line.
+
+        The loop shrinks in proportion to the overshoot, so it converges in a
+        step or two even for a headline that is nothing but ampersands.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Item, [Parameter(Mandatory)][int]$MaxLength)
+    $raw = $Item
+    $ellipsis = ''
+    if ($raw.Length -gt $MaxLength) { $raw = $raw.Substring(0, $MaxLength - 1); $ellipsis = '…' }
+    $escaped = ConvertTo-TelegramHtmlText -Text $raw
+    while (($escaped.Length + $ellipsis.Length) -gt $MaxLength -and $raw.Length -gt 1) {
+        $keep = [math]::Floor($raw.Length * ($MaxLength - 1) / $escaped.Length)
+        if ($keep -ge $raw.Length) { $keep = $raw.Length - 1 }
+        $raw = $raw.Substring(0, [math]::Max(1, $keep))
+        $escaped = ConvertTo-TelegramHtmlText -Text $raw
+        $ellipsis = '…'
+    }
+    return "$escaped$ellipsis"
+}
+
 function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft) { return "📝 الترتيب والتعديل`n`n⚠️ لا توجد مسودة مملوكة لك." }
@@ -800,9 +848,10 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     $last = [math]::Min($count, $first + $size - 1)
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📝 ترتيب المسودة')
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الأخبار: $count")
+    # Sent with parse_mode=HTML, so every literal < > & below must already be
+    # escaped and every headline must go through ConvertTo-TelegramHtmlText.
+    $lines.Add('<b>📝 ترتيب المسودة</b>')
+    $lines.Add("الأخبار: <b>$count</b>")
     if ($pages -gt 1) { $lines.Add("المعروض: $first–$last  ·  صفحة $($Page + 1) من $pages") }
     # Said plainly, because the operator asked for one long list and is
     # getting pages anyway: the reason is Telegram's limit, not the setting
@@ -817,15 +866,27 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
         # wraps by itself. Capped so a long draft cannot push the message
         # past what Telegram will send.
         $items = @($draft.Items)
+        # The budget is measured AFTER escaping, and against the bridge's own
+        # send limit rather than a number of its own. Escaping only ever grows
+        # text - one '&' becomes five characters - so a page of headlines like
+        # "AT&T" measured before escaping came out at 6000 characters against
+        # a 3500 limit, split into two chunks, and lost its parse mode: the
+        # operator got '<b>' and '<blockquote expandable>' as visible text.
+        # 900 leaves room for the heading, the hint and the quotation tags.
+        $pageBudget = [math]::Max(400, $script:TelegramTextLimit - 900)
         $lineMax = [math]::Min(
             [math]::Max(40, (Get-SettingInt 'NewsListLabelLength' 8)),
-            [math]::Max(40, [math]::Floor(3000 / $size)))
+            [math]::Max(40, [math]::Floor($pageBudget / $size)))
         $lines.Add('')
+        # An expandable block quotation (Bot API 7.6) collapses the listing to
+        # a few lines with a "show more" of Telegram's own, so a forty-item
+        # page no longer pushes its own keyboard off the screen. The character
+        # budget still applies: expandable governs height, not length.
+        $body = [System.Collections.Generic.List[string]]::new()
         for ($i = $first; $i -le $last; $i++) {
-            $item = [string]$items[$i - 1]
-            if ($item.Length -gt $lineMax) { $item = $item.Substring(0, $lineMax - 1) + '…' }
-            $lines.Add("$i. $item")
+            $body.Add("<b>$i.</b> $(Get-NewsListEscapedLine -Item ([string]$items[$i - 1]) -MaxLength $lineMax)")
         }
+        $lines.Add("<blockquote expandable>$($body -join "`n")</blockquote>")
     }
 
     $lines.Add('')
@@ -842,8 +903,8 @@ function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$
     <# Edits the originating message when possible so repeated ⬆️/⬇️ presses
        reuse a single message instead of flooding the chat with stale lists. #>
     $text=Get-NewsTickerReorderText -UserId $UserId -Page $Page;$kb=Get-NewsTickerReorderKeyboard -UserId $UserId -Page $Page
-    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $kb)){return}
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb
+    if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $kb -ParseMode 'HTML')){return}
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb -ParseMode 'HTML'
 }
 
 function Get-NewsTickerBackupsKeyboard {

@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.OnAir.Tests.ps1 - On-air records, layers, hide/exit, and timers.
 
@@ -640,7 +640,7 @@ Describe 'Configurable hide-all layers' {
     It 'shows the selected layers as toggles in the administrator settings panel' {
         $keyboard = Get-HideAllLayerSettingsKeyboard
         $labels = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
-        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_['callback_data'] })
 
         $labels | Should -Contain '✅ طبقة 2'
         $labels | Should -Contain '✅ طبقة 4'
@@ -1161,7 +1161,7 @@ Describe 'Main menu on-air priority' {
         $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 1; Source = 'bot' }
 
         $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
-        $firstRowData = @($rows[0] | ForEach-Object { $_.callback_data })
+        $firstRowData = @($rows[0] | ForEach-Object { $_['callback_data'] })
 
         # The operator opens this menu when the wrong graphic is live; the fix
         # must not sit below the buttons that caused it.
@@ -1173,7 +1173,7 @@ Describe 'Main menu on-air priority' {
         $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 1; Source = 'cinegy' }
 
         $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
-        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $hideAllIndex = [array]::IndexOf($flat, 'menu:hideall')
         $templatesIndex = [array]::IndexOf($flat, 'menu:templates')
 
@@ -1183,7 +1183,7 @@ Describe 'Main menu on-air priority' {
 
     It 'still offers hide-all when nothing is tracked as live' {
         $flat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Contain 'menu:hideall'
     }
 
@@ -1350,7 +1350,7 @@ Describe 'Undo survives navigating away' {
             ExpiresAt = (Get-Date).AddSeconds(45); CreatedAt = (Get-Date) }
 
         $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Contain 'rollback:3'
     }
@@ -1360,7 +1360,7 @@ Describe 'Undo survives navigating away' {
             ExpiresAt = (Get-Date).AddSeconds(45); CreatedAt = (Get-Date) }
 
         $flat = @((Get-MainMenuKeyboard -ChatId 99 -UserId 99).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Not -Contain 'rollback:3'
     }
@@ -1370,7 +1370,7 @@ Describe 'Undo survives navigating away' {
             ExpiresAt = (Get-Date).AddSeconds(-1); CreatedAt = (Get-Date).AddMinutes(-5) }
 
         $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Not -Contain 'rollback:3'
     }
@@ -1390,7 +1390,7 @@ Describe 'On-air row tools' {
         $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         $flat = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Contain 'menu:snapshot'
         $flat | Should -Contain 'menu:sharestatus'
@@ -1399,8 +1399,8 @@ Describe 'On-air row tools' {
     It 'keeps the emergency hide on that same row' {
         $script:OnAir[3] = @{ Key = 'lower-third'; At = (Get-Date); UserId = 42; Source = 'bridge' }
         $rows = @((Get-MainMenuKeyboard -ChatId 42 -UserId 42).inline_keyboard)
-        $toolRow = @($rows | Where-Object { @($_ | ForEach-Object { $_.callback_data }) -contains 'menu:hideall' })
-        @($toolRow[0] | ForEach-Object { $_.callback_data }) | Should -Contain 'menu:sharestatus'
+        $toolRow = @($rows | Where-Object { @($_ | ForEach-Object { $_['callback_data'] }) -contains 'menu:hideall' })
+        @($toolRow[0] | ForEach-Object { $_['callback_data'] }) | Should -Contain 'menu:sharestatus'
     }
 }
 

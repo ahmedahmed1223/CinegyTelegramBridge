@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 
@@ -611,7 +611,7 @@ Describe 'Administrator tools grouping' {
     It 'keeps settings and access requests one tap away for an administrator' {
         Mock Test-Admin { $true }
         $flat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Contain 'menu:settings'
         $flat | Should -Contain 'menu:pending'
@@ -621,7 +621,7 @@ Describe 'Administrator tools grouping' {
     It 'moves the rarely used configuration off the main menu' {
         Mock Test-Admin { $true }
         $flat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         foreach ($moved in @('menu:usersadmin', 'menu:presetsadmin', 'menu:templatesadmin', 'menu:audit', 'menu:diagnostics')) {
             $flat | Should -Not -Contain $moved
@@ -631,7 +631,7 @@ Describe 'Administrator tools grouping' {
     It 'still reaches every moved entry from the tools screen, with a way back' {
         Mock Test-Admin { $true }
         $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         foreach ($moved in @('menu:usersadmin', 'menu:presetsadmin', 'menu:templatesadmin', 'menu:audit', 'menu:diagnostics')) {
             $flat | Should -Contain $moved
@@ -642,7 +642,7 @@ Describe 'Administrator tools grouping' {
     It 'shows no administrator surface at all to an operator' {
         Mock Test-Admin { $false }
         $flat = @((Get-MainMenuKeyboard -ChatId 200 -UserId 200).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Not -Contain 'menu:admintools'
         $flat | Should -Not -Contain 'menu:settings'
@@ -660,15 +660,15 @@ Describe 'Administrator tools grouping' {
             $script:PendingApprovals = @{ 555 = @{ UserId = 555 } }
 
             $adminFlat = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
             $adminFlat | Should -Contain 'menu:pending'
 
             $ownerFlat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
             $ownerFlat | Should -Contain 'menu:pending'
 
             $operatorFlat = @((Get-MainMenuKeyboard -ChatId 200 -UserId 200).inline_keyboard |
-                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
             $operatorFlat | Should -Not -Contain 'menu:pending'
         }
         finally {
@@ -701,7 +701,7 @@ Describe 'What is new and help content' {
 
     It 'is reachable from the menu and as a command' {
         $flat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Contain 'menu:whatsnew'
         @($script:BotCommandList | ForEach-Object { $_.command }) | Should -Contain 'whatsnew'
     }
@@ -940,7 +940,7 @@ Describe 'Administrator restart' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableRawCommand' }
 
         $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Not -Contain 'menu:restart'
     }
@@ -1016,7 +1016,7 @@ Describe 'Cancel reasons' {
     }
 
     It 'offers a skip, because an unexplained undo is still a valid undo' {
-        $flat = @((Get-CancelReasonKeyboard).inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+        $flat = @((Get-CancelReasonKeyboard).inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $flat | Should -Contain 'menu'
         $flat | Should -Contain 'cancelreason:template'
     }

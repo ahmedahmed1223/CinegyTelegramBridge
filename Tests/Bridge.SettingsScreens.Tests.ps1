@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.SettingsScreens.Tests.ps1 - Settings screens, backups, presets, and import/export.
 
@@ -176,7 +176,7 @@ Describe 'Configuration backups' {
         Save-Config -Path $script:ConfigPath
 
         $keyboard = Get-ConfigBackupsKeyboard -Path $script:ConfigPath
-        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_['callback_data'] })
 
         $callbackData | Should -Contain 'cfg:restore:0'
         $callbackData | Should -Contain 'cfg:restore:1'
@@ -543,8 +543,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '6.9.5'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '6.9.5'
+        $script:BridgeVersion | Should -Be '7.0.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.0.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -577,7 +577,7 @@ Describe 'Version 6 settings navigation schema' {
 
     It 'opens settings on category choices instead of every technical setting' {
         $keyboard = Get-SettingsKeyboard
-        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_.callback_data })
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
 
         $callbacks | Should -Contain 'cfgcat:security:0'
         $callbacks | Should -Contain 'cfgcat:monitoring:0'
@@ -586,7 +586,7 @@ Describe 'Version 6 settings navigation schema' {
 
     It 'limits a category page to eight setting actions and provides paging' {
         $keyboard = Get-SettingsCategoryKeyboard -Category 'monitoring' -Page 0 -PageSize 8
-        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_.callback_data })
+        $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
         $settingCallbacks = @($callbacks | Where-Object { $_ -match '^cfg:(t|v|s):' })
 
         $settingCallbacks.Count | Should -Be 8
@@ -597,7 +597,7 @@ Describe 'Version 6 settings navigation schema' {
     It 'uses the existing protected toggle callback behind an Arabic label' {
         $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Page 0
         $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
-        $button = @($buttons | Where-Object { $_.callback_data -eq 'cfg:t:RequireUserLevelAuth' })[0]
+        $button = @($buttons | Where-Object { $_['callback_data'] -eq 'cfg:t:RequireUserLevelAuth' })[0]
 
         $button.text | Should -Match 'التحقق من هوية المستخدم'
         $button.text | Should -Match '🔒'
@@ -656,9 +656,14 @@ Describe 'Version 6 settings navigation schema' {
         $original = Get-Setting 'TemplateBasePath'
         try {
             $config.Settings | Add-Member -NotePropertyName TemplateBasePath -NotePropertyValue ('D:\' + ('very-long-folder\' * 10)) -Force
-            $keyboard = Get-SettingsCategoryKeyboard -Category 'templates' -Page 1 -PageSize 8
-            $button = @($keyboard.inline_keyboard | ForEach-Object { @($_) } |
-                    Where-Object callback_data -eq 'cfg:s:TemplateBasePath')[0]
+            # Every page, not a fixed one: which page a setting lands on is an
+            # accident of how many others share its category, and pinning it
+            # here made adding any setting look like a capping regression.
+            $button = @(0..4 | ForEach-Object {
+                    @((Get-SettingsCategoryKeyboard -Category 'templates' -Page $_ -PageSize 8).inline_keyboard) |
+                        ForEach-Object { @($_) }
+                } | Where-Object { $_['callback_data'] -eq 'cfg:s:TemplateBasePath' })[0]
+            $button | Should -Not -BeNullOrEmpty
 
             (Get-TextElementCount -Text $button.text) | Should -BeLessOrEqual 64
             $button.text | Should -Match '…$'

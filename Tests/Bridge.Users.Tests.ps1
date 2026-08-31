@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Users.Tests.ps1 - Authorization, roles, aliases, and per-role menus.
 
@@ -148,9 +148,9 @@ Describe 'Authorized user administration' {
         $config.AdminUserIds = @(101, 202)
 
         $ownerView = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
         $adminView = @((Get-UsersAdminKeyboard -ViewerUserId 202).inline_keyboard |
-                ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $ownerView | Should -Contain 'usr:demote:202'
         $adminView | Should -Not -Contain 'usr:demote:202'
@@ -246,7 +246,7 @@ Describe 'Role-aware status menus' {
         Mock Test-Admin { $false }
 
         $keyboard = Get-MainMenuKeyboard -ChatId 200 -UserId 200
-        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_['callback_data'] })
 
         $callbackData | Should -Contain 'menu:status'
         $callbackData | Should -Not -Contain 'menu:fullstatus'
@@ -258,7 +258,7 @@ Describe 'Role-aware status menus' {
         Mock Test-Admin { $true }
 
         $keyboard = Get-MainMenuKeyboard -ChatId 100 -UserId 100
-        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_['callback_data'] })
 
         $callbackData | Should -Contain 'menu:status'
         $callbackData | Should -Contain 'menu:fullstatus'
@@ -271,7 +271,7 @@ Describe 'Role-aware status menus' {
         Mock Test-Owner { $true }
 
         $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101
-        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $callbackData = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_['callback_data'] })
 
         $callbackData | Should -Contain 'menu:fullstatus'
     }

@@ -1,4 +1,4 @@
-# Cinegy Air Pro / Titler Telegram Bridge
+﻿# Cinegy Air Pro / Titler Telegram Bridge
 
 A Telegram bot that lets whitelisted operators drive Cinegy Air Pro's Titler
 graphics layer from chat: push a named title template on air with text
@@ -12,6 +12,18 @@ It's built directly on the HTTP control surfaces that Cinegy demonstrates in
 those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
+
+## Version 7.0.0
+
+The bot's screens now use the Bot API features that did not exist when they
+were designed. Buttons carry a colour (`style`, Bot API 9.4) - red on delete
+and discard, green on publish - so the destructive action is no longer told
+apart from its neighbour by the label alone. The two placeholder arrows at the
+ends of the reorder list are genuinely disabled (`disabled`, Bot API 10.3)
+instead of live buttons pointing at a no-op handler. And the reorder listing is
+sent as HTML inside an expandable block quotation (Bot API 7.6), so a long page
+collapses to a few lines with Telegram's own "show more" and stops pushing its
+own keyboard off the screen. `EnableButtonStyles` turns the colours off.
 
 ## Version 6.9.5
 

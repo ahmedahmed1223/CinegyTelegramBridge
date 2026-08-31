@@ -502,3 +502,80 @@ Describe 'Version 6 Telegram update admission integration' {
         $script:ProcessedUpdateLedger.Capacity | Should -Be 4096
     }
 }
+
+Describe 'Telegram HTML escaping' {
+    It 'escapes ampersand before the entities it would otherwise corrupt' {
+        # '&' last would turn the '&lt;' just produced into '&amp;lt;'.
+        ConvertTo-TelegramHtmlText -Text 'AT&T <b>' | Should -Be 'AT&amp;T &lt;b&gt;'
+    }
+
+    It 'leaves ordinary Arabic copy untouched' {
+        ConvertTo-TelegramHtmlText -Text 'خبر عاجل: القمة تبدأ' | Should -Be 'خبر عاجل: القمة تبدأ'
+    }
+
+    It 'returns an empty string for nothing, rather than throwing' {
+        ConvertTo-TelegramHtmlText -Text '' | Should -Be ''
+        ConvertTo-TelegramHtmlText -Text $null | Should -Be ''
+    }
+}
+
+Describe 'Bridge button construction' {
+    It 'carries a callback and a style together' {
+        $button = New-BridgeButton -Text '🗑 حذف' -CallbackData 'news:delask:0' -Style 'danger'
+
+        $button.text | Should -Be '🗑 حذف'
+        $button.callback_data | Should -Be 'news:delask:0'
+        $button.style | Should -Be 'danger'
+    }
+
+    It 'gives a disabled button no callback, because Telegram treats it as the type' {
+        $button = New-BridgeButton -Text '▫️' -CallbackData 'news:noop' -Disabled
+
+        $button.ContainsKey('disabled') | Should -BeTrue
+        $button.ContainsKey('callback_data') | Should -BeFalse
+    }
+
+    It 'refuses a colour Telegram does not define' {
+        { New-BridgeButton -Text 'x' -CallbackData 'y' -Style 'purple' } | Should -Throw
+    }
+
+    It 'does not read the styles setting, so building a keyboard stays pure' {
+        # The gate belongs at send time. Reading it here made every keyboard
+        # test depend on a setting it does not care about.
+        Mock Get-Setting { throw 'a button must not read settings' }
+
+        { New-BridgeButton -Text 'x' -CallbackData 'y' -Style 'primary' } | Should -Not -Throw
+    }
+}
+
+Describe 'Reply markup serialisation' {
+    BeforeAll {
+        $script:StyledMarkup = @{ inline_keyboard = @(
+                , @((New-BridgeButton -Text 'انشر' -CallbackData 'news:publish' -Style 'success'),
+                    (New-BridgeButton -Text 'رجوع' -CallbackData 'menu'))) }
+    }
+
+    It 'keeps the colour while the setting is on' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+
+        ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:StyledMarkup | Should -Match '"style":"success"'
+    }
+
+    It 'drops the colour while the setting is off, keeping everything else' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+
+        $json = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:StyledMarkup
+
+        $json | Should -Not -Match '"style"'
+        $json | Should -Match 'news:publish'
+        $json | Should -Match 'menu'
+    }
+
+    It 'leaves the caller keyboard alone, so the next render still has the colour' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+
+        ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:StyledMarkup | Out-Null
+
+        @($script:StyledMarkup.inline_keyboard)[0][0].style | Should -Be 'success'
+    }
+}

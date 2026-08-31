@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.4.0'
+$script:BridgeVersion = '6.5.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -186,7 +186,7 @@ $script:DefaultSettings = [ordered]@{
     NewsSheetSyncMode          = 'manual' # manual = a button; auto = every NewsSheetSyncMinutes
     NewsSheetSyncMinutes       = 5
     NewsSheetTimeoutSeconds    = 30
-    NewsSheetNotifyAdmins      = $true    # a Telegram summary after each automatic publish
+    NewsSheetNotifyScope       = 'admins' # none | admins | all authorised chats
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
@@ -794,6 +794,7 @@ $script:SettingChoices = @{
     AirVariableType = @('Text', 'String', 'Bool', 'Float')
     SceneMode = @('Single', 'Multi')
     NewsSheetSyncMode = @('manual', 'auto')
+    NewsSheetNotifyScope = @('none', 'admins', 'all')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -845,7 +846,7 @@ foreach ($entry in @(
                 'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
-                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyAdmins'
+                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyScope'
             ) },
         @{ Category = 'schedule'; Names = @(
                 'ScheduleConflictWindowMinutes', 'SchedulePaused', 'SchedulePreNotifyMinutes',
@@ -902,7 +903,7 @@ $script:SettingNavigationLabels = @{
     NewsSheetSyncMode = 'وضع مزامنة الشيت'
     NewsSheetSyncMinutes = 'كل كم دقيقة تُزامن الشيت'
     NewsSheetTimeoutSeconds = 'مهلة تنزيل الشيت'
-    NewsSheetNotifyAdmins = 'تنبيه المشرفين بعد مزامنة الشيت'
+    NewsSheetNotifyScope = 'من يُنبَّه بعد مزامنة الشيت'
     NewsMaxItemLength = 'الحد الأقصى لطول الخبر'
     NewsMaxItems = 'الحد الأقصى لعدد الأخبار'
     NewsImportMaxBytes = 'حد استيراد الأخبار'

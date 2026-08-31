@@ -334,11 +334,24 @@ function Get-NewsSheetNoticeText {
     return ($lines -join "`n")
 }
 
+function Get-NewsSheetNoticeAudience {
+    <# Who hears that the ticker changed. Administrators by default: they own
+       the sheet and are the ones who would have to undo a bad publish. "all"
+       adds every authorised chat, for a newsroom that wants the whole desk to
+       see what went out. #>
+    param([string]$Scope = '')
+    if ([string]::IsNullOrWhiteSpace($Scope)) { $Scope = [string](Get-Setting 'NewsSheetNotifyScope') }
+    if ($Scope -eq 'none') { return @() }
+    $admins = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })
+    if ($Scope -ne 'all') { return @($admins) }
+    $everyone = @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })
+    return @(@($admins + $everyone) | Sort-Object -Unique)
+}
+
 function Send-NewsSheetNotice {
     param([Parameter(Mandatory)][string]$Text)
-    if (-not (Get-Setting 'NewsSheetNotifyAdmins')) { return }
-    foreach ($admin in @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })) {
-        Send-TelegramMessage -ChatId $admin -Text $Text
+    foreach ($chat in @(Get-NewsSheetNoticeAudience)) {
+        Send-TelegramMessage -ChatId ([long]$chat) -Text $Text
     }
 }
 
@@ -353,12 +366,17 @@ function Invoke-NewsSheetSync {
        but it still names the current owner and asks first. #>
     param(
         [ValidateSet('auto', 'manual')][string]$Trigger = 'manual',
+        [ValidateSet('air', 'draft')][string]$Target = 'air',
         [long]$UserId = 0,
+        [long]$ChatId = 0,
         [switch]$Confirmed
     )
     $stop = { param([string]$Message, [bool]$Skip = $false, [bool]$Ask = $false)
-        [pscustomobject]@{ Success = $false; Skipped = $Skip; Unchanged = $false
+        [pscustomobject]@{ Success = $false; Skipped = $Skip; Unchanged = $false; Drafted = $false
             NeedsConfirmation = $Ask; Items = @(); Summary = $null; Error = $Message } }
+    # A draft belongs to somebody. An unattended run has no owner to give it
+    # to, so the review target is a deliberate act by a named person.
+    if ($Target -eq 'draft' -and $UserId -le 0) { return (& $stop 'السحب إلى المسودة يحتاج مستخدمًا معروفًا.') }
 
     $url = [string](Get-Setting 'NewsSheetCsvUrl')
     if ([string]::IsNullOrWhiteSpace($url)) { return (& $stop 'لم يُضبط رابط Google Sheets في الإعدادات.') }
@@ -394,8 +412,25 @@ function Invoke-NewsSheetSync {
     $snapshot = Get-NewsTickerConfiguredSnapshot
     $current = if ($snapshot.Success) { @($snapshot.Items) } else { @() }
     $summary = Get-NewsSheetChangeSummary -Before $current -After $items
+
+    if ($Target -eq 'draft') {
+        # Straight into the draft so the sheet can be read, reordered, or
+        # corrected before any of it reaches air. Routed through the ordinary
+        # draft import so the same length, count, and duplicate rules apply.
+        if ($draft -and [long]$draft.OwnerUserId -ne $UserId) { Remove-NewsTickerDraft }
+        if (-not (Get-NewsTickerDraft -UserId $UserId)) {
+            $started = Start-NewsTickerDraft -ChatId $ChatId -UserId $UserId
+            if (-not $started.Success) { return (& $stop $started.Error) }
+        }
+        $text = ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))
+        $import = Import-NewsTickerTextToDraft -UserId $UserId -Text $text -Mode replace
+        if (-not $import.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($import.Error)") }
+        return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false; Drafted = $true
+            NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
+    }
+
     if (-not $summary.Changed) {
-        return [pscustomobject]@{ Success = $false; Skipped = $false; Unchanged = $true
+        return [pscustomobject]@{ Success = $false; Skipped = $false; Unchanged = $true; Drafted = $false
             NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
     }
 
@@ -414,7 +449,7 @@ function Invoke-NewsSheetSync {
     Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count
     Send-NewsSheetNotice -Text (Get-NewsSheetNoticeText -Summary $summary -Trigger $Trigger -UserId $UserId)
 
-    return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false
+    return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false; Drafted = $false
         NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
 }
 
@@ -443,7 +478,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
     }
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
-        $rows += , @(@{text='⬇️ سحب من الشيت';callback_data='news:sheet'})
+        $rows += , @(@{text='⬇️ سحب ونشر';callback_data='news:sheet'}, @{text='📝 سحب إلى المسودة';callback_data='news:sheetdraft'})
     }
     $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})
     return @{inline_keyboard=$rows}

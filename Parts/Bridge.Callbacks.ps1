@@ -75,10 +75,22 @@ function Invoke-CallbackQuery {
     switch -Wildcard ($data) {
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+        { $_ -in @('news:sheetdraft', 'news:sheetdraftconfirm') } {
+            if (-not (Test-Admin -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت للمشرفين فقط.'; break }
+            $sync = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId $userId -ChatId $chatId -Confirmed:($data -eq 'news:sheetdraftconfirm')
+            if ($sync.NeedsConfirmation) {
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ $($sync.Error)" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، استبدل';callback_data='news:sheetdraftconfirm'},@{text='إلغاء';callback_data='news:refresh'}))}
+                break
+            }
+            $text = if ($sync.Success) { "📝 حُمّل $(@($sync.Items).Count) خبرًا في المسودة. راجعها ثم اضغط «مراجعة ونشر»." } else { "❌ $($sync.Error)" }
+            Send-TelegramMessage -ChatId $chatId -Text $text
+            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+            break
+        }
         { $_ -in @('news:sheet', 'news:sheetconfirm') } {
             if (-not (Test-Admin -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت للمشرفين فقط.'; break }
             $confirmed = $data -eq 'news:sheetconfirm'
-            $sync = Invoke-NewsSheetSync -Trigger manual -UserId $userId -Confirmed:$confirmed
+            $sync = Invoke-NewsSheetSync -Trigger manual -Target air -UserId $userId -ChatId $chatId -Confirmed:$confirmed
             if ($sync.NeedsConfirmation) {
                 Send-TelegramMessage -ChatId $chatId -Text "⚠️ $($sync.Error)" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، استبدل';callback_data='news:sheetconfirm'},@{text='إلغاء';callback_data='news:refresh'}))}
                 break

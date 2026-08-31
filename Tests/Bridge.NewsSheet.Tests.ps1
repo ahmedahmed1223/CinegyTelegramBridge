@@ -70,7 +70,7 @@ Describe 'News sheet sync rules' {
                 'NewsSheetSyncMode' { 'auto' }
                 'NewsFilePath' { Join-Path $TestDrive 'news.txt' }
                 'NewsItemSeparator' { '|' }
-                'NewsSheetNotifyAdmins' { $true }
+                'NewsSheetNotifyScope' { 'admins' }
                 default { '' }
             }
         }
@@ -146,6 +146,91 @@ Describe 'News sheet sync rules' {
     It 'tells the administrators what changed after a successful publish' {
         Invoke-NewsSheetSync -Trigger auto | Out-Null
         Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'الشيت' }
+    }
+}
+
+Describe 'News sheet pulled into the draft for review' {
+    BeforeEach {
+        $script:NewsTickerDraft = $null
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/spreadsheets/d/x/export?format=csv' }
+                'NewsFilePath' { Join-Path $TestDrive 'news.txt' }
+                'NewsItemSeparator' { '|' }
+                'NewsMaxItemLength' { 1000 }
+                'NewsMaxItems' { 200 }
+                'NewsSheetNotifyScope' { 'admins' }
+                default { '' }
+            }
+        }
+        Mock Get-SettingInt { if ($Name -eq 'NewsMaxItems') { 200 } elseif ($Name -eq 'NewsMaxItemLength') { 1000 } else { 1 } }
+        Mock Get-NewsSheetCsvText { [pscustomobject]@{ Success = $true; Csv = "خبر أول`r`nخبر ثانٍ"; Error = '' } }
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('قديم'); Hash = 'h1'; Error = '' } }
+        Mock Publish-NewsTickerFile { [pscustomobject]@{ Success = $true; Conflict = $false; BackupPath = ''; Hash = 'h2'; Error = '' } }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+    }
+
+    It 'fills the draft and puts nothing on air' {
+        $result = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101
+        $result.Success | Should -BeTrue
+        $result.Drafted | Should -BeTrue
+        Should -Invoke Publish-NewsTickerFile -Times 0 -Exactly
+        @((Get-NewsTickerDraft -UserId 101).Items) | Should -Be @('خبر أول', 'خبر ثانٍ')
+    }
+
+    It 'replaces what the draft held rather than appending to it' {
+        Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101 | Out-Null
+        Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101 | Out-Null
+        @((Get-NewsTickerDraft -UserId 101).Items).Count | Should -Be 2
+    }
+
+    It 'pulls into the draft even when the sheet matches what is on air' {
+        # Unchanged only means there is nothing to publish; the operator asked
+        # for a draft to work from, so they still get one.
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('خبر أول', 'خبر ثانٍ'); Hash = 'h1'; Error = '' } }
+        (Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101).Drafted | Should -BeTrue
+    }
+
+    It 'refuses a draft pull with no named owner' {
+        (Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 0 -ChatId 0).Success | Should -BeFalse
+    }
+
+    It 'asks before taking over another operator draft' {
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
+        $result = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId 101 -ChatId 101
+        $result.NeedsConfirmation | Should -BeTrue
+        $result.Success | Should -BeFalse
+    }
+
+    It 'offers both the publish and the review pull on the news screen' {
+        Mock Test-Admin { $true }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'news:sheet'
+        $callbacks | Should -Contain 'news:sheetdraft'
+    }
+}
+
+Describe 'News sheet notice audience' {
+    BeforeEach {
+        $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11) -Force
+        $config | Add-Member -NotePropertyName 'AllowedChatIds' -NotePropertyValue @(11, 22, 33) -Force
+    }
+
+    It 'tells nobody when the scope is none' {
+        @(Get-NewsSheetNoticeAudience -Scope 'none') | Should -BeNullOrEmpty
+    }
+
+    It 'tells only the administrators by default' {
+        @(Get-NewsSheetNoticeAudience -Scope 'admins') | Should -Be @(11)
+    }
+
+    It 'tells every authorised chat once when the scope is all' {
+        $audience = @(Get-NewsSheetNoticeAudience -Scope 'all')
+        $audience | Should -Be @(11, 22, 33)
+        @($audience | Where-Object { $_ -eq 11 }).Count | Should -Be 1
     }
 }
 

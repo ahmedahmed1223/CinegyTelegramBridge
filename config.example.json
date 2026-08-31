@@ -50,7 +50,7 @@
     "NewsSheetSyncMode": "manual",
     "NewsSheetSyncMinutes": 5,
     "NewsSheetTimeoutSeconds": 30,
-    "NewsSheetNotifyAdmins": true,
+    "NewsSheetNotifyScope": "admins",
     "NewsDraftTimeoutMinutes": 30,
     "AllowOperatorsDeleteNews": false,
     "AllowOperatorsRestoreNews": false,

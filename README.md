@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.5.0
+
+The sheet can be pulled into the draft for review instead of published
+straight away: the news screen offers both a publish pull and a review pull.
+The review pull replaces the draft contents through the ordinary import path,
+so the same length, count, and duplicate rules apply. `NewsSheetNotifyScope`
+(`none` / `admins` / `all`) replaces the admins-only boolean and decides who
+hears about a sync.
+
 ## Version 6.4.0
 
 The news ticker can be driven from a Google Sheets CSV export. Set

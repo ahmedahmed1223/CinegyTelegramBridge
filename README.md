@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.8.0
+
+Corrects a wrong number in the news report. The ticker is one running strip
+that gets edited, not a series of separate bulletins, so adding up how many
+items each publish recorded counted the same headlines once per edit - a
+strip of 14 edited three times was reported as 40. The report now shows what
+the day ended with, the size of every edit as a trail, the days nothing was
+touched at all, and how long the strip has been sitting unedited. The full
+manual becomes one message with collapsible chapters, and the operation
+history a structured list.
+
 ## Version 7.7.0
 
 The news report joins the banner one as a real table - day, publishes,

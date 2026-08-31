@@ -830,7 +830,7 @@ Describe 'Rich sending never becomes a dependency' {
     }
 
     It 'builds the news report from blocks too, and still falls back' {
-        Mock Get-NewsReportDays { @{ Label = 'اليوم'; Days = @(); Publishes = 0; Items = 0; Truncated = $false } }
+        Mock Get-NewsReportDays { @{ Label = 'اليوم'; Days = @(); Publishes = 0; Items = 0; Truncated = $false; SilentDays = 1; LastPublishedAt = $null } }
         Mock Get-NewsReportText { 'تقرير' }
         Mock Send-TelegramRichMessage { $true }
 
@@ -895,5 +895,47 @@ Describe 'An overlong HTML message loses its markup, not its meaning' {
         Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
             $Body.parse_mode -eq 'HTML' -and $Body.text -eq '<b>قصير</b>'
         }
+    }
+}
+
+Describe 'The operation history as a list' {
+    It 'keeps the on-air copy, which a table would have squeezed out' {
+        # This screen is the one place the copy IS the point, so the grid is
+        # the wrong shape here even though it is right for the reports.
+        Mock Get-UserOperationHistory {
+            @([pscustomobject]@{
+                    At = '2026-08-31T21:40:00'; Action = 'SHOW'; Result = 'success'
+                    Target = 'urgent'; Values = 'عاجل: بيان الوزارة'
+                    OperationId = 'air-5023333b032c476eb48204ca08032a98'
+                })
+        }
+        Mock Get-TemplateCategoryLabel { 'أخبار' }
+
+        $blocks = @(Get-MyOperationsBlocks -UserId 101)
+        $list = @($blocks | Where-Object { $_.type -eq 'list' })[0]
+        $texts = @(@($list.items)[0].blocks | ForEach-Object { $_.text })
+
+        $blocks[0].type | Should -Be 'heading'
+        @($texts | Where-Object { $_ -match 'عاجل: بيان الوزارة' }).Count | Should -Be 1
+        @($texts | Where-Object { $_ -match '5023333b' }).Count | Should -Be 1
+    }
+
+    It 'says an empty history is empty rather than drawing a list of nothing' {
+        Mock Get-UserOperationHistory { @() }
+
+        $blocks = @(Get-MyOperationsBlocks -UserId 101)
+
+        @($blocks | Where-Object { $_.type -eq 'list' }).Count | Should -Be 0
+        @($blocks | Where-Object { $_.type -eq 'paragraph' })[0].text | Should -Match 'لم تُسجَّل'
+    }
+
+    It 'falls back to the text screen when rich sending is refused' {
+        Mock Send-TelegramRichMessage { $false }
+        Mock Get-UserOperationHistory { @() }
+        Mock Send-TelegramMessage { }
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 }

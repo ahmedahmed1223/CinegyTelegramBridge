@@ -125,11 +125,13 @@ Describe 'News report' {
         }
     }
 
-    It 'totals the items and splits the day between its publishers' {
+    It 'reports what is on air and splits the day between its publishers' {
+        # Not a total any more: the strip is one running thing, so adding its
+        # readings up counted the same headlines once per edit.
         $text = Get-NewsReportText -Period today
 
-        $text | Should -Match '20 خبرًا'
-        $text | Should -Match '2 نشرة'
+        $text | Should -Match 'على الهواء'
+        $text | Should -Match '2 تعديلًا'
         $text | Should -Match 'أحمد 1'
         $text | Should -Match 'محمد 1'
         # An air_control record is not a news publish.
@@ -254,9 +256,14 @@ Describe 'News report as rich blocks' {
         # The text version spends a second indented line on the tally because
         # it has nowhere else to put it; here it is the fourth column.
         Mock Get-NewsReportDays {
-            @{ Label = 'الأسبوع'; Publishes = 3; Items = 40; Truncated = $false; Days = @(
-                    @{ Date = [datetime]'2026-08-30'; Publishes = 1; Items = 12; Tally = @{ Breakdown = 'سامي 1'; Single = '' } }
-                    @{ Date = [datetime]'2026-08-31'; Publishes = 2; Items = 28; Tally = @{ Breakdown = ''; Single = 'ليلى' } }
+            @{ Label = 'الأسبوع'; Publishes = 3; Items = 14; Truncated = $false; SilentDays = 0
+                LastPublishedAt = [datetime]'2026-08-31T21:40'; Days = @(
+                    @{ Date = [datetime]'2026-08-30'; Publishes = 1; Items = 12; Counts = @(12)
+                        First = [datetime]'2026-08-30T20:00'; Last = [datetime]'2026-08-30T20:00'
+                        Tally = @{ Breakdown = 'سامي 1'; Single = '' } }
+                    @{ Date = [datetime]'2026-08-31'; Publishes = 2; Items = 14; Counts = @(15, 14)
+                        First = [datetime]'2026-08-31T07:10'; Last = [datetime]'2026-08-31T21:40'
+                        Tally = @{ Breakdown = ''; Single = 'ليلى' } }
                 ) }
         }
 
@@ -265,14 +272,19 @@ Describe 'News report as rich blocks' {
 
         $blocks[0].type | Should -Be 'heading'
         @($table.cells).Count | Should -Be 3
-        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
+        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 6
         @($table.cells[1])[2].text | Should -Be '12'
-        @($table.cells[1])[3].text | Should -Be 'سامي 1'
-        @($table.cells[2])[3].text | Should -Be 'ليلى'
+        @($table.cells[1])[5].text | Should -Be 'سامي 1'
+        @($table.cells[2])[2].text | Should -Be '14'
+        # The edit trail and the span are what the review added: how big each
+        # edit was, and whether the day was worked or touched once at handover.
+        @($table.cells[2])[3].text | Should -Be '15 ← 14'
+        @($table.cells[2])[4].text | Should -Be '07:10 ← 21:40'
+        @($table.cells[2])[5].text | Should -Be 'ليلى'
     }
 
     It 'draws no table for a period nothing was published in' {
-        Mock Get-NewsReportDays { @{ Label = 'أمس'; Publishes = 0; Items = 0; Truncated = $false; Days = @() } }
+        Mock Get-NewsReportDays { @{ Label = 'أمس'; Publishes = 0; Items = 0; Truncated = $false; SilentDays = 1; LastPublishedAt = $null; Days = @() } }
 
         $blocks = @(Get-NewsReportBlocks -Period yesterday)
 
@@ -282,13 +294,85 @@ Describe 'News report as rich blocks' {
 
     It 'says so rather than leaving the operator column blank' {
         Mock Get-NewsReportDays {
-            @{ Label = 'اليوم'; Publishes = 1; Items = 5; Truncated = $false; Days = @(
-                    @{ Date = [datetime]'2026-08-31'; Publishes = 1; Items = 5; Tally = @{ Breakdown = ''; Single = '' } }
+            @{ Label = 'اليوم'; Publishes = 1; Items = 5; Truncated = $false; SilentDays = 0
+                LastPublishedAt = [datetime]'2026-08-31T20:00'; Days = @(
+                    @{ Date = [datetime]'2026-08-31'; Publishes = 1; Items = 5; Counts = @(5)
+                        First = [datetime]'2026-08-31T20:00'; Last = [datetime]'2026-08-31T20:00'
+                        Tally = @{ Breakdown = ''; Single = '' } }
                 ) }
         }
 
         $table = @(@(Get-NewsReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
 
-        @($table.cells[1])[3].text | Should -Be '—'
+        @($table.cells[1])[5].text | Should -Be '—'
+    }
+}
+
+Describe 'The ticker is one running strip, not a series of bulletins' {
+    It 'reports what the day ended with instead of adding every reading up' {
+        # A strip of 14 edited three times was being reported as 40 items:
+        # each publish records how many the strip held at that moment, so the
+        # sum counted the same headlines once per edit.
+        Mock Get-ReportPeriod { @{ From = [datetime]'2026-08-31'; To = [datetime]'2026-08-31T23:59'; Label = 'اليوم' } }
+        Mock Get-ReportRecords {
+            @{ Truncated = $false; Records = @(
+                    [pscustomobject]@{ When = [datetime]'2026-08-31T07:10'; Count = 12; UserId = '10' }
+                    [pscustomobject]@{ When = [datetime]'2026-08-31T13:00'; Count = 15; UserId = '10' }
+                    [pscustomobject]@{ When = [datetime]'2026-08-31T21:40'; Count = 14; UserId = '10' }
+                ) }
+        }
+        Mock Get-OperatorTally { @{ Breakdown = ''; Single = 'سامي' } }
+
+        $data = Get-NewsReportDays -Period today
+
+        $data.Publishes | Should -Be 3
+        $data.Items | Should -Be 14
+        @($data.Days)[0].Counts | Should -Be @(12, 15, 14)
+    }
+
+    It 'shows the size of every edit rather than only how many there were' {
+        Get-NewsEditTrail -Counts @(12, 15, 14) | Should -Be '12 ← 15 ← 14'
+        Get-NewsEditTrail -Counts @(9) | Should -Be '9'
+        Get-NewsEditTrail -Counts @() | Should -Be '—'
+    }
+
+    It 'trims a long day to its most recent edits, and says it trimmed' {
+        Get-NewsEditTrail -Counts @(1, 2, 3, 4, 5, 6, 7, 8) -Max 3 | Should -Be '… ← 6 ← 7 ← 8'
+    }
+}
+
+Describe 'A day with no edit is a row, not an absence' {
+    It 'fills the silent days so the gap is visible' {
+        # Group-Object only produces days that have records, so a week in
+        # which Wednesday carried nothing simply had no Wednesday row - and
+        # that gap is what a supervisor opens the report to find.
+        Mock Get-ReportPeriod { @{ From = [datetime]'2026-08-29'; To = [datetime]'2026-08-31T23:59'; Label = 'آخر 3 أيام' } }
+        Mock Get-ReportRecords {
+            @{ Truncated = $false; Records = @(
+                    [pscustomobject]@{ When = [datetime]'2026-08-29T20:00'; Count = 10; UserId = '10' }
+                    [pscustomobject]@{ When = [datetime]'2026-08-31T20:00'; Count = 11; UserId = '10' }
+                ) }
+        }
+        Mock Get-OperatorTally { @{ Breakdown = ''; Single = 'سامي' } }
+
+        $data = Get-NewsReportDays -Period week
+
+        @($data.Days).Count | Should -Be 3
+        @($data.Days)[1].Publishes | Should -Be 0
+        $data.SilentDays | Should -Be 1
+    }
+
+    It 'says how long the strip has been sitting untouched' {
+        $lines = @(Get-NewsReportHighlights -Data @{
+                LastPublishedAt = [datetime]'2026-08-31T18:00'; SilentDays = 2
+            } -Now ([datetime]'2026-08-31T21:00'))
+
+        @($lines | Where-Object { $_ -match 'منذ 3 ساعة' }).Count | Should -Be 1
+        @($lines | Where-Object { $_ -match 'أيام بلا نشرة: 2' }).Count | Should -Be 1
+    }
+
+    It 'says nothing was published rather than pretending to a last time' {
+        @(Get-NewsReportHighlights -Data @{ LastPublishedAt = $null; SilentDays = 7 })[0] |
+            Should -Match 'لم تُنشر'
     }
 }

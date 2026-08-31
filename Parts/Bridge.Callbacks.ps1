@@ -508,7 +508,14 @@ function Invoke-CallbackQuery {
             break
         }
         'help:full' {
-            Send-TelegramPagedText -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+            # One message with the chapters collapsed, so the whole manual is
+            # on screen without scrolling past the chapters nobody wanted.
+            # The paged text remains the fallback it always was.
+            $helpKeyboard = Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId
+            $helpBlocks = Get-HelpRichBlocks -ChatId $chatId -UserId $userId
+            if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks $helpBlocks -ReplyMarkup $helpKeyboard)) {
+                Send-TelegramPagedText -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup $helpKeyboard
+            }
             break
         }
         'help:ch:*' {

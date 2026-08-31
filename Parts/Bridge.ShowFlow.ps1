@@ -103,6 +103,12 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.8.0'; Items = @(
+                '📊 تقرير الأخبار صُحّح: الشريط واحد يُعدَّل، فعدد الأخبار صار «ما على الهواء» لا مجموع القراءات — كان يضخّم الرقم.'
+                '📈 وصار يعرض حجم كل تعديل (12 ← 15 ← 14)، ووقت أول وآخر تعديل، والأيام التي مرّت بلا تعديل.'
+                '📖 «الدليل كاملًا» صار رسالة واحدة بأبواب تُفتح بالضغط.'
+                '🧾 «عملياتي» صار قائمة مرتّبة بدل أسطر مُزاحة.'
+            ) }
         @{ Version = '7.7.0'; Items = @(
                 '📰 تقرير الأخبار صار جدولًا أيضًا: اليوم · النشرات · الأخبار · المشغّلون في صف واحد.'
             ) }
@@ -585,6 +591,73 @@ function Get-HelpChapters {
     }
 
     return @($chapters | Where-Object { -not $_.AdminOnly -or $isAdmin })
+}
+
+function Get-HelpRichBlocks {
+    <#
+        The whole manual as one message, a chapter per collapsible block.
+
+        The full guide has always been longer than a Telegram message, so it
+        arrived split across several and the reader had to scroll through
+        every chapter to reach the one they wanted. A details block (Bot API
+        10.2) puts the chapter titles on screen and the bodies behind them,
+        which is what an index was approximating with buttons and round
+        trips.
+    #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
+    $blocks = @(@{ type = 'heading'; text = '📖 دليل الجسر'; size = 3 })
+    foreach ($chapter in $chapters) {
+        $body = @(@($chapter.Body) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
+        # A details block with nothing in it renders as a control that opens
+        # onto blank space, which reads as a chapter that failed to load.
+        if ($body.Count -eq 0) { continue }
+        $blocks += @{ type = 'details'; summary = [string]$chapter.Title; blocks = $body }
+    }
+    return $blocks
+}
+
+function Get-MyOperationsBlocks {
+    <#
+        The operation history as a list rather than a table.
+
+        Deliberately not a table: the line that matters most here is the copy
+        that actually reached the screen, and it is a sentence. The banner
+        report leaves that column out for exactly this reason - a column wide
+        enough for it squeezes every other one to nothing - so where the copy
+        IS the point, the grid is the wrong shape and a list is the right one.
+    #>
+    param([Parameter(Mandatory)][long]$UserId)
+    $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
+    $blocks = @(@{ type = 'heading'; text = '🧾 آخر عملياتك'; size = 3 })
+    if ($history.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لم تُسجَّل لك عمليات بعد.' }
+        return $blocks
+    }
+
+    $items = @()
+    foreach ($item in $history) {
+        $icon = switch ([string]$item.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
+        $sentence = Get-OperationSentence -Action ([string]$item.Action) -Result ([string]$item.Result) -Target ([string]$item.Target)
+        $inner = @(@{ type = 'paragraph'; text = "$icon $(([datetime]$item.At).ToString('HH:mm')) — $sentence" })
+
+        $category = Get-TemplateCategoryLabel -Key ([string]$item.Target)
+        if ($category) { $inner += @{ type = 'paragraph'; text = "🏷 $category" } }
+        $onAirText = [string](Get-JsonProp $item 'Values')
+        if ($onAirText) { $inner += @{ type = 'paragraph'; text = "📝 $onAirText" } }
+        $reference = Get-OperationReference -OperationId ([string]$item.OperationId)
+        if ($reference) { $inner += @{ type = 'paragraph'; text = "🔖 مرجع $reference" } }
+        $advice = switch ([string]$item.Result) {
+            'failed' { 'افحص الاتصال ثم أعد المحاولة' }
+            'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
+            default { '' }
+        }
+        if ($advice) { $inner += @{ type = 'paragraph'; text = "↳ $advice" } }
+        $items += @{ blocks = $inner }
+    }
+    $blocks += @{ type = 'list'; items = $items }
+    return $blocks
 }
 
 function Get-HelpChapterIndex {
@@ -1731,6 +1804,9 @@ function Get-OperationReference {
 function Invoke-MyOperationsCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    # Structured list first; the text below is what it falls back to.
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MyOperationsBlocks -UserId $UserId) `
+            -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)) { return }
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
     if ($history.Count -eq 0) {
         # Not "منذ آخر تشغيل" any more: the history is rebuilt from audit.jsonl

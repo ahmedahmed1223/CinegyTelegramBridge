@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -47,7 +47,7 @@ function Show-ReportsMenu {
 النطاق: $scope
 
 🖼 البنرات — ماذا ظهر، بأي نص، ومتى اختفى
-📰 الأخبار — النشر اليومي وعدد الأخبار
+📰 الأخبار — تعديلات الشريط اليومي وحجم كل تعديل
 "@
 }
 
@@ -143,23 +143,66 @@ function Get-NewsReportDays {
     # StrictMode - which is exactly the "nothing published today" case.
     $days = foreach ($day in @($records | Group-Object -Property { $_.When.Date } | Sort-Object Name)) {
         $dayRecords = @($day.Group)
-        $dayItems = 0
-        foreach ($record in $dayRecords) { $dayItems += [int]$record.Count }
+        $ordered = @($dayRecords | Sort-Object { [datetime]$_.When })
+        $stamps = @($ordered | ForEach-Object { [datetime]$_.When })
+        $counts = @($ordered | ForEach-Object { [int]$_.Count })
         [pscustomobject]@{
             Date      = ([datetime]$dayRecords[0].When).Date
             Publishes = $dayRecords.Count
-            Items     = $dayItems
+            # The ticker is one running strip that gets edited, not a series
+            # of separate bulletins, so every publish records how many items
+            # the strip held at that moment. Adding those up counted the same
+            # headlines once per edit: a strip of 14 edited three times was
+            # reported as 40 items. What the day actually ended with is the
+            # last reading.
+            Items     = $(if ($counts.Count -gt 0) { $counts[-1] } else { 0 })
+            Counts    = $counts
+            # When the ticker was first and last touched that day. "3
+            # publishes" does not say whether they were spread across the
+            # bulletin or all fired in one minute at handover.
+            First     = $stamps[0]
+            Last      = $stamps[-1]
             Tally     = (Get-OperatorTally -Records $dayRecords)
         }
     }
     $days = @($days)
-    $totalItems = 0
-    foreach ($day in $days) { $totalItems += [int]$day.Items }
+
+    # Days with nothing published are filled in rather than left out.
+    # Group-Object only produces days that have records, so a week in which
+    # Wednesday carried no bulletin at all simply had no Wednesday row - and
+    # the gap is the single thing a supervisor opens this report to find.
+    $byDate = @{}
+    foreach ($day in $days) { $byDate[$day.Date.ToString('yyyy-MM-dd')] = $day }
+    $filled = [System.Collections.Generic.List[object]]::new()
+    $cursor = ([datetime]$window.From).Date
+    $lastDay = ([datetime]$window.To).Date
+    while ($cursor -le $lastDay) {
+        $key = $cursor.ToString('yyyy-MM-dd')
+        if ($byDate.ContainsKey($key)) { $filled.Add($byDate[$key]) }
+        else {
+            $filled.Add([pscustomobject]@{
+                    Date = $cursor; Publishes = 0; Items = 0; Counts = @()
+                    First = $null; Last = $null
+                    Tally = @{ Breakdown = ''; Single = '' }
+                })
+        }
+        $cursor = $cursor.AddDays(1)
+    }
+    $days = @($filled)
+
+    $published = @($days | Where-Object { $_.Publishes -gt 0 })
+    # On air at the end of the window, for the same reason: summing a running
+    # strip's readings is not a total of anything.
+    $totalItems = $(if ($published.Count -gt 0) { [int]$published[-1].Items } else { 0 })
     return @{
         Label      = $window.Label
         Days       = $days
         Publishes  = $records.Count
         Items      = $totalItems
+        # The two facts a ticker report exists to answer, and neither was
+        # here: when it was last touched, and how many days went by untouched.
+        LastPublishedAt = $(if ($published.Count -gt 0) { $published[-1].Last } else { $null })
+        SilentDays = @($days | Where-Object { $_.Publishes -eq 0 }).Count
         Truncated  = $scan.Truncated
     }
 }
@@ -192,35 +235,115 @@ function Get-NewsReportBlocks {
     $days = @($data.Days)
 
     $blocks = @(@{ type = 'heading'; text = "📰 تقرير الأخبار — $($data.Label)"; size = 3 })
-    if ($days.Count -eq 0) {
+    # Days are filled in for silent ones now, so the window always has rows;
+    # what makes it empty is that none of them carried an edit.
+    if ([int]$data.Publishes -eq 0) {
         $blocks += @{ type = 'paragraph'; text = 'لم يُنشر شريط أخبار في هذه الفترة.' }
         return $blocks
     }
 
     $cells = @(, @(
             @{ text = 'اليوم'; is_header = $true }
-            @{ text = 'النشرات'; is_header = $true }
-            @{ text = 'الأخبار'; is_header = $true }
+            @{ text = 'تعديلات'; is_header = $true }
+            @{ text = 'على الهواء'; is_header = $true }
+            @{ text = 'حجم التعديل'; is_header = $true }
+            @{ text = 'من ← إلى'; is_header = $true }
             @{ text = 'المشغّلون'; is_header = $true }
         ))
     foreach ($day in $days) {
+        # A silent day says so in every column rather than showing zeros that
+        # read like a rendering fault.
+        if ($day.Publishes -eq 0) {
+            $cells += , @(
+                @{ text = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)" }
+                @{ text = '—' }; @{ text = '—' }; @{ text = '—' }; @{ text = '—' }
+                @{ text = 'بلا تعديل' }
+            )
+            continue
+        }
         $who = if ($day.Tally.Breakdown) { [string]$day.Tally.Breakdown }
         elseif ($day.Tally.Single) { [string]$day.Tally.Single }
         else { '—' }
+        $span = if ($day.First -and $day.Last -and $day.First -ne $day.Last) {
+            "$(([datetime]$day.First).ToString('HH:mm')) ← $(([datetime]$day.Last).ToString('HH:mm'))"
+        }
+        elseif ($day.Last) { ([datetime]$day.Last).ToString('HH:mm') }
+        else { '—' }
         $cells += , @(
-            @{ text = $day.Date.ToString('MM/dd') }
+            @{ text = "$($day.Date.ToString('MM/dd')) $(Get-ArabicWeekdayShort -Date $day.Date)" }
             @{ text = [string]$day.Publishes }
             @{ text = [string]$day.Items }
+            @{ text = (Get-NewsEditTrail -Counts $day.Counts) }
+            @{ text = $span }
             @{ text = $who }
         )
     }
 
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
-    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) نشرة · $($data.Items) خبرًا" }
+    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا" }
+    foreach ($line in @(Get-NewsReportHighlights -Data $data)) {
+        $blocks += @{ type = 'paragraph'; text = $line }
+    }
     if ($data.Truncated) {
         $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
     }
     return $blocks
+}
+
+function Get-NewsEditTrail {
+    <#
+        How big each edit was, as the strip's item count after every one of
+        them: '12 ← 15 ← 14'.
+
+        A count of edits does not say whether the day was one strip written
+        once and nudged twice, or a strip rebuilt from nothing three times.
+        The numbers themselves show both the direction and the size, and the
+        last of them is what stayed on air.
+
+        Read right to left with the rest of the screen, so the arrow points
+        the way the eye travels and the newest reading sits at the end.
+    #>
+    param([AllowNull()][object[]]$Counts, [int]$Max = 6)
+    $list = @($Counts)
+    if ($list.Count -eq 0) { return '—' }
+    if ($list.Count -eq 1) { return [string]$list[0] }
+    $shown = $list
+    $prefix = ''
+    if ($list.Count -gt $Max) { $shown = $list[($list.Count - $Max)..($list.Count - 1)]; $prefix = '… ← ' }
+    return $prefix + (($shown | ForEach-Object { [string]$_ }) -join ' ← ')
+}
+
+function Get-ArabicWeekdayShort {
+    <# The day name, because '08/27' does not tell a supervisor whether the
+       silent day was a Friday. #>
+    param([Parameter(Mandatory)][datetime]$Date)
+    return @('أحد', 'إثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت')[[int]$Date.DayOfWeek]
+}
+
+function Get-NewsReportHighlights {
+    <#
+        The two sentences this report exists to produce and never did: how
+        long the ticker has been sitting untouched, and how many days in the
+        window carried no bulletin at all.
+
+        A count of publishes answers neither. A ticker last written six hours
+        ago is stale copy on air right now, and that is not visible anywhere
+        in a table of totals.
+    #>
+    param([Parameter(Mandatory)][hashtable]$Data, [datetime]$Now = (Get-Date))
+    $lines = @()
+    if ($Data.LastPublishedAt) {
+        $ago = $Now - ([datetime]$Data.LastPublishedAt)
+        $since = if ($ago.TotalMinutes -lt 60) { "$([int]$ago.TotalMinutes) دقيقة" }
+        elseif ($ago.TotalHours -lt 24) { "$([int]$ago.TotalHours) ساعة" }
+        else { "$([int]$ago.TotalDays) يومًا" }
+        $lines += "🕒 آخر نشرة: $(([datetime]$Data.LastPublishedAt).ToString('MM/dd HH:mm')) — منذ $since"
+    }
+    else { $lines += '🕒 لم تُنشر أي نشرة في هذه الفترة.' }
+    if ([int]$Data.SilentDays -gt 0) {
+        $lines += "🔇 أيام بلا نشرة: $($Data.SilentDays)"
+    }
+    return $lines
 }
 
 function Get-NewsReportText {
@@ -233,19 +356,19 @@ function Get-NewsReportText {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("📰 تقرير الأخبار — $($data.Label)")
     $lines.Add('━━━━━━━━━━━━━━')
-    if (@($data.Days).Count -eq 0) {
+    if ([int]$data.Publishes -eq 0) {
         $lines.Add('لم يُنشر شريط أخبار في هذه الفترة.')
         return ($lines -join "`n")
     }
 
     foreach ($day in @($data.Days)) {
-        $lines.Add("• $($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) نشرة · $($day.Items) خبرًا")
+        $lines.Add("• $($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) تعديلًا · على الهواء $($day.Items) · $(Get-NewsEditTrail -Counts $day.Counts)")
         if ($day.Tally.Breakdown) { $lines.Add("   ↳ $($day.Tally.Breakdown)") }
         elseif ($day.Tally.Single) { $lines.Add("   ↳ $($day.Tally.Single)") }
     }
 
     $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الإجمالي: $($data.Publishes) نشرة · $($data.Items) خبرًا")
+    $lines.Add("الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا")
     if ($data.Truncated) { $lines.Add("⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.") }
     return ($lines -join "`n")
 }
@@ -492,10 +615,10 @@ function Get-NewsReportHtml {
     foreach ($day in $days) {
         $who = if ($day.Tally.Breakdown) { $day.Tally.Breakdown } else { $day.Tally.Single }
         $sub = if ($who) { ConvertTo-HtmlText $who } else { '&mdash;' }
-        $head = "$($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) نشرة &middot; $($day.Items) خبرًا"
+        $head = "$($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) تعديلًا &middot; على الهواء $($day.Items) &middot; $(Get-NewsEditTrail -Counts $day.Counts)"
         $body.Add('<div class="row"><div class="head">' + $head + '</div><div class="sub">' + $sub + '</div></div>')
     }
-    $body.Add('<p class="totals">' + "الإجمالي: $($data.Publishes) نشرة &middot; $($data.Items) خبرًا" + '</p>')
+    $body.Add('<p class="totals">' + "الإجمالي: $($data.Publishes) تعديلًا &middot; على الهواء $($data.Items) خبرًا" + '</p>')
     return Get-ReportHtmlDocument -Title "تقرير الأخبار — $($data.Label)" -Body ($body -join "`n") `
         -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
 }

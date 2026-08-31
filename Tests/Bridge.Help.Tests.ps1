@@ -142,3 +142,34 @@ Describe 'Google Sheets chapter' {
         Get-HelpChapterText -Key 'sheet' -ChatId 100 -UserId 101 | Should -Match 'config.json'
     }
 }
+
+Describe 'The whole manual in one message' {
+    It 'gives every chapter a collapsible block under one heading' {
+        $blocks = @(Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        $details = @($blocks | Where-Object { $_.type -eq 'details' })
+
+        $blocks[0].type | Should -Be 'heading'
+        $details.Count | Should -BeGreaterThan 4
+        foreach ($block in $details) {
+            $block.summary | Should -Not -BeNullOrEmpty
+            @($block.blocks).Count | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'never emits a block that opens onto nothing' {
+        # A details control with an empty body reads as a chapter that failed
+        # to load.
+        foreach ($block in @(Get-HelpRichBlocks -ChatId 101 -UserId 101 | Where-Object { $_.type -eq 'details' })) {
+            @($block.blocks | Where-Object { [string]::IsNullOrWhiteSpace($_.text) }).Count | Should -Be 0
+        }
+    }
+
+    It 'keeps the administrator chapter out of an operator manual' {
+        Mock Test-Admin { $false }
+        $operator = @(Get-HelpRichBlocks -ChatId 202 -UserId 202 | Where-Object { $_.type -eq 'details' })
+        Mock Test-Admin { $true }
+        $admin = @(Get-HelpRichBlocks -ChatId 101 -UserId 101 | Where-Object { $_.type -eq 'details' })
+
+        $operator.Count | Should -BeLessThan $admin.Count
+    }
+}

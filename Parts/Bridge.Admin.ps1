@@ -627,6 +627,132 @@ function Get-BridgeDiagnosticsSnapshot {
     }
 }
 
+function Get-BridgeRuntimeFiles {
+    <# The state files an operator would actually miss. Deliberately not every
+       file under logs/: bridge.log and the audit trail are append-only text
+       whose health is a different question, and listing twenty rows would bury
+       the one that matters. #>
+    return @(
+        @{ Name = 'onair.json'; Path = $script:onAirFile }
+        @{ Name = 'schedule.json'; Path = $script:scheduleFile }
+        @{ Name = 'autohide.json'; Path = $script:autoHideFile }
+        @{ Name = 'template-reminders.json'; Path = $script:templateReminderFile }
+        @{ Name = 'drafts.json'; Path = $script:draftsFile }
+        @{ Name = 'news-draft.json'; Path = $script:newsDraftFile }
+        @{ Name = 'favorites.json'; Path = $script:userFavoritesFile }
+        @{ Name = 'user-profiles.json'; Path = $script:userProfilesFile }
+    )
+}
+
+function Get-RuntimeFileHealth {
+    <# Reads each state file and says whether it would survive a restart.
+       "absent" is not a fault: a bridge that never scheduled anything has no
+       schedule.json, and colouring that red would train the administrator to
+       ignore the screen. A corrupt file with a .bak beside it is recoverable
+       because Read-BridgeValidatedJson falls back to that backup on load. #>
+    param([Parameter(Mandatory)][object[]]$Files)
+    $records = foreach ($file in $Files) {
+        $path = [string]$file.Path
+        $exists = $path -and (Test-Path -LiteralPath $path -PathType Leaf)
+        $valid = $false
+        $sizeKB = 0
+        $sizeText = ''
+        $modified = $null
+        if ($exists) {
+            $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+            if ($item) {
+                $sizeKB = [math]::Round($item.Length / 1KB, 1)
+                $sizeText = if ($item.Length -lt 1KB) { "$($item.Length) بايت" } else { "$sizeKB KB" }
+                $modified = $item.LastWriteTime
+            }
+            $raw = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                try { $null = $raw | ConvertFrom-Json -ErrorAction Stop; $valid = $true }
+                catch { $valid = $false }
+            }
+        }
+        $hasBackup = $path -and (Test-Path -LiteralPath "$path.bak" -PathType Leaf)
+        $state = if (-not $exists) { 'absent' }
+        elseif ($valid) { 'healthy' }
+        elseif ($hasBackup) { 'recoverable' }
+        else { 'broken' }
+        [pscustomobject]@{
+            Name = [string]$file.Name; Path = $path; Exists = [bool]$exists; Valid = [bool]$valid
+            HasBackup = [bool]$hasBackup; SizeKB = $sizeKB; SizeText = $sizeText; ModifiedAt = $modified; State = $state
+        }
+    }
+    return @($records)
+}
+
+function Get-RuntimeFileHealthText {
+    param([AllowNull()][object[]]$Records = $null)
+    if ($null -eq $Records) { $Records = @(Get-RuntimeFileHealth -Files (Get-BridgeRuntimeFiles)) }
+    $Records = @($Records)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('🗂 صحة ملفات التشغيل')
+    $lines.Add('━━━━━━━━━━━━━━')
+
+    $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
+    if ($faults.Count -eq 0) {
+        $lines.Add('🟢 كل ملفات التشغيل سليمة.')
+    }
+    else {
+        $lines.Add("🔴 ملفات تحتاج انتباهك: $($faults.Count)")
+    }
+    $lines.Add('')
+
+    foreach ($record in $Records) {
+        $icon = switch ([string]$record.State) {
+            'healthy' { '🟢' }
+            'absent' { '⚪️' }
+            'recoverable' { '🟠' }
+            default { '🔴' }
+        }
+        $detail = switch ([string]$record.State) {
+            'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
+            'absent' { 'لم يُكتب بعد — لا شيء لاستعادته' }
+            'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
+            default { 'تالف ولا توجد نسخة احتياطية' }
+        }
+        $lines.Add("$icon $($record.Name)")
+        $lines.Add("      $detail")
+    }
+
+    if ($faults.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('↳ الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل.')
+        $lines.Add('↳ التالف بلا نسخة يبدأ فارغًا؛ خذ نسخة من المجلد قبل إعادة التشغيل إن كان محتواه مهمًا.')
+    }
+    return ($lines -join "`n")
+}
+
+function Invoke-RuntimeFileHealthCommand {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-RuntimeFileHealthText) -ReplyMarkup (Get-HealthCenterKeyboard)
+}
+
+function Get-BridgeUsageMetrics {
+    <# Counted from the in-memory operation history the 🧾 screen already
+       reads, so opening the health centre never touches disk or Cinegy. That
+       history is capped at 20 per user and rebuilt from audit.jsonl at
+       startup, so these are "recent", not lifetime, totals. #>
+    $operations = 0
+    $operators = 0
+    $today = (Get-Date).Date
+    foreach ($key in @($script:UserOperationHistory.Keys)) {
+        $userOps = @(@($script:UserOperationHistory[$key]) | Where-Object { ([datetime]$_.At).Date -eq $today })
+        if ($userOps.Count -gt 0) { $operators++; $operations += $userOps.Count }
+    }
+    $uptime = (Get-Date) - $script:BridgeStartedAt
+    return [pscustomobject]@{
+        OperationsToday = $operations
+        ActiveOperators = $operators
+        OnAirCount      = @($script:OnAir.Keys).Count
+        UptimeText      = Format-DurationMinutes -Minutes ([int][math]::Max(0, $uptime.TotalMinutes))
+    }
+}
+
 function Get-BridgeHealthCenterText {
     param(
         $DiagnosticsSnapshot = $null,
@@ -679,6 +805,10 @@ function Get-BridgeHealthCenterText {
     }
     $errorLine = if ($recentErrors.Count -gt 0) { "🟠 آخر الأخطاء: $($recentErrors -join ' | ')" } else { '🟢 آخر الأخطاء: لا توجد أخطاء مسجلة' }
 
+    # Read from state already in memory, so the screen still runs no probe.
+    $usage = Get-BridgeUsageMetrics
+    $usageLine = "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء · يعمل منذ $($usage.UptimeText)"
+
     return @(
         '🩺 مركز صحة النظام'
         "Bridge v$script:BridgeVersion"
@@ -690,6 +820,7 @@ function Get-BridgeHealthCenterText {
         $storageLine
         $scheduleLine
         $errorLine
+        $usageLine
     ) -join "`n"
 }
 

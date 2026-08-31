@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.3.0
+
+Operations on the 🧾 screen now carry a short reference taken from the `AIR_OP`
+correlation id, so an operator can quote it and an administrator can find the
+exact log line. The health centre gains a runtime-file screen (healthy / not yet
+written / corrupt-with-backup / corrupt) and a usage line covering today's
+operations, active operators, graphics on air, and uptime. Neither screen runs a
+new probe.
+
 ## Version 6.2.0
 
 6.2.0 is a maintenance release. No screen, button, or command changed. The

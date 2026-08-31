@@ -103,6 +103,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.3.0'; Items = @(
+                '🔖 كل عملية في «عملياتي» صار لها مرجع قصير. اذكره للمشرف وهو يجد سطرها في السجل مباشرة.'
+                '🗂 «ملفات التشغيل» شاشة جديدة في مركز الصحة: تقول أي ملف حالة سليم، وأيّهما تالف، وأيّهما له نسخة احتياطية تُستعاد وحدها.'
+                '📈 مركز الصحة صار يعرض سطر استخدام: عمليات اليوم، عدد المشغّلين، كم على الهواء، ومنذ متى يعمل الجسر.'
+            ) }
         @{ Version = '6.2.0'; Items = @(
                 '🧹 إصدار صيانة: لا شيء تغيّر في أي شاشة أو زر أو أمر. العمل كله داخلي.'
                 '🕒 «ماذا فاتني» صارت تقرأ أوقات سجل التدقيق بنفس الطريقة التي تقرأ بها بقية الشاشات، فلا تختلف الساعة بين شاشة وأخرى.'
@@ -1433,6 +1438,19 @@ function Get-OperationSentence {
     return $phrase
 }
 
+function Get-OperationReference {
+    <# The short half of the AIR_OP correlation id. An operator reporting a
+       problem can quote this and an administrator can find the exact line in
+       the log with it; the full 32-hex id is unreadable on a phone and nobody
+       would retype it. Eight hex characters is 4 billion values against a
+       history of at most a few thousand operations. #>
+    param([string]$OperationId)
+    if ([string]::IsNullOrWhiteSpace($OperationId)) { return '' }
+    $hex = $OperationId -replace '^air-', ''
+    if ($hex.Length -lt 8) { return '' }
+    return $hex.Substring(0, 8)
+}
+
 function Invoke-MyOperationsCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -1461,6 +1479,12 @@ function Invoke-MyOperationsCommand {
         if ($category) { $lines.Add("      🏷 $category") }
         $onAirText = [string](Get-JsonProp $item 'Values')
         if ($onAirText) { $lines.Add("      📝 $onAirText") }
+
+        # The link back to the log. Shown for every operation, not just
+        # failures: when an operator asks "what happened at 21:40" the
+        # reference is what turns that into one grep.
+        $reference = Get-OperationReference -OperationId ([string]$item.OperationId)
+        if ($reference) { $lines.Add("      🔖 مرجع $reference") }
 
         $advice = switch ([string]$item.Result) {
             'failed' { 'افحص الاتصال ثم أعد المحاولة' }

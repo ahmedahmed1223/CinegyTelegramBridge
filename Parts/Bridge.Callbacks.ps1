@@ -363,6 +363,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-HealthCenterCommand -ChatId $chatId -UserId $userId }
             break
         }
+        'health:files' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-RuntimeFileHealthCommand -ChatId $chatId -UserId $userId }
+            break
+        }
         'diag:bundle' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-DiagnosticBundleCommand -ChatId $chatId -UserId $userId }
             break

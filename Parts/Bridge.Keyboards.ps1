@@ -260,7 +260,7 @@ function Get-AdminToolsKeyboard {
 function Get-HealthCenterKeyboard {
     return @{ inline_keyboard = @(
             , @((New-Button '🔄 تحديث' 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
-            , @((New-Button '🧪 التشخيص' 'menu:diagnostics'))
+            , @((New-Button '🧪 التشخيص' 'menu:diagnostics'), (New-Button '🗂 ملفات التشغيل' 'health:files'))
             , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
         ) }
 }

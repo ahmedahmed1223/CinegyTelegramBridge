@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.16.0
+
+The reorder screen becomes a table - number, headline, length - with the
+length column flagging any headline near NewsMaxItemLength, which an editor
+previously discovered only when the publish was refused. What is on air sits
+folded under the draft rather than behind a preview button, and the publish
+confirmation shows the words it would change instead of counting them.
+
 ## Version 7.15.0
 
 Withdraws the table-direction changes from 7.14.0 and 7.14.1. Both were

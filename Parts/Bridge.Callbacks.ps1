@@ -168,6 +168,11 @@ function Invoke-CallbackQuery {
         }
         'news:publish' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
+            # The words, not a count: an editor about to put copy on air is
+            # deciding whether these are the right ones.
+            $publishMarkup = @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm';style='success'},@{text='إلغاء';callback_data='news:refresh'}))}
+            $publishBlocks = @(Get-NewsPublishReviewBlocks -UserId $userId)
+            if ($publishBlocks.Count -gt 0 -and (Send-TelegramRichMessage -ChatId $chatId -Blocks $publishBlocks -ReplyMarkup $publishMarkup)) { break }
             Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm';style='success'},@{text='إلغاء';callback_data='news:refresh'}))};break
         }
         'news:publishconfirm' {

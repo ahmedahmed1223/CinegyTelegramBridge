@@ -872,11 +872,119 @@ Describe 'News reorder screen as HTML' {
         $text | Should -Match ([regex]::Escape('</blockquote>'))
     }
 
-    It 'sends the screen as HTML, not as text that merely looks like it' {
+    It 'falls back to HTML, not to text that merely looks like it' {
+        # Blocks are tried first now; the HTML version is what catches a
+        # refusal, and it has to keep its parse mode when it does.
+        $script:RichMessagesUnavailable = $true
         Mock Edit-TelegramMessageText { $true }
+
+        try { Show-NewsTickerReorderScreen -ChatId 42 -UserId 42 -MessageId 7 }
+        finally { $script:RichMessagesUnavailable = $false }
+
+        Should -Invoke Edit-TelegramMessageText -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' }
+    }
+
+    It 'edits the rich screen in place rather than leaving a message per press' {
+        Mock Get-NewsTickerReorderBlocks { @(@{ type = 'paragraph'; text = 'x' }) }
+        Mock Edit-TelegramRichMessage { $true }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Send-TelegramMessage { }
 
         Show-NewsTickerReorderScreen -ChatId 42 -UserId 42 -MessageId 7
 
-        Should -Invoke Edit-TelegramMessageText -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' }
+        Should -Invoke Edit-TelegramRichMessage -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'The draft is shown against what it would replace' {
+    BeforeAll {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر باقٍ', 'خبر جديد')
+        }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'names what would be added and what would go, not just how many' {
+        # "3 items will be replaced" is a count. An editor about to put copy
+        # on air is deciding whether these are the right words.
+        $diff = Get-NewsDraftDiff -Draft @('خبر باقٍ', 'خبر جديد') -Live @('خبر باقٍ', 'خبر قديم')
+
+        @($diff.Added) | Should -Be @('خبر جديد')
+        @($diff.Removed) | Should -Be @('خبر قديم')
+        @($diff.Kept) | Should -Be @('خبر باقٍ')
+    }
+
+    It 'reports no difference when the draft matches the air' {
+        $diff = Get-NewsDraftDiff -Draft @('أ', 'ب') -Live @('أ', 'ب')
+
+        @($diff.Added).Count | Should -Be 0
+        @($diff.Removed).Count | Should -Be 0
+        @($diff.Kept).Count | Should -Be 2
+    }
+
+    It 'treats an empty air as everything being added' {
+        $diff = Get-NewsDraftDiff -Draft @('أ') -Live @()
+
+        @($diff.Added) | Should -Be @('أ')
+        @($diff.Removed).Count | Should -Be 0
+    }
+
+    It 'puts the running order in a table, with the length of each item' {
+        # The ticker enforces NewsMaxItemLength and an editor had no way to
+        # see which headline was near it until the publish was refused.
+        Mock Get-NewsTickerConfiguredSnapshot { @{ Success = $false; Items = @() } }
+
+        $blocks = @(Get-NewsTickerReorderBlocks -UserId 42)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[0]).Count | Should -Be 3
+        @($table.cells[1])[0].text | Should -Be '1'
+        @($table.cells[1])[2].text | Should -Be '8'
+    }
+
+    It 'flags a headline that is close to the limit rather than only counting it' {
+        Mock Get-NewsTickerConfiguredSnapshot { @{ Success = $false; Items = @() } }
+        $script:NewsTickerDraft.Items = @('ط' * 95)
+        try {
+            $config.Settings | Add-Member -NotePropertyName NewsMaxItemLength -NotePropertyValue 100 -Force
+            $table = @(@(Get-NewsTickerReorderBlocks -UserId 42) | Where-Object { $_.type -eq 'table' })[0]
+
+            @($table.cells[1])[2].text | Should -Match '⚠️'
+        }
+        finally { $script:NewsTickerDraft.Items = @('خبر باقٍ', 'خبر جديد') }
+    }
+
+    It 'folds the on-air comparison under the draft instead of behind a preview button' {
+        Mock Get-NewsTickerConfiguredSnapshot { @{ Success = $true; Items = @('خبر باقٍ', 'خبر قديم') } }
+
+        $folded = @(@(Get-NewsTickerReorderBlocks -UserId 42) | Where-Object { $_.type -eq 'details' })[0]
+        $texts = @($folded.blocks | ForEach-Object { $_.text })
+
+        $folded.summary | Should -Match '\+1 −1'
+        @($texts | Where-Object { $_ -eq '➕ خبر جديد' }).Count | Should -Be 1
+        @($texts | Where-Object { $_ -eq '➖ خبر قديم' }).Count | Should -Be 1
+    }
+
+    It 'says the publish would change nothing rather than drawing an empty table' {
+        Mock Get-NewsTickerConfiguredSnapshot { @{ Success = $true; Items = @('خبر باقٍ', 'خبر جديد') } }
+
+        $blocks = @(Get-NewsPublishReviewBlocks -UserId 42)
+
+        @($blocks | Where-Object { $_.type -eq 'table' }).Count | Should -Be 0
+        @($blocks | Where-Object { $_.text -match 'لن يغيّر' }).Count | Should -Be 1
+    }
+
+    It 'reviews a publish as the words it changes' {
+        Mock Get-NewsTickerConfiguredSnapshot { @{ Success = $true; Items = @('خبر باقٍ', 'خبر قديم') } }
+
+        $blocks = @(Get-NewsPublishReviewBlocks -UserId 42)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+        $marks = @($table.cells | Select-Object -Skip 1 | ForEach-Object { @($_)[0].text })
+
+        $marks | Should -Contain '➕'
+        $marks | Should -Contain '➖'
+        @($blocks | Where-Object { $_.type -eq 'details' })[0].summary | Should -Match 'بلا تغيير \(1\)'
     }
 }

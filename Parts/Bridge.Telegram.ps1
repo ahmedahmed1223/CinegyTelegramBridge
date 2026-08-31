@@ -183,6 +183,45 @@ function Send-TelegramRichMessage {
     return $false
 }
 
+function Edit-TelegramRichMessage {
+    <#
+        Replaces a sent rich message in place (Bot API 10.1's rich_message on
+        editMessageText).
+
+        The reorder screen re-renders on every ⬆️/⬇️ press, so without this a
+        rich version of it would leave a new message behind for each one - the
+        pile of stale keyboards that editing in place was introduced to stop.
+
+        Returns $false rather than throwing, so a caller keeps its text
+        version as the fallback, and a refusal of the method itself disables
+        rich sending for the session exactly as Send-TelegramRichMessage does.
+    #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][int]$MessageId,
+        [Parameter(Mandatory)][array]$Blocks,
+        [hashtable]$ReplyMarkup
+    )
+    if ($script:RichMessagesUnavailable) { return $false }
+    $body = @{
+        chat_id = $ChatId
+        message_id = $MessageId
+        rich_message = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    }
+    if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if ($request.Success) { return $true }
+    if ([string]$request.Error -match '400|404') {
+        $script:RichMessagesUnavailable = $true
+        Write-BridgeLog "editMessageText rejected a rich message; using text for the rest of this session: $($request.Error)" 'WARN'
+    }
+    else {
+        Write-BridgeLog "Failed to edit a rich message in $ChatId : $($request.Error)" 'WARN'
+    }
+    return $false
+}
+
 function Send-TelegramPhoto {
     param(
         [Parameter(Mandatory)][long]$ChatId,

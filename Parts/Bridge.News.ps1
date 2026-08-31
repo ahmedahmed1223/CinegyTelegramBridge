@@ -899,10 +899,153 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     return ($lines -join "`n")
 }
 
+function Get-NewsDraftDiff {
+    <#
+        What publishing this draft would change, item by item.
+
+        The publish confirmation said "3 items will be replaced", which is a
+        count, not a decision: it does not say whether three were reworded or
+        three were thrown away and three new ones written. Comparing the two
+        lists says which.
+    #>
+    param([AllowNull()][object[]]$Draft, [AllowNull()][object[]]$Live)
+    $draftItems = @(@($Draft) | ForEach-Object { [string]$_ })
+    $liveItems = @(@($Live) | ForEach-Object { [string]$_ })
+    return [pscustomobject]@{
+        Added = @($draftItems | Where-Object { $liveItems -notcontains $_ })
+        Removed = @($liveItems | Where-Object { $draftItems -notcontains $_ })
+        Kept = @($draftItems | Where-Object { $liveItems -contains $_ })
+    }
+}
+
+function Get-NewsTickerReorderBlocks {
+    <#
+        The reorder screen as a table.
+
+        The headline and its controls have been apart since 6.9.3 - the text
+        in the message body, the buttons underneath - because a button that
+        shares a row's width with three others gets a quarter of the screen.
+        A table puts the order back in front of the eye as an order: a
+        numbered column reads as a running order, which is what this list is.
+
+        The length column is new and is the reason the table earns its place:
+        the ticker enforces NewsMaxItemLength and an editor had no way to see
+        which headline was near it until the publish was refused.
+    #>
+    param([long]$UserId, [int]$Page = 0)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) {
+        return @(
+            @{ type = 'heading'; text = '📝 الترتيب والتعديل'; size = 3 }
+            @{ type = 'paragraph'; text = '⚠️ لا توجد مسودة مملوكة لك.' }
+        )
+    }
+    $items = @($draft.Items)
+    $count = $items.Count
+    $size = Get-NewsTickerPageSize
+    $pages = [math]::Max(1, [math]::Ceiling($count / $size))
+    if ($Page -lt 0) { $Page = 0 }
+    if ($Page -ge $pages) { $Page = $pages - 1 }
+    $first = $Page * $size + 1
+    $last = [math]::Min($count, $first + $size - 1)
+    $max = Get-SettingInt 'NewsMaxItemLength' 1
+
+    $blocks = @(@{ type = 'heading'; text = "📝 ترتيب المسودة — $count خبرًا"; size = 3 })
+    if ($pages -gt 1) {
+        $blocks += @{ type = 'paragraph'; text = "المعروض: $first–$last · صفحة $($Page + 1) من $pages" }
+    }
+
+    $lineMax = [math]::Max(40, (Get-SettingInt 'NewsListLabelLength' 8))
+    $cells = @(, @(
+            @{ text = '#'; is_header = $true }
+            @{ text = 'الخبر'; is_header = $true }
+            @{ text = 'أحرف'; is_header = $true }
+        ))
+    for ($i = $first; $i -le $last; $i++) {
+        $item = [string]$items[$i - 1]
+        $shown = if ($item.Length -gt $lineMax) { $item.Substring(0, $lineMax - 1) + '…' } else { $item }
+        # Marked rather than merely counted: a number the editor has to
+        # compare against a setting they cannot see is not a warning.
+        $length = if ($max -gt 0 -and $item.Length -gt ($max * 0.9)) { "⚠️ $($item.Length)" } else { [string]$item.Length }
+        $cells += , @(@{ text = [string]$i }, @{ text = $shown }, @{ text = $length })
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+
+    # What is on air right now, under the draft rather than behind a preview
+    # button. Deciding whether a draft is ready means comparing it with what
+    # it would replace, and that took a round trip through 👁 معاينة and back.
+    $snapshot = Get-NewsTickerConfiguredSnapshot
+    if ($snapshot.Success) {
+        $live = @($snapshot.Items)
+        $diff = Get-NewsDraftDiff -Draft $items -Live $live
+        $summary = "🔴 على الهواء الآن: $($live.Count) خبرًا · +$($diff.Added.Count) −$($diff.Removed.Count)"
+        $inner = @()
+        foreach ($line in $diff.Added) { $inner += @{ type = 'paragraph'; text = "➕ $line" } }
+        foreach ($line in $diff.Removed) { $inner += @{ type = 'paragraph'; text = "➖ $line" } }
+        if ($inner.Count -eq 0) { $inner = @(@{ type = 'paragraph'; text = 'لا فرق بين المسودة وما على الهواء.' }) }
+        $blocks += @{ type = 'details'; summary = $summary; blocks = $inner }
+    }
+
+    $blocks += @{ type = 'paragraph'; text = $(switch (Get-NewsListLayout) {
+                'stacked' { 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف' }
+                'inline' { '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف' }
+                'compact' { 'اضغط رقم الخبر: الترتيب والتعديل والحذف في شاشته' }
+                default { 'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف' }
+            }) }
+    return $blocks
+}
+
+function Get-NewsPublishReviewBlocks {
+    <#
+        The publish confirmation, as what would actually change.
+
+        "3 items will be replaced" is a count. An editor about to put copy on
+        air is deciding whether these are the right words, and for that they
+        need the words.
+    #>
+    param([long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return @() }
+    $snapshot = Get-NewsTickerConfiguredSnapshot
+    if (-not $snapshot.Success) { return @() }
+    $diff = Get-NewsDraftDiff -Draft @($draft.Items) -Live @($snapshot.Items)
+
+    $blocks = @(@{ type = 'heading'; text = '✅ مراجعة النشر'; size = 3 })
+    $blocks += @{ type = 'paragraph'
+        text = "المسودة $(@($draft.Items).Count) خبرًا · على الهواء $(@($snapshot.Items).Count) — سيُضاف $($diff.Added.Count) ويُحذف $($diff.Removed.Count)" }
+    if ($diff.Added.Count -eq 0 -and $diff.Removed.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لا فرق: النشر لن يغيّر ما على الهواء.' }
+        return $blocks
+    }
+    $cells = @(, @(@{ text = ''; is_header = $true }, @{ text = 'الخبر'; is_header = $true }))
+    foreach ($line in $diff.Added) { $cells += , @(@{ text = '➕' }, @{ text = [string]$line }) }
+    foreach ($line in $diff.Removed) { $cells += , @(@{ text = '➖' }, @{ text = [string]$line }) }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    if ($diff.Kept.Count -gt 0) {
+        $blocks += @{ type = 'details'; summary = "بلا تغيير ($($diff.Kept.Count))"
+            blocks = @($diff.Kept | ForEach-Object { @{ type = 'paragraph'; text = "· $_" } }) }
+    }
+    return $blocks
+}
+
 function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0,[int]$Page=0)
     <# Edits the originating message when possible so repeated ⬆️/⬇️ presses
        reuse a single message instead of flooding the chat with stale lists. #>
-    $text=Get-NewsTickerReorderText -UserId $UserId -Page $Page;$kb=Get-NewsTickerReorderKeyboard -UserId $UserId -Page $Page
+    $kb = Get-NewsTickerReorderKeyboard -UserId $UserId -Page $Page
+    # Blocks first, edited in place exactly as the text version is, so
+    # repeated ⬆️/⬇️ presses still reuse one message.
+    #
+    # Not built at all once rich sending is known to be refused: this screen
+    # re-renders on every arrow press and the block version reads the on-air
+    # file to compare against it, which is work nobody would see.
+    if (-not $script:RichMessagesUnavailable) {
+        $blocks = Get-NewsTickerReorderBlocks -UserId $UserId -Page $Page
+        if ($MessageId -gt 0) {
+            if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $blocks -ReplyMarkup $kb) { return }
+        }
+        elseif (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $kb) { return }
+    }
+    $text=Get-NewsTickerReorderText -UserId $UserId -Page $Page
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $kb -ParseMode 'HTML')){return}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb -ParseMode 'HTML'
 }

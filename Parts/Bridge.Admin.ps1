@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -996,7 +996,7 @@ function Request-BridgeRestart {
     $live = if ($script:OnAir.Count -gt 0) { "`n⚠️ يوجد $($script:OnAir.Count) مشهدًا مسجّلًا على الهواء. إعادة التشغيل لا تغيّر ما هو على الشاشة، لكن البوت لن يستجيب لثوانٍ." } else { '' }
     Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $who تلقائيًا.$live") `
         -ReplyMarkup @{ inline_keyboard = @(, @(
-                @{ text = '✅ نعم، أعد التشغيل'; callback_data = 'restart:confirm' },
+                @{ text = '✅ نعم، أعد التشغيل'; callback_data = 'restart:confirm'; style = 'danger' },
                 @{ text = '❌ إلغاء'; callback_data = 'menu:admintools' })) }
     return $true
 }
@@ -1152,7 +1152,7 @@ function Receive-SettingsImport {
         $more = if (@($validation.Changes).Count -gt 20) { "`n… و$(@($validation.Changes).Count - 20) خيارًا آخر." } else { '' }
         Send-TelegramMessage -ChatId $ChatId -Text ("⚠️ مراجعة استيراد الإعدادات — $(@($validation.Changes).Count) تغييرًا:`n" + ($preview -join "`n") + $more) `
             -ReplyMarkup @{ inline_keyboard = @(, @(
-                    @{ text = '✅ تطبيق'; callback_data = 'cfgimport:apply' },
+                    @{ text = '✅ تطبيق'; callback_data = 'cfgimport:apply'; style = 'success' },
                     @{ text = '❌ إلغاء'; callback_data = 'cfgimport:cancel' })) }
     }
     catch {
@@ -1404,7 +1404,7 @@ function Receive-TemplateRegistryImport {
         Set-PendingState -ChatId $ChatId -State $state
         $summary = "🔎 مراجعة استيراد القوالب`nالإجمالي: $($validation.Count)`nمضاف: $($comparison.Added.Count)`nمعدّل: $($comparison.Changed.Count)`nمحذوف: $($comparison.Removed.Count)`nبلا تغيير: $($comparison.Unchanged.Count)`n`nلن يُستبدل الملف حتى التأكيد."
         Send-TelegramMessage -ChatId $ChatId -Text $summary -ReplyMarkup @{ inline_keyboard=@(
-            , @((New-Button '✅ اعتماد الاستيراد' 'timport:confirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+            , @((New-Button '✅ اعتماد الاستيراد' 'timport:confirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
         ) }
     }
     catch {
@@ -1560,7 +1560,7 @@ function Request-DiagnosticLogClear {
     $label = if ($Kind -eq 'runtime') { 'سجل التشغيل الحالي وكل نسخه المدورة' } else { 'سجل التدقيق الدائم' }
     Send-TelegramMessage -ChatId $ChatId -Text "⚠️ هل تريد مسح $label؟`nلا يؤثر هذا على onair.json أو القوالب الموجودة على الهواء." -ReplyMarkup @{
         inline_keyboard = @(
-            , @((New-Button '⚠️ نعم، امسح' 'diag:clearconfirm'), (New-Button '❌ إلغاء' 'menu:diagnostics'))
+            , @((New-Button '⚠️ نعم، امسح' 'diag:clearconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:diagnostics'))
         )
     }
 }

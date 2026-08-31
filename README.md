@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.0.1
+
+Button colour reaches the rest of the screens, under a policy written above
+`New-Button`: red for a press that takes something off air, destroys typed
+work, or overwrites live state; green for one that commits what the operator
+just authored; nothing for navigation and for cancel. A menu entry that only
+opens the screen where the act happens stays uncoloured, and only the
+affirming half of a confirmation is coloured - colouring both halves leaves
+the thumb with no signal.
+
 ## Version 7.0.0
 
 The bot's screens now use the Bot API features that did not exist when they

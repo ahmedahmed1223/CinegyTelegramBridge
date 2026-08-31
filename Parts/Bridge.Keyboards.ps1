@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -26,10 +26,31 @@ function ConvertTo-OneHandLayout {
 }
 
 function New-Button {
+    <#
+        -Style is Bot API 9.4's button colour. Where it is used is a policy,
+        not a taste, because a screen where everything is coloured says
+        nothing:
+
+          danger  - the press takes something off air, destroys typed work,
+                    or overwrites live state: hide, exit scene, delete,
+                    clear, revoke, restore, restart, and the affirming half
+                    of any confirmation of those.
+          success - the press commits what the operator just authored: send
+                    on air, save, apply, confirm an import or a schedule.
+          (none)  - navigation, cancel, and every menu entry that only opens
+                    the screen where the act actually happens.
+
+        A cancel stays uncoloured on purpose: colouring both halves of a
+        confirmation leaves the thumb with no signal at all.
+
+        The setting that turns colours off is honoured at send time, in
+        ConvertTo-TelegramReplyMarkupJson, not here.
+    #>
     param(
         [Parameter(Mandatory)][string]$Text,
         [Parameter(Mandatory)][string]$Data,
-        [int]$MaxTextLength = -1
+        [int]$MaxTextLength = -1,
+        [ValidateSet('', 'danger', 'success', 'primary')][string]$Style = ''
     )
     $maxLength = if ($MaxTextLength -ge 0) { $MaxTextLength } else { Get-SettingInt 'ButtonTextMaxLength' }
     $displayText = $Text
@@ -37,7 +58,9 @@ function New-Button {
         $info = [Globalization.StringInfo]::new($Text)
         $displayText = $info.SubstringByTextElements(0, $maxLength - 1).TrimEnd() + '…'
     }
-    return @{ text = $displayText; callback_data = $Data }
+    $button = @{ text = $displayText; callback_data = $Data }
+    if ($Style) { $button.style = $Style }
+    return $button
 }
 
 function Get-MainMenuKeyboard {
@@ -50,7 +73,7 @@ function Get-MainMenuKeyboard {
     # every row above the fix is a row they must scroll past to reach it.
     if ($script:OnAir.Count -gt 0) {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer") )
+            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
             # A timer can be attached to something already live, not just at
             # the moment it is put on air.
             if (Get-Setting 'EnableTimedShow') {
@@ -575,13 +598,13 @@ function Get-PresetActionKeyboard {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex)
     return @{ inline_keyboard = @(
             , @( (New-Button "✏️ تعديل القيم" "pae:$TemplateIndex`:$PresetIndex"), (New-Button "🏷 إعادة تسمية" "par:$TemplateIndex`:$PresetIndex") )
-            , @( (New-Button "🗑 حذف" "pad:$TemplateIndex`:$PresetIndex"), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
+            , @( (New-Button "🗑 حذف" "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
         ) }
 }
 
 function Get-PresetReviewKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "✅ حفظ التغيير" 'presetadmin:confirm'), (New-Button "❌ إلغاء" 'cancel') )
+            , @( (New-Button "✅ حفظ التغيير" 'presetadmin:confirm' -Style success), (New-Button "❌ إلغاء" 'cancel') )
         ) }
 }
 
@@ -605,7 +628,7 @@ function Get-ScheduleReviewKeyboard {
     if ($State -and [string]$State.Recurrence -ne 'once') {
         $rows += , @((New-Button '📆 تحديد نهاية التكرار' 'schedule:setend'), (New-Button '♾ بدون انتهاء' 'schedule:clearend'))
     }
-    $rows += , @((New-Button "✅ تأكيد الجدولة" 'schedule:confirm'), (New-Button "❌ إلغاء" 'cancel'))
+    $rows += , @((New-Button "✅ تأكيد الجدولة" 'schedule:confirm' -Style success), (New-Button "❌ إلغاء" 'cancel'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -633,7 +656,7 @@ function Get-LayerDashboardKeyboard {
             $button = New-Button "🔄 فحص ومقارنة · $(Get-LayerDisplayName -Layer $layer)" 'menu:layers'
         }
         elseif ($status.IsOnAir) {
-            $button = New-Button "🙈 إخفاء $(Get-LayerDisplayName -Layer $layer)" "hide:$layer"
+            $button = New-Button "🙈 إخفاء $(Get-LayerDisplayName -Layer $layer)" "hide:$layer" -Style danger
         }
         else {
             $button = New-Button "🔄 تحديث · $(Get-LayerDisplayName -Layer $layer) مخفية" 'menu:layers'
@@ -667,7 +690,7 @@ function Get-AfterShowKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
-    $first = @( (New-Button "🙈 إخفاء هذا (طبقة $Layer)" "hide:$Layer"), (New-Button "🚪 خروج" "exit:$Layer") )
+    $first = @( (New-Button "🙈 إخفاء هذا (طبقة $Layer)" "hide:$Layer" -Style danger), (New-Button "🚪 خروج" "exit:$Layer" -Style danger) )
     if (Get-Setting 'EnableTimedShow') { $first += (New-Button "⏱ مؤقت" "timer:$Layer") }
     $rows = @( , $first )
     if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ تراجع آمن' "rollback:$Layer")) }
@@ -687,7 +710,7 @@ function Get-AfterLayerRemovalKeyboard {
 function Get-RollbackReviewKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
     return @{ inline_keyboard=@(
-        , @((New-Button '✅ تأكيد التراجع' "rollbackconfirm:$Layer"), (New-Button '❌ إلغاء' 'menu'))
+        , @((New-Button '✅ تأكيد التراجع' "rollbackconfirm:$Layer" -Style success), (New-Button '❌ إلغاء' 'menu'))
     ) }
 }
 
@@ -725,14 +748,14 @@ function Get-FieldPromptKeyboard {
 
 function Get-ShowReviewKeyboard {
     param([switch]$HasFields)
-    $row = @( (New-Button "✅ تأكيد الإرسال" "show:confirm") )
+    $row = @( (New-Button "✅ تأكيد الإرسال" "show:confirm" -Style success) )
     if ($HasFields) { $row += (New-Button "✏️ تعديل" "show:edit") }
     return @{ inline_keyboard = @( , $row; , @( (New-Button "❌ إلغاء" "cancel") ) ) }
 }
 
 function Get-HideAllConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "🚨 نعم، إخفاء الكل" "hideall:confirm"), (New-Button "❌ إلغاء" "cancel") )
+            , @( (New-Button "🚨 نعم، إخفاء الكل" "hideall:confirm" -Style danger), (New-Button "❌ إلغاء" "cancel") )
         ) }
 }
 
@@ -806,7 +829,7 @@ function Get-SettingsKeyboard {
     $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
     $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
     $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
-    $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset") )
+    $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset" -Style danger) )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
 }
@@ -952,7 +975,7 @@ function Get-TemplateAdminDetailKeyboard {
         $rows += , @( (New-Button '🔔 تنبيه الظهور' "tadm:reminder:$TemplateIndex") )
     }
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
-        $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex") )
+        $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex" -Style danger) )
         if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button '🧪 اختبار على طبقة التجربة' "tadm:test:$TemplateIndex")) }
     }
     $rows += , @( (New-Button '⬅️ القوالب' 'menu:templatesadmin') )
@@ -961,7 +984,7 @@ function Get-TemplateAdminDetailKeyboard {
 
 function Get-TemplateDefinitionReviewKeyboard {
     return @{ inline_keyboard = @(
-        , @( (New-Button '✅ حفظ التغيير' 'tadm:confirm'), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
+        , @( (New-Button '✅ حفظ التغيير' 'tadm:confirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
     ) }
 }
 
@@ -991,7 +1014,7 @@ function Get-LayerNamesKeyboard {
 function Get-LayerNameEditKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
     return @{ inline_keyboard = @(
-            , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer") )
+            , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer" -Style danger) )
             , @( (New-Button '⬅️ أسماء الطبقات' 'menu:layernames'), (New-Button '❌ إلغاء' 'menu:settings') )
         ) }
 }
@@ -1015,13 +1038,13 @@ function Get-ConfigBackupsKeyboard {
 
 function Get-ConfigRestoreConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "⚠️ نعم، استعادة النسخة" 'cfg:restoreconfirm'), (New-Button "❌ إلغاء" 'menu:backups') )
+            , @( (New-Button "⚠️ نعم، استعادة النسخة" 'cfg:restoreconfirm' -Style danger), (New-Button "❌ إلغاء" 'menu:backups') )
         ) }
 }
 
 function Get-SettingConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @( , @( (New-Button "⚠️ نعم، عطّل الحماية" "cfgc:$Name"), (New-Button "❌ إلغاء" "menu:settings") ) ) }
+    return @{ inline_keyboard = @( , @( (New-Button "⚠️ نعم، عطّل الحماية" "cfgc:$Name" -Style danger), (New-Button "❌ إلغاء" "menu:settings") ) ) }
 }
 
 function Get-AutoHideChoices {

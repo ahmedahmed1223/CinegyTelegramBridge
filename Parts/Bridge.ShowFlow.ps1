@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.0.1'; Items = @(
+                '🎨 اللون وصل بقية الشاشات: الإخفاء والخروج من المشهد وحذف القالب وسحب الصلاحية بالأحمر، و«تأكيد الإرسال» و«تأكيد الجدولة» و«حفظ التغيير» بالأخضر.'
+                '🧭 زر القائمة الذي يفتح شاشة يبقى بلا لون — الأحمر على الضغطة التي تُنفّذ فعلًا، لا على الطريق إليها.'
+            ) }
         @{ Version = '7.0.0'; Items = @(
                 '🎨 الأزرار صار لها لون: الحذف وإلغاء المسودة ومسح الكل بالأحمر، و«مراجعة ونشر» بالأخضر. أطفئه من ⚙️ الإعدادات ← «تلوين الأزرار».'
                 '🚫 السهم الخامل في طرفي القائمة (▫️) صار معطّلًا فعلًا: لم يعد يُضغط ويبتلع الضغطة بلا نتيجة.'

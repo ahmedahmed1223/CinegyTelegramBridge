@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -158,7 +158,7 @@ function Request-UserRevocation {
     param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$AdminUserId)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'user_revoke'; TargetUserId = $TargetUserId; UserId = $AdminUserId }
     Send-TelegramMessage -ChatId $ChatId -Text "⚠️ تأكيد سحب صلاحية $(Get-UserDisplayName -UserId $TargetUserId) ($TargetUserId)؟" `
-        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '✅ نعم، اسحب الصلاحية' 'usr:revokeconfirm'), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
+        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '✅ نعم، اسحب الصلاحية' 'usr:revokeconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
 }
 
 function Test-Authorized {
@@ -335,7 +335,7 @@ function Request-AdminRoleChange {
     }
     else { "⚠️ خفض $alias ($TargetUserId) إلى مشغّل؟`nستُسحب منه أدوات الإدارة كلها." }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{ inline_keyboard = @(, @(
-                (New-Button '✅ تأكيد' 'usr:roleconfirm'), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
+                (New-Button '✅ تأكيد' 'usr:roleconfirm' -Style success), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
 }
 
 function Test-TelegramPrivateChat {

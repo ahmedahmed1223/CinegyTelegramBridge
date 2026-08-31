@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Tests.ps1 — Pester tests for the bridge's pure logic.
 
@@ -577,5 +577,56 @@ Describe 'Reply markup serialisation' {
         ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:StyledMarkup | Out-Null
 
         @($script:StyledMarkup.inline_keyboard)[0][0].style | Should -Be 'success'
+    }
+}
+
+Describe 'Button colour policy' {
+    It 'colours the act that takes a template off air, not the menu that opens it' {
+        $script:OnAir[7] = @{ Key = 'urgent'; Values = @{}; ShownAt = (Get-Date) }
+        try {
+            $removal = @((Get-AfterShowKeyboard -Layer 7 -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+            $hide = @($removal | Where-Object { $_['callback_data'] -eq 'hide:7' })[0]
+            $exit = @($removal | Where-Object { $_['callback_data'] -eq 'exit:7' })[0]
+
+            $hide.style | Should -Be 'danger'
+            $exit.style | Should -Be 'danger'
+        }
+        finally { $script:OnAir.Remove(7) }
+    }
+
+    It 'leaves a menu entry uncoloured, because pressing it removes nothing' {
+        # The screen it opens is where the act lives, and colouring both makes
+        # neither mean anything.
+        $main = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+        $entry = @($main | Where-Object { $_['callback_data'] -eq 'menu:hide' })[0]
+
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.ContainsKey('style') | Should -BeFalse
+    }
+
+    It 'colours the affirming half of a destructive confirmation and not the cancel' {
+        $rows = @((Get-HideAllConfirmKeyboard).inline_keyboard | ForEach-Object { @($_) })
+        $yes = @($rows | Where-Object { $_['callback_data'] -eq 'hideall:confirm' })[0]
+        $no = @($rows | Where-Object { $_['callback_data'] -eq 'cancel' })[0]
+
+        $yes.style | Should -Be 'danger'
+        $no.ContainsKey('style') | Should -BeFalse
+    }
+
+    It 'uses only the three styles Telegram defines' {
+        # A value outside the documented set is rejected for the whole message,
+        # so a typo would take a screen off the air rather than mis-colour it.
+        $keyboards = @(
+            (Get-MainMenuKeyboard -ChatId 101 -UserId 101)
+            (Get-HideAllConfirmKeyboard)
+            (Get-SettingsKeyboard)
+        )
+        foreach ($keyboard in $keyboards) {
+            foreach ($button in @($keyboard.inline_keyboard | ForEach-Object { @($_) })) {
+                if ($button.ContainsKey('style')) {
+                    $button.style | Should -BeIn @('danger', 'success', 'primary')
+                }
+            }
+        }
     }
 }

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.2
+
+Help now carries its own Google Sheets chapter: the shape the sheet has to be
+in, both pull buttons, what happens to an empty sheet or a draft somebody else
+holds, and the write-back in the other direction. The setup half - the CSV
+export link, the sync mode, and where the write URL and its token live in
+`config.json` - shows only to administrators.
+
 ## Version 6.9.1
 
 `/help` and the 🆘 button opened the old one-screen manual instead of the

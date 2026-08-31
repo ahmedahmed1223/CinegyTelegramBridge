@@ -123,3 +123,22 @@ Describe 'The full guide stays reachable' {
         $text.Length | Should -BeGreaterThan 1000
     }
 }
+
+Describe 'Google Sheets chapter' {
+    It 'tells any operator how the sheet and the ticker line up' {
+        Mock Test-Admin { $false }
+
+        $text = Get-HelpChapterText -Key 'sheet' -ChatId 100 -UserId 202
+
+        $text | Should -Match 'العمود الأول'
+        $text | Should -Match 'سحب إلى المسودة'
+    }
+
+    It 'keeps the setup - and where the write token lives - to administrators' {
+        Mock Test-Admin { $false }
+        Get-HelpChapterText -Key 'sheet' -ChatId 100 -UserId 202 | Should -Not -Match 'config.json'
+
+        Mock Test-Admin { $true }
+        Get-HelpChapterText -Key 'sheet' -ChatId 100 -UserId 101 | Should -Match 'config.json'
+    }
+}

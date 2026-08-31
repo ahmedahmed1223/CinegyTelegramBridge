@@ -1487,8 +1487,8 @@ Describe 'The health screen can be read down its state column' {
 
         @($table.cells[0]).Count | Should -Be 3
         @($table.cells).Count | Should -Be 8
-        foreach ($row in @($table.cells | Select-Object -Skip 1)) {
-            @($row)[1].text | Should -BeIn @('🟢', '🟠', '🔴')
+        for ($row = 1; $row -lt @($table.cells).Count; $row++) {
+            Get-TableCell -Table $table -Row $row -Column 'الحالة' | Should -BeIn @('🟢', '🟠', '🔴')
         }
     }
 
@@ -1496,10 +1496,9 @@ Describe 'The health screen can be read down its state column' {
         $script:RuntimeState.Monitoring.CinegyHealthState = 'unhealthy'
         try {
             $table = @(@(Get-BridgeHealthCenterBlocks -Warnings @()) | Where-Object { $_.type -eq 'table' })[0]
-            $first = @($table.cells)[1]
 
-            @($first)[0].text | Should -Be 'Cinegy'
-            @($first)[1].text | Should -Be '🔴'
+            Get-TableCell -Table $table -Row 1 -Column 'النظام' | Should -Be 'Cinegy'
+            Get-TableCell -Table $table -Row 1 -Column 'الحالة' | Should -Be '🔴'
         }
         finally { $script:RuntimeState.Monitoring.CinegyHealthState = 'unknown' }
     }
@@ -1536,9 +1535,9 @@ Describe 'The status screens lead with the verdict and table what is on air' {
 
         @($table.cells).Count | Should -Be 3
         @($table.cells[0]).Count | Should -Be 4
-        @($table.cells[1])[1].text | Should -Be 'urgent'
+        Get-TableCell -Table $table -Row 1 -Column 'القالب' | Should -Be 'urgent'
         # A layer that went up two seconds ago reads better than "منذ 0 ثانية".
-        @($table.cells[2])[2].text | Should -Be 'الآن'
+        Get-TableCell -Table $table -Row 2 -Column 'منذ' | Should -Be 'الآن'
     }
 
     It 'puts the verdict above everything and folds the machine detail' {

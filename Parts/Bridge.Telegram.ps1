@@ -73,7 +73,16 @@ function New-BridgeTableBlock {
     #>
     param([Parameter(Mandatory)][object[]]$Cells)
     $rows = @(foreach ($row in @($Cells)) {
-            , @(foreach ($cell in @($row)) {
+            # Reversed, because the columns are written in importance order
+            # and Telegram lays a row's cells out left to right whatever the
+            # message direction. Left to right puts the first column at the
+            # far left, which is where an Arabic reader's eye arrives LAST -
+            # so the identifying column was the last one read and the least
+            # important was the first. Callers keep writing the important
+            # column first; this is the one place that turns it round.
+            $ordered = @($row)
+            if ($ordered.Count -gt 1) { $ordered = $ordered[($ordered.Count - 1)..0] }
+            , @(foreach ($cell in $ordered) {
                     $copy = @{}
                     foreach ($key in $cell.Keys) { $copy[$key] = $cell[$key] }
                     $copy.text = Format-BridgeCellText -Text ([string]$cell.text)

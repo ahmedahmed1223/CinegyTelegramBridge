@@ -58,11 +58,15 @@ function Get-OnAirTableBlocks {
     if ($script:OnAir.Count -eq 0) {
         return @(@{ type = 'paragraph'; text = '⚫️ لا شيء على الهواء' })
     }
+    # Written most-important-first; New-BridgeTableBlock turns the row round
+    # so this one lands at the right edge, where an Arabic reader starts. Who
+    # put it up leads on a status screen - the layer number is the least
+    # interesting thing about a live graphic and goes furthest left.
     $cells = @(, @(
-            @{ text = 'الطبقة'; is_header = $true }
+            @{ text = 'المشغّل'; is_header = $true }
             @{ text = 'القالب'; is_header = $true }
             @{ text = 'منذ'; is_header = $true }
-            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = 'الطبقة'; is_header = $true }
         ))
     foreach ($layer in @($script:OnAir.Keys | Sort-Object)) {
         $record = $script:OnAir[$layer]
@@ -76,10 +80,10 @@ function Get-OnAirTableBlocks {
         else { '—' }
         $who = Get-AuditOperatorName -UserId ([string](Get-JsonProp $record 'UserId'))
         $cells += , @(
-            @{ text = [string]$layer }
+            @{ text = $(if ($who) { $who } else { '—' }) }
             @{ text = [string](Get-JsonProp $record 'Key') }
             @{ text = $since }
-            @{ text = $(if ($who) { $who } else { '—' }) }
+            @{ text = [string]$layer }
         )
     }
     return @((New-BridgeTableBlock -Cells $cells))

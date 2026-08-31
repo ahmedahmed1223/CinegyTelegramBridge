@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.14.1
+
+Table columns are ordered for an Arabic reader. Telegram lays a row's cells
+out left to right whatever the message direction, so the column written
+first landed at the far left - where the eye arrives last. Rows are reversed
+in the one builder they all pass through. On the status screen the operator
+now leads, with the layer number furthest from the eye.
+
 ## Version 7.14.0
 
 Fixes the direction of table cells. Every table here is Arabic with Latin

@@ -898,48 +898,6 @@ Describe 'An overlong HTML message loses its markup, not its meaning' {
     }
 }
 
-Describe 'The operation history as a list' {
-    It 'keeps the on-air copy, which a table would have squeezed out' {
-        # This screen is the one place the copy IS the point, so the grid is
-        # the wrong shape here even though it is right for the reports.
-        Mock Get-UserOperationHistory {
-            @([pscustomobject]@{
-                    At = '2026-08-31T21:40:00'; Action = 'SHOW'; Result = 'success'
-                    Target = 'urgent'; Values = 'عاجل: بيان الوزارة'
-                    OperationId = 'air-5023333b032c476eb48204ca08032a98'
-                })
-        }
-        Mock Get-TemplateCategoryLabel { 'أخبار' }
-
-        $blocks = @(Get-MyOperationsBlocks -UserId 101)
-        $list = @($blocks | Where-Object { $_.type -eq 'list' })[0]
-        $texts = @(@($list.items)[0].blocks | ForEach-Object { $_.text })
-
-        $blocks[0].type | Should -Be 'heading'
-        @($texts | Where-Object { $_ -match 'عاجل: بيان الوزارة' }).Count | Should -Be 1
-        @($texts | Where-Object { $_ -match '5023333b' }).Count | Should -Be 1
-    }
-
-    It 'says an empty history is empty rather than drawing a list of nothing' {
-        Mock Get-UserOperationHistory { @() }
-
-        $blocks = @(Get-MyOperationsBlocks -UserId 101)
-
-        @($blocks | Where-Object { $_.type -eq 'list' }).Count | Should -Be 0
-        @($blocks | Where-Object { $_.type -eq 'paragraph' })[0].text | Should -Match 'لم تُسجَّل'
-    }
-
-    It 'falls back to the text screen when rich sending is refused' {
-        Mock Send-TelegramRichMessage { $false }
-        Mock Get-UserOperationHistory { @() }
-        Mock Send-TelegramMessage { }
-
-        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
-
-        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
-    }
-}
-
 Describe 'The handover screen answers its first question first' {
     BeforeEach {
         $script:OnAir.Clear()
@@ -995,34 +953,96 @@ Describe 'The handover screen answers its first question first' {
     }
 }
 
-Describe 'The operation history folds what is not the newest' {
-    It 'keeps three open and folds the rest' {
-        Mock Get-UserOperationHistory {
-            @(1..8 | ForEach-Object {
-                    [pscustomobject]@{
-                        At = "2026-08-31T{0:00}:00:00" -f (8 + $_); Action = 'SHOW'; Result = 'success'
-                        Target = "t$_"; Values = "نص $_"; OperationId = "air-5023333b032c476eb48204ca08032a9$_"
-                    }
-                })
-        }
-        Mock Get-TemplateCategoryLabel { '' }
-        Mock Get-OperationSentence { 'عُرض' }
-
-        $blocks = @(Get-MyOperationsBlocks -UserId 101)
-        $open = @($blocks | Where-Object { $_.type -eq 'list' })[0]
-        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
-
-        @($open.items).Count | Should -Be 3
-        $folded.summary | Should -Match 'أقدم \(5\)'
+Describe 'The operation history says what happened before it says what was done' {
+    BeforeEach {
+        Mock Get-TemplateCategoryLabel { 'أخبار' }
+        Mock Get-OperationSentence { "عُرض $Target" }
     }
 
-    It 'folds nothing when there is nothing older' {
+    It 'leads with a tally, because the question is whether anything failed' {
+        # Reading ten rows to find that out is the work this screen exists to
+        # save.
         Mock Get-UserOperationHistory {
-            @([pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 't'; Values = ''; OperationId = '' })
+            @(
+                [pscustomobject]@{ At = '2026-08-31T20:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'a'; Values = ''; OperationId = '' }
+                [pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'failed'; Target = 'b'; Values = ''; OperationId = 'air-5023333b032c476eb48204ca08032a98' }
+            )
         }
-        Mock Get-TemplateCategoryLabel { '' }
-        Mock Get-OperationSentence { 'عُرض' }
 
-        @(@(Get-MyOperationsBlocks -UserId 101) | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
+        $blocks = @(Get-MyOperationsBlocks -UserId 101)
+
+        $blocks[0].type | Should -Be 'heading'
+        $blocks[1].text | Should -Be '2 عملية · ✅ 1 · ❌ 1'
+    }
+
+    It 'puts the newest first, not last' {
+        Mock Get-UserOperationHistory {
+            @(
+                [pscustomobject]@{ At = '2026-08-31T20:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'قديم'; Values = ''; OperationId = '' }
+                [pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'أحدث'; Values = ''; OperationId = '' }
+            )
+        }
+
+        $texts = @(@(Get-MyOperationsBlocks -UserId 101) | Where-Object { $_.ContainsKey('text') } | ForEach-Object { $_.text })
+
+        @($texts | Where-Object { $_ -match 'أحدث' })[0] | Should -Not -BeNullOrEmpty
+        [array]::IndexOf($texts, @($texts | Where-Object { $_ -match 'أحدث' })[0]) |
+            Should -BeLessThan ([array]::IndexOf($texts, @($texts | Where-Object { $_ -match 'قديم' })[0]))
+    }
+
+    It 'spends one line on a successful operation, not five' {
+        Mock Get-UserOperationHistory {
+            @([pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'urgent'; Values = ''; OperationId = 'air-5023333b032c476eb48204ca08032a98' })
+        }
+
+        $lines = @(Get-MyOperationBlock -Item @(Get-UserOperationHistory -UserId 101)[0])
+
+        @($lines).Count | Should -Be 1
+        $lines[0].text | Should -Match 'أخبار'
+        # The reference is eight characters of noise on a row that worked.
+        $lines[0].text | Should -Not -Match '5023333b'
+    }
+
+    It 'brings the reference out only where somebody has to report it' {
+        $item = [pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'failed'; Target = 'urgent'; Values = ''; OperationId = 'air-5023333b032c476eb48204ca08032a98' }
+
+        $lines = @(Get-MyOperationBlock -Item $item)
+
+        @($lines).Count | Should -Be 2
+        $lines[1].text | Should -Match '5023333b'
+        $lines[1].text | Should -Match 'افحص الاتصال'
+    }
+
+    It 'keeps the copy on its own line, because that is what the graphic is known by' {
+        $item = [pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'urgent'; Values = 'عاجل: بيان الوزارة'; OperationId = '' }
+
+        $lines = @(Get-MyOperationBlock -Item $item)
+
+        @($lines).Count | Should -Be 2
+        $lines[1].text | Should -Be '📝 عاجل: بيان الوزارة'
+    }
+
+    It 'shows three and folds the rest' {
+        Mock Get-UserOperationHistory {
+            @(1..8 | ForEach-Object {
+                    [pscustomobject]@{ At = "2026-08-31T{0:00}:00:00" -f (8 + $_); Action = 'SHOW'; Result = 'success'; Target = "t$_"; Values = ''; OperationId = '' }
+                })
+        }
+
+        $blocks = @(Get-MyOperationsBlocks -UserId 101)
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+
+        $folded.summary | Should -Match 'أقدم \(5\)'
+        @($blocks | Where-Object { $_.type -eq 'divider' }).Count | Should -Be 3
+    }
+
+    It 'falls back to the text screen when rich sending is refused' {
+        Mock Send-TelegramRichMessage { $false }
+        Mock Get-UserOperationHistory { @() }
+        Mock Send-TelegramMessage { }
+
+        Invoke-MyOperationsCommand -ChatId 101 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 }

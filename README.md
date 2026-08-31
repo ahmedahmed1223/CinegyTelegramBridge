@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.10.1
+
+My operations was spending five lines on each entry, most of it true of
+every row. A successful operation is one line now, the reference appears
+only where somebody has to report it, and a tally at the top answers the
+question the screen is opened with: did anything I did fail?
+
 ## Version 7.10.0
 
 The handover screen opens with what is on air instead of ending on it, keeps

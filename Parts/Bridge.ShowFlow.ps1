@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.10.1'; Items = @(
+                '🧾 «عملياتي» صارت أقصر وأوضح: حصيلة في الأعلى (كم نجح وكم فشل)، والعملية الناجحة سطر واحد، والمرجع يظهر عند الفشل وحده.'
+            ) }
         @{ Version = '7.10.0'; Items = @(
                 '🕘 «ماذا فاتني» تبدأ الآن بما على الهواء — كان آخر سطر فيها، وهو أول ما تحتاجه عند تسلّم الوردية.'
                 '📝 نصوص البنرات عادت إلى تقرير البنرات تحت «نصوص البنرات».'
@@ -627,15 +630,59 @@ function Get-HelpRichBlocks {
     return $blocks
 }
 
+function Get-MyOperationBlock {
+    <#
+        One operation, in as few lines as it can be told in.
+
+        The first version spent up to five blocks each - the sentence, the
+        category, the copy, the reference and the advice on separate lines -
+        so three operations filled fifteen. Most of that was true of every
+        row and therefore told the reader nothing: the category belongs
+        beside the name it describes, and the reference is eight hex
+        characters that matter only when something has to be reported.
+    #>
+    param([Parameter(Mandatory)]$Item)
+    $icon = switch ([string]$Item.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
+    $sentence = Get-OperationSentence -Action ([string]$Item.Action) -Result ([string]$Item.Result) -Target ([string]$Item.Target)
+    $head = "$icon $(([datetime]$Item.At).ToString('HH:mm')) — $sentence"
+    $category = Get-TemplateCategoryLabel -Key ([string]$Item.Target)
+    if ($category) { $head += " · $category" }
+    $blocks = @(@{ type = 'paragraph'; text = $head })
+
+    # The copy keeps its own line: it is a whole sentence that went to air,
+    # and it is what the graphic is recognised by.
+    $onAirText = [string](Get-JsonProp $Item 'Values')
+    if ($onAirText) { $blocks += @{ type = 'paragraph'; text = "📝 $onAirText" } }
+
+    # Reference and advice only where they are asked for. On a successful
+    # operation the reference is eight characters of noise on every row; on a
+    # failed one it is the thing the administrator needs, so it arrives on the
+    # same line as what to do about it.
+    $advice = switch ([string]$Item.Result) {
+        'failed' { 'افحص الاتصال ثم أعد المحاولة' }
+        'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
+        default { '' }
+    }
+    if ($advice) {
+        $reference = Get-OperationReference -OperationId ([string]$Item.OperationId)
+        $tail = if ($reference) { "🔖 $reference · $advice" } else { "↳ $advice" }
+        $blocks += @{ type = 'paragraph'; text = $tail }
+    }
+    return $blocks
+}
+
 function Get-MyOperationsBlocks {
     <#
-        The operation history as a list rather than a table.
+        The operation history: a verdict, then the newest few, then the rest
+        folded.
 
-        Deliberately not a table: the line that matters most here is the copy
-        that actually reached the screen, and it is a sentence. The banner
-        report leaves that column out for exactly this reason - a column wide
-        enough for it squeezes every other one to nothing - so where the copy
-        IS the point, the grid is the wrong shape and a list is the right one.
+        Deliberately not a table - the line that matters here is the copy that
+        reached the screen, and it is a sentence, which is exactly why the
+        banner report leaves that column out.
+
+        The tally leads because it is the question the screen is opened with:
+        did anything I did fail? Reading ten rows to find out is the work the
+        screen exists to save.
     #>
     param([Parameter(Mandatory)][long]$UserId)
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
@@ -645,34 +692,31 @@ function Get-MyOperationsBlocks {
         return $blocks
     }
 
-    $items = @()
-    foreach ($item in $history) {
-        $icon = switch ([string]$item.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
-        $sentence = Get-OperationSentence -Action ([string]$item.Action) -Result ([string]$item.Result) -Target ([string]$item.Target)
-        $inner = @(@{ type = 'paragraph'; text = "$icon $(([datetime]$item.At).ToString('HH:mm')) — $sentence" })
+    $failed = @($history | Where-Object { [string]$_.Result -eq 'failed' }).Count
+    $blockedCount = @($history | Where-Object { [string]$_.Result -eq 'blocked' }).Count
+    $succeeded = $history.Count - $failed - $blockedCount
+    $tally = "$($history.Count) عملية · ✅ $succeeded"
+    if ($failed -gt 0) { $tally += " · ❌ $failed" }
+    if ($blockedCount -gt 0) { $tally += " · ⛔ $blockedCount" }
+    $blocks += @{ type = 'paragraph'; text = $tally }
 
-        $category = Get-TemplateCategoryLabel -Key ([string]$item.Target)
-        if ($category) { $inner += @{ type = 'paragraph'; text = "🏷 $category" } }
-        $onAirText = [string](Get-JsonProp $item 'Values')
-        if ($onAirText) { $inner += @{ type = 'paragraph'; text = "📝 $onAirText" } }
-        $reference = Get-OperationReference -OperationId ([string]$item.OperationId)
-        if ($reference) { $inner += @{ type = 'paragraph'; text = "🔖 مرجع $reference" } }
-        $advice = switch ([string]$item.Result) {
-            'failed' { 'افحص الاتصال ثم أعد المحاولة' }
-            'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
-            default { '' }
-        }
-        if ($advice) { $inner += @{ type = 'paragraph'; text = "↳ $advice" } }
-        $items += @{ blocks = $inner }
+    # Newest first here, unlike the list which is stored oldest-first: the one
+    # being looked for is almost always the one just done.
+    $ordered = @($history)[($history.Count - 1)..0]
+    $recent = @($ordered | Select-Object -First 3)
+    $older = @($ordered | Select-Object -Skip 3)
+
+    foreach ($item in $recent) {
+        $blocks += @{ type = 'divider' }
+        $blocks += @(Get-MyOperationBlock -Item $item)
     }
-    # The three newest stay open and the rest fold. Ten operations, each
-    # carrying its copy and its reference, is a screen nobody scrolls to the
-    # end of - and the one being looked for is almost always the last one.
-    $recent = @($items | Select-Object -Last 3)
-    $older = @($items | Select-Object -First ([math]::Max(0, $items.Count - 3)))
-    $blocks += @{ type = 'list'; items = $recent }
     if ($older.Count -gt 0) {
-        $blocks += @{ type = 'details'; summary = "عمليات أقدم ($($older.Count))"; blocks = @(@{ type = 'list'; items = $older }) }
+        $inner = @()
+        foreach ($item in $older) {
+            if ($inner.Count -gt 0) { $inner += @{ type = 'divider' } }
+            $inner += @(Get-MyOperationBlock -Item $item)
+        }
+        $blocks += @{ type = 'details'; summary = "🔍 عمليات أقدم ($($older.Count))"; blocks = $inner }
     }
     return $blocks
 }

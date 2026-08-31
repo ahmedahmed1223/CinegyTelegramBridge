@@ -273,6 +273,18 @@ function Update-NewsLockRequest {
     Complete-NewsLockRelease -Reason 'no reply within the window' | Out-Null
 }
 
+function Test-NewsSheetPullAccess {
+    <# Who may pull the sheet. Open to every authorised operator by default:
+       the content is whatever the newsroom sheet already says, so a pull
+       publishes editorial copy rather than anything the presser typed. Set
+       AllowOperatorsSheetPull to false to put it back behind the administrator
+       bar, the same way the other AllowOperators* news switches work. #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (Test-Admin -ChatId $ChatId -UserId $UserId) { return $true }
+    return [bool](Get-Setting 'AllowOperatorsSheetPull')
+}
+
 function Get-NewsSheetCsvText {
     <# Downloads the sheet's CSV export. The content ends up on air, so this is
        a trust boundary: https only, a byte cap so a runaway document cannot
@@ -477,7 +489,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsRestoreNews')) {
         $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
     }
-    if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
+    if ((Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
         $rows += , @(@{text='⬇️ سحب ونشر';callback_data='news:sheet'}, @{text='📝 سحب إلى المسودة';callback_data='news:sheetdraft'})
     }
     $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})

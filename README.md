@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.6.0
+
+Both sheet pulls - publish and review - are available to every authorised
+operator, not only administrators, and `AllowOperatorsSheetPull` (default true)
+puts them back behind the administrator bar in one setting. The button is not
+drawn and the callback is refused, because Telegram keeps buttons alive in old
+messages. `NewsSheetNotifyScope` now defaults to `all`.
+
 ## Version 6.5.0
 
 The sheet can be pulled into the draft for review instead of published

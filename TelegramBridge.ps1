@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.5.0'
+$script:BridgeVersion = '6.6.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -186,7 +186,8 @@ $script:DefaultSettings = [ordered]@{
     NewsSheetSyncMode          = 'manual' # manual = a button; auto = every NewsSheetSyncMinutes
     NewsSheetSyncMinutes       = 5
     NewsSheetTimeoutSeconds    = 30
-    NewsSheetNotifyScope       = 'admins' # none | admins | all authorised chats
+    NewsSheetNotifyScope       = 'all'    # none | admins | all authorised chats
+    AllowOperatorsSheetPull    = $true    # operators may pull the sheet, not only administrators
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
@@ -846,7 +847,8 @@ foreach ($entry in @(
                 'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
-                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyScope'
+                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyScope',
+                'AllowOperatorsSheetPull'
             ) },
         @{ Category = 'schedule'; Names = @(
                 'ScheduleConflictWindowMinutes', 'SchedulePaused', 'SchedulePreNotifyMinutes',
@@ -904,6 +906,7 @@ $script:SettingNavigationLabels = @{
     NewsSheetSyncMinutes = 'كل كم دقيقة تُزامن الشيت'
     NewsSheetTimeoutSeconds = 'مهلة تنزيل الشيت'
     NewsSheetNotifyScope = 'من يُنبَّه بعد مزامنة الشيت'
+    AllowOperatorsSheetPull = 'سماح المشغّلين بسحب الشيت'
     NewsMaxItemLength = 'الحد الأقصى لطول الخبر'
     NewsMaxItems = 'الحد الأقصى لعدد الأخبار'
     NewsImportMaxBytes = 'حد استيراد الأخبار'

@@ -256,6 +256,48 @@ Describe 'News sheet operator surface' {
             Should -Contain 'news:sheet'
     }
 
+    It 'offers the pull to an operator too, because it is open by default' {
+        Mock Test-Admin { $false }
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $true }
+                default { '' }
+            }
+        }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'news:sheet'
+        # The review pull travels with it: an operator who may publish the
+        # sheet may certainly load it into a draft first.
+        $callbacks | Should -Contain 'news:sheetdraft'
+    }
+
+    It 'puts the pull back behind the administrator bar when the switch is off' {
+        Mock Test-Admin { $false }
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $false }
+                default { '' }
+            }
+        }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Not -Contain 'news:sheet'
+        $callbacks | Should -Not -Contain 'news:sheetdraft'
+    }
+
+    It 'still lets an administrator pull when operators are barred' {
+        Mock Test-Admin { $true }
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $false }
+                default { '' }
+            }
+        }
+        Test-NewsSheetPullAccess -ChatId 100 -UserId 101 | Should -BeTrue
+    }
+
     It 'hides the button when no sheet is configured' {
         Mock Get-Setting { '' }
         Mock Test-Admin { $true }

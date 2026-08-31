@@ -103,6 +103,15 @@ function ConvertTo-ProcessArgumentLine {
     return ConvertTo-BridgeProcessArgumentLine -Arguments $Arguments
 }
 
+function Test-MediaSourceUnreachable {
+    <# ffmpeg failing because the stream host is down is not the bridge
+       failing, and logging it as an error buries the failures that are. The
+       reason line ffmpeg prints is the only thing that tells them apart. #>
+    param([string]$Detail)
+    if ([string]::IsNullOrWhiteSpace($Detail)) { return $false }
+    return [bool]($Detail -match 'Error opening input|Server returned|Connection refused|Connection timed out|No route to host|not known|Invalid data found|HTTP error')
+}
+
 function Get-LastErrorLine {
     <# Surfaces the tail of an ffmpeg stderr file so the operator sees the real
        reason in Telegram instead of a bare exit code. #>
@@ -208,7 +217,8 @@ function Update-SnapshotJobs {
         }
         elseif ($job.Proc.ExitCode -ne 0 -or -not (Test-Path $job.OutPath)) {
             $detail = Get-LastErrorLine -Path $job.ErrLog
-            Write-BridgeLog "Snapshot ffmpeg failed (exit $($job.Proc.ExitCode)): $detail" "ERROR"
+            $level = if (Test-MediaSourceUnreachable -Detail $detail) { 'WARN' } else { 'ERROR' }
+            Write-BridgeLog "Snapshot ffmpeg failed (exit $($job.Proc.ExitCode)): $detail" $level
             $msg = "❌ فشل التقاط الصورة (كود $($job.Proc.ExitCode))."
             if ($detail) { $msg += "`nسبب ffmpeg: $detail" }
             # Clean up the partial/zero-byte output ffmpeg may have left behind.
@@ -265,6 +275,11 @@ function Get-MonitorFrame {
     $ffmpeg = Get-FfmpegPath
     if (-not $ffmpeg) { return $null }
 
+    # The watchdog counts consecutive failures and alerts at its threshold, so
+    # once the source is known down a line per attempt adds nothing: an hour of
+    # 5XX from the stream host filled the log with twenty identical warnings.
+    $note = { param([string]$Text) if ($script:OutputMonitorFailureCount -le 0) { Write-BridgeLog $Text 'WARN' } }
+
     $stamp = "monitor-$([guid]::NewGuid().ToString('N'))"
     $outPath = Join-Path $script:logDir "$stamp.jpg"
     $errLog = Join-Path $script:logDir "$stamp.err"
@@ -275,17 +290,17 @@ function Get-MonitorFrame {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Write-BridgeLog "Output monitor capture timed out after ${TimeoutSeconds}s" 'WARN'
+            & $note "Output monitor capture timed out after ${TimeoutSeconds}s"
             return $null
         }
         if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outPath)) {
-            Write-BridgeLog "Output monitor capture failed (exit $($proc.ExitCode)): $(Get-LastErrorLine -Path $errLog)" 'WARN'
+            & $note "Output monitor capture failed (exit $($proc.ExitCode)): $(Get-LastErrorLine -Path $errLog)"
             return $null
         }
         return $outPath
     }
     catch {
-        Write-BridgeLog "Output monitor capture could not start: $($_.Exception.Message)" 'WARN'
+        & $note "Output monitor capture could not start: $($_.Exception.Message)"
         return $null
     }
     finally { Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue }

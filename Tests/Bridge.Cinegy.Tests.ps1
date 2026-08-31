@@ -924,3 +924,37 @@ Describe 'Cinegy results keep one shape' {
         @($bad.PSObject.Properties.Name | Sort-Object) | Should -Be $expected
     }
 }
+
+Describe 'Capture failure logging' {
+    It 'reads a dead stream host out of the ffmpeg reason line' {
+        Test-MediaSourceUnreachable -Detail 'Error opening input file https://x/y.m3u8 | Server returned 5XX Server Error reply' |
+            Should -BeTrue
+    }
+
+    It 'still calls anything else a bridge failure' {
+        Test-MediaSourceUnreachable -Detail 'Output file #0 does not contain any stream' | Should -BeFalse
+        Test-MediaSourceUnreachable -Detail '' | Should -BeFalse
+    }
+
+    It 'says the monitor source is down once, not once per attempt' {
+        Mock Write-BridgeLog { }
+        Mock Get-FfmpegPath { 'ffmpeg.exe' }
+        Mock Start-BridgeMediaProcess { throw 'source unavailable' }
+        $previousLiveStream = $config.LiveStream
+        $config.LiveStream = [pscustomobject]@{ SourceType = 'm3u8'; SourceUrl = 'https://primary.example/stream.m3u8' }
+        try {
+            $script:OutputMonitorFailureCount = 0
+            Get-MonitorFrame -TimeoutSeconds 1 | Should -BeNullOrEmpty
+            $script:OutputMonitorFailureCount = 3
+            Get-MonitorFrame -TimeoutSeconds 1 | Should -BeNullOrEmpty
+        }
+        finally {
+            $config.LiveStream = $previousLiveStream
+            $script:OutputMonitorFailureCount = 0
+        }
+
+        # The watchdog alerts at its threshold; repeating the line every hour
+        # of a stream-host outage only buries other failures.
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly
+    }
+}

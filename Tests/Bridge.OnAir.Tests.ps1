@@ -1638,3 +1638,61 @@ Describe 'Audit actor label' {
         Format-UserAuditActor -UserId 8201739556 | Should -Be '8201739556'
     }
 }
+
+Describe 'What came off air is named and quoted' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Write-AuditRecord { }
+        Mock Add-UserOperationHistory { }
+        Mock Sync-LayerAfterOperatorAction { }
+        Mock Save-OnAirState { }
+        Mock Test-MaintenanceControl { $true }
+        # Through the config, not a filtered mock of Get-Setting: that would
+        # need a default mock for every other setting this flow reads.
+        $script:RollbackWas = Get-Setting 'EnableSafeRollback'
+        $config.Settings | Add-Member -NotePropertyName EnableSafeRollback -NotePropertyValue $false -Force
+        $script:OnAir.Clear()
+    }
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName EnableSafeRollback -NotePropertyValue $script:RollbackWas -Force
+        $script:OnAir.Clear()
+    }
+
+    It 'carries the on-air copy on the layer record, so a hide can quote it' {
+        # The record held the key and the time only, so hiding recorded a
+        # layer number and nothing else - the history could say something was
+        # hidden but never which strap.
+        Set-OnAirShownRecord -Layer 7 -Record @{
+            Key = 'urgent'; At = (Get-Date); UserId = 10; ActiveId = ''
+            ActiveIdConfirmed = $false; AirCopy = 'text: عاجل'
+        }
+
+        Get-JsonProp $script:OnAir[7] 'AirCopy' | Should -Be 'text: عاجل'
+    }
+
+    It 'names and quotes the outgoing banner when a layer is hidden' {
+        Mock Hide-TitlerTemplate { @{ Success = $true; Error = '' } }
+        Set-OnAirShownRecord -Layer 7 -Record @{
+            Key = 'urgent'; At = (Get-Date); UserId = 10; ActiveId = ''
+            ActiveIdConfirmed = $false; AirCopy = 'text: عاجل'
+        }
+
+        Invoke-HideLayer -Layer 7 -ChatId 10 -UserId 10 -Quiet | Out-Null
+
+        Should -Invoke Add-UserOperationHistory -Times 1 -Exactly -ParameterFilter {
+            $Action -eq 'HIDE' -and $Target -eq 'urgent' -and $Values -eq 'text: عاجل'
+        }
+    }
+
+    It 'records nothing rather than guessing when the layer was already empty' {
+        Mock Hide-TitlerTemplate { @{ Success = $true; Error = '' } }
+
+        Invoke-HideLayer -Layer 4 -ChatId 10 -UserId 10 -Quiet | Out-Null
+
+        Should -Invoke Add-UserOperationHistory -Times 1 -Exactly -ParameterFilter {
+            $Action -eq 'HIDE' -and $Target -eq '' -and $Values -eq ''
+        }
+    }
+}

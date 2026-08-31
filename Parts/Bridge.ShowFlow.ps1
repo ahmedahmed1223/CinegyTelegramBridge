@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.11.0'; Items = @(
+                '🙈 الإخفاء والخروج صارا يذكران اسم البنر الذي خرج ونصّه في «عملياتي» — كانا يذكران رقم الطبقة وحده.'
+                '📝 والعرض الفاشل صار يسجّل النص الذي كان سيُعرض، فتعرف ماذا كنت تحاول رفعه.'
+            ) }
         @{ Version = '7.10.1'; Items = @(
                 '🧾 «عملياتي» صارت أقصر وأوضح: حصيلة في الأعلى (كم نجح وكم فشل)، والعملية الناجحة سطر واحد، والمرجع يظهر عند الفشل وحده.'
             ) }
@@ -1064,13 +1068,13 @@ function Invoke-ShowTemplateResult {
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
     $operation = New-AirOperationContext -Action SHOW -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'maintenance mode'
         return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
     }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
         Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'unknown template'
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'unknown template'
         return
     }
     $template = $store.Map[$Key]
@@ -1082,7 +1086,7 @@ function Invoke-ShowTemplateResult {
     $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$policy.Reason)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$policy.Reason)
         return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
     }
 
@@ -1096,7 +1100,7 @@ function Invoke-ShowTemplateResult {
         $errorText = [string](Get-JsonProp $layerStatus 'Error')
         Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText $errorText
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText $errorText
         return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
@@ -1182,6 +1186,11 @@ function Invoke-ShowTemplateResult {
         Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
             ActiveIdConfirmed = $activeIdConfirmed
+            # The copy travels with the record so that taking it off air can
+            # say what came off. Until now hide and exit recorded a layer
+            # number and nothing else, and the history could only report that
+            # something was hidden - never which strap.
+            AirCopy = (Format-AuditTemplateValues -Variables $Variables)
         }
         Save-OnAirState
         Add-UsageCount -Key $Key
@@ -1237,7 +1246,7 @@ function Invoke-ShowTemplateResult {
     }
     else {
         Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText ([string]$result.Error)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$result.Error)
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     return $result
@@ -1474,8 +1483,13 @@ function Invoke-HideLayer {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
+    # Read before anything runs: the operation clears the layer, and the
+    # answer to "what did I just take down" is only available beforehand.
+    $outgoing = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $outgoingKey = if ($outgoing) { [string](Get-JsonProp $outgoing 'Key') } else { '' }
+    $outgoingCopy = if ($outgoing) { [string](Get-JsonProp $outgoing 'AirCopy') } else { '' }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
-        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
     $rollbackSnapshot = $null
@@ -1493,13 +1507,13 @@ function Invoke-HideLayer {
         Write-BridgeLog "User $actor hid layer $Layer"
         Add-AuditEntry "🙈 إخفاء طبقة $Layer - بواسطة $actor"
         if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
-        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     elseif (-not $Quiet) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إخفاء الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     if (-not $result.Success) {
-        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
+        Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$result.Error)
     }
     return $result.Success
 }
@@ -1508,8 +1522,13 @@ function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
+    # Read before anything runs: the operation clears the layer, and the
+    # answer to "what did I just take down" is only available beforehand.
+    $outgoing = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $outgoingKey = if ($outgoing) { [string](Get-JsonProp $outgoing 'Key') } else { '' }
+    $outgoingCopy = if ($outgoing) { [string](Get-JsonProp $outgoing 'AirCopy') } else { '' }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
-        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'maintenance mode'
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
     $rollbackSnapshot = $null
@@ -1531,11 +1550,11 @@ function Invoke-ExitLayer {
         Write-BridgeLog "User $actor exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - بواسطة $actor"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الخروج من المشهد على الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText ([string]$result.Error)
+        Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$result.Error)
     }
     return $result.Success
 }

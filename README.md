@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.11.0
+
+Hiding and exiting now name the banner that came off and quote its copy.
+They were recording a layer number and nothing else, so my operations could
+say "layer 7 was hidden" but never which strap was on it - the copy was not
+being captured at all. The on-air record carries it now, read before the
+operation empties the layer. A failed or blocked show records what it would
+have said, too.
+
 ## Version 7.10.1
 
 My operations was spending five lines on each entry, most of it true of

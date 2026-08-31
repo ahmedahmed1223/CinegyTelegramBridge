@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.9.4'; Items = @(
+                '🧩 «شكل قائمة الأخبار» في ⚙️ الإعدادات: ثلاثة أشكال للترتيب — text نص كامل فوق الأزرار · stacked الخبر بزر مستقل · inline الخبر داخل الصف. جرّب واختر.'
+            ) }
         @{ Version = '6.9.3'; Items = @(
                 '📝 شاشة الترتيب: نص الخبر صار يظهر كاملًا فوق الأزرار بدل أن يُقصّ داخل زر ضيق، وصفوف الأخبار صارت بحجم واحد.'
             ) }

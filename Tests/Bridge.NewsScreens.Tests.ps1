@@ -500,7 +500,7 @@ Describe 'News list layout' {
     AfterAll { $script:NewsTickerDraft = $null }
 
     It 'keeps everything on one row by default' {
-        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
         $middle = @($rows[1] | ForEach-Object { $_.callback_data })
         $middle | Should -Contain 'news:up:1'
@@ -511,14 +511,14 @@ Describe 'News list layout' {
     It 'gives the headline its own row when stacked' {
         # A 24-character label tells you nothing about a long headline, which
         # is the whole point of the alternative layout.
-        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
         @($rows[2]).Count | Should -Be 1
         @($rows[2])[0].callback_data | Should -Be 'news:item:1'
     }
 
     It 'puts move, edit and delete on the row beneath it' {
-        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
         $controls = @($rows[3] | ForEach-Object { $_.callback_data })
         $controls | Should -Contain 'news:up:1'
@@ -528,23 +528,23 @@ Describe 'News list layout' {
     }
 
     It 'omits the move it cannot make, at either end' {
-        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
         @($rows[1] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:up:0'
         @($rows[5] | ForEach-Object { $_.callback_data }) | Should -Not -Contain 'news:down:2'
     }
 
     It 'shows more of a long headline when it owns the row' {
-        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $stacked = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[2][0].text
-        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         $inline = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] | Where-Object { $_.callback_data -eq 'news:item:1' })[0].text
         $stacked.Length | Should -BeGreaterThan $inline.Length
     }
 
     It 'still deletes through the confirmation in both layouts' {
-        foreach ($stacked in @($true, $false)) {
-            Mock Get-Setting { $stacked } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        foreach ($layout in @('text', 'stacked', 'inline')) {
+            Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
             $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
                     ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
             $flat | Should -Not -Contain 'news:delete:1'
@@ -559,7 +559,7 @@ Describe 'News list row geometry' {
             OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
             Items = @('خبر أول', 'خبر ثانٍ طويل جدًا يتجاوز أي حدّ كان يُقصّ عنده في زر ضيق', 'خبر ثالث')
         }
-        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
     }
     AfterAll { $script:NewsTickerDraft = $null }
@@ -596,7 +596,7 @@ Describe 'News list paging' {
             OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
             Items = @(1..38 | ForEach-Object { "خبر رقم $_" })
         }
-        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'text' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
         Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'NewsListPageSize' }
         Mock Get-SettingInt { 24 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
@@ -636,7 +636,7 @@ Describe 'News list paging' {
         # budget buys fewer of them.
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
         $inline = Get-NewsTickerPageSize
-        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
 
         (Get-NewsTickerPageSize) | Should -BeLessThan $inline
     }
@@ -707,5 +707,45 @@ Describe 'News list paging' {
                 ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
         $flat | Should -Contain 'news:up:10'
         $flat | Should -Contain 'news:delask:10'
+    }
+}
+
+Describe 'News list layout choice' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر أول', 'خبر ثانٍ', 'خبر ثالث')
+        }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'offers exactly the three shapes, and falls back to text for anything else' {
+        $script:SettingChoices['NewsListLayout'] | Should -Be @('text', 'stacked', 'inline')
+
+        Mock Get-Setting { 'nonsense' } -ParameterFilter { $Name -eq 'NewsListLayout' }
+        Get-NewsListLayout | Should -Be 'text'
+    }
+
+    It 'puts the headline in the row itself when inline is chosen' {
+        Mock Get-Setting { 'inline' } -ParameterFilter { $Name -eq 'NewsListLayout' }
+        Mock Get-SettingInt { 24 } -ParameterFilter { $Name -eq 'NewsListLabelLength' }
+        Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'NewsListPageSize' }
+        Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'NewsListStackedLabelLength' }
+
+        $label = @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] |
+            Where-Object { $_.callback_data -eq 'news:item:1' })[0].text
+
+        $label | Should -Match 'خبر ثانٍ'
+        Get-NewsTickerReorderText -UserId 42 | Should -Not -Match '2\. خبر ثانٍ'
+    }
+
+    It 'reaches every item in all three shapes' {
+        foreach ($layout in @('text', 'stacked', 'inline')) {
+            Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
+            $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+            foreach ($i in 0..2) { $flat | Should -Contain "news:item:$i" }
+        }
     }
 }

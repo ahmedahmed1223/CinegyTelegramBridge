@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.9.3'
+$script:BridgeVersion = '6.9.4'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -171,7 +171,7 @@ $script:DefaultSettings = [ordered]@{
     # clear a draft left open overnight, not to hurry an operator who is still
     # working on it.
     NewsDraftTimeoutMinutes    = 120
-    NewsListStackedLayout      = $false  # headline on its own row, move/edit/delete beneath it
+    NewsListLayout             = 'text'  # text | stacked | inline - see Get-NewsListLayout
     NewNewsItemAtTop           = $true   # a newly added item leads the ticker instead of trailing it
     NewsListPaged              = $true   # off puts the whole draft on one screen, as far as Telegram allows
     NewsListPageSize           = 10      # items per page; Telegram refuses an over-large keyboard outright
@@ -299,7 +299,7 @@ $script:SettingDisplayMetadata = @{
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
-    NewsListStackedLayout = @{ Unit = ''; Description = 'قائمة الأخبار: نص الخبر بسطر مستقل وأزرار الترتيب والحذف أسفله' }
+    NewsListLayout = @{ Unit = ''; Description = 'شكل قائمة الأخبار: text نص كامل فوق الأزرار · stacked الخبر بزر مستقل · inline الخبر داخل الصف' }
     NewsDraftTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مهلة مسودة الأخبار قبل انتهاء صلاحيتها (0 = بلا مهلة)' }
     NewNewsItemAtTop = @{ Unit = ''; Description = 'الخبر الجديد يُضاف في أول الشريط (عند الإطفاء: في آخره)' }
     NewsListPaged = @{ Unit = ''; Description = 'قائمة الأخبار على صفحات (عند الإطفاء: قائمة واحدة طويلة)' }
@@ -794,6 +794,7 @@ $script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests
 $script:SettingChoices = @{
     AirVariableType = @('Text', 'String', 'Bool', 'Float')
     SceneMode = @('Single', 'Multi')
+    NewsListLayout = @('text', 'stacked', 'inline')
     NewsSheetSyncMode = @('manual', 'auto')
     NewsSheetNotifyScope = @('none', 'admins', 'all')
 }
@@ -842,7 +843,7 @@ foreach ($entry in @(
         @{ Category = 'news'; Names = @(
                 'EnableNewsTickerManagement', 'NewsFilePath', 'NewsItemSeparator',
                 'NewsMaxItemLength', 'NewsMaxItems', 'NewsImportMaxBytes',
-                'NewsDraftTimeoutMinutes', 'NewsListStackedLayout', 'NewNewsItemAtTop',
+                'NewsDraftTimeoutMinutes', 'NewsListLayout', 'NewNewsItemAtTop',
                 'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength',
                 'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',

@@ -636,6 +636,19 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
 }
 
+function Get-NewsListLayout {
+    <# How the reorder screen renders one item:
+         text    - the headline in the message body, a compact button row.
+         stacked - the headline on its own button, controls on the row under it.
+         inline  - the headline in the row beside its controls.
+       Telegram splits a row's width equally between its buttons, so inline
+       gives a headline a quarter of the screen; it stays available because
+       it is the most compact of the three. #>
+    $layout = [string](Get-Setting 'NewsListLayout')
+    if ($layout -notin @('text', 'stacked', 'inline')) { return 'text' }
+    return $layout
+}
+
 function Get-NewsTickerPageSize {
     <#
         How many items one screen of the reorder list may carry.
@@ -654,7 +667,7 @@ function Get-NewsTickerPageSize {
     # Telegram's practical ceiling is around a hundred buttons. Staying well
     # under it leaves room for the navigation row and the add/back row.
     $buttonBudget = 90
-    $perItem = if (Get-Setting 'NewsListStackedLayout') { 5 } else { 4 }
+    $perItem = if ((Get-NewsListLayout) -eq 'stacked') { 5 } else { 4 }
     $maxItems = [math]::Max(3, [math]::Floor(($buttonBudget - 5) / $perItem))
 
     if (-not (Get-Setting 'NewsListPaged')) { return $maxItems }
@@ -695,9 +708,11 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     $first = $Page * $size
     $last = [math]::Min($count - 1, $first + $size - 1)
     $stackedMax = [math]::Max(8, (Get-SettingInt 'NewsListStackedLabelLength' 8))
+    $inlineMax = [math]::Max(8, (Get-SettingInt 'NewsListLabelLength' 8))
+    $layout = Get-NewsListLayout
 
     for ($i = $first; $i -le $last; $i++) {
-        if (Get-Setting 'NewsListStackedLayout') {
+        if ($layout -eq 'stacked') {
             $fullLabel = "$($i + 1). $($draft.Items[$i])"
             if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
             $rows += , @(@{text=$fullLabel; callback_data="news:item:$i"})
@@ -709,6 +724,18 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
             $rows += , @($controls)
             continue
         }
+        if ($layout -eq 'inline') {
+            $label = "$($i + 1). $($draft.Items[$i])"
+            if ($label.Length -gt $inlineMax) { $label = $label.Substring(0, $inlineMax - 1) + '…' }
+            $row = @()
+            if ($i -gt 0) { $row += , @{text='⬆️'; callback_data="news:up:$i"} }
+            $row += , @{text=$label; callback_data="news:item:$i"}
+            if ($i -lt ($count - 1)) { $row += , @{text='⬇️'; callback_data="news:down:$i"} }
+            $row += , @{text='🗑'; callback_data="news:delask:$i"}
+            $rows += , @($row)
+            continue
+        }
+
         # The headline is in the message text above, not in this button.
         # Telegram splits a row's width equally between its buttons, so a
         # headline sharing a row with three controls only ever got a quarter
@@ -760,7 +787,8 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     if ($pages -gt 1 -and -not (Get-Setting 'NewsListPaged')) {
         $lines.Add("القائمة الطويلة مفعّلة، لكن تيليجرام لا يقبل أكثر من $size خبرًا في شاشة واحدة.")
     }
-    if (-not (Get-Setting 'NewsListStackedLayout')) {
+    $layout = Get-NewsListLayout
+    if ($layout -eq 'text') {
         # Here rather than in a button: a button shares its row's width with
         # the controls beside it, while this line has the whole message and
         # wraps by itself. Capped so a long draft cannot push the message
@@ -778,10 +806,10 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     }
 
     $lines.Add('')
-    $lines.Add($(if (Get-Setting 'NewsListStackedLayout') {
-                'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'
-            } else {
-                'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف'
+    $lines.Add($(switch ($layout) {
+                'stacked' { 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف' }
+                'inline'  { '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف' }
+                default   { 'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف' }
             }))
     return ($lines -join "`n")
 }

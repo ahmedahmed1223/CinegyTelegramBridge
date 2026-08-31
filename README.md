@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.4
+
+The reorder screen's shape is now a three-way setting - `NewsListLayout`:
+`text` (headline in the message body), `stacked` (headline on its own button)
+and `inline` (headline in the row beside its controls, the pre-6.9.3
+behaviour). It replaces the `NewsListStackedLayout` toggle, so anyone who had
+that on picks the shape again once.
+
 ## Version 6.9.3
 
 The reorder screen now lists the headlines in the message body instead of

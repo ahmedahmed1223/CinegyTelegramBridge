@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '6.9.2'
+$script:BridgeVersion = '6.9.3'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -175,7 +175,7 @@ $script:DefaultSettings = [ordered]@{
     NewNewsItemAtTop           = $true   # a newly added item leads the ticker instead of trailing it
     NewsListPaged              = $true   # off puts the whole draft on one screen, as far as Telegram allows
     NewsListPageSize           = 10      # items per page; Telegram refuses an over-large keyboard outright
-    NewsListLabelLength        = 24      # headline characters shown when the row also carries buttons
+    NewsListLabelLength        = 120     # headline characters listed in the reorder screen's text
     NewsListStackedLabelLength = 60      # headline characters shown when it owns the row
     NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
     # Google Sheets as the ticker source. Empty URL disables the whole path, so
@@ -304,7 +304,7 @@ $script:SettingDisplayMetadata = @{
     NewNewsItemAtTop = @{ Unit = ''; Description = 'الخبر الجديد يُضاف في أول الشريط (عند الإطفاء: في آخره)' }
     NewsListPaged = @{ Unit = ''; Description = 'قائمة الأخبار على صفحات (عند الإطفاء: قائمة واحدة طويلة)' }
     NewsListPageSize = @{ Unit = 'خبر'; Description = 'عدد الأخبار في صفحة قائمة الترتيب' }
-    NewsListLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر في الصف الأفقي (مع الأزرار)' }
+    NewsListLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر في قائمة الترتيب' }
     NewsListStackedLabelLength = @{ Unit = 'حرف'; Description = 'طول نص الخبر حين يشغل السطر وحده' }
     RepeatWarningCount = @{ Unit = 'مرة'; Description = 'التنبيه عند تكرار القالب هذا العدد خلال النافذة (0 للتعطيل)' }
     RepeatWarningWindowMinutes = @{ Unit = 'دقيقة'; Description = 'نافذة قياس تكرار القالب' }

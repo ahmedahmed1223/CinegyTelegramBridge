@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.3
+
+The reorder screen now lists the headlines in the message body instead of
+inside a button. Telegram splits a row's width equally between its buttons, so
+a headline sharing a row with three controls only ever had a quarter of the
+screen; every item row is now a fixed four buttons - number, two arrows or an
+inert placeholder, delete - so the rows stop rendering at different sizes.
+
 ## Version 6.9.2
 
 Help now carries its own Google Sheets chapter: the shape the sheet has to be

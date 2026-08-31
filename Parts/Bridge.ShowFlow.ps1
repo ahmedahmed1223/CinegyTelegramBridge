@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '6.9.3'; Items = @(
+                '📝 شاشة الترتيب: نص الخبر صار يظهر كاملًا فوق الأزرار بدل أن يُقصّ داخل زر ضيق، وصفوف الأخبار صارت بحجم واحد.'
+            ) }
         @{ Version = '6.9.2'; Items = @(
                 '📊 باب جديد في المساعدة: «الربط مع Google Sheets» — شكل الشيت، والسحب في الاتجاهين، ومن يملك المسودة.'
             ) }

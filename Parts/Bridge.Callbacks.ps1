@@ -142,6 +142,10 @@ function Invoke-CallbackQuery {
             break
         }
         'news:list' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id);break }
+        # The reorder rows keep a fixed four buttons so every row renders the
+        # same width; the end rows have no arrow to offer and carry this
+        # instead. The tap is already acknowledged, so there is nothing to do.
+        'news:noop' { break }
         'news:list:*' { Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'news:list:'));break }
         'news:item:*' {
             $i=[int](Get-CallbackArg $data 'news:item:');Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index $i;break

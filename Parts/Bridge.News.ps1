@@ -694,16 +694,12 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     if ($Page -ge $pages) { $Page = $pages - 1 }
     $first = $Page * $size
     $last = [math]::Min($count - 1, $first + $size - 1)
-    $labelMax = [math]::Max(8, (Get-SettingInt 'NewsListLabelLength' 8))
-    $stackedMax = [math]::Max($labelMax, (Get-SettingInt 'NewsListStackedLabelLength' 8))
+    $stackedMax = [math]::Max(8, (Get-SettingInt 'NewsListStackedLabelLength' 8))
 
     for ($i = $first; $i -le $last; $i++) {
-        $label = "$($i + 1). $($draft.Items[$i])"
-        $fullLabel = $label
-        if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
-        if ($label.Length -gt $labelMax) { $label = $label.Substring(0, $labelMax - 1) + '…' }
-
         if (Get-Setting 'NewsListStackedLayout') {
+            $fullLabel = "$($i + 1). $($draft.Items[$i])"
+            if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
             $rows += , @(@{text=$fullLabel; callback_data="news:item:$i"})
             $controls = @()
             if ($i -gt 0) { $controls += , @{text='⬆️'; callback_data="news:up:$i"} }
@@ -713,10 +709,19 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
             $rows += , @($controls)
             continue
         }
+        # The headline is in the message text above, not in this button.
+        # Telegram splits a row's width equally between its buttons, so a
+        # headline sharing a row with three controls only ever got a quarter
+        # of the screen and wrapped into three lines. And the row kept a
+        # fixed four buttons: dropping the arrow at either end gave those two
+        # rows a third of the width each and made them render taller than the
+        # rest, which is what read as items of different sizes.
         $row = @()
+        $row += , @{text="$($i + 1)"; callback_data="news:item:$i"}
         if ($i -gt 0) { $row += , @{text='⬆️'; callback_data="news:up:$i"} }
-        $row += , @{text=$label; callback_data="news:item:$i"}
+        else { $row += , @{text='▫️'; callback_data='news:noop'} }
         if ($i -lt ($count - 1)) { $row += , @{text='⬇️'; callback_data="news:down:$i"} }
+        else { $row += , @{text='▫️'; callback_data='news:noop'} }
         $row += , @{text='🗑'; callback_data="news:delask:$i"}
         $rows += , @($row)
     }
@@ -755,11 +760,28 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     if ($pages -gt 1 -and -not (Get-Setting 'NewsListPaged')) {
         $lines.Add("القائمة الطويلة مفعّلة، لكن تيليجرام لا يقبل أكثر من $size خبرًا في شاشة واحدة.")
     }
+    if (-not (Get-Setting 'NewsListStackedLayout')) {
+        # Here rather than in a button: a button shares its row's width with
+        # the controls beside it, while this line has the whole message and
+        # wraps by itself. Capped so a long draft cannot push the message
+        # past what Telegram will send.
+        $items = @($draft.Items)
+        $lineMax = [math]::Min(
+            [math]::Max(40, (Get-SettingInt 'NewsListLabelLength' 8)),
+            [math]::Max(40, [math]::Floor(3000 / $size)))
+        $lines.Add('')
+        for ($i = $first; $i -le $last; $i++) {
+            $item = [string]$items[$i - 1]
+            if ($item.Length -gt $lineMax) { $item = $item.Substring(0, $lineMax - 1) + '…' }
+            $lines.Add("$i. $item")
+        }
+    }
+
     $lines.Add('')
     $lines.Add($(if (Get-Setting 'NewsListStackedLayout') {
                 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'
             } else {
-                '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف'
+                'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف'
             }))
     return ($lines -join "`n")
 }

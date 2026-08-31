@@ -553,6 +553,43 @@ Describe 'News list layout' {
     }
 }
 
+Describe 'News list row geometry' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @('خبر أول', 'خبر ثانٍ طويل جدًا يتجاوز أي حدّ كان يُقصّ عنده في زر ضيق', 'خبر ثالث')
+        }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListStackedLayout' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'NewsListPaged' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'gives every row the same four buttons, including the two ends' {
+        # Telegram splits a row's width equally, so a row of three buttons
+        # renders wider than a row of four - which is what made the first and
+        # last items look bigger than the rest.
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        foreach ($index in 0..2) { @($rows[$index]).Count | Should -Be 4 }
+        @($rows[0] | ForEach-Object { $_.callback_data }) | Should -Contain 'news:noop'
+        @($rows[2] | ForEach-Object { $_.callback_data }) | Should -Contain 'news:noop'
+    }
+
+    It 'carries the headline in the message text, uncut, instead of a button' {
+        $text = Get-NewsTickerReorderText -UserId 42
+
+        $text | Should -Match ([regex]::Escape('2. خبر ثانٍ طويل جدًا يتجاوز أي حدّ كان يُقصّ عنده في زر ضيق'))
+        @(@((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)[1] |
+            Where-Object { $_.callback_data -eq 'news:item:1' })[0].text | Should -Be '2'
+    }
+
+    It 'keeps the listing inside one Telegram message for a full page' {
+        $script:NewsTickerDraft.Items = @(1..21 | ForEach-Object { "خبر رقم $_ " + ('ط' * 400) })
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+
+        (Get-NewsTickerReorderText -UserId 42).Length | Should -BeLessThan 4096
+    }
+}
+
 Describe 'News list paging' {
     BeforeEach {
         $script:NewsTickerDraft = @{
@@ -629,7 +666,7 @@ Describe 'News list paging' {
     It 'numbers items by their real position, not their position on the page' {
         $labels = @((Get-NewsTickerReorderKeyboard -UserId 42 -Page 2).inline_keyboard |
                 ForEach-Object { @($_) } | Where-Object { $_.callback_data -like 'news:item:*' })
-        $labels[0].text | Should -Match '^21\.'
+        $labels[0].text | Should -Be '21'
         $labels[0].callback_data | Should -Be 'news:item:20'
     }
 

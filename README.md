@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.6.0
+
+Scheduling gets a date field and a time field, built from inline buttons
+because Telegram has no native picker: a month grid, then hours, then
+minutes in fives. Past days and spent hours render disabled rather than
+missing, so the grid keeps the shape the eye reads it by. Typing still works
+and understands more of it - a bare 21:45, "tomorrow 21:45", "+30", a day
+and month, and Arabic-Indic digits.
+
 ## Version 7.5.0
 
 Upcoming events carry a tg-time entity rather than a rendering of the time,

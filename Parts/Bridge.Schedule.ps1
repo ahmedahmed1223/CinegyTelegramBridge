@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -16,14 +16,219 @@ function Get-SystemClockStatus {
     }
 }
 
+function Set-ScheduleMoment {
+    <# What happens once a moment is settled, whichever way it was chosen.
+
+       Shared by the typed path and the picker so the two cannot drift: an
+       edit flow goes straight to review, a new one goes on to recurrence,
+       and both echo the moment back in full before anything is saved. #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][hashtable]$State,
+        [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
+        [Parameter(Mandatory)][string]$TimeZoneId
+    )
+    $State.ScheduledAt = $ScheduledAt.ToString('o'); $State.TimeZoneId = $TimeZoneId
+    if ($State.ContainsKey('MutationAction')) {
+        Show-ScheduleReview -ChatId $ChatId -State $State
+        return
+    }
+    $State.Mode = 'schedule_recurrence'; Set-PendingState -ChatId $ChatId -State $State
+    Send-TelegramMessage -ChatId $ChatId -Text "فُهم الموعد: $($ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $TimeZoneId`nاختر التكرار:" -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
+}
+
+function Get-ScheduleCalendarKeyboard {
+    <#
+        A month of days as buttons.
+
+        Telegram has no date field, so this is the nearest thing: a grid the
+        thumb picks from instead of eleven characters typed into a phone in
+        the middle of a shift. Days already past are rendered disabled (Bot
+        API 10.3) rather than left out, because a month with holes in it
+        stops reading as a calendar - the row a date sits on is how the eye
+        finds it.
+
+        Month is 'yyyy-MM'. Weekday headers are disabled buttons for the same
+        reason: they must occupy a column without being pressable.
+    #>
+    param([Parameter(Mandatory)][string]$Month, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    $first = [datetime]::ParseExact("$Month-01", 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    $today = $Now.DateTime.Date
+    $rows = @()
+    $rows += , @((New-BridgeButton -Text $first.ToString('yyyy / MM') -Disabled))
+    $rows += , @('أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت' | ForEach-Object { New-BridgeButton -Text $_ -Disabled })
+
+    # Sunday-first, matching the weekday header above it.
+    $week = @()
+    for ($blank = 0; $blank -lt [int]$first.DayOfWeek; $blank++) { $week += , (New-BridgeButton -Text '·' -Disabled) }
+    for ($day = 1; $day -le [datetime]::DaysInMonth($first.Year, $first.Month); $day++) {
+        $date = $first.AddDays($day - 1)
+        $week += , $(if ($date -lt $today) { New-BridgeButton -Text '·' -Disabled }
+            else { New-BridgeButton -Text "$day" -CallbackData "schday:$($date.ToString('yyyy-MM-dd'))" })
+        if ($week.Count -eq 7) { $rows += , @($week); $week = @() }
+    }
+    if ($week.Count -gt 0) {
+        while ($week.Count -lt 7) { $week += , (New-BridgeButton -Text '·' -Disabled) }
+        $rows += , @($week)
+    }
+
+    # Back only where there is somewhere to go: the month containing today is
+    # the earliest one that can hold a future date.
+    $nav = @()
+    if ($first -gt $today) { $nav += , (New-BridgeButton -Text '◀️ السابق' -CallbackData "schcal:$($first.AddMonths(-1).ToString('yyyy-MM'))") }
+    $nav += , (New-BridgeButton -Text 'التالي ▶️' -CallbackData "schcal:$($first.AddMonths(1).ToString('yyyy-MM'))")
+    $rows += , @($nav)
+    $rows += , @((New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ScheduleHourKeyboard {
+    <# The chosen day's hours, six to a row. Hours already gone today are
+       disabled for the same reason past days are: the grid keeps its shape. #>
+    param([Parameter(Mandatory)][string]$Date, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    $day = [datetime]::ParseExact($Date, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    $isToday = $day -eq $Now.DateTime.Date
+    $rows = @(, @((New-BridgeButton -Text "$Date — اختر الساعة" -Disabled)))
+    $row = @()
+    for ($hour = 0; $hour -lt 24; $hour++) {
+        # An hour is still choosable while any of its minutes are ahead.
+        $spent = $isToday -and $hour -lt $Now.Hour
+        $row += , $(if ($spent) { New-BridgeButton -Text '·' -Disabled }
+            else { New-BridgeButton -Text ('{0:00}' -f $hour) -CallbackData "schhour:${Date}:$hour" })
+        if ($row.Count -eq 6) { $rows += , @($row); $row = @() }
+    }
+    $rows += , @((New-BridgeButton -Text '◀️ التاريخ' -CallbackData "schcal:$($day.ToString('yyyy-MM'))"),
+        (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ScheduleMinuteKeyboard {
+    <# Five-minute steps: a playout cue is written to the minute, and sixty
+       buttons would be a wall nobody reads. Anything finer is still typed. #>
+    param([Parameter(Mandatory)][string]$Date, [Parameter(Mandatory)][int]$Hour, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    $day = [datetime]::ParseExact($Date, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    $rows = @(, @((New-BridgeButton -Text "$Date $('{0:00}' -f $Hour):— اختر الدقيقة" -Disabled)))
+    $row = @()
+    for ($minute = 0; $minute -lt 60; $minute += 5) {
+        $moment = $day.AddHours($Hour).AddMinutes($minute)
+        $row += , $(if ($moment -le $Now.DateTime) { New-BridgeButton -Text '·' -Disabled }
+            else { New-BridgeButton -Text ('{0:00}' -f $minute) -CallbackData "schmin:${Date}:${Hour}:$minute" })
+        if ($row.Count -eq 6) { $rows += , @($row); $row = @() }
+    }
+    $rows += , @((New-BridgeButton -Text '◀️ الساعة' -CallbackData "schday:$Date"),
+        (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ScheduleTimePromptKeyboard {
+    <# Offered with the typed prompt: the three offsets that cover most cues,
+       and the calendar for everything else. Typing still works - the picker
+       is another way in, not a replacement. #>
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    return @{ inline_keyboard = @(
+            , @((New-BridgeButton -Text '⏱ +15 د' -CallbackData 'schrel:15'),
+                (New-BridgeButton -Text '⏱ +30 د' -CallbackData 'schrel:30'),
+                (New-BridgeButton -Text '⏱ +60 د' -CallbackData 'schrel:60'))
+            , @((New-BridgeButton -Text '📅 اختر من التقويم' -CallbackData "schcal:$($Now.ToString('yyyy-MM'))"))
+            , @((New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+        ) }
+}
+
+function Test-ScheduleClockParts {
+    <# 25:00 and 21:70 parse as digits and then silently become tomorrow or
+       the next hour if handed to AddHours/AddMinutes, so they are refused
+       before arithmetic rather than accepted as something else. #>
+    param([Parameter(Mandatory)][string]$Hour, [Parameter(Mandatory)][string]$Minute)
+    return ([int]$Hour -le 23 -and [int]$Minute -le 59)
+}
+
+function ConvertTo-BridgeLatinDigits {
+    <# Arabic-Indic and Persian digits as ASCII.
+
+       An operator writing Arabic types on an Arabic keyboard, which produces
+       ٢١:٤٥, and every date parser in .NET's invariant culture refuses it.
+       The schedule screen was therefore unusable without switching keyboard
+       layouts to enter the one field that is pure digits. #>
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($char in $Text.ToCharArray()) {
+        $code = [int]$char
+        if ($code -ge 0x0660 -and $code -le 0x0669) { [void]$builder.Append([char](48 + $code - 0x0660)) }      # ٠-٩
+        elseif ($code -ge 0x06F0 -and $code -le 0x06F9) { [void]$builder.Append([char](48 + $code - 0x06F0)) }   # ۰-۹
+        else { [void]$builder.Append($char) }
+    }
+    return $builder.ToString()
+}
+
+function Get-ScheduleTimeHint {
+    <# Kept in one place because the prompt, the re-prompt after a rejection
+       and the help chapter all have to describe the same accepted forms. #>
+    return "الصيغ المقبولة:`n• 21:45 — اليوم، أو الغد إن مضى الوقت`n• غدًا 21:45 · اليوم 21:45`n• +30 — بعد ثلاثين دقيقة`n• 09-15 21:45 — يوم وشهر`n• 2026-09-15 21:45 — كاملة"
+}
+
 function ConvertFrom-OperatorScheduleTime {
+    <#
+        The moment an operator meant.
+
+        The strict YYYY-MM-DD HH:mm still works and is still what the review
+        screen echoes back. What changed is that it is no longer the only
+        thing accepted: a bare 21:45 is what somebody standing in a gallery
+        actually types, and demanding eleven more characters of it - on a
+        phone, in the middle of a shift - bought nothing but typos.
+
+        A bare time rolls to tomorrow once today's has passed, because a
+        schedule entry is refused in the past anyway: the operator would
+        otherwise be told "must be in the future" for a time they plainly
+        meant tonight.
+    #>
     param([Parameter(Mandatory)][string]$Text, [datetimeoffset]$Now = [datetimeoffset]::Now)
     $clock = Get-SystemClockStatus -Now $Now
     if (-not $clock.Success) { return $clock }
     $localTime = [datetime]::MinValue
     $culture = [System.Globalization.CultureInfo]::InvariantCulture
-    if (-not [datetime]::TryParseExact($Text.Trim(), 'yyyy-MM-dd HH:mm', $culture, [System.Globalization.DateTimeStyles]::None, [ref]$localTime)) {
-        return [pscustomobject]@{ Success = $false; Error = 'استخدم الصيغة YYYY-MM-DD HH:mm'; TimeZoneId = $clock.TimeZoneId }
+    # Digits first, then separators: '/' and '.' are what a numeric keypad
+    # offers, and rejecting them taught nothing.
+    $value = (ConvertTo-BridgeLatinDigits -Text $Text).Trim()
+    $value = [regex]::Replace($value, '\s+', ' ')
+    $today = $Now.DateTime.Date
+
+    if ($value -match '^(?:\+|بعد\s*)(\d{1,4})$') {
+        $localTime = $Now.DateTime.AddMinutes([int]$Matches[1])
+        # Seconds would make the review screen echo a time nobody typed.
+        $localTime = $localTime.AddSeconds(-$localTime.Second).AddMilliseconds(-$localTime.Millisecond)
+    }
+    elseif ($value -match '^(اليوم|غدا|غدًا|غداً|بكرة|بكره)\s+(\d{1,2}):(\d{2})$') {
+        $day = if ($Matches[1] -eq 'اليوم') { $today } else { $today.AddDays(1) }
+        if (-not (Test-ScheduleClockParts -Hour $Matches[2] -Minute $Matches[3])) {
+            return [pscustomobject]@{ Success = $false; Error = "ساعة أو دقيقة خارج المدى.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+        }
+        $localTime = $day.AddHours([int]$Matches[2]).AddMinutes([int]$Matches[3])
+    }
+    elseif ($value -match '^(\d{1,2}):(\d{2})$') {
+        if (-not (Test-ScheduleClockParts -Hour $Matches[1] -Minute $Matches[2])) {
+            return [pscustomobject]@{ Success = $false; Error = "ساعة أو دقيقة خارج المدى.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+        }
+        $localTime = $today.AddHours([int]$Matches[1]).AddMinutes([int]$Matches[2])
+        if ($localTime -le $Now.DateTime) { $localTime = $localTime.AddDays(1) }
+    }
+    else {
+        $normalized = $value -replace '[./]', '-'
+        $formats = @('yyyy-MM-dd HH:mm', 'yyyy-M-d H:mm', 'MM-dd HH:mm', 'M-d H:mm')
+        $parsedAny = $false
+        foreach ($format in $formats) {
+            if ([datetime]::TryParseExact($normalized, $format, $culture, [System.Globalization.DateTimeStyles]::None, [ref]$localTime)) {
+                # A day-and-month form has no year, so .NET supplies the
+                # current one; that is what was meant unless it is already
+                # behind us, in which case it is next year's date.
+                if ($format -notlike 'yyyy*' -and $localTime -le $Now.DateTime) { $localTime = $localTime.AddYears(1) }
+                $parsedAny = $true
+                break
+            }
+        }
+        if (-not $parsedAny) {
+            return [pscustomobject]@{ Success = $false; Error = "لم أفهم الموعد.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+        }
     }
     $localTime = [datetime]::SpecifyKind($localTime, [System.DateTimeKind]::Unspecified)
     $zone = [System.TimeZoneInfo]::Local
@@ -392,7 +597,7 @@ function Start-ScheduleShowFlow {
     }
     if ($state.Fields.Count -eq 0) {
         $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "أرسل موعد العرض بصيغة YYYY-MM-DD HH:mm`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text "⏰ متى يُعرض؟`n$(Get-ScheduleTimeHint)`n`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
         return
     }
     Set-PendingState -ChatId $ChatId -State $state
@@ -433,22 +638,16 @@ function Complete-ScheduleText {
             return
         }
         $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "أرسل موعد العرض بصيغة YYYY-MM-DD HH:mm`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text "⏰ متى يُعرض؟`n$(Get-ScheduleTimeHint)`n`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
         return
     }
     if ($state.Mode -eq 'schedule_time') {
         $parsed = ConvertFrom-OperatorScheduleTime -Text $Value
         if (-not $parsed.Success) {
-            Send-TelegramMessage -ChatId $ChatId -Text "❌ $($parsed.Error)`nأرسل الموعد بصيغة YYYY-MM-DD HH:mm" -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text "❌ $($parsed.Error)" -ReplyMarkup (Get-CancelKeyboard)
             return
         }
-        $state.ScheduledAt = $parsed.ScheduledAt.ToString('o'); $state.TimeZoneId = $parsed.TimeZoneId
-        if ($state.ContainsKey('MutationAction')) {
-            Show-ScheduleReview -ChatId $ChatId -State $state
-            return
-        }
-        $state.Mode = 'schedule_recurrence'; Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "فُهم الموعد: $($parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($parsed.TimeZoneId)`nاختر التكرار:" -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
+        Set-ScheduleMoment -ChatId $ChatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
     }
 }
 

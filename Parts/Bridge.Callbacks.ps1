@@ -768,6 +768,58 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-UpcomingScheduleKeyboard) -ParseMode 'HTML'
             break
         }
+        # The date/time picker. Every branch re-renders in place so the
+        # calendar, the hours and the minutes reuse one message instead of
+        # leaving three stale grids behind.
+        'schcal:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
+                -Text '📅 اختر اليوم:' -ReplyMarkup (Get-ScheduleCalendarKeyboard -Month (Get-CallbackArg $data 'schcal:')) | Out-Null
+            break
+        }
+        'schday:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            $day = [string](Get-CallbackArg $data 'schday:')
+            Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
+                -Text "🕒 $day — اختر الساعة:" -ReplyMarkup (Get-ScheduleHourKeyboard -Date $day) | Out-Null
+            break
+        }
+        'schhour:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            $parts = ([string](Get-CallbackArg $data 'schhour:')) -split ':'
+            Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
+                -Text "🕒 $($parts[0]) $($parts[1]) — اختر الدقيقة:" -ReplyMarkup (Get-ScheduleMinuteKeyboard -Date $parts[0] -Hour ([int]$parts[1])) | Out-Null
+            break
+        }
+        'schmin:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            $parts = ([string](Get-CallbackArg $data 'schmin:')) -split ':'
+            # Through the same parser the typed path uses, so the picker
+            # cannot produce a moment the parser would have refused - a past
+            # minute, or one inside a daylight-saving gap.
+            $parsed = ConvertFrom-OperatorScheduleTime -Text ("{0} {1:00}:{2:00}" -f $parts[0], [int]$parts[1], [int]$parts[2])
+            if (-not $parsed.Success) {
+                Send-TelegramMessage -ChatId $chatId -Text "❌ $($parsed.Error)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
+                break
+            }
+            Set-ScheduleMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
+            break
+        }
+        'schrel:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            $parsed = ConvertFrom-OperatorScheduleTime -Text "+$(Get-CallbackArg $data 'schrel:')"
+            if (-not $parsed.Success) {
+                Send-TelegramMessage -ChatId $chatId -Text "❌ $($parsed.Error)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
+                break
+            }
+            Set-ScheduleMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
+            break
+        }
         'schtpl:*' {
             Start-ScheduleShowFlow -TemplateIndex ([int](Get-CallbackArg $data 'schtpl:')) -ChatId $chatId -UserId $userId
             break

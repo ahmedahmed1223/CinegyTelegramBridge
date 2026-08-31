@@ -494,3 +494,135 @@ Describe 'Upcoming events carry the instant, not a rendering of it' {
         Format-ScheduleEvent -ScheduleEntry $script:Entry | Should -Not -Match '<'
     }
 }
+
+Describe 'Entering a schedule time the way an operator types it' {
+    BeforeAll { $script:Ref = [datetimeoffset]::new(2026, 9, 1, 14, 0, 0, [datetimeoffset]::Now.Offset) }
+
+    It 'takes a bare time as today' {
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '21:45' -Now $script:Ref
+
+        $parsed.Success | Should -BeTrue
+        $parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm') | Should -Be '2026-09-01 21:45'
+    }
+
+    It 'rolls a bare time that has already gone to tomorrow' {
+        # Otherwise the operator is told "must be in the future" about a time
+        # they obviously meant for tonight's next bulletin.
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '09:00' -Now $script:Ref
+
+        $parsed.Success | Should -BeTrue
+        $parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm') | Should -Be '2026-09-02 09:00'
+    }
+
+    It 'understands اليوم and غدًا' {
+        (ConvertFrom-OperatorScheduleTime -Text 'اليوم 21:45' -Now $script:Ref).ScheduledAt.ToString('yyyy-MM-dd HH:mm') |
+            Should -Be '2026-09-01 21:45'
+        foreach ($word in 'غدًا', 'غدا', 'بكرة') {
+            (ConvertFrom-OperatorScheduleTime -Text "$word 06:00" -Now $script:Ref).ScheduledAt.ToString('yyyy-MM-dd HH:mm') |
+                Should -Be '2026-09-02 06:00'
+        }
+    }
+
+    It 'takes a relative offset in minutes' {
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '+30' -Now $script:Ref
+
+        $parsed.ScheduledAt.ToString('yyyy-MM-dd HH:mm') | Should -Be '2026-09-01 14:30'
+        (ConvertFrom-OperatorScheduleTime -Text 'بعد 90' -Now $script:Ref).ScheduledAt.ToString('HH:mm') | Should -Be '15:30'
+    }
+
+    It 'accepts the Arabic-Indic digits an Arabic keyboard produces' {
+        # Without this the one field that is pure digits could not be typed
+        # without switching keyboard layouts.
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '٢١:٤٥' -Now $script:Ref
+
+        $parsed.Success | Should -BeTrue
+        $parsed.ScheduledAt.ToString('HH:mm') | Should -Be '21:45'
+    }
+
+    It 'takes a day and month, and reads a past one as next year' {
+        (ConvertFrom-OperatorScheduleTime -Text '09-15 21:45' -Now $script:Ref).ScheduledAt.ToString('yyyy-MM-dd HH:mm') |
+            Should -Be '2026-09-15 21:45'
+        (ConvertFrom-OperatorScheduleTime -Text '01-05 21:45' -Now $script:Ref).ScheduledAt.ToString('yyyy-MM-dd') |
+            Should -Be '2027-01-05'
+    }
+
+    It 'still takes the full form, and its slash and dot spellings' {
+        foreach ($text in '2026-09-15 21:45', '2026/09/15 21:45', '2026.09.15 21:45') {
+            (ConvertFrom-OperatorScheduleTime -Text $text -Now $script:Ref).ScheduledAt.ToString('yyyy-MM-dd HH:mm') |
+                Should -Be '2026-09-15 21:45'
+        }
+    }
+
+    It 'refuses a clock reading that is not one, instead of rolling it over' {
+        # 25:00 handed to AddHours silently becomes 01:00 tomorrow.
+        foreach ($text in '25:00', '21:70') {
+            (ConvertFrom-OperatorScheduleTime -Text $text -Now $script:Ref).Success | Should -BeFalse
+        }
+    }
+
+    It 'still refuses a past moment and says what it accepts' {
+        $parsed = ConvertFrom-OperatorScheduleTime -Text '2020-01-01 10:00' -Now $script:Ref
+        $parsed.Success | Should -BeFalse
+
+        (ConvertFrom-OperatorScheduleTime -Text 'الليلة' -Now $script:Ref).Error | Should -Match '21:45'
+    }
+}
+
+Describe 'Picking a date and time instead of typing one' {
+    BeforeAll { $script:Ref = [datetimeoffset]::new(2026, 9, 15, 14, 30, 0, [datetimeoffset]::Now.Offset) }
+
+    It 'lays the month out as weeks under a weekday header' {
+        $rows = @((Get-ScheduleCalendarKeyboard -Month '2026-09' -Now $script:Ref).inline_keyboard)
+
+        @($rows[1]).Count | Should -Be 7
+        foreach ($row in $rows[2..($rows.Count - 3)]) { @($row).Count | Should -Be 7 }
+    }
+
+    It 'disables a day that has gone rather than dropping it out of the grid' {
+        # A month with holes in it stops reading as a calendar: the row a date
+        # sits on is how the eye finds it.
+        $flat = @((Get-ScheduleCalendarKeyboard -Month '2026-09' -Now $script:Ref).inline_keyboard | ForEach-Object { @($_) })
+        $callbacks = @($flat | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Not -Contain 'schday:2026-09-14'
+        $callbacks | Should -Contain 'schday:2026-09-15'
+        $callbacks | Should -Contain 'schday:2026-09-30'
+        @($flat | Where-Object { $_.ContainsKey('disabled') }).Count | Should -BeGreaterThan 7
+    }
+
+    It 'offers no way back past the month that holds today' {
+        $callbacks = @((Get-ScheduleCalendarKeyboard -Month '2026-09' -Now $script:Ref).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Not -Contain 'schcal:2026-08'
+        $callbacks | Should -Contain 'schcal:2026-10'
+    }
+
+    It 'keeps every hour of a future day, and only the spent ones of today' {
+        $today = @((Get-ScheduleHourKeyboard -Date '2026-09-15' -Now $script:Ref).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $later = @((Get-ScheduleHourKeyboard -Date '2026-09-16' -Now $script:Ref).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $today | Should -Not -Contain 'schhour:2026-09-15:13'
+        $today | Should -Contain 'schhour:2026-09-15:14'
+        $later | Should -Contain 'schhour:2026-09-16:0'
+    }
+
+    It 'steps the minutes by five and refuses one already gone' {
+        $callbacks = @((Get-ScheduleMinuteKeyboard -Date '2026-09-15' -Hour 14 -Now $script:Ref).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Not -Contain 'schmin:2026-09-15:14:30'
+        $callbacks | Should -Contain 'schmin:2026-09-15:14:35'
+        $callbacks | Should -Not -Contain 'schmin:2026-09-15:14:36'
+    }
+
+    It 'offers the common offsets and the calendar beside the typed prompt' {
+        $callbacks = @((Get-ScheduleTimePromptKeyboard -Now $script:Ref).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Contain 'schrel:30'
+        $callbacks | Should -Contain 'schcal:2026-09'
+    }
+}

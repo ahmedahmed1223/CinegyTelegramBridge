@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 

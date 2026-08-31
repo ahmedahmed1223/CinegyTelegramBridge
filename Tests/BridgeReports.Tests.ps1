@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 BeforeAll {
     # The bridge runs under StrictMode, and without it here these tests pass
     # on code that throws in production: reading .Sum off an empty
@@ -450,5 +450,26 @@ Describe 'The banner table gives its width to the name' {
 
         @($table.cells[0]).Count | Should -Be 4
         @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
+    }
+}
+
+Describe 'The banner copy is kept, below the table' {
+    It 'folds the on-air text under the report instead of dropping it' {
+        # No column in a four-column table is wide enough for a sentence, but
+        # the copy is what an operator recognises a banner by.
+        Mock Get-BannerReportData {
+            @{ Label = 'اليوم'; Operators = 1; Truncated = $false; Sessions = @(
+                    @{ UserId = 10; Layer = 7; Target = 'urgent'; Values = 'عاجل: بيان الوزارة'
+                        StartedAt = '2026-08-31T21:00:00'; EndedAt = '2026-08-31T21:05:00' }
+                    @{ UserId = 10; Layer = 8; Target = 'ticker'; Values = ''
+                        StartedAt = '2026-08-31T22:00:00'; EndedAt = $null }
+                ) }
+        }
+        Mock Get-AuditOperatorName { 'سامي' }
+
+        $details = @(@(Get-BannerReportBlocks -Period today) | Where-Object { $_.type -eq 'details' })[0]
+
+        $details.summary | Should -Match 'نصوص البنرات \(1\)'
+        @($details.blocks)[0].text | Should -Match 'عاجل: بيان الوزارة'
     }
 }

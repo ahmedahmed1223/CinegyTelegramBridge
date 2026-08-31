@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.NewsScreens.Tests.ps1 - News ticker screens, drafts, locks, and publishing.
 

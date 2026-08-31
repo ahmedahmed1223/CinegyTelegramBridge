@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -506,6 +506,17 @@ function Get-BannerReportBlocks {
 
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
     $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($sessions.Count) بنرًا · $($data.Operators) مشغّلين" }
+    # The copy that actually reached the screen is what an operator
+    # recognises a banner by, and no column in a four-column table is wide
+    # enough for a sentence. It goes underneath, where the width is the
+    # whole message.
+    $copy = @(foreach ($session in $sessions) {
+            if (-not $session.Values) { continue }
+            @{ type = 'paragraph'; text = "$(([datetime]$session.StartedAt).ToString('HH:mm')) · $([string]$session.Target) — $([string]$session.Values)" }
+        })
+    if ($copy.Count -gt 0) {
+        $blocks += @{ type = 'details'; summary = "📝 نصوص البنرات ($($copy.Count))"; blocks = $copy }
+    }
     if ($data.Truncated) {
         $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
     }

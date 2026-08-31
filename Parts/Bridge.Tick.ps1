@@ -508,24 +508,103 @@ function Get-OperatorTally {
     return @{ Single = ''; Breakdown = ($parts -join ' · ') }
 }
 
-function Get-MissedEventsText {
+function Get-MissedEventsBlocks {
     <#
-        What happened while nobody was looking.
+        The handover screen as blocks, with what is on air FIRST.
 
-        The first version counted verbs - "SHOW 23, other 73" - which tells an
-        operator taking over a shift nothing: not which graphic, not who, not
-        when, and the largest bucket was simply everything without an action
-        field. This answers what is actually asked at a handover: what went to
-        air, who did it, what failed, and what is up right now.
+        The text version ends on it, after the shows, the removals, the
+        notable activity and the failures. That is the wrong order for the
+        one screen somebody opens while walking into a gallery: the first
+        question is always what is on the screen right now, and it was the
+        last line they reached.
+
+        Failures stay open for the same reason - a failure is usually why
+        this screen was opened at all - while the general activity, read only
+        when something needs tracing, folds away.
     #>
+    param([int]$Hours = 12, [AllowNull()][object[]]$Records = $null)
+    # Wrapped around the whole if: the expression emits its result to the
+    # pipeline, which unwraps a one-item array back to a scalar, and .Count
+    # on that throws under StrictMode.
+    $records = @(if ($null -ne $Records) { $Records } else { Get-MissedEventsRecords -Hours $Hours })
+
+    $blocks = @(@{ type = 'heading'; text = "🕘 ماذا فاتني — آخر $Hours ساعة"; size = 3 })
+    # On air first: it is the question this screen is opened to answer.
+    $blocks += @{ type = 'paragraph'; text = $(if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
+            else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join '، ')" }) }
+    $blocks += @{ type = 'divider' }
+
+    if ($records.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لا شيء مسجّل في هذه الفترة.' }
+        return $blocks
+    }
+
+    $airOps = @($records | Where-Object { $_.Action -in @('SHOW', 'HIDE', 'EXIT') })
+    $shows = @($airOps | Where-Object { $_.Action -eq 'SHOW' -and $_.Target })
+    if ($shows.Count -gt 0) {
+        $blocks += @{ type = 'heading'; text = "📺 ما عُرض — $($shows.Count)"; size = 5 }
+        # Four columns, as everywhere else here: the width is divided evenly,
+        # so a fifth would cost the graphic's name a fifth of the screen.
+        $cells = @(, @(
+                @{ text = 'القالب'; is_header = $true }
+                @{ text = 'مرات'; is_header = $true }
+                @{ text = 'آخرها'; is_header = $true }
+                @{ text = 'المشغّل'; is_header = $true }
+            ))
+        foreach ($group in ($shows | Group-Object -Property Target | Sort-Object Count -Descending | Select-Object -First 8)) {
+            $tally = Get-OperatorTally -Records @($group.Group)
+            $who = if ($tally.Breakdown) { [string]$tally.Breakdown } elseif ($tally.Single) { [string]$tally.Single } else { '—' }
+            $cells += , @(
+                @{ text = [string]$group.Name }
+                @{ text = [string]$group.Count }
+                @{ text = @($group.Group)[-1].When.ToString('HH:mm') }
+                @{ text = $who }
+            )
+        }
+        $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    }
+
+    $removals = @($airOps | Where-Object { $_.Action -in @('HIDE', 'EXIT') })
+    if ($removals.Count -gt 0) {
+        $newest = @($removals)[-1]
+        $lastWho = Get-AuditOperatorName -UserId $newest.UserId
+        $line = "🙈 إخفاء وخروج: $($removals.Count) — آخرها $($newest.When.ToString('HH:mm'))"
+        if ($lastWho) { $line += " — $lastWho" }
+        $blocks += @{ type = 'paragraph'; text = $line }
+    }
+
+    # Failures stay open: they are usually why the screen was opened.
+    $failures = @($records | Where-Object { $_.Result -eq 'failed' })
+    $blocked = @($records | Where-Object { $_.Result -eq 'blocked' })
+    if ($failures.Count -gt 0 -or $blocked.Count -gt 0) {
+        $blocks += @{ type = 'heading'; text = "⚠️ فشل: $($failures.Count) · مرفوض: $($blocked.Count)"; size = 5 }
+        foreach ($failure in @($failures | Select-Object -Last 3)) {
+            $detail = if ($failure.Message) { $failure.Message } else { 'بلا تفصيل' }
+            $blocks += @{ type = 'paragraph'; text = "$($failure.When.ToString('HH:mm')) — $($failure.Action) $($failure.Target): $detail" }
+        }
+    }
+
+    $activity = @($records | Where-Object { -not $_.Action -and $_.Message })
+    $notable = @($activity | Where-Object { $_.Message -match '📰|⚙️|👤|🔓|🚨|♻️' })
+    if ($notable.Count -gt 0) {
+        $inner = @(@($notable | Select-Object -Last 8) | ForEach-Object {
+                @{ type = 'paragraph'; text = "$($_.When.ToString('HH:mm')) — $($_.Message)" }
+            })
+        $blocks += @{ type = 'details'; summary = "📌 أحداث تستحق الانتباه ($($notable.Count))"; blocks = $inner }
+    }
+
+    $blocks += @{ type = 'divider' }
+    $blocks += @{ type = 'paragraph'; text = "Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState) · Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)" }
+    return $blocks
+}
+
+function Get-MissedEventsRecords {
+    <# The window's audit records, normalised. Extracted so the text screen
+       and the block screen read exactly the same set - two readers of one
+       log that filter it separately are two answers waiting to disagree. #>
     param([int]$Hours = 12)
     $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
-    # Normalised up front through the shared audit readers. Records are
-    # written by a dozen call sites and only carry the fields each one cares
-    # about; under StrictMode a single record without an "action" key would
-    # otherwise take down the whole digest, which is exactly the screen an
-    # operator opens when something has already gone wrong.
-    $records = @(Read-AuditRecords -MaxLines 1500 | ForEach-Object {
+    return @(Read-AuditRecords -MaxLines 1500 | ForEach-Object {
             $record = $_
             $when = Read-AuditRecordStamp -Record $record
             if (-not $when -or $when.ToUniversalTime() -lt $since) { return }
@@ -538,6 +617,26 @@ function Get-MissedEventsText {
                 UserId  = (Get-AuditRecordField -Record $record -Name 'userId')
             }
         })
+}
+
+function Get-MissedEventsText {
+    <#
+        What happened while nobody was looking.
+
+        The first version counted verbs - "SHOW 23, other 73" - which tells an
+        operator taking over a shift nothing: not which graphic, not who, not
+        when, and the largest bucket was simply everything without an action
+        field. This answers what is actually asked at a handover: what went to
+        air, who did it, what failed, and what is up right now.
+    #>
+    param([int]$Hours = 12)
+    # One reader for both screens: records are written by a dozen call
+    # sites and carry only the fields each cares about, so under StrictMode
+    # a record without an "action" key would take down the whole digest -
+    # which is exactly the screen opened when something has already gone
+    # wrong. Two readers filtering one log separately are two answers
+    # waiting to disagree.
+    $records = @(Get-MissedEventsRecords -Hours $Hours)
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("🕘 ماذا فاتني — آخر $Hours ساعة")

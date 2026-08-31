@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Users.Tests.ps1 - Authorization, roles, aliases, and per-role menus.
 

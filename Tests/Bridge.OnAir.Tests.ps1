@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.OnAir.Tests.ps1 - On-air records, layers, hide/exit, and timers.
 

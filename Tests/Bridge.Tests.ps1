@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Tests.ps1 — Pester tests for the bridge's pure logic.
 
@@ -937,5 +937,92 @@ Describe 'The operation history as a list' {
         Invoke-MyOperationsCommand -ChatId 101 -UserId 101
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+}
+
+Describe 'The handover screen answers its first question first' {
+    BeforeEach {
+        $script:OnAir.Clear()
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'ok'
+        $script:RuntimeState.Monitoring.TelegramConnectionState = 'ok'
+    }
+    AfterEach { $script:OnAir.Clear() }
+
+    It 'leads with what is on air, not ends with it' {
+        # The text version reached it last, after the shows, the removals and
+        # the failures - on the one screen somebody opens walking into a
+        # gallery, where it is the first thing asked.
+        $script:OnAir[7] = @{ Key = 'urgent'; Values = @{}; ShownAt = (Get-Date) }
+
+        $blocks = @(Get-MissedEventsBlocks -Hours 12 -Records @())
+
+        $blocks[0].type | Should -Be 'heading'
+        $blocks[1].text | Should -Match 'على الهواء: urgent'
+    }
+
+    It 'says the screen is black rather than saying nothing' {
+        @(Get-MissedEventsBlocks -Hours 12 -Records @())[1].text | Should -Match 'لا شيء على الهواء'
+    }
+
+    It 'keeps failures open and folds the general activity away' {
+        # A failure is usually why this screen was opened; the activity log is
+        # read only when something needs tracing.
+        $records = @(
+            [pscustomobject]@{ When = [datetime]'2026-08-31T21:00'; Action = 'SHOW'; Target = 'urgent'; Result = 'failed'; Message = 'انقطع الاتصال'; UserId = '10' }
+            [pscustomobject]@{ When = [datetime]'2026-08-31T20:00'; Action = ''; Target = ''; Result = ''; Message = '📰 نُشر شريط الأخبار'; UserId = '10' }
+        )
+        Mock Get-OperatorTally { @{ Breakdown = ''; Single = 'سامي' } }
+        Mock Get-AuditOperatorName { 'سامي' }
+
+        $blocks = @(Get-MissedEventsBlocks -Hours 12 -Records $records)
+        $texts = @($blocks | Where-Object { $_.ContainsKey('text') } | ForEach-Object { $_.text })
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })
+
+        @($texts | Where-Object { $_ -match 'انقطع الاتصال' }).Count | Should -Be 1
+        $folded.Count | Should -Be 1
+        $folded[0].summary | Should -Match 'تستحق الانتباه'
+    }
+
+    It 'keeps the shows table to four columns like every other table here' {
+        $records = @(
+            [pscustomobject]@{ When = [datetime]'2026-08-31T21:00'; Action = 'SHOW'; Target = 'urgent'; Result = 'success'; Message = ''; UserId = '10' }
+        )
+        Mock Get-OperatorTally { @{ Breakdown = ''; Single = 'سامي' } }
+
+        $table = @(@(Get-MissedEventsBlocks -Hours 12 -Records $records) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[0]).Count | Should -Be 4
+    }
+}
+
+Describe 'The operation history folds what is not the newest' {
+    It 'keeps three open and folds the rest' {
+        Mock Get-UserOperationHistory {
+            @(1..8 | ForEach-Object {
+                    [pscustomobject]@{
+                        At = "2026-08-31T{0:00}:00:00" -f (8 + $_); Action = 'SHOW'; Result = 'success'
+                        Target = "t$_"; Values = "نص $_"; OperationId = "air-5023333b032c476eb48204ca08032a9$_"
+                    }
+                })
+        }
+        Mock Get-TemplateCategoryLabel { '' }
+        Mock Get-OperationSentence { 'عُرض' }
+
+        $blocks = @(Get-MyOperationsBlocks -UserId 101)
+        $open = @($blocks | Where-Object { $_.type -eq 'list' })[0]
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+
+        @($open.items).Count | Should -Be 3
+        $folded.summary | Should -Match 'أقدم \(5\)'
+    }
+
+    It 'folds nothing when there is nothing older' {
+        Mock Get-UserOperationHistory {
+            @([pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 't'; Values = ''; OperationId = '' })
+        }
+        Mock Get-TemplateCategoryLabel { '' }
+        Mock Get-OperationSentence { 'عُرض' }
+
+        @(@(Get-MyOperationsBlocks -UserId 101) | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
     }
 }

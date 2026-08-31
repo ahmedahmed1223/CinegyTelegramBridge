@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -103,6 +103,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.10.0'; Items = @(
+                '🕘 «ماذا فاتني» تبدأ الآن بما على الهواء — كان آخر سطر فيها، وهو أول ما تحتاجه عند تسلّم الوردية.'
+                '📝 نصوص البنرات عادت إلى تقرير البنرات تحت «نصوص البنرات».'
+                '🧾 «عملياتي» تعرض الثلاث الأحدث وتطوي ما قبلها.'
+            ) }
         @{ Version = '7.9.0'; Items = @(
                 '📐 التقارير صارت تتسع لشاشة الهاتف: أربعة أعمدة قصيرة، والتفصيل تحت «تفاصيل كل يوم» يُفتح بالضغط.'
                 '📊 عمود «المدى» (12–18) يقول أين تراوح الشريط طوال اليوم مهما بلغ عدد التعديلات.'
@@ -660,7 +665,15 @@ function Get-MyOperationsBlocks {
         if ($advice) { $inner += @{ type = 'paragraph'; text = "↳ $advice" } }
         $items += @{ blocks = $inner }
     }
-    $blocks += @{ type = 'list'; items = $items }
+    # The three newest stay open and the rest fold. Ten operations, each
+    # carrying its copy and its reference, is a screen nobody scrolls to the
+    # end of - and the one being looked for is almost always the last one.
+    $recent = @($items | Select-Object -Last 3)
+    $older = @($items | Select-Object -First ([math]::Max(0, $items.Count - 3)))
+    $blocks += @{ type = 'list'; items = $recent }
+    if ($older.Count -gt 0) {
+        $blocks += @{ type = 'details'; summary = "عمليات أقدم ($($older.Count))"; blocks = @(@{ type = 'list'; items = $older }) }
+    }
     return $blocks
 }
 

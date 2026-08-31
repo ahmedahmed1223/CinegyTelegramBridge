@@ -1,4 +1,4 @@
-﻿# Cinegy Air Pro / Titler Telegram Bridge
+# Cinegy Air Pro / Titler Telegram Bridge
 
 A Telegram bot that lets whitelisted operators drive Cinegy Air Pro's Titler
 graphics layer from chat: push a named title template on air with text
@@ -12,6 +12,14 @@ It's built directly on the HTTP control surfaces that Cinegy demonstrates in
 those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
+
+## Version 7.10.0
+
+The handover screen opens with what is on air instead of ending on it, keeps
+failures in view and folds the general activity away. The banner copy comes
+back to its report in a block under the table, having been dropped when the
+table narrowed. My operations keeps the three newest open and folds the
+rest.
 
 ## Version 7.9.0
 

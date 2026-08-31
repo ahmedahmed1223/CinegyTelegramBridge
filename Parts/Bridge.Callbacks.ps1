@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -579,7 +579,10 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:digest' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            $digestHours = Get-SettingInt 'MissedEventsHours' 1
+            $digestMenu = Get-MainMenuKeyboard -ChatId $chatId -UserId $userId
+            if (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-MissedEventsBlocks -Hours $digestHours) -ReplyMarkup $digestMenu) { break }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MissedEventsText -Hours $digestHours) -ReplyMarkup $digestMenu
             break
         }
         'menu:sharestatus' {

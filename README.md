@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.9.5
+
+Stacked rows now carry the item number on every control (`⬆️ 3`, `🗑 3`) and
+alternate a `▪️`/`▫️` marker, because Telegram gives a button no colour or
+spacing to group it with the headline above. A fourth shape, `compact`, spends
+one numbered button per item and puts the controls in the item screen - the
+only way thirty items fit on a single screen.
+
 ## Version 6.9.4
 
 The reorder screen's shape is now a three-way setting - `NewsListLayout`:

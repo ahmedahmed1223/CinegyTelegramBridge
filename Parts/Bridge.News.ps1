@@ -641,11 +641,13 @@ function Get-NewsListLayout {
          text    - the headline in the message body, a compact button row.
          stacked - the headline on its own button, controls on the row under it.
          inline  - the headline in the row beside its controls.
+         compact - one numbered button per item, controls in the item screen;
+                   the only shape that fits thirty items on one screen.
        Telegram splits a row's width equally between its buttons, so inline
        gives a headline a quarter of the screen; it stays available because
        it is the most compact of the three. #>
     $layout = [string](Get-Setting 'NewsListLayout')
-    if ($layout -notin @('text', 'stacked', 'inline')) { return 'text' }
+    if ($layout -notin @('text', 'stacked', 'inline', 'compact')) { return 'text' }
     return $layout
 }
 
@@ -667,8 +669,12 @@ function Get-NewsTickerPageSize {
     # Telegram's practical ceiling is around a hundred buttons. Staying well
     # under it leaves room for the navigation row and the add/back row.
     $buttonBudget = 90
-    $perItem = if ((Get-NewsListLayout) -eq 'stacked') { 5 } else { 4 }
+    $perItem = switch (Get-NewsListLayout) { 'stacked' { 5 } 'compact' { 1 } default { 4 } }
     $maxItems = [math]::Max(3, [math]::Floor(($buttonBudget - 5) / $perItem))
+    # Compact could fit eighty-five buttons, but every one of them also needs
+    # a readable line in the message above, and eighty-five lines share the
+    # message budget down to nothing. Forty keeps a line worth reading.
+    if ($perItem -eq 1) { $maxItems = [math]::Min($maxItems, 40) }
 
     if (-not (Get-Setting 'NewsListPaged')) { return $maxItems }
     return [math]::Max(3, [math]::Min($maxItems, (Get-SettingInt 'NewsListPageSize' 10)))
@@ -710,18 +716,33 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     $stackedMax = [math]::Max(8, (Get-SettingInt 'NewsListStackedLabelLength' 8))
     $inlineMax = [math]::Max(8, (Get-SettingInt 'NewsListLabelLength' 8))
     $layout = Get-NewsListLayout
+    $numbers = @()
 
     for ($i = $first; $i -le $last; $i++) {
         if ($layout -eq 'stacked') {
-            $fullLabel = "$($i + 1). $($draft.Items[$i])"
+            # Telegram gives a button no colour, border or spacing, so the
+            # only way to say "these four belong to that headline" is the
+            # label itself: the number rides on every control, and the marker
+            # alternates so consecutive items read as separate bands.
+            $number = $i + 1
+            $marker = if ($i % 2 -eq 0) { '▪️' } else { '▫️' }
+            $fullLabel = "$marker $number. $($draft.Items[$i])"
             if ($fullLabel.Length -gt $stackedMax) { $fullLabel = $fullLabel.Substring(0, $stackedMax - 1) + '…' }
             $rows += , @(@{text=$fullLabel; callback_data="news:item:$i"})
             $controls = @()
-            if ($i -gt 0) { $controls += , @{text='⬆️'; callback_data="news:up:$i"} }
-            if ($i -lt ($count - 1)) { $controls += , @{text='⬇️'; callback_data="news:down:$i"} }
-            $controls += , @{text='✏️'; callback_data="news:edit:$i"}
-            $controls += , @{text='🗑'; callback_data="news:delask:$i"}
+            if ($i -gt 0) { $controls += , @{text="⬆️ $number"; callback_data="news:up:$i"} }
+            if ($i -lt ($count - 1)) { $controls += , @{text="⬇️ $number"; callback_data="news:down:$i"} }
+            $controls += , @{text="✏️ $number"; callback_data="news:edit:$i"}
+            $controls += , @{text="🗑 $number"; callback_data="news:delask:$i"}
             $rows += , @($controls)
+            continue
+        }
+        if ($layout -eq 'compact') {
+            # One button per item is what makes thirty of them fit: the
+            # controls live in the item screen the number opens, and the
+            # headline itself is in the message text above.
+            $numbers += , @{text="$($i + 1)"; callback_data="news:item:$i"}
+            if ($numbers.Count -eq 5) { $rows += , @($numbers); $numbers = @() }
             continue
         }
         if ($layout -eq 'inline') {
@@ -752,6 +773,8 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
         $row += , @{text='🗑'; callback_data="news:delask:$i"}
         $rows += , @($row)
     }
+
+    if ($numbers.Count -gt 0) { $rows += , @($numbers) }
 
     if ($pages -gt 1) {
         $nav = @()
@@ -788,7 +811,7 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
         $lines.Add("القائمة الطويلة مفعّلة، لكن تيليجرام لا يقبل أكثر من $size خبرًا في شاشة واحدة.")
     }
     $layout = Get-NewsListLayout
-    if ($layout -eq 'text') {
+    if ($layout -in @('text', 'compact')) {
         # Here rather than in a button: a button shares its row's width with
         # the controls beside it, while this line has the whole message and
         # wraps by itself. Capped so a long draft cannot push the message
@@ -809,6 +832,7 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     $lines.Add($(switch ($layout) {
                 'stacked' { 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف' }
                 'inline'  { '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف' }
+                'compact' { 'اضغط رقم الخبر: الترتيب والتعديل والحذف في شاشته' }
                 default   { 'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف' }
             }))
     return ($lines -join "`n")

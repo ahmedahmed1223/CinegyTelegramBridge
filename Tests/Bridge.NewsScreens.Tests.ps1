@@ -720,8 +720,8 @@ Describe 'News list layout choice' {
     }
     AfterAll { $script:NewsTickerDraft = $null }
 
-    It 'offers exactly the three shapes, and falls back to text for anything else' {
-        $script:SettingChoices['NewsListLayout'] | Should -Be @('text', 'stacked', 'inline')
+    It 'offers exactly the four shapes, and falls back to text for anything else' {
+        $script:SettingChoices['NewsListLayout'] | Should -Be @('text', 'stacked', 'inline', 'compact')
 
         Mock Get-Setting { 'nonsense' } -ParameterFilter { $Name -eq 'NewsListLayout' }
         Get-NewsListLayout | Should -Be 'text'
@@ -740,12 +740,54 @@ Describe 'News list layout choice' {
         Get-NewsTickerReorderText -UserId 42 | Should -Not -Match '2\. خبر ثانٍ'
     }
 
-    It 'reaches every item in all three shapes' {
-        foreach ($layout in @('text', 'stacked', 'inline')) {
+    It 'reaches every item in all four shapes' {
+        foreach ($layout in @('text', 'stacked', 'inline', 'compact')) {
             Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
             $flat = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard |
                     ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
             foreach ($i in 0..2) { $flat | Should -Contain "news:item:$i" }
         }
+    }
+}
+
+Describe 'Compact and stacked shapes' {
+    BeforeEach {
+        $script:NewsTickerDraft = @{
+            OwnerUserId = 42; OwnerChatId = 42; UpdatedAt = (Get-Date).ToString('o')
+            Items = @(1..30 | ForEach-Object { "خبر رقم $_" })
+        }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewsListPaged' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'fits thirty items on one compact screen, five numbers to a row' {
+        Mock Get-Setting { 'compact' } -ParameterFilter { $Name -eq 'NewsListLayout' }
+
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+        $flat = @($rows | ForEach-Object { @($_) | ForEach-Object { $_.callback_data } })
+
+        foreach ($i in 0..29) { $flat | Should -Contain "news:item:$i" }
+        $flat | Should -Not -Contain 'news:list:1'
+        @($rows[0]).Count | Should -Be 5
+        (@($rows | ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum) | Should -BeLessThan 100
+    }
+
+    It 'cannot fit thirty in any shape that carries per-item controls' {
+        foreach ($layout in @('text', 'stacked', 'inline')) {
+            Mock Get-Setting { $layout } -ParameterFilter { $Name -eq 'NewsListLayout' }
+            (Get-NewsTickerPageCount -UserId 42) | Should -BeGreaterThan 1
+        }
+    }
+
+    It 'carries the item number on every stacked control' {
+        Mock Get-Setting { 'stacked' } -ParameterFilter { $Name -eq 'NewsListLayout' }
+
+        $rows = @((Get-NewsTickerReorderKeyboard -UserId 42).inline_keyboard)
+
+        # Telegram gives buttons no colour or spacing, so the number is what
+        # says which headline these four belong to.
+        foreach ($button in @($rows[3])) { $button.text | Should -Match '2$' }
+        @($rows[2])[0].text | Should -Match '^▫️ 2\.'
+        @($rows[0])[0].text | Should -Match '^▪️ 1\.'
     }
 }

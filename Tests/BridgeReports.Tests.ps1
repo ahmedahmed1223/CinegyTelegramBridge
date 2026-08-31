@@ -248,3 +248,47 @@ Describe 'Banner report as rich blocks' {
         @($blocks | Where-Object { $_.type -eq 'paragraph' })[0].text | Should -Match 'لم يُعرض'
     }
 }
+
+Describe 'News report as rich blocks' {
+    It 'puts the day, its counts and its operators on one row' {
+        # The text version spends a second indented line on the tally because
+        # it has nowhere else to put it; here it is the fourth column.
+        Mock Get-NewsReportDays {
+            @{ Label = 'الأسبوع'; Publishes = 3; Items = 40; Truncated = $false; Days = @(
+                    @{ Date = [datetime]'2026-08-30'; Publishes = 1; Items = 12; Tally = @{ Breakdown = 'سامي 1'; Single = '' } }
+                    @{ Date = [datetime]'2026-08-31'; Publishes = 2; Items = 28; Tally = @{ Breakdown = ''; Single = 'ليلى' } }
+                ) }
+        }
+
+        $blocks = @(Get-NewsReportBlocks -Period week)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+
+        $blocks[0].type | Should -Be 'heading'
+        @($table.cells).Count | Should -Be 3
+        @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
+        @($table.cells[1])[2].text | Should -Be '12'
+        @($table.cells[1])[3].text | Should -Be 'سامي 1'
+        @($table.cells[2])[3].text | Should -Be 'ليلى'
+    }
+
+    It 'draws no table for a period nothing was published in' {
+        Mock Get-NewsReportDays { @{ Label = 'أمس'; Publishes = 0; Items = 0; Truncated = $false; Days = @() } }
+
+        $blocks = @(Get-NewsReportBlocks -Period yesterday)
+
+        @($blocks | Where-Object { $_.type -eq 'table' }).Count | Should -Be 0
+        @($blocks | Where-Object { $_.type -eq 'paragraph' })[0].text | Should -Match 'لم يُنشر'
+    }
+
+    It 'says so rather than leaving the operator column blank' {
+        Mock Get-NewsReportDays {
+            @{ Label = 'اليوم'; Publishes = 1; Items = 5; Truncated = $false; Days = @(
+                    @{ Date = [datetime]'2026-08-31'; Publishes = 1; Items = 5; Tally = @{ Breakdown = ''; Single = '' } }
+                ) }
+        }
+
+        $table = @(@(Get-NewsReportBlocks -Period today) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[1])[3].text | Should -Be '—'
+    }
+}

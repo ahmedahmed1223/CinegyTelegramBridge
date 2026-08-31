@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.7.0
+
+The news report joins the banner one as a real table - day, publishes,
+items, operators - with the operator tally as its fourth column instead of a
+second indented line the text version had nowhere else to put.
+
 ## Version 7.6.0
 
 Scheduling gets a date field and a time field, built from inline buttons

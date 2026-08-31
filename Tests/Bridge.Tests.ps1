@@ -829,13 +829,16 @@ Describe 'Rich sending never becomes a dependency' {
         Should -Invoke Send-TelegramPagedText -Times 0 -Exactly
     }
 
-    It 'leaves the news report on text, because it has no columns to gain' {
-        Mock Send-TelegramRichMessage { $true }
+    It 'builds the news report from blocks too, and still falls back' {
+        Mock Get-NewsReportDays { @{ Label = 'اليوم'; Days = @(); Publishes = 0; Items = 0; Truncated = $false } }
         Mock Get-NewsReportText { 'تقرير' }
+        Mock Send-TelegramRichMessage { $true }
 
         Show-Report -ChatId 101 -UserId 101 -Kind news -Period today
+        Should -Invoke Send-TelegramPagedText -Times 0 -Exactly
 
-        Should -Invoke Send-TelegramRichMessage -Times 0 -Exactly
+        Mock Send-TelegramRichMessage { $false }
+        Show-Report -ChatId 101 -UserId 101 -Kind news -Period today
         Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
     }
 

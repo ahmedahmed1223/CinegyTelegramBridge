@@ -64,14 +64,17 @@ function Show-Report {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $onlyUser = if (Test-Admin -ChatId $ChatId -UserId $UserId) { 0 } else { $UserId }
     $markup = Get-ReportPeriodKeyboard -Kind $Kind -Period $Period
-    # The banner report is the one with columns, so it is the one that gains
-    # from a real table. Tried first and never depended on: an API without
-    # sendRichMessage, or a shape it will not take, falls through to exactly
-    # the text this screen has always sent.
-    if ($Kind -eq 'banners') {
-        $blocks = Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser
-        if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $markup) { return }
+    # Both reports are rows of columns, so both gain from a real table.
+    # Tried first and never depended on: an API without sendRichMessage, or a
+    # shape it will not take, falls through to exactly the text this screen
+    # has always sent.
+    $blocks = if ($Kind -eq 'news') {
+        Get-NewsReportBlocks -Period $Period -OnlyUserId $onlyUser
     }
+    else {
+        Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser
+    }
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $markup) { return }
     $text = if ($Kind -eq 'news') {
         Get-NewsReportText -Period $Period -OnlyUserId $onlyUser
     }
@@ -173,6 +176,51 @@ function Get-BannerReportData {
         Operators = @($sessions | Group-Object -Property UserId).Count
         Truncated = $scan.Truncated
     }
+}
+
+function Get-NewsReportBlocks {
+    <#
+        The news report as rich blocks: a day per row, four columns.
+
+        Four numbers per day lined up with '·' separators is the shape a
+        table is for, and the text version has to spend a second indented
+        line on the operator tally because there is nowhere else to put it.
+        Here it is simply the fourth column.
+    #>
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
+    $days = @($data.Days)
+
+    $blocks = @(@{ type = 'heading'; text = "📰 تقرير الأخبار — $($data.Label)"; size = 3 })
+    if ($days.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لم يُنشر شريط أخبار في هذه الفترة.' }
+        return $blocks
+    }
+
+    $cells = @(, @(
+            @{ text = 'اليوم'; is_header = $true }
+            @{ text = 'النشرات'; is_header = $true }
+            @{ text = 'الأخبار'; is_header = $true }
+            @{ text = 'المشغّلون'; is_header = $true }
+        ))
+    foreach ($day in $days) {
+        $who = if ($day.Tally.Breakdown) { [string]$day.Tally.Breakdown }
+        elseif ($day.Tally.Single) { [string]$day.Tally.Single }
+        else { '—' }
+        $cells += , @(
+            @{ text = $day.Date.ToString('MM/dd') }
+            @{ text = [string]$day.Publishes }
+            @{ text = [string]$day.Items }
+            @{ text = $who }
+        )
+    }
+
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) نشرة · $($data.Items) خبرًا" }
+    if ($data.Truncated) {
+        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+    }
+    return $blocks
 }
 
 function Get-NewsReportText {

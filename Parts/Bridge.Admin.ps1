@@ -753,7 +753,114 @@ function Get-BridgeUsageMetrics {
     }
 }
 
+function Get-BridgeHealthRows {
+    <#
+        One row per subsystem: the name, a state glyph, and the detail.
+
+        Extracted so the text screen and the block screen cannot drift into
+        disagreeing about whether something is healthy - the same reason the
+        two digest screens read the audit log through one function.
+
+        The glyph is its own field rather than part of the sentence because a
+        table can then give it a column of its own, and a column of glyphs is
+        what makes the one red line findable without reading the other six.
+    #>
+    param($DiagnosticsSnapshot, [AllowNull()][object[]]$Warnings)
+    $rows = @()
+
+    $telegramState = [string]$script:RuntimeState.Monitoring.TelegramConnectionState
+    $rows += switch ($telegramState) {
+        'connected' { @{ Name = 'Telegram'; Icon = '🟢'; Detail = 'متصل' } }
+        'disconnected' { @{ Name = 'Telegram'; Icon = '🔴'; Detail = 'غير متصل' } }
+        default { @{ Name = 'Telegram'; Icon = '🟠'; Detail = 'لم تُحسم الحالة' } }
+    }
+
+    $cinegyState = [string]$script:RuntimeState.Monitoring.CinegyHealthState
+    $rows += switch ($cinegyState) {
+        'healthy' { @{ Name = 'Cinegy'; Icon = '🟢'; Detail = 'سليم' } }
+        'unhealthy' { @{ Name = 'Cinegy'; Icon = '🔴'; Detail = 'غير سليم' } }
+        default { @{ Name = 'Cinegy'; Icon = '🟠'; Detail = 'الحالة غير معروفة' } }
+    }
+
+    $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
+    $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
+    $rows += if ($monitorDisabled) { @{ Name = 'مراقبة المخرج'; Icon = '🟢'; Detail = 'معطلة باختيار المشرف' } }
+    elseif ($monitorFault) { @{ Name = 'مراقبة المخرج'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
+    else { @{ Name = 'مراقبة المخرج'; Icon = '🟢'; Detail = 'سليمة' } }
+
+    $relay = $script:RuntimeState.Relay
+    $rows += if (-not [bool]$relay.ShouldRun) { @{ Name = 'البث المرحّل'; Icon = '🟢'; Detail = 'غير مطلوب' } }
+    elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = 'البث المرحّل'; Icon = '🟢'; Detail = 'يعمل' } }
+    else { @{ Name = 'البث المرحّل'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
+
+    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Icon = '🟠'; Detail = "$diskText — $(@($Warnings).Count) تحذير" } }
+    else { @{ Name = 'التخزين'; Icon = '🟢'; Detail = $diskText } }
+
+    $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
+    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingCount حدث قادم" } }
+    else { @{ Name = 'الجدولة'; Icon = '🟢'; Detail = "$upcomingCount حدث قادم" } }
+
+    $recentErrors = @()
+    foreach ($service in @('Telegram', 'Cinegy')) {
+        $history = $script:HealthHistory[$service]
+        if ($history.LastErrorAt -and $history.LastError) {
+            $recentErrors += "${service}: $(Protect-SensitiveText ([string]$history.LastError))"
+        }
+    }
+    $rows += if ($recentErrors.Count -gt 0) { @{ Name = 'آخر الأخطاء'; Icon = '🟠'; Detail = ($recentErrors -join ' | ') } }
+    else { @{ Name = 'آخر الأخطاء'; Icon = '🟢'; Detail = 'لا شيء' } }
+
+    return $rows
+}
+
+function Get-BridgeHealthCenterBlocks {
+    <#
+        The health screen as a table, so the state column can be read down.
+
+        Seven sentences each beginning with a coloured circle is a paragraph
+        the eye has to parse one line at a time. A column of them is scanned
+        in one movement, which is the whole job of this screen: find the red
+        one. The detail keeps its own column rather than being folded away -
+        a health screen that hides why something is red is a screen that has
+        to be opened twice.
+    #>
+    param($DiagnosticsSnapshot = $null, [AllowNull()][object[]]$Warnings = $null)
+    if ($null -eq $DiagnosticsSnapshot) { $DiagnosticsSnapshot = Get-BridgeDiagnosticsSnapshot }
+    if (-not $PSBoundParameters.ContainsKey('Warnings')) {
+        $Warnings = @(Get-DiagnosticWarnings -Snapshot $DiagnosticsSnapshot `
+                -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
+                -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
+                -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
+    }
+    $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot $DiagnosticsSnapshot -Warnings @($Warnings))
+
+    $blocks = @(@{ type = 'heading'; text = '🩺 مركز صحة النظام'; size = 3 })
+    $blocks += @{ type = 'paragraph'; text = "Bridge v$script:BridgeVersion" }
+
+    # Faults first. On a screen opened because something is wrong, the wrong
+    # thing should not be in row six.
+    $faults = @($rows | Where-Object { $_.Icon -ne '🟢' })
+    $healthy = @($rows | Where-Object { $_.Icon -eq '🟢' })
+    $cells = @(, @(
+            @{ text = 'النظام'; is_header = $true }
+            @{ text = 'الحالة'; is_header = $true }
+            @{ text = 'التفصيل'; is_header = $true }
+        ))
+    foreach ($row in ($faults + $healthy)) {
+        $cells += , @(@{ text = [string]$row.Name }, @{ text = [string]$row.Icon }, @{ text = [string]$row.Detail })
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+
+    $usage = Get-BridgeUsageMetrics
+    $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء" }
+    return $blocks
+}
+
 function Get-BridgeHealthCenterText {
+    <# The same rows the block screen renders, as lines. Both read
+       Get-BridgeHealthRows so the two can never disagree about whether
+       something is healthy. #>
     param(
         $DiagnosticsSnapshot = $null,
         [AllowNull()][object[]]$Warnings = $null
@@ -765,69 +872,25 @@ function Get-BridgeHealthCenterText {
                 -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
                 -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
     }
-    $Warnings = @($Warnings)
-
-    $telegramState = [string]$script:RuntimeState.Monitoring.TelegramConnectionState
-    $telegramLine = switch ($telegramState) {
-        'connected' { '🟢 Telegram: متصل' }
-        'disconnected' { '🔴 Telegram: غير متصل' }
-        default { '🟠 Telegram: لم تُحسم الحالة' }
-    }
-    $cinegyState = [string]$script:RuntimeState.Monitoring.CinegyHealthState
-    $cinegyLine = switch ($cinegyState) {
-        'healthy' { '🟢 Cinegy: سليم' }
-        'unhealthy' { '🔴 Cinegy: غير سليم' }
-        default { '🟠 Cinegy: الحالة غير معروفة' }
-    }
-
-    $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
-    $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
-    $monitorLine = if ($monitorDisabled) { '🟢 مراقبة المخرج: معطلة باختيار المشرف' }
-    elseif ($monitorFault) { "🔴 مراقبة المخرج: إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" }
-    else { '🟢 مراقبة المخرج: سليمة' }
-
-    $relay = $script:RuntimeState.Relay
-    $relayLine = if (-not [bool]$relay.ShouldRun) { '🟢 البث المرحّل: غير مطلوب' }
-    elseif ($relay.Process -and -not $relay.Process.HasExited) { '🟢 البث المرحّل: يعمل' }
-    else { '🔴 البث المرحّل: مطلوب لكنه متوقف' }
-
-    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
-    $storageLine = if ($Warnings.Count -gt 0) { "🟠 التخزين: $diskText — $($Warnings.Count) تحذير" } else { "🟢 التخزين: $diskText" }
-    $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
-    $scheduleLine = if (Get-Setting 'SchedulePaused') { "🟠 الجدولة: متوقفة مؤقتًا — $upcomingCount حدث قادم" } else { "🟢 الجدولة: $upcomingCount حدث قادم" }
-
-    $recentErrors = @()
-    foreach ($service in @('Telegram', 'Cinegy')) {
-        $history = $script:HealthHistory[$service]
-        if ($history.LastErrorAt -and $history.LastError) {
-            $recentErrors += "${service}: $(Protect-SensitiveText ([string]$history.LastError))"
-        }
-    }
-    $errorLine = if ($recentErrors.Count -gt 0) { "🟠 آخر الأخطاء: $($recentErrors -join ' | ')" } else { '🟢 آخر الأخطاء: لا توجد أخطاء مسجلة' }
-
-    # Read from state already in memory, so the screen still runs no probe.
+    $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot $DiagnosticsSnapshot -Warnings @($Warnings))
     $usage = Get-BridgeUsageMetrics
-    $usageLine = "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء · يعمل منذ $($usage.UptimeText)"
-
     return @(
         '🩺 مركز صحة النظام'
         "Bridge v$script:BridgeVersion"
         ''
-        $telegramLine
-        $cinegyLine
-        $monitorLine
-        $relayLine
-        $storageLine
-        $scheduleLine
-        $errorLine
-        $usageLine
+    ) + @($rows | ForEach-Object { "$($_.Icon) $($_.Name): $($_.Detail)" }) + @(
+        "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء"
     ) -join "`n"
 }
 
 function Invoke-HealthCenterCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeHealthCenterText) -ReplyMarkup (Get-HealthCenterKeyboard)
+    $healthKeyboard = Get-HealthCenterKeyboard
+    # Table first so the state column can be read down; the lines remain
+    # the fallback, and they are built from the same rows.
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-BridgeHealthCenterBlocks) -ReplyMarkup $healthKeyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeHealthCenterText) -ReplyMarkup $healthKeyboard
 }
 
 function Start-TemplateTestReview {

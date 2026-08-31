@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.12.0
+
+The health centre becomes a table whose state column can be read straight
+down, with any fault sorted above the healthy rows - a screen opened because
+something broke should not put the break in row six. Both the table and the
+lines are built from one set of rows, so they cannot drift into disagreeing
+about whether a subsystem is healthy.
+
 ## Version 7.11.0
 
 Hiding and exiting now name the banner that came off and quote its copy.

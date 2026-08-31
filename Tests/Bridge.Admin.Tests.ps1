@@ -1471,3 +1471,45 @@ Describe 'Reference lookup with exactly one hit' {
         Test-OperationReference -Reference '' | Should -BeFalse
     }
 }
+
+Describe 'The health screen can be read down its state column' {
+    BeforeEach {
+        Mock Get-BridgeUsageMetrics { @{ OperationsToday = 3; ActiveOperators = 1; OnAirCount = 0 } }
+        Mock Get-UpcomingScheduleEvents { @() }
+        Mock Get-BridgeDiagnosticsSnapshot { @{ DiskFreeGB = 40 } }
+    }
+
+    It 'gives every subsystem a row, with the glyph in a column of its own' {
+        # Seven sentences each starting with a coloured circle is parsed one
+        # line at a time; a column of them is scanned in one movement, which
+        # is the whole job of this screen.
+        $table = @(@(Get-BridgeHealthCenterBlocks -Warnings @()) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[0]).Count | Should -Be 3
+        @($table.cells).Count | Should -Be 8
+        foreach ($row in @($table.cells | Select-Object -Skip 1)) {
+            @($row)[1].text | Should -BeIn @('🟢', '🟠', '🔴')
+        }
+    }
+
+    It 'puts a fault above the healthy rows, not in row six' {
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'unhealthy'
+        try {
+            $table = @(@(Get-BridgeHealthCenterBlocks -Warnings @()) | Where-Object { $_.type -eq 'table' })[0]
+            $first = @($table.cells)[1]
+
+            @($first)[0].text | Should -Be 'Cinegy'
+            @($first)[1].text | Should -Be '🔴'
+        }
+        finally { $script:RuntimeState.Monitoring.CinegyHealthState = 'unknown' }
+    }
+
+    It 'builds the lines from the same rows, so the two screens cannot disagree' {
+        $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
+        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @()
+
+        foreach ($row in $rows) {
+            $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Name): $($row.Detail)"))
+        }
+    }
+}

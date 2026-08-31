@@ -75,26 +75,27 @@ function Invoke-CallbackQuery {
     switch -Wildcard ($data) {
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
-        { $_ -in @('news:sheetdraft', 'news:sheetdraftconfirm') } {
+        'news:sheetdraft' {
             if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت غير مسموح لك.'; break }
-            $sync = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId $userId -ChatId $chatId -Confirmed:($data -eq 'news:sheetdraftconfirm')
-            if ($sync.NeedsConfirmation) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ $($sync.Error)" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، استبدل';callback_data='news:sheetdraftconfirm'},@{text='إلغاء';callback_data='news:refresh'}))}
-                break
-            }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-NewsSheetConfirmPrompt -Target draft) -ReplyMarkup (Get-NewsSheetConfirmKeyboard -Target draft)
+            break
+        }
+        'news:sheetdraftconfirm' {
+            if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت غير مسموح لك.'; break }
+            $sync = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId $userId -ChatId $chatId -Confirmed
             $text = if ($sync.Success) { "📝 حُمّل $(@($sync.Items).Count) خبرًا في المسودة. راجعها ثم اضغط «مراجعة ونشر»." } else { "❌ $($sync.Error)" }
             Send-TelegramMessage -ChatId $chatId -Text $text
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
         }
-        { $_ -in @('news:sheet', 'news:sheetconfirm') } {
+        'news:sheet' {
             if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت غير مسموح لك.'; break }
-            $confirmed = $data -eq 'news:sheetconfirm'
-            $sync = Invoke-NewsSheetSync -Trigger manual -Target air -UserId $userId -ChatId $chatId -Confirmed:$confirmed
-            if ($sync.NeedsConfirmation) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ $($sync.Error)" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، استبدل';callback_data='news:sheetconfirm'},@{text='إلغاء';callback_data='news:refresh'}))}
-                break
-            }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-NewsSheetConfirmPrompt -Target air) -ReplyMarkup (Get-NewsSheetConfirmKeyboard -Target air)
+            break
+        }
+        'news:sheetconfirm' {
+            if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت غير مسموح لك.'; break }
+            $sync = Invoke-NewsSheetSync -Trigger manual -Target air -UserId $userId -ChatId $chatId -Confirmed
             $text = if ($sync.Success) { "✅ $(Get-NewsSheetNoticeText -Summary $sync.Summary -Trigger manual -UserId $userId)" }
             elseif ($sync.Unchanged) { 'ℹ️ الشيت مطابق لما على الهواء؛ لم يتغير شيء.' }
             else { "❌ $($sync.Error)" }

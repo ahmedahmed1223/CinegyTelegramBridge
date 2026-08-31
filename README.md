@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 6.7.0
+
+Both sheet pulls now always confirm before acting, not only on a draft
+conflict. The first press asks and the second acts, and the single prompt
+carries every relevant fact: how many ticker items the publish pull would
+replace, that the review pull reaches nothing on air, and who currently holds
+the draft.
+
 ## Version 6.6.0
 
 Both sheet pulls - publish and review - are available to every authorised

@@ -273,6 +273,34 @@ function Update-NewsLockRequest {
     Complete-NewsLockRelease -Reason 'no reply within the window' | Out-Null
 }
 
+function Get-NewsSheetConfirmPrompt {
+    <# One prompt carrying every fact that matters, rather than a generic
+       "are you sure" followed by a second warning about the draft owner. Both
+       pulls overwrite something, and since the pull is open to operators a
+       stray tap must not be enough to rewrite the ticker. #>
+    param([ValidateSet('air', 'draft')][string]$Target = 'air')
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($Target -eq 'air') {
+        $lines.Add('⚠️ سحب الشيت ونشره على الهواء مباشرة؟')
+        $snapshot = Get-NewsTickerConfiguredSnapshot
+        if ($snapshot.Success) { $lines.Add("سيستبدل $(@($snapshot.Items).Count) خبرًا على الشريط الآن.") }
+    }
+    else {
+        $lines.Add('⚠️ تحميل الشيت في المسودة للمراجعة؟')
+        $lines.Add('لن يصل الهواء شيء قبل أن تضغط «مراجعة ونشر».')
+    }
+    $draft = Get-NewsTickerDraft
+    if ($draft) { $lines.Add("🔒 المسودة الحالية بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))، وسيُستبدل محتواها.") }
+    return ($lines -join "`n")
+}
+
+function Get-NewsSheetConfirmKeyboard {
+    param([ValidateSet('air', 'draft')][string]$Target = 'air')
+    $go = if ($Target -eq 'air') { @{text='✅ نعم، انشر';callback_data='news:sheetconfirm'} }
+    else { @{text='✅ نعم، حمّل المسودة';callback_data='news:sheetdraftconfirm'} }
+    return @{inline_keyboard=@(,@($go, @{text='❌ إلغاء';callback_data='news:refresh'}))}
+}
+
 function Test-NewsSheetPullAccess {
     <# Who may pull the sheet. Open to every authorised operator by default:
        the content is whatever the newsroom sheet already says, so a pull

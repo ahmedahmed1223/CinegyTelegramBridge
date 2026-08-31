@@ -234,6 +234,47 @@ Describe 'News sheet notice audience' {
     }
 }
 
+Describe 'News sheet pull confirmation' {
+    BeforeEach {
+        $script:NewsTickerDraft = $null
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('خبر', 'آخر'); Hash = 'h1'; Error = '' } }
+        Mock Get-UserDisplayName { "مستخدم $UserId" }
+    }
+
+    It 'warns that the publish pull overwrites the ticker, and says how much' {
+        $prompt = Get-NewsSheetConfirmPrompt -Target air
+        $prompt | Should -Match 'على الهواء'
+        $prompt | Should -Match '2 خبرًا'
+    }
+
+    It 'makes clear the review pull reaches nothing on air' {
+        Get-NewsSheetConfirmPrompt -Target draft | Should -Match 'لن يصل الهواء'
+    }
+
+    It 'names the draft owner in the same prompt rather than a second one' {
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; Items = @('يحرر') }
+        Get-NewsSheetConfirmPrompt -Target air | Should -Match 'مستخدم 202'
+    }
+
+    It 'sends the publish confirmation to the publish callback' {
+        @((Get-NewsSheetConfirmKeyboard -Target air).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
+            Should -Be @('news:sheetconfirm', 'news:refresh')
+    }
+
+    It 'sends the review confirmation to the draft callback' {
+        @((Get-NewsSheetConfirmKeyboard -Target draft).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
+            Should -Be @('news:sheetdraftconfirm', 'news:refresh')
+    }
+
+    It 'keeps the plain pull callbacks separate from the confirmed ones' {
+        # The button on the news screen must not be the one that acts, or the
+        # confirmation would be skipped entirely.
+        $plain = @('news:sheet', 'news:sheetdraft')
+        $confirmed = @('news:sheetconfirm', 'news:sheetdraftconfirm')
+        @($plain | Where-Object { $confirmed -contains $_ }) | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'News sheet download guard' {
     It 'rejects a url that is not https' {
         $result = Get-NewsSheetCsvText -Url 'http://docs.google.com/x' -TimeoutSeconds 5 -MaxBytes 1024

@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.17.2
+
+Reference lookup results come back in a monospace block. A log line is
+columns held together by spaces, and it is the one thing on these screens a
+proportional font actively breaks: id=, action= and result= stop lining up
+between rows and the eye loses the column it was following.
+
 ## Version 7.17.1
 
 A refused rich message no longer costs the session every rich screen. Only a

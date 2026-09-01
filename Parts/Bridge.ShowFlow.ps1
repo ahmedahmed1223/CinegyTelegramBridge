@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.17.2'; Items = @(
+                '🔎 نتيجة «ابحث بمرجع عملية» صارت بخط موحّد العرض، فتبقى أعمدة سطر السجل متحاذية.'
+            ) }
         @{ Version = '7.17.1'; Items = @(
                 '📊 جداول الشاشات لم تعد تختفي جميعًا لأن تيليجرام رفض واحدة منها.'
             ) }

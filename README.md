@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.17.1
+
+A refused rich message no longer costs the session every rich screen. Only a
+404 - the method not existing here - stops all of them, because that is the
+one refusal true of every screen. A 400 is blamed on the block types in the
+payload that have never rendered before, so adopting a new block risks that
+block and nothing else; when every type in it has rendered before, the fault
+is that message rather than a capability and nothing is disabled.
+
 ## Version 7.17.0
 
 Favourites were losing everything past the first pick: the writer built the

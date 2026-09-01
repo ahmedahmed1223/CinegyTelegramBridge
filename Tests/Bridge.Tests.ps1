@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Tests.ps1 — Pester tests for the bridge's pure logic.
 
@@ -810,7 +810,7 @@ Describe 'Rich sending never becomes a dependency' {
         Mock Send-TelegramPagedText { }
         Mock Test-Admin { $true }
         Mock Get-BannerReportData { @{ Label = 'اليوم'; Operators = 0; Truncated = $false; Sessions = @() } }
-        $script:RichMessagesUnavailable = $false
+        Reset-RichBlockCapabilities
     }
 
     It 'falls back to the text report the screen has always sent' {
@@ -842,16 +842,88 @@ Describe 'Rich sending never becomes a dependency' {
         Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
     }
 
-    It 'stops trying once the method itself has been refused' {
-        # Otherwise every report pays two round trips to rediscover it.
-        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = 'Response status code does not indicate success: 400 (Bad Request).' } }
+    It 'stops trying once the method itself is missing' {
+        # A 404 is the method not existing here, so nothing built from blocks
+        # will ever work and every screen may as well stop asking.
+        Reset-RichBlockCapabilities
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = 'Response status code does not indicate success: 404 (Not Found).' } }
         Mock Write-BridgeLog { }
 
         Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeFalse
         $script:RichMessagesUnavailable | Should -BeTrue
 
-        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeFalse
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'table'; cells = @() }) | Should -BeFalse
         Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly
+    }
+
+    It 'blames a rejected payload on its new block type, not on the session' {
+        # One screen reaching for a block type this server does not have used
+        # to take the status table, the reports and the news listing down with
+        # it until a restart.
+        Reset-RichBlockCapabilities
+        Mock Write-BridgeLog { }
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeTrue
+
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = 'Response status code does not indicate success: 400 (Bad Request).' } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(
+            @{ type = 'paragraph'; text = 'x' }, @{ type = 'expandable_block_quotation'; text = 'y' }) | Should -BeFalse
+
+        $script:RichMessagesUnavailable | Should -BeFalse
+        $script:RichBlockTypesUnavailable.ContainsKey('expandable_block_quotation') | Should -BeTrue
+        $script:RichBlockTypesUnavailable.ContainsKey('paragraph') | Should -BeFalse
+    }
+
+    It 'keeps sending the block types that already rendered' {
+        Reset-RichBlockCapabilities
+        Mock Write-BridgeLog { }
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeTrue
+
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = '400 (Bad Request).' } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'thinking'; text = 'y' }) | Should -BeFalse
+
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'z' }) | Should -BeTrue
+    }
+
+    It 'does not spend a round trip on a block type already known to be refused' {
+        Reset-RichBlockCapabilities
+        $script:RichBlockTypesUnavailable['thinking'] = $true
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'thinking'; text = 'y' }) | Should -BeFalse
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+    }
+
+    It 'disables nothing when every type in the refused payload has rendered before' {
+        # Then the fault is this message - its size, a field, a value - and
+        # disabling a working block type for it would be a permanent cost.
+        Reset-RichBlockCapabilities
+        Mock Write-BridgeLog { }
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeTrue
+
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $false; Error = '400 (Bad Request).' } }
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'huge' }) | Should -BeFalse
+
+        @($script:RichBlockTypesUnavailable.Keys).Count | Should -Be 0
+        $script:RichMessagesUnavailable | Should -BeFalse
+    }
+
+    It 'sees the block types nested in a details block and in a table cell' {
+        # Those are the parts most likely to be why a server refused the whole
+        # message, so a blame that cannot see them blames the wrong thing.
+        $types = @(Get-RichBlockTypes -Blocks @(
+                @{ type = 'heading'; text = 'h' }
+                @{ type = 'details'; blocks = @(@{ type = 'preformatted'; text = 'p' }) }
+                @{ type = 'table'; cells = @(, @(@{ type = 'paragraph'; text = 'c' })) }))
+
+        $types | Should -Contain 'preformatted'
+        $types | Should -Contain 'paragraph'
+        $types | Should -Contain 'details'
+        $types | Should -Contain 'table'
     }
 
     It 'asks Telegram to lay the table out right-to-left' {

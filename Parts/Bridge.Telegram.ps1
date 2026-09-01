@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -142,6 +142,96 @@ function Send-TelegramMessage {
     }
 }
 
+function Get-RichBlockTypes {
+    <# Every block type a payload uses, including the ones nested inside a
+       details block or a table cell - those are the parts most likely to be
+       the reason a server refuses the whole message. #>
+    param([AllowNull()][array]$Blocks)
+    $found = [System.Collections.Generic.List[string]]::new()
+    foreach ($block in @($Blocks)) {
+        if (-not $block) { continue }
+        $type = [string](Get-JsonProp $block 'type')
+        if (-not [string]::IsNullOrWhiteSpace($type)) { $found.Add($type) }
+        foreach ($nested in @(Get-JsonProp $block 'blocks')) {
+            foreach ($inner in @(Get-RichBlockTypes -Blocks @($nested))) { $found.Add($inner) }
+        }
+        foreach ($row in @(Get-JsonProp $block 'cells')) {
+            foreach ($inner in @(Get-RichBlockTypes -Blocks @($row))) { $found.Add($inner) }
+        }
+    }
+    return @($found | Sort-Object -Unique)
+}
+
+function Test-RichBlocksSendable {
+    <# Whether this payload is worth a round trip at all. #>
+    param([AllowNull()][array]$Blocks)
+    if ($script:RichMessagesUnavailable) { return $false }
+    foreach ($type in @(Get-RichBlockTypes -Blocks $Blocks)) {
+        if ($script:RichBlockTypesUnavailable.ContainsKey($type)) { return $false }
+    }
+    return $true
+}
+
+function Register-RichBlocksAccepted {
+    <# A type that has rendered once is a type this server has. That record is
+       what lets a later refusal be blamed on the new thing in the payload
+       rather than on everything in it. #>
+    param([AllowNull()][array]$Blocks)
+    foreach ($type in @(Get-RichBlockTypes -Blocks $Blocks)) { $script:RichBlockTypesProven[$type] = $true }
+}
+
+function Register-RichBlocksRejected {
+    <#
+        Narrows a refusal to the smallest thing it can honestly be blamed on.
+
+        A 400 says the payload was wrong, not which part, and switching the
+        whole session off for it meant one screen reaching for a block type
+        this server does not have took the status table, the reports and the
+        news listing down with it until a restart. So only the types that have
+        never rendered here are blamed: adopting a new block risks that block
+        and nothing else.
+
+        When every type in the payload has already rendered before, the fault
+        is in this particular message - its size, a field, a value - and not
+        in a capability. Nothing is disabled then, or one oversized report
+        would permanently cost the bridge a block type that works.
+    #>
+    param([AllowNull()][array]$Blocks)
+    $unproven = @(Get-RichBlockTypes -Blocks $Blocks | Where-Object { -not $script:RichBlockTypesProven.ContainsKey($_) })
+    if ($unproven.Count -eq 0) { return @() }
+    foreach ($type in $unproven) { $script:RichBlockTypesUnavailable[$type] = $true }
+    return $unproven
+}
+
+function Reset-RichBlockCapabilities {
+    $script:RichMessagesUnavailable = $false
+    $script:RichBlockTypesProven = @{}
+    $script:RichBlockTypesUnavailable = @{}
+}
+
+function Resolve-RichSendFailure {
+    <# The two refusals mean different things. A 404 is the method missing, so
+       nothing built from blocks will ever work here and the session-wide stop
+       is both correct and the cheap answer. A 400 is this payload. #>
+    param([Parameter(Mandatory)][string]$ErrorText, [AllowNull()][array]$Blocks, [Parameter(Mandatory)][string]$Context)
+    if ($ErrorText -match '404') {
+        $script:RichMessagesUnavailable = $true
+        Write-BridgeLog "$Context is not available here; using text for the rest of this session: $ErrorText" 'WARN'
+        return
+    }
+    if ($ErrorText -match '400') {
+        $blamed = @(Register-RichBlocksRejected -Blocks $Blocks)
+        if ($blamed.Count -gt 0) {
+            Write-BridgeLog "$Context refused a payload using $($blamed -join ', '); those block types are disabled for this session: $ErrorText" 'WARN'
+        }
+        else {
+            Write-BridgeLog "$Context refused this message, but every block type in it has rendered before, so nothing was disabled: $ErrorText" 'WARN'
+        }
+        return
+    }
+    Write-BridgeLog "$Context failed: $ErrorText" 'WARN'
+}
+
 function Send-TelegramRichMessage {
     <#
         A message built from blocks (Bot API 10.1) rather than from text with
@@ -154,17 +244,17 @@ function Send-TelegramRichMessage {
         eye arrives last.
 
         Returns $false rather than throwing, so every caller keeps its
-        existing text version as the fallback. A refusal of the method itself
-        - the shape being wrong, or an API that does not have it - disables
-        rich sending for the rest of the session: without that, every report
-        would pay two round trips to discover the same thing again.
+        existing text version as the fallback. A refusal is remembered so the
+        next screen does not pay a round trip to discover the same thing -
+        but only as narrowly as it can honestly be read: see
+        Resolve-RichSendFailure.
     #>
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [Parameter(Mandatory)][array]$Blocks,
         [hashtable]$ReplyMarkup
     )
-    if ($script:RichMessagesUnavailable) { return $false }
+    if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
     $body = @{
         chat_id = $ChatId
         rich_message = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
@@ -172,14 +262,11 @@ function Send-TelegramRichMessage {
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendRichMessage" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
-    if ($request.Success) { return $true }
-    if ([string]$request.Error -match '400|404') {
-        $script:RichMessagesUnavailable = $true
-        Write-BridgeLog "sendRichMessage was refused; using text for the rest of this session: $($request.Error)" 'WARN'
+    if ($request.Success) {
+        Register-RichBlocksAccepted -Blocks $Blocks
+        return $true
     }
-    else {
-        Write-BridgeLog "Failed to send a rich message to $ChatId : $($request.Error)" 'WARN'
-    }
+    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'sendRichMessage'
     return $false
 }
 
@@ -193,8 +280,8 @@ function Edit-TelegramRichMessage {
         pile of stale keyboards that editing in place was introduced to stop.
 
         Returns $false rather than throwing, so a caller keeps its text
-        version as the fallback, and a refusal of the method itself disables
-        rich sending for the session exactly as Send-TelegramRichMessage does.
+        version as the fallback, and a refusal is narrowed and remembered
+        exactly as Send-TelegramRichMessage does.
     #>
     param(
         [Parameter(Mandatory)][long]$ChatId,
@@ -202,7 +289,7 @@ function Edit-TelegramRichMessage {
         [Parameter(Mandatory)][array]$Blocks,
         [hashtable]$ReplyMarkup
     )
-    if ($script:RichMessagesUnavailable) { return $false }
+    if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
     $body = @{
         chat_id = $ChatId
         message_id = $MessageId
@@ -211,14 +298,11 @@ function Edit-TelegramRichMessage {
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
-    if ($request.Success) { return $true }
-    if ([string]$request.Error -match '400|404') {
-        $script:RichMessagesUnavailable = $true
-        Write-BridgeLog "editMessageText rejected a rich message; using text for the rest of this session: $($request.Error)" 'WARN'
+    if ($request.Success) {
+        Register-RichBlocksAccepted -Blocks $Blocks
+        return $true
     }
-    else {
-        Write-BridgeLog "Failed to edit a rich message in $ChatId : $($request.Error)" 'WARN'
-    }
+    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'editMessageText'
     return $false
 }
 

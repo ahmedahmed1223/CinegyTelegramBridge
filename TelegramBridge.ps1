@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.17.0'
+$script:BridgeVersion = '7.17.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -734,6 +734,11 @@ $script:TelegramRateLimitHits = 0
 # Set once sendRichMessage is known to be refused, so a bridge talking to an
 # API without it pays the discovery a single time instead of on every report.
 $script:RichMessagesUnavailable = $false
+# Rich sending is refused two ways and they are not the same fault: a missing
+# method kills every screen, a rejected payload usually kills one block type.
+# Proven types are what let the second be told from the first.
+$script:RichBlockTypesProven = @{}
+$script:RichBlockTypesUnavailable = @{}
 $script:RestartRequested = $false
 $script:RestartSelfRelaunch = $false
 # Long screens waiting behind 📄 المزيد, keyed by chat. In memory only: a

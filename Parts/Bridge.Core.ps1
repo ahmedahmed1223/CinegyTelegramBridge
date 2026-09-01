@@ -164,6 +164,98 @@ function Restore-ConfigBackup {
     }
 }
 
+function Format-ConfigDiffValue {
+    <#
+        A configuration value, safe to put in a chat message.
+
+        config.json is the one file the bridge holds that is genuinely secret
+        - BotToken lives in it, and so does the sheet write token. A restore
+        screen that printed old and new values would publish them to whoever
+        is looking at that chat, which is why the settings export refuses to
+        write them at all.
+
+        So: anything whose name reads like a credential is shown as its
+        length, never its content; a list is shown as a count, because the
+        whitelist is a list of people; and everything else is shown, capped.
+    #>
+    param([string]$Name, $Value)
+    if ($Name -match '(?i)token|secret|password|apikey') {
+        $text = [string]$Value
+        return $(if ($text) { "•••• ($($text.Length) حرفًا)" } else { '(فارغ)' })
+    }
+    if ($Value -is [array]) { return "$(@($Value).Count) عنصرًا" }
+    if ($null -eq $Value) { return '(غير موجود)' }
+    $text = ([string]$Value -replace '[\r\n]+', ' ').Trim()
+    if ([string]::IsNullOrEmpty($text)) { return '(فارغ)' }
+    if ($text.Length -gt 40) { return $text.Substring(0, 39) + '…' }
+    return $text
+}
+
+function Get-ConfigDifferenceRows {
+    <#
+        Which top-level settings a backup would change, and to what.
+
+        The summary this replaces listed the names only - "الاختلافات:
+        NewsFilePath، MaxFieldLength" - so an administrator about to overwrite
+        the live configuration could see that something changed but not what
+        it would become. That is the same shape as telling an editor three
+        items will be replaced without saying which.
+    #>
+    param([Parameter(Mandatory)][string]$CurrentPath, [Parameter(Mandatory)][string]$BackupPath)
+    try {
+        $current = Get-Content -LiteralPath $CurrentPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $backup = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch { return $null }
+    $names = @(@($current.PSObject.Properties.Name) + @($backup.PSObject.Properties.Name) | Sort-Object -Unique)
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($name in $names) {
+        # Read through the property directly rather than Get-JsonProp: a
+        # one-element list comes back from a function unwrapped into the
+        # element, and then a whitelist of one person reads as that person's
+        # id instead of as a count.
+        $currentProperty = $current.PSObject.Properties[$name]
+        $backupProperty = $backup.PSObject.Properties[$name]
+        $currentValue = $null
+        $backupValue = $null
+        if ($currentProperty) { $currentValue = $currentProperty.Value }
+        if ($backupProperty) { $backupValue = $backupProperty.Value }
+        if (($currentValue | ConvertTo-Json -Depth 20 -Compress) -eq ($backupValue | ConvertTo-Json -Depth 20 -Compress)) { continue }
+        $rows.Add([pscustomobject]@{
+                Name = $name
+                Current = (Format-ConfigDiffValue -Name $name -Value $currentValue)
+                Backup = (Format-ConfigDiffValue -Name $name -Value $backupValue)
+            })
+    }
+    # Comma so an empty result stays an empty array: $null is how this
+    # function says the JSON would not parse. Assign the call directly -
+    # wrapping it in @() would nest the array inside another one.
+    return , $rows.ToArray()
+}
+
+function Get-ConfigRestoreBlocks {
+    <# The restore confirmation as what it would actually change. #>
+    param([Parameter(Mandatory)][string]$CurrentPath, [Parameter(Mandatory)][string]$BackupPath, [Parameter(Mandatory)][string]$BackupName)
+    $rows = Get-ConfigDifferenceRows -CurrentPath $CurrentPath -BackupPath $BackupPath
+    if ($null -eq $rows) { return @() }
+    $blocks = @(@{ type = 'heading'; text = "⚠️ استعادة النسخة $BackupName"; size = 3 })
+    if ($rows.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لا اختلافات ظاهرة: الاستعادة لن تغيّر شيئًا.' }
+        return $blocks
+    }
+    $blocks += @{ type = 'paragraph'; text = "$($rows.Count) إعدادًا سيتغيّر · تُحفظ الحالة الحالية أولًا" }
+    $cells = @(, @(
+            @{ text = 'الإعداد'; is_header = $true }
+            @{ text = 'الحالي'; is_header = $true }
+            @{ text = 'في النسخة'; is_header = $true }
+        ))
+    foreach ($row in $rows) {
+        $cells += , @(@{ text = $row.Name }, @{ text = $row.Current }, @{ text = $row.Backup })
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    return $blocks
+}
+
 function Get-ConfigDifferenceSummary {
     param(
         [Parameter(Mandatory)][string]$CurrentPath,

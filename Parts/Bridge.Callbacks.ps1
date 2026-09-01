@@ -1225,8 +1225,17 @@ function Invoke-CallbackQuery {
                 Set-PendingState -ChatId $chatId -State @{
                     Mode = 'config_restore'; UserId = $userId; BackupPath = $files[$index].FullName
                 }
+                # The names of the changed settings said something changed but
+                # not what it would become. The table says both, with anything
+                # that reads like a credential shown as a length.
+                $restoreBlocks = @(Get-ConfigRestoreBlocks -CurrentPath $ConfigPath -BackupPath $files[$index].FullName -BackupName $files[$index].Name)
+                $restoreKeyboard = Get-ConfigRestoreConfirmKeyboard
+                if ($restoreBlocks.Count -gt 0) {
+                    $restoreBlocks += @{ type = 'paragraph'; text = 'سيتم حفظ الإعدادات الحالية أولاً، ويجب إعادة تشغيل البوت بعد الاستعادة.' }
+                    if (Send-TelegramRichMessage -ChatId $chatId -Blocks $restoreBlocks -ReplyMarkup $restoreKeyboard) { break }
+                }
                 $differenceSummary = Get-ConfigDifferenceSummary -CurrentPath $ConfigPath -BackupPath $files[$index].FullName
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد استعادة النسخة '$($files[$index].Name)'؟`n$differenceSummary`nسيتم حفظ الإعدادات الحالية أولًا، ويجب إعادة تشغيل البوت بعد الاستعادة." -ReplyMarkup (Get-ConfigRestoreConfirmKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد استعادة النسخة '$($files[$index].Name)'؟`n$differenceSummary`nسيتم حفظ الإعدادات الحالية أولًا، ويجب إعادة تشغيل البوت بعد الاستعادة." -ReplyMarkup $restoreKeyboard
             }
             break
         }

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.18.0
+
+The config restore confirmation says what each setting would become, not just
+which settings differ: a three-column table of setting, current value, and
+the value in the backup. Anything whose name reads like a credential is shown
+as its length and a list as a count, because config.json is the one file that
+holds the bot token. The old text message stays as the fallback.
+
 ## Version 7.17.2
 
 Reference lookup results come back in a monospace block. A log line is

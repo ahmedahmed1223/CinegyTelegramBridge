@@ -195,6 +195,50 @@ Describe 'Configuration backups' {
         $summary | Should -Match 'BotToken'
         $summary | Should -Match 'marker'
     }
+
+    It 'shows what each changed setting would become, never a credential value' {
+        $current = Join-Path $TestDrive 'diff-current.json'
+        $backup = Join-Path $TestDrive 'diff-backup.json'
+        Set-Content -LiteralPath $current -Value '{ "BotToken": "1234:AAAA", "AdminChatIds": [1, 2, 3], "AirServerAddress": "10.0.0.1" }' -Encoding utf8
+        Set-Content -LiteralPath $backup -Value '{ "BotToken": "9999:BBBBBB", "AdminChatIds": [7], "AirServerAddress": "10.0.0.1" }' -Encoding utf8
+
+        $rows = Get-ConfigDifferenceRows -CurrentPath $current -BackupPath $backup
+
+        @($rows | ForEach-Object Name) | Should -Not -Contain 'AirServerAddress'
+        $token = $rows | Where-Object { $_.Name -eq 'BotToken' }
+        $token.Current | Should -Not -Match 'AAAA'
+        $token.Backup | Should -Not -Match 'BBBB'
+        $token.Current | Should -Match '9'
+        $ids = $rows | Where-Object { $_.Name -eq 'AdminChatIds' }
+        $ids.Current | Should -Match '3'
+        $ids.Backup | Should -Match '1'
+    }
+
+    It 'renders the restore confirmation as a table of current against backup' {
+        $current = Join-Path $TestDrive 'blocks-current.json'
+        $backup = Join-Path $TestDrive 'blocks-backup.json'
+        Set-Content -LiteralPath $current -Value '{ "AirServerAddress": "10.0.0.1" }' -Encoding utf8
+        Set-Content -LiteralPath $backup -Value '{ "AirServerAddress": "10.0.0.9" }' -Encoding utf8
+
+        $blocks = @(Get-ConfigRestoreBlocks -CurrentPath $current -BackupPath $backup -BackupName 'config.bak.json')
+
+        $blocks[0].text | Should -Match 'config.bak.json'
+        $table = $blocks | Where-Object { $_.type -eq 'table' }
+        $table | Should -Not -BeNullOrEmpty
+        @($table.cells[1] | ForEach-Object text) | Should -Contain '10.0.0.9'
+    }
+
+    It 'says a backup would change nothing rather than drawing an empty table' {
+        $same = Join-Path $TestDrive 'same-current.json'
+        $copy = Join-Path $TestDrive 'same-backup.json'
+        Set-Content -LiteralPath $same -Value '{ "AirServerAddress": "10.0.0.1" }' -Encoding utf8
+        Copy-Item -LiteralPath $same -Destination $copy
+
+        $blocks = @(Get-ConfigRestoreBlocks -CurrentPath $same -BackupPath $copy -BackupName 'config.bak.json')
+
+        @($blocks | Where-Object { $_.type -eq 'table' }) | Should -BeNullOrEmpty
+        ($blocks | Where-Object { $_.type -eq 'paragraph' }).text | Should -Match 'لا اختلافات'
+    }
 }
 
 Describe 'Configuration migration' {
@@ -543,8 +587,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.17.2'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.17.2'
+        $script:BridgeVersion | Should -Be '7.18.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.18.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

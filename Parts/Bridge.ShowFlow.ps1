@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.19.0'; Items = @(
+                '⚙️ باب جديد في 📖 المساعدة يشرح شاشة الإعدادات: الأبواب، البحث، التعديل، الحماية، النسخ والنقل.'
+                '📖 صفحات المساعدة صارت بنص منسّق: عنوان القسم عريضًا واسم الإعداد بخط موحّد العرض ليُنسخ كما هو.'
+            ) }
         @{ Version = '7.18.1'; Items = @(
                 '🆕 صفحة «ما الجديد» صارت بنص منسّق: رقم الإصدار عريضًا فوق تغييراته، فترى أين ينتهي إصدار ويبدأ الذي قبله.'
             ) }
@@ -572,6 +576,47 @@ function Get-HelpChapters {
                 '⚠️ السطر أعلى القائمة يذكر متى تحقّق الجسر آخر مرة.'
                 '↳ إن ظهر تحذير هناك فالمعلومة قد لا تطابق الشاشة — تأكد بلقطة.'
             ) }
+        @{ Key = 'settings'; Title = '⚙️ الإعدادات'; AdminOnly = $true; Body = @(
+                'كل ما يغيّر سلوك الجسر هنا، والتعديل يسري فورًا ويُحفظ في'
+                '   config.json دون إعادة تشغيل، إلا ما يقول عكس ذلك عند حفظه.'
+                ''
+                '🗂 الأبواب الثمانية:'
+                '↳ 🔐 الأمان · 🔴 التشغيل على الهواء · 📚 القوالب · 📰 شريط الأخبار.'
+                '↳ 📅 الجدولة · 📊 المراقبة · 🗄️ الملفات والاحتفاظ · 🛠️ خيارات متقدمة.'
+                '↳ كل إعداد في باب واحد فقط، وكل زر يعرض قيمته الحالية.'
+                ''
+                '🔎 الوصول السريع:'
+                '↳ «🔎 بحث» يقبل اسم الإعداد أو جزءًا من وصفه العربي.'
+                '↳ «📝 المعدّل فقط» يعرض ما يخالف الافتراضي — أول ما يُنظر إليه'
+                '   حين يتصرف الجسر خلاف المتوقّع.'
+                '↳ «🧭 مبسّط» ما يحتاجه التشغيل اليومي، و«🛠 متقدم» الباقي.'
+                ''
+                '✏️ التعديل:'
+                '↳ إعداد نعم/لا ينقلب بضغطة واحدة.'
+                '↳ إعداد رقمي يطلب القيمة كتابة؛ السالب وغير الرقم يُرفضان'
+                '   ولا يتغيّر شيء.'
+                '↳ إعداد محدود الخيارات يُعرض أزرارًا، فلا يكسره خطأ إملائي.'
+                '↳ كل تغيير يُكتب في 📜 السجل باسم من غيّره.'
+                ''
+                '🔒 إعدادات الحماية:'
+                '↳ تظهر بقفل وتطلب تأكيدًا عند إضعافها لا عند تقويتها.'
+                '↳ وهي: RequireUserLevelAuth، EnableSelfServiceRequests،'
+                '   EnableRawCommand، EnableFullTemplateManagement،'
+                '   EnableDpapiSecrets.'
+                ''
+                '♻️ التراجع:'
+                '↳ لكل إعداد زر يعيده إلى الافتراضي بتأكيد، و«استعادة الافتراضي»'
+                '   يعيد الكل.'
+                "↳ 🗄 نسخ الإعدادات: كل حفظ يخلف نسخة، ويُحتفظ بـ $(Get-SettingInt 'ConfigBackupKeepFiles' 1) منها."
+                '↳ الاستعادة تعرض جدولًا: الإعداد، قيمته الآن، وقيمته في النسخة —'
+                '   ثم تحفظ الحالية قبل الكتابة، وتحتاج إعادة تشغيل بعدها.'
+                '↳ القيم السرّية تظهر بطولها لا بمحتواها، والقوائم بعدد عناصرها.'
+                ''
+                '📤 النقل بين الأجهزة:'
+                '↳ التصدير يخرج الإعدادات وحدها: لا BotToken ولا قوائم المستخدمين.'
+                '↳ الاستيراد يعرض ما سيتغيّر ويرفض أي مفتاح لا يعرفه، ولا يُطبّق'
+                '   إلا بتأكيد.'
+            ) }
         @{ Key = 'admin'; Title = '🛡️ أدوات المشرف'; AdminOnly = $true; Body = @(
                 '⚙️ الإعدادات و👤 طلبات الوصول: في القائمة الرئيسية.'
                 '🗂 أدوات الإدارة تجمع الباقي:'
@@ -766,6 +811,35 @@ function Get-MyOperationsBlocks {
     return $blocks
 }
 
+function Format-HelpHtmlLine {
+    <#
+        One line of the manual, formatted.
+
+        The guide is a hierarchy - chapter, section, step - and plain text
+        gave all three the same weight: the line naming a section read
+        exactly like the steps under it. Two rules carry that structure, and
+        both are read off the text rather than written into every line:
+        a line that ends in a colon is a section head, and a word that is
+        the name of a real setting is code.
+
+        The tags never span a line, because Split-TelegramText cuts on line
+        boundaries and Telegram refuses a message with half a tag in it.
+    #>
+    param([string]$Line)
+    $text = ConvertTo-TelegramHtmlText -Text ([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    if (-not $script:HelpCodeTermPattern) {
+        # Longest first, so SceneMode inside a longer name is not matched
+        # before the name itself.
+        $terms = @(@($script:DefaultSettings.Keys) + @('BotToken', 'config.json')) |
+            Sort-Object -Property Length -Descending
+        $script:HelpCodeTermPattern = '(' + ((@($terms) | ForEach-Object { [regex]::Escape([string]$_) }) -join '|') + ')'
+    }
+    $text = [regex]::Replace($text, $script:HelpCodeTermPattern, '<code>$1</code>')
+    if ($text.TrimEnd().EndsWith(':')) { return "<b>$text</b>" }
+    return $text
+}
+
 function Get-HelpChapterIndex {
     param([AllowNull()][object[]]$Chapters, [string]$Key)
     $list = @($Chapters)
@@ -781,8 +855,9 @@ function Get-HelpChapterText {
     $index = Get-HelpChapterIndex -Chapters $chapters -Key $Key
     if ($index -lt 0) { return '' }
     $chapter = $chapters[$index]
-    $lines = @("📖 $($chapter.Title)", '━━━━━━━━━━━━━━') + @($chapter.Body) +
-        @('', "الباب $($index + 1) من $($chapters.Count)")
+    $lines = @("<b>📖 $(ConvertTo-TelegramHtmlText -Text ([string]$chapter.Title))</b>", '━━━━━━━━━━━━━━') +
+        @(@($chapter.Body) | ForEach-Object { Format-HelpHtmlLine -Line ([string]$_) }) +
+        @('', "<i>الباب $($index + 1) من $($chapters.Count)</i>")
     return ($lines -join "`n")
 }
 
@@ -806,14 +881,14 @@ function Get-HelpHomeText {
     param([long]$ChatId = 0, [long]$UserId = 0)
     $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
     $lines = @(
-        '📘 دليل بوت Cinegy Air'
-        "الإصدار $($script:BridgeVersion)"
+        '<b>📘 دليل بوت Cinegy Air</b>'
+        "الإصدار <code>$($script:BridgeVersion)</code>"
         ''
-        'اختر ما تريد معرفته:'
+        '<b>اختر ما تريد معرفته:</b>'
         ''
     )
-    foreach ($chapter in $chapters) { $lines += "• $($chapter.Title)" }
-    $lines += @('', '🚀 جديد على البوت؟ ابدأ بـ«بداية سريعة».')
+    foreach ($chapter in $chapters) { $lines += "• $(ConvertTo-TelegramHtmlText -Text ([string]$chapter.Title))" }
+    $lines += @('', '<i>🚀 جديد على البوت؟ ابدأ بـ«بداية سريعة».</i>')
     return ($lines -join "`n")
 }
 
@@ -841,14 +916,14 @@ function Get-HelpText {
     if ($UserId -eq 0) { $UserId = $ChatId }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📘 دليل بوت Cinegy Air')
-    $lines.Add("الإصدار $($script:BridgeVersion)")
+    $lines.Add('<b>📘 دليل بوت Cinegy Air</b>')
+    $lines.Add("الإصدار <code>$($script:BridgeVersion)</code>")
     $lines.Add('')
     foreach ($chapter in @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)) {
         $lines.Add('━━━━━━━━━━━━━━━━')
-        $lines.Add([string]$chapter.Title)
+        $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text ([string]$chapter.Title))</b>")
         $lines.Add('━━━━━━━━━━━━━━━━')
-        foreach ($line in @($chapter.Body)) { $lines.Add([string]$line) }
+        foreach ($line in @($chapter.Body)) { $lines.Add([string](Format-HelpHtmlLine -Line ([string]$line))) }
         $lines.Add('')
     }
     return (($lines -join "`n").TrimEnd())

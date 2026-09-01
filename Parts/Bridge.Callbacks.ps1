@@ -521,7 +521,7 @@ function Invoke-CallbackQuery {
             break
         }
         { $_ -in @('menu:help', 'help:home') } {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
             break
         }
         'help:quickstart' {
@@ -535,7 +535,7 @@ function Invoke-CallbackQuery {
             $helpKeyboard = Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId
             $helpBlocks = Get-HelpRichBlocks -ChatId $chatId -UserId $userId
             if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks $helpBlocks -ReplyMarkup $helpKeyboard)) {
-                Send-TelegramPagedText -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup $helpKeyboard
+                Send-TelegramPagedText -ChatId $chatId -Text (Get-HelpText -ChatId $chatId -UserId $userId) -ReplyMarkup $helpKeyboard -ParseMode HTML
             }
             break
         }
@@ -543,10 +543,10 @@ function Invoke-CallbackQuery {
             $chapterKey = Get-CallbackArg $data 'help:ch:'
             $chapterText = Get-HelpChapterText -Key $chapterKey -ChatId $chatId -UserId $userId
             if ([string]::IsNullOrWhiteSpace($chapterText)) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
                 break
             }
-            Send-TelegramMessage -ChatId $chatId -Text $chapterText -ReplyMarkup (Get-HelpChapterKeyboard -Key $chapterKey -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text $chapterText -ReplyMarkup (Get-HelpChapterKeyboard -Key $chapterKey -ChatId $chatId -UserId $userId) -ParseMode HTML
             break
         }
         'menu:audit' {

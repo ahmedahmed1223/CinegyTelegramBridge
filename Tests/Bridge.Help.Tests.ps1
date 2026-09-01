@@ -173,3 +173,33 @@ Describe 'The whole manual in one message' {
         $operator.Count | Should -BeLessThan $admin.Count
     }
 }
+
+Describe 'The settings chapter' {
+    It 'explains the settings screen to an administrator and to nobody else' {
+        Mock Test-Admin { $true }
+        $text = Get-HelpChapterText -Key 'settings' -ChatId 101 -UserId 101
+        $text | Should -Match 'المعدّل فقط'
+        $text | Should -Match 'RequireUserLevelAuth'
+        $text | Should -Match 'نسخ الإعدادات'
+
+        Mock Test-Admin { $false }
+        Get-HelpChapterText -Key 'settings' -ChatId 202 -UserId 202 | Should -BeNullOrEmpty
+    }
+
+    It 'sets a section head in bold and a real setting name in code' {
+        Mock Test-Admin { $true }
+        $text = Get-HelpChapterText -Key 'settings' -ChatId 101 -UserId 101
+        $text | Should -Match '<b>[^<]*التعديل:</b>'
+        $text | Should -Match '<code>EnableRawCommand</code>'
+        # A word that is not a setting stays plain: the code style is the
+        # reader's promise that the name can be searched for in ⚙️ الإعدادات.
+        $text | Should -Not -Match '<code>[^<]*الإعداد'
+    }
+
+    It 'keeps every help tag inside one line, because the splitter cuts between them' {
+        Mock Test-Admin { $true }
+        foreach ($line in ((Get-HelpText -ChatId 101 -UserId 101) -split "`n")) {
+            (([regex]::Matches($line, '<[a-z]')).Count) | Should -Be (([regex]::Matches($line, '</[a-z]')).Count)
+        }
+    }
+}

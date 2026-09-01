@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.18.1'
+$script:BridgeVersion = '7.19.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -744,6 +744,9 @@ $script:RestartSelfRelaunch = $false
 # Long screens waiting behind 📄 المزيد, keyed by chat. In memory only: a
 # restart drops them, and the button says so rather than pretending.
 $script:PagedText = @{}
+# Built on first use from the settings table: the manual mentions setting
+# names in prose, and a name is worth setting in code only if it is real.
+$script:HelpCodeTermPattern = ''
 $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
@@ -1350,7 +1353,7 @@ try {
                         }
                         elseif ($trimmed -eq $script:HelpHotword) {
                             Clear-PendingState -ChatId $chatId
-                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId)
+                            Send-TelegramMessage -ChatId $chatId -Text (Get-HelpHomeText -ChatId $chatId -UserId $userId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
                         }
                         else {
                             Show-MainMenu -ChatId $chatId -UserId $userId

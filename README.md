@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.19.0
+
+The manual gains a settings chapter - the screen that changes every other
+behaviour was the one with no explanation - and the help screens are sent as
+HTML. Two rules carry the hierarchy without marking up every line: a line
+ending in a colon is a section head, and a word that is the name of a real
+setting is set in code so it can be copied into the settings search.
+
 ## Version 7.18.1
 
 The release notes screen is sent as HTML: the version number is bold above

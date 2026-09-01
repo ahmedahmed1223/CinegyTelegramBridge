@@ -1578,3 +1578,47 @@ Describe 'The status screens lead with the verdict and table what is on air' {
         $blocks[2].type | Should -Be 'divider'
     }
 }
+
+Describe 'A log line is shown in the font it was written for' {
+    BeforeEach {
+        Mock Test-Admin { $true }
+        Mock Send-TelegramPagedText { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'sends the matching lines as preformatted, so the columns stay columns' {
+        # id=, action= and result= are held in place by spaces; a proportional
+        # font stops them lining up between rows and the eye loses the column.
+        Mock Find-OperationByReference { @('AIR_OP id=air-5023333b action=SHOW result=ok', 'AIR_OP id=air-5023333b action=HIDE result=ok') }
+        Mock Send-TelegramRichMessage { $true }
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value '5023333b'
+
+        Should -Invoke Send-TelegramRichMessage -Times 1 -Exactly -ParameterFilter {
+            @($Blocks | Where-Object { $_.type -eq 'pre' }).Count -eq 1
+        }
+        Should -Invoke Send-TelegramPagedText -Times 0 -Exactly
+    }
+
+    It 'falls back to the text version when rich sending is refused' {
+        Mock Find-OperationByReference { @('AIR_OP id=air-5023333b action=SHOW result=ok') }
+        Mock Send-TelegramRichMessage { $false }
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value '5023333b'
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
+    }
+
+    It 'does not draw an empty code block when the log has no such line' {
+        Mock Find-OperationByReference { @() }
+        Mock Send-TelegramRichMessage { $true }
+        Set-PendingState -ChatId 777 -State @{ Mode = 'operation_reference'; UserId = 777 }
+
+        Complete-OperationReferenceLookup -ChatId 777 -UserId 777 -Value '5023333b'
+
+        Should -Invoke Send-TelegramRichMessage -Times 0 -Exactly
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
+    }
+}

@@ -1720,7 +1720,19 @@ function Complete-OperationReferenceLookup {
     else {
         "🔎 المرجع $($Value.Trim()) — $($lines.Count) سطرًا:`n`n" + ($lines -join "`n")
     }
-    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup (Get-DiagnosticsKeyboard)
+    # A log line is columns held together by spaces, so it is the one thing on
+    # these screens a proportional font actively breaks: id=, action= and
+    # result= stop lining up between rows and the eye loses the column it was
+    # following. 'pre' is what monowidth exists for.
+    $lookupKeyboard = Get-DiagnosticsKeyboard
+    if ($lines.Count -gt 0) {
+        $lookupBlocks = @(
+            @{ type = 'heading'; text = "🔎 المرجع $($Value.Trim()) — $($lines.Count) سطرًا"; size = 3 }
+            @{ type = 'pre'; text = ($lines -join "`n") }
+        )
+        if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $lookupBlocks -ReplyMarkup $lookupKeyboard) { return }
+    }
+    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup $lookupKeyboard
 }
 
 function Get-DiagnosticsKeyboard {

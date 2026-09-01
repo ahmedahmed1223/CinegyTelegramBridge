@@ -620,7 +620,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:whatsnew' {
-            Send-TelegramPagedText -ChatId $chatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramPagedText -ChatId $chatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
             break
         }
         'menu:restart' {

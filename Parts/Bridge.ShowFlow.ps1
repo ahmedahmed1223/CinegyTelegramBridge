@@ -103,6 +103,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.18.1'; Items = @(
+                '🆕 صفحة «ما الجديد» صارت بنص منسّق: رقم الإصدار عريضًا فوق تغييراته، فترى أين ينتهي إصدار ويبدأ الذي قبله.'
+            ) }
         @{ Version = '7.18.0'; Items = @(
                 '⚙️ تأكيد استعادة الإعدادات صار جدولًا يقابل القيمة الحالية بما في النسخة، بدل أسماء الإعدادات وحدها.'
                 '🔒 أي إعداد يشبه مفتاحًا أو رمزًا يُعرَض بطوله لا بمحتواه، والقوائم بعدد عناصرها.'
@@ -400,23 +403,31 @@ function Get-WhatsNewSections {
 }
 
 function Get-WhatsNewText {
-    <# The whole history as one string. Get-WhatsNewParts is what the screen
-       actually sends; this stays for anything that wants the lot. #>
+    <#
+        The whole history as one string. Get-WhatsNewParts is what the screen
+        actually sends; this stays for anything that wants the lot.
+
+        HTML, because this screen is a list of releases inside a list of
+        changes and plain text gave both the same weight: the version a line
+        belongs to read exactly like the change itself. The tags stay inside
+        one line each - the splitter cuts on line boundaries, and a tag cut in
+        half is a message Telegram refuses outright.
+    #>
     param([int]$Skip = 0, [int]$Take = 0, [switch]$NoHeading)
     $sections = @(Get-WhatsNewSections)
     if ($Skip -gt 0) { $sections = @($sections | Select-Object -Skip $Skip) }
     if ($Take -gt 0) { $sections = @($sections | Select-Object -First $Take) }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    if (-not $NoHeading) { $lines.Add("🆕 ما الجديد — الإصدار الحالي $($script:BridgeVersion)") }
-    else { $lines.Add('🆕 ما الجديد — الإصدارات الأقدم') }
+    if (-not $NoHeading) { $lines.Add("<b>🆕 ما الجديد</b> — الإصدار الحالي <code>$($script:BridgeVersion)</code>") }
+    else { $lines.Add('<b>🆕 ما الجديد</b> — <i>الإصدارات الأقدم</i>') }
     foreach ($section in $sections) {
         $lines.Add('')
-        $lines.Add("▪️ $($section.Version)")
-        foreach ($item in $section.Items) { $lines.Add("• $item") }
+        $lines.Add("<b>▪️ $(ConvertTo-TelegramHtmlText -Text ([string]$section.Version))</b>")
+        foreach ($item in $section.Items) { $lines.Add("• $(ConvertTo-TelegramHtmlText -Text ([string]$item))") }
     }
     $lines.Add('')
-    $lines.Add('السجل التقني الكامل في ملف CHANGELOG.md مع الإصدار.')
+    $lines.Add('<i>السجل التقني الكامل في ملف CHANGELOG.md مع الإصدار.</i>')
     return ($lines -join "`n")
 }
 

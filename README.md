@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.18.1
+
+The release notes screen is sent as HTML: the version number is bold above
+its changes and the running build is code-styled, so the eye can tell where
+one release ends. Every tag stays inside a single line - the splitter cuts on
+line boundaries, and a tag cut in half is a message Telegram refuses.
+
 ## Version 7.18.0
 
 The config restore confirmation says what each setting would become, not just

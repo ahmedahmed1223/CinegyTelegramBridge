@@ -453,7 +453,8 @@ function Send-TelegramPagedText {
         Short text is sent untouched, so nothing gains a button it does not
         need.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [string]$Text = '', [string[]]$Parts = @(), $ReplyMarkup = $null)
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Text = '', [string[]]$Parts = @(), $ReplyMarkup = $null,
+        [ValidateSet('', 'HTML')][string]$ParseMode = '')
     # -Parts lets the caller break the text where it means something - the
     # release notes split after the third version, not mid-sentence at
     # whatever character the limit happens to fall on. Each part is still run
@@ -466,10 +467,12 @@ function Send-TelegramPagedText {
     # gets that far.
     if ($chunks.Count -eq 0) { return }
     if ($chunks.Count -eq 1) {
-        Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[0]) -ReplyMarkup $ReplyMarkup
+        Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[0]) -ReplyMarkup $ReplyMarkup -ParseMode $ParseMode
         return
     }
-    $script:PagedText[$ChatId] = @{ Chunks = $chunks; Index = 0; Markup = $ReplyMarkup }
+    # The mode travels with the pages: 📄 المزيد arrives on a later turn, and a
+    # part sent without it would show the operator its own tags.
+    $script:PagedText[$ChatId] = @{ Chunks = $chunks; Index = 0; Markup = $ReplyMarkup; ParseMode = $ParseMode }
     Send-TelegramPagedChunk -ChatId $ChatId | Out-Null
 }
 
@@ -487,7 +490,8 @@ function Send-TelegramPagedChunk {
     $markup = if ($isLast) { $state.Markup }
     else { @{ inline_keyboard = @(, @((New-Button "📄 المزيد ($($index + 2)/$($chunks.Count))" 'more:next'))) } }
 
-    Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[$index]) -ReplyMarkup $markup
+    $mode = if ($state.ContainsKey('ParseMode')) { [string]$state['ParseMode'] } else { '' }
+    Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[$index]) -ReplyMarkup $markup -ParseMode $mode
     if ($isLast) { $script:PagedText.Remove($ChatId) } else { $state.Index = $index + 1 }
     return $true
 }

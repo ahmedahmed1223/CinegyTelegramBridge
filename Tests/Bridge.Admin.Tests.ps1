@@ -687,6 +687,21 @@ Describe 'What is new and help content' {
         Get-WhatsNewText | Should -Match ([regex]::Escape($script:BridgeVersion))
     }
 
+    It 'sends the release notes as HTML and keeps every tag inside one line' {
+        Mock Send-TelegramMessage { $script:sentText = $Text }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+
+        Send-TelegramPagedText -ChatId 100 -Parts @(Get-WhatsNewParts)[0] -ParseMode HTML
+
+        $script:sentText | Should -Match '<b>'
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' }
+        # A line-boundary split cuts between lines, so a tag that opens on one
+        # line and closes on another is the one thing that cannot survive it.
+        foreach ($line in (Get-WhatsNewText -split "`n")) {
+            (([regex]::Matches($line, '<[a-z]')).Count) | Should -Be (([regex]::Matches($line, '</[a-z]')).Count)
+        }
+    }
+
     It 'describes changes in operator terms, not function names' {
         $text = Get-WhatsNewText
         $text | Should -Match 'على الهواء'

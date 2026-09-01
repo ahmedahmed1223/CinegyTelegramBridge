@@ -1,4 +1,4 @@
-# Cinegy Air Pro / Titler Telegram Bridge
+﻿# Cinegy Air Pro / Titler Telegram Bridge
 
 A Telegram bot that lets whitelisted operators drive Cinegy Air Pro's Titler
 graphics layer from chat: push a named title template on air with text
@@ -12,6 +12,27 @@ It's built directly on the HTTP control surfaces that Cinegy demonstrates in
 those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
+
+## Version 7.17.0
+
+Favourites were losing everything past the first pick: the writer built the
+list with `$x = if (...) { @(...) } else { @() }`, an if branch is a pipeline,
+a pipeline unrolls a short array, and the `+=` that followed concatenated
+strings - two favourites became the single key `urgenttickr`, which names no
+template, so every reader filtered it out and the whole selection vanished
+with no error anywhere. The management screen also read the capped menu list
+to decide its ticks, which made any pick past FavoritesCount impossible to
+remove.
+
+Status and full status now carry the operator's own id above the fold, which
+is what they are asked for when requesting access or reporting a fault.
+
+The news lock holds up under simultaneous requests: a repeat tap no longer
+re-arms the countdown, a hand-over refuses to delete a draft that changed
+hands while the window was open, and the freed slot is held for the granted
+requester instead of going to whoever taps first. Both sheet pulls now sit
+inside the lock - they rewrite the ticker like any other edit, so they are
+neither drawn nor honoured for anyone who is not the current writer.
 
 ## Version 7.16.0
 

@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -41,12 +41,41 @@ function Remove-NewsTickerDraft {
     Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction SilentlyContinue
 }
 
+function Get-NewsLockReservation {
+    <# The short hold that belongs to whoever just won a hand-over.
+
+       A grant only ever emptied the draft slot and told the requester to press
+       the start button. Between those two moments the slot was free to
+       everyone, so five minutes of negotiation could be lost to whoever
+       happened to tap first - including the owner who had just handed it over.
+       Expiry is checked on read so nothing has to sweep it. #>
+    if (-not $script:NewsLockGrant) { return $null }
+    if ((Get-Date) -ge [datetime]$script:NewsLockGrant.ExpiresAt) { $script:NewsLockGrant = $null; return $null }
+    return $script:NewsLockGrant
+}
+
+function Set-NewsLockReservation {
+    param([Parameter(Mandatory)][long]$UserId)
+    $seconds = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
+    if ($seconds -le 0) { $script:NewsLockGrant = $null; return $null }
+    $script:NewsLockGrant = @{ UserId = $UserId; ExpiresAt = (Get-Date).AddSeconds($seconds) }
+    return $script:NewsLockGrant
+}
+
+function Clear-NewsLockReservation { $script:NewsLockGrant = $null }
+
 function Start-NewsTickerDraft {
     param([long]$ChatId,[long]$UserId)
     if ($script:NewsTickerDraft) {
         if ([long]$script:NewsTickerDraft.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''} }
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا للمستخدم $($script:NewsTickerDraft.OwnerUserId)."}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا لدى $(Format-UserAuditActor -UserId ([long]$script:NewsTickerDraft.OwnerUserId))."}
     }
+    $reservation = Get-NewsLockReservation
+    if ($reservation -and [long]$reservation.UserId -ne $UserId) {
+        $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $secondsLeft ثانية بعد تسليم القفل له."}
+    }
+    if ($reservation) { Clear-NewsLockReservation }
     $snapshot = Get-NewsTickerConfiguredSnapshot
     if (-not $snapshot.Success) { return [pscustomobject]@{Success=$false;Draft=$null;Error=$snapshot.Error} }
     $script:NewsTickerDraft = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
@@ -257,13 +286,23 @@ function Request-NewsLockRelease {
     if (-not $draft) { return $false }
     if ([long]$draft.OwnerUserId -eq $UserId) { return $false }
 
+    $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     $existing = $script:NewsLockRequest
-    if ($existing -and [long]$existing.RequesterUserId -ne $UserId) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⏳ يوجد طلب فكّ قفل قيد الانتظار من $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId)). انتظر نتيجته." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    if ($existing) {
+        if ([long]$existing.RequesterUserId -ne $UserId) {
+            Send-TelegramMessage -ChatId $ChatId -Text "⏳ يوجد طلب فكّ قفل قيد الانتظار من $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId)). انتظر نتيجته." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+            return $false
+        }
+        # The same requester tapping again used to overwrite the record with a
+        # fresh RequestedAt. That pushed the auto-grant back by the full window
+        # on every tap, so an impatient operator could wait forever while the
+        # owner collected a new ping each time. A repeat tap now only reports
+        # how long is left.
+        $secondsLeft = [math]::Max(0, [int]([math]::Ceiling(($minutes * 60) - ((Get-Date) - [datetime]$existing.RequestedAt).TotalSeconds)))
+        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $secondsLeft ثانية قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
 
-    $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     $script:NewsLockRequest = @{
         RequesterUserId = $UserId; RequesterChatId = $ChatId
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
@@ -300,6 +339,16 @@ function Complete-NewsLockRelease {
     }
 
     $draft = Get-NewsTickerDraft
+    if ($draft -and [long]$draft.OwnerUserId -ne [long]$request.OwnerUserId) {
+        # The draft changed hands while the window was open - the owner
+        # published or cancelled, and somebody uninvolved started a fresh one.
+        # Granting here would delete a third party's work to settle an argument
+        # they were never part of, so the request dies instead.
+        Write-BridgeLog "News lock request from $($request.RequesterUserId) lapsed: the draft moved from $($request.OwnerUserId) to $($draft.OwnerUserId)" 'WARN'
+        Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "ℹ️ تغيّر مالك المسودة أثناء انتظار طلبك؛ أرسل طلب فكّ قفل جديدًا إن كنت ما زلت بحاجة إليها." `
+            -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
+        return $false
+    }
     $items = @(if ($draft) { $draft.Items } else { @() })
     if ($draft -and [long]$request.OwnerChatId -gt 0 -and $items.Count -gt 0) {
         $position = 0
@@ -308,12 +357,19 @@ function Complete-NewsLockRelease {
     }
     if ($draft) { Remove-NewsTickerDraft }
 
+    # Hold the empty slot for the person the hand-over was decided in favour of.
+    # Emptying it and asking them to press a button is a race everyone else can
+    # win, and losing it silently undoes the whole negotiation.
+    Set-NewsLockReservation -UserId ([long]$request.RequesterUserId) | Out-Null
+
     Write-BridgeLog "News lock handed to $($request.RequesterUserId) ($Reason)" 'WARN'
     Add-AuditEntry "🔓 سُلّم قفل شريط الأخبار إلى $(Get-UserDisplayName -UserId ([long]$request.RequesterUserId)) ($Reason)"
     if ([long]$request.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text '🔓 سُلّم قفل شريط الأخبار وأُلغيت مسودتك.'
     }
-    Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text '🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.' `
+    $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
+    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $hold ثانية." } else { '' }
+    Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.$holdNote" `
         -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
     return $true
 }
@@ -355,6 +411,32 @@ function Get-NewsSheetConfirmKeyboard {
     $go = if ($Target -eq 'air') { @{text='✅ نعم، انشر';callback_data='news:sheetconfirm';style='danger'} }
     else { @{text='✅ نعم، حمّل المسودة';callback_data='news:sheetdraftconfirm';style='success'} }
     return @{inline_keyboard=@(,@($go, @{text='❌ إلغاء';callback_data='news:refresh'}))}
+}
+
+function Get-NewsSheetPullLockDenial {
+    <# A sheet pull is an edit to the ticker, so it belongs inside the lock
+       like every other edit.
+
+       Both pulls rewrite what the newsroom sees: one goes straight to air, the
+       other replaces the draft. Neither used to need the lock when no draft
+       existed, so any operator with pull access could rewrite the ticker while
+       the person who had just published was still looking at it, and the
+       buttons sat on the screen inviting exactly that. Holding the lock first
+       makes the single-writer rule the whole news screen is built on true of
+       the sheet path as well.
+
+       Returns the reason to refuse, or an empty string when the pull is
+       allowed - the same shape Get-CallbackRefusal already speaks. #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $draft = Get-NewsTickerDraft
+    if (-not $draft) {
+        return 'السحب من الشيت يحتاج قفل المسودة. اضغط ✏️ بدء التحرير أولًا.'
+    }
+    if ([long]$draft.OwnerUserId -ne $UserId) {
+        return "المسودة بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))؛ السحب من الشيت لمن يحمل القفل وحده."
+    }
+    return ''
 }
 
 function Test-NewsSheetPullAccess {
@@ -561,7 +643,13 @@ function Invoke-NewsSheetSync {
 function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     $rows = @()
     $draft = Get-NewsTickerDraft
-    if (-not $draft) {
+    $reservation = Get-NewsLockReservation
+    if (-not $draft -and $reservation -and [long]$reservation.UserId -ne $UserId) {
+        # Showing the start button here would be a lie: the reservation refuses
+        # it for as long as it lasts.
+        $rows += , @(@{text="⏳ محجوز لـ $(Get-UserDisplayName -UserId ([long]$reservation.UserId))";callback_data='news:refresh'})
+    }
+    elseif (-not $draft) {
         $rows += , @(@{text='✏️ بدء التحرير';callback_data='news:start'}, @{text='📥 استيراد TXT';callback_data='news:import'})
     }
     elseif ([long]$draft.OwnerUserId -eq $UserId) {
@@ -585,8 +673,12 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsRestoreNews')) {
         $rows += , @(@{text='🕘 النسخ والاستعادة';callback_data='news:backups'})
     }
-    $lockedByOther = $draft -and [long]$draft.OwnerUserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)
-    if (-not $lockedByOther -and (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId) -and -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
+    # Drawn only for whoever holds the lock, and refused for anyone else by
+    # Get-CallbackRefusal - a button already delivered to a screen can still be
+    # pressed after the lock moves, so hiding it is not on its own a rule.
+    if ([string]::IsNullOrWhiteSpace((Get-NewsSheetPullLockDenial -ChatId $ChatId -UserId $UserId)) -and
+        (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId) -and
+        -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
         $rows += , @(@{text='⬇️ سحب ونشر';callback_data='news:sheet'}, @{text='📝 سحب إلى المسودة';callback_data='news:sheetdraft'})
     }
     $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})

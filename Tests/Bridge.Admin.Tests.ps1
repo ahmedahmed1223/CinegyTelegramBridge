@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 
@@ -1557,5 +1557,24 @@ Describe 'The status screens lead with the verdict and table what is on air' {
         $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' -DetailLines @())
 
         @($blocks | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
+    }
+
+    It 'shows the identity above the fold, not inside the collapsed detail' {
+        # The id is what an operator is asked for when requesting access or
+        # reporting a fault; behind a disclosure triangle it gets screenshotted
+        # wrongly or not at all.
+        $identity = '👤 معرّفك: 8201739556'
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' `
+                -Identity $identity -DetailLines @('🌐 127.0.0.1'))
+
+        $blocks[2].text | Should -Be $identity
+        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
+        @($folded.blocks | Where-Object { $_.text -eq $identity }).Count | Should -Be 0
+    }
+
+    It 'omits the identity paragraph entirely when none is supplied' {
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' -DetailLines @())
+
+        $blocks[2].type | Should -Be 'divider'
     }
 }

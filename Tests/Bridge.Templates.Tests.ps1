@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Templates.Tests.ps1 - Template catalogue, registry, and the SHOW field flow.
 
@@ -35,6 +35,89 @@ Describe 'Per-user editable favourites' {
     It 'rejects a template key that is not in the catalogue' {
         Set-UserFavorite -UserId 101 -TemplateKey 'missing' -Enabled $true | Should -BeFalse
         @(Get-FavoriteTemplateKeys -UserId 101).Count | Should -Be 0
+    }
+
+    It 'keeps a second favourite as its own entry instead of concatenating it onto the first' {
+        # `$x = if (...) { @(...) } else { @() }` unrolls, so $x arrived as a
+        # String and the `+=` that followed was string concatenation: two
+        # favourites became the single key 'urgentlowerthird', which names no
+        # template, so every reader filtered it out and the user's whole
+        # selection disappeared without an error anywhere.
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $true | Out-Null
+        Set-UserFavorite -UserId 101 -TemplateKey 'lowerthird' -Enabled $true | Out-Null
+
+        @($script:UserFavorites['101']).Count | Should -Be 2
+        @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('urgent', 'lowerthird')
+    }
+
+    It 'survives a round trip through favorites.json with more than one favourite' {
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $true | Out-Null
+        Set-UserFavorite -UserId 101 -TemplateKey 'lowerthird' -Enabled $true | Should -BeTrue
+
+        $script:UserFavorites = @{}
+        Import-UserFavorites
+
+        @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('urgent', 'lowerthird')
+    }
+
+    It 'ignores a corrupted concatenated key left behind by the old writer' {
+        # Existing favorites.json files carry the damage; they must degrade to
+        # "nothing selected", never to a phantom favourite.
+        $script:UserFavorites['101'] = @('urgentlowerthird')
+
+        @(Get-UserFavoriteSelection -UserId 101).Count | Should -Be 0
+        Set-UserFavorite -UserId 101 -TemplateKey 'urgent' -Enabled $true | Should -BeTrue
+        @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('urgent')
+    }
+
+    Context 'when the selection is larger than the menu can show' {
+        BeforeEach {
+            Mock Get-TemplateStore {
+                [pscustomobject]@{ Map = @{ a = 1; b = 2; c = 3 }; Order = @('a', 'b', 'c'); Errors = @() }
+            }
+            Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'FavoritesCount' }
+        }
+
+        It 'still reports every pick as selected, so a pick past the cap can be undone' {
+            # Reading the capped menu list to decide the tick left the third
+            # pick permanently stuck: it never showed selected, so each tap
+            # re-added a key that was already stored.
+            @('a', 'b', 'c') | ForEach-Object { Set-UserFavorite -UserId 101 -TemplateKey $_ -Enabled $true | Out-Null }
+
+            @(Get-UserFavoriteSelection -UserId 101) | Should -Be @('a', 'b', 'c')
+            @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('a', 'b')
+        }
+
+        It 'removes a pick that sits past the cap' {
+            @('a', 'b', 'c') | ForEach-Object { Set-UserFavorite -UserId 101 -TemplateKey $_ -Enabled $true | Out-Null }
+
+            $selected = @(Get-UserFavoriteSelection -UserId 101) -contains 'c'
+            $selected | Should -BeTrue
+            Set-UserFavorite -UserId 101 -TemplateKey 'c' -Enabled (-not $selected) | Should -BeTrue
+
+            @(Get-UserFavoriteSelection -UserId 101) | Should -Be @('a', 'b')
+        }
+
+        It 'ticks nothing before the user has picked, rather than ticking the usage guesses' {
+            # The menu falls back to most-used templates, but the management
+            # screen must not claim the user chose them.
+            $script:UsageCounts = @{ a = 9; b = 4 }
+
+            @(Get-UserFavoriteSelection -UserId 101).Count | Should -Be 0
+            @(Get-FavoriteTemplateKeys -UserId 101) | Should -Be @('a', 'b')
+        }
+
+        It 'drops a key whose template has left the catalogue' {
+            Set-UserFavorite -UserId 101 -TemplateKey 'a' -Enabled $true | Out-Null
+            $script:UserFavorites['101'] = @('a', 'deleted')
+
+            @(Get-UserFavoriteSelection -UserId 101) | Should -Be @('a')
+        }
+
+        It 'returns an empty array for an unknown user without touching the store' {
+            @(Get-UserFavoriteSelection -UserId 999).Count | Should -Be 0
+            @(Get-UserFavoriteSelection -UserId 0).Count | Should -Be 0
+        }
     }
 }
 

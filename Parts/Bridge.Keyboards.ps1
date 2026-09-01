@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -546,9 +546,34 @@ function Complete-UserAliasEdit {
     return $true
 }
 
+function Get-FavoritesManagementText {
+    <# The tick marks alone cannot explain two states the user can be in:
+       having picked nothing (the menu row is then guessed from usage), and
+       having picked more than FavoritesCount (only the first few reach the
+       menu). Both used to look like the screen was ignoring the taps. #>
+    param([Parameter(Mandatory)][long]$UserId)
+    $selected = @(Get-UserFavoriteSelection -UserId $UserId)
+    $count = Get-SettingInt 'FavoritesCount' 0
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('⭐ اختر القوالب التي تريد إظهارها في مفضلتك:')
+    if ($count -le 0) {
+        $lines.Add('⚠️ عدد المفضلة المعروضة مضبوط على صفر، فلن يظهر أي قالب في القائمة.')
+    }
+    elseif ($selected.Count -eq 0) {
+        $lines.Add("ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $count قوالب استخدامًا تلقائيًا.")
+    }
+    elseif ($selected.Count -gt $count) {
+        $lines.Add("⚠️ اخترت $($selected.Count) قوالب، وتعرض القائمة أول $count منها فقط.")
+    }
+    return ($lines -join "`n")
+}
+
 function Get-FavoritesManagementKeyboard {
     param([Parameter(Mandatory)][long]$UserId)
-    $store = Get-TemplateStore; $selected = @(Get-FavoriteTemplateKeys -UserId $UserId); $rows = @()
+    # Get-UserFavoriteSelection, not Get-FavoriteTemplateKeys: the tick has to
+    # follow what is stored, or a pick past FavoritesCount shows unticked and
+    # the toggle can never turn it back off.
+    $store = Get-TemplateStore; $selected = @(Get-UserFavoriteSelection -UserId $UserId); $rows = @()
     for ($i = 0; $i -lt $store.Order.Count; $i++) {
         $key = [string]$store.Order[$i]
         $mark = if ($selected -contains $key) { '✅' } else { '▫️' }

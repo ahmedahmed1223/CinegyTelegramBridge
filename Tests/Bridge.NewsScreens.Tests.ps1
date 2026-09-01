@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.NewsScreens.Tests.ps1 - News ticker screens, drafts, locks, and publishing.
 
@@ -302,6 +302,7 @@ Describe 'News publish conflict reporting' {
 Describe 'News lock hand-over' {
     BeforeEach {
         $script:NewsLockRequest = $null
+        $script:NewsLockGrant = $null
         $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
         Mock Send-TelegramMessage {}
         Mock Write-BridgeLog {}
@@ -310,8 +311,9 @@ Describe 'News lock hand-over' {
         Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
         Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'NewsLockRequestMinutes' }
+        Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsLockGrantHoldSeconds' }
     }
-    AfterAll { $script:NewsTickerDraft = $null; $script:NewsLockRequest = $null }
+    AfterAll { $script:NewsTickerDraft = $null; $script:NewsLockRequest = $null; $script:NewsLockGrant = $null }
 
     It 'asks the owner rather than taking the draft outright' {
         Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
@@ -362,6 +364,116 @@ Describe 'News lock hand-over' {
         Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
         Update-NewsLockRequest
         $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'News lock under simultaneous requests' {
+    BeforeEach {
+        $script:NewsLockRequest = $null
+        $script:NewsLockGrant = $null
+        $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
+        Mock Send-TelegramMessage {}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Get-UserDisplayName { "user$UserId" }
+        Mock Format-UserAuditActor { "user$UserId" }
+        Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
+        Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('حي'); Hash = 'H'; Error = '' } }
+        Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'NewsLockRequestMinutes' }
+        Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsLockGrantHoldSeconds' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null; $script:NewsLockRequest = $null; $script:NewsLockGrant = $null }
+
+    It 'does not re-arm the countdown when the same requester taps again' {
+        # A repeat tap used to overwrite RequestedAt, pushing the auto-grant
+        # back a full window each time, so an impatient operator waited forever
+        # while the owner collected a fresh ping on every press.
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-4)
+        $firstRequestedAt = [datetime]$script:NewsLockRequest.RequestedAt
+
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeFalse
+
+        [datetime]$script:NewsLockRequest.RequestedAt | Should -Be $firstRequestedAt
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -match 'يطلب' }
+    }
+
+    It 'still auto-grants on schedule after repeated taps' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-6)
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+
+        Update-NewsLockRequest
+
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+    }
+
+    It 'holds the freed slot for the granted requester so a bystander cannot take it' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Complete-NewsLockRelease -Reason 'granted by the owner' | Should -BeTrue
+
+        $bystander = Start-NewsTickerDraft -ChatId 99 -UserId 99
+        $bystander.Success | Should -BeFalse
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+
+        $winner = Start-NewsTickerDraft -ChatId 21 -UserId 21
+        $winner.Success | Should -BeTrue
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 21
+    }
+
+    It 'releases the hold once it expires, so nobody is locked out for good' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null
+        $script:NewsLockGrant.ExpiresAt = (Get-Date).AddSeconds(-1)
+
+        (Start-NewsTickerDraft -ChatId 99 -UserId 99).Success | Should -BeTrue
+        $script:NewsLockGrant | Should -BeNullOrEmpty
+    }
+
+    It 'clears the hold when the granted requester actually starts editing' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null
+
+        (Start-NewsTickerDraft -ChatId 21 -UserId 21).Success | Should -BeTrue
+
+        $script:NewsLockGrant | Should -BeNullOrEmpty
+    }
+
+    It 'refuses to delete a draft that changed hands while the window was open' {
+        # A published, cancelled, or admin-unlocked draft can be replaced by
+        # somebody uninvolved. Granting then would destroy a third party's work
+        # to settle an argument they were never part of.
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        $script:NewsTickerDraft = @{ OwnerUserId = 30; OwnerChatId = 30; Items = @('جديد'); UpdatedAt = (Get-Date).ToString('o') }
+
+        Complete-NewsLockRelease -Reason 'no reply within the window' | Should -BeFalse
+
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 30
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsLockGrant | Should -BeNullOrEmpty
+    }
+
+    It 'keeps the second requester out while the first request is live' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        Request-NewsLockRelease -ChatId 22 -UserId 22 | Should -BeFalse
+
+        [long]$script:NewsLockRequest.RequesterUserId | Should -Be 21
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 20
+    }
+
+    It 'lets only the first of two simultaneous starts take the draft' {
+        # The poll loop hands updates to one handler at a time, so a burst
+        # arriving together is still resolved in order; the second must lose.
+        $script:NewsTickerDraft = $null
+
+        (Start-NewsTickerDraft -ChatId 41 -UserId 41).Success | Should -BeTrue
+        $second = Start-NewsTickerDraft -ChatId 42 -UserId 42
+
+        $second.Success | Should -BeFalse
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 41
     }
 }
 

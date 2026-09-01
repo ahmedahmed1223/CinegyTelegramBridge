@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -461,10 +461,20 @@ function Set-UserFavorite {
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($TemplateKey)) { return $false }
     $id = [string]$UserId
-    $current = if ($script:UserFavorites.ContainsKey($id)) { @($script:UserFavorites[$id]) } else { @() }
-    if ($Enabled) { if ($current -notcontains $TemplateKey) { $current += $TemplateKey } }
-    else { $current = @($current | Where-Object { $_ -ne $TemplateKey }) }
-    $script:UserFavorites[$id] = $current
+    # A typed list, because `$x = if (...) { @(...) } else { @() }` does not
+    # survive: an if branch is a pipeline, a pipeline unrolls a zero- or
+    # one-element array, and $x lands as $null or a bare String. The `+=` that
+    # followed was then string concatenation, so a user's second favourite
+    # turned @('a') into 'ab' - one key naming no template, which every reader
+    # silently filtered out. Both favourites vanished from the menu and no
+    # error was raised anywhere.
+    $current = [System.Collections.Generic.List[string]]::new()
+    if ($script:UserFavorites.ContainsKey($id)) {
+        foreach ($existing in @($script:UserFavorites[$id])) { $current.Add([string]$existing) }
+    }
+    if ($Enabled) { if (-not $current.Contains($TemplateKey)) { $current.Add($TemplateKey) } }
+    else { $current.RemoveAll({ param($k) $k -eq $TemplateKey }) | Out-Null }
+    $script:UserFavorites[$id] = $current.ToArray()
     return Save-UserFavorites
 }
 
@@ -518,6 +528,25 @@ function Format-UserAuditActor {
     return "$cleanName $lrm($id)$lrm"
 }
 
+function Get-UserFavoriteSelection {
+    <# What the user actually ticked: every stored key that still names a live
+       template, uncapped, with no usage-based guessing.
+
+       Get-FavoriteTemplateKeys below answers a different question - what fits
+       on the menu row - and using it to decide whether a checkbox is ticked
+       made every pick past FavoritesCount unreachable. The key was in the
+       store but truncated out of the answer, so the screen showed it
+       unticked, the toggle read that as not-a-favourite and tried to add it
+       again, and it could never be removed. Selection and display are two
+       different lists and have to be read from two different functions. #>
+    param([long]$UserId = 0)
+    if ($UserId -le 0) { return @() }
+    $id = [string]$UserId
+    if (-not $script:UserFavorites.ContainsKey($id)) { return @() }
+    $store = Get-TemplateStore
+    return @($script:UserFavorites[$id] | Where-Object { $store.Map.ContainsKey($_) })
+}
+
 function Get-FavoriteTemplateKeys {
     param([long]$UserId = 0)
     $count = Get-SettingInt 'FavoritesCount' 0
@@ -525,7 +554,7 @@ function Get-FavoriteTemplateKeys {
     $store = Get-TemplateStore
     $id = [string]$UserId
     if ($UserId -gt 0 -and $script:UserFavorites.ContainsKey($id)) {
-        return @($script:UserFavorites[$id] | Where-Object { $store.Map.ContainsKey($_) } | Select-Object -First $count)
+        return @((Get-UserFavoriteSelection -UserId $UserId) | Select-Object -First $count)
     }
     return @(
         $script:UsageCounts.GetEnumerator() |

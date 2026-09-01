@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -57,8 +57,15 @@ function Get-CallbackRefusal {
         always been that a button is both not drawn and not honoured.
     #>
     param([string]$Data, [long]$ChatId, [long]$UserId)
-    if ($Data -like 'news:sheet*' -and -not (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId)) {
-        return 'سحب الشيت غير مسموح لك. اطلب من المشرف تفعيله.'
+    if ($Data -like 'news:sheet*') {
+        if (-not (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId)) {
+            return 'سحب الشيت غير مسموح لك. اطلب من المشرف تفعيله.'
+        }
+        # Permission says who may ever pull; the lock says who may pull now.
+        # Both pulls rewrite the ticker, so neither belongs to an operator who
+        # is not the current writer - including when nobody is.
+        $lockDenial = Get-NewsSheetPullLockDenial -ChatId $ChatId -UserId $UserId
+        if (-not [string]::IsNullOrWhiteSpace($lockDenial)) { return $lockDenial }
     }
     if ($Data -like 'news:restore*' -and -not (Test-Admin -ChatId $ChatId -UserId $UserId) `
             -and -not (Get-Setting 'AllowOperatorsRestoreNews')) {
@@ -252,7 +259,7 @@ function Invoke-CallbackQuery {
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
         }
-        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
+        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Clear-NewsLockReservation;$script:NewsLockRequest=$null;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
         'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm';style='danger'},@{text='إلغاء';callback_data='news:refresh'}))};break }
         'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
         'news:backups' { Send-TelegramMessage -ChatId $chatId -Text 'اختر نسخة لمراجعة استعادتها:' -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
@@ -388,17 +395,26 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:favorites' {
-            Send-TelegramMessage -ChatId $chatId -Text '⭐ اختر القوالب التي تريد إظهارها في مفضلتك:' -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FavoritesManagementText -UserId $userId) -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
             break
         }
         'favtoggle:*' {
             $template = Get-TemplateByIndex -Index ([int](Get-CallbackArg $data 'favtoggle:'))
             if (-not $template) { break }
-            $selected = @(Get-FavoriteTemplateKeys -UserId $userId) -contains [string]$template.Key
+            # The stored selection decides the direction of the toggle, not the
+            # capped menu list: reading the capped list made a pick past
+            # FavoritesCount permanently unremovable, because it never appeared
+            # selected and every tap re-added a key that was already there.
+            $selected = @(Get-UserFavoriteSelection -UserId $userId) -contains [string]$template.Key
             if (Set-UserFavorite -UserId $userId -TemplateKey ([string]$template.Key) -Enabled (-not $selected)) {
                 $action = if ($selected) { 'أزيل من' } else { 'أضيف إلى' }
                 Add-AuditEntry "⭐ $($template.Key) $action مفضلة - بواسطة $(Format-UserAuditActor -UserId $userId)"
-                Send-TelegramMessage -ChatId $chatId -Text "✅ $($template.Key): $action المفضلة." -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text "✅ $($template.Key): $action المفضلة.`n$(Get-FavoritesManagementText -UserId $userId)" -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+            }
+            else {
+                # A failed write used to be silent, so the tick simply did not
+                # move and the user tapped again against a full or locked disk.
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تعذّر حفظ المفضلة. راجع السجل ثم أعد المحاولة." -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
             }
             break
         }

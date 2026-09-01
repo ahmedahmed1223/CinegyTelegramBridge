@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     TelegramBridge.ps1
 
@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.16.0'
+$script:BridgeVersion = '7.17.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -182,6 +182,7 @@ $script:DefaultSettings = [ordered]@{
     NewsListLabelLength        = 120     # headline characters listed in the reorder screen's text
     NewsListStackedLabelLength = 60      # headline characters shown when it owns the row
     NewsLockRequestMinutes     = 5       # a draft owner has this long to answer a hand-over request
+    NewsLockGrantHoldSeconds   = 120     # the granted requester alone may start a draft for this long
     # Google Sheets as the ticker source. Empty URL disables the whole path, so
     # a bridge that never configures it behaves exactly as before. The default
     # mode is manual on purpose: an unattended job that rewrites what is on air
@@ -357,6 +358,7 @@ $script:SettingDisplayMetadata = @{
     MaxPendingApprovals = @{ Unit = 'طلب'; Description = 'الحد الأقصى لطلبات الوصول المعلّقة' }
     PendingApprovalExpiryHours = @{ Unit = 'ساعة'; Description = 'مدة صلاحية طلب الوصول' }
     FavoritesCount = @{ Unit = 'قوالب'; Description = 'عدد القوالب المفضلة المعروضة' }
+    NewsLockGrantHoldSeconds = @{ Unit = 'ثانية'; Description = 'مدة حجز قفل الأخبار لمن طلبه بعد التسليم (0 للتعطيل)' }
     RecentValuesPerField = @{ Unit = 'قيم'; Description = 'عدد القيم الحديثة لكل حقل' }
     LogMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'الحجم الأقصى لملف السجل' }
     LogKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد ملفات السجل المحتفَظ بها' }
@@ -720,6 +722,10 @@ $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
 $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
 $script:NewsLockRequest = $null
+# Who a just-granted news lock is being held for, and until when. Without it a
+# hand-over settled after five minutes of negotiation was won by whoever tapped
+# fastest in the second after the grant.
+$script:NewsLockGrant = $null
 $script:PendingCancelReason = $null
 $script:BridgeStartedAt = Get-Date
 # Last attempt (not last success) of the Google Sheets ticker sync.
@@ -854,6 +860,7 @@ foreach ($entry in @(
                 'NewsDraftTimeoutMinutes', 'NewsListLayout', 'NewNewsItemAtTop',
                 'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength',
                 'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
+                'NewsLockGrantHoldSeconds',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
                 'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyScope',
@@ -921,6 +928,7 @@ $script:SettingNavigationLabels = @{
     NewsImportMaxBytes = 'حد استيراد الأخبار'
     NewsBackupKeepFiles = 'نسخ الأخبار المحفوظة'
     NewsLockRequestMinutes = 'مهلة قفل مسودة الأخبار'
+    NewsLockGrantHoldSeconds = 'حجز قفل الأخبار بعد التسليم'
     AllowOperatorsDeleteNews = 'السماح للمشغل بحذف الأخبار'
     AllowOperatorsRestoreNews = 'السماح للمشغل باستعادة الأخبار'
     AllowOperatorsClearAllNews = 'السماح للمشغل بمسح كل الأخبار'

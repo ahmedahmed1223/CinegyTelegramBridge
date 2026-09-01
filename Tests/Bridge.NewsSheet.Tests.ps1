@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.NewsSheet.Tests.ps1 - pulling the ticker from a Google Sheets CSV
     export, and the rules about who wins when a person is editing.
@@ -208,8 +208,9 @@ Describe 'News sheet pulled into the draft for review' {
         $result.Success | Should -BeFalse
     }
 
-    It 'offers both the publish and the review pull on the news screen' {
+    It 'offers both the publish and the review pull to the lock holder' {
         Mock Test-Admin { $true }
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 101; OwnerChatId = 100; Items = @('يحرر') }
         $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
         $callbacks | Should -Contain 'news:sheet'
         $callbacks | Should -Contain 'news:sheetdraft'
@@ -292,10 +293,38 @@ Describe 'The draft lock binds the sheet pull too' {
         $callbacks | Should -Contain 'news:lockrequest'
     }
 
-    It 'keeps the pull buttons for an administrator' {
+    It 'hides them from an administrator who does not hold the lock either' {
+        # An administrator pulling over a live draft is the same two-writer
+        # situation the lock exists to prevent. The unlock button is still
+        # there: take the lock first, then pull.
         Mock Test-Admin { $true }
-        @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
-            Should -Contain 'news:sheet'
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Not -Contain 'news:sheet'
+        $callbacks | Should -Not -Contain 'news:sheetdraft'
+        $callbacks | Should -Contain 'news:unlock'
+    }
+
+    It 'shows them to the operator who does hold the lock' {
+        Mock Test-Admin { $false }
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $true }
+                default { '' }
+            }
+        }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 202 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Contain 'news:sheet'
+        $callbacks | Should -Contain 'news:sheetdraft'
+    }
+
+    It 'refuses a pull button pressed from a screen drawn before the lock moved' {
+        # Hiding a button is not a rule: Telegram keeps old messages alive, so
+        # the callback has to refuse it as well.
+        Mock Test-Admin { $false }
+        Get-CallbackRefusal -Data 'news:sheet' -ChatId 100 -UserId 101 | Should -Match 'القفل'
+        Get-CallbackRefusal -Data 'news:sheetdraftconfirm' -ChatId 100 -UserId 101 | Should -Not -BeNullOrEmpty
+        Get-CallbackRefusal -Data 'news:sheet' -ChatId 202 -UserId 202 | Should -BeNullOrEmpty
     }
 }
 
@@ -435,12 +464,12 @@ Describe 'News sheet download guard' {
 }
 
 Describe 'News sheet operator surface' {
-    BeforeEach { $script:NewsTickerDraft = $null }
+    BeforeEach { $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 202; OwnerChatId = 202; Items = @('يحرر') } }
 
-    It 'offers the manual pull from the news management screen' {
+    It 'offers the manual pull to the administrator holding the lock' {
         Mock Get-Setting { if ($Name -eq 'NewsSheetCsvUrl') { 'https://docs.google.com/x' } else { '' } }
         Mock Test-Admin { $true }
-        @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
+        @((Get-NewsTickerManagementKeyboard -ChatId 202 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) |
             Should -Contain 'news:sheet'
     }
 
@@ -453,11 +482,30 @@ Describe 'News sheet operator surface' {
                 default { '' }
             }
         }
-        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 100 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 202 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
         $callbacks | Should -Contain 'news:sheet'
         # The review pull travels with it: an operator who may publish the
         # sheet may certainly load it into a draft first.
         $callbacks | Should -Contain 'news:sheetdraft'
+    }
+
+    It 'shows neither pull while nobody holds the lock' {
+        # The gap the lock rule closes: with no draft open, any operator with
+        # pull access could rewrite the ticker straight from the sheet.
+        $script:NewsTickerDraft = $null
+        Mock Test-Admin { $false }
+        Mock Get-Setting {
+            switch ($Name) {
+                'NewsSheetCsvUrl' { 'https://docs.google.com/x' }
+                'AllowOperatorsSheetPull' { $true }
+                default { '' }
+            }
+        }
+        $callbacks = @((Get-NewsTickerManagementKeyboard -ChatId 202 -UserId 202).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks | Should -Not -Contain 'news:sheet'
+        $callbacks | Should -Not -Contain 'news:sheetdraft'
+        $callbacks | Should -Contain 'news:start'
+        Get-CallbackRefusal -Data 'news:sheet' -ChatId 202 -UserId 202 | Should -Match 'بدء التحرير'
     }
 
     It 'puts the pull back behind the administrator bar when the switch is off' {

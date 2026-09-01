@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -100,10 +100,19 @@ function Get-StatusRichBlocks {
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Overall,
         [AllowNull()][object[]]$DetailLines = $null,
-        [string]$DetailSummary = '🔍 التفاصيل'
+        [string]$DetailSummary = '🔍 التفاصيل',
+        [AllowEmptyString()][string]$Identity = ''
     )
     $blocks = @(@{ type = 'heading'; text = "$Title — v$($script:BridgeVersion)"; size = 3 })
     $blocks += @{ type = 'paragraph'; text = $Overall }
+    # Above the fold rather than inside the collapsed detail: the id is what
+    # an operator is asked for when requesting access or reporting a fault,
+    # and a fact you have to expand a section to reach is a fact people
+    # screenshot wrongly. It is kept out of the details list so it appears
+    # exactly once on the screen.
+    if (-not [string]::IsNullOrWhiteSpace($Identity)) {
+        $blocks += @{ type = 'paragraph'; text = $Identity }
+    }
     $blocks += @{ type = 'divider' }
     $blocks += @(Get-OnAirTableBlocks)
     # Blank separators are a text-screen device; as blocks they would be empty
@@ -142,6 +151,11 @@ function Invoke-StatusCommand {
     $lines.Add("ℹ️ الحالة — v$($script:BridgeVersion)")
     $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
     $lines.Add($overall)
+    # Format-UserAuditActor, not a bare id: it resolves the alias when there is
+    # one and pins the bracketed digits to LTR, so an Arabic name followed by
+    # an id does not render as ")8201739556(".
+    $identityLine = "👤 معرّفك: $(Format-UserAuditActor -UserId $UserId)"
+    $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
@@ -184,8 +198,11 @@ function Invoke-StatusCommand {
     # The same lines, reshaped: the verdict as a heading, what is on air
     # as a table, and the machine detail folded under it. The leading
     # lines are skipped because the blocks already carry them.
-    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall `
-        -DetailLines @($lines | Select-Object -Skip 3) -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
+    # Skip 4: the blocks already carry the title, the clock, the verdict and
+    # now the identity line, and repeating them inside the details would print
+    # each of those facts twice on one screen.
+    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall -Identity $identityLine `
+        -DetailLines @($lines | Select-Object -Skip 4) -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
 }
@@ -610,6 +627,8 @@ function Invoke-FullStatusCommand {
     $lines.Add("📊 الحالة الكاملة — v$($script:BridgeVersion)")
     $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
     $lines.Add($overall)
+    $identityLine = "👤 معرّفك: $(Format-UserAuditActor -UserId $UserId)"
+    $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add((Get-OnAirSummary))
     $lines.Add('')
@@ -652,8 +671,10 @@ function Invoke-FullStatusCommand {
     # The same lines, reshaped: the verdict as a heading, what is on air
     # as a table, and the machine detail folded under it. The leading
     # lines are skipped because the blocks already carry them.
-    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
-        -DetailLines @($lines | Select-Object -Skip 5) -DetailSummary '🔍 التفاصيل الكاملة'
+    # Skip 6 rather than 5: the identity line joined the header block, so the
+    # count of lines the blocks already carry moved with it.
+    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall -Identity $identityLine `
+        -DetailLines @($lines | Select-Object -Skip 6) -DetailSummary '🔍 التفاصيل الكاملة'
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
 }

@@ -950,3 +950,57 @@ Describe 'The picture the scene ships with' {
         Get-MojazTemplateImage -Path $scene | Should -BeNullOrEmpty
     }
 }
+
+function global:Assert-MojazKeyboardShape {
+    <# Telegram wants an array of arrays. A bare button where a row should be
+       is a 400, and the shape that produces it - a leading comma on the first
+       row of a multi-row literal - reads exactly like the correct single-row
+       idiom, so it is worth asserting rather than eyeballing. #>
+    param($Markup, [string]$Because)
+    foreach ($row in $Markup.inline_keyboard) {
+        ($row -is [hashtable]) | Should -BeFalse -Because "$Because has a bare button where a row should be"
+        @($row).Count | Should -BeGreaterThan 0 -Because "$Because has an empty row"
+        foreach ($button in @($row)) {
+            $button.ContainsKey('text') | Should -BeTrue -Because "$Because has a row entry that is not a button"
+            $button.ContainsKey('callback_data') | Should -BeTrue -Because "$Because has a button with no callback"
+        }
+    }
+}
+
+Describe 'Every Mojaz keyboard is shaped the way Telegram wants' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplateImage { '.\Mojaz\Pic01.png' }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        $script:bulletin = New-TestMojazLibrary -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'أ' -Image '.\Mojaz\bot\a.jpg')
+            (New-TestMojazRow -Id 'r_2' -Title 'ب')
+        )
+        $script:MojazSchedules = @(
+            [pscustomobject]@{ Id = 'ms_1'; BulletinId = [string]$script:bulletin.Id; Status = 'scheduled'; ScheduledAt = '2026-09-03T08:00:00+03:00' }
+        )
+    }
+
+    It 'builds every screen keyboard as rows of buttons' {
+        Assert-MojazKeyboardShape -Markup (Get-MojazKeyboard -Bulletin $script:bulletin) -Because 'the bulletin screen'
+        Assert-MojazKeyboardShape -Markup (Get-MojazLibraryKeyboard) -Because 'the library screen'
+        Assert-MojazKeyboardShape -Markup (Get-MojazSchedulesKeyboard) -Because 'the schedules screen'
+        Assert-MojazKeyboardShape -Markup (Get-MojazImageKeyboard) -Because 'the picture chooser'
+        Assert-MojazKeyboardShape -Markup (Get-MojazConfirmKeyboard -Question 'q' -ConfirmData 'mojaz:dropconfirm') -Because 'the confirmation'
+    }
+
+    It 'builds the row screen keyboard as rows of buttons' {
+        # The bug this exists for: a leading comma on the first of two rows
+        # flattened the second into bare buttons, and every press of ✏️
+        # answered with a 400 in the log and nothing on the phone.
+        $script:sent = $null
+        Mock Send-TelegramMessage { $script:sent = $ReplyMarkup }
+
+        Show-MojazRowScreen -RowId 'r_1' -ChatId 100 -UserId 101
+
+        $script:sent | Should -Not -BeNullOrEmpty
+        Assert-MojazKeyboardShape -Markup $script:sent -Because 'the row screen'
+    }
+}

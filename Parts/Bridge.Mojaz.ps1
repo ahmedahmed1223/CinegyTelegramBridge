@@ -804,13 +804,19 @@ function Show-MojazRowScreen {
     if ($effective.Count -gt $index -and $effective[$index]) {
         $lines += "<i>ما سيظهر: $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$index] -Leaf))</i>"
     }
+    # A comma before EVERY row, the way every other keyboard here is written:
+    # @() flattens nested arrays, so a row without it is spread into bare
+    # buttons and Telegram answers 400.
     $keyboard = @{ inline_keyboard = @(
             , @(
                 (New-Button '🖼 الصورة' "mojaz:editimg:$RowId")
                 (New-Button '📝 العنوان' "mojaz:edittitle:$RowId")
                 (New-Button '📰 النص' "mojaz:edittext:$RowId")
             )
-            @((New-Button '🗑 حذف الصف' "mojaz:del:$RowId" -Style danger), (New-Button '⬅️ الجدول' 'mojaz:refresh'))
+            , @(
+                (New-Button '🗑 حذف الصف' "mojaz:del:$RowId" -Style danger)
+                (New-Button '⬅️ الجدول' 'mojaz:refresh')
+            )
         ) }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard
 }

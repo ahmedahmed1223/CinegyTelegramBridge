@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.25.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.25.0'
+        $script:BridgeVersion | Should -Be '7.26.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.26.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -915,5 +915,32 @@ Describe 'Restoring every default asks first' {
 
         $yes['style'] | Should -Be 'danger'
         $no.ContainsKey('style') | Should -BeFalse
+    }
+}
+
+Describe 'The configuration backups list' {
+    It 'says there are none rather than showing a bare title' {
+        $missing = Join-Path $TestDrive 'no-such-config.json'
+
+        Get-ConfigBackupsText -Path $missing | Should -Match 'لا نسخ محفوظة'
+        # The listing used to be an if-expression per caller: no files came
+        # back as $null and the .Count each did on it threw - on this screen.
+        @(Get-ConfigBackupFiles -Path $missing).Count | Should -Be 0
+        { Get-ConfigBackupsKeyboard -Path $missing } | Should -Not -Throw
+    }
+
+    It 'numbers each saved copy with its age, matching the buttons' {
+        $configPath = Join-Path $TestDrive 'aged-config.json'
+        $backupDirectory = "$configPath.backups"
+        New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+        '{}' | Set-Content -LiteralPath (Join-Path $backupDirectory 'config-one.json')
+
+        $text = Get-ConfigBackupsText -Path $configPath
+
+        $text | Should -Match '1\.'
+        $text | Should -Match 'نسخة'
+        @((Get-ConfigBackupsKeyboard -Path $configPath).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['text'] } |
+                Where-Object { $_ -like '1.*' }).Count | Should -Be 1
     }
 }

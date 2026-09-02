@@ -262,7 +262,7 @@ function Invoke-CallbackQuery {
         'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Clear-NewsLockReservation;$script:NewsLockRequest=$null;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
         'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm';style='danger'},@{text='إلغاء';callback_data='news:refresh'}))};break }
         'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
-        'news:backups' { Send-TelegramMessage -ChatId $chatId -Text 'اختر نسخة لمراجعة استعادتها:' -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
+        'news:backups' { Send-TelegramMessage -ChatId $chatId -Text (Get-NewsTickerBackupsText) -ParseMode HTML -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
         'news:restore:*' {
             if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restore:')
             Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ استعادة';callback_data="news:restoreconfirm:$i";style='danger'},@{text='إلغاء';callback_data='news:backups'}))};break
@@ -1036,7 +1036,7 @@ function Invoke-CallbackQuery {
         }
         'menu:backups' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text "🗄 نسخ الإعدادات المحفوظة:" -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-ConfigBackupsText) -ParseMode HTML -ReplyMarkup (Get-ConfigBackupsKeyboard)
             }
             break
         }
@@ -1223,11 +1223,7 @@ function Invoke-CallbackQuery {
         }
         'cfg:restore:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $backupDirectory = "$ConfigPath.backups"
-                $files = if (Test-Path -LiteralPath $backupDirectory) {
-                    @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Sort-Object LastWriteTimeUtc, Name -Descending)
-                }
-                else { @() }
+                $files = @(Get-ConfigBackupFiles -Path $ConfigPath)
                 $index = [int](Get-CallbackArg $data 'cfg:restore:')
                 if ($index -lt 0 -or $index -ge $files.Count) {
                     Send-TelegramMessage -ChatId $chatId -Text "النسخة المحددة لم تعد موجودة." -ReplyMarkup (Get-ConfigBackupsKeyboard)

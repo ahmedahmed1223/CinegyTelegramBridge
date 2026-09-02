@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.26.0
+
+Both backup screens are lists now. A timestamp on a button does not say what
+is inside that copy, and restoring a ticker backup puts its text on air, so
+each entry says how many items it holds and how long ago it was saved; the
+configuration backups say the same, with what a restore costs. The listing of
+configuration backups had been written three times as an if-expression, which
+hands back no files as $null and throws on .Count - on the empty screen. It is
+one reader now, covered by a test.
+
 ## Version 7.25.0
 
 The authorized users screen is a list again. It was four buttons per person -

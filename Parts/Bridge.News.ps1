@@ -1142,9 +1142,55 @@ function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb -ParseMode 'HTML'
 }
 
+function Get-NewsTickerBackupFiles {
+    <# The saved copies, newest first. One reader for the list and the
+       keyboard, so line 3 in the text is the copy button 3 restores. #>
+    return @(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 10)
+}
+
+function Get-NewsTickerBackupsText {
+    <#
+        Which saved copy is which.
+
+        The screen was one line - "اختر نسخة لمراجعة استعادتها:" - over
+        buttons carrying a timestamp each. A timestamp does not say what is
+        in that copy, and the press puts its text on air; how many items it
+        holds is what an editor recognises a copy by, next to how long ago it
+        was saved.
+    #>
+    $files = @(Get-NewsTickerBackupFiles)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🕘 نسخ شريط الأخبار</b>')
+    if ($files.Count -eq 0) {
+        $lines.Add('<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل نشر.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add('')
+    $separator = [string](Get-Setting 'NewsItemSeparator')
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $file = $files[$i]
+        $age = [int]([math]::Max(0, ((Get-Date) - $file.LastWriteTime).TotalMinutes))
+        $count = ''
+        try {
+            $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
+            $parsed = ConvertFrom-NewsTickerText -Text $text -Separator $separator `
+                -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+            $count = " · $(@($parsed.Items).Count) خبرًا"
+        }
+        catch { $count = ' · تعذّرت قراءتها' }
+        $lines.Add("$($i + 1). <code>$($file.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code>$count")
+        $lines.Add("   $(if ($age -lt 1) { 'حُفظت الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+    }
+    $lines.Add('')
+    $lines.Add('<i>الاستعادة تعرض النسخة للمراجعة قبل أن يصل شيء إلى الهواء.</i>')
+    return ($lines -join "`n")
+}
+
 function Get-NewsTickerBackupsKeyboard {
-    $rows=@();$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10)
-    for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text=$files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss');callback_data="news:restore:$i"})};$rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
+    $rows=@();$files=@(Get-NewsTickerBackupFiles)
+    for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text="$($i+1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))";callback_data="news:restore:$i"})};$rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
 }
 
 function Get-NewsTickerItemsKeyboard { param([long]$UserId)

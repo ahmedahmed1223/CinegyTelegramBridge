@@ -1165,17 +1165,54 @@ function Get-LayerNameEditKeyboard {
         ) }
 }
 
-function Get-ConfigBackupsKeyboard {
+function Get-ConfigBackupFiles {
+    <#
+        The saved configurations, newest first.
+
+        One reader for the list, the keyboard and the restore itself, so the
+        row that is pressed is the file that is read. It also stops the
+        listing being written three times with an if-expression: that hands
+        back a single file as the file and no files as $null, and the .Count
+        each caller does on it then throws - on the empty screen, which is
+        exactly where nobody is watching.
+    #>
     param([string]$Path = $ConfigPath)
     $backupDirectory = "$Path.backups"
-    $files = if (Test-Path -LiteralPath $backupDirectory) {
-        @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' | Sort-Object LastWriteTimeUtc, Name -Descending)
+    if (-not (Test-Path -LiteralPath $backupDirectory)) { return @() }
+    return @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc, Name -Descending)
+}
+
+function Get-ConfigBackupsText {
+    <# Which saved configuration is which. The buttons carried a timestamp
+       and nothing else; how long ago it was written is what tells an
+       administrator whether it predates the change they are undoing. #>
+    param([string]$Path = $ConfigPath)
+    $files = @(Get-ConfigBackupFiles -Path $Path)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🗄 نسخ الإعدادات</b>')
+    if ($files.Count -eq 0) {
+        $lines.Add('<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل تغيير.</i>')
+        return ($lines -join "`n")
     }
-    else { @() }
+    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add('')
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $age = [int]([math]::Max(0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
+        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { 'الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+    }
+    $lines.Add('')
+    $lines.Add('<i>الاستعادة تعرض جدول ما سيتغيّر قبل الكتابة، وتحتاج إعادة تشغيل بعدها.</i>')
+    return ($lines -join "`n")
+}
+
+function Get-ConfigBackupsKeyboard {
+    param([string]$Path = $ConfigPath)
+    $files = @(Get-ConfigBackupFiles -Path $Path)
     $rows = @()
     for ($i = 0; $i -lt $files.Count; $i++) {
-        $label = $files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-        $rows += , @( (New-Button "🗄 $label" "cfg:restore:$i" -Style danger) )
+        $label = $files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+        $rows += , @( (New-Button "$($i + 1). 🗄 $label" "cfg:restore:$i" -Style danger) )
     }
     if ($files.Count -eq 0) { $rows += , @( (New-Button "لا توجد نسخ محفوظة" 'menu:settings') ) }
     $rows += , @( (New-Button "⬅️ رجوع" 'menu:settings') )

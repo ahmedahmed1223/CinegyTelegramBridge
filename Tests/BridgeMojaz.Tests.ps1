@@ -1,0 +1,191 @@
+#requires -Version 7
+
+BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeMojaz.psm1') -Force
+}
+
+Describe 'Mojaz bulletin library domain' {
+    It 'creates named bulletins with stable ids and normalized unique names' {
+        $library = New-MojazLibrary
+        $first = Add-MojazBulletin -Library $library -Name '  الموجز   الصباحي  ' -Now ([datetimeoffset]'2026-09-02T08:00:00+03:00') -UserId 11
+        $duplicate = Add-MojazBulletin -Library $first.Value -Name 'الموجز الصباحي' -Now ([datetimeoffset]'2026-09-02T08:01:00+03:00') -UserId 12
+
+        $first.Success | Should -BeTrue
+        $first.Value.Bulletins.Count | Should -Be 1
+        $first.Value.Bulletins[0].Name | Should -Be 'الموجز الصباحي'
+        $first.Value.Bulletins[0].Id | Should -Match '^b_[a-f0-9]{8}$'
+        $duplicate.Success | Should -BeFalse
+        $duplicate.ErrorCode | Should -Be 'duplicate_name'
+    }
+
+    It 'copies a bulletin without sharing its rows and starts a new revision' {
+        $library = New-MojazLibrary
+        $created = Add-MojazBulletin -Library $library -Name 'صباحي' -Now ([datetimeoffset]'2026-09-02T08:00:00+03:00') -UserId 11
+        $source = $created.Value.Bulletins[0]
+        $source.Rows = @(@{ Id = 'r_01'; ImageMode = 'inherit'; Image = ''; Title = 'أ'; Text = 'خبر' })
+        $source.Revision = 3
+
+        $copy = Copy-MojazBulletin -Library $created.Value -BulletinId $source.Id -Name 'مسائي' -Now ([datetimeoffset]'2026-09-02T09:00:00+03:00') -UserId 12
+        $source.Rows[0].Title = 'تغيّر الأصل'
+
+        $copy.Success | Should -BeTrue
+        $copy.Value.Bulletins[1].Name | Should -Be 'مسائي'
+        $copy.Value.Bulletins[1].Revision | Should -Be 1
+        $copy.Value.Bulletins[1].Rows[0].Title | Should -Be 'أ'
+        $copy.Value.Bulletins[1].Id | Should -Not -Be $source.Id
+    }
+
+    It 'renames a bulletin and increments only its saved revision' {
+        $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name 'قديم' -Now ([datetimeoffset]'2026-09-02T08:00:00+03:00') -UserId 11
+        $id = $created.Value.Bulletins[0].Id
+
+        $renamed = Rename-MojazBulletin -Library $created.Value -BulletinId $id -Name 'جديد' -Now ([datetimeoffset]'2026-09-02T10:00:00+03:00') -UserId 12
+
+        $renamed.Success | Should -BeTrue
+        $renamed.Value.Bulletins[0].Name | Should -Be 'جديد'
+        $renamed.Value.Bulletins[0].Revision | Should -Be 2
+        $renamed.Value.Bulletins[0].UpdatedBy | Should -Be 12
+    }
+}
+
+Describe 'Mojaz immutable run snapshots' {
+    It 'keeps copied rows after the editable bulletin changes' {
+        $bulletin = [pscustomobject]@{
+            Id = 'b_12345678'; Name = 'صباحي'; Revision = 7
+            DelaySeconds = 8; IntroExtraSeconds = 0; LastRowSeconds = 0
+            Rows = @(
+                [pscustomobject]@{ Id='r_1'; ImageMode='new'; Image='.\Mojaz\bot\a.jpg'; Title='أ'; Text='الأول' }
+                [pscustomobject]@{ Id='r_2'; ImageMode='inherit'; Image=''; Title='ب'; Text='الثاني' }
+            )
+        }
+        $snapshot = New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming ([pscustomobject]@{ IntroSeconds=1.2; OutroSeconds=6.72 }) -Now ([datetimeoffset]'2026-09-02T08:00:00+03:00')
+
+        $bulletin.Rows[0].Title = 'معدّل'
+        $bulletin.Rows = @()
+
+        $snapshot.Success | Should -BeTrue
+        $snapshot.Value.Rows.Count | Should -Be 2
+        $snapshot.Value.Rows[0].Title | Should -Be 'أ'
+        $snapshot.Value.BulletinRevision | Should -Be 7
+    }
+
+    It 'uses one plan for a single row including entrance dwell and exit hold' {
+        $bulletin = [pscustomobject]@{
+            Id='b_12345678'; Name='واحد'; Revision=1; DelaySeconds=8
+            IntroExtraSeconds=0; LastRowSeconds=0
+            Rows=@([pscustomobject]@{ Id='r_1'; ImageMode='inherit'; Image=''; Title='أ'; Text='خبر' })
+        }
+
+        $snapshot = New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming ([pscustomobject]@{ IntroSeconds=1.2; OutroSeconds=6.72 })
+
+        $snapshot.Value.Plan.Count | Should -Be 1
+        $snapshot.Value.Plan[0].HoldSeconds | Should -Be 17
+        $snapshot.Value.TotalSeconds | Should -Be 17
+    }
+
+    It 'plans multiple rows with intro on the first and outro hold on the last' {
+        $bulletin = [pscustomobject]@{
+            Id='b_12345678'; Name='متعدد'; Revision=1; DelaySeconds=8
+            IntroExtraSeconds=0; LastRowSeconds=0
+            Rows=@(
+                [pscustomobject]@{ Id='r_1'; ImageMode='inherit'; Image=''; Title='أ'; Text='1' }
+                [pscustomobject]@{ Id='r_2'; ImageMode='inherit'; Image=''; Title='ب'; Text='2' }
+                [pscustomobject]@{ Id='r_3'; ImageMode='inherit'; Image=''; Title='ج'; Text='3' }
+            )
+        }
+
+        $snapshot = New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming ([pscustomobject]@{ IntroSeconds=1.2; OutroSeconds=6.72 })
+
+        @($snapshot.Value.Plan.HoldSeconds) | Should -Be @(10, 8, 7)
+        $snapshot.Value.TotalSeconds | Should -Be 25
+    }
+}
+
+Describe 'Mojaz due schedule ordering' {
+    It 'orders due work by scheduled time then creation time then id and excludes future work' {
+        $schedules = @(
+            [pscustomobject]@{ Id='c'; Status='scheduled'; ScheduledAt='2026-09-02T09:00:00+03:00'; CreatedAt='2026-09-01T08:00:00+03:00' }
+            [pscustomobject]@{ Id='b'; Status='queued'; ScheduledAt='2026-09-02T08:00:00+03:00'; CreatedAt='2026-09-01T09:00:00+03:00' }
+            [pscustomobject]@{ Id='a'; Status='scheduled'; ScheduledAt='2026-09-02T08:00:00+03:00'; CreatedAt='2026-09-01T09:00:00+03:00' }
+            [pscustomobject]@{ Id='future'; Status='scheduled'; ScheduledAt='2026-09-02T12:00:00+03:00'; CreatedAt='2026-09-01T07:00:00+03:00' }
+            [pscustomobject]@{ Id='done'; Status='completed'; ScheduledAt='2026-09-02T07:00:00+03:00'; CreatedAt='2026-09-01T07:00:00+03:00' }
+        )
+
+        $due = @(Get-MojazDueQueue -Schedules $schedules -Now ([datetimeoffset]'2026-09-02T10:00:00+03:00'))
+
+        @($due.Id) | Should -Be @('a', 'b', 'c')
+    }
+}
+
+Describe 'Mojaz bulletin row editing' {
+    BeforeEach {
+        $script:library = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الصباحي').Value
+        $script:id = [string]$script:library.Bulletins[0].Id
+    }
+
+    It 'adds rows with stable ids and bumps the revision once per change' {
+        $first = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'خبر أ'
+        $first.Success | Should -BeTrue
+        $bulletin = $first.Value.Bulletins[0]
+        @($bulletin.Rows).Count | Should -Be 1
+        [string]$bulletin.Rows[0].Id | Should -Match '^r_[0-9a-f]{8}$'
+        [int]$bulletin.Revision | Should -Be 2
+        # The library handed in is never touched: only the returned copy moves.
+        @($script:library.Bulletins[0].Rows).Count | Should -Be 0
+    }
+
+    It 'refuses a row with no title and no text' {
+        $result = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title '  ' -Text ''
+        $result.Success | Should -BeFalse
+        $result.ErrorCode | Should -Be 'empty_row'
+    }
+
+    It 'removes one row by id and leaves an identical twin in place' {
+        $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
+        $library = (Add-MojazBulletinRow -Library $library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
+        $target = [string]$library.Bulletins[0].Rows[0].Id
+        $result = Remove-MojazBulletinRow -Library $library -BulletinId $script:id -RowId $target
+        $result.Success | Should -BeTrue
+        @($result.Value.Bulletins[0].Rows).Count | Should -Be 1
+        [string]$result.Value.Bulletins[0].Rows[0].Id | Should -Not -Be $target
+    }
+
+    It 'moves a row up and refuses to move the first row further up' {
+        $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
+        $library = (Add-MojazBulletinRow -Library $library -BulletinId $script:id -Title 'ب' -Text 'ن').Value
+        $second = [string]$library.Bulletins[0].Rows[1].Id
+        $moved = Move-MojazBulletinRow -Library $library -BulletinId $script:id -RowId $second -Direction up
+        $moved.Success | Should -BeTrue
+        [string]$moved.Value.Bulletins[0].Rows[0].Title | Should -Be 'ب'
+        (Move-MojazBulletinRow -Library $moved.Value -BulletinId $script:id -RowId $second -Direction up).ErrorCode | Should -Be 'at_edge'
+    }
+
+    It 'keeps an inherited image empty and a new image as its path' {
+        $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
+        [string]$library.Bulletins[0].Rows[0].ImageMode | Should -Be 'inherit'
+        [string]$library.Bulletins[0].Rows[0].Image | Should -BeNullOrEmpty
+        $withImage = (Add-MojazBulletinRow -Library $library -BulletinId $script:id -Title 'ب' -Text 'ن' -Image 'Mojaz\bot\a.jpg').Value
+        [string]$withImage.Bulletins[0].Rows[1].ImageMode | Should -Be 'new'
+    }
+
+    It 'clears every row and validates timing bounds' {
+        $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
+        @((Clear-MojazBulletinRows -Library $library -BulletinId $script:id).Value.Bulletins[0].Rows).Count | Should -Be 0
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 12).Value.Bulletins[0].DelaySeconds | Should -Be 12
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 0).ErrorCode | Should -Be 'out_of_range'
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 601).ErrorCode | Should -Be 'out_of_range'
+    }
+
+    It 'reports a missing bulletin instead of throwing' {
+        (Add-MojazBulletinRow -Library $script:library -BulletinId 'b_nope' -Title 'أ' -Text 'ن').ErrorCode | Should -Be 'not_found'
+        (Remove-MojazBulletin -Library $script:library -BulletinId 'b_nope').ErrorCode | Should -Be 'not_found'
+    }
+
+    It 'removes a whole bulletin and leaves the others alone' {
+        $library = (Add-MojazBulletin -Library $script:library -Name 'المسائي').Value
+        $result = Remove-MojazBulletin -Library $library -BulletinId $script:id
+        $result.Success | Should -BeTrue
+        @($result.Value.Bulletins).Count | Should -Be 1
+        [string]$result.Value.Bulletins[0].Name | Should -Be 'المسائي'
+    }
+}

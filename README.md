@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.25.0
+
+The authorized users screen is a list again. It was four buttons per person -
+the alias three times over - and never the user id, the one thing that ties
+someone to their line in the log, to an operation reference, and to the access
+request just approved. A tally and one entry per person now sit above the
+buttons, numbered to match them, and anyone with no operational name is said
+to have none rather than having their id printed twice.
+
 ## Version 7.24.0
 
 The pending access requests screen shows what the decision needs: the user and

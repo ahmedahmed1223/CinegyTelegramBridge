@@ -448,6 +448,51 @@ function Get-ScheduleLayerConflicts {
     }
 }
 
+function Get-AuthorizedUsersText {
+    <#
+        The roster, read rather than tapped.
+
+        The screen was four buttons per person and no text: the alias three
+        times over, and never the user id - the one thing that identifies
+        them in the log, in an operation reference, and in the access request
+        that was just approved. Ten people made forty buttons and no list.
+
+        The alias is written by an administrator, so it is escaped like any
+        other text that did not come from here.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 10)
+    $users = @(Get-AuthorizedUsers)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>👥 المستخدمون المصرح لهم</b>')
+    if ($users.Count -eq 0) {
+        $lines.Add('<i>لا أحد في القائمة بعد.</i>')
+        return ($lines -join "`n")
+    }
+    $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
+    $admins = @($users | Where-Object { $_.Role -ne 'operator' }).Count
+    $disabled = @($users | Where-Object { $_.Disabled }).Count
+    $tally = "$($users.Count) مستخدمًا · $admins بصلاحية إشراف"
+    if ($disabled -gt 0) { $tally += " · $disabled معطّل" }
+    if ($window.PageCount -gt 1) { $tally += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
+    $lines.Add("<i>$tally</i>")
+    $lines.Add('')
+    $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $user = $users[$index]
+        $role = switch ([string]$user.Role) { 'owner' { '👑 مالك' } 'admin' { '🛡️ مشرف' } default { 'مشغّل' } }
+        $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
+        $alias = [string]$user.Alias
+        # Get-UserDisplayName falls back to the id, and printing it twice on
+        # two lines says nothing twice - and hides that nobody named them.
+        if ($alias -eq [string]$user.UserId) { $alias = 'بلا اسم تشغيلي' }
+        if ($alias.Length -gt 32) { $alias = $alias.Substring(0, 31) + '…' }
+        $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text $alias)</b> · $role · $state")
+        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
+        $lines.Add("   <code>$([long]$user.UserId)</code> · $(ConvertTo-TelegramHtmlText -Text ([string]$activity.Label))")
+    }
+    return ($lines -join "`n")
+}
+
 function Get-UsersAdminKeyboard {
     <# The promote/demote row is drawn only for an owner. An administrator who
        cannot use it should not be looking at it: a button that always answers
@@ -466,7 +511,7 @@ function Get-UsersAdminKeyboard {
         $user = $users[$index]
         $role = switch ($user.Role) { 'owner' { '👑 مالك' } 'admin' { 'مشرف' } default { 'مشغّل' } }
         $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
-        $rows += , @((New-Button "$state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
+        $rows += , @((New-Button "$($index + 1). $state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
         $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
         $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
         $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
@@ -502,7 +547,10 @@ function Show-UsersAdminScreen {
         "`n👑 بصفتك المالك يمكنك ترقية مشغّل إلى مشرف أو خفضه."
     }
     else { '' }
-    Send-TelegramMessage -ChatId $ChatId -Text ("👥 المستخدمون المصرح لهم`nاضغط المستخدم لتعطيله أو إعادة تفعيله، واستخدم ✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد.`nحالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.$roleLine") `
+    $text = (Get-AuthorizedUsersText -Page $Page) +
+    "`n`nاضغط المستخدم لتعطيله أو إعادة تفعيله، و✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد." +
+    "`n<i>حالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>$roleLine"
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML `
         -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
 }
 

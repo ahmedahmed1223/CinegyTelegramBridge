@@ -1677,3 +1677,43 @@ Describe 'The pending access requests screen' {
         $no.ContainsKey('style') | Should -BeFalse
     }
 }
+
+Describe 'The authorized users roster' {
+    It 'shows the id, the role and the state for each person' {
+        $text = Get-AuthorizedUsersText
+
+        # The id is what ties a person to the log, to an operation reference
+        # and to the access request that was approved.
+        $text | Should -Match '<code>111111111</code>'
+        $text | Should -Match 'مالك'
+        $text | Should -Match 'مستخدمًا'
+    }
+
+    It 'says who has no operational name rather than printing their id twice' {
+        Get-AuthorizedUsersText | Should -Match 'بلا اسم تشغيلي'
+    }
+
+    It 'escapes an alias an administrator typed' {
+        Mock Get-AuthorizedUsers {
+            @([pscustomobject]@{ UserId = 4242; Alias = '<b>مشرف</b>'; Role = 'operator'; Disabled = $false; AddedAt = ''; AddedByUserId = 0; LastActivityAt = '' })
+        }
+
+        $text = Get-AuthorizedUsersText
+
+        $text | Should -Match '&lt;b&gt;'
+        $text | Should -Not -Match '<b>مشرف'
+    }
+
+    It 'numbers the rows the same way the buttons are numbered' {
+        Mock Get-AuthorizedUsers {
+            @(
+                [pscustomobject]@{ UserId = 11; Alias = 'أول'; Role = 'operator'; Disabled = $false; AddedAt = ''; AddedByUserId = 0; LastActivityAt = '' }
+                [pscustomobject]@{ UserId = 22; Alias = 'ثانٍ'; Role = 'operator'; Disabled = $false; AddedAt = ''; AddedByUserId = 0; LastActivityAt = '' }
+            )
+        }
+
+        Get-AuthorizedUsersText | Should -Match '2\. <b>ثانٍ</b>'
+        $buttons = @((Get-UsersAdminKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { [string]$_['text'] })
+        @($buttons | Where-Object { $_ -like '2.*ثانٍ*' }).Count | Should -Be 1
+    }
+}

@@ -290,6 +290,10 @@ function Invoke-CallbackQuery {
         'mojaz:add' { Start-MojazRowAdd -ChatId $chatId -UserId $userId; break }
         'mojaz:skipimage' { Complete-MojazRowImage -ChatId $chatId -Skip; break }
         'mojaz:delay' { Start-MojazDelayPrompt -ChatId $chatId -UserId $userId; break }
+        'mojaz:intro' { Start-MojazTimingPrompt -Which intro -ChatId $chatId -UserId $userId; break }
+        'mojaz:last' { Start-MojazTimingPrompt -Which last -ChatId $chatId -UserId $userId; break }
+        'mojaz:later' { Start-MojazLaterPrompt -ChatId $chatId -UserId $userId; break }
+        'mojaz:cancelstart' { Stop-MojazPendingStart -ChatId $chatId -UserId $userId; break }
         'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:stop' { Stop-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:del:*' {

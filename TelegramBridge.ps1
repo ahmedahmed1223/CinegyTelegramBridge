@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.28.1'
+$script:BridgeVersion = '7.29.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -808,6 +808,12 @@ $script:MojazTemplateKey = 'Mojaz'
 $script:MojazRows = @()
 $script:MojazDelaySeconds = 8
 $script:MojazPlayback = $null
+$script:MojazIntroOverride = 0
+$script:MojazLastRowOverride = 0
+# A run asked for later: the moment, and who to answer when it fires.
+$script:MojazStartAt = $null
+$script:MojazStartChatId = 0
+$script:MojazStartUserId = 0
 # Built on first use from the settings table: the manual mentions setting
 # names in prose, and a name is worth setting in code only if it is real.
 $script:HelpCodeTermPattern = ''
@@ -1537,6 +1543,9 @@ try {
                                 'mojaz_row_title' { Complete-MojazRowTitle -ChatId $chatId -Value $text }
                                 'mojaz_row_text' { Complete-MojazRowText -ChatId $chatId -Value $text }
                                 'mojaz_delay' { Complete-MojazDelay -ChatId $chatId -Value $text }
+                                'mojaz_intro_seconds' { Complete-MojazTiming -Which intro -ChatId $chatId -Value $text }
+                                'mojaz_last_seconds' { Complete-MojazTiming -Which last -ChatId $chatId -Value $text }
+                                'mojaz_start_at' { Complete-MojazLater -ChatId $chatId -Value $text }
                                 'operation_reference' { Complete-OperationReferenceLookup -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }

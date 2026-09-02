@@ -54,9 +54,22 @@ function Import-MojazPlaylist {
     $path = Get-MojazStateFile
     $script:MojazRows = @()
     $script:MojazDelaySeconds = Get-SettingInt 'MojazRowSeconds' 1
+    # 0 means "follow the default": the setting for the entrance, half the
+    # dwell for the exit. Stored per bulletin so a one-off does not have to go
+    # through the settings screen to change it.
+    $script:MojazIntroOverride = 0
+    $script:MojazLastRowOverride = 0
     if (-not (Test-Path -LiteralPath $path)) { return }
     try {
         $saved = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $override = 0
+        if ([int]::TryParse([string](Get-JsonProp $saved 'IntroExtraSeconds'), [ref]$override) -and $override -ge 0) {
+            $script:MojazIntroOverride = $override
+        }
+        $override = 0
+        if ([int]::TryParse([string](Get-JsonProp $saved 'LastRowSeconds'), [ref]$override) -and $override -ge 0) {
+            $script:MojazLastRowOverride = $override
+        }
         $delay = 0
         if ([int]::TryParse([string](Get-JsonProp $saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) {
             $script:MojazDelaySeconds = $delay
@@ -78,7 +91,12 @@ function Save-MojazPlaylist {
        the next start would lose the whole bulletin. #>
     $path = Get-MojazStateFile
     try {
-        $payload = @{ DelaySeconds = $script:MojazDelaySeconds; Rows = @($script:MojazRows) }
+        $payload = @{
+            DelaySeconds = $script:MojazDelaySeconds
+            IntroExtraSeconds = $script:MojazIntroOverride
+            LastRowSeconds = $script:MojazLastRowOverride
+            Rows = @($script:MojazRows)
+        }
         $temporary = "$path.tmp"
         $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
@@ -144,16 +162,46 @@ function Format-MojazCell {
     return $value
 }
 
+function Get-MojazIntroSeconds {
+    <# What the first row gets on top of its dwell, because the entrance
+       animation is playing over it. The bulletin's own number when it has
+       one, else the setting. #>
+    if ([int]$script:MojazIntroOverride -gt 0) { return [int]$script:MojazIntroOverride }
+    return (Get-SettingInt 'MojazIntroExtraSeconds' 0)
+}
+
+function Get-MojazLastRowSeconds {
+    <# How long the last row holds before EXIT. Half the dwell unless the
+       bulletin says otherwise - the outro runs after it, and a full dwell
+       there leaves the last story sitting still. #>
+    if ([int]$script:MojazLastRowOverride -gt 0) { return [int]$script:MojazLastRowOverride }
+    return [math]::Max(1, [int][math]::Floor([int]$script:MojazDelaySeconds / 2))
+}
+
+function Set-MojazIntroSeconds {
+    param([Parameter(Mandatory)][int]$Seconds)
+    if ($Seconds -lt 0 -or $Seconds -gt 120) { return $false }
+    $script:MojazIntroOverride = $Seconds
+    return (Save-MojazPlaylist)
+}
+
+function Set-MojazLastRowSeconds {
+    param([Parameter(Mandatory)][int]$Seconds)
+    if ($Seconds -lt 0 -or $Seconds -gt 600) { return $false }
+    $script:MojazLastRowOverride = $Seconds
+    return (Save-MojazPlaylist)
+}
+
 function Get-MojazPlanText {
     <# How long the bulletin runs, in the same words the screen used to ask
        for the dwell. #>
     $rows = @(Get-MojazRows)
     if ($rows.Count -eq 0) { return '' }
     $delay = [int]$script:MojazDelaySeconds
-    $intro = Get-SettingInt 'MojazIntroExtraSeconds' 0
-    $half = [math]::Max(1, [int][math]::Floor($delay / 2))
-    $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $delay + $intro + $half
-    return "كل صف $delay ث · الأول +$intro ث لحركة الدخول · الأخير يخرج بعد $half ث · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)"
+    $intro = Get-MojazIntroSeconds
+    $last = Get-MojazLastRowSeconds
+    $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
+    return "كل صف $delay ث · الأول +$intro ث لحركة الدخول · الأخير $last ث ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)"
 }
 
 function Get-MojazBlocks {
@@ -184,6 +232,9 @@ function Get-MojazBlocks {
     if ($script:MojazPlayback) {
         $blocks += @{ type = 'paragraph'; text = "▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $($rows.Count)" }
     }
+    elseif ($script:MojazStartAt) {
+        $blocks += @{ type = 'paragraph'; text = (Get-MojazPendingStartText) }
+    }
     return $blocks
 }
 
@@ -207,6 +258,10 @@ function Get-MojazText {
         $lines.Add('')
         $lines.Add("▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $($rows.Count)")
     }
+    elseif ($script:MojazStartAt) {
+        $lines.Add('')
+        $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text (Get-MojazPendingStartText))</b>")
+    }
     return ($lines -join "`n")
 }
 
@@ -216,10 +271,20 @@ function Get-MojazKeyboard {
     if ($script:MojazPlayback) {
         $keyboard += , @((New-Button '⏹ إيقاف وخروج' 'mojaz:stop' -Style danger))
     }
+    elseif ($script:MojazStartAt) {
+        $keyboard += , @((New-Button '🚫 إلغاء التشغيل المؤجّل' 'mojaz:cancelstart' -Style danger))
+    }
     elseif ($rows.Count -gt 0) {
-        $keyboard += , @((New-Button "▶️ تشغيل ($($rows.Count) صفًّا)" 'mojaz:play' -Style success))
+        $keyboard += , @(
+            (New-Button "▶️ تشغيل ($($rows.Count) صفًّا)" 'mojaz:play' -Style success)
+            (New-Button '🕒 تشغيل لاحقًا' 'mojaz:later')
+        )
     }
     $keyboard += , @((New-Button '➕ إضافة صف' 'mojaz:add'), (New-Button "⏱ المدة: $([int]$script:MojazDelaySeconds) ث" 'mojaz:delay'))
+    $keyboard += , @(
+        (New-Button "⏩ الأول: +$(Get-MojazIntroSeconds) ث" 'mojaz:intro')
+        (New-Button "⏹ الأخير: $(Get-MojazLastRowSeconds) ث" 'mojaz:last')
+    )
     # One delete button per row, numbered like the table above it.
     $deleteRow = @()
     for ($i = 0; $i -lt $rows.Count; $i++) {
@@ -344,6 +409,83 @@ function Complete-MojazDelay {
     Show-MojazScreen -ChatId $ChatId -UserId $userId
 }
 
+function Get-MojazPendingStartText {
+    <# The wait, said as both the clock time and how long from now - the first
+       is what a rundown is written against, the second is what the person
+       holding the phone is actually counting. #>
+    if (-not $script:MojazStartAt) { return '' }
+    $moment = [datetimeoffset]$script:MojazStartAt
+    $seconds = [int][math]::Max(0, ($moment - [datetimeoffset]::Now).TotalSeconds)
+    return "🕒 يبدأ $($moment.ToString('HH:mm')) — بعد $(Format-DurationSeconds -Seconds $seconds)"
+}
+
+function Start-MojazTimingPrompt {
+    <# One prompt for both numbers; the mode says which. #>
+    param([Parameter(Mandatory)][ValidateSet('intro', 'last')][string]$Which, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $text = if ($Which -eq 'intro') {
+        "⏩ كم ثانية تُضاف إلى الصف الأول وحده (حركة الدخول)؟ (0-120)`nالحالي: $(Get-MojazIntroSeconds) ث · أرسل 0 للعودة إلى قيمة الإعدادات."
+    }
+    else {
+        "⏹ كم ثانية يبقى الصف الأخير قبل أمر الخروج؟ (0-600)`nالحالي: $(Get-MojazLastRowSeconds) ث · أرسل 0 لجعلها نصف مدة الصف تلقائيًا."
+    }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = "mojaz_$($Which)_seconds"; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-MojazTiming {
+    param([Parameter(Mandatory)][ValidateSet('intro', 'last')][string]$Which, [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne "mojaz_$($Which)_seconds") { return }
+    $seconds = 0
+    $parsed = [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds)
+    $applied = $false
+    if ($parsed) {
+        $applied = if ($Which -eq 'intro') { Set-MojazIntroSeconds -Seconds $seconds } else { Set-MojazLastRowSeconds -Seconds $seconds }
+    }
+    if (-not $applied) {
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'intro') { '❌ أرسل رقمًا بين 0 و120.' } else { '❌ أرسل رقمًا بين 0 و600.' }) -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    $userId = [long]$state.UserId
+    Clear-PendingState -ChatId $ChatId
+    Show-MojazScreen -ChatId $ChatId -UserId $userId
+}
+
+function Start-MojazLaterPrompt {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_start_at'; UserId = $UserId }
+    Send-TelegramMessage -ChatId $ChatId -Text "🕒 متى يبدأ الموجز؟`nمثل: +30 (بعد 30 دقيقة) · بعد 90 · 21:45 · غدًا 07:00" -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-MojazLater {
+    <# The same wording the scheduling screen accepts, parsed by the same
+       function - one grammar for "when", not two. #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'mojaz_start_at') { return }
+    $moment = ConvertFrom-OperatorScheduleTime -Text ([string]$Value)
+    if (-not $moment.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string](Get-JsonProp $moment 'Error'))" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    $userId = [long]$state.UserId
+    Clear-PendingState -ChatId $ChatId
+    $script:MojazStartAt = [datetimeoffset]$moment.ScheduledAt
+    $script:MojazStartChatId = $ChatId
+    $script:MojazStartUserId = $userId
+    Write-BridgeLog "Mojaz playback scheduled for $($script:MojazStartAt.ToString('yyyy-MM-dd HH:mm')) by $userId"
+    Add-AuditEntry "🕒 تأجيل تشغيل الموجز إلى $($script:MojazStartAt.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+    Show-MojazScreen -ChatId $ChatId -UserId $userId
+}
+
+function Stop-MojazPendingStart {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $script:MojazStartAt = $null
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
 function Start-MojazPlayback {
     <#
         Shows the first row, then leaves the rest to the tick.
@@ -369,11 +511,12 @@ function Start-MojazPlayback {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard)
         return $false
     }
+    $script:MojazStartAt = $null
     $delay = [int]$script:MojazDelaySeconds
     # The first row carries the entrance animation, so it stays for the dwell
     # plus that animation - otherwise its text is replaced while the graphic is
     # still sliding in.
-    $extra = Get-SettingInt 'MojazIntroExtraSeconds' 0
+    $extra = Get-MojazIntroSeconds
     $script:MojazPlayback = @{
         Index = 0; ChatId = $ChatId; UserId = $UserId
         NextAt = (Get-Date).AddSeconds($delay + $extra)
@@ -400,6 +543,20 @@ function Stop-MojazPlayback {
     }
     if (-not $Quiet -and $ChatId -gt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
     return $true
+}
+
+function Update-MojazPendingStart {
+    <# The deferred start, checked from the tick. Held in memory only: a
+       bridge that restarts before it fires has no run to resume, and the
+       screen says as much rather than starting a bulletin nobody is waiting
+       for. #>
+    if (-not $script:MojazStartAt) { return }
+    if ([datetimeoffset]::Now -lt [datetimeoffset]$script:MojazStartAt) { return }
+    $chatId = [long]$script:MojazStartChatId
+    $userId = [long]$script:MojazStartUserId
+    $script:MojazStartAt = $null
+    Write-BridgeLog "Mojaz scheduled start firing for chat $chatId"
+    Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null
 }
 
 function Update-MojazPlayback {
@@ -430,10 +587,9 @@ function Update-MojazPlayback {
         Stop-MojazPlayback -Quiet | Out-Null
         return
     }
-    $delay = [int]$script:MojazDelaySeconds
-    # Half the dwell on the last row: the EXIT that follows plays the outro,
-    # and a full dwell before it would leave the last story sitting there.
-    $wait = if ($index -ge ($rows.Count - 1)) { [math]::Max(1, [int][math]::Floor($delay / 2)) } else { $delay }
+    # The last row holds for its own number - half the dwell unless the
+    # bulletin says otherwise - because the EXIT that follows plays the outro.
+    $wait = if ($index -ge ($rows.Count - 1)) { Get-MojazLastRowSeconds } else { [int]$script:MojazDelaySeconds }
     $script:MojazPlayback.Index = $index
     $script:MojazPlayback.NextAt = (Get-Date).AddSeconds($wait)
 }

@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.29.0
+
+The two special timings are buttons on the Mojaz screen now: the extra the
+first row gets for the entrance animation, and how long the last row holds
+before EXIT. Both are saved with the bulletin rather than in settings, because
+one bulletin can need its own pace; sending 0 puts the default back. There is
+also a deferred start - "play later" - written in the same words the
+scheduling screen takes (+30, بعد 90, 21:45, غدًا 07:00) and read by the same
+parser.
+
 ## Version 7.28.1
 
 Fixes a bug in 7.28.0 that answered every text message - including /start -

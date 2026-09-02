@@ -198,3 +198,116 @@ Describe 'Telling a photo message from every other message' {
         Get-TelegramMessagePhotoId -Message $message | Should -Be 'full'
     }
 }
+
+Describe 'Adjusting the bulletin timings' {
+    BeforeEach {
+        Mock Save-MojazPlaylist { $true }
+        $script:MojazRows = @(); $script:MojazDelaySeconds = 8
+        $script:MojazIntroOverride = 0; $script:MojazLastRowOverride = 0
+        $script:MojazPlayback = $null; $script:MojazStartAt = $null
+    }
+    AfterAll { $script:MojazIntroOverride = 0; $script:MojazLastRowOverride = 0; $script:MojazStartAt = $null }
+
+    It 'falls back to the setting and to half the dwell until told otherwise' {
+        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraSeconds' -NotePropertyValue 2 -Force
+
+        Get-MojazIntroSeconds | Should -Be 2
+        Get-MojazLastRowSeconds | Should -Be 4
+    }
+
+    It 'takes the bulletin its own numbers, and zero puts the default back' {
+        Set-MojazIntroSeconds -Seconds 5 | Should -BeTrue
+        Set-MojazLastRowSeconds -Seconds 12 | Should -BeTrue
+        Get-MojazIntroSeconds | Should -Be 5
+        Get-MojazLastRowSeconds | Should -Be 12
+
+        Set-MojazIntroSeconds -Seconds 0 | Should -BeTrue
+        Set-MojazLastRowSeconds -Seconds 0 | Should -BeTrue
+        Get-MojazLastRowSeconds | Should -Be 4
+    }
+
+    It 'refuses a timing outside its range' {
+        Set-MojazIntroSeconds -Seconds 121 | Should -BeFalse
+        Set-MojazLastRowSeconds -Seconds 601 | Should -BeFalse
+        Set-MojazIntroSeconds -Seconds -1 | Should -BeFalse
+    }
+
+    It 'holds the last row for the number it was given' {
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Add-MojazRow -Image '' -Title 'أ' -Text 'خبر' | Out-Null
+        Add-MojazRow -Image '' -Title 'ب' -Text 'خبر' | Out-Null
+        Set-MojazLastRowSeconds -Seconds 15 | Out-Null
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+        $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
+        Update-MojazPlayback
+
+        $wait = ([datetime]$script:MojazPlayback.NextAt - (Get-Date)).TotalSeconds
+        $wait | Should -BeGreaterThan 14
+        $wait | Should -BeLessThan 15.5
+    }
+}
+
+Describe 'Starting the bulletin later' {
+    BeforeEach {
+        Mock Save-MojazPlaylist { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        $script:MojazRows = @(); $script:MojazDelaySeconds = 8
+        $script:MojazPlayback = $null; $script:MojazStartAt = $null
+        Add-MojazRow -Image '' -Title 'أ' -Text 'خبر' | Out-Null
+    }
+    AfterAll { $script:MojazStartAt = $null; $script:MojazPlayback = $null; $script:MojazRows = @() }
+
+    It 'accepts the same wording the scheduling screen does' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_start_at'; UserId = 101 }
+
+        Complete-MojazLater -ChatId 100 -Value '+30'
+
+        $script:MojazStartAt | Should -Not -BeNullOrEmpty
+        # Nothing on air yet: it is a promise, not a show.
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        Get-MojazPendingStartText | Should -Match 'يبدأ'
+    }
+
+    It 'refuses a time it cannot read, and starts nothing' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_start_at'; UserId = 101 }
+
+        Complete-MojazLater -ChatId 100 -Value 'قريبًا'
+
+        $script:MojazStartAt | Should -BeNullOrEmpty
+        Get-PendingState -ChatId 100 | Should -Not -BeNullOrEmpty
+    }
+
+    It 'waits until the moment, then plays' {
+        $script:MojazStartAt = [datetimeoffset]::Now.AddMinutes(5)
+        $script:MojazStartChatId = 100; $script:MojazStartUserId = 101
+
+        Update-MojazPendingStart
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+        $script:MojazStartAt = [datetimeoffset]::Now.AddSeconds(-1)
+        Update-MojazPendingStart
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $script:MojazStartAt | Should -BeNullOrEmpty
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+    }
+
+    It 'can be called off before it fires' {
+        $script:MojazStartAt = [datetimeoffset]::Now.AddMinutes(5)
+
+        Stop-MojazPendingStart -ChatId 100 -UserId 101
+
+        $script:MojazStartAt | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+}

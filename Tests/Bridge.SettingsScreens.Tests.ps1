@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.22.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.22.0'
+        $script:BridgeVersion | Should -Be '7.23.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.23.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -878,5 +878,42 @@ Describe 'Confirming a settings change' {
             $Text -match 'طول نص الحقل' -and $Text -match '500' -and
             $Text -match [regex]::Escape([string]$script:DefaultSettings['MaxFieldLength'])
         }
+    }
+}
+
+Describe 'Restoring every default asks first' {
+    It 'writes nothing on the first press and names what it would undo' {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Set-Setting -Name 'MaxFieldLength' -Value 500
+
+        Reset-SettingsToDefault -ChatId 100 -UserId 101
+
+        # The one button that rewrites every setting at once used to do it on
+        # a single tap.
+        (Get-Setting 'MaxFieldLength') | Should -Be 500
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'طول نص الحقل' -and
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfg:resetconfirm'
+        }
+    }
+
+    It 'restores them once confirmed' {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Set-Setting -Name 'MaxFieldLength' -Value 500
+
+        Reset-SettingsToDefault -ChatId 100 -UserId 101 -Confirmed
+
+        (Get-Setting 'MaxFieldLength') | Should -Be $script:DefaultSettings['MaxFieldLength']
+    }
+
+    It 'colours the affirming half and leaves the cancel plain' {
+        $buttons = @((Get-SettingsResetConfirmKeyboard).inline_keyboard | ForEach-Object { @($_) })
+        $yes = @($buttons | Where-Object { $_['callback_data'] -eq 'cfg:resetconfirm' })[0]
+        $no = @($buttons | Where-Object { $_['callback_data'] -eq 'menu:settings' })[0]
+
+        $yes['style'] | Should -Be 'danger'
+        $no.ContainsKey('style') | Should -BeFalse
     }
 }

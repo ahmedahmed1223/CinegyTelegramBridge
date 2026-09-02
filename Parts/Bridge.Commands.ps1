@@ -279,8 +279,40 @@ function Complete-SettingValue {
 }
 
 function Reset-SettingsToDefault {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    <#
+        Asks first, because this is the one button that rewrites every
+        setting at once. Every sibling - clear the log, revoke access,
+        restore a backup, delete a template - stops to confirm; this one
+        overwrote the news file path, the sheet URL and every threshold on a
+        single mistap, and said so only afterwards.
+
+        The question names what would actually be undone: how many settings
+        differ from their defaults, and the first few by name.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Confirmed)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not $Confirmed) {
+        $values = @{}
+        foreach ($name in $script:DefaultSettings.Keys) { $values[$name] = Get-Setting $name }
+        $modified = @(Get-ModifiedBridgeSettings -Schema $script:SettingSchema -Values $values)
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add('<b>♻️ استعادة كل الإعدادات الافتراضية؟</b>')
+        if ($modified.Count -eq 0) {
+            $lines.Add('<i>لا إعداد يخالف الافتراضي الآن، فلن يتغيّر شيء.</i>')
+        }
+        else {
+            $lines.Add("<i>$($modified.Count) إعدادًا ستعود إلى قيمتها الأصلية:</i>")
+            $lines.Add('')
+            foreach ($line in @(Get-SettingsExplainedLines -Names @($modified | Select-Object -First 8 | ForEach-Object { [string]$_.Name }))) {
+                $lines.Add($line)
+            }
+            if ($modified.Count -gt 8) { $lines.Add("… و$($modified.Count - 8) غيرها.") }
+        }
+        $lines.Add('')
+        $lines.Add('تُحفظ نسخة من الإعدادات الحالية قبل الكتابة، وتجدها في 🗄 نسخ الإعدادات.')
+        Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsResetConfirmKeyboard)
+        return
+    }
     $settings = [pscustomobject]@{}
     foreach ($name in $script:DefaultSettings.Keys) {
         $settings | Add-Member -NotePropertyName $name -NotePropertyValue $script:DefaultSettings[$name] -Force

@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.23.0
+
+Restoring every default now asks first, and the question says how many
+settings would go back and names the first few - it was the one button that
+rewrote all of them on a single tap while every sibling stopped to confirm.
+Six destructive buttons that the written colour policy already covered -
+clearing either log, revoking access, restarting the bridge, restoring a
+config backup, rolling a layer back - are now coloured like the rest.
+
 ## Version 7.22.0
 
 The confirmation of a settings change speaks the same language as the screen

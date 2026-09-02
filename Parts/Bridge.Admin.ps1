@@ -1739,7 +1739,7 @@ function Get-DiagnosticsKeyboard {
     return @{ inline_keyboard = @(
         , @((New-Button '🔎 ابحث بمرجع عملية' 'diag:findref'))
         , @((New-Button '📦 حزمة تشخيص منقحة' 'diag:bundle'))
-        , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime'), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit'))
+        , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime' -Style danger), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit' -Style danger))
         , @((New-Button '🏠 القائمة' 'menu:main'))
     ) }
 }

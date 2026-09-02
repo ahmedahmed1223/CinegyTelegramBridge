@@ -274,7 +274,7 @@ function Get-AdminToolsKeyboard {
     $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
     $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
     $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
-    if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart") ) }
+    if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart" -Style danger) ) }
     $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
     if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
     $rows += , $adminRow
@@ -481,7 +481,7 @@ function Get-UsersAdminKeyboard {
                         (New-Button "⬆️ ترقية $($user.Alias) إلى مشرف" "usr:promote:$($user.UserId)")
                     }))
         }
-        $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)"))
+        $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)" -Style danger))
         }
     }
     if ($window.PageCount -gt 1) {
@@ -729,7 +729,7 @@ function Get-AfterLayerRemovalKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     $rows = @()
-    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ استعادة المشهد السابق' "rollback:$Layer")) }
+    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ استعادة المشهد السابق' "rollback:$Layer" -Style danger)) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard=$rows }
 }
@@ -835,6 +835,14 @@ function Get-SettingsInCategory {
     foreach ($record in @($script:SettingSchema)) {
         if ($record.Category -eq $Category) { $record.Name }
     }
+}
+
+function Get-SettingsResetConfirmKeyboard {
+    <# The affirming half is coloured, the cancel is not: colouring both
+       leaves the thumb with no signal. #>
+    return @{ inline_keyboard = @(
+            , @((New-Button '♻️ نعم، استعد الافتراضي' 'cfg:resetconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))
+        ) }
 }
 
 function Get-SettingsCategoryPageNames {
@@ -1072,7 +1080,7 @@ function Get-ConfigBackupsKeyboard {
     $rows = @()
     for ($i = 0; $i -lt $files.Count; $i++) {
         $label = $files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
-        $rows += , @( (New-Button "🗄 $label" "cfg:restore:$i") )
+        $rows += , @( (New-Button "🗄 $label" "cfg:restore:$i" -Style danger) )
     }
     if ($files.Count -eq 0) { $rows += , @( (New-Button "لا توجد نسخ محفوظة" 'menu:settings') ) }
     $rows += , @( (New-Button "⬅️ رجوع" 'menu:settings') )

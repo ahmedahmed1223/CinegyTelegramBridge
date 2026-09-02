@@ -49,6 +49,7 @@ function Test-MojazNameAvailable {
 function Add-MojazBulletin {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$Name,
+        [int]$DelaySeconds = 8,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $normalized = ConvertTo-MojazName -Name $Name
     if ([string]::IsNullOrWhiteSpace($normalized)) { return (New-MojazResult $false $null 'invalid_name' 'اسم الموجز مطلوب.') }
@@ -58,7 +59,8 @@ function Add-MojazBulletin {
     $bulletin = [pscustomobject]@{
         Id = New-MojazId -Prefix b; Name = $normalized; Revision = 1
         CreatedAt = $Now.ToString('o'); UpdatedAt = $Now.ToString('o'); UpdatedBy = $UserId
-        DelaySeconds = 8; IntroExtraSeconds = 0; LastRowSeconds = 0; Rows = @()
+        DelaySeconds = [math]::Min(600, [math]::Max(1, $DelaySeconds))
+        IntroExtraSeconds = 0; LastRowSeconds = 0; Rows = @()
     }
     $copy.Bulletins = @($bulletins + $bulletin)
     return (New-MojazResult $true $copy)
@@ -148,6 +150,10 @@ function Update-MojazBulletinIn {
         bulletin, bump its revision. Only the middle step differs, so it is
         the only part a caller writes. Nothing mutates what was handed in -
         an edit that fails leaves the caller's library exactly as it was.
+
+        A -Change block is run with & here, so it reads this function's
+        variables, not its author's: name anything it closes over distinctly
+        ($doomedRowId, not $target) or it silently picks up the local below.
     #>
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][scriptblock]$Change,
@@ -216,12 +222,13 @@ function Remove-MojazBulletinRow {
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][string]$RowId,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+    $doomedRowId = $RowId
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
             $rows = @(Get-MojazProperty $bulletin 'Rows' @())
             # By id, never by value: two identical rows are legitimate and a
             # value match would drop both.
-            $kept = @($rows | Where-Object { [string]$_.Id -ne $RowId })
+            $kept = @($rows | Where-Object { [string]$_.Id -ne $doomedRowId })
             if ($kept.Count -eq $rows.Count) { return (New-MojazResult $false $null 'row_not_found' 'الصف غير موجود.') }
             $bulletin.Rows = $kept
         })
@@ -232,18 +239,20 @@ function Move-MojazBulletinRow {
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][ValidateSet('up', 'down')][string]$Direction,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+    $wanted = $RowId
+    $step = if ($Direction -eq 'up') { -1 } else { 1 }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
             $rows = [System.Collections.Generic.List[object]]::new()
             foreach ($row in @(Get-MojazProperty $bulletin 'Rows' @())) { $rows.Add($row) }
             $index = -1
-            for ($i = 0; $i -lt $rows.Count; $i++) { if ([string]$rows[$i].Id -eq $RowId) { $index = $i; break } }
+            for ($i = 0; $i -lt $rows.Count; $i++) { if ([string]$rows[$i].Id -eq $wanted) { $index = $i; break } }
             if ($index -lt 0) { return (New-MojazResult $false $null 'row_not_found' 'الصف غير موجود.') }
-            $target = if ($Direction -eq 'up') { $index - 1 } else { $index + 1 }
-            if ($target -lt 0 -or $target -ge $rows.Count) { return (New-MojazResult $false $null 'at_edge' 'الصف في طرف الجدول.') }
+            $destination = $index + $step
+            if ($destination -lt 0 -or $destination -ge $rows.Count) { return (New-MojazResult $false $null 'at_edge' 'الصف في طرف الجدول.') }
             $moved = $rows[$index]
             $rows.RemoveAt($index)
-            $rows.Insert($target, $moved)
+            $rows.Insert($destination, $moved)
             $bulletin.Rows = $rows.ToArray()
         })
 }

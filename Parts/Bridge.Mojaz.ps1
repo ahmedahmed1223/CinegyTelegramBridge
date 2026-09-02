@@ -1,18 +1,21 @@
 #requires -Version 7
 <#
-    Bridge.Mojaz.ps1 - the Mojaz playlist.
+    Bridge.Mojaz.ps1 - the bulletin library.
 
-    The Mojaz scene is one graphic that stays on air and changes its contents:
-    it animates in over its first 30 frames, loops between frames 30 and 285,
-    and animates out on EXIT. So a bulletin of several stories is ONE show
-    followed by a value update per story - not a show per story, which would
-    replay the entrance animation and flash the screen between them.
+    A bulletin is a named table of rows: a picture, a title, a story. The
+    library holds as many as the newsroom wants, each with its own timing, and
+    a run resolves the latest saved revision at the moment it starts.
 
-    That shape is the whole reason this screen exists rather than the ordinary
-    template flow: the operator writes a table of rows (image, title, text),
-    says how long each row stays, and presses play. The first row gets extra
-    time because the entrance animation is playing over it, and the last row
-    is taken off with EXIT after half the dwell so the outro is not clipped.
+    The rules that touch neither Telegram, disk nor Cinegy live in
+    Modules\BridgeMojaz.psm1 and are tested on their own. What is here is the
+    orchestration: persistence, screens, and the walk down the table on air.
+
+    One scene, not one per row. The Mojaz scene animates in, loops, and
+    animates out on EXIT, so showing the template again for every story would
+    replay the entrance and flash the screen between them. The first row is a
+    SHOW; every row after it is written into the running scene through the
+    postbox; the last row holds for the outro's own length and then EXIT plays
+    it.
 #>
 
 # The scene's own variable names, from mojaz.cintitle. Hard-coded on purpose:
@@ -20,6 +23,10 @@
 $script:MojazImageVariable = 'mojaz_img'
 $script:MojazTitleVariable = 'title.Text'
 $script:MojazTextVariable = 'Subject.Text'
+
+# A file the bridge named itself, and nothing else: the cleanup below deletes
+# only names of this exact shape, inside the bulletin's own picture folder.
+$script:MojazUploadPattern = '^mojaz-\d{8}-\d{6}-[0-9a-f]{8}\.[A-Za-z0-9]{1,5}$'
 
 function Get-MojazTemplate {
     <# The registry entry, or $null when this bridge has no Mojaz template -
@@ -37,108 +44,165 @@ function Get-MojazStateFile {
     return (Join-Path $logDir 'mojaz.json')
 }
 
-function Get-MojazUploadDirectory {
-    <# Beside the scene, not in the bridge's own upload folder: Cinegy reads
-       the file off disk when the graphic goes up, and the bridge's uploads are
-       swept on a timer - which would delete a picture that is still on air. #>
-    $template = Get-MojazTemplate
-    if (-not $template) { return '' }
-    $root = Split-Path -Parent ([string]$template.Path)
-    if ([string]::IsNullOrWhiteSpace($root)) { return '' }
-    return (Join-Path (Join-Path $root 'Mojaz') 'bot')
+function Get-MojazLibraryFile {
+    return (Join-Path $logDir 'mojaz-bulletins.json')
 }
 
-function Import-MojazPlaylist {
-    <# Reads the saved table. A missing or unreadable file is an empty table,
-       never an error: the screen must open. #>
-    $path = Get-MojazStateFile
-    $script:MojazRows = @()
-    $script:MojazDelaySeconds = Get-SettingInt 'MojazRowSeconds' 1
-    # 0 means "follow the default": the setting for the entrance, half the
-    # dwell for the exit. Stored per bulletin so a one-off does not have to go
-    # through the settings screen to change it.
-    $script:MojazIntroOverride = 0
-    $script:MojazLastRowOverride = 0
+function Get-MojazSchedulesFile {
+    return (Join-Path $logDir 'mojaz-schedules.json')
+}
+
+function Save-MojazLibrary {
+    <# The caller gives us a candidate. It does not become live until the
+       validated atomic write succeeds, so a full disk never creates a state
+       that looks saved only until the next restart. #>
+    param([Parameter(Mandatory)]$Library)
+    if (-not (Write-BridgeValidatedJson -Path (Get-MojazLibraryFile) -Json ($Library | ConvertTo-Json -Depth 20))) {
+        Write-BridgeLog 'Could not write the Mojaz bulletin library.' 'WARN'
+        return $false
+    }
+    $script:MojazLibrary = $Library
+    return $true
+}
+
+function Save-MojazSchedules {
+    param([Parameter(Mandatory)]$Schedules)
+    $payload = [pscustomobject]@{ SchemaVersion = 1; Schedules = @($Schedules) }
+    if (-not (Write-BridgeValidatedJson -Path (Get-MojazSchedulesFile) -Json ($payload | ConvertTo-Json -Depth 12))) {
+        Write-BridgeLog 'Could not write the Mojaz schedules.' 'WARN'
+        return $false
+    }
+    $script:MojazSchedules = @($Schedules)
+    return $true
+}
+
+function ConvertFrom-LegacyMojazPlaylist {
+    <# The single table that existed before the library becomes the first
+       bulletin in it, timings and inherited pictures intact. #>
+    param([Parameter(Mandatory)]$Saved)
+    $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الموجز الحالي' -UserId 0
+    $bulletin = $created.Value.Bulletins[0]
+    $delay = 0
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) { $bulletin.DelaySeconds = $delay }
+    $intro = 0
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'IntroExtraSeconds'), [ref]$intro) -and $intro -ge 0) { $bulletin.IntroExtraSeconds = $intro }
+    $last = 0
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'LastRowSeconds'), [ref]$last) -and $last -ge 0) { $bulletin.LastRowSeconds = $last }
+    $bulletin.Rows = @(foreach ($row in @(Get-JsonProp $Saved 'Rows')) {
+            if (-not $row) { continue }
+            $image = [string](Get-JsonProp $row 'Image')
+            [pscustomobject]@{
+                Id = "r_$([guid]::NewGuid().ToString('N').Substring(0,8))"
+                ImageMode = $(if ([string]::IsNullOrWhiteSpace($image)) { 'inherit' } else { 'new' })
+                Image = $image
+                Title = [string](Get-JsonProp $row 'Title')
+                Text = [string](Get-JsonProp $row 'Text')
+            }
+        })
+    return $created.Value
+}
+
+function Import-MojazLibrary {
+    <# Read, or migrate once. The legacy file is archived only after the new
+       library is safely on disk, so a failed migration can be retried at the
+       next start instead of losing the table. #>
+    $script:MojazLibrary = New-MojazLibrary
+    $libraryPath = Get-MojazLibraryFile
+    if (Test-Path -LiteralPath $libraryPath) {
+        try {
+            $stored = Read-BridgeValidatedJson -Path $libraryPath
+            if ($stored -and $stored.Data) { $script:MojazLibrary = $stored.Data }
+        }
+        catch { Write-BridgeLog "Could not read the Mojaz bulletin library: $($_.Exception.Message)" 'WARN' }
+        return
+    }
+    $legacyPath = Get-MojazStateFile
+    if (-not (Test-Path -LiteralPath $legacyPath)) { return }
+    try {
+        $legacy = Get-Content -LiteralPath $legacyPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $candidate = ConvertFrom-LegacyMojazPlaylist -Saved $legacy
+        if (-not (Save-MojazLibrary -Library $candidate)) { return }
+        $archiveName = "mojaz.migrated-$([datetime]::Now.ToString('yyyyMMdd-HHmmss')).json"
+        Move-Item -LiteralPath $legacyPath -Destination (Join-Path (Split-Path $legacyPath -Parent) $archiveName) -ErrorAction Stop
+        Write-BridgeLog "Migrated the legacy Mojaz playlist to '$archiveName'."
+    }
+    catch {
+        $script:MojazLibrary = New-MojazLibrary
+        Write-BridgeLog "Could not migrate mojaz.json: $($_.Exception.Message)" 'WARN'
+    }
+}
+
+function Import-MojazSchedules {
+    $script:MojazSchedules = @()
+    $path = Get-MojazSchedulesFile
     if (-not (Test-Path -LiteralPath $path)) { return }
     try {
-        $saved = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $override = 0
-        if ([int]::TryParse([string](Get-JsonProp $saved 'IntroExtraSeconds'), [ref]$override) -and $override -ge 0) {
-            $script:MojazIntroOverride = $override
-        }
-        $override = 0
-        if ([int]::TryParse([string](Get-JsonProp $saved 'LastRowSeconds'), [ref]$override) -and $override -ge 0) {
-            $script:MojazLastRowOverride = $override
-        }
-        $delay = 0
-        if ([int]::TryParse([string](Get-JsonProp $saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) {
-            $script:MojazDelaySeconds = $delay
-        }
-        $script:MojazRows = @(foreach ($row in @(Get-JsonProp $saved 'Rows')) {
-                if (-not $row) { continue }
-                @{
-                    Image = [string](Get-JsonProp $row 'Image')
-                    Title = [string](Get-JsonProp $row 'Title')
-                    Text  = [string](Get-JsonProp $row 'Text')
-                }
-            })
+        $stored = Read-BridgeValidatedJson -Path $path
+        if ($stored -and $stored.Data) { $script:MojazSchedules = @(Get-JsonProp $stored.Data 'Schedules') }
     }
-    catch { Write-BridgeLog "Could not read mojaz.json: $($_.Exception.Message)" 'WARN' }
-}
-
-function Save-MojazPlaylist {
-    <# Atomic, like every other state file here: a half-written table read at
-       the next start would lose the whole bulletin. #>
-    $path = Get-MojazStateFile
-    try {
-        $payload = @{
-            DelaySeconds = $script:MojazDelaySeconds
-            IntroExtraSeconds = $script:MojazIntroOverride
-            LastRowSeconds = $script:MojazLastRowOverride
-            Rows = @($script:MojazRows)
-        }
-        $temporary = "$path.tmp"
-        $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
-        return $true
+    catch { Write-BridgeLog "Could not read Mojaz schedules: $($_.Exception.Message)" 'WARN' }
+    # A run that was on air when the bridge stopped is not on air now. Left as
+    # 'running' it would block every later appointment forever.
+    $stranded = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Status') -eq 'running' })
+    if ($stranded.Count -eq 0) { return }
+    $candidate = @($script:MojazSchedules | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+    foreach ($entry in @($candidate | Where-Object { [string]$_.Status -eq 'running' })) {
+        $entry.Status = 'failed'
+        $entry.LastError = 'bridge_restarted'
     }
-    catch { Write-BridgeLog "Could not write mojaz.json: $($_.Exception.Message)" 'WARN'; return $false }
+    Save-MojazSchedules -Schedules $candidate | Out-Null
 }
 
-function Get-MojazRows { return @($script:MojazRows) }
-
-function Add-MojazRow {
-    param([string]$Image = '', [string]$Title = '', [string]$Text = '')
-    $rows = [System.Collections.Generic.List[object]]::new()
-    foreach ($row in @($script:MojazRows)) { $rows.Add($row) }
-    $rows.Add(@{ Image = $Image; Title = $Title; Text = $Text })
-    $script:MojazRows = $rows.ToArray()
-    return (Save-MojazPlaylist)
+function Get-MojazUploadDirectory {
+    <# Beside the scene, not in the bridge's own upload folder: Cinegy reads
+       the picture off disk for as long as the graphic is up, and the upload
+       sweeper would delete one that is still on air. #>
+    $template = Get-MojazTemplate
+    if (-not $template) { return '' }
+    $root = Split-Path -Path ([string]$template.Path) -Parent
+    if (-not $root) { return '' }
+    return (Join-Path $root 'Mojaz\bot')
 }
 
-function Remove-MojazRow {
-    param([Parameter(Mandatory)][int]$Index)
-    $rows = @($script:MojazRows)
-    if ($Index -lt 0 -or $Index -ge $rows.Count) { return $false }
-    # Rebuilt by position, not by value: two identical rows are legitimate and
-    # a value match would drop both.
-    $kept = [System.Collections.Generic.List[object]]::new()
-    for ($i = 0; $i -lt $rows.Count; $i++) { if ($i -ne $Index) { $kept.Add($rows[$i]) } }
-    $script:MojazRows = $kept.ToArray()
-    return (Save-MojazPlaylist)
+# ------------------------------------------------------------------ selection
+
+function Get-MojazSelectedId {
+    <# Which bulletin this chat has open. One selection per chat, so two
+       operators in two chats edit two bulletins without colliding. #>
+    param([Parameter(Mandatory)][long]$ChatId)
+    $key = [string]$ChatId
+    if ($script:MojazSelections.ContainsKey($key)) { return [string]$script:MojazSelections[$key] }
+    return ''
 }
 
-function Clear-MojazRows {
-    $script:MojazRows = @()
-    return (Save-MojazPlaylist)
+function Get-MojazSelected {
+    param([Parameter(Mandatory)][long]$ChatId)
+    return (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId))
 }
 
-function Set-MojazDelaySeconds {
-    param([Parameter(Mandatory)][int]$Seconds)
-    if ($Seconds -lt 1 -or $Seconds -gt 600) { return $false }
-    $script:MojazDelaySeconds = $Seconds
-    return (Save-MojazPlaylist)
+function Invoke-MojazEdit {
+    <#
+        The one place where an edit becomes a saved fact.
+
+        The module refuses bad edits and the disk refuses full ones; both end
+        the same way for the operator - a message saying what happened, and a
+        library that has not moved. Nothing else in this file writes the
+        library, so there is no path where a screen says "saved" while the file
+        disagrees.
+    #>
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][long]$ChatId, [switch]$Quiet)
+    if (-not $Result.Success) {
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$Result.Error)" }
+        return $false
+    }
+    if (-not (Save-MojazLibrary -Library $Result.Value)) {
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الحفظ. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.' }
+        return $false
+    }
+    return $true
 }
+
+# -------------------------------------------------------------------- timing
 
 function Get-MojazRowVariables {
     <# One row as the scene's variables. A row without a picture omits the
@@ -147,9 +211,9 @@ function Get-MojazRowVariables {
     param([Parameter(Mandatory)]$Row)
     $values = @{
         $script:MojazTitleVariable = [string]$Row.Title
-        $script:MojazTextVariable  = [string]$Row.Text
+        $script:MojazTextVariable = [string]$Row.Text
     }
-    $image = [string]$Row.Image
+    $image = [string](Get-JsonProp $Row 'Image')
     if (-not [string]::IsNullOrWhiteSpace($image)) { $values[$script:MojazImageVariable] = $image }
     return $values
 }
@@ -162,58 +226,124 @@ function Format-MojazCell {
     return $value
 }
 
+function Get-MojazSceneTiming {
+    <#
+        The scene's own clock, read from the .cintitle rather than guessed.
+
+        A Cinegy scene says where its loop starts and ends, and those two
+        markers are exactly the three durations this screen needs:
+
+            0            -> LoopStartFrame   the entrance animation
+            LoopStart    -> LoopEnd          the part that repeats
+            LoopEnd      -> Duration         the exit animation
+
+        So the extra the first row needs is not a number somebody guessed in
+        the settings - it is LoopStartFrame / Fps - and the hold before EXIT
+        is the outro's own length. Re-timing the scene in Titler re-times the
+        bulletin, with nothing to update here.
+
+        Cached on path plus write time, the way the template store is: this is
+        read every time the screen is drawn.
+    #>
+    param([string]$Path = '')
+    if (-not $Path) {
+        $template = Get-MojazTemplate
+        if (-not $template) { return $null }
+        $Path = [string]$template.Path
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $stamp = (Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue).LastWriteTimeUtc
+    $key = "$Path|$stamp"
+    if ($script:MojazSceneTimingKey -eq $key) { return $script:MojazSceneTiming }
+    $timing = $null
+    try {
+        $scene = ([xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)).CinegyTitler.Scene
+        $fps = [double]$scene.Fps
+        $loopStart = [double]$scene.LoopStartFrame
+        $loopEnd = [double]$scene.LoopEndFrame
+        $duration = [double]$scene.Duration
+        # A scene with no loop, or a nonsense one, is not a timing source.
+        if ($fps -gt 0 -and $loopEnd -gt $loopStart -and $duration -ge $loopEnd) {
+            $timing = [pscustomobject]@{
+                Fps = $fps
+                IntroSeconds = [math]::Round($loopStart / $fps, 2)
+                LoopSeconds = [math]::Round(($loopEnd - $loopStart) / $fps, 2)
+                OutroSeconds = [math]::Round(($duration - $loopEnd) / $fps, 2)
+            }
+        }
+    }
+    catch { Write-BridgeLog "Could not read the Mojaz scene timing: $($_.Exception.Message)" 'WARN' }
+    $script:MojazSceneTimingKey = $key
+    $script:MojazSceneTiming = $timing
+    return $timing
+}
+
 function Get-MojazIntroSeconds {
     <# What the first row gets on top of its dwell, because the entrance
        animation is playing over it. The bulletin's own number when it has
-       one, else the setting. #>
-    if ([int]$script:MojazIntroOverride -gt 0) { return [int]$script:MojazIntroOverride }
+       one, else the scene's, else the setting. #>
+    param($Bulletin)
+    if ($Bulletin -and [int](Get-JsonProp $Bulletin 'IntroExtraSeconds') -gt 0) { return [int]$Bulletin.IntroExtraSeconds }
+    $timing = Get-MojazSceneTiming
+    # Rounded up: a second short here replaces the first story's text while
+    # the graphic is still sliding in.
+    if ($timing) { return [int][math]::Ceiling([double]$timing.IntroSeconds) }
     return (Get-SettingInt 'MojazIntroExtraSeconds' 0)
 }
 
 function Get-MojazLastRowSeconds {
-    <# How long the last row holds before EXIT. Half the dwell unless the
-       bulletin says otherwise - the outro runs after it, and a full dwell
-       there leaves the last story sitting still. #>
-    if ([int]$script:MojazLastRowOverride -gt 0) { return [int]$script:MojazLastRowOverride }
-    return [math]::Max(1, [int][math]::Floor([int]$script:MojazDelaySeconds / 2))
-}
-
-function Set-MojazIntroSeconds {
-    param([Parameter(Mandatory)][int]$Seconds)
-    if ($Seconds -lt 0 -or $Seconds -gt 120) { return $false }
-    $script:MojazIntroOverride = $Seconds
-    return (Save-MojazPlaylist)
-}
-
-function Set-MojazLastRowSeconds {
-    param([Parameter(Mandatory)][int]$Seconds)
-    if ($Seconds -lt 0 -or $Seconds -gt 600) { return $false }
-    $script:MojazLastRowOverride = $Seconds
-    return (Save-MojazPlaylist)
+    <# How long the last row holds before EXIT: the outro's own length, so the
+       last story stays readable for exactly as long as the graphic takes to
+       leave. Half the dwell only when the scene cannot say. #>
+    param($Bulletin)
+    if ($Bulletin -and [int](Get-JsonProp $Bulletin 'LastRowSeconds') -gt 0) { return [int]$Bulletin.LastRowSeconds }
+    $timing = Get-MojazSceneTiming
+    if ($timing -and [double]$timing.OutroSeconds -gt 0) { return [int][math]::Ceiling([double]$timing.OutroSeconds) }
+    $delay = if ($Bulletin) { [int](Get-JsonProp $Bulletin 'DelaySeconds') } else { 8 }
+    return [math]::Max(1, [int][math]::Floor($delay / 2))
 }
 
 function Get-MojazPlanText {
     <# How long the bulletin runs, in the same words the screen used to ask
        for the dwell. #>
-    $rows = @(Get-MojazRows)
+    param($Bulletin)
+    if (-not $Bulletin) { return '' }
+    $rows = @(Get-JsonProp $Bulletin 'Rows')
     if ($rows.Count -eq 0) { return '' }
-    $delay = [int]$script:MojazDelaySeconds
-    $intro = Get-MojazIntroSeconds
-    $last = Get-MojazLastRowSeconds
+    $delay = [int]$Bulletin.DelaySeconds
+    $intro = Get-MojazIntroSeconds -Bulletin $Bulletin
+    $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
     $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
-    return "كل صف $delay ث · الأول +$intro ث لحركة الدخول · الأخير $last ث ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)"
+    $line = "كل صف $delay ث · الأول +$intro ث لحركة الدخول · الأخير $last ث ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)"
+    $timing = Get-MojazSceneTiming
+    if ($timing) {
+        $line += "`nمن القالب: دخول $($timing.IntroSeconds) ث · لوب $($timing.LoopSeconds) ث · خروج $($timing.OutroSeconds) ث"
+    }
+    return $line
 }
+
+function Test-MojazOnAir {
+    <# Is this the bulletin currently playing? Asked by every screen, so the
+       comparison lives in one place. #>
+    param($Bulletin)
+    if (-not $script:MojazPlayback -or -not $Bulletin) { return $false }
+    return ([string]$script:MojazPlayback.BulletinId -eq [string]$Bulletin.Id)
+}
+
+# --------------------------------------------------------------- one bulletin
 
 function Get-MojazBlocks {
     <# The table the operator asked for: a row per story, four columns, with
        the copy itself trimmed to fit beside them. #>
-    $rows = @(Get-MojazRows)
-    $blocks = @(@{ type = 'heading'; text = '📑 الموجز'; size = 3 })
+    param($Bulletin)
+    $name = if ($Bulletin) { [string]$Bulletin.Name } else { 'الموجز' }
+    $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
+    $blocks = @(@{ type = 'heading'; text = "📑 $name"; size = 3 })
     if ($rows.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = 'الجدول فارغ. أضف صفًّا: صورة، عنوان، خبر.' }
         return $blocks
     }
-    $blocks += @{ type = 'paragraph'; text = "$($rows.Count) صفًّا · $(Get-MojazPlanText)" }
+    $blocks += @{ type = 'paragraph'; text = "$($rows.Count) صفًّا · $(Get-MojazPlanText -Bulletin $Bulletin)" }
     $cells = @(, @(
             @{ text = '#'; is_header = $true }
             @{ text = '🖼'; is_header = $true }
@@ -229,50 +359,50 @@ function Get-MojazBlocks {
         )
     }
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
-    if ($script:MojazPlayback) {
-        $blocks += @{ type = 'paragraph'; text = "▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $($rows.Count)" }
+    if (Test-MojazOnAir -Bulletin $Bulletin) {
+        $blocks += @{ type = 'paragraph'; text = "▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $(@($script:MojazPlayback.Rows).Count)" }
     }
-    elseif ($script:MojazStartAt) {
-        $blocks += @{ type = 'paragraph'; text = (Get-MojazPendingStartText) }
-    }
+    $waiting = Get-MojazBulletinScheduleText -BulletinId ([string]$Bulletin.Id)
+    if ($waiting) { $blocks += @{ type = 'paragraph'; text = $waiting } }
     return $blocks
 }
 
 function Get-MojazText {
     <# The same table as text, for a Telegram that refuses rich blocks. #>
-    $rows = @(Get-MojazRows)
+    param($Bulletin)
+    $name = if ($Bulletin) { [string]$Bulletin.Name } else { 'الموجز' }
+    $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>📑 الموجز</b>')
+    $lines.Add("<b>📑 $(ConvertTo-TelegramHtmlText -Text $name)</b>")
     if ($rows.Count -eq 0) {
         $lines.Add('<i>الجدول فارغ. أضف صفًّا: صورة، عنوان، خبر.</i>')
         return ($lines -join "`n")
     }
-    $lines.Add("<i>$($rows.Count) صفًّا · $(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText))</i>")
+    $lines.Add("<i>$($rows.Count) صفًّا · $(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText -Bulletin $Bulletin))</i>")
     $lines.Add('')
     for ($i = 0; $i -lt $rows.Count; $i++) {
         $picture = if ([string]::IsNullOrWhiteSpace([string]$rows[$i].Image)) { '— بلا صورة' } else { '🖼 صورة' }
         $lines.Add("$($i + 1). <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 40))</b> · $picture")
         $lines.Add("   $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 90))")
     }
-    if ($script:MojazPlayback) {
+    if (Test-MojazOnAir -Bulletin $Bulletin) {
         $lines.Add('')
-        $lines.Add("▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $($rows.Count)")
+        $lines.Add("▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $(@($script:MojazPlayback.Rows).Count)")
     }
-    elseif ($script:MojazStartAt) {
+    $waiting = Get-MojazBulletinScheduleText -BulletinId ([string]$Bulletin.Id)
+    if ($waiting) {
         $lines.Add('')
-        $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text (Get-MojazPendingStartText))</b>")
+        $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $waiting)</b>")
     }
     return ($lines -join "`n")
 }
 
 function Get-MojazKeyboard {
-    $rows = @(Get-MojazRows)
+    param($Bulletin)
+    $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $keyboard = @()
-    if ($script:MojazPlayback) {
+    if (Test-MojazOnAir -Bulletin $Bulletin) {
         $keyboard += , @((New-Button '⏹ إيقاف وخروج' 'mojaz:stop' -Style danger))
-    }
-    elseif ($script:MojazStartAt) {
-        $keyboard += , @((New-Button '🚫 إلغاء التشغيل المؤجّل' 'mojaz:cancelstart' -Style danger))
     }
     elseif ($rows.Count -gt 0) {
         $keyboard += , @(
@@ -280,20 +410,34 @@ function Get-MojazKeyboard {
             (New-Button '🕒 تشغيل لاحقًا' 'mojaz:later')
         )
     }
-    $keyboard += , @((New-Button '➕ إضافة صف' 'mojaz:add'), (New-Button "⏱ المدة: $([int]$script:MojazDelaySeconds) ث" 'mojaz:delay'))
     $keyboard += , @(
-        (New-Button "⏩ الأول: +$(Get-MojazIntroSeconds) ث" 'mojaz:intro')
-        (New-Button "⏹ الأخير: $(Get-MojazLastRowSeconds) ث" 'mojaz:last')
+        (New-Button '➕ إضافة صف' 'mojaz:add')
+        (New-Button "⏱ المدة: $(if ($Bulletin) { [int]$Bulletin.DelaySeconds } else { 0 }) ث" 'mojaz:delay')
     )
-    # One delete button per row, numbered like the table above it.
-    $deleteRow = @()
+    $keyboard += , @(
+        (New-Button "⏩ الأول: +$(Get-MojazIntroSeconds -Bulletin $Bulletin) ث" 'mojaz:intro')
+        (New-Button "⏹ الأخير: $(Get-MojazLastRowSeconds -Bulletin $Bulletin) ث" 'mojaz:last')
+    )
+    # A line per row: delete it, or move it up or down the rundown. Numbered
+    # like the table above, so the button and the story line up by eye.
     for ($i = 0; $i -lt $rows.Count; $i++) {
-        $deleteRow += (New-Button "🗑 $($i + 1)" "mojaz:del:$i" -Style danger)
-        if ($deleteRow.Count -eq 5) { $keyboard += , $deleteRow; $deleteRow = @() }
+        $rowId = [string]$rows[$i].Id
+        $line = @((New-Button "🗑 $($i + 1)" "mojaz:del:$rowId" -Style danger))
+        if ($i -gt 0) { $line += (New-Button '⬆️' "mojaz:up:$rowId") }
+        if ($i -lt ($rows.Count - 1)) { $line += (New-Button '⬇️' "mojaz:down:$rowId") }
+        $keyboard += , $line
     }
-    if ($deleteRow.Count -gt 0) { $keyboard += , $deleteRow }
     if ($rows.Count -gt 0) { $keyboard += , @((New-Button '🧹 مسح الجدول' 'mojaz:clear' -Style danger)) }
-    $keyboard += , @((New-Button '🔄 تحديث' 'mojaz:refresh'), (New-Button '🏠 القائمة' 'menu:main'))
+    $keyboard += , @(
+        (New-Button '✏️ إعادة تسمية' 'mojaz:rename')
+        (New-Button '📋 نسخة منه' 'mojaz:copy')
+        (New-Button '🗑 حذف الموجز' 'mojaz:drop' -Style danger)
+    )
+    $keyboard += , @(
+        (New-Button '🕒 المواعيد' 'mojaz:times')
+        (New-Button '🔄 تحديث' 'mojaz:refresh')
+        (New-Button '⬅️ الموجزات' 'mojaz:back')
+    )
     return @{ inline_keyboard = $keyboard }
 }
 
@@ -304,15 +448,184 @@ function Show-MojazScreen {
         Send-TelegramMessage -ChatId $ChatId -Text "قالب '$($script:MojazTemplateKey)' غير موجود في سجل القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $keyboard = Get-MojazKeyboard
-    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks) -ReplyMarkup $keyboard) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText) -ParseMode HTML -ReplyMarkup $keyboard
+    # The bulletin this chat had open can be gone - deleted from another chat.
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $keyboard = Get-MojazKeyboard -Bulletin $bulletin
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks -Bulletin $bulletin) -ReplyMarkup $keyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText -Bulletin $bulletin) -ParseMode HTML -ReplyMarkup $keyboard
 }
+
+# ---------------------------------------------------------------- the library
+
+function Get-MojazLibraryText {
+    $bulletins = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>📑 الموجزات المحفوظة</b>')
+    if ($bulletins.Count -eq 0) {
+        $lines.Add('<i>لا توجد موجزات محفوظة. أنشئ موجزًا ثم أضف صفوفه.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add("<i>$($bulletins.Count) موجزًا · كل تشغيل يستخدم آخر تحديث محفوظ</i>")
+    $lines.Add('')
+    for ($index = 0; $index -lt $bulletins.Count; $index++) {
+        $bulletin = $bulletins[$index]
+        $upcoming = @(Get-MojazBulletinSchedules -BulletinId ([string]$bulletin.Id)).Count
+        $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text ([string]$bulletin.Name))</b>")
+        $detail = "   $(@(Get-JsonProp $bulletin 'Rows').Count) صف · المراجعة $([int]$bulletin.Revision)"
+        if ($upcoming -gt 0) { $detail += " · $upcoming موعدًا قادمًا" }
+        if (Test-MojazOnAir -Bulletin $bulletin) { $detail += ' · ▶️ على الهواء' }
+        $lines.Add($detail)
+    }
+    return ($lines -join "`n")
+}
+
+function Get-MojazLibraryKeyboard {
+    $keyboard = @()
+    foreach ($bulletin in @(Get-JsonProp $script:MojazLibrary 'Bulletins')) {
+        $mark = if (Test-MojazOnAir -Bulletin $bulletin) { '▶️' } else { '📄' }
+        $keyboard += , @((New-Button "$mark $([string]$bulletin.Name)" "mojaz:open:$([string]$bulletin.Id)"))
+    }
+    $keyboard += , @((New-Button '➕ موجز جديد' 'mojaz:new' -Style success))
+    $keyboard += , @((New-Button '🕒 المواعيد' 'mojaz:times'), (New-Button '🔄 تحديث' 'menu:mojaz'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $keyboard }
+}
+
+function Show-MojazLibraryScreen {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-MojazAvailable)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "قالب '$($script:MojazTemplateKey)' غير موجود في سجل القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $script:MojazSelections.Remove([string]$ChatId)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazLibraryText) -ParseMode HTML -ReplyMarkup (Get-MojazLibraryKeyboard)
+}
+
+function Open-MojazBulletin {
+    param([Parameter(Mandatory)][string]$BulletinId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if (-not (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId)) {
+        Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId
+        return
+    }
+    $script:MojazSelections[[string]$ChatId] = $BulletinId
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
+function Start-MojazNamePrompt {
+    <# One prompt for the three things that need a name: a new bulletin, a
+       rename, and a copy. The mode says which. #>
+    param([Parameter(Mandatory)][ValidateSet('new', 'rename', 'copy')][string]$Which,
+        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletinId = Get-MojazSelectedId -ChatId $ChatId
+    if ($Which -ne 'new' -and -not $bulletinId) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $prompt = switch ($Which) {
+        'new' { '📝 أرسل اسم الموجز الجديد، مثل: الموجز الصباحي.' }
+        'rename' { '✏️ أرسل الاسم الجديد لهذا الموجز.' }
+        'copy' { '📋 أرسل اسم النسخة الجديدة.' }
+    }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = "mojaz_name_$Which"; UserId = $UserId; BulletinId = $bulletinId }
+    Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Complete-MojazName {
+    param([Parameter(Mandatory)][ValidateSet('new', 'rename', 'copy')][string]$Which,
+        [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne "mojaz_name_$Which") { return }
+    $userId = [long]$state.UserId
+    $bulletinId = [string](Get-JsonProp $state 'BulletinId')
+    $result = switch ($Which) {
+        # A new bulletin opens on the newsroom's usual dwell; the ⏱ button
+        # changes it for this one without touching the setting.
+        'new' { Add-MojazBulletin -Library $script:MojazLibrary -Name $Value -DelaySeconds (Get-SettingInt 'MojazRowSeconds' 8) -UserId $userId }
+        'rename' { Rename-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
+        'copy' { Copy-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
+    }
+    if (-not $result.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$result.Error)" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    if (-not (Save-MojazLibrary -Library $result.Value)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الحفظ. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.' -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    Clear-PendingState -ChatId $ChatId
+    $actor = Format-UserAuditActor -UserId $userId
+    if ($Which -eq 'rename') {
+        Add-AuditEntry "📑 إعادة تسمية موجز - بواسطة $actor"
+    }
+    else {
+        # A create and a copy both append, so the new bulletin is the last one.
+        $created = @(Get-JsonProp $script:MojazLibrary 'Bulletins')[-1]
+        $script:MojazSelections[[string]$ChatId] = [string]$created.Id
+        $verb = if ($Which -eq 'new') { 'إنشاء' } else { 'نسخ' }
+        Add-AuditEntry "📑 $verb موجز '$([string]$created.Name)' - بواسطة $actor"
+    }
+    Show-MojazScreen -ChatId $ChatId -UserId $userId
+}
+
+function Get-MojazConfirmKeyboard {
+    <# The screens that destroy work ask first, and colour only the half that
+       destroys - the way every other danger button in the bridge does. #>
+    param([Parameter(Mandatory)][string]$Question, [Parameter(Mandatory)][string]$ConfirmData)
+    return @{ inline_keyboard = @(, @(
+                (New-Button $Question $ConfirmData -Style danger)
+                (New-Button '↩️ تراجع' 'mojaz:refresh')
+            )) }
+}
+
+function Remove-MojazBulletinAndSchedules {
+    <#
+        Deleting a bulletin takes its appointments with it, or takes nothing.
+
+        Two files have to move together. The schedules go first: if that write
+        fails nothing has happened yet, and if the library write then fails the
+        schedules are put back - so no appointment is ever left pointing at a
+        bulletin that no longer exists.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return $false }
+    $bulletinId = [string]$bulletin.Id
+    if (Test-MojazOnAir -Bulletin $bulletin) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ هذا الموجز على الهواء الآن. أوقفه أولًا.'
+        Show-MojazScreen -ChatId $ChatId -UserId $UserId
+        return $false
+    }
+    $removal = Remove-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId
+    if (-not $removal.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$removal.Error)"
+        return $false
+    }
+    $previousSchedules = @($script:MojazSchedules)
+    $keptSchedules = @($previousSchedules | Where-Object { [string](Get-JsonProp $_ 'BulletinId') -ne $bulletinId })
+    $cancelled = $previousSchedules.Count - $keptSchedules.Count
+    if ($cancelled -gt 0 -and -not (Save-MojazSchedules -Schedules $keptSchedules)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر إلغاء مواعيد هذا الموجز، فلم يُحذف شيء.'
+        return $false
+    }
+    if (-not (Save-MojazLibrary -Library $removal.Value)) {
+        if ($cancelled -gt 0) { Save-MojazSchedules -Schedules $previousSchedules | Out-Null }
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حذف الموجز. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.'
+        return $false
+    }
+    $note = if ($cancelled -gt 0) { " ومعه $cancelled موعدًا" } else { '' }
+    Add-AuditEntry "🗑 حذف موجز '$([string]$bulletin.Name)'$note - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Send-TelegramMessage -ChatId $ChatId -Text "🗑 حُذف «$([string]$bulletin.Name)»$note."
+    Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId
+    return $true
+}
+
+# --------------------------------------------------------------------- rows
 
 function Start-MojazRowAdd {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_image'; UserId = $UserId; Image = ''; Title = '' }
+    $bulletinId = Get-MojazSelectedId -ChatId $ChatId
+    if (-not $bulletinId) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_image'; UserId = $UserId; BulletinId = $bulletinId; Image = ''; Title = '' }
     Send-TelegramMessage -ChatId $ChatId -Text "🖼 أرسل صورة الصف (كصورة أو كملف)، أو أرسل مسارًا مثل ‎.\Mojaz\Pic01.png‎`nأو اضغط ⏭ تخطٍّ لإبقاء صورة القالب." `
         -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏭ تخطٍّ' 'mojaz:skipimage'), (New-Button '❌ إلغاء' 'mojaz:refresh'))) }
 }
@@ -324,7 +637,10 @@ function Complete-MojazRowImage {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'mojaz_row_image') { return }
     $image = if ($Skip) { '' } else { ([string]$Value).Trim() }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_title'; UserId = $state.UserId; Image = $image; Title = '' }
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = 'mojaz_row_title'; UserId = $state.UserId
+        BulletinId = [string](Get-JsonProp $state 'BulletinId'); Image = $image; Title = ''
+    }
     Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل عنوان الصف (مثل: قطاع غزة).' -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -337,7 +653,10 @@ function Complete-MojazRowTitle {
         Send-TelegramMessage -ChatId $ChatId -Text '❌ العنوان فارغ. أرسل عنوانًا.' -ReplyMarkup (Get-CancelKeyboard)
         return
     }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_text'; UserId = $state.UserId; Image = [string]$state.Image; Title = $title }
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = 'mojaz_row_text'; UserId = $state.UserId
+        BulletinId = [string](Get-JsonProp $state 'BulletinId'); Image = [string]$state.Image; Title = $title
+    }
     Send-TelegramMessage -ChatId $ChatId -Text '📰 أرسل نص الخبر.' -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -351,9 +670,16 @@ function Complete-MojazRowText {
         return
     }
     $userId = [long]$state.UserId
+    # The row goes to the bulletin this flow started in, not to whatever is
+    # selected now: the selection can have moved while the operator typed.
+    $bulletinId = [string](Get-JsonProp $state 'BulletinId')
     Clear-PendingState -ChatId $ChatId
-    Add-MojazRow -Image ([string]$state.Image) -Title ([string]$state.Title) -Text $text | Out-Null
-    Add-AuditEntry "📑 أُضيف صف للموجز - بواسطة $(Format-UserAuditActor -UserId $userId)"
+    $result = Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $bulletinId `
+        -Image ([string]$state.Image) -Title ([string]$state.Title) -Text $text -UserId $userId
+    if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
+        Add-AuditEntry "📑 أُضيف صف للموجز - بواسطة $(Format-UserAuditActor -UserId $userId)"
+        $script:MojazSelections[[string]$ChatId] = $bulletinId
+    }
     Show-MojazScreen -ChatId $ChatId -UserId $userId
 }
 
@@ -388,75 +714,163 @@ function Receive-MojazPhoto {
     return $true
 }
 
+function Remove-MojazRow {
+    param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $result = Remove-MojazBulletinRow -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -RowId $RowId -UserId $UserId
+    Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
+function Move-MojazRow {
+    param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][ValidateSet('up', 'down')][string]$Direction,
+        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $result = Move-MojazBulletinRow -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -RowId $RowId -Direction $Direction -UserId $UserId
+    # Hitting the edge of the table is not worth a message: the screen simply
+    # redraws unchanged.
+    Invoke-MojazEdit -Result $result -ChatId $ChatId -Quiet | Out-Null
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
+function Clear-MojazRows {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $result = Clear-MojazBulletinRows -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -UserId $UserId
+    if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
+        Add-AuditEntry "🧹 مسح جدول الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    }
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
+# ----------------------------------------------------------- timing prompts
+
 function Start-MojazDelayPrompt {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_delay'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏱ كم ثانية يبقى كل صف على الهواء؟ (1-600)`nالحالي: $([int]$script:MojazDelaySeconds) ث" -ReplyMarkup (Get-CancelKeyboard)
-}
-
-function Complete-MojazDelay {
-    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
-    $state = Get-PendingState -ChatId $ChatId
-    if (-not $state -or [string]$state.Mode -ne 'mojaz_delay') { return }
-    $seconds = 0
-    if (-not [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds) -or -not (Set-MojazDelaySeconds -Seconds $seconds)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل رقمًا بين 1 و600.' -ReplyMarkup (Get-CancelKeyboard)
-        return
-    }
-    $userId = [long]$state.UserId
-    Clear-PendingState -ChatId $ChatId
-    Show-MojazScreen -ChatId $ChatId -UserId $userId
-}
-
-function Get-MojazPendingStartText {
-    <# The wait, said as both the clock time and how long from now - the first
-       is what a rundown is written against, the second is what the person
-       holding the phone is actually counting. #>
-    if (-not $script:MojazStartAt) { return '' }
-    $moment = [datetimeoffset]$script:MojazStartAt
-    $seconds = [int][math]::Max(0, ($moment - [datetimeoffset]::Now).TotalSeconds)
-    return "🕒 يبدأ $($moment.ToString('HH:mm')) — بعد $(Format-DurationSeconds -Seconds $seconds)"
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_delay'; UserId = $UserId; BulletinId = [string]$bulletin.Id }
+    Send-TelegramMessage -ChatId $ChatId -Text "⏱ كم ثانية يبقى كل صف على الهواء؟ (1-600)`nالحالي: $([int]$bulletin.DelaySeconds) ث" -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-MojazTimingPrompt {
     <# One prompt for both numbers; the mode says which. #>
     param([Parameter(Mandatory)][ValidateSet('intro', 'last')][string]$Which, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
     $text = if ($Which -eq 'intro') {
-        "⏩ كم ثانية تُضاف إلى الصف الأول وحده (حركة الدخول)؟ (0-120)`nالحالي: $(Get-MojazIntroSeconds) ث · أرسل 0 للعودة إلى قيمة الإعدادات."
+        "⏩ كم ثانية تُضاف إلى الصف الأول وحده (حركة الدخول)؟ (0-600)`nالحالي: $(Get-MojazIntroSeconds -Bulletin $bulletin) ث · أرسل 0 لاتّباع القالب."
     }
     else {
-        "⏹ كم ثانية يبقى الصف الأخير قبل أمر الخروج؟ (0-600)`nالحالي: $(Get-MojazLastRowSeconds) ث · أرسل 0 لجعلها نصف مدة الصف تلقائيًا."
+        "⏹ كم ثانية يبقى الصف الأخير قبل أمر الخروج؟ (0-600)`nالحالي: $(Get-MojazLastRowSeconds -Bulletin $bulletin) ث · أرسل 0 لاتّباع القالب."
     }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = "mojaz_$($Which)_seconds"; UserId = $UserId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = "mojaz_$($Which)_seconds"; UserId = $UserId; BulletinId = [string]$bulletin.Id }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-MojazTiming {
-    param([Parameter(Mandatory)][ValidateSet('intro', 'last')][string]$Which, [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    <# The three numbers a bulletin owns, set the same way: parse it, hand it
+       to the module, let the module say whether the range allows it. #>
+    param([Parameter(Mandatory)][ValidateSet('delay', 'intro', 'last')][string]$Which,
+        [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $mode = if ($Which -eq 'delay') { 'mojaz_delay' } else { "mojaz_$($Which)_seconds" }
     $state = Get-PendingState -ChatId $ChatId
-    if (-not $state -or [string]$state.Mode -ne "mojaz_$($Which)_seconds") { return }
+    if (-not $state -or [string]$state.Mode -ne $mode) { return }
     $seconds = 0
-    $parsed = [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds)
-    $applied = $false
-    if ($parsed) {
-        $applied = if ($Which -eq 'intro') { Set-MojazIntroSeconds -Seconds $seconds } else { Set-MojazLastRowSeconds -Seconds $seconds }
-    }
-    if (-not $applied) {
-        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'intro') { '❌ أرسل رقمًا بين 0 و120.' } else { '❌ أرسل رقمًا بين 0 و600.' }) -ReplyMarkup (Get-CancelKeyboard)
+    if (-not [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds)) {
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'delay') { '❌ أرسل رقمًا بين 1 و600.' } else { '❌ أرسل رقمًا بين 0 و600.' }) -ReplyMarkup (Get-CancelKeyboard)
         return
     }
+    $bulletinId = [string](Get-JsonProp $state 'BulletinId')
     $userId = [long]$state.UserId
+    $result = switch ($Which) {
+        'delay' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -DelaySeconds $seconds -UserId $userId }
+        'intro' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -IntroExtraSeconds $seconds -UserId $userId }
+        'last' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -LastRowSeconds $seconds -UserId $userId }
+    }
+    if (-not $result.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$result.Error)" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    if (-not (Save-MojazLibrary -Library $result.Value)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الحفظ. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.' -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
     Clear-PendingState -ChatId $ChatId
     Show-MojazScreen -ChatId $ChatId -UserId $userId
+}
+
+# ------------------------------------------------------------------ schedules
+
+function Get-MojazBulletinSchedules {
+    <# The appointments still ahead of one bulletin, soonest first. #>
+    param([Parameter(Mandatory)][string]$BulletinId)
+    return @($script:MojazSchedules | Where-Object {
+            [string](Get-JsonProp $_ 'BulletinId') -eq $BulletinId -and
+            [string](Get-JsonProp $_ 'Status') -in @('scheduled', 'queued')
+        } | Sort-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') })
+}
+
+function Get-MojazBulletinScheduleText {
+    <# The wait, said as both the clock time and how long from now - the first
+       is what a rundown is written against, the second is what the person
+       holding the phone is actually counting. #>
+    param([Parameter(Mandatory)][string]$BulletinId)
+    $next = @(Get-MojazBulletinSchedules -BulletinId $BulletinId) | Select-Object -First 1
+    if (-not $next) { return '' }
+    $moment = [datetimeoffset](Get-JsonProp $next 'ScheduledAt')
+    if ([string](Get-JsonProp $next 'Status') -eq 'queued') {
+        return "⏳ في الانتظار — موعده $($moment.ToString('HH:mm')) مرّ وموجز آخر على الهواء."
+    }
+    $seconds = [int][math]::Max(0, ($moment - [datetimeoffset]::Now).TotalSeconds)
+    return "🕒 يبدأ $($moment.ToString('HH:mm')) — بعد $(Format-DurationSeconds -Seconds $seconds)"
+}
+
+function Add-MojazSchedule {
+    <# An appointment names the bulletin, not its rows: what plays is whatever
+       is saved when the moment arrives. #>
+    param(
+        [Parameter(Mandatory)][string]$BulletinId,
+        [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0
+    )
+    if (-not (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId)) { return $false }
+    $schedule = [pscustomobject]@{
+        Id = "ms_$([guid]::NewGuid().ToString('N').Substring(0,8))"
+        BulletinId = $BulletinId
+        ScheduledAt = $ScheduledAt.ToString('o')
+        CreatedAt = [datetimeoffset]::Now.ToString('o')
+        CreatedBy = $UserId
+        ChatId = $ChatId
+        Status = 'scheduled'
+        DueAt = $null
+        StartedAt = $null
+        CompletedAt = $null
+        DelayReason = ''
+        LastError = ''
+    }
+    return (Save-MojazSchedules -Schedules @(@($script:MojazSchedules) + $schedule))
+}
+
+function Stop-MojazSchedule {
+    param([Parameter(Mandatory)][string]$ScheduleId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $kept = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Id') -ne $ScheduleId })
+    if ($kept.Count -eq @($script:MojazSchedules).Count) { Show-MojazSchedulesScreen -ChatId $ChatId -UserId $UserId; return }
+    if (-not (Save-MojazSchedules -Schedules $kept)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر إلغاء الموعد. لم يتغيّر شيء.'
+        return
+    }
+    Add-AuditEntry "🚫 إلغاء موعد موجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Show-MojazSchedulesScreen -ChatId $ChatId -UserId $UserId
 }
 
 function Start-MojazLaterPrompt {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_start_at'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "🕒 متى يبدأ الموجز؟`nمثل: +30 (بعد 30 دقيقة) · بعد 90 · 21:45 · غدًا 07:00" -ReplyMarkup (Get-CancelKeyboard)
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_start_at'; UserId = $UserId; BulletinId = [string]$bulletin.Id }
+    Send-TelegramMessage -ChatId $ChatId -Text "🕒 متى يبدأ «$([string]$bulletin.Name)»؟`nمثل: +30 (بعد 30 دقيقة) · بعد 90 · 21:45 · غدًا 07:00" -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-MojazLater {
@@ -471,59 +885,168 @@ function Complete-MojazLater {
         return
     }
     $userId = [long]$state.UserId
+    $bulletinId = [string](Get-JsonProp $state 'BulletinId')
+    $scheduledAt = [datetimeoffset]$moment.ScheduledAt
+    if (-not (Add-MojazSchedule -BulletinId $bulletinId -ScheduledAt $scheduledAt -ChatId $ChatId -UserId $userId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الموعد. لم يتغيّر شيء.' -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
     Clear-PendingState -ChatId $ChatId
-    $script:MojazStartAt = [datetimeoffset]$moment.ScheduledAt
-    $script:MojazStartChatId = $ChatId
-    $script:MojazStartUserId = $userId
-    Write-BridgeLog "Mojaz playback scheduled for $($script:MojazStartAt.ToString('yyyy-MM-dd HH:mm')) by $userId"
-    Add-AuditEntry "🕒 تأجيل تشغيل الموجز إلى $($script:MojazStartAt.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+    Write-BridgeLog "Mojaz playback scheduled for $($scheduledAt.ToString('yyyy-MM-dd HH:mm')) by $userId"
+    Add-AuditEntry "🕒 موعد موجز $($scheduledAt.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
     Show-MojazScreen -ChatId $ChatId -UserId $userId
 }
 
-function Stop-MojazPendingStart {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    $script:MojazStartAt = $null
-    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+function Get-MojazSchedulesText {
+    $pending = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Status') -in @('scheduled', 'queued', 'running') } |
+            Sort-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') })
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🕒 مواعيد الموجزات</b>')
+    if ($pending.Count -eq 0) {
+        $lines.Add('<i>لا مواعيد. افتح موجزًا واضغط «تشغيل لاحقًا».</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add('<i>الموعد يستخدم آخر تحديث محفوظ للموجز، لا نسخته وقت الحجز</i>')
+    $lines.Add('')
+    for ($index = 0; $index -lt $pending.Count; $index++) {
+        $entry = $pending[$index]
+        $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $entry 'BulletinId'))
+        $name = if ($bulletin) { [string]$bulletin.Name } else { 'موجز محذوف' }
+        $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
+        $mark = switch ([string](Get-JsonProp $entry 'Status')) {
+            'running' { '▶️ على الهواء' }
+            'queued' { '⏳ في الانتظار — موجز آخر كان يعمل' }
+            default { '🕒 مجدول' }
+        }
+        $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text $name)</b> — $($moment.ToString('MM-dd HH:mm'))")
+        $lines.Add("   $mark")
+    }
+    return ($lines -join "`n")
 }
+
+function Get-MojazSchedulesKeyboard {
+    $pending = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Status') -in @('scheduled', 'queued') } |
+            Sort-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') })
+    $keyboard = @()
+    foreach ($entry in $pending) {
+        $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $entry 'BulletinId'))
+        $name = if ($bulletin) { [string]$bulletin.Name } else { 'موجز محذوف' }
+        $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
+        $keyboard += , @((New-Button "🚫 $($moment.ToString('HH:mm')) · $name" "mojaz:unschedule:$([string](Get-JsonProp $entry 'Id'))" -Style danger))
+    }
+    $keyboard += , @((New-Button '⬅️ الموجزات' 'menu:mojaz'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $keyboard }
+}
+
+function Show-MojazSchedulesScreen {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSchedulesText) -ParseMode HTML -ReplyMarkup (Get-MojazSchedulesKeyboard)
+}
+
+function Set-MojazScheduleStatus {
+    <# One writer for a schedule's state, so a transition is never half
+       applied: the whole list is rewritten, or none of it is. #>
+    param([Parameter(Mandatory)][string]$ScheduleId, [Parameter(Mandatory)][string]$Status, [hashtable]$Fields = @{})
+    $candidate = @($script:MojazSchedules | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+    $target = @($candidate | Where-Object { [string]$_.Id -eq $ScheduleId }) | Select-Object -First 1
+    if (-not $target) { return $false }
+    $target.Status = $Status
+    foreach ($key in $Fields.Keys) { $target.$key = $Fields[$key] }
+    return (Save-MojazSchedules -Schedules $candidate)
+}
+
+function Update-MojazScheduleQueue {
+    <#
+        The clock, checked from the tick.
+
+        Only one bulletin may be on air, so an appointment that comes due while
+        another is running does not fight for the layer: it is queued, said
+        once, and started later in the order the appointments were originally
+        due - not the order they happened to be noticed.
+    #>
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    $due = @(Get-MojazDueQueue -Schedules $script:MojazSchedules -Now $Now)
+    if ($due.Count -eq 0) { return }
+    if ($script:MojazPlayback) {
+        foreach ($entry in $due) {
+            if ([string](Get-JsonProp $entry 'Status') -ne 'scheduled') { continue }
+            $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$entry.BulletinId)
+            $waitingName = if ($bulletin) { [string]$bulletin.Name } else { 'الموجز المجدول' }
+            $activeName = if ([string]$script:MojazPlayback.BulletinName) { [string]$script:MojazPlayback.BulletinName } else { 'الموجز الحالي' }
+            if (Set-MojazScheduleStatus -ScheduleId ([string]$entry.Id) -Status 'queued' -Fields @{ DueAt = $Now.ToString('o'); DelayReason = 'active_bulletin' }) {
+                Send-TelegramMessage -ChatId ([long]$entry.ChatId) -Text "⏳ تأخّر «$waitingName» لأن «$activeName» ما زال على الهواء. سيبدأ بعد انتهائه."
+            }
+        }
+        return
+    }
+    $next = $due[0]
+    $scheduleId = [string]$next.Id
+    if (-not (Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'running' -Fields @{ StartedAt = $Now.ToString('o') })) { return }
+    $script:MojazSelections[[string]$next.ChatId] = [string]$next.BulletinId
+    if (-not (Start-MojazPlayback -ChatId ([long]$next.ChatId) -UserId ([long]$next.CreatedBy) -ScheduleId $scheduleId)) {
+        Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'failed' -Fields @{ LastError = 'playback_start_failed' } | Out-Null
+    }
+}
+
+# ------------------------------------------------------------------ playback
 
 function Start-MojazPlayback {
     <#
         Shows the first row, then leaves the rest to the tick.
 
+        The run works from a snapshot taken here and never reads the saved
+        bulletin again, so editing or even deleting the table mid-bulletin
+        changes what plays next time, not what is on air now.
+
         The show goes through the ordinary pipeline so this screen cannot skip
         maintenance mode, the layer policy, the live Cinegy check or the audit
         trail - a bulletin is still a graphic going on air.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $rows = @(Get-MojazRows)
-    if ($rows.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الجدول فارغ.' -ReplyMarkup (Get-MojazKeyboard)
-        return $false
-    }
     if ($script:MojazPlayback) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز يعمل بالفعل.' -ReplyMarkup (Get-MojazKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز يعمل بالفعل.'
         return $false
     }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز غير موجود.'
+        return $false
+    }
+    $schedule = if ($ScheduleId) { [pscustomobject]@{ Id = $ScheduleId } } else { $null }
+    # Resolve the two timings here rather than leaving the module to guess:
+    # these are the same numbers the screen printed, so what plays is what the
+    # plan line promised. The saved bulletin is not touched - the copy carries
+    # them into the snapshot, which owns the timing for this run alone.
+    $resolved = $bulletin | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $resolved.IntroExtraSeconds = Get-MojazIntroSeconds -Bulletin $bulletin
+    $resolved.LastRowSeconds = Get-MojazLastRowSeconds -Bulletin $bulletin
+    $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule
+    if (-not $snapshotResult.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الجدول فارغ.' -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
+        return $false
+    }
+    $snapshot = $snapshotResult.Value
+    $rows = @($snapshot.Rows)
     $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0]) -ChatId $ChatId -UserId $UserId
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { 'تعذّر العرض' }
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
-    $script:MojazStartAt = $null
-    $delay = [int]$script:MojazDelaySeconds
-    # The first row carries the entrance animation, so it stays for the dwell
-    # plus that animation - otherwise its text is replaced while the graphic is
-    # still sliding in.
-    $extra = Get-MojazIntroSeconds
     $script:MojazPlayback = @{
         Index = 0; ChatId = $ChatId; UserId = $UserId
-        NextAt = (Get-Date).AddSeconds($delay + $extra)
-        Rows = $rows.Count
+        NextAt = (Get-Date).AddSeconds([int]$snapshot.Plan[0].HoldSeconds)
+        Rows = $rows
+        Plan = @($snapshot.Plan)
+        BulletinId = [string]$snapshot.BulletinId
+        BulletinName = [string]$snapshot.BulletinName
+        BulletinRevision = [int]$snapshot.BulletinRevision
+        ScheduleId = $ScheduleId
     }
-    Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $delay s each)"
-    Add-AuditEntry "📑 تشغيل الموجز ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $([int]$bulletin.DelaySeconds) s each)"
+    Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true
 }
@@ -541,22 +1064,11 @@ function Stop-MojazPlayback {
         $user = if ($UserId -gt 0) { $UserId } else { [long]$playback.UserId }
         Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user | Out-Null
     }
+    if ([string]$playback.ScheduleId) {
+        Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
+    }
     if (-not $Quiet -and $ChatId -gt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
     return $true
-}
-
-function Update-MojazPendingStart {
-    <# The deferred start, checked from the tick. Held in memory only: a
-       bridge that restarts before it fires has no run to resume, and the
-       screen says as much rather than starting a bulletin nobody is waiting
-       for. #>
-    if (-not $script:MojazStartAt) { return }
-    if ([datetimeoffset]::Now -lt [datetimeoffset]$script:MojazStartAt) { return }
-    $chatId = [long]$script:MojazStartChatId
-    $userId = [long]$script:MojazStartUserId
-    $script:MojazStartAt = $null
-    Write-BridgeLog "Mojaz scheduled start firing for chat $chatId"
-    Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null
 }
 
 function Update-MojazPlayback {
@@ -565,11 +1077,11 @@ function Update-MojazPlayback {
 
         Rows after the first are pushed through the postbox, which is what
         changes a running scene's values without restarting it. The last row is
-        followed by EXIT after half the dwell, so the outro has time to run.
+        followed by EXIT after its own hold, so the outro has time to run.
     #>
     if (-not $script:MojazPlayback) { return }
     if ((Get-Date) -lt [datetime]$script:MojazPlayback.NextAt) { return }
-    $rows = @(Get-MojazRows)
+    $rows = @($script:MojazPlayback.Rows)
     $index = [int]$script:MojazPlayback.Index
     if ($index -ge ($rows.Count - 1)) {
         Write-BridgeLog "Mojaz playback finished after $($rows.Count) row(s)"
@@ -587,9 +1099,48 @@ function Update-MojazPlayback {
         Stop-MojazPlayback -Quiet | Out-Null
         return
     }
-    # The last row holds for its own number - half the dwell unless the
-    # bulletin says otherwise - because the EXIT that follows plays the outro.
-    $wait = if ($index -ge ($rows.Count - 1)) { Get-MojazLastRowSeconds } else { [int]$script:MojazDelaySeconds }
+    $wait = [int]$script:MojazPlayback.Plan[$index].HoldSeconds
     $script:MojazPlayback.Index = $index
     $script:MojazPlayback.NextAt = (Get-Date).AddSeconds($wait)
+}
+
+function Update-MojazImageCleanup {
+    <#
+        Pictures whose row is gone.
+
+        Deleting a row does not delete its picture, because the same file may
+        be on air in the run that is playing, or referenced by another
+        bulletin. So the sweep is deliberately narrow: only files this bridge
+        named itself, only inside the bulletin's own picture folder, only when
+        no saved row and no running snapshot mentions them, and only once they
+        are a day old - long enough that a picture uploaded for a row still
+        being written is never taken out from under it.
+    #>
+    param([int]$MinimumAgeHours = 24)
+    $directory = Get-MojazUploadDirectory
+    if (-not $directory -or -not (Test-Path -LiteralPath $directory)) { return 0 }
+    $referenced = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($bulletin in @(Get-JsonProp $script:MojazLibrary 'Bulletins')) {
+        foreach ($row in @(Get-JsonProp $bulletin 'Rows')) {
+            $image = [string](Get-JsonProp $row 'Image')
+            if ($image) { $referenced.Add((Split-Path -Path $image -Leaf)) | Out-Null }
+        }
+    }
+    if ($script:MojazPlayback) {
+        foreach ($row in @($script:MojazPlayback.Rows)) {
+            $image = [string](Get-JsonProp $row 'Image')
+            if ($image) { $referenced.Add((Split-Path -Path $image -Leaf)) | Out-Null }
+        }
+    }
+    $cutoff = (Get-Date).AddHours(-1 * [math]::Max(1, $MinimumAgeHours))
+    $removed = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -ErrorAction SilentlyContinue)) {
+        if ($file.Name -notmatch $script:MojazUploadPattern) { continue }
+        if ($referenced.Contains($file.Name)) { continue }
+        if ($file.LastWriteTime -gt $cutoff) { continue }
+        try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $removed++ }
+        catch { Write-BridgeLog "Could not remove the orphaned Mojaz picture '$($file.Name)': $($_.Exception.Message)" 'WARN' }
+    }
+    if ($removed -gt 0) { Write-BridgeLog "Removed $removed orphaned Mojaz picture(s)." }
+    return $removed
 }

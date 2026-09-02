@@ -285,7 +285,12 @@ function Invoke-CallbackQuery {
         # «خيار غير معروف.» and, worse, left any half-finished input
         # pending: the home button is what an operator presses to get out of
         # a flow, and it was the one press that did not clear it.
-        'menu:mojaz' { Show-MojazScreen -ChatId $chatId -UserId $userId; break }
+        'menu:mojaz' { Clear-PendingState -ChatId $chatId; Show-MojazLibraryScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:back' { Clear-PendingState -ChatId $chatId; Show-MojazLibraryScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:new' { Start-MojazNamePrompt -Which new -ChatId $chatId -UserId $userId; break }
+        'mojaz:rename' { Start-MojazNamePrompt -Which rename -ChatId $chatId -UserId $userId; break }
+        'mojaz:copy' { Start-MojazNamePrompt -Which copy -ChatId $chatId -UserId $userId; break }
+        'mojaz:open:*' { Clear-PendingState -ChatId $chatId; Open-MojazBulletin -BulletinId (Get-CallbackArg $data 'mojaz:open:') -ChatId $chatId -UserId $userId; break }
         'mojaz:refresh' { Clear-PendingState -ChatId $chatId; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:add' { Start-MojazRowAdd -ChatId $chatId -UserId $userId; break }
         'mojaz:skipimage' { Complete-MojazRowImage -ChatId $chatId -Skip; break }
@@ -293,22 +298,30 @@ function Invoke-CallbackQuery {
         'mojaz:intro' { Start-MojazTimingPrompt -Which intro -ChatId $chatId -UserId $userId; break }
         'mojaz:last' { Start-MojazTimingPrompt -Which last -ChatId $chatId -UserId $userId; break }
         'mojaz:later' { Start-MojazLaterPrompt -ChatId $chatId -UserId $userId; break }
-        'mojaz:cancelstart' { Stop-MojazPendingStart -ChatId $chatId -UserId $userId; break }
+        'mojaz:times' { Clear-PendingState -ChatId $chatId; Show-MojazSchedulesScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:unschedule:*' { Stop-MojazSchedule -ScheduleId (Get-CallbackArg $data 'mojaz:unschedule:') -ChatId $chatId -UserId $userId; break }
         'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:stop' { Stop-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
-        'mojaz:del:*' {
-            $rowIndex = 0
-            if ([int]::TryParse((Get-CallbackArg $data 'mojaz:del:'), [ref]$rowIndex)) { Remove-MojazRow -Index $rowIndex | Out-Null }
-            Show-MojazScreen -ChatId $chatId -UserId $userId
-            break
-        }
+        'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
+        'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }
+        'mojaz:down:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:down:') -Direction down -ChatId $chatId -UserId $userId; break }
         'mojaz:clear' {
-            Send-TelegramMessage -ChatId $chatId -Text '⚠️ مسح كل صفوف الموجز؟ لا يؤثر على ما هو على الهواء الآن.' -ReplyMarkup @{ inline_keyboard = @(
-                    , @((New-Button '🧹 نعم، امسح' 'mojaz:clearconfirm' -Style danger), (New-Button '❌ إلغاء' 'mojaz:refresh'))
-                ) }
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ مسح كل صفوف هذا الموجز؟ لا يؤثر على ما هو على الهواء الآن.' `
+                -ReplyMarkup (Get-MojazConfirmKeyboard -Question '🧹 نعم، امسح الصفوف' -ConfirmData 'mojaz:clearconfirm')
             break
         }
-        'mojaz:clearconfirm' { Clear-MojazRows | Out-Null; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:clearconfirm' { Clear-MojazRows -ChatId $chatId -UserId $userId; break }
+        'mojaz:drop' {
+            $doomed = Get-MojazSelected -ChatId $chatId
+            if (-not $doomed) { Show-MojazLibraryScreen -ChatId $chatId -UserId $userId; break }
+            $waiting = @(Get-MojazBulletinSchedules -BulletinId ([string]$doomed.Id)).Count
+            $warning = "⚠️ حذف «$([string]$doomed.Name)» نهائيًا مع $(@(Get-JsonProp $doomed 'Rows').Count) صفًّا؟"
+            if ($waiting -gt 0) { $warning += " وسيُلغى معه $waiting موعدًا." }
+            Send-TelegramMessage -ChatId $chatId -Text $warning `
+                -ReplyMarkup (Get-MojazConfirmKeyboard -Question '🗑 نعم، احذف الموجز' -ConfirmData 'mojaz:dropconfirm')
+            break
+        }
+        'mojaz:dropconfirm' { Remove-MojazBulletinAndSchedules -ChatId $chatId -UserId $userId | Out-Null; break }
         { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
             Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
@@ -1353,4 +1366,3 @@ function Invoke-CallbackQuery {
         }
     }
 }
-

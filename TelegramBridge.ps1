@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.29.0'
+$script:BridgeVersion = '7.31.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -73,6 +73,7 @@ Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeMojaz.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
@@ -805,15 +806,17 @@ $script:PagedText = @{}
 # The Mojaz bulletin: the saved table, the dwell it was saved with, and
 # the run in progress ($null when nothing is playing).
 $script:MojazTemplateKey = 'Mojaz'
-$script:MojazRows = @()
-$script:MojazDelaySeconds = 8
+# Every saved bulletin, and the appointments that will play them. Rows live
+# here and nowhere else: an edit is a write to the library, so what a restart
+# reads back is exactly what the screen last showed.
+$script:MojazLibrary = New-MojazLibrary
+$script:MojazSchedules = @()
+# Which bulletin each chat has open, keyed by chat id as a string.
+$script:MojazSelections = @{}
 $script:MojazPlayback = $null
-$script:MojazIntroOverride = 0
-$script:MojazLastRowOverride = 0
-# A run asked for later: the moment, and who to answer when it fires.
-$script:MojazStartAt = $null
-$script:MojazStartChatId = 0
-$script:MojazStartUserId = 0
+# The scene's own durations, cached on its path and write time.
+$script:MojazSceneTiming = $null
+$script:MojazSceneTimingKey = ''
 # Built on first use from the settings table: the manual mentions setting
 # names in prose, and a name is worth setting in code only if it is real.
 $script:HelpCodeTermPattern = ''
@@ -1429,7 +1432,8 @@ Import-UserOperationHistory
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 Update-UploadCleanup -Force     # and any staged upload left behind with it
-Import-MojazPlaylist            # the saved bulletin table, if there is one
+Import-MojazLibrary             # named bulletins, migrating the old singleton once
+Import-MojazSchedules           # reusable future runs and their queue state
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
@@ -1542,10 +1546,13 @@ try {
                                 'mojaz_row_image' { Complete-MojazRowImage -ChatId $chatId -Value $text }
                                 'mojaz_row_title' { Complete-MojazRowTitle -ChatId $chatId -Value $text }
                                 'mojaz_row_text' { Complete-MojazRowText -ChatId $chatId -Value $text }
-                                'mojaz_delay' { Complete-MojazDelay -ChatId $chatId -Value $text }
+                                'mojaz_delay' { Complete-MojazTiming -Which delay -ChatId $chatId -Value $text }
                                 'mojaz_intro_seconds' { Complete-MojazTiming -Which intro -ChatId $chatId -Value $text }
                                 'mojaz_last_seconds' { Complete-MojazTiming -Which last -ChatId $chatId -Value $text }
                                 'mojaz_start_at' { Complete-MojazLater -ChatId $chatId -Value $text }
+                                'mojaz_name_new' { Complete-MojazName -Which new -ChatId $chatId -Value $text }
+                                'mojaz_name_rename' { Complete-MojazName -Which rename -ChatId $chatId -Value $text }
+                                'mojaz_name_copy' { Complete-MojazName -Which copy -ChatId $chatId -Value $text }
                                 'operation_reference' { Complete-OperationReferenceLookup -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }

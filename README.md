@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.31.0
+
+The single Mojaz table became a library of named bulletins - a morning one, an
+evening one, as many as the newsroom keeps - each with its own rows and
+timing. Rows now live in one place: every edit writes the library through a
+validated atomic save, so a failed write changes nothing and never claims it
+saved, and what a restart reads back is exactly what the screen last showed.
+The old single table migrates into the library once, and the legacy file is
+only archived after the new one is safely on disk.
+
+"Start later" is a saved appointment rather than a promise held in memory, so
+it survives a restart; a bulletin can hold several, each resolves the latest
+saved revision when it fires, and two appointments never fight for the layer -
+the second waits for the first with a single notice. A run works from a
+snapshot taken at start, so editing or clearing the table mid-bulletin changes
+what plays next time, not what is on air now.
+
+## Version 7.30.0
+
+The bulletin's timing is read from the scene instead of guessed. A Cinegy
+scene already says where its loop starts and ends, and those markers are the
+three durations this screen needs: 0 to LoopStartFrame is the entrance,
+LoopStart to LoopEnd is the part that repeats, LoopEnd to Duration is the
+exit. Re-timing the scene in Titler re-times the bulletin with nothing to
+change here - the read is cached on the file's write time.
+
 ## Version 7.29.0
 
 The two special timings are buttons on the Mojaz screen now: the extra the

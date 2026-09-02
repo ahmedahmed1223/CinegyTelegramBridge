@@ -35,6 +35,20 @@ function global:New-TestMojazRow {
     }
 }
 
+function global:Step-TestMojazPlayback {
+    <# Wait out the next moment without actually waiting: the run measures
+       itself with a stopwatch, and ClockOffset is there so a test can move
+       time instead of sleeping through it. #>
+    $index = [int]$script:MojazPlayback.Index
+    $rows = @($script:MojazPlayback.Rows)
+    $moment = if ($index -ge ($rows.Count - 1)) {
+        [double]$script:MojazPlayback.ExitAtSeconds
+    }
+    else { [double]$script:MojazPlayback.Plan[$index + 1].AtSeconds }
+    $script:MojazPlayback.ClockOffset = $moment + 1
+    Update-MojazPlayback
+}
+
 Describe 'The bulletin table' {
     BeforeEach {
         Mock Write-BridgeValidatedJson { $true }
@@ -198,19 +212,16 @@ Describe 'Playing a bulletin' {
         Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeTrue
 
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
-        $wait = ([datetime]$script:MojazPlayback.NextAt - (Get-Date)).TotalSeconds
-        # 4 second dwell + 2 second entrance, give or take the test's own time.
-        $wait | Should -BeGreaterThan 5
-        $wait | Should -BeLessThan 6.5
+        # 4 second dwell + 2 second entrance, as an absolute moment measured
+        # from the start of the run rather than a delay from the last send.
+        [double]$script:MojazPlayback.Plan[1].AtSeconds | Should -Be 6
     }
 
     It 'changes the following rows through the postbox, not with another show' {
         # Another SHOW would replay the entrance animation and flash the
         # screen between stories; the postbox writes into the running scene.
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
-        $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-
-        Update-MojazPlayback
+        Step-TestMojazPlayback
 
         Should -Invoke Send-PostboxValues -Times 1 -Exactly
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
@@ -221,17 +232,14 @@ Describe 'Playing a bulletin' {
         # With no scene to read, half the dwell is the documented fallback.
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
         foreach ($step in 1..2) {
-            $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-            Update-MojazPlayback
+            Step-TestMojazPlayback
         }
 
         [int]$script:MojazPlayback.Index | Should -Be 2
-        $wait = ([datetime]$script:MojazPlayback.NextAt - (Get-Date)).TotalSeconds
-        $wait | Should -BeGreaterThan 1
-        $wait | Should -BeLessThan 2.5
+        # Half the 4 second dwell between the last row and the exit.
+        ([double]$script:MojazPlayback.ExitAtSeconds - [double]$script:MojazPlayback.Plan[2].AtSeconds) | Should -Be 2
 
-        $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-        Update-MojazPlayback
+        Step-TestMojazPlayback
 
         Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
         $script:MojazPlayback | Should -BeNullOrEmpty
@@ -240,9 +248,7 @@ Describe 'Playing a bulletin' {
     It 'stops the bulletin when a row fails rather than carrying on blind' {
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $false; Error = 'no route'; Xml = '' } }
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
-        $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-
-        Update-MojazPlayback
+        Step-TestMojazPlayback
 
         $script:MojazPlayback | Should -BeNullOrEmpty
         Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
@@ -374,12 +380,9 @@ Describe 'Adjusting the bulletin timings' {
         $script:MojazLibrary.Bulletins[0].LastRowSeconds = 15
 
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
-        $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-        Update-MojazPlayback
+        Step-TestMojazPlayback
 
-        $wait = ([datetime]$script:MojazPlayback.NextAt - (Get-Date)).TotalSeconds
-        $wait | Should -BeGreaterThan 14
-        $wait | Should -BeLessThan 15.5
+        ([double]$script:MojazPlayback.ExitAtSeconds - [double]$script:MojazPlayback.Plan[1].AtSeconds) | Should -Be 15
     }
 }
 
@@ -632,7 +635,7 @@ Describe 'Deleting a bulletin' {
     }
 
     It 'refuses while that bulletin is on air' {
-        $script:MojazPlayback = @{ BulletinId = [string]$script:bulletin.Id; BulletinName = 'الصباحي'; Rows = @(1); Index = 0; NextAt = (Get-Date).AddMinutes(1) }
+        $script:MojazPlayback = @{ BulletinId = [string]$script:bulletin.Id; BulletinName = 'الصباحي'; Rows = @(1); Index = 0 }
 
         Remove-MojazBulletinAndSchedules -ChatId 100 -UserId 101 | Should -BeFalse
 
@@ -678,8 +681,7 @@ Describe 'Named bulletin playback isolation' {
     It 'shows the entrance once and updates every later row only through postbox' {
         Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeTrue
         foreach ($step in 1..2) {
-            $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-            Update-MojazPlayback
+            Step-TestMojazPlayback
         }
 
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
@@ -691,8 +693,7 @@ Describe 'Named bulletin playback isolation' {
         $script:MojazLibrary.Bulletins[0].Rows = @()
 
         foreach ($step in 1..2) {
-            $script:MojazPlayback.NextAt = (Get-Date).AddSeconds(-1)
-            Update-MojazPlayback
+            Step-TestMojazPlayback
         }
 
         [int]$script:MojazPlayback.Index | Should -Be 2
@@ -783,7 +784,7 @@ Describe 'Reusable Mojaz schedules and overlap prevention' {
                 Id = 'ms_due'; BulletinId = $id; ScheduledAt = '2026-09-02T08:00:00+03:00'; CreatedAt = '2026-09-01T08:00:00+03:00'
                 CreatedBy = 101; ChatId = 100; Status = 'scheduled'; DueAt = $null; StartedAt = $null; CompletedAt = $null; DelayReason = ''; LastError = ''
             })
-        $script:MojazPlayback = @{ BulletinId = 'b_other'; BulletinName = 'الجارى'; Rows = @(1); Index = 0; NextAt = (Get-Date).AddMinutes(1) }
+        $script:MojazPlayback = @{ BulletinId = 'b_other'; BulletinName = 'الجارى'; Rows = @(1); Index = 0 }
 
         Update-MojazScheduleQueue -Now ([datetimeoffset]'2026-09-02T09:00:00+03:00')
         Update-MojazScheduleQueue -Now ([datetimeoffset]'2026-09-02T09:01:00+03:00')
@@ -1002,5 +1003,74 @@ Describe 'Every Mojaz keyboard is shaped the way Telegram wants' {
 
         $script:sent | Should -Not -BeNullOrEmpty
         Assert-MojazKeyboardShape -Markup $script:sent -Because 'the row screen'
+    }
+}
+
+Describe 'Hiding the change behind the scene fade' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazTemplateImage { '' }
+        # The scene re-cut so one loop is one story: entrance 1.2 s, loop 8 s.
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 8; OutroSeconds = 6.72 } }
+        $script:bulletin = New-TestMojazLibrary -DelaySeconds 30 -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'أ')
+            (New-TestMojazRow -Id 'r_2' -Title 'ب')
+        )
+    }
+    AfterAll { $script:MojazPlayback = $null }
+
+    It 'turns on from its button and says what it means' {
+        Test-MojazSyncToLoop -Bulletin (Get-MojazSelected -ChatId 100) | Should -BeFalse
+
+        Switch-MojazSync -ChatId 100 -UserId 101
+
+        Test-MojazSyncToLoop -Bulletin (Get-MojazSelected -ChatId 100) | Should -BeTrue
+        Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId 100) | Should -Match 'لوبًا كاملًا'
+        # The dwell no longer decides the pace, so the plan must not quote it.
+        Get-MojazPlanText -Bulletin (Get-MojazSelected -ChatId 100) | Should -Match 'كل صف لوب واحد'
+    }
+
+    It 'warns instead of silently running a row for a whole minute' {
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 60; OutroSeconds = 6.72 } }
+        Switch-MojazSync -ChatId 100 -UserId 101
+
+        Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId 100) | Should -Match 'اللوب طويل'
+    }
+
+    It 'takes the run moments from the loop, not from the dwell' {
+        Switch-MojazSync -ChatId 100 -UserId 101
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:MojazPlayback.SyncToLoop | Should -BeTrue
+        # The second row is written 0.4 s after the first wrap at 9.2 s, well
+        # inside the 1.2 s fade - and nowhere near the bulletin's 30 s dwell.
+        [double]$script:MojazPlayback.Plan[1].AtSeconds | Should -Be 9.6
+        [double]$script:MojazPlayback.ExitAtSeconds | Should -Be 17.2
+    }
+
+    It 'still plays when sync is asked for but the scene has no loop' {
+        Switch-MojazSync -ChatId 100 -UserId 101
+        Mock Get-MojazSceneTiming { $null }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:MojazPlayback.SyncToLoop | Should -BeFalse
+        Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId 100) | Should -Match 'لا يعطي لوبًا صالحًا'
+    }
+
+    It 'keeps the loop fast enough to hit the fade while a bulletin is on air' {
+        # The bug this exists for: the poll timeout knew about snapshots and
+        # relays but not about a bulletin, so the tick could be half a minute
+        # apart and miss every window.
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Get-EffectivePollTimeout | Should -Be 1
     }
 }

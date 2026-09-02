@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.32.1'
+$script:BridgeVersion = '7.33.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -201,6 +201,8 @@ $script:DefaultSettings = [ordered]@{
     # --- safety ---
     MojazRowSeconds            = 8       # how long each Mojaz row stays before the next replaces it
     MojazIntroExtraSeconds     = 2       # added to the FIRST row only: the entrance animation plays over it
+    MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
+    MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
@@ -378,6 +380,8 @@ $script:SettingDisplayMetadata = @{
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
     MojazRowSeconds = @{ Unit = 'ثانية'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي' }
     MojazIntroExtraSeconds = @{ Unit = 'ثانية'; Description = 'تُضاف إلى الصف الأول وحده، بقدر حركة دخول القالب' }
+    MojazSyncOffsetMs = @{ Unit = 'مللي ثانية'; Description = 'بعد التفاف اللوب بكم يُكتب الصف التالي، ليقع داخل حركة الظهور فتُخفيه' }
+    MojazSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
     EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
@@ -926,7 +930,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'MojazRowSeconds', 'MojazIntroExtraSeconds',
+                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1050,6 +1054,8 @@ $script:SettingNavigationLabels = @{
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
     MojazRowSeconds = 'مدة صف الموجز'
     MojazIntroExtraSeconds = 'زيادة الصف الأول'
+    MojazSyncOffsetMs = 'لحظة الكتابة داخل الظهور'
+    MojazSyncLeadMs = 'تعويض زمن الشبكة'
     AirCommandTimeoutSeconds = 'مهلة أمر Cinegy'
     AllowRemoteRestart = 'إعادة التشغيل من البوت'
     AuditArchiveKeepFiles = 'أرشيفات التدقيق المحفوظة'

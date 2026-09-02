@@ -28,6 +28,11 @@ $script:MojazTextVariable = 'Subject.Text'
 # only names of this exact shape, inside the bulletin's own picture folder.
 $script:MojazUploadPattern = '^mojaz-\d{8}-\d{6}-[0-9a-f]{8}\.[A-Za-z0-9]{1,5}$'
 
+# How early the tick takes an interest in the next moment. Longer than the
+# poll interval, so a moment is always noticed before it arrives; and it caps
+# the blocking wait that lands the send on time.
+$script:MojazPreRollSeconds = 1.5
+
 function Get-MojazTemplate {
     <# The registry entry, or $null when this bridge has no Mojaz template -
        which is how the menu knows not to offer the screen at all. #>
@@ -369,6 +374,38 @@ function Get-MojazLastRowSeconds {
     return [math]::Max(1, [int][math]::Floor($delay / 2))
 }
 
+function Test-MojazSyncToLoop {
+    param($Bulletin)
+    if (-not $Bulletin) { return $false }
+    return [bool](Get-JsonProp $Bulletin 'SyncToLoop')
+}
+
+function Get-MojazSyncText {
+    <#
+        What the sync is doing, or why it cannot.
+
+        The scene hides its own content at every loop wrap and fades it back
+        in, so a row written just after the wrap is never seen changing. That
+        only works when one loop is one story, which is a cut in Titler and
+        not something this screen can do - so when the loop is long it says so
+        plainly rather than quietly running rows at a minute each.
+    #>
+    param($Bulletin)
+    $timing = Get-MojazSceneTiming
+    if (-not (Test-MojazSyncToLoop -Bulletin $Bulletin)) {
+        return '🎬 المزامنة متوقّفة: يتغيّر الصف في منتصف الثبات، بلا حركة تُخفيه.'
+    }
+    if (-not $timing -or [double]$timing.LoopSeconds -le 0) {
+        return '⚠️ المزامنة مطلوبة لكن القالب لا يعطي لوبًا صالحًا، فيعمل الموجز بالمدّة المكتوبة.'
+    }
+    $loop = [double]$timing.LoopSeconds
+    $line = "🎬 مزامنة مع حركة الظهور: كل صف يبقى لوبًا كاملًا ($loop ث) ويتبدّل داخل ظهورٍ مدّته $($timing.IntroSeconds) ث."
+    if ($loop -ge 30) {
+        $line += "`n⚠️ اللوب طويل، فالصف يبقى $loop ث. لتسريعه قصِّر LoopEndFrame في Titler."
+    }
+    return $line
+}
+
 function Get-MojazPlanText {
     <# How long the bulletin runs, in the same words the screen used to ask
        for the dwell. #>
@@ -376,6 +413,13 @@ function Get-MojazPlanText {
     if (-not $Bulletin) { return '' }
     $rows = @(Get-JsonProp $Bulletin 'Rows')
     if ($rows.Count -eq 0) { return '' }
+    $timing = Get-MojazSceneTiming
+    if ((Test-MojazSyncToLoop -Bulletin $Bulletin) -and $timing -and [double]$timing.LoopSeconds -gt 0) {
+        # The loop owns the pace here, so quoting the dwell would be a lie.
+        $plan = New-MojazLoopPlan -SceneTiming $timing -RowCount $rows.Count -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
+        $total = [int][math]::Ceiling([double]$plan.ExitOffset + [double]$timing.OutroSeconds)
+        return "كل صف لوب واحد ($($timing.LoopSeconds) ث) · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)`n$(Get-MojazSyncText -Bulletin $Bulletin)"
+    }
     $delay = [int]$Bulletin.DelaySeconds
     $intro = Get-MojazIntroSeconds -Bulletin $Bulletin
     $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
@@ -484,6 +528,9 @@ function Get-MojazKeyboard {
     $keyboard += , @(
         (New-Button "⏩ الأول: +$(Get-MojazIntroSeconds -Bulletin $Bulletin) ث" 'mojaz:intro')
         (New-Button "⏹ الأخير: $(Get-MojazLastRowSeconds -Bulletin $Bulletin) ث" 'mojaz:last')
+    )
+    $keyboard += , @(
+        (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم' } else { 'لا' })" 'mojaz:sync')
     )
     # A line per row: delete it, or move it up or down the rundown. Numbered
     # like the table above, so the button and the story line up by eye.
@@ -1025,6 +1072,21 @@ function Complete-MojazTiming {
 
 # ------------------------------------------------------------------ schedules
 
+function Switch-MojazSync {
+    <# The one button that changes what the bulletin's pace is measured
+       against: its own dwell, or the scene's loop. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $wanted = -not (Test-MojazSyncToLoop -Bulletin $bulletin)
+    $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -SyncToLoop $wanted -UserId $UserId
+    if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
+        Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId $ChatId))
+    }
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
 function Get-MojazBulletinSchedules {
     <# The appointments still ahead of one bulletin, soonest first. #>
     param([Parameter(Mandatory)][string]$BulletinId)
@@ -1239,6 +1301,7 @@ function Start-MojazPlayback {
         return $false
     }
     $schedule = if ($ScheduleId) { [pscustomobject]@{ Id = $ScheduleId } } else { $null }
+    $syncOffset = (Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0
     # Resolve the two timings here rather than leaving the module to guess:
     # these are the same numbers the screen printed, so what plays is what the
     # plan line promised. The saved bulletin is not touched - the copy carries
@@ -1246,7 +1309,7 @@ function Start-MojazPlayback {
     $resolved = $bulletin | ConvertTo-Json -Depth 12 | ConvertFrom-Json
     $resolved.IntroExtraSeconds = Get-MojazIntroSeconds -Bulletin $bulletin
     $resolved.LastRowSeconds = Get-MojazLastRowSeconds -Bulletin $bulletin
-    $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule
+    $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule -OffsetSeconds $syncOffset
     if (-not $snapshotResult.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text 'الجدول فارغ.' -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
@@ -1265,9 +1328,15 @@ function Start-MojazPlayback {
     }
     $script:MojazPlayback = @{
         Index = 0; ChatId = $ChatId; UserId = $UserId
-        NextAt = (Get-Date).AddSeconds([int]$snapshot.Plan[0].HoldSeconds)
+        # Monotonic, and started the moment the scene is actually up: every
+        # row's moment is measured from here, so a slow send delays that row
+        # and no other. ClockOffset exists so a test can move time.
+        Clock = [System.Diagnostics.Stopwatch]::StartNew()
+        ClockOffset = 0.0
         Rows = $rows
         Plan = @($snapshot.Plan)
+        ExitAtSeconds = [double]$snapshot.ExitAtSeconds
+        SyncToLoop = [bool]$snapshot.SyncToLoop
         BulletinId = [string]$snapshot.BulletinId
         BulletinName = [string]$snapshot.BulletinName
         BulletinRevision = [int]$snapshot.BulletinRevision
@@ -1300,19 +1369,40 @@ function Stop-MojazPlayback {
     return $true
 }
 
+function Get-MojazElapsedSeconds {
+    <# How long this run has been going, by a clock that cannot step. #>
+    if (-not $script:MojazPlayback) { return 0.0 }
+    return ([double]$script:MojazPlayback.Clock.Elapsed.TotalSeconds + [double]$script:MojazPlayback.ClockOffset)
+}
+
 function Update-MojazPlayback {
     <#
         One step of the bulletin, called from the tick.
 
         Rows after the first are pushed through the postbox, which is what
-        changes a running scene's values without restarting it. The last row is
-        followed by EXIT after its own hold, so the outro has time to run.
+        changes a running scene's values without restarting it.
+
+        Each moment is absolute, measured from the start of the run, so a slow
+        send delays its own row and none of the ones behind it. The tick is
+        about a second apart - too coarse for a fade that lasts just over a
+        second - so once a moment is close this waits out the remainder itself
+        and sends on time. That blocks the bot for at most PreRoll, once per
+        row, which is the price of landing inside the window.
     #>
     if (-not $script:MojazPlayback) { return }
-    if ((Get-Date) -lt [datetime]$script:MojazPlayback.NextAt) { return }
     $rows = @($script:MojazPlayback.Rows)
     $index = [int]$script:MojazPlayback.Index
-    if ($index -ge ($rows.Count - 1)) {
+    $isLast = ($index -ge ($rows.Count - 1))
+    $moment = if ($isLast) { [double]$script:MojazPlayback.ExitAtSeconds } else { [double]$script:MojazPlayback.Plan[$index + 1].AtSeconds }
+    # Sent early by the measured round trip, so it arrives at the moment
+    # rather than after it. Calibrate against air, not against theory.
+    $target = $moment - ((Get-SettingInt 'MojazSyncLeadMs' 120) / 1000.0)
+    if ((Get-MojazElapsedSeconds) -lt ($target - $script:MojazPreRollSeconds)) { return }
+    $remaining = $target - (Get-MojazElapsedSeconds)
+    if ($remaining -gt 0) {
+        Start-Sleep -Milliseconds ([int][math]::Min(($script:MojazPreRollSeconds * 1000), ($remaining * 1000)))
+    }
+    if ($isLast) {
         Write-BridgeLog "Mojaz playback finished after $($rows.Count) row(s)"
         Stop-MojazPlayback -Quiet | Out-Null
         return
@@ -1328,9 +1418,7 @@ function Update-MojazPlayback {
         Stop-MojazPlayback -Quiet | Out-Null
         return
     }
-    $wait = [int]$script:MojazPlayback.Plan[$index].HoldSeconds
     $script:MojazPlayback.Index = $index
-    $script:MojazPlayback.NextAt = (Get-Date).AddSeconds($wait)
 }
 
 function Update-MojazImageCleanup {

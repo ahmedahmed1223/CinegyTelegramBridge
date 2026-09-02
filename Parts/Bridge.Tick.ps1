@@ -1167,6 +1167,10 @@ function Get-EffectivePollTimeout {
        whenever async work is outstanding so a finished snapshot or a dead
        relay is noticed within a second instead of up to 30. #>
     if ($script:PostShowQueue.Count -gt 0) { return 1 }
+    # A bulletin on air has a moment to hit every few seconds, and the write
+    # has to land inside a fade that lasts about a second. Polling for the
+    # configured half-minute would miss every one of them.
+    if ($script:MojazPlayback) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout
     $upcoming = @(Get-UpcomingScheduleEvents)

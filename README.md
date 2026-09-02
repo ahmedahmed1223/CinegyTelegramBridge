@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.33.0
+
+The row change can now be hidden by the scene's own animation. At every loop
+wrap the scene drops its content to zero opacity and fades it back in over the
+entrance frames; with sync on, each row is written just inside that fade, so
+the new story is already there by the time anything is visible. That only
+lines up when one loop is one story, so the loop length becomes the dwell -
+re-cut LoopEndFrame in Titler and the bulletin follows - and the screen says
+so, and warns when the loop is long. EXIT is sent on the wrap rather than
+after it, where the content is still at full opacity, so the join is seamless.
+
+Timing underneath it was rebuilt: every row has an absolute moment measured
+from the start of the run on a monotonic clock, instead of a delay measured
+from the previous send that accumulated every round trip; the poll loop now
+knows a bulletin is playing, which it did not; and the bridge waits out the
+last fraction of a second itself rather than missing the window waiting for
+the next tick. Two settings calibrate it against air.
+
+## Version 7.32.1
+
+The row-edit screen was rejected by Telegram and answered nothing - a
+keyboard row was flattened into bare buttons. Fixed, with a test that asserts
+the shape of every Mojaz keyboard.
+
 ## Version 7.32.0
 
 A row can be edited now - press its number for a screen that changes the

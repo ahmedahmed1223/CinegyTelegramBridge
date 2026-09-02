@@ -104,10 +104,59 @@ function Rename-MojazBulletin {
     return (New-MojazResult $true $copy)
 }
 
+function New-MojazLoopPlan {
+    <#
+        When each row should be written, if the write is to be hidden by the
+        scene's own fade.
+
+        The scene loops LoopStart..LoopEnd, and at the wrap the content jumps
+        to zero opacity and fades back in over the entrance frames. That fade
+        is a window in which the text can be replaced without anyone seeing it
+        change: written a moment after the wrap, the new row is already there
+        by the time the picture is visible again.
+
+        The first wrap is LoopEnd/Fps after SHOW - the entrance plus one whole
+        loop - and every wrap after it is one loop apart. So this only lines up
+        when the loop is as long as a story should stay: re-cut LoopEndFrame in
+        Titler and the bulletin's pace follows it.
+
+        The exit is placed ON the wrap rather than after it, because EXIT jumps
+        the scene to LoopEnd, where the content is still at full opacity - a
+        seamless join, where a moment later it would flash back before fading.
+    #>
+    [CmdletBinding()]
+    param($SceneTiming, [Parameter(Mandatory)][int]$RowCount, [double]$OffsetSeconds = 0.4)
+    if (-not $SceneTiming -or $RowCount -lt 1) { return $null }
+    $loop = [double](Get-MojazProperty $SceneTiming 'LoopSeconds' 0)
+    $entrance = [double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0)
+    if ($loop -le 0) { return $null }
+    # Aiming past the fade would show the change; clamp into it. The literals
+    # are 0.0 on purpose: an int 0 picks [math]::Max(int,int) and truncates
+    # the offset to nothing without saying so.
+    $offset = [math]::Max(0.0, [math]::Min([double]$OffsetSeconds, [math]::Max(0.0, $entrance - 0.1)))
+    $firstWrap = $entrance + $loop
+    $writes = @(0.0)
+    for ($index = 1; $index -lt $RowCount; $index++) {
+        $writes += [math]::Round($firstWrap + (($index - 1) * $loop) + $offset, 3)
+    }
+    return [pscustomobject]@{
+        LoopSeconds = $loop
+        FadeSeconds = $entrance
+        OffsetSeconds = $offset
+        WriteOffsets = $writes
+        ExitOffset = [math]::Round($firstWrap + (($RowCount - 1) * $loop), 3)
+    }
+}
+
 function New-MojazRunSnapshot {
+    <#
+        Every row gets an absolute moment measured from the start of the run,
+        never a delay measured from the previous send: a row that goes out late
+        must not push every row behind it later still.
+    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Bulletin, $SceneTiming = $null, $Schedule = $null,
-        [datetimeoffset]$Now = [datetimeoffset]::Now)
+        [double]$OffsetSeconds = 0.4, [datetimeoffset]$Now = [datetimeoffset]::Now)
     $rows = @(Copy-MojazValue @(Get-MojazProperty $Bulletin 'Rows' @()))
     if ($rows.Count -eq 0) { return (New-MojazResult $false $null 'empty_bulletin' 'الموجز بلا صفوف.') }
     $delay = [math]::Max(1, [int](Get-MojazProperty $Bulletin 'DelaySeconds' 8))
@@ -115,11 +164,26 @@ function New-MojazRunSnapshot {
     $lastOverride = [int](Get-MojazProperty $Bulletin 'LastRowSeconds' 0)
     $intro = if ($introOverride -gt 0) { $introOverride } elseif ($SceneTiming) { [int][math]::Ceiling([double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0)) } else { 0 }
     $last = if ($lastOverride -gt 0) { $lastOverride } elseif ($SceneTiming -and [double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0) -gt 0) { [int][math]::Ceiling([double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0)) } else { [math]::Max(1, [int][math]::Floor($delay / 2)) }
+    # Asking for sync is not the same as getting it: a scene with no usable
+    # loop falls back to the dwell rather than refusing to play.
+    $loopPlan = $null
+    if ([bool](Get-MojazProperty $Bulletin 'SyncToLoop' $false)) {
+        $loopPlan = New-MojazLoopPlan -SceneTiming $SceneTiming -RowCount $rows.Count -OffsetSeconds $OffsetSeconds
+    }
     $plan = @()
+    $at = 0.0
     for ($index = 0; $index -lt $rows.Count; $index++) {
         $hold = if ($rows.Count -eq 1) { $delay + $intro + $last } elseif ($index -eq 0) { $delay + $intro } elseif ($index -eq ($rows.Count - 1)) { $last } else { $delay }
-        $plan += [pscustomobject]@{ Index = $index; RowId = [string](Get-MojazProperty $rows[$index] 'Id' ''); HoldSeconds = [int]$hold }
+        $moment = if ($loopPlan) { [double]@($loopPlan.WriteOffsets)[$index] } else { $at }
+        $plan += [pscustomobject]@{
+            Index = $index
+            RowId = [string](Get-MojazProperty $rows[$index] 'Id' '')
+            HoldSeconds = [int]$hold
+            AtSeconds = $moment
+        }
+        $at += $hold
     }
+    $exitAt = if ($loopPlan) { [double]$loopPlan.ExitOffset } else { $at }
     $snapshot = [pscustomobject]@{
         Id = New-MojazId -Prefix run
         BulletinId = [string](Get-MojazProperty $Bulletin 'Id' '')
@@ -128,7 +192,11 @@ function New-MojazRunSnapshot {
         ScheduleId = [string](Get-MojazProperty $Schedule 'Id' '')
         StartedAt = $Now.ToString('o')
         Rows = $rows; Plan = $plan
-        TotalSeconds = [int](($plan | Measure-Object -Property HoldSeconds -Sum).Sum)
+        SyncToLoop = [bool]$loopPlan
+        LoopSeconds = $(if ($loopPlan) { [double]$loopPlan.LoopSeconds } else { 0 })
+        FadeSeconds = $(if ($loopPlan) { [double]$loopPlan.FadeSeconds } else { 0 })
+        ExitAtSeconds = $exitAt
+        TotalSeconds = [int][math]::Ceiling($exitAt)
     }
     return (New-MojazResult $true $snapshot)
 }
@@ -324,6 +392,7 @@ function Set-MojazBulletinTiming {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [int]$DelaySeconds, [int]$IntroExtraSeconds, [int]$LastRowSeconds,
+        [nullable[bool]]$SyncToLoop,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
     if ($fields.ContainsKey('DelaySeconds') -and ($DelaySeconds -lt 1 -or $DelaySeconds -gt 600)) {
@@ -340,6 +409,14 @@ function Set-MojazBulletinTiming {
             if ($fields.ContainsKey('DelaySeconds')) { $bulletin.DelaySeconds = $DelaySeconds }
             if ($fields.ContainsKey('IntroExtraSeconds')) { $bulletin.IntroExtraSeconds = $IntroExtraSeconds }
             if ($fields.ContainsKey('LastRowSeconds')) { $bulletin.LastRowSeconds = $LastRowSeconds }
+            if ($fields.ContainsKey('SyncToLoop')) {
+                # Bulletins written before the loop mode existed have no such
+                # property, so it is added rather than assigned.
+                if ($bulletin.PSObject.Properties.Match('SyncToLoop').Count -eq 0) {
+                    $bulletin | Add-Member -NotePropertyName 'SyncToLoop' -NotePropertyValue ([bool]$SyncToLoop)
+                }
+                else { $bulletin.SyncToLoop = [bool]$SyncToLoop }
+            }
         })
 }
 
@@ -362,6 +439,6 @@ function Get-MojazBulletin {
 
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
-    Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, Get-MojazDueQueue,
+    Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
     Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow,
     Clear-MojazBulletinRows, Set-MojazBulletinTiming

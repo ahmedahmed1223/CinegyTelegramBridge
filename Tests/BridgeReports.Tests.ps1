@@ -115,7 +115,12 @@ Describe 'Report windows' {
 
 Describe 'News report' {
     BeforeEach {
-        $stamp = (Get-Date).ToUniversalTime().AddHours(-2).ToString('o')
+        # Two hours ago, but never before today began: the record has to fall
+        # inside the "today" period even when the suite runs just after
+        # midnight, which is where this used to fail once a night.
+        $moment = [datetime]::Now.AddHours(-2)
+        if ($moment -lt [datetime]::Now.Date) { $moment = [datetime]::Now.Date.AddMinutes(1) }
+        $stamp = $moment.ToUniversalTime().ToString('o')
         Mock Read-AuditRecords {
             @(
                 [pscustomobject]@{ timestampUtc = $stamp; event = 'news_publish'; action = 'PUBLISH'; result = 'success'; userId = '42'; count = '10' }

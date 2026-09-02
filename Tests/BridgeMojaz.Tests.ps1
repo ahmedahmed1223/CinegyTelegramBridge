@@ -263,3 +263,95 @@ Describe 'Which picture each row actually shows' {
         @(Get-MojazUsedImages -Rows $rows) | Should -Be @('a.jpg', 'b.jpg')
     }
 }
+
+Describe 'Timing a bulletin against the loop it plays in' {
+    BeforeAll {
+        # The scene as it ships: 25 fps, entrance 0-30, loop 30-1530.
+        $script:sceneTiming = [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 60; OutroSeconds = 6.72 }
+        # The same scene re-cut so one loop is one story: loop 30-230.
+        $script:shortLoop = [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 8; OutroSeconds = 6.72 }
+    }
+
+    It 'writes each row just after a loop wrap, where the fade hides it' {
+        # The first wrap is LoopEnd/Fps after SHOW - the entrance plus one
+        # loop - and every wrap after it is one loop apart.
+        $plan = New-MojazLoopPlan -SceneTiming $script:shortLoop -RowCount 3 -OffsetSeconds 0.4
+
+        @($plan.WriteOffsets) | Should -Be @(0, 9.6, 17.6)
+        $plan.ExitOffset | Should -Be 25.2
+    }
+
+    It 'leaves the last row a full loop before the exit' {
+        $plan = New-MojazLoopPlan -SceneTiming $script:shortLoop -RowCount 1 -OffsetSeconds 0.4
+
+        @($plan.WriteOffsets) | Should -Be @(0)
+        # One loop of screen time, then out - no write at all after SHOW.
+        $plan.ExitOffset | Should -Be 9.2
+    }
+
+    It 'keeps every write inside the window the fade covers' {
+        $plan = New-MojazLoopPlan -SceneTiming $script:shortLoop -RowCount 4 -OffsetSeconds 0.4
+        $fade = $script:shortLoop.IntroSeconds
+
+        foreach ($offset in @($plan.WriteOffsets)[1..3]) {
+            $sinceWrap = ($offset - ($script:shortLoop.IntroSeconds + $script:shortLoop.LoopSeconds)) % $script:shortLoop.LoopSeconds
+            $sinceWrap | Should -BeGreaterOrEqual 0
+            $sinceWrap | Should -BeLessThan $fade
+        }
+    }
+
+    It 'refuses to plan against a scene with no usable loop' {
+        New-MojazLoopPlan -SceneTiming $null -RowCount 3 | Should -BeNullOrEmpty
+        New-MojazLoopPlan -SceneTiming ([pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 0; OutroSeconds = 1 }) -RowCount 3 | Should -BeNullOrEmpty
+    }
+
+    It 'gives every row an absolute moment, so a late row does not push the rest' {
+        # Without sync, the moments are the dwells added up - but they are
+        # still absolute from the start, not measured from the previous send.
+        $bulletin = [pscustomobject]@{
+            Id = 'b_1'; Name = 'ن'; Revision = 1; DelaySeconds = 10; IntroExtraSeconds = 2; LastRowSeconds = 5
+            Rows = @(
+                [pscustomobject]@{ Id = 'r_1'; ImageMode = 'inherit'; Image = ''; Title = 'أ'; Text = 'ن' }
+                [pscustomobject]@{ Id = 'r_2'; ImageMode = 'inherit'; Image = ''; Title = 'ب'; Text = 'ن' }
+                [pscustomobject]@{ Id = 'r_3'; ImageMode = 'inherit'; Image = ''; Title = 'ج'; Text = 'ن' }
+            )
+        }
+
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin).Value
+
+        @($snapshot.Plan | ForEach-Object { $_.AtSeconds }) | Should -Be @(0, 12, 22)
+        $snapshot.ExitAtSeconds | Should -Be 27
+        $snapshot.SyncToLoop | Should -BeFalse
+    }
+
+    It 'takes its moments from the loop when the bulletin asks for sync' {
+        $bulletin = [pscustomobject]@{
+            Id = 'b_1'; Name = 'ن'; Revision = 1; DelaySeconds = 30; IntroExtraSeconds = 0; LastRowSeconds = 0
+            SyncToLoop = $true
+            Rows = @(
+                [pscustomobject]@{ Id = 'r_1'; ImageMode = 'inherit'; Image = ''; Title = 'أ'; Text = 'ن' }
+                [pscustomobject]@{ Id = 'r_2'; ImageMode = 'inherit'; Image = ''; Title = 'ب'; Text = 'ن' }
+            )
+        }
+
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming $script:shortLoop -OffsetSeconds 0.4).Value
+
+        $snapshot.SyncToLoop | Should -BeTrue
+        # The bulletin's own 30 second dwell is ignored: the loop is 8.
+        @($snapshot.Plan | ForEach-Object { $_.AtSeconds }) | Should -Be @(0, 9.6)
+        $snapshot.ExitAtSeconds | Should -Be 17.2
+    }
+
+    It 'falls back to the dwell when sync is asked for but the scene cannot give it' {
+        $bulletin = [pscustomobject]@{
+            Id = 'b_1'; Name = 'ن'; Revision = 1; DelaySeconds = 10; IntroExtraSeconds = 0; LastRowSeconds = 0
+            SyncToLoop = $true
+            Rows = @([pscustomobject]@{ Id = 'r_1'; ImageMode = 'inherit'; Image = ''; Title = 'أ'; Text = 'ن' })
+        }
+
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming $null).Value
+
+        $snapshot.SyncToLoop | Should -BeFalse
+        $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
+    }
+}

@@ -27,6 +27,29 @@ function Show-SettingsScreen {
     Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات`nاختر قسمًا. تظهر الخيارات الشائعة أولًا، وتبقى الإعدادات التقنية في «خيارات متقدمة»." -ReplyMarkup (Get-SettingsKeyboard)
 }
 
+function Get-SettingsExplainedLines {
+    <#
+        The settings on a screen, each as its name and what it does.
+
+        The buttons carry a name and a value and no room for more, so what a
+        setting actually does had nowhere to appear - it was written down in
+        the metadata and shown only on the prompt for a number. These lines
+        are that explanation, above the buttons they describe.
+    #>
+    param([AllowEmptyCollection()][string[]]$Names = @())
+    return @(foreach ($name in @($Names)) {
+            $metadata = Get-SettingNavigationMetadata -Name $name
+            $description = [string](Get-JsonProp (Get-JsonProp $script:SettingDisplayMetadata $name) 'Description')
+            $line = "• <b>$(ConvertTo-TelegramHtmlText -Text ([string]$metadata.Label))</b>"
+            # A setting without a short name of its own falls back to its
+            # description; printing it twice says nothing twice.
+            if ($description -and $description -ne [string]$metadata.Label) {
+                $line += " — $(ConvertTo-TelegramHtmlText -Text $description)"
+            }
+            $line
+        })
+}
+
 function Show-SettingsCategoryScreen {
     param(
         [Parameter(Mandatory)][string]$Category,
@@ -50,13 +73,7 @@ function Show-SettingsCategoryScreen {
     $summary = [string](Get-JsonProp $definition[0] 'Summary')
     if ($summary) { $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text $summary)</i>") }
     $lines.Add('')
-    foreach ($name in @(Get-SettingsCategoryPageNames -Category $Category -Page $Page)) {
-        $metadata = Get-SettingNavigationMetadata -Name $name
-        $description = [string](Get-JsonProp (Get-JsonProp $script:SettingDisplayMetadata $name) 'Description')
-        $line = "• <b>$(ConvertTo-TelegramHtmlText -Text ([string]$metadata.Label))</b>"
-        # Some settings have no short label of their own and fall back to
-        # their description; printing it twice says nothing twice.
-        if ($description -and $description -ne [string]$metadata.Label) { $line += " — $(ConvertTo-TelegramHtmlText -Text $description)" }
+    foreach ($line in @(Get-SettingsExplainedLines -Names @(Get-SettingsCategoryPageNames -Category $Category -Page $Page))) {
         $lines.Add($line)
     }
     $lines.Add('')
@@ -243,7 +260,10 @@ function Reset-SettingsToDefault {
 function Show-SettingsListScreen {
     param([Parameter(Mandatory)][ValidateSet('simple','advanced','modified','search')][string]$Mode, [int]$Page = 0, [string]$Query = '', [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $records = switch ($Mode) {
+    # Wrapped: a switch is a pipeline, and a pipeline hands back a single
+    # match as the match itself - .Count on which throws, on the empty-search
+    # screen of all places.
+    $records = @(switch ($Mode) {
         'simple' { @(Get-BridgeSettingsForMode -Schema $script:SettingSchema) }
         'advanced' { @($script:SettingSchema) }
         'modified' {
@@ -251,9 +271,25 @@ function Show-SettingsListScreen {
             @(Get-ModifiedBridgeSettings -Schema $script:SettingSchema -Values $values)
         }
         'search' { @(Find-BridgeSettings -Schema $script:SettingSchema -Query $Query) }
+    })
+    $title = switch ($Mode) { 'simple' { '🧭 الإعدادات المبسطة' }; 'advanced' { '🛠 كل الإعدادات' }; 'modified' { '📝 الإعدادات المعدّلة' }; default { "🔎 نتائج البحث عن «$Query»" } }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $title)</b>")
+    if ($records.Count -eq 0) {
+        # A title over an empty keyboard read as a screen that had failed to
+        # load. This says the search found nothing, and where to look instead.
+        $lines.Add('<i>لا إعداد يطابق. جرّب كلمة أقصر، أو افتح 📝 المعدّل فقط أو أحد الأبواب.</i>')
     }
-    $title = switch ($Mode) { 'simple' { '🧭 الإعدادات المبسطة' }; 'advanced' { '🛠 كل الإعدادات' }; 'modified' { '📝 الإعدادات المعدّلة' }; default { "🔎 نتائج: $Query" } }
-    Send-TelegramMessage -ChatId $ChatId -Text $title -ReplyMarkup (Get-SettingsListKeyboard -Records $records -Mode $Mode -Page $Page)
+    else {
+        # The same page the keyboard is about to draw, so the lines and the
+        # buttons under them are the same settings.
+        $window = Get-BridgePageWindow -ItemCount $records.Count -Page $Page -PageSize 8
+        $shown = @($records[$window.StartIndex..$window.EndIndex] | ForEach-Object { [string]$_.Name })
+        $lines.Add("<i>$($records.Count) إعدادًا$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+        $lines.Add('')
+        foreach ($line in @(Get-SettingsExplainedLines -Names $shown)) { $lines.Add($line) }
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsListKeyboard -Records $records -Mode $Mode -Page $Page)
 }
 
 function Start-SettingsSearch {

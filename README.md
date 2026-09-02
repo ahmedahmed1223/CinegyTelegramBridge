@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.21.0
+
+Setting buttons are names again. A setting with no short label of its own
+inherited its description as one, so 77 buttons were whole sentences; each now
+has a short name, with the description on the line above it. The list and
+search screens say how many settings matched, explain the ones on the page,
+and say plainly when a search found nothing instead of showing a bare title
+over an empty keyboard.
+
 ## Version 7.20.0
 
 Every setting now has a description and every category a summary line, shown

@@ -48,7 +48,9 @@ Describe 'Version 6 settings discovery controls' {
         (Get-PendingState -ChatId 100).Mode | Should -Be 'settings_search'
         Complete-SettingsSearch -ChatId 100 -Value '  MaxFieldLength  '
         Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
-        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'MaxFieldLength$' }
+        # The screen now names the term and counts what it found, so the
+        # term is in the title rather than the last thing on the screen.
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '«​MaxFieldLength»' -or $Text -match '«MaxFieldLength»' }
     }
 
     It 'lists only the settings the schema search matches' {
@@ -587,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.20.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.20.0'
+        $script:BridgeVersion | Should -Be '7.21.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.21.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -780,6 +782,21 @@ Describe 'Settings are explained, not just listed' {
         $undocumented | Should -BeNullOrEmpty
     }
 
+    It 'gives every setting a short name of its own for its button' {
+        # Without one the schema falls back to the description, so the button
+        # became a sentence and the screen a wall of them. The name goes on
+        # the button; the description goes on the line above it.
+        $unnamed = @(@($script:DefaultSettings.Keys) | Where-Object { -not $script:SettingNavigationLabels.ContainsKey($_) })
+        $unnamed | Should -BeNullOrEmpty
+    }
+
+    It 'keeps every setting name short enough to read beside its value' {
+        $tooLong = @(@($script:DefaultSettings.Keys) | Where-Object {
+                ([string](Get-SettingNavigationMetadata -Name $_).Label).Length -gt 32
+            })
+        $tooLong | Should -BeNullOrEmpty
+    }
+
     It 'gives every category the sentence its screen opens with' {
         foreach ($category in @(Get-SettingCategoryDefinitions)) {
             [string]$category.Summary | Should -Not -BeNullOrEmpty
@@ -809,5 +826,31 @@ Describe 'The technical changelog' {
 
     It 'ships beside the bridge, so the button has something to send' {
         Test-Path -LiteralPath (Join-Path $script:Root 'CHANGELOG.md') | Should -BeTrue
+    }
+}
+
+Describe 'Settings list and search screens' {
+    It 'says how many matched and explains each one on the page' {
+        Mock Send-TelegramMessage {}
+        Show-SettingsListScreen -Mode modified -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ParseMode -eq 'HTML' -and $Text -match 'الإعدادات المعدّلة' -and $Text -match 'إعدادًا'
+        }
+    }
+
+    It 'says a search found nothing instead of showing a bare title' {
+        # An empty result is also the shape that unwraps to $null, so this
+        # covers the crash as well as the wording.
+        Mock Send-TelegramMessage {}
+        Show-SettingsListScreen -Mode search -Query 'zzzznotasetting' -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'لا إعداد يطابق' }
+    }
+
+    It 'describes exactly the settings on the page the keyboard draws' {
+        Mock Send-TelegramMessage {}
+        Show-SettingsListScreen -Mode advanced -Page 0 -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            @($Text -split "`n" | Where-Object { $_ -like '•*' }).Count -eq 8
+        }
     }
 }

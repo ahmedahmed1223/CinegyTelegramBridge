@@ -294,6 +294,20 @@ function Invoke-CallbackQuery {
         'mojaz:refresh' { Clear-PendingState -ChatId $chatId; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:add' { Start-MojazRowAdd -ChatId $chatId -UserId $userId; break }
         'mojaz:skipimage' { Complete-MojazRowImage -ChatId $chatId -Skip; break }
+        'mojaz:img:inherit' { Complete-MojazRowImage -ChatId $chatId -Mode inherit; break }
+        'mojaz:img:template' { Complete-MojazRowImage -ChatId $chatId -Mode template; break }
+        'mojaz:img:use:*' {
+            $slot = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojaz:img:use:'), [ref]$slot)) {
+                $reused = Resolve-MojazUsedImage -ChatId $chatId -Index $slot
+                if ($reused) { Complete-MojazRowImage -ChatId $chatId -Mode new -Value $reused }
+            }
+            break
+        }
+        'mojaz:row:*' { Clear-PendingState -ChatId $chatId; Show-MojazRowScreen -RowId (Get-CallbackArg $data 'mojaz:row:') -ChatId $chatId -UserId $userId; break }
+        'mojaz:editimg:*' { Start-MojazRowEdit -Which image -RowId (Get-CallbackArg $data 'mojaz:editimg:') -ChatId $chatId -UserId $userId; break }
+        'mojaz:edittitle:*' { Start-MojazRowEdit -Which title -RowId (Get-CallbackArg $data 'mojaz:edittitle:') -ChatId $chatId -UserId $userId; break }
+        'mojaz:edittext:*' { Start-MojazRowEdit -Which text -RowId (Get-CallbackArg $data 'mojaz:edittext:') -ChatId $chatId -UserId $userId; break }
         'mojaz:delay' { Start-MojazDelayPrompt -ChatId $chatId -UserId $userId; break }
         'mojaz:intro' { Start-MojazTimingPrompt -Which intro -ChatId $chatId -UserId $userId; break }
         'mojaz:last' { Start-MojazTimingPrompt -Which last -ChatId $chatId -UserId $userId; break }

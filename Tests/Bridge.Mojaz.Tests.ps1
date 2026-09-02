@@ -118,10 +118,21 @@ Describe 'The bulletin table' {
         )
         $table = @(Get-MojazBlocks -Bulletin (Get-MojazSelected -ChatId 100) | Where-Object { $_.type -eq 'table' })[0]
 
-        # Header plus a row each.
+        # Header plus a row each, and the picture column says which of the
+        # three modes each row is in.
         @($table.cells).Count | Should -Be 3
-        @($table.cells[1] | ForEach-Object { $_.text }) | Should -Contain '✅'
-        @($table.cells[2] | ForEach-Object { $_.text }) | Should -Contain '—'
+        @($table.cells[1] | ForEach-Object { $_.text }) | Should -Contain '🖼'
+        @($table.cells[2] | ForEach-Object { $_.text }) | Should -Contain '↑'
+    }
+
+    It 'calls the first row the template picture, not an inheritance' {
+        # There is nothing above the first row to inherit from, so saying it
+        # follows the previous one would be a lie.
+        $script:MojazLibrary.Bulletins[0].Rows = @((New-TestMojazRow -Title 'أول'))
+        $table = @(Get-MojazBlocks -Bulletin (Get-MojazSelected -ChatId 100) | Where-Object { $_.type -eq 'table' })[0]
+
+        @($table.cells[1] | ForEach-Object { $_.text }) | Should -Contain '▫️'
+        Get-MojazText -Bulletin (Get-MojazSelected -ChatId 100) | Should -Match 'صورة القالب'
     }
 
     It 'writes an added row into the library, so a restart reads it back' {
@@ -839,5 +850,103 @@ Describe 'Cleaning up orphaned bulletin pictures' {
         Update-MojazImageCleanup | Should -Be 0
 
         Test-Path -LiteralPath $fresh | Should -BeTrue
+    }
+}
+
+Describe 'Editing a row that already exists' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplateImage { '.\Mojaz\Pic01.png' }
+        $script:bulletin = New-TestMojazLibrary -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'الأول' -Text 'خبر أول' -Image '.\Mojaz\bot\a.jpg')
+            (New-TestMojazRow -Id 'r_2' -Title 'الثاني' -Text 'خبر ثانٍ')
+        )
+    }
+
+    It 'changes the story without disturbing the title or the picture' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_edit_text'; UserId = 101; BulletinId = [string]$script:bulletin.Id; RowId = 'r_1' }
+
+        Complete-MojazRowEdit -Which text -ChatId 100 -Value 'خبر معدَّل'
+
+        $row = @((Get-MojazSelected -ChatId 100).Rows)[0]
+        [string]$row.Text | Should -Be 'خبر معدَّل'
+        [string]$row.Title | Should -Be 'الأول'
+        [string]$row.Image | Should -Be '.\Mojaz\bot\a.jpg'
+    }
+
+    It 'refuses an empty title and leaves the row as it was' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_edit_title'; UserId = 101; BulletinId = [string]$script:bulletin.Id; RowId = 'r_1' }
+
+        Complete-MojazRowEdit -Which title -ChatId 100 -Value '   '
+
+        [string]@((Get-MojazSelected -ChatId 100).Rows)[0].Title | Should -Be 'الأول'
+        Get-PendingState -ChatId 100 | Should -Not -BeNullOrEmpty
+    }
+
+    It 'puts a row back on the template picture' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_edit_image'; UserId = 101; BulletinId = [string]$script:bulletin.Id; RowId = 'r_1' }
+
+        Complete-MojazRowImage -ChatId 100 -Mode template
+
+        $row = @((Get-MojazSelected -ChatId 100).Rows)[0]
+        [string]$row.ImageMode | Should -Be 'template'
+        [string]$row.Image | Should -BeNullOrEmpty
+        (Get-MojazRowVariables -Row $row -TemplateImage '.\Mojaz\Pic01.png')['mojaz_img'] | Should -Be '.\Mojaz\Pic01.png'
+    }
+
+    It 'makes a row follow the one above it, sending no picture at all' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_edit_image'; UserId = 101; BulletinId = [string]$script:bulletin.Id; RowId = 'r_1' }
+
+        Complete-MojazRowImage -ChatId 100 -Mode inherit
+
+        $row = @((Get-MojazSelected -ChatId 100).Rows)[0]
+        [string]$row.ImageMode | Should -Be 'inherit'
+        (Get-MojazRowVariables -Row $row -TemplateImage '.\Mojaz\Pic01.png').ContainsKey('mojaz_img') | Should -BeFalse
+    }
+
+    It 'reuses a picture the bulletin already carries instead of a second upload' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_edit_image'; UserId = 101; BulletinId = [string]$script:bulletin.Id; RowId = 'r_2' }
+
+        $reused = Resolve-MojazUsedImage -ChatId 100 -Index 0
+        $reused | Should -Be '.\Mojaz\bot\a.jpg'
+        Complete-MojazRowImage -ChatId 100 -Mode new -Value $reused
+
+        $row = @((Get-MojazSelected -ChatId 100).Rows)[1]
+        [string]$row.ImageMode | Should -Be 'new'
+        [string]$row.Image | Should -Be '.\Mojaz\bot\a.jpg'
+    }
+
+    It 'offers the picture, the title and the story on the row screen' {
+        Show-MojazRowScreen -RowId 'r_1' -ChatId 100 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -ParameterFilter {
+            $callbacks = @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+            $callbacks -contains 'mojaz:editimg:r_1' -and $callbacks -contains 'mojaz:edittitle:r_1' -and $callbacks -contains 'mojaz:edittext:r_1'
+        }
+    }
+}
+
+Describe 'The picture the scene ships with' {
+    BeforeEach { $script:MojazSceneImage = ''; $script:MojazSceneImageKey = '' }
+    AfterAll { $script:MojazSceneImage = ''; $script:MojazSceneImageKey = '' }
+
+    It 'reads the default from the variable the scene declares' {
+        $scene = Join-Path $TestDrive 'picture.cintitle'
+        '<CinegyTitler><Scene Fps="25"><Var Name="mojaz_img" Type="File" Value=".\Mojaz\Pic01.png" /><Var Name="title.Text" Value="x" /></Scene></CinegyTitler>' |
+            Set-Content -LiteralPath $scene -Encoding utf8
+
+        Get-MojazTemplateImage -Path $scene | Should -Be '.\Mojaz\Pic01.png'
+    }
+
+    It 'answers with nothing when the scene declares no such picture' {
+        $scene = Join-Path $TestDrive 'nopicture.cintitle'
+        '<CinegyTitler><Scene Fps="25"><Var Name="title.Text" Value="x" /></Scene></CinegyTitler>' |
+            Set-Content -LiteralPath $scene -Encoding utf8
+
+        Get-MojazTemplateImage -Path $scene | Should -BeNullOrEmpty
     }
 }

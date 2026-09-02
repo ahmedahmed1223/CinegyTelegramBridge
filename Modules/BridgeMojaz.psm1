@@ -169,10 +169,57 @@ function Update-MojazBulletinIn {
     return (New-MojazResult $true $copy)
 }
 
+function Get-MojazRowImageMode {
+    <# A row written before the modes existed says only whether it has a path,
+       and that is exactly what the two original modes meant. #>
+    param($Row)
+    $mode = [string](Get-MojazProperty $Row 'ImageMode' '')
+    if ($mode -in @('new', 'inherit', 'template')) { return $mode }
+    return $(if ([string](Get-MojazProperty $Row 'Image' '')) { 'new' } else { 'inherit' })
+}
+
+function Get-MojazEffectiveImages {
+    <#
+        The picture each row actually puts on screen, in order.
+
+        Only 'new' and 'template' send the image variable; 'inherit' leaves it
+        out, so whatever is already in the scene stays - which is how one
+        picture stands for a run of rows. The first row inherits from the
+        scene itself, so a bulletin that never sets a picture shows the
+        template's own throughout.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Rows, [string]$TemplateImage = '')
+    $current = $TemplateImage
+    $effective = @()
+    foreach ($row in @($Rows)) {
+        switch (Get-MojazRowImageMode -Row $row) {
+            'new' { $current = [string](Get-MojazProperty $row 'Image' '') }
+            'template' { $current = $TemplateImage }
+        }
+        $effective += $current
+    }
+    return $effective
+}
+
+function Get-MojazUsedImages {
+    <# The distinct pictures this bulletin already carries, in the order they
+       first appear - what the screen offers instead of a second upload. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Rows)
+    $seen = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in @($Rows)) {
+        $image = [string](Get-MojazProperty $row 'Image' '')
+        if ($image -and -not $seen.Contains($image)) { $seen.Add($image) }
+    }
+    return $seen.ToArray()
+}
+
 function Add-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [string]$Image = '', [string]$Title = '', [string]$Text = '',
+        [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $rowTitle = ([string]$Title).Trim()
     $rowText = ([string]$Text).Trim()
@@ -180,15 +227,15 @@ function Add-MojazBulletinRow {
         return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
     }
     $rowImage = ([string]$Image).Trim()
+    # Given a mode, take it; otherwise a path means 'new' and none means
+    # 'inherit', which is what the caller is saying either way.
+    $rowMode = if ($ImageMode) { $ImageMode } elseif ($rowImage) { 'new' } else { 'inherit' }
+    if ($rowMode -ne 'new') { $rowImage = '' }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            # ponytail: two image modes. 'inherit' omits the variable so the
-            # scene keeps whatever picture is already in it; 'new' sends a
-            # path. A third 'default' mode needs a default in the template
-            # record - add it when a template actually carries one.
             $row = [pscustomobject]@{
                 Id = New-MojazId -Prefix r
-                ImageMode = $(if ($rowImage) { 'new' } else { 'inherit' })
+                ImageMode = $rowMode
                 Image = $rowImage; Title = $rowTitle; Text = $rowText
             }
             $bulletin.Rows = @(@(Get-MojazProperty $bulletin 'Rows' @()) + $row)
@@ -199,17 +246,21 @@ function Set-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image,
+        [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
+    $editedRowId = $RowId
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            $row = @(@(Get-MojazProperty $bulletin 'Rows' @()) | Where-Object { [string]$_.Id -eq $RowId }) | Select-Object -First 1
+            $row = @(@(Get-MojazProperty $bulletin 'Rows' @()) | Where-Object { [string]$_.Id -eq $editedRowId }) | Select-Object -First 1
             if (-not $row) { return (New-MojazResult $false $null 'row_not_found' 'الصف غير موجود.') }
             if ($fields.ContainsKey('Title')) { $row.Title = ([string]$Title).Trim() }
             if ($fields.ContainsKey('Text')) { $row.Text = ([string]$Text).Trim() }
-            if ($fields.ContainsKey('Image')) {
-                $row.Image = ([string]$Image).Trim()
-                $row.ImageMode = $(if ($row.Image) { 'new' } else { 'inherit' })
+            if ($fields.ContainsKey('Image') -or $fields.ContainsKey('ImageMode')) {
+                $path = ([string]$Image).Trim()
+                $mode = if ($ImageMode) { $ImageMode } elseif ($path) { 'new' } else { 'inherit' }
+                $row.ImageMode = $mode
+                $row.Image = $(if ($mode -eq 'new') { $path } else { '' })
             }
             if ([string]::IsNullOrWhiteSpace([string]$row.Title) -and [string]::IsNullOrWhiteSpace([string]$row.Text)) {
                 return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
@@ -310,6 +361,7 @@ function Get-MojazBulletin {
 }
 
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
+    Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, Get-MojazDueQueue,
     Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow,
     Clear-MojazBulletinRows, Set-MojazBulletinTiming

@@ -189,3 +189,77 @@ Describe 'Mojaz bulletin row editing' {
         [string]$result.Value.Bulletins[0].Name | Should -Be 'المسائي'
     }
 }
+
+Describe 'Which picture each row actually shows' {
+    BeforeEach {
+        $script:library = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الصباحي').Value
+        $script:id = [string]$script:library.Bulletins[0].Id
+    }
+
+    It 'lets one picture stand for a run of rows that inherit it' {
+        # The whole point of the inherit mode: set the picture once and the
+        # rows after it keep showing it.
+        $rows = @(
+            [pscustomobject]@{ Id = 'r_1'; ImageMode = 'new'; Image = 'a.jpg'; Title = 'أ'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_2'; ImageMode = 'inherit'; Image = ''; Title = 'ب'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_3'; ImageMode = 'inherit'; Image = ''; Title = 'ج'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_4'; ImageMode = 'new'; Image = 'b.jpg'; Title = 'د'; Text = 'ن' }
+        )
+
+        $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage 'pic01.png')
+
+        $effective | Should -Be @('a.jpg', 'a.jpg', 'a.jpg', 'b.jpg')
+    }
+
+    It 'starts from the template picture, and goes back to it on request' {
+        $rows = @(
+            [pscustomobject]@{ Id = 'r_1'; ImageMode = 'inherit'; Image = ''; Title = 'أ'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_2'; ImageMode = 'new'; Image = 'a.jpg'; Title = 'ب'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_3'; ImageMode = 'template'; Image = ''; Title = 'ج'; Text = 'ن' }
+        )
+
+        $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage 'pic01.png')
+
+        # The first row inherits nothing, so it is the scene's own picture.
+        $effective | Should -Be @('pic01.png', 'a.jpg', 'pic01.png')
+    }
+
+    It 'reads a row written before modes existed by whether it has a path' {
+        $rows = @(
+            [pscustomobject]@{ Id = 'r_1'; Image = 'a.jpg'; Title = 'أ'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_2'; Image = ''; Title = 'ب'; Text = 'ن' }
+        )
+
+        @(Get-MojazEffectiveImages -Rows $rows -TemplateImage 'pic01.png') | Should -Be @('a.jpg', 'a.jpg')
+    }
+
+    It 'stores the mode the caller asked for, path or not' {
+        $result = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن' -ImageMode template
+        [string]$result.Value.Bulletins[0].Rows[0].ImageMode | Should -Be 'template'
+        [string]$result.Value.Bulletins[0].Rows[0].Image | Should -BeNullOrEmpty
+    }
+
+    It 'changes one row picture without touching its title or story' {
+        $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'عنوان' -Text 'خبر' -Image 'a.jpg').Value
+        $rowId = [string]$library.Bulletins[0].Rows[0].Id
+
+        $result = Set-MojazBulletinRow -Library $library -BulletinId $script:id -RowId $rowId -Image '' -ImageMode inherit
+
+        $row = $result.Value.Bulletins[0].Rows[0]
+        [string]$row.ImageMode | Should -Be 'inherit'
+        [string]$row.Image | Should -BeNullOrEmpty
+        [string]$row.Title | Should -Be 'عنوان'
+        [string]$row.Text | Should -Be 'خبر'
+    }
+
+    It 'lists each distinct picture the bulletin already carries, once' {
+        $rows = @(
+            [pscustomobject]@{ Id = 'r_1'; ImageMode = 'new'; Image = 'a.jpg'; Title = 'أ'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_2'; ImageMode = 'inherit'; Image = ''; Title = 'ب'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_3'; ImageMode = 'new'; Image = 'a.jpg'; Title = 'ج'; Text = 'ن' }
+            [pscustomobject]@{ Id = 'r_4'; ImageMode = 'new'; Image = 'b.jpg'; Title = 'د'; Text = 'ن' }
+        )
+
+        @(Get-MojazUsedImages -Rows $rows) | Should -Be @('a.jpg', 'b.jpg')
+    }
+}

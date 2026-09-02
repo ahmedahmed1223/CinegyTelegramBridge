@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.32.0
+
+A row can be edited now - press its number for a screen that changes the
+picture, the title or the story - and each row states its picture in one of
+three explicit modes: its own, the template's, or inherited from the row
+above. Inheriting sends no image variable at all, so the picture already on
+screen stays, which is how one picture serves a run of rows; the template mode
+reads the path the scene declares for itself, so a row that was given a
+picture can be put back. The table's picture column shows which mode each row
+is in, and a picture already uploaded to the bulletin can be reused with one
+press instead of being uploaded twice.
+
 ## Version 7.31.0
 
 The single Mojaz table became a library of named bulletins - a morning one, an

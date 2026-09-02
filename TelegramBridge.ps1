@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.31.0'
+$script:BridgeVersion = '7.32.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -814,9 +814,14 @@ $script:MojazSchedules = @()
 # Which bulletin each chat has open, keyed by chat id as a string.
 $script:MojazSelections = @{}
 $script:MojazPlayback = $null
-# The scene's own durations, cached on its path and write time.
+# The scene's own durations and its declared picture, each cached on the
+# file's path and write time.
 $script:MojazSceneTiming = $null
 $script:MojazSceneTimingKey = ''
+$script:MojazSceneImage = ''
+$script:MojazSceneImageKey = ''
+# Which chat the picture keyboard is being drawn for.
+$script:MojazImageChatId = 0
 # Built on first use from the settings table: the manual mentions setting
 # names in prose, and a name is worth setting in code only if it is real.
 $script:HelpCodeTermPattern = ''
@@ -1489,7 +1494,7 @@ try {
                 if ($photoFileId) {
                     try {
                         $photoState = Get-PendingState -ChatId $chatId
-                        if ($photoState -and [string]$photoState.Mode -eq 'mojaz_row_image') {
+                        if ($photoState -and [string]$photoState.Mode -in @('mojaz_row_image', 'mojaz_edit_image')) {
                             Receive-MojazPhoto -FileId $photoFileId -ChatId $chatId -UserId $userId | Out-Null
                         }
                         else { Send-TelegramMessage -ChatId $chatId -Text 'لا يُنتظر منك صورة الآن. افتح 📑 الموجز ثم ➕ إضافة صف.' }
@@ -1501,7 +1506,7 @@ try {
                 if ($document) {
                     try {
                         $uploadState=Get-PendingState -ChatId $chatId
-                        if($uploadState -and [string]$uploadState.Mode -eq 'mojaz_row_image'){Receive-MojazPhoto -FileId ([string]$document.file_id) -ChatId $chatId -UserId $userId -Extension ([IO.Path]::GetExtension([string](Get-JsonProp $document 'file_name'))) | Out-Null}
+                        if($uploadState -and [string]$uploadState.Mode -in @('mojaz_row_image', 'mojaz_edit_image')){Receive-MojazPhoto -FileId ([string]$document.file_id) -ChatId $chatId -UserId $userId -Extension ([IO.Path]::GetExtension([string](Get-JsonProp $document 'file_name'))) | Out-Null}
                         elseif($uploadState -and $uploadState.Mode -eq 'news_import_upload'){Receive-NewsTickerImport -Document $document -ChatId $chatId -UserId $userId}
                         elseif($uploadState -and $uploadState.Mode -eq 'settings_import_upload'){Receive-SettingsImport -Document $document -ChatId $chatId -UserId $userId}
                         else{Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId}
@@ -1546,6 +1551,9 @@ try {
                                 'mojaz_row_image' { Complete-MojazRowImage -ChatId $chatId -Value $text }
                                 'mojaz_row_title' { Complete-MojazRowTitle -ChatId $chatId -Value $text }
                                 'mojaz_row_text' { Complete-MojazRowText -ChatId $chatId -Value $text }
+                                'mojaz_edit_image' { Complete-MojazRowImage -ChatId $chatId -Value $text }
+                                'mojaz_edit_title' { Complete-MojazRowEdit -Which title -ChatId $chatId -Value $text }
+                                'mojaz_edit_text' { Complete-MojazRowEdit -Which text -ChatId $chatId -Value $text }
                                 'mojaz_delay' { Complete-MojazTiming -Which delay -ChatId $chatId -Value $text }
                                 'mojaz_intro_seconds' { Complete-MojazTiming -Which intro -ChatId $chatId -Value $text }
                                 'mojaz_last_seconds' { Complete-MojazTiming -Which last -ChatId $chatId -Value $text }

@@ -204,18 +204,84 @@ function Invoke-MojazEdit {
 
 # -------------------------------------------------------------------- timing
 
+function Get-MojazTemplateImage {
+    <#
+        The picture the scene ships with, read from its own declaration:
+
+            <Var Name="mojaz_img" Type="File" Value=".\Mojaz\Pic01.png" />
+
+        Without it there is no way back: an operator who gives one row a
+        picture of its own could never return a later row to the template's,
+        short of typing the path from memory.
+
+        Cached on write time like the timing, and read separately from it so a
+        scene with unusable loop markers still yields its picture.
+    #>
+    param([string]$Path = '')
+    if (-not $Path) {
+        $template = Get-MojazTemplate
+        if (-not $template) { return '' }
+        $Path = [string]$template.Path
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $stamp = (Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue).LastWriteTimeUtc
+    $key = "$Path|$stamp"
+    if ($script:MojazSceneImageKey -eq $key) { return $script:MojazSceneImage }
+    $image = ''
+    try {
+        $document = [xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+        $variable = @($document.SelectNodes('//Var') | Where-Object { [string]$_.Name -eq $script:MojazImageVariable }) | Select-Object -First 1
+        if ($variable) { $image = [string]$variable.Value }
+    }
+    catch { Write-BridgeLog "Could not read the Mojaz template picture: $($_.Exception.Message)" 'WARN' }
+    $script:MojazSceneImageKey = $key
+    $script:MojazSceneImage = $image
+    return $image
+}
+
 function Get-MojazRowVariables {
-    <# One row as the scene's variables. A row without a picture omits the
-       image variable entirely rather than sending an empty path, so the
-       graphic keeps the picture it already has instead of blanking. #>
-    param([Parameter(Mandatory)]$Row)
+    <#
+        One row as the scene's variables.
+
+        The image variable is sent only when the row names a picture - its own
+        ('new') or the template's ('template'). A row that inherits omits it
+        entirely rather than sending an empty path, so the graphic keeps
+        whatever picture is already in it: that omission is what lets one
+        picture stand for a run of rows.
+    #>
+    param([Parameter(Mandatory)]$Row, [string]$TemplateImage = '')
     $values = @{
         $script:MojazTitleVariable = [string]$Row.Title
         $script:MojazTextVariable = [string]$Row.Text
     }
-    $image = [string](Get-JsonProp $Row 'Image')
+    $image = switch (Get-MojazRowImageMode -Row $Row) {
+        'new' { [string](Get-JsonProp $Row 'Image') }
+        'template' { $TemplateImage }
+        default { '' }
+    }
     if (-not [string]::IsNullOrWhiteSpace($image)) { $values[$script:MojazImageVariable] = $image }
     return $values
+}
+
+function Get-MojazImageMark {
+    <# What the table's picture column says about one row. #>
+    param($Row, [int]$Index = 0)
+    switch (Get-MojazRowImageMode -Row $Row) {
+        'new' { return '🖼' }
+        'template' { return '▫️' }
+        # The first row has nothing above it to inherit from, so inheriting
+        # there is the template's own picture, and saying '↑' would be a lie.
+        default { return $(if ($Index -eq 0) { '▫️' } else { '↑' }) }
+    }
+}
+
+function Get-MojazImageLabel {
+    param($Row, [int]$Index = 0)
+    switch (Get-MojazRowImageMode -Row $Row) {
+        'new' { return '🖼 صورة خاصة' }
+        'template' { return '▫️ صورة القالب' }
+        default { return $(if ($Index -eq 0) { '▫️ صورة القالب' } else { '↑ يتبع الصف السابق' }) }
+    }
 }
 
 function Format-MojazCell {
@@ -353,12 +419,13 @@ function Get-MojazBlocks {
     for ($i = 0; $i -lt $rows.Count; $i++) {
         $cells += , @(
             @{ text = [string]($i + 1) }
-            @{ text = $(if ([string]::IsNullOrWhiteSpace([string]$rows[$i].Image)) { '—' } else { '✅' }) }
+            @{ text = (Get-MojazImageMark -Row $rows[$i] -Index $i) }
             @{ text = (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 24) }
             @{ text = (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 60) }
         )
     }
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $blocks += @{ type = 'paragraph'; text = '🖼 صورة خاصة · ↑ يتبع الصف السابق · ▫️ صورة القالب' }
     if (Test-MojazOnAir -Bulletin $Bulletin) {
         $blocks += @{ type = 'paragraph'; text = "▶️ يعمل الآن: الصف $([int]$script:MojazPlayback.Index + 1) من $(@($script:MojazPlayback.Rows).Count)" }
     }
@@ -381,7 +448,7 @@ function Get-MojazText {
     $lines.Add("<i>$($rows.Count) صفًّا · $(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText -Bulletin $Bulletin))</i>")
     $lines.Add('')
     for ($i = 0; $i -lt $rows.Count; $i++) {
-        $picture = if ([string]::IsNullOrWhiteSpace([string]$rows[$i].Image)) { '— بلا صورة' } else { '🖼 صورة' }
+        $picture = Get-MojazImageLabel -Row $rows[$i] -Index $i
         $lines.Add("$($i + 1). <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 40))</b> · $picture")
         $lines.Add("   $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 90))")
     }
@@ -422,7 +489,10 @@ function Get-MojazKeyboard {
     # like the table above, so the button and the story line up by eye.
     for ($i = 0; $i -lt $rows.Count; $i++) {
         $rowId = [string]$rows[$i].Id
-        $line = @((New-Button "🗑 $($i + 1)" "mojaz:del:$rowId" -Style danger))
+        $line = @(
+            (New-Button "✏️ $($i + 1)" "mojaz:row:$rowId")
+            (New-Button '🗑' "mojaz:del:$rowId" -Style danger)
+        )
         if ($i -gt 0) { $line += (New-Button '⬆️' "mojaz:up:$rowId") }
         if ($i -lt ($rows.Count - 1)) { $line += (New-Button '⬇️' "mojaz:down:$rowId") }
         $keyboard += , $line
@@ -620,28 +690,173 @@ function Remove-MojazBulletinAndSchedules {
 
 # --------------------------------------------------------------------- rows
 
+function Get-MojazImageKeyboard {
+    <#
+        The picture choices, offered the same way whether a row is being
+        written or edited: inherit what is already showing, go back to the
+        template's own, or take a picture this bulletin already carries
+        instead of uploading it a second time.
+
+        Reused pictures are addressed by their position in that list, because
+        a callback carries 64 bytes and a path does not fit.
+    #>
+    param([string]$Cancel = 'mojaz:refresh')
+    $keyboard = @(, @(
+            (New-Button '↑ يتبع السابق' 'mojaz:img:inherit')
+            (New-Button '▫️ صورة القالب' 'mojaz:img:template')
+        ))
+    $used = @(Get-MojazUsedImages -Rows @(Get-JsonProp (Get-MojazSelected -ChatId $script:MojazImageChatId) 'Rows'))
+    $line = @()
+    for ($i = 0; $i -lt $used.Count -and $i -lt 8; $i++) {
+        $line += (New-Button "🖼 $(Split-Path -Path $used[$i] -Leaf)" "mojaz:img:use:$i")
+        if ($line.Count -eq 2) { $keyboard += , $line; $line = @() }
+    }
+    if ($line.Count -gt 0) { $keyboard += , $line }
+    $keyboard += , @((New-Button '❌ إلغاء' $Cancel))
+    return @{ inline_keyboard = $keyboard }
+}
+
+function Send-MojazImagePrompt {
+    <# One prompt for both flows; the pending mode already says which. #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Cancel = 'mojaz:refresh')
+    $script:MojazImageChatId = $ChatId
+    Send-TelegramMessage -ChatId $ChatId -Text "🖼 أرسل صورة الصف (كصورة أو كملف)، أو أرسل مسارًا مثل ‎.\Mojaz\Pic01.png‎`nأو اختر أحد الأزرار." `
+        -ReplyMarkup (Get-MojazImageKeyboard -Cancel $Cancel)
+}
+
 function Start-MojazRowAdd {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $bulletinId = Get-MojazSelectedId -ChatId $ChatId
     if (-not $bulletinId) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_image'; UserId = $UserId; BulletinId = $bulletinId; Image = ''; Title = '' }
-    Send-TelegramMessage -ChatId $ChatId -Text "🖼 أرسل صورة الصف (كصورة أو كملف)، أو أرسل مسارًا مثل ‎.\Mojaz\Pic01.png‎`nأو اضغط ⏭ تخطٍّ لإبقاء صورة القالب." `
-        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏭ تخطٍّ' 'mojaz:skipimage'), (New-Button '❌ إلغاء' 'mojaz:refresh'))) }
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_row_image'; UserId = $UserId; BulletinId = $bulletinId; Image = ''; ImageMode = 'inherit'; Title = '' }
+    Send-MojazImagePrompt -ChatId $ChatId
+}
+
+function Resolve-MojazUsedImage {
+    <# The reuse buttons carry a position, not a path. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][int]$Index)
+    $used = @(Get-MojazUsedImages -Rows @(Get-JsonProp (Get-MojazSelected -ChatId $ChatId) 'Rows'))
+    if ($Index -lt 0 -or $Index -ge $used.Count) { return '' }
+    return [string]$used[$Index]
 }
 
 function Complete-MojazRowImage {
-    <# The typed-path branch. A picture sent as a photo arrives in
-       Receive-MojazPhoto instead and lands here with a path already on disk. #>
-    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '', [switch]$Skip)
+    <#
+        Where every way of naming a picture arrives: a typed path, a photo
+        already downloaded by Receive-MojazPhoto, or one of the buttons. The
+        pending mode decides whether this is the first step of a new row or an
+        edit of one that exists.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '',
+        [ValidateSet('new', 'inherit', 'template')][string]$Mode = 'new', [switch]$Skip)
     $state = Get-PendingState -ChatId $ChatId
-    if (-not $state -or [string]$state.Mode -ne 'mojaz_row_image') { return }
-    $image = if ($Skip) { '' } else { ([string]$Value).Trim() }
-    Set-PendingState -ChatId $ChatId -State @{
-        Mode = 'mojaz_row_title'; UserId = $state.UserId
-        BulletinId = [string](Get-JsonProp $state 'BulletinId'); Image = $image; Title = ''
+    if (-not $state) { return }
+    $image = if ($Skip -or $Mode -ne 'new') { '' } else { ([string]$Value).Trim() }
+    $imageMode = if ($Skip) { 'inherit' } elseif ($Mode -eq 'new' -and -not $image) { 'inherit' } else { $Mode }
+    switch ([string]$state.Mode) {
+        'mojaz_row_image' {
+            Set-PendingState -ChatId $ChatId -State @{
+                Mode = 'mojaz_row_title'; UserId = $state.UserId
+                BulletinId = [string](Get-JsonProp $state 'BulletinId')
+                Image = $image; ImageMode = $imageMode; Title = ''
+            }
+            Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل عنوان الصف (مثل: قطاع غزة).' -ReplyMarkup (Get-CancelKeyboard)
+        }
+        'mojaz_edit_image' {
+            $userId = [long]$state.UserId
+            $rowId = [string](Get-JsonProp $state 'RowId')
+            Clear-PendingState -ChatId $ChatId
+            $result = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $state 'BulletinId')) `
+                -RowId $rowId -Image $image -ImageMode $imageMode -UserId $userId
+            Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
+            Show-MojazRowScreen -RowId $rowId -ChatId $ChatId -UserId $userId
+        }
     }
-    Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل عنوان الصف (مثل: قطاع غزة).' -ReplyMarkup (Get-CancelKeyboard)
+}
+
+function Get-MojazRowNumber {
+    param($Bulletin, [string]$RowId)
+    $rows = @(Get-JsonProp $Bulletin 'Rows')
+    for ($i = 0; $i -lt $rows.Count; $i++) { if ([string]$rows[$i].Id -eq $RowId) { return ($i + 1) } }
+    return 0
+}
+
+function Show-MojazRowScreen {
+    <# One row on its own, so a typo in the third story is three presses to
+       fix instead of deleting it and writing it again. #>
+    param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $rows = @(Get-JsonProp $bulletin 'Rows')
+    $index = (Get-MojazRowNumber -Bulletin $bulletin -RowId $RowId) - 1
+    if ($index -lt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId; return }
+    $row = $rows[$index]
+    $lines = @(
+        "<b>✏️ الصف $($index + 1) من «$(ConvertTo-TelegramHtmlText -Text ([string]$bulletin.Name))»</b>"
+        ''
+        "🖼 $(ConvertTo-TelegramHtmlText -Text (Get-MojazImageLabel -Row $row -Index $index))"
+        "📝 <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Title) -Limit 60))</b>"
+        "📰 $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Text) -Limit 200))"
+    )
+    $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage (Get-MojazTemplateImage))
+    if ($effective.Count -gt $index -and $effective[$index]) {
+        $lines += "<i>ما سيظهر: $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$index] -Leaf))</i>"
+    }
+    $keyboard = @{ inline_keyboard = @(
+            , @(
+                (New-Button '🖼 الصورة' "mojaz:editimg:$RowId")
+                (New-Button '📝 العنوان' "mojaz:edittitle:$RowId")
+                (New-Button '📰 النص' "mojaz:edittext:$RowId")
+            )
+            @((New-Button '🗑 حذف الصف' "mojaz:del:$RowId" -Style danger), (New-Button '⬅️ الجدول' 'mojaz:refresh'))
+        ) }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard
+}
+
+function Start-MojazRowEdit {
+    param([Parameter(Mandatory)][ValidateSet('image', 'title', 'text')][string]$Which,
+        [Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $row = @(@(Get-JsonProp $bulletin 'Rows') | Where-Object { [string]$_.Id -eq $RowId }) | Select-Object -First 1
+    if (-not $row) { Show-MojazScreen -ChatId $ChatId -UserId $UserId; return }
+    Set-PendingState -ChatId $ChatId -State @{
+        Mode = "mojaz_edit_$Which"; UserId = $UserId
+        BulletinId = [string]$bulletin.Id; RowId = $RowId
+    }
+    if ($Which -eq 'image') { Send-MojazImagePrompt -ChatId $ChatId -Cancel "mojaz:row:$RowId"; return }
+    $current = if ($Which -eq 'title') { [string]$row.Title } else { [string]$row.Text }
+    $prompt = if ($Which -eq 'title') { '📝 أرسل العنوان الجديد.' } else { '📰 أرسل نص الخبر الجديد.' }
+    Send-TelegramMessage -ChatId $ChatId -Text "$prompt`nالحالي: $current" `
+        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '❌ إلغاء' "mojaz:row:$RowId"))) }
+}
+
+function Complete-MojazRowEdit {
+    param([Parameter(Mandatory)][ValidateSet('title', 'text')][string]$Which,
+        [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne "mojaz_edit_$Which") { return }
+    $value = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'title') { '❌ العنوان فارغ. أرسل عنوانًا.' } else { '❌ نص الخبر فارغ. أرسل النص.' }) -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    $userId = [long]$state.UserId
+    $rowId = [string](Get-JsonProp $state 'RowId')
+    Clear-PendingState -ChatId $ChatId
+    $result = if ($Which -eq 'title') {
+        Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $state 'BulletinId')) -RowId $rowId -Title $value -UserId $userId
+    }
+    else {
+        Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $state 'BulletinId')) -RowId $rowId -Text $value -UserId $userId
+    }
+    if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
+        Add-AuditEntry "📑 تعديل صف في الموجز - بواسطة $(Format-UserAuditActor -UserId $userId)"
+    }
+    Show-MojazRowScreen -RowId $rowId -ChatId $ChatId -UserId $userId
 }
 
 function Complete-MojazRowTitle {
@@ -655,7 +870,8 @@ function Complete-MojazRowTitle {
     }
     Set-PendingState -ChatId $ChatId -State @{
         Mode = 'mojaz_row_text'; UserId = $state.UserId
-        BulletinId = [string](Get-JsonProp $state 'BulletinId'); Image = [string]$state.Image; Title = $title
+        BulletinId = [string](Get-JsonProp $state 'BulletinId')
+        Image = [string]$state.Image; ImageMode = [string](Get-JsonProp $state 'ImageMode'); Title = $title
     }
     Send-TelegramMessage -ChatId $ChatId -Text '📰 أرسل نص الخبر.' -ReplyMarkup (Get-CancelKeyboard)
 }
@@ -674,8 +890,10 @@ function Complete-MojazRowText {
     # selected now: the selection can have moved while the operator typed.
     $bulletinId = [string](Get-JsonProp $state 'BulletinId')
     Clear-PendingState -ChatId $ChatId
+    $imageMode = [string](Get-JsonProp $state 'ImageMode')
+    if (-not $imageMode) { $imageMode = 'inherit' }
     $result = Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $bulletinId `
-        -Image ([string]$state.Image) -Title ([string]$state.Title) -Text $text -UserId $userId
+        -Image ([string]$state.Image) -ImageMode $imageMode -Title ([string]$state.Title) -Text $text -UserId $userId
     if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
         Add-AuditEntry "📑 أُضيف صف للموجز - بواسطة $(Format-UserAuditActor -UserId $userId)"
         $script:MojazSelections[[string]$ChatId] = $bulletinId
@@ -1029,7 +1247,11 @@ function Start-MojazPlayback {
     }
     $snapshot = $snapshotResult.Value
     $rows = @($snapshot.Rows)
-    $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0]) -ChatId $ChatId -UserId $UserId
+    # The template's picture is part of the snapshot too: a row set to
+    # "template" must show the picture the scene had when the run started,
+    # not one edited into it half way through.
+    $templateImage = Get-MojazTemplateImage
+    $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) -ChatId $ChatId -UserId $UserId
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { 'تعذّر العرض' }
         Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
@@ -1044,6 +1266,7 @@ function Start-MojazPlayback {
         BulletinName = [string]$snapshot.BulletinName
         BulletinRevision = [int]$snapshot.BulletinRevision
         ScheduleId = $ScheduleId
+        TemplateImage = $templateImage
     }
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $([int]$bulletin.DelaySeconds) s each)"
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
@@ -1089,7 +1312,7 @@ function Update-MojazPlayback {
         return
     }
     $index++
-    $values = Get-MojazRowVariables -Row $rows[$index]
+    $values = Get-MojazRowVariables -Row $rows[$index] -TemplateImage ([string](Get-JsonProp $script:MojazPlayback 'TemplateImage'))
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Values $values -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Mojaz POSTBOX XML: $($result.Xml)" }

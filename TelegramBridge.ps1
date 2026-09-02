@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.19.0'
+$script:BridgeVersion = '7.20.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -372,6 +372,59 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
+    RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
+    EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
+    EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
+    EnableFullTemplateManagement = @{ Unit = ''; Description = 'يسمح بتعديل بنية القوالب من تيليجرام لا بعرضها فقط' }
+    EnableDpapiSecrets = @{ Unit = ''; Description = 'يخزّن الأسرار مشفّرة بـ Windows DPAPI لحساب التشغيل بدل نص صريح في config.json' }
+    EnableSnapshot = @{ Unit = ''; Description = 'يفعّل 📸 صورة من البث: لقطة من خرج القناة' }
+    EnableLiveRelay = @{ Unit = ''; Description = 'يفعّل ▶️ البث المباشر: ترحيل خرج القناة إلى تيليجرام' }
+    EnableTimedShow = @{ Unit = ''; Description = 'يفعّل ⏱ العرض المؤقّت: عرض يُخفى تلقائيًا بعد مدة' }
+    EnableHideAll = @{ Unit = ''; Description = 'يفعّل 🚨 إخفاء الكل: زر الطوارئ الذي يخفي الطبقات المحددة' }
+    HideAllLayers = @{ Unit = ''; Description = 'ما يخفيه زر الطوارئ: all لكل الطبقات المعروفة، أو قائمة طبقات محددة' }
+    ReservedLayers = @{ Unit = ''; Description = 'طبقات يُمنع العرض عليها؛ الإخفاء والخروج يبقيان متاحين' }
+    ReshowClearsLayer = @{ Unit = ''; Description = 'يخفي الطبقة قبل إعادة العرض عليها فيظهر النص الجديد بدل القديم' }
+    SetValuesAfterShow = @{ Unit = ''; Description = 'يعيد إرسال قيم الحقول بعد العرض مباشرة ليضمن ظهور النص الصحيح' }
+    AutoHidePresetSeconds = @{ Unit = ''; Description = 'مدد الإخفاء الجاهزة المعروضة كأزرار في ⏱ العرض المؤقّت، مفصولة بفاصلة' }
+    RelayAutoRestart = @{ Unit = ''; Description = 'يعيد تشغيل الترحيل تلقائيًا إن انقطع' }
+    MaintenanceMode = @{ Unit = ''; Description = 'يوقف كل ما يغيّر الهواء ويُبقي المتابعة والتقارير تعمل' }
+    DisabledTemplateKeys = @{ Unit = ''; Description = 'قوالب ممنوعة من العرض، بمفاتيحها مفصولة بفاصلة' }
+    SensitiveTemplateKeys = @{ Unit = ''; Description = 'قوالب تُعطى مؤقّت إخفاء تلقائيًا دائمًا فلا تبقى على الهواء منسية' }
+    LayerNames = @{ Unit = ''; Description = 'أسماء الطبقات كما تُعرض للمشغّل، بصيغة 7=عاجل;8=شريط الأخبار' }
+    EnableFavorites = @{ Unit = ''; Description = 'يفعّل ⭐ المفضّلة: القوالب المختارة تظهر أعلى القائمة' }
+    SharedFavoritesEnabled = @{ Unit = ''; Description = 'محجوز لمفضّلة مشتركة بين الجميع؛ الوضع العامل حاليًا مفضّلة لكل مستخدم' }
+    EnablePersistentMenuButton = @{ Unit = ''; Description = 'يبقي شريط 🏠 القائمة و🆘 مساعدة ظاهرًا أسفل المحادثة' }
+    EnableNewsTickerManagement = @{ Unit = ''; Description = 'يفعّل 📰 إدارة شريط الأخبار في القائمة' }
+    NewsFilePath = @{ Unit = ''; Description = 'مسار ملف الشريط الذي يقرأه المشغّل على الهواء (.txt بمسار كامل)' }
+    NewsItemSeparator = @{ Unit = ''; Description = 'الفاصل بين الأخبار داخل ملف الشريط' }
+    NewsMaxItemLength = @{ Unit = 'حرفًا'; Description = 'أطول خبر مسموح به؛ ما يقاربه يُعلَّم بـ ⚠️ في شاشة الترتيب' }
+    NewsMaxItems = @{ Unit = 'خبرًا'; Description = 'أقصى عدد أخبار في الشريط' }
+    NewsImportMaxBytes = @{ Unit = 'بايت'; Description = 'أكبر حجم لملف الاستيراد TXT' }
+    NewsBackupKeepFiles = @{ Unit = 'نسخة'; Description = 'كم نسخة من الشريط يُحتفظ بها للاستعادة' }
+    NewsLockRequestMinutes = @{ Unit = 'دقيقة'; Description = 'مهلة صاحب المسودة للردّ على طلب فكّ القفل' }
+    NewsSheetCsvUrl = @{ Unit = ''; Description = 'رابط تصدير CSV للشيت — لا رابط الشيت العادي' }
+    NewsSheetSyncMode = @{ Unit = ''; Description = 'manual: بزر فقط · auto: كل فترة المزامنة' }
+    NewsSheetSyncMinutes = @{ Unit = 'دقيقة'; Description = 'كل كم تُسحب نسخة من الشيت في الوضع التلقائي' }
+    NewsSheetTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة تنزيل الشيت قبل اعتباره فاشلًا' }
+    NewsSheetNotifyScope = @{ Unit = ''; Description = 'من يصله إشعار تغيّر الشيت: none بلا أحد · admins المشرفون · all كل المصرّح لهم' }
+    AllowOperatorsSheetPull = @{ Unit = ''; Description = 'يسمح للمشغّل بسحب الشيت، لا للمشرف وحده' }
+    AllowOperatorsDeleteNews = @{ Unit = ''; Description = 'يسمح للمشغّل بحذف خبر من الشريط' }
+    AllowOperatorsRestoreNews = @{ Unit = ''; Description = 'يسمح للمشغّل باستعادة نسخة سابقة من الشريط' }
+    AllowOperatorsClearAllNews = @{ Unit = ''; Description = 'يسمح للمشغّل بمسح الشريط كاملًا' }
+    ScheduleConflictWindowMinutes = @{ Unit = 'دقيقة'; Description = 'ينبّه إن تقاربت أحداث على طبقة واحدة داخل هذه النافذة' }
+    SchedulePaused = @{ Unit = ''; Description = 'يُبقي الأحداث المجدولة معلّقة دون تنفيذ' }
+    ScheduleMaxRetries = @{ Unit = 'محاولة'; Description = 'كم مرة يُعاد عرض مجدول فشل؛ 0 يعني لا إعادة' }
+    ScheduleRetryDelaySeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل إعادة محاولة عرض مجدول' }
+    ScheduleRetryBackoffFactor = @{ Unit = ''; Description = 'مضاعف التأخير بعد كل محاولة فاشلة' }
+    ScheduleRetryMaxDelaySeconds = @{ Unit = 'ثانية'; Description = 'سقف التأخير مهما تكرّر الفشل' }
+    CinegyStateStaleSeconds = @{ Unit = 'ثانية'; Description = 'بعدها تُعدّ آخر قراءة ناجحة لحالة Cinegy قديمة' }
+    HeartbeatEnabled = @{ Unit = ''; Description = 'رسالة نبض يومية تؤكد أن الجسر يعمل' }
+    NotifyAdminsOnRelayFailure = @{ Unit = ''; Description = 'يُبلغ المشرفين حين يفشل ترحيل البث' }
+    NotifyAdminsOnExternalChange = @{ Unit = ''; Description = 'يُبلغ المشرفين حين يظهر أو يختفي شيء لم يُرسله الجسر' }
+    NotifyAdminsOnCinegyHealth = @{ Unit = ''; Description = 'يُبلغ المشرفين بتغيّر صحة Cinegy: إطارات ساقطة أو انقطاع' }
+    LogAirXml = @{ Unit = ''; Description = 'يسجّل XML المُرسل إلى Cinegy في السجل — للتشخيص لا للتشغيل اليومي' }
+    AirVariableType = @{ Unit = ''; Description = 'نوع المتغيرات المُرسلة مع العرض؛ Text يناسب القوالب النصية' }
+    DropPendingUpdatesOnStart = @{ Unit = ''; Description = 'يتجاهل ضغطات الأزرار التي وصلت قبل إعادة التشغيل فلا تُنفَّذ على الهواء متأخرة' }
 }
 
 # ============================================================================
@@ -825,15 +878,18 @@ $script:SettingChoices = @{
 # schema for compatibility; this map only controls how administrators discover
 # them in Telegram. Any future key omitted here is deliberately shown under
 # Advanced rather than becoming unreachable.
+# Each category carries the sentence its screen opens with: eight labels are
+# a list of names, and a name does not say which of eight screens holds the
+# setting somebody came looking for.
 $script:SettingCategoryDefinitions = @(
-    [pscustomobject]@{ Key = 'security';   Label = 'الأمان والصلاحيات';       Icon = '🔐' }
-    [pscustomobject]@{ Key = 'onair';      Label = 'التشغيل على الهواء';      Icon = '🔴' }
-    [pscustomobject]@{ Key = 'templates';  Label = 'القوالب والطبقات';        Icon = '📚' }
-    [pscustomobject]@{ Key = 'news';       Label = 'شريط الأخبار';            Icon = '📰' }
-    [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅' }
-    [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊' }
-    [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️' }
-    [pscustomobject]@{ Key = 'advanced';   Label = 'خيارات متقدمة';           Icon = '🛠️' }
+    [pscustomobject]@{ Key = 'security';   Label = 'الأمان والصلاحيات';       Icon = '🔐'; Summary = 'من يستطيع التحكم بالهواء، وكيف يُتحقق منه، وأي أبواب إدارية مفتوحة.' }
+    [pscustomobject]@{ Key = 'onair';      Label = 'التشغيل على الهواء';      Icon = '🔴'; Summary = 'ما يظهر ويختفي على الشاشة: أزرار العرض والإخفاء والطوارئ، وكيف يتعامل الجسر مع Cinegy.' }
+    [pscustomobject]@{ Key = 'templates';  Label = 'القوالب والطبقات';        Icon = '📚'; Summary = 'أي قالب متاح، وعلى أي طبقة، وبأي اسم يراه المشغّل.' }
+    [pscustomobject]@{ Key = 'news';       Label = 'شريط الأخبار';            Icon = '📰'; Summary = 'الشريط وملفه وحدوده، والربط مع Google Sheets، وما يُسمح به للمشغّل.' }
+    [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅'; Summary = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.' }
+    [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊'; Summary = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.' }
+    [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️'; Summary = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.' }
+    [pscustomobject]@{ Key = 'advanced';   Label = 'خيارات متقدمة';           Icon = '🛠️'; Summary = 'تفاصيل التشخيص والسلوك الداخلي؛ لا يحتاجها التشغيل اليومي.' }
 )
 
 $script:SettingCategoryByName = @{}

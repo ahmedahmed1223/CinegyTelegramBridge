@@ -587,8 +587,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.19.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.19.0'
+        $script:BridgeVersion | Should -Be '7.20.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.20.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -767,5 +767,47 @@ Describe 'Version 6 settings navigation schema' {
 
             Should -Invoke Show-SettingsCategoryScreen -Times 0 -Exactly
         }
+    }
+}
+
+Describe 'Settings are explained, not just listed' {
+    It 'gives every setting a description an administrator can act on' {
+        $undocumented = @(@($script:DefaultSettings.Keys) | Where-Object {
+                $metadata = Get-JsonProp $script:SettingDisplayMetadata $_
+                -not ($metadata -and (Get-JsonProp $metadata 'Description'))
+            })
+        # A setting nobody can explain is a setting nobody should change.
+        $undocumented | Should -BeNullOrEmpty
+    }
+
+    It 'gives every category the sentence its screen opens with' {
+        foreach ($category in @(Get-SettingCategoryDefinitions)) {
+            [string]$category.Summary | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'describes exactly the settings whose buttons are on that page' {
+        Mock Send-TelegramMessage {}
+        Show-SettingsCategoryScreen -Category 'news' -Page 0 -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ParseMode -eq 'HTML' -and
+            $Text -match 'شريط الأخبار' -and
+            # One page, one slice: the text lines and the buttons are the same
+            # eight settings.
+            (@($Text -split "`n" | Where-Object { $_ -like '•*' }).Count -eq
+                @(Get-SettingsCategoryPageNames -Category 'news' -Page 0).Count)
+        }
+    }
+}
+
+Describe 'The technical changelog' {
+    It 'offers the file on the release notes screen' {
+        $callbacks = @((Get-WhatsNewKeyboard -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Contain 'menu:changelog'
+    }
+
+    It 'ships beside the bridge, so the button has something to send' {
+        Test-Path -LiteralPath (Join-Path $script:Root 'CHANGELOG.md') | Should -BeTrue
     }
 }

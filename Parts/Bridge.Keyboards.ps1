@@ -837,6 +837,24 @@ function Get-SettingsInCategory {
     }
 }
 
+function Get-SettingsCategoryPageNames {
+    <# The settings on one page of a category. Shared, so the text above the
+       keyboard describes the same eight settings the buttons under it act
+       on - two slices of one list are two answers waiting to disagree. #>
+    param(
+        [Parameter(Mandatory)][string]$Category,
+        [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
+        [ValidateRange(1, 20)][int]$PageSize = 8
+    )
+    $names = @(Get-SettingsInCategory -Category $Category)
+    if ($names.Count -eq 0) { return @() }
+    $pageCount = [math]::Max(1, [int][math]::Ceiling($names.Count / [double]$PageSize))
+    $safePage = [math]::Min($Page, $pageCount - 1)
+    $start = $safePage * $PageSize
+    $end = [math]::Min($start + $PageSize - 1, $names.Count - 1)
+    return @($names[$start..$end])
+}
+
 function Get-SettingsKeyboard {
     $rows = @()
     $categoryRow = @()
@@ -903,12 +921,10 @@ function Get-SettingsCategoryKeyboard {
     $names = @(Get-SettingsInCategory -Category $Category)
     $pageCount = [math]::Max(1, [int][math]::Ceiling($names.Count / [double]$PageSize))
     $safePage = [math]::Min($Page, $pageCount - 1)
-    $start = $safePage * $PageSize
-    $end = [math]::Min($start + $PageSize - 1, $names.Count - 1)
     $rows = @()
 
     if ($names.Count -gt 0) {
-        foreach ($name in @($names[$start..$end])) {
+        foreach ($name in @(Get-SettingsCategoryPageNames -Category $Category -Page $Page -PageSize $PageSize)) {
             $value = Get-Setting $name
             $metadata = Get-SettingNavigationMetadata -Name $name
             if ($name -eq 'HideAllLayers') {

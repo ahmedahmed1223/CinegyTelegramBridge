@@ -619,8 +619,20 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'menu:changelog' {
+            $changelogPath = Join-Path $scriptRoot 'CHANGELOG.md'
+            if (Test-Path -LiteralPath $changelogPath) {
+                if (-not (Send-TelegramDocument -ChatId $chatId -FilePath $changelogPath -Caption '📄 سجل التغييرات التقني الكامل.')) {
+                    Send-TelegramMessage -ChatId $chatId -Text 'تعذّر إرسال الملف. حاول مرة أخرى.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                }
+            }
+            else {
+                Send-TelegramMessage -ChatId $chatId -Text 'ملف CHANGELOG.md غير موجود بجانب الجسر.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'menu:whatsnew' {
-            Send-TelegramPagedText -ChatId $chatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
+            Send-TelegramPagedText -ChatId $chatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-WhatsNewKeyboard -ChatId $chatId -UserId $userId) -ParseMode HTML
             break
         }
         'menu:restart' {

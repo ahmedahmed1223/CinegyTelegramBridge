@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.20.0
+
+Every setting now has a description and every category a summary line, shown
+above the buttons they describe - 53 of 134 settings had no explanation at
+all, and the ones that did only showed it on a numeric prompt. The release
+notes screen gains a button that sends CHANGELOG.md itself. The copy-reference
+button now copies the failed operation's reference: the screen prints a
+reference beside a failure only, so copying the newest operation handed the
+operator eight characters that appeared nowhere on their screen.
+
 ## Version 7.19.0
 
 The manual gains a settings chapter - the screen that changes every other

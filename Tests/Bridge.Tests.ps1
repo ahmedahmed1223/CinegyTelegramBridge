@@ -796,6 +796,23 @@ Describe 'Copy the operation reference' {
         $copy.ContainsKey('callback_data') | Should -BeFalse
     }
 
+    It 'copies the reference of the failure, not of whatever happened last' {
+        # The screen prints a reference beside a failure only, so copying the
+        # newest operation handed the operator eight characters that appear
+        # nowhere on the screen they are reading from.
+        Mock Get-UserOperationHistory {
+            @(
+                [pscustomobject]@{ OperationId = 'air-11111111032c476eb48204ca08032a98'; Result = 'failed' }
+                [pscustomobject]@{ OperationId = 'air-22222222032c476eb48204ca08032a98'; Result = 'success' }
+            )
+        }
+
+        $rows = @((Get-MyOperationsKeyboard -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+        $copy = @($rows | Where-Object { $_.ContainsKey('copy_text') })[0]
+
+        $copy.copy_text.text | Should -Be '11111111'
+    }
+
     It 'offers nothing to copy when the operator has no history yet' {
         Mock Get-UserOperationHistory { @() }
 

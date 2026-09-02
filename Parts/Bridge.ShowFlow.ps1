@@ -103,6 +103,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.20.0'; Items = @(
+                '⚙️ كل باب في الإعدادات صار يبدأ بسطر يقول ما فيه، وتحت كل زر شرح لما يفعله الإعداد.'
+                '📄 «ما الجديد» صار فيها زر يرسل ملف السجل التقني الكامل.'
+                '🧾 «نسخ مرجع» في عملياتي صار ينسخ مرجع العملية الفاشلة — وهو المرجع الظاهر على الشاشة.'
+            ) }
         @{ Version = '7.19.0'; Items = @(
                 '⚙️ باب جديد في 📖 المساعدة يشرح شاشة الإعدادات: الأبواب، البحث، التعديل، الحماية، النسخ والنقل.'
                 '📖 صفحات المساعدة صارت بنص منسّق: عنوان القسم عريضًا واسم الإعداد بخط موحّد العرض ليُنسخ كما هو.'
@@ -444,6 +449,18 @@ function Get-WhatsNewParts {
     $parts = @((Get-WhatsNewText -Take $LeadVersions))
     if ($total -gt $LeadVersions) { $parts += (Get-WhatsNewText -Skip $LeadVersions -NoHeading) }
     return $parts
+}
+
+function Get-WhatsNewKeyboard {
+    <# The release notes with the technical log behind a button. The screen
+       says what changed on an operator's screen; CHANGELOG.md says why, in
+       the maintainer's words, and it ships beside the bridge - so the answer
+       to "where is the full history" is a file, not a paragraph asking
+       somebody to open the server. #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    $rows = @(, @((New-Button '📄 السجل التقني (ملف)' 'menu:changelog')))
+    return @{ inline_keyboard = $rows + @($menu.inline_keyboard) }
 }
 
 function Get-QuickStartText {
@@ -1929,7 +1946,17 @@ function Get-MyOperationsKeyboard {
     # that finds nothing; copy_text (Bot API 7.11) puts it on the clipboard.
     # Only the newest one gets a button - ten of them would bury the two
     # controls under a wall of hex.
-    $latest = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 1)
+    # The newest *failed* one when there is one: a reference is printed on
+    # screen only beside a failure, and that failure is what gets reported.
+    # Copying the reference of a successful operation instead handed the
+    # operator eight characters that appear nowhere on the screen they are
+    # reading from.
+    $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
+    # Get-JsonProp, not $_.Result: a history entry carries only the fields
+    # its writer knew, and StrictMode turns a missing one into a crash on the
+    # screen an operator opens to report a crash.
+    $troubled = @($history | Where-Object { [string](Get-JsonProp $_ 'Result') -notin @('', 'success') })
+    $latest = @(@(if ($troubled.Count -gt 0) { $troubled } else { $history }) | Select-Object -Last 1)
     if ($latest.Count -gt 0) {
         $reference = Get-OperationReference -OperationId ([string]$latest[0].OperationId)
         if ($reference) {

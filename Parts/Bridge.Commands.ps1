@@ -41,7 +41,27 @@ function Show-SettingsCategoryScreen {
         return
     }
     $title = "$($definition[0].Icon) $($definition[0].Label)"
-    Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات ← $title`nاضغط خيارًا لتبديله أو تغيير قيمته." -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page)
+    # The buttons carry a label and a value; neither says what the setting
+    # does, and a label alone left the reader guessing which of eight screens
+    # held what they came for. The summary answers that, and each line under
+    # it explains the button below it.
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>⚙️ الإعدادات ← $(ConvertTo-TelegramHtmlText -Text $title)</b>")
+    $summary = [string](Get-JsonProp $definition[0] 'Summary')
+    if ($summary) { $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text $summary)</i>") }
+    $lines.Add('')
+    foreach ($name in @(Get-SettingsCategoryPageNames -Category $Category -Page $Page)) {
+        $metadata = Get-SettingNavigationMetadata -Name $name
+        $description = [string](Get-JsonProp (Get-JsonProp $script:SettingDisplayMetadata $name) 'Description')
+        $line = "• <b>$(ConvertTo-TelegramHtmlText -Text ([string]$metadata.Label))</b>"
+        # Some settings have no short label of their own and fall back to
+        # their description; printing it twice says nothing twice.
+        if ($description -and $description -ne [string]$metadata.Label) { $line += " — $(ConvertTo-TelegramHtmlText -Text $description)" }
+        $lines.Add($line)
+    }
+    $lines.Add('')
+    $lines.Add('اضغط خيارًا لتبديله أو تغيير قيمته.')
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page)
 }
 
 function Show-HideAllLayerSettings {
@@ -421,7 +441,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('قائمة', 'القائمة', 'menu') } { Show-MainMenu -ChatId $ChatId -UserId $UserId }
         { $_ -in @('الغاء', 'إلغاء', 'cancel') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "❌ تم إلغاء أي عملية معلّقة. اختر من القائمة:" }
         { $_ -in @('مساعدة', 'help') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-HelpHomeText -ChatId $ChatId -UserId $UserId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
-        { $_ -in @('الجديد', 'whatsnew') } { Send-TelegramPagedText -ChatId $ChatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
+        { $_ -in @('الجديد', 'whatsnew') } { Send-TelegramPagedText -ChatId $ChatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-WhatsNewKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
         { $_ -in @('digest', 'ملخص') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         { $_ -like 'who*' -or $_ -like 'من *' } {
             if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }

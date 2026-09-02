@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.28.0'
+$script:BridgeVersion = '7.28.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -1475,12 +1475,12 @@ try {
                 # A picture for a Mojaz row can arrive either way: as a photo
                 # (Telegram recompresses it) or as a file. Both land in the same
                 # place, and neither is accepted unless a row is being written.
-                $photo = @(Get-JsonProp $message 'photo')
-                if ($photo.Count -gt 0) {
+                $photoFileId = Get-TelegramMessagePhotoId -Message $message
+                if ($photoFileId) {
                     try {
                         $photoState = Get-PendingState -ChatId $chatId
                         if ($photoState -and [string]$photoState.Mode -eq 'mojaz_row_image') {
-                            Receive-MojazPhoto -FileId ([string]$photo[-1].file_id) -ChatId $chatId -UserId $userId | Out-Null
+                            Receive-MojazPhoto -FileId $photoFileId -ChatId $chatId -UserId $userId | Out-Null
                         }
                         else { Send-TelegramMessage -ChatId $chatId -Text 'لا يُنتظر منك صورة الآن. افتح 📑 الموجز ثم ➕ إضافة صف.' }
                     }

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.28.1
+
+Fixes a bug in 7.28.0 that answered every text message - including /start -
+with "no picture is expected right now". The photo branch tested for a picture
+with @(...).Count on a field that is absent, and @($null) has one element, so
+every message looked like a photo. The test is a named function now, with a
+test of its own.
+
 ## Version 7.28.0
 
 A Mojaz bulletin screen: the editor writes a table of rows - picture, title,

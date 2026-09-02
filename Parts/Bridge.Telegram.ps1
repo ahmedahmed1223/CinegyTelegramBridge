@@ -101,6 +101,23 @@ function ConvertTo-TelegramReplyMarkupJson {
     return ($markup | ConvertTo-Json -Depth 10 -Compress)
 }
 
+function Get-TelegramMessagePhotoId {
+    <#
+        The file id of the largest size of a photo message, or '' when the
+        message carries no photo at all.
+
+        Written as a function with a test behind it because the obvious
+        inline version is wrong in a way that takes the whole bot down:
+        @(Get-JsonProp $message 'photo') on a message with no photo is
+        @($null) - one element, Count 1 - so a "did a photo arrive" test
+        written that way answers yes to every text message ever sent.
+    #>
+    param($Message)
+    $sizes = @(@(Get-JsonProp $Message 'photo') | Where-Object { $_ })
+    if ($sizes.Count -eq 0) { return '' }
+    return [string](Get-JsonProp $sizes[-1] 'file_id')
+}
+
 function Send-TelegramMessage {
     param(
         [Parameter(Mandatory)][long]$ChatId,

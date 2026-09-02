@@ -177,3 +177,24 @@ Describe 'The Mojaz screen is reachable and complete' {
         $directory | Should -Match 'bot$'
     }
 }
+
+Describe 'Telling a photo message from every other message' {
+    It 'answers with nothing for a message that carries no photo' {
+        # The bug this exists for: @(Get-JsonProp $message 'photo') on a text
+        # message is @($null) - Count 1 - so "did a photo arrive" answered yes
+        # to every message, and the bot replied to /start and /menu with
+        # "لا يُنتظر منك صورة الآن" instead of opening the menu.
+        Get-TelegramMessagePhotoId -Message ([pscustomobject]@{ text = '/start' }) | Should -BeNullOrEmpty
+        Get-TelegramMessagePhotoId -Message ([pscustomobject]@{ photo = @() }) | Should -BeNullOrEmpty
+        Get-TelegramMessagePhotoId -Message ([pscustomobject]@{ document = [pscustomobject]@{ file_id = 'd' } }) | Should -BeNullOrEmpty
+    }
+
+    It 'takes the largest size Telegram offers' {
+        $message = [pscustomobject]@{ photo = @(
+                [pscustomobject]@{ file_id = 'thumb' }
+                [pscustomobject]@{ file_id = 'full' }
+            ) }
+
+        Get-TelegramMessagePhotoId -Message $message | Should -Be 'full'
+    }
+}

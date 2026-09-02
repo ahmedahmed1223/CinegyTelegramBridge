@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.22.0
+
+The confirmation of a settings change speaks the same language as the screen
+it came from: the setting's Arabic name, and what the value was before as well
+as after. It used to read "EnableSnapshot = False" - the JSON key and a
+PowerShell boolean - and never said what the value had been, so an
+administrator who mistapped had nothing to put back. The single-reset button
+now asks with both values in the question.
+
 ## Version 7.21.0
 
 Setting buttons are names again. A setting with no short label of its own

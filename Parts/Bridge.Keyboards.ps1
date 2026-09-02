@@ -1184,10 +1184,11 @@ function Complete-SettingText {
         return
     }
     Clear-PendingState -ChatId $ChatId
+    $previous = Get-Setting $state.Name
     Set-Setting -Name $state.Name -Value $trimmed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $trimmed"
     Add-AuditEntry "⚙️ $($state.Name) = $trimmed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ $($state.Name) = $trimmed$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $previous -To $trimmed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Set-SettingChoice {
@@ -1213,8 +1214,9 @@ function Set-SettingChoice {
             return
         }
     }
+    $previous = Get-Setting $Name
     Set-Setting -Name $Name -Value $choices[$Index]
     Write-BridgeLog "User $UserId set $Name = $($choices[$Index])"
     Add-AuditEntry "⚙️ $Name = $($choices[$Index]) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ $Name = $($choices[$Index])$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From $previous -To $choices[$Index]) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }

@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '7.21.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '7.21.0'
+        $script:BridgeVersion | Should -Be '7.22.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '7.22.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -851,6 +851,32 @@ Describe 'Settings list and search screens' {
         Show-SettingsListScreen -Mode advanced -Page 0 -ChatId 100 -UserId 101
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             @($Text -split "`n" | Where-Object { $_ -like '•*' }).Count -eq 8
+        }
+    }
+}
+
+Describe 'Confirming a settings change' {
+    It 'names the setting the way the screens do, and says what it was' {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Invoke-SettingToggle -Name 'EnableSnapshot' -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ParseMode -eq 'HTML' -and
+            $Text -match 'التقاط لقطات البث' -and $Text -match 'مفعّل' -and $Text -match 'معطّل' -and
+            # The JSON key belongs in the log, not on a screen whose buttons,
+            # lists and search results are all Arabic.
+            $Text -notmatch 'EnableSnapshot'
+        }
+    }
+
+    It 'says what a single reset would change it from and to' {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Set-Setting -Name 'MaxFieldLength' -Value 500
+        Reset-SingleSettingToDefault -Name 'MaxFieldLength' -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'طول نص الحقل' -and $Text -match '500' -and
+            $Text -match [regex]::Escape([string]$script:DefaultSettings['MaxFieldLength'])
         }
     }
 }

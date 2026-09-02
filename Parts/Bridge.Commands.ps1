@@ -50,6 +50,39 @@ function Get-SettingsExplainedLines {
         })
 }
 
+function Get-SettingValueDisplay {
+    <# A setting's value in the words its own screen uses: a switch reads
+       مفعّل/معطّل there, not True/False. #>
+    param([Parameter(Mandatory)][string]$Name, $Value)
+    if ($script:DefaultSettings[$Name] -is [bool]) {
+        return $(if ([bool]$Value) { 'مفعّل' } else { 'معطّل' })
+    }
+    $text = [string](Format-SettingDisplay -Name $Name -Value $Value)
+    return $(if ([string]::IsNullOrWhiteSpace($text)) { '(فارغ)' } else { $text })
+}
+
+function Get-SettingChangeText {
+    <#
+        The confirmation of a change, in the words the rest of the screens
+        use.
+
+        It used to read "✅ AuditTemplateValues = True": the key from the
+        JSON file and the value as PowerShell prints it, on a screen whose
+        buttons, list lines and search results are all Arabic. And it said
+        what the setting is now without saying what it was, so an
+        administrator who mistapped had nothing to undo it back to.
+    #>
+    param([Parameter(Mandatory)][string]$Name, $From, $To)
+    $label = [string](Get-SettingNavigationMetadata -Name $Name).Label
+    $lines = @(
+        "✅ <b>$(ConvertTo-TelegramHtmlText -Text $label)</b>"
+        "من «$(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $From))» إلى «$(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $To))»"
+    )
+    $warning = [string](Get-ConfigSaveWarning)
+    if ($warning) { $lines += (ConvertTo-TelegramHtmlText -Text $warning.Trim()) }
+    return ($lines -join "`n")
+}
+
 function Show-SettingsCategoryScreen {
     param(
         [Parameter(Mandatory)][string]$Category,
@@ -196,13 +229,14 @@ function Invoke-SettingToggle {
     # Only *weakening* a protected setting needs confirmation; re-enabling
     # protection should stay a single tap.
     if (-not $Confirmed -and -not $new -and $script:ProtectedSettings -contains $Name) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ '$Name' إعداد حماية. تعطيله يوسّع من يستطيع التحكم بالهواء.`nهل أنت متأكد؟" -ReplyMarkup (Get-SettingConfirmKeyboard -Name $Name)
+        $protectedLabel = [string](Get-SettingNavigationMetadata -Name $Name).Label
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ «$protectedLabel» إعداد حماية. تعطيله يوسّع من يستطيع التحكم بالهواء.`nهل أنت متأكد؟" -ReplyMarkup (Get-SettingConfirmKeyboard -Name $Name)
         return
     }
     Set-Setting -Name $Name -Value $new
     Write-BridgeLog "User $UserId set $Name = $new"
     Add-AuditEntry "⚙️ $Name = $new - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ $Name = $(if ($new) { 'مفعّل' } else { 'معطّل' })$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From (-not $new) -To $new) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Start-SettingValuePrompt {
@@ -237,10 +271,11 @@ function Complete-SettingValue {
             return
         }
     }
+    $previous = Get-Setting $state.Name
     Set-Setting -Name $state.Name -Value $parsed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $parsed"
     Add-AuditEntry "⚙️ $($state.Name) = $parsed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ $($state.Name) = $parsed$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $previous -To $parsed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Reset-SettingsToDefault {
@@ -312,12 +347,16 @@ function Reset-SingleSettingToDefault {
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:DefaultSettings.Contains($Name)) { return }
     if (-not $Confirmed) {
-        Send-TelegramMessage -ChatId $ChatId -Text "إعادة '$Name' فقط إلى قيمته الافتراضية؟" -ReplyMarkup (Get-SingleSettingResetConfirmKeyboard -Name $Name)
+        $resetLabel = [string](Get-SettingNavigationMetadata -Name $Name).Label
+        $current = Get-SettingValueDisplay -Name $Name -Value (Get-Setting $Name)
+        $default = Get-SettingValueDisplay -Name $Name -Value $script:DefaultSettings[$Name]
+        Send-TelegramMessage -ChatId $ChatId -Text "↩️ إعادة «$resetLabel» وحده إلى الافتراضي؟`nالآن: $current`nسيصير: $default" -ReplyMarkup (Get-SingleSettingResetConfirmKeyboard -Name $Name)
         return
     }
+    $previousValue = Get-Setting $Name
     Set-Setting -Name $Name -Value $script:DefaultSettings[$Name]
     Add-AuditEntry "↩️ إعادة إعداد $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ أُعيد $Name فقط إلى القيمة الافتراضية.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From $previousValue -To $script:DefaultSettings[$Name]) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Invoke-AdminRawCommand {

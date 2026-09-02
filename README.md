@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.28.0
+
+A Mojaz bulletin screen: the editor writes a table of rows - picture, title,
+story - sets how long each row holds, and presses play. The scene is shown
+once and the following rows are written into it through the postbox, because
+re-showing it per story would replay the entrance animation and flash the
+screen between them. The first row holds for its dwell plus that animation,
+and the last holds for half before EXIT plays the outro. Pictures upload
+straight from the phone and are saved beside the scene, where the bridge's own
+upload sweeper cannot delete one that is still on air.
+
 ## Version 7.27.0
 
 The home button was dead on seven screens. The router knew `menu` and not

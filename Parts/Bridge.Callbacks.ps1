@@ -285,6 +285,26 @@ function Invoke-CallbackQuery {
         # «خيار غير معروف.» and, worse, left any half-finished input
         # pending: the home button is what an operator presses to get out of
         # a flow, and it was the one press that did not clear it.
+        'menu:mojaz' { Show-MojazScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:refresh' { Clear-PendingState -ChatId $chatId; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
+        'mojaz:add' { Start-MojazRowAdd -ChatId $chatId -UserId $userId; break }
+        'mojaz:skipimage' { Complete-MojazRowImage -ChatId $chatId -Skip; break }
+        'mojaz:delay' { Start-MojazDelayPrompt -ChatId $chatId -UserId $userId; break }
+        'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:stop' { Stop-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:del:*' {
+            $rowIndex = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojaz:del:'), [ref]$rowIndex)) { Remove-MojazRow -Index $rowIndex | Out-Null }
+            Show-MojazScreen -ChatId $chatId -UserId $userId
+            break
+        }
+        'mojaz:clear' {
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ مسح كل صفوف الموجز؟ لا يؤثر على ما هو على الهواء الآن.' -ReplyMarkup @{ inline_keyboard = @(
+                    , @((New-Button '🧹 نعم، امسح' 'mojaz:clearconfirm' -Style danger), (New-Button '❌ إلغاء' 'mojaz:refresh'))
+                ) }
+            break
+        }
+        'mojaz:clearconfirm' { Clear-MojazRows | Out-Null; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
         { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
             Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)

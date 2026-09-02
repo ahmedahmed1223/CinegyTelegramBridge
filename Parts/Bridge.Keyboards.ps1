@@ -150,6 +150,9 @@ function Get-MainMenuKeyboard {
     if (Get-Setting 'EnableNewsTickerManagement') {
         $rows += , @( (New-Button "📰 إدارة شريط الأخبار" 'menu:news') )
     }
+    # Offered only where the template exists: the screen is that scene's, and
+    # a bridge without it has nothing to play.
+    if (Test-MojazAvailable) { $rows += , @( (New-Button '📑 الموجز' 'menu:mojaz') ) }
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )

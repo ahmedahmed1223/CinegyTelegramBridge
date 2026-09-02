@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.27.0'
+$script:BridgeVersion = '7.28.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -89,6 +89,7 @@ foreach ($part in @(
         'Bridge.Core'
         'Bridge.Telegram'
         'Bridge.News'
+        'Bridge.Mojaz'
         'Bridge.Users'
         'Bridge.Templates'
         'Bridge.OnAir'
@@ -197,6 +198,8 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
     # --- safety ---
+    MojazRowSeconds            = 8       # how long each Mojaz row stays before the next replaces it
+    MojazIntroExtraSeconds     = 2       # added to the FIRST row only: the entrance animation plays over it
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
@@ -372,6 +375,8 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
+    MojazRowSeconds = @{ Unit = 'ثانية'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي' }
+    MojazIntroExtraSeconds = @{ Unit = 'ثانية'; Description = 'تُضاف إلى الصف الأول وحده، بقدر حركة دخول القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
     EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
@@ -797,6 +802,12 @@ $script:RestartSelfRelaunch = $false
 # Long screens waiting behind 📄 المزيد, keyed by chat. In memory only: a
 # restart drops them, and the button says so rather than pretending.
 $script:PagedText = @{}
+# The Mojaz bulletin: the saved table, the dwell it was saved with, and
+# the run in progress ($null when nothing is playing).
+$script:MojazTemplateKey = 'Mojaz'
+$script:MojazRows = @()
+$script:MojazDelaySeconds = 8
+$script:MojazPlayback = $null
 # Built on first use from the settings table: the manual mentions setting
 # names in prose, and a name is worth setting in code only if it is real.
 $script:HelpCodeTermPattern = ''
@@ -901,6 +912,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
+                'MojazRowSeconds', 'MojazIntroExtraSeconds',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1022,6 +1034,8 @@ $script:SettingNavigationLabels = @{
     UserActivityRecentMinutes = 'نافذة النشاط الحديث للمستخدم'
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
+    MojazRowSeconds = 'مدة صف الموجز'
+    MojazIntroExtraSeconds = 'زيادة الصف الأول'
     AirCommandTimeoutSeconds = 'مهلة أمر Cinegy'
     AllowRemoteRestart = 'إعادة التشغيل من البوت'
     AuditArchiveKeepFiles = 'أرشيفات التدقيق المحفوظة'
@@ -1409,6 +1423,7 @@ Import-UserOperationHistory
 Register-BotCommands
 Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 Update-UploadCleanup -Force     # and any staged upload left behind with it
+Import-MojazPlaylist            # the saved bulletin table, if there is one
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
@@ -1457,11 +1472,27 @@ try {
                 }
                 $fromObj = Get-JsonProp $message 'from'
                 $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { $chatId }
+                # A picture for a Mojaz row can arrive either way: as a photo
+                # (Telegram recompresses it) or as a file. Both land in the same
+                # place, and neither is accepted unless a row is being written.
+                $photo = @(Get-JsonProp $message 'photo')
+                if ($photo.Count -gt 0) {
+                    try {
+                        $photoState = Get-PendingState -ChatId $chatId
+                        if ($photoState -and [string]$photoState.Mode -eq 'mojaz_row_image') {
+                            Receive-MojazPhoto -FileId ([string]$photo[-1].file_id) -ChatId $chatId -UserId $userId | Out-Null
+                        }
+                        else { Send-TelegramMessage -ChatId $chatId -Text 'لا يُنتظر منك صورة الآن. افتح 📑 الموجز ثم ➕ إضافة صف.' }
+                    }
+                    catch { Write-BridgeLog "Unhandled error processing photo from $chatId : $($_.Exception.Message)" 'ERROR' }
+                    continue
+                }
                 $document = Get-JsonProp $message 'document'
                 if ($document) {
                     try {
                         $uploadState=Get-PendingState -ChatId $chatId
-                        if($uploadState -and $uploadState.Mode -eq 'news_import_upload'){Receive-NewsTickerImport -Document $document -ChatId $chatId -UserId $userId}
+                        if($uploadState -and [string]$uploadState.Mode -eq 'mojaz_row_image'){Receive-MojazPhoto -FileId ([string]$document.file_id) -ChatId $chatId -UserId $userId -Extension ([IO.Path]::GetExtension([string](Get-JsonProp $document 'file_name'))) | Out-Null}
+                        elseif($uploadState -and $uploadState.Mode -eq 'news_import_upload'){Receive-NewsTickerImport -Document $document -ChatId $chatId -UserId $userId}
                         elseif($uploadState -and $uploadState.Mode -eq 'settings_import_upload'){Receive-SettingsImport -Document $document -ChatId $chatId -UserId $userId}
                         else{Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId}
                     }
@@ -1502,6 +1533,10 @@ try {
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
                                 'settings_search' { Complete-SettingsSearch -ChatId $chatId -Value $text | Out-Null }
+                                'mojaz_row_image' { Complete-MojazRowImage -ChatId $chatId -Value $text }
+                                'mojaz_row_title' { Complete-MojazRowTitle -ChatId $chatId -Value $text }
+                                'mojaz_row_text' { Complete-MojazRowText -ChatId $chatId -Value $text }
+                                'mojaz_delay' { Complete-MojazDelay -ChatId $chatId -Value $text }
                                 'operation_reference' { Complete-OperationReferenceLookup -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }

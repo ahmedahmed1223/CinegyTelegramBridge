@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.24.0
+
+The pending access requests screen shows what the decision needs: the user and
+chat ids, how long ago the request was made, and when it expires on its own.
+It used to be a title over buttons carrying a name - a name the requester chose
+- while the press granted the ability to put graphics on air. That name is the
+one piece of text on the screen a stranger wrote, so it is escaped and capped.
+
 ## Version 7.23.0
 
 Restoring every default now asks first, and the question says how many

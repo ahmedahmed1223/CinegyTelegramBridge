@@ -1637,3 +1637,43 @@ Describe 'A log line is shown in the font it was written for' {
         Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
     }
 }
+
+Describe 'The pending access requests screen' {
+    BeforeEach { $script:PendingApprovals.Clear() }
+    AfterAll { $script:PendingApprovals.Clear() }
+
+    It 'shows who is asking, from which id, and since when' {
+        $script:PendingApprovals[555001] = @{ Name = 'مشغّل جديد'; ChatId = 555001; UserId = 999777; RequestedAt = (Get-Date).AddMinutes(-30) }
+
+        $text = Get-PendingApprovalsText
+
+        $text | Should -Match 'مشغّل جديد'
+        # The id is what the administrator is actually granting control to.
+        $text | Should -Match '999777'
+        $text | Should -Match 'منذ'
+    }
+
+    It 'escapes a name its requester chose' {
+        # The only text on this screen written by a stranger.
+        $script:PendingApprovals[555002] = @{ Name = '<b>مدير</b>'; ChatId = 555002; UserId = 555002; RequestedAt = (Get-Date) }
+
+        $text = Get-PendingApprovalsText
+
+        $text | Should -Match '&lt;b&gt;'
+        $text | Should -Not -Match '<b>مدير'
+    }
+
+    It 'says there are none rather than showing an empty screen' {
+        Get-PendingApprovalsText | Should -Match 'لا طلبات'
+    }
+
+    It 'colours approval and leaves the refusal plain' {
+        $script:PendingApprovals[555003] = @{ Name = 'س'; ChatId = 555003; UserId = 555003; RequestedAt = (Get-Date) }
+        $buttons = @((Get-PendingKeyboard).inline_keyboard | ForEach-Object { @($_) })
+        $yes = @($buttons | Where-Object { [string]$_['callback_data'] -eq 'approve:555003' })[0]
+        $no = @($buttons | Where-Object { [string]$_['callback_data'] -eq 'reject:555003' })[0]
+
+        $yes['style'] | Should -Be 'success'
+        $no.ContainsKey('style') | Should -BeFalse
+    }
+}

@@ -794,6 +794,53 @@ function Get-ApprovalKeyboard {
         ) }
 }
 
+function Get-PendingApprovalsText {
+    <#
+        Who is asking for control of the on-air graphics, and since when.
+
+        The screen said "طلبات الوصول المعلّقة:" and then a row of buttons
+        carrying a name - a name the requester chose, and nothing else. An
+        administrator granting the ability to put graphics on air could not
+        see the user id they were granting it to, when it was asked for, or
+        that the request expires on its own.
+
+        The name is the one piece of text on this screen that a stranger
+        wrote, so it is escaped and capped like any other untrusted input.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
+    $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>👤 طلبات الوصول المعلّقة</b>')
+    if ($ids.Count -eq 0) {
+        $lines.Add('<i>لا طلبات الآن.</i>')
+        return ($lines -join "`n")
+    }
+    $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
+    $expiryHours = Get-SettingInt 'PendingApprovalExpiryHours' 1
+    $lines.Add("<i>$($ids.Count) طلبًا$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+    $lines.Add('')
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $id = $ids[$index]
+        $info = $script:PendingApprovals[$id]
+        $name = [string](Get-JsonProp $info 'Name')
+        if ($name.Length -gt 40) { $name = $name.Substring(0, 39) + '…' }
+        $shown = if ($name) { ConvertTo-TelegramHtmlText -Text $name } else { 'بلا اسم' }
+        $lines.Add("$($index + 1). <b>$shown</b>")
+        $lines.Add("   المستخدم <code>$([long](Get-JsonProp $info 'UserId'))</code> · المحادثة <code>$([long]$id)</code>")
+        $requestedAt = Get-JsonProp $info 'RequestedAt'
+        if ($requestedAt) {
+            $elapsed = [int]([math]::Max(0, ((Get-Date) - [datetime]$requestedAt).TotalMinutes))
+            $line = "   منذ $(Format-DurationMinutes -Minutes $elapsed)"
+            if ($expiryHours -gt 0) {
+                $left = [int]([math]::Max(0, ($expiryHours * 60) - $elapsed))
+                $line += " · ينتهي تلقائيًا بعد $(Format-DurationMinutes -Minutes $left)"
+            }
+            $lines.Add($line)
+        }
+    }
+    return ($lines -join "`n")
+}
+
 function Get-PendingKeyboard {
     param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
     $rows = @()
@@ -804,7 +851,7 @@ function Get-PendingKeyboard {
         $id = $ids[$index]
         $info = $script:PendingApprovals[$id]
         $label = if ($info.Name) { "$($info.Name)" } else { "$id" }
-        $rows += , @( (New-Button "✅ $label" "approve:$id"), (New-Button "❌" "reject:$id") )
+        $rows += , @( (New-Button "✅ $($index + 1). $label" "approve:$id" -Style success), (New-Button "❌" "reject:$id") )
         }
     }
     if ($window.PageCount -gt 1) {

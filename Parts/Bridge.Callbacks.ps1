@@ -1048,7 +1048,7 @@ function Invoke-CallbackQuery {
         }
         'menu:pending' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text "طلبات الوصول المعلّقة:" -ReplyMarkup (Get-PendingKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-PendingApprovalsText) -ParseMode HTML -ReplyMarkup (Get-PendingKeyboard)
             }
             break
         }
@@ -1062,7 +1062,7 @@ function Invoke-CallbackQuery {
             $page = 0
             if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
                 [int]::TryParse((Get-CallbackArg $data 'pendingpage:'), [ref]$page) -and $page -ge 0) {
-                Send-TelegramMessage -ChatId $chatId -Text 'طلبات الوصول المعلّقة:' -ReplyMarkup (Get-PendingKeyboard -Page $page)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-PendingApprovalsText -Page $page) -ParseMode HTML -ReplyMarkup (Get-PendingKeyboard -Page $page)
             }
             break
         }

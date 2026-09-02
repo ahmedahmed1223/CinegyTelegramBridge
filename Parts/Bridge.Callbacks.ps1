@@ -278,7 +278,14 @@ function Invoke-CallbackQuery {
             Set-PendingState -ChatId $chatId -State @{Mode='news_import_upload';UserId=$userId;StartedAt=(Get-Date)}
             Send-TelegramMessage -ChatId $chatId -Text '📥 أرسل ملف TXT UTF-8. سيُستورد إلى المسودة فقط ثم يمكنك معاينته ونشره.';break
         }
-        'menu' {
+        # Both spellings: seven screens send 'menu:main' on their 🏠 button -
+        # the diagnostics screen, quick start, both report screens, a help
+        # chapter, the help index and 🧾 عملياتي - and only 'menu' was
+        # handled. The press fell to the default branch, which answered
+        # «خيار غير معروف.» and, worse, left any half-finished input
+        # pending: the home button is what an operator presses to get out of
+        # a flow, and it was the one press that did not clear it.
+        { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
             Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break

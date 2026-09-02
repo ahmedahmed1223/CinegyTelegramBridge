@@ -1135,3 +1135,46 @@ Describe 'The operation history says what happened before it says what was done'
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly
     }
 }
+
+Describe 'Every button on screen goes somewhere' {
+    It 'opens the main menu from the home button, in both spellings' {
+        Mock Send-TelegramMessage {}
+        Mock Confirm-TelegramCallback {}
+
+        # The whitelisted chat from config.example.json: an unauthorized one never reaches the router.
+        $chatId = @(Get-JsonProp $config 'AllowedChatIds')[0]
+        foreach ($data in @('menu', 'menu:main')) {
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'setting_value'; Name = 'MaxFieldLength'; UserId = $chatId }
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                    id = '1'; data = $data
+                    message = [pscustomobject]@{ chat = [pscustomobject]@{ id = $chatId } }
+                    from = [pscustomobject]@{ id = $chatId; first_name = 'x' }
+                })
+            # 🏠 is what an operator presses to get out of a flow: it must
+            # clear what they had half-typed, not answer "unknown option".
+            Get-PendingState -ChatId $chatId | Should -BeNullOrEmpty
+        }
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -match 'خيار غير معروف' }
+    }
+
+    It 'has a handler for every callback its keyboards emit' {
+        # The audit that found the dead home button, kept as a test: a button
+        # nothing handles answers «خيار غير معروف» and is only ever found by
+        # someone pressing it.
+        $source = (Get-ChildItem (Join-Path $script:Root 'Parts/*.ps1') | ForEach-Object { Get-Content -Raw $_.FullName }) -join "`n"
+        $router = Get-Content -Raw (Join-Path $script:Root 'Parts/Bridge.Callbacks.ps1')
+        $cases = @([regex]::Matches($router, "(?m)^\s{8}'([^']+)' \{") | ForEach-Object { $_.Groups[1].Value })
+        $cases += @([regex]::Matches($router, "(?m)^\s{8}\{ \`$_ -in @\(([^)]+)\) \} \{") |
+                ForEach-Object { $_.Groups[1].Value -split ',' } | ForEach-Object { $_.Trim().Trim("'") })
+
+        $emitted = @([regex]::Matches($source, "New-Button\s+(?:`"[^`"]*`"|'[^']*')\s+'([a-z][a-zA-Z:]*)'") |
+                ForEach-Object { $_.Groups[1].Value }) +
+        @([regex]::Matches($source, "callback_data\s*=\s*'([a-z][a-zA-Z:]*)'") | ForEach-Object { $_.Groups[1].Value })
+
+        $dead = @(@($emitted | Sort-Object -Unique) | Where-Object {
+                $value = $_
+                -not @($cases | Where-Object { $value -like $_ })
+            })
+        $dead | Should -BeNullOrEmpty
+    }
+}

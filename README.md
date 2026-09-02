@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.27.0
+
+The home button was dead on seven screens. The router knew `menu` and not
+`menu:main`, which is what diagnostics, quick start, both report screens, a
+help chapter, the help index and my-operations send - so the press fell to the
+default branch, answered "unknown option", and left any half-finished input
+pending: the one button an operator presses to get out of a flow was the one
+that did not clear it. The audit that found it is now a test: every
+callback_data the keyboards emit must have a handler.
+
 ## Version 7.26.0
 
 Both backup screens are lists now. A timestamp on a button does not say what

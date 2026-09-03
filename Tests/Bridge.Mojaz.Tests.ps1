@@ -207,7 +207,7 @@ Describe 'Playing a bulletin' {
     AfterAll { $script:MojazPlayback = $null }
 
     It 'shows the first row and gives it the entrance animation on top of its dwell' {
-        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraSeconds' -NotePropertyValue 2 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraFrames' -NotePropertyValue 50 -Force
 
         Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeTrue
 
@@ -340,7 +340,7 @@ Describe 'Adjusting the bulletin timings' {
     It 'falls back to the setting and to half the dwell until told otherwise' {
         # The scene is the first source; these are what is used without one.
         Mock Get-MojazSceneTiming { $null }
-        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraSeconds' -NotePropertyValue 2 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraFrames' -NotePropertyValue 50 -Force
 
         Get-MojazIntroSeconds -Bulletin $script:bulletin | Should -Be 2
         Get-MojazLastRowSeconds -Bulletin $script:bulletin | Should -Be 4
@@ -348,7 +348,9 @@ Describe 'Adjusting the bulletin timings' {
 
     It 'takes the bulletin its own numbers, and zero puts the default back' {
         Mock Get-MojazSceneTiming { $null }
-        foreach ($pair in @(@('intro', '5'), @('last', '12'))) {
+        # Frames now: 125 and 300 are the five and twelve seconds these used
+        # to be typed as, at 25 fps.
+        foreach ($pair in @(@('intro', '125'), @('last', '300'))) {
             Set-PendingState -ChatId 100 -State @{ Mode = "mojaz_$($pair[0])_seconds"; UserId = 101; BulletinId = [string]$script:bulletin.Id }
             Complete-MojazTiming -Which $pair[0] -ChatId 100 -Value $pair[1]
         }
@@ -364,9 +366,9 @@ Describe 'Adjusting the bulletin timings' {
 
     It 'refuses a timing outside its range and keeps the prompt open' {
         Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_last_seconds'; UserId = 101; BulletinId = [string]$script:bulletin.Id }
-        Complete-MojazTiming -Which last -ChatId 100 -Value '601'
+        Complete-MojazTiming -Which last -ChatId 100 -Value '15001'
 
-        [int](Get-MojazSelected -ChatId 100).LastRowSeconds | Should -Be 0
+        [int](Get-JsonProp (Get-MojazSelected -ChatId 100) 'LastRowFrames') | Should -Be 0
         Get-PendingState -ChatId 100 | Should -Not -BeNullOrEmpty
         Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match '❌' }
     }
@@ -391,6 +393,11 @@ Describe 'Timing read from the scene itself' {
         Mock Write-BridgeValidatedJson { $true }
         $script:bulletin = New-TestMojazLibrary -DelaySeconds 20
         $script:MojazSceneTiming = $null; $script:MojazSceneTimingKey = ''
+        # One settings object for the whole suite: these tests are about what
+        # the scene says, so the newsroom defaults that outrank it are cleared.
+        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraFrames' -NotePropertyValue 0 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazLastRowFrames' -NotePropertyValue 0 -Force
+        $config.Settings | Add-Member -NotePropertyName 'BroadcastFps' -NotePropertyValue '25' -Force
     }
     AfterAll { $script:MojazSceneTiming = $null; $script:MojazSceneTimingKey = '' }
 
@@ -409,11 +416,26 @@ Describe 'Timing read from the scene itself' {
         $timing.OutroSeconds | Should -Be 6.72
     }
 
-    It 'rounds each up into whole seconds, so nothing is clipped' {
+    It 'uses the scene frames exactly, with no rounding to whole seconds' {
+        # Rounding up used to add most of a second to the entrance and a
+        # quarter to the exit. The animation is cut in frames; so is this.
+        Mock Get-MojazSceneTiming {
+            [pscustomobject]@{ Fps = 25; IntroFrames = 30; LoopFrames = 1500; OutroFrames = 168
+                IntroSeconds = 1.2; LoopSeconds = 60; OutroSeconds = 6.72 }
+        }
+
+        Get-MojazIntroFrames -Bulletin $script:bulletin | Should -Be 30
+        Get-MojazLastRowFrames -Bulletin $script:bulletin | Should -Be 168
+        Get-MojazIntroSeconds -Bulletin $script:bulletin | Should -Be 1.2
+        Get-MojazLastRowSeconds -Bulletin $script:bulletin | Should -Be 6.72
+    }
+
+    It 'answers in frames for a scene that states only seconds' {
+        # An older cached timing, or a stand-in for one, still has to work.
         Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 60; OutroSeconds = 6.72 } }
 
-        Get-MojazIntroSeconds -Bulletin $script:bulletin | Should -Be 2
-        Get-MojazLastRowSeconds -Bulletin $script:bulletin | Should -Be 7
+        Get-MojazIntroFrames -Bulletin $script:bulletin | Should -Be 30
+        Get-MojazLastRowFrames -Bulletin $script:bulletin | Should -Be 168
     }
 
     It 'still lets the bulletin override what the scene says' {
@@ -426,7 +448,9 @@ Describe 'Timing read from the scene itself' {
     }
 
     It 'falls back to the setting and half the dwell when the scene cannot be read' {
-        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraSeconds' -NotePropertyValue 2 -Force
+        # 50 frames at 25 fps is the two seconds this used to be written as.
+        $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraFrames' -NotePropertyValue 50 -Force
+        $config.Settings | Add-Member -NotePropertyName 'BroadcastFps' -NotePropertyValue '25' -Force
         Mock Get-MojazSceneTiming { $null }
 
         Get-MojazIntroSeconds -Bulletin $script:bulletin | Should -Be 2

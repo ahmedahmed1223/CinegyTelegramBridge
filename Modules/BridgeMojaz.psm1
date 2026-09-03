@@ -160,10 +160,13 @@ function New-MojazRunSnapshot {
     $rows = @(Copy-MojazValue @(Get-MojazProperty $Bulletin 'Rows' @()))
     if ($rows.Count -eq 0) { return (New-MojazResult $false $null 'empty_bulletin' 'الموجز بلا صفوف.') }
     $delay = [math]::Max(1, [int](Get-MojazProperty $Bulletin 'DelaySeconds' 8))
-    $introOverride = [int](Get-MojazProperty $Bulletin 'IntroExtraSeconds' 0)
-    $lastOverride = [int](Get-MojazProperty $Bulletin 'LastRowSeconds' 0)
-    $intro = if ($introOverride -gt 0) { $introOverride } elseif ($SceneTiming) { [int][math]::Ceiling([double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0)) } else { 0 }
-    $last = if ($lastOverride -gt 0) { $lastOverride } elseif ($SceneTiming -and [double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0) -gt 0) { [int][math]::Ceiling([double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0)) } else { [math]::Max(1, [int][math]::Floor($delay / 2)) }
+    # Doubles, not ints: these come from frame counts divided by a frame
+    # rate, and rounding 1.2 seconds down to 1 was throwing away a fifth of
+    # the entrance animation.
+    $introOverride = [double](Get-MojazProperty $Bulletin 'IntroExtraSeconds' 0)
+    $lastOverride = [double](Get-MojazProperty $Bulletin 'LastRowSeconds' 0)
+    $intro = if ($introOverride -gt 0) { $introOverride } elseif ($SceneTiming) { [double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0) } else { 0.0 }
+    $last = if ($lastOverride -gt 0) { $lastOverride } elseif ($SceneTiming -and [double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0) -gt 0) { [double](Get-MojazProperty $SceneTiming 'OutroSeconds' 0) } else { [math]::Max(1.0, [math]::Floor($delay / 2)) }
     # Asking for sync is not the same as getting it: a scene with no usable
     # loop falls back to the dwell rather than refusing to play.
     $loopPlan = $null
@@ -178,7 +181,7 @@ function New-MojazRunSnapshot {
         $plan += [pscustomobject]@{
             Index = $index
             RowId = [string](Get-MojazProperty $rows[$index] 'Id' '')
-            HoldSeconds = [int]$hold
+            HoldSeconds = [int][math]::Round($hold)
             AtSeconds = $moment
         }
         $at += $hold
@@ -391,24 +394,32 @@ function Set-MojazBulletinTiming {
        markers in the .cintitle already answer. #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [int]$DelaySeconds, [int]$IntroExtraSeconds, [int]$LastRowSeconds,
+        [int]$DelaySeconds, [int]$IntroExtraFrames, [int]$LastRowFrames,
         [nullable[bool]]$SyncToLoop,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
     if ($fields.ContainsKey('DelaySeconds') -and ($DelaySeconds -lt 1 -or $DelaySeconds -gt 600)) {
         return (New-MojazResult $false $null 'out_of_range' 'المدة بين ١ و٦٠٠ ثانية.')
     }
-    if ($fields.ContainsKey('IntroExtraSeconds') -and ($IntroExtraSeconds -lt 0 -or $IntroExtraSeconds -gt 600)) {
-        return (New-MojazResult $false $null 'out_of_range' 'زمن الدخول بين ٠ و٦٠٠ ثانية.')
+    # Frames, because that is the unit the animation is cut in. Ten minutes
+    # at 25 fps is the ceiling, which is far past anything a bulletin needs.
+    if ($fields.ContainsKey('IntroExtraFrames') -and ($IntroExtraFrames -lt 0 -or $IntroExtraFrames -gt 15000)) {
+        return (New-MojazResult $false $null 'out_of_range' 'زمن الدخول بين ٠ و١٥٠٠٠ إطار.')
     }
-    if ($fields.ContainsKey('LastRowSeconds') -and ($LastRowSeconds -lt 0 -or $LastRowSeconds -gt 600)) {
-        return (New-MojazResult $false $null 'out_of_range' 'زمن الخروج بين ٠ و٦٠٠ ثانية.')
+    if ($fields.ContainsKey('LastRowFrames') -and ($LastRowFrames -lt 0 -or $LastRowFrames -gt 15000)) {
+        return (New-MojazResult $false $null 'out_of_range' 'زمن الخروج بين ٠ و١٥٠٠٠ إطار.')
     }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
             if ($fields.ContainsKey('DelaySeconds')) { $bulletin.DelaySeconds = $DelaySeconds }
-            if ($fields.ContainsKey('IntroExtraSeconds')) { $bulletin.IntroExtraSeconds = $IntroExtraSeconds }
-            if ($fields.ContainsKey('LastRowSeconds')) { $bulletin.LastRowSeconds = $LastRowSeconds }
+            foreach ($pair in @(@('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames))) {
+                if (-not $fields.ContainsKey($pair[0])) { continue }
+                # Bulletins written before frames existed carry neither field.
+                if ($bulletin.PSObject.Properties.Match($pair[0]).Count -eq 0) {
+                    $bulletin | Add-Member -NotePropertyName $pair[0] -NotePropertyValue ([int]$pair[1])
+                }
+                else { $bulletin.$($pair[0]) = [int]$pair[1] }
+            }
             if ($fields.ContainsKey('SyncToLoop')) {
                 # Bulletins written before the loop mode existed have no such
                 # property, so it is added rather than assigned.

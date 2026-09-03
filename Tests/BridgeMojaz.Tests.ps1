@@ -79,8 +79,11 @@ Describe 'Mojaz immutable run snapshots' {
         $snapshot = New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming ([pscustomobject]@{ IntroSeconds=1.2; OutroSeconds=6.72 })
 
         $snapshot.Value.Plan.Count | Should -Be 1
-        $snapshot.Value.Plan[0].HoldSeconds | Should -Be 17
-        $snapshot.Value.TotalSeconds | Should -Be 17
+        # 8 + 1.2 + 6.72. The entrance and the exit are used as the scene cut
+        # them; rounding each up to a whole second used to add 1.08 s of
+        # nothing to a bulletin this short.
+        $snapshot.Value.Plan[0].HoldSeconds | Should -Be 16
+        $snapshot.Value.TotalSeconds | Should -Be 16
     }
 
     It 'plans multiple rows with intro on the first and outro hold on the last' {
@@ -96,8 +99,10 @@ Describe 'Mojaz immutable run snapshots' {
 
         $snapshot = New-MojazRunSnapshot -Bulletin $bulletin -SceneTiming ([pscustomobject]@{ IntroSeconds=1.2; OutroSeconds=6.72 })
 
-        @($snapshot.Value.Plan.HoldSeconds) | Should -Be @(10, 8, 7)
-        $snapshot.Value.TotalSeconds | Should -Be 25
+        # 9.2, 8, 6.72 - shown rounded, but the clock runs on the fractions.
+        @($snapshot.Value.Plan.HoldSeconds) | Should -Be @(9, 8, 7)
+        @($snapshot.Value.Plan.AtSeconds) | Should -Be @(0, 9.2, 17.2)
+        $snapshot.Value.TotalSeconds | Should -Be 24
     }
 }
 

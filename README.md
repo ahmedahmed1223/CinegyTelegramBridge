@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.46.0
+
+The bulletin's two animation-tied timings are set in frames, because that is
+the unit the animation is cut in, and the rounding to whole seconds is gone
+with them: a 30 frame entrance is 1.2 seconds rather than 2, a 168 frame exit
+6.72 rather than 7, and the clock runs on the fractions. Two settings carry
+the newsroom defaults, taking effect over the scene since a default the scene
+always overrides would never apply. A channel frame rate setting - 25, 50 or
+60 - is used wherever a scene cannot state its own; where it can, it wins,
+being the thing actually being timed.
+
 ## Version 7.45.0
 
 The template list is filtered by the permission of whoever opened it: a

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.45.0'
+$script:BridgeVersion = '7.46.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -208,7 +208,12 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsClearAllNews = $false
     # --- safety ---
     MojazRowSeconds            = 8       # how long each Mojaz row stays before the next replaces it
-    MojazIntroExtraSeconds     = 2       # added to the FIRST row only: the entrance animation plays over it
+    # In frames, because that is how the animation is cut. 0 for either means
+    # "take it from the scene's own entrance and exit".
+    # The channel's frame rate, used wherever a scene cannot state its own.
+    BroadcastFps               = '25'    # 25, 50 or 60
+    MojazIntroExtraFrames      = 0       # added to the FIRST row only, while the entrance animation plays over it
+    MojazLastRowFrames         = 0       # how long the LAST row holds before EXIT plays the outro
     MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
     MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
     MojazHidesTicker           = $false  # off: this newsroom keeps the strip up through a bulletin. Turn on to have it stand down and return
@@ -394,7 +399,9 @@ $script:SettingDisplayMetadata = @{
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
     MojazRowSeconds = @{ Unit = 'ثانية'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي' }
-    MojazIntroExtraSeconds = @{ Unit = 'ثانية'; Description = 'تُضاف إلى الصف الأول وحده، بقدر حركة دخول القالب' }
+    BroadcastFps = @{ Unit = 'إطار/ث'; Description = 'معدل إطارات القناة، يُستخدم في حساب المدد حين لا يذكر المشهد معدله. المشهد أولى بنفسه حين يذكره' }
+    MojazIntroExtraFrames = @{ Unit = 'إطار'; Description = 'إطارات تُضاف إلى الصف الأول وحده بقدر حركة الدخول. صفر يعني أخذها من المشهد نفسه' }
+    MojazLastRowFrames = @{ Unit = 'إطار'; Description = 'إطارات يبقاها الصف الأخير قبل أمر الخروج. صفر يعني أخذها من حركة خروج المشهد' }
     MojazSyncOffsetMs = @{ Unit = 'مللي ثانية'; Description = 'بعد التفاف اللوب بكم يُكتب الصف التالي، ليقع داخل حركة الظهور فتُخفيه' }
     MojazSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
     MojazHidesTicker = @{ Description = 'شريط الأخبار يخرج عند بدء الموجز ويعود بعد انتهائه، لأنهما يتقاسمان أسفل الشاشة. لا يُعاد شريط لم يكن على الهواء أصلًا' }
@@ -937,6 +944,7 @@ $script:SettingChoices = @{
     NewsSheetSyncMode = @('manual', 'auto')
     NewsSheetNotifyScope = @('none', 'admins', 'all')
     LayersScreenAccess = @('all', 'admin', 'owner')
+    BroadcastFps = @('25', '50', '60')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -966,7 +974,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazRowSeconds', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1095,7 +1103,9 @@ $script:SettingNavigationLabels = @{
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
     MojazRowSeconds = 'مدة صف الموجز'
-    MojazIntroExtraSeconds = 'زيادة الصف الأول'
+    BroadcastFps = 'معدل إطارات القناة'
+    MojazIntroExtraFrames = 'إطارات الصف الأول'
+    MojazLastRowFrames = 'إطارات الصف الأخير'
     MojazSyncOffsetMs = 'لحظة الكتابة داخل الظهور'
     MojazSyncLeadMs = 'تعويض زمن الشبكة'
     MojazHidesTicker = 'إخفاء الشريط أثناء الموجز'

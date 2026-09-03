@@ -429,11 +429,16 @@ function Get-MojazSceneTiming {
         $duration = [double]$scene.Duration
         # A scene with no loop, or a nonsense one, is not a timing source.
         if ($fps -gt 0 -and $loopEnd -gt $loopStart -and $duration -ge $loopEnd) {
+            # Frames are what the scene is cut in and what the operator sets;
+            # the seconds beside them are for reading, and for the clock.
             $timing = [pscustomobject]@{
                 Fps = $fps
-                IntroSeconds = [math]::Round($loopStart / $fps, 2)
-                LoopSeconds = [math]::Round(($loopEnd - $loopStart) / $fps, 2)
-                OutroSeconds = [math]::Round(($duration - $loopEnd) / $fps, 2)
+                IntroFrames = [int]$loopStart
+                LoopFrames = [int]($loopEnd - $loopStart)
+                OutroFrames = [int]($duration - $loopEnd)
+                IntroSeconds = [math]::Round($loopStart / $fps, 3)
+                LoopSeconds = [math]::Round(($loopEnd - $loopStart) / $fps, 3)
+                OutroSeconds = [math]::Round(($duration - $loopEnd) / $fps, 3)
             }
         }
     }
@@ -443,29 +448,88 @@ function Get-MojazSceneTiming {
     return $timing
 }
 
-function Get-MojazIntroSeconds {
-    <# What the first row gets on top of its dwell, because the entrance
-       animation is playing over it. The bulletin's own number when it has
-       one, else the scene's, else the setting. #>
-    param($Bulletin)
-    if ($Bulletin -and [int](Get-JsonProp $Bulletin 'IntroExtraSeconds') -gt 0) { return [int]$Bulletin.IntroExtraSeconds }
+function Get-MojazFps {
+    <#
+        The frame rate every frame count here is measured against.
+
+        The scene's own rate first - it is the thing being timed, and it
+        cannot be wrong about itself. The channel's configured rate only when
+        the scene cannot be read, which is the case the setting exists for.
+    #>
     $timing = Get-MojazSceneTiming
-    # Rounded up: a second short here replaces the first story's text while
-    # the graphic is still sliding in.
-    if ($timing) { return [int][math]::Ceiling([double]$timing.IntroSeconds) }
-    return (Get-SettingInt 'MojazIntroExtraSeconds' 0)
+    if ($timing -and [double](Get-JsonProp $timing 'Fps') -gt 0) { return [double]$timing.Fps }
+    $configured = 0.0
+    if ([double]::TryParse([string](Get-Setting 'BroadcastFps'), [ref]$configured) -and $configured -gt 0) { return $configured }
+    return 25.0
+}
+
+function Get-MojazIntroFrames {
+    <#
+        What the first row gets on top of its dwell, in frames - the unit the
+        entrance animation is actually cut in.
+
+        The bulletin's own number first, then the newsroom's default, then the
+        scene's own entrance. Seconds are derived from this, never the other
+        way round: a fifth of a second is five frames, and rounding it to a
+        whole second used to replace the first story while the graphic was
+        still sliding in.
+    #>
+    param($Bulletin)
+    if ($Bulletin) {
+        $own = [int](Get-JsonProp $Bulletin 'IntroExtraFrames')
+        if ($own -gt 0) { return $own }
+        # Written before frames existed: its seconds still mean something.
+        $legacy = [double](Get-JsonProp $Bulletin 'IntroExtraSeconds')
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+    }
+    $default = Get-SettingInt 'MojazIntroExtraFrames' 0
+    if ($default -gt 0) { return $default }
+    return (Get-MojazSceneFrames -Which intro)
+}
+
+function Get-MojazSceneFrames {
+    <# The scene's own entrance or exit in frames. Derived from its seconds
+       when the frames are not there, so a caller holding an older timing -
+       or a test standing in for one - still gets an answer. #>
+    param([Parameter(Mandatory)][ValidateSet('intro', 'outro')][string]$Which)
+    $timing = Get-MojazSceneTiming
+    if (-not $timing) { return 0 }
+    $name = if ($Which -eq 'intro') { 'IntroFrames' } else { 'OutroFrames' }
+    $frames = [int](Get-JsonProp $timing $name)
+    if ($frames -gt 0) { return $frames }
+    $seconds = [double](Get-JsonProp $timing $(if ($Which -eq 'intro') { 'IntroSeconds' } else { 'OutroSeconds' }))
+    if ($seconds -le 0) { return 0 }
+    return [int][math]::Round($seconds * (Get-MojazFps))
+}
+
+function Get-MojazIntroSeconds {
+    param($Bulletin)
+    return [math]::Round((Get-MojazIntroFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
+}
+
+function Get-MojazLastRowFrames {
+    <# How long the last row holds before EXIT, in frames: the outro's own
+       length, so the last story stays readable for exactly as long as the
+       graphic takes to leave. Half the dwell only when the scene cannot
+       say. #>
+    param($Bulletin)
+    if ($Bulletin) {
+        $own = [int](Get-JsonProp $Bulletin 'LastRowFrames')
+        if ($own -gt 0) { return $own }
+        $legacy = [double](Get-JsonProp $Bulletin 'LastRowSeconds')
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+    }
+    $default = Get-SettingInt 'MojazLastRowFrames' 0
+    if ($default -gt 0) { return $default }
+    $sceneFrames = Get-MojazSceneFrames -Which outro
+    if ($sceneFrames -gt 0) { return $sceneFrames }
+    $delay = if ($Bulletin) { [int](Get-JsonProp $Bulletin 'DelaySeconds') } else { 8 }
+    return [int][math]::Max((Get-MojazFps), [math]::Floor($delay / 2) * (Get-MojazFps))
 }
 
 function Get-MojazLastRowSeconds {
-    <# How long the last row holds before EXIT: the outro's own length, so the
-       last story stays readable for exactly as long as the graphic takes to
-       leave. Half the dwell only when the scene cannot say. #>
     param($Bulletin)
-    if ($Bulletin -and [int](Get-JsonProp $Bulletin 'LastRowSeconds') -gt 0) { return [int]$Bulletin.LastRowSeconds }
-    $timing = Get-MojazSceneTiming
-    if ($timing -and [double]$timing.OutroSeconds -gt 0) { return [int][math]::Ceiling([double]$timing.OutroSeconds) }
-    $delay = if ($Bulletin) { [int](Get-JsonProp $Bulletin 'DelaySeconds') } else { 8 }
-    return [math]::Max(1, [int][math]::Floor($delay / 2))
+    return [math]::Round((Get-MojazLastRowFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
 }
 
 function Test-MojazSyncToLoop {
@@ -518,10 +582,10 @@ function Get-MojazPlanText {
     $intro = Get-MojazIntroSeconds -Bulletin $Bulletin
     $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
     $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
-    $line = "كل صف $delay ث · الأول +$intro ث لحركة الدخول · الأخير $last ث ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)"
+    $line = "كل صف $delay ث · الأول +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار لحركة الدخول · الأخير $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total)))"
     $timing = Get-MojazSceneTiming
     if ($timing) {
-        $line += "`nمن القالب: دخول $($timing.IntroSeconds) ث · لوب $($timing.LoopSeconds) ث · خروج $($timing.OutroSeconds) ث"
+        $line += "`nمن القالب: دخول $(Get-MojazSceneFrames -Which intro) إطار · لوب $([int](Get-JsonProp $timing 'LoopFrames')) إطار · خروج $(Get-MojazSceneFrames -Which outro) إطار (‏$(Get-MojazFps) إطارًا/ث)"
     }
     return $line
 }
@@ -620,8 +684,8 @@ function Get-MojazKeyboard {
         (New-Button "⏱ المدة: $(if ($Bulletin) { [int]$Bulletin.DelaySeconds } else { 0 }) ث" 'mojaz:delay')
     )
     $keyboard += , @(
-        (New-Button "⏩ الأول: +$(Get-MojazIntroSeconds -Bulletin $Bulletin) ث" 'mojaz:intro')
-        (New-Button "⏹ الأخير: $(Get-MojazLastRowSeconds -Bulletin $Bulletin) ث" 'mojaz:last')
+        (New-Button "⏩ الأول: +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار" 'mojaz:intro')
+        (New-Button "⏹ الأخير: $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار" 'mojaz:last')
     )
     $keyboard += , @(
         (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم' } else { 'لا' })" 'mojaz:sync')
@@ -1142,11 +1206,12 @@ function Start-MojazTimingPrompt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $fps = Get-MojazFps
     $text = if ($Which -eq 'intro') {
-        "⏩ كم ثانية تُضاف إلى الصف الأول وحده (حركة الدخول)؟ (0-600)`nالحالي: $(Get-MojazIntroSeconds -Bulletin $bulletin) ث · أرسل 0 لاتّباع القالب."
+        "⏩ كم إطارًا يُضاف إلى الصف الأول وحده (حركة الدخول)؟`nالحالي: $(Get-MojazIntroFrames -Bulletin $bulletin) إطار ≈ $(Get-MojazIntroSeconds -Bulletin $bulletin) ث · المشهد $fps إطارًا في الثانية.`nأرسل 0 لاتّباع القالب."
     }
     else {
-        "⏹ كم ثانية يبقى الصف الأخير قبل أمر الخروج؟ (0-600)`nالحالي: $(Get-MojazLastRowSeconds -Bulletin $bulletin) ث · أرسل 0 لاتّباع القالب."
+        "⏹ كم إطارًا يبقى الصف الأخير قبل أمر الخروج؟`nالحالي: $(Get-MojazLastRowFrames -Bulletin $bulletin) إطار ≈ $(Get-MojazLastRowSeconds -Bulletin $bulletin) ث · المشهد $fps إطارًا في الثانية.`nأرسل 0 لاتّباع القالب."
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = "mojaz_$($Which)_seconds"; UserId = $UserId; BulletinId = [string]$bulletin.Id }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-CancelKeyboard)
@@ -1162,15 +1227,15 @@ function Complete-MojazTiming {
     if (-not $state -or [string]$state.Mode -ne $mode) { return }
     $seconds = 0
     if (-not [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds)) {
-        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'delay') { '❌ أرسل رقمًا بين 1 و600.' } else { '❌ أرسل رقمًا بين 0 و600.' }) -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'delay') { '❌ أرسل رقمًا بين 1 و600 ثانية.' } else { '❌ أرسل عدد إطارات بين 0 و15000.' }) -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     $bulletinId = [string](Get-JsonProp $state 'BulletinId')
     $userId = [long]$state.UserId
     $result = switch ($Which) {
         'delay' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -DelaySeconds $seconds -UserId $userId }
-        'intro' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -IntroExtraSeconds $seconds -UserId $userId }
-        'last' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -LastRowSeconds $seconds -UserId $userId }
+        'intro' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -IntroExtraFrames $seconds -UserId $userId }
+        'last' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -LastRowFrames $seconds -UserId $userId }
     }
     if (-not $result.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$result.Error)" -ReplyMarkup (Get-CancelKeyboard)

@@ -29,15 +29,7 @@ function Get-OnAirSummary {
         $age = [math]::Max(0, [int]((Get-Date) - $info.At).TotalSeconds)
         $ageText = Format-DurationSeconds -Seconds $age
         $source = [string](Get-JsonProp $info 'Source')
-        if ($source -eq 'cinegy-unconfirmed') {
-            # The engine says a scene is loaded here and will not say whether
-            # it is rendering. Calling that "on air" is a claim the bridge
-            # cannot make - and did make, about a bulletin that had already
-            # played its way off the screen.
-            $lines.Add("🟡 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
-            $lines.Add("   مشهد محمّل من Cinegy · قد لا يكون ظاهرًا · منذ $ageText")
-        }
-        elseif ($source -eq 'cinegy') {
+        if ($source -eq 'cinegy') {
             $eventName = [string](Get-JsonProp $info 'CinegyEventName')
             $detail = "   المصدر: Cinegy Air · منذ $ageText"
             if ($eventName) { $detail += " · الحدث: $eventName" }

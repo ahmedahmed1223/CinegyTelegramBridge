@@ -334,15 +334,7 @@ function Update-OnAirStateFromCinegy {
             $layer = 0
             if (-not [int]::TryParse([string](Get-JsonProp $item 'Layer'), [ref]$layer)) { continue }
             if ($script:OnAir.ContainsKey($layer)) { continue }
-            # The engine may not name what it is playing; the registry does,
-            # when exactly one template owns the layer. Two templates sharing a
-            # layer is a real configuration - a ticker and an alert - and
-            # guessing between them would be inventing a name, so that case
-            # stays anonymous and unadopted.
-            $claimants = @(Get-TemplateLayerUsage -Layer $layer)
-            $registered = if ($claimants.Count -eq 1) { [string]$claimants[0] } else { '' }
-            $decision = Resolve-BridgeCinegyLayerState -Layer $layer -Status $item -DiscoverExternal `
-                -RegisteredTemplateName $registered
+            $decision = Resolve-BridgeCinegyLayerState -Layer $layer -Status $item -DiscoverExternal
             if ($decision.Action -eq 'failed') {
                 if (-not $failed.Contains($layer)) { $failed.Add($layer) }
                 Write-BridgeLog "Could not discover GFX layer $layer during $Reason comparison: $([string](Get-JsonProp $item 'Error'))" "WARN"

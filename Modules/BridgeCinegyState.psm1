@@ -23,7 +23,6 @@ function Resolve-BridgeCinegyLayerState {
         [hashtable]$TrackedRecord,
         [Parameter(Mandatory)]$Status,
         [switch]$DiscoverExternal,
-        [string]$RegisteredTemplateName='',
         [datetime]$Now=(Get-Date)
     )
     if(-not [bool](Get-CinegyStateProperty $Status Success)){
@@ -54,6 +53,19 @@ function Resolve-BridgeCinegyLayerState {
         }
         $source=[string](Get-CinegyStateProperty $TrackedRecord Source)
         $templateName=[string](Get-CinegyStateProperty $Status ActiveTemplateName)
+        # A discovered record survives a restart in onair.json, so one adopted
+        # under the withdrawn rule would go on claiming air for ever - which is
+        # exactly what happened to a bulletin that had already left the screen.
+        # If the engine will not name what is on this layer, the bridge has no
+        # ground to say a scene is showing there, and never had.
+        #
+        # Only DISCOVERED records are dropped this way. A bridge-pushed record
+        # is the bridge's own knowledge of what it did, and is never
+        # second-guessed by a read that cannot represent an exit.
+        if($source -like 'cinegy*' -and [string]::IsNullOrWhiteSpace($templateName) -and
+            [string]::IsNullOrWhiteSpace([string](Get-CinegyStateProperty $Status ActiveName))){
+            return [pscustomobject]@{Action='remove';Record=$null;Change=$null}
+        }
         if($source -eq 'cinegy' -and -not [string]::IsNullOrWhiteSpace($templateName) -and
             $templateName -ne [string](Get-CinegyStateProperty $TrackedRecord Key)){
             if(-not $updated){$updated=Copy-CinegyTrackedRecord $TrackedRecord}
@@ -81,74 +93,24 @@ function Resolve-BridgeCinegyLayerState {
     # live when the screen was blank. Ambiguity must never ADD a record. It
     # still never removes one either - that asymmetry is deliberate.
     #
-    # Not every engine names what it plays, though, and this one names none of
-    # it: every Active element it returns is <Item Id=.. LogId=.. ScheduledAt=..
-    # Duration=.. ManualEnd=..> with no Name and no Description at all. So the
-    # rule above refused every layer and external discovery never once fired
-    # here - the news strip was on air, the engine said so, and the bot's menu
-    # did not list it, so nobody could hide it from the bot.
+    # Naming an unnamed item from the template registry was tried here and
+    # withdrawn. EXIT_SCENE_LOOP ends the animation but leaves the playlist
+    # item Active under the same Id with no marker, so a bulletin that had
+    # played its way off the screen got adopted as live and the bot announced
+    # it for hours. Nothing the engine exposes separates the two cases:
+    # IsOnAir, ActiveId, LogId, ScheduledAt, Duration, ManualEnd and
+    # OutputState were identical on an exited layer and a visible one.
     #
-    # Hence a second route, which invents nothing either: hard evidence that a
-    # real item is playing rather than the husk of a spent one, plus a name the
-    # caller already knew - the template registered for that layer. Missing
-    # either, this still ignores the layer. Ambiguity must never ADD a record.
-    $inferred=$false
+    # An unnamed active item is not a claim this function is entitled to make.
+    # The layers screen reads Cinegy live and already offers the hide button
+    # for any layer the engine reports on air, so an operator loses no control
+    # by this silence - only a claim that was not true.
     if([string]::IsNullOrWhiteSpace($name) -or $name -eq 'Item'){
-        if([string]::IsNullOrWhiteSpace($RegisteredTemplateName) -or
-            -not (Test-BridgeCinegyActiveItem -Status $Status)){
-            return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
-        }
-        $name=$RegisteredTemplateName
-        $inferred=$true
+        return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
     }
-    # An unnamed item proves a scene is LOADED on the layer. It does not prove
-    # anything is rendering, and on this engine it cannot: EXIT_SCENE_LOOP ends
-    # the animation but leaves the playlist item Active under the same Id with
-    # no IsEmpty marker, so a layer that has played its way off the screen
-    # reads exactly like one still playing. Remove-OnAirRecord says the same
-    # thing from the other side - it is why the bridge drops its own record
-    # after an EXIT rather than trusting a later read.
-    #
-    # So it is adopted, because the operator still needs the button that
-    # releases the layer - but under a source that says the claim is
-    # unverified, and every screen showing it says so instead of calling it
-    # live.
-    $source=if($inferred){'cinegy-unconfirmed'}else{'cinegy'}
-    $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source=$source}
+    $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
     if(-not [string]::IsNullOrWhiteSpace($cinegyEventName)){$record.CinegyEventName=$cinegyEventName}
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}
-}
-
-function Test-BridgeCinegyActiveItem {
-    <#
-        Is a real item playing on this layer, or is this the anonymous husk a
-        spent one leaves behind?
-
-        That husk is why the naming rule refused anything unnamed: it stays
-        Active for a moment after its item ends and reads like a live one. But
-        the two are not actually alike. A real item carries the engine's own
-        log identity and the moment it was scheduled; a placeholder carries
-        neither, and a genuinely empty layer reports the zero GUID.
-
-        All three must hold. Any one of them alone is how a phantom scene got
-        into onair.json and the bot claimed a blank layer was live.
-    #>
-    [CmdletBinding()]
-    param([Parameter(Mandatory)]$Status)
-    $activeId=([string](Get-CinegyStateProperty $Status ActiveId)).Trim().Trim('{','}')
-    if([string]::IsNullOrWhiteSpace($activeId) -or $activeId -eq '00000000-0000-0000-0000-000000000000'){return $false}
-    $xml=[string](Get-CinegyStateProperty $Status ActiveXml)
-    if([string]::IsNullOrWhiteSpace($xml)){return $false}
-    # When the engine says so outright, believe it and stop.
-    if([regex]::IsMatch($xml,'IsEmpty\s*=\s*"y"','IgnoreCase')){return $false}
-    $logId=[regex]::Match($xml,'LogId\s*=\s*"([^"]*)"')
-    if(-not $logId.Success){return $false}
-    $normalizedLogId=$logId.Groups[1].Value.Trim().Trim('{','}')
-    if([string]::IsNullOrWhiteSpace($normalizedLogId) -or $normalizedLogId -eq '00000000-0000-0000-0000-000000000000'){return $false}
-    $scheduled=[regex]::Match($xml,'ScheduledAt\s*=\s*"([^"]*)"')
-    if(-not $scheduled.Success){return $false}
-    $parsed=[datetime]::MinValue
-    return [datetime]::TryParse($scheduled.Groups[1].Value,[ref]$parsed)
 }
 
 function Get-BridgeCinegyStateBackoff {
@@ -219,4 +181,4 @@ function Get-BridgeStaleOnAirLayers {
     }
     return @($stale)
 }
-Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Test-BridgeCinegyActiveItem, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff
+Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff

@@ -73,12 +73,7 @@ function Get-MainMenuKeyboard {
     # every row above the fix is a row they must scroll past to reach it.
     if ($script:OnAir.Count -gt 0) {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            # 🔴 means the bridge knows this is live. A layer discovered from
-            # Cinegy carrying an unnamed item is not that: the engine will not
-            # say whether it is rendering, so the row offers the same release
-            # button under a mark that does not claim it is on screen.
-            $liveMark = if ([string](Get-JsonProp $script:OnAir[$layer] 'Source') -eq 'cinegy-unconfirmed') { '🟡' } else { '🔴' }
-            $liveRow = @( (New-Button "$liveMark إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
+            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
             # A timer can be attached to something already live, not just at
             # the moment it is put on air.
             if (Get-Setting 'EnableTimedShow') {

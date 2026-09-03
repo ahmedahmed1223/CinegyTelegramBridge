@@ -1150,20 +1150,6 @@ Describe 'Taking the bulletin off air from the main menu' {
         Test-MojazOnAirLayer | Should -BeTrue
     }
 
-    It 'does not count a layer the bridge only inferred from Cinegy' {
-        # That record says a scene is loaded, not that a bulletin is showing -
-        # and an exited bulletin leaves exactly such a record behind, which is
-        # how the menu came to offer to hide one that had left the screen.
-        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'Mojaz'; Source = 'cinegy-unconfirmed' } }
-
-        Test-MojazOnAirLayer | Should -BeFalse
-        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
-                Where-Object { $_['callback_data'] -eq 'mojaz:hide' }).Count | Should -Be 0
-        # The plain hide row still releases the layer.
-        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
-                Where-Object { $_['callback_data'] -eq 'hide:5' }).Count | Should -Be 1
-    }
-
     It 'stops the run and leaves by exit, not by a cut' {
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
 

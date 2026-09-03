@@ -13,6 +13,26 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.54.0
+
+The claim is withdrawn at its source. Naming an unnamed item from the template
+registry (7.52) and then marking it yellow (7.53) both treated the symptom: the
+bot still said there was a bulletin when there was none. The rule is gone - an
+item the engine will not name is not adopted at all - which is the right
+behaviour while nothing distinguishes a layer whose scene has exited from one
+that is showing.
+
+The stale record is cleared too. The one written at 21:19 survived the restart
+in onair.json and went on claiming air; reconciliation now drops any
+*discovered* record whose layer the engine will not name. A bridge-pushed
+record is never touched by that rule: it is the bridge's own knowledge of what
+it did, and a read that cannot represent an exit is not evidence against it.
+
+No control is lost. The layers screen reads Cinegy live and already offers
+"hide" for every layer the engine reports on air, with no onair.json record
+involved - which is the honest place for it, since the bridge cannot verify
+visibility itself.
+
 ## Version 7.53.0
 
 The bot said a bulletin was on air when the screen was blank. It had been

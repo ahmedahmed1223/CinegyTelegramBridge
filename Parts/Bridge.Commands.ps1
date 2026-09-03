@@ -527,9 +527,8 @@ function Invoke-BridgeCommand {
     if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) {
         Write-BridgeLog "Rejected message from unauthorized chat $ChatId / user $UserId" "WARN"
         $queued = Request-Approval -ChatId $ChatId -UserId $UserId -From $From
-        $msg = if ($queued) { "غير مصرح لك باستخدام هذا البوت بعد. تم إرسال طلب وصول إلى المشرف - ستصلك رسالة فور الموافقة." }
-        else { "غير مصرح لك باستخدام هذا البوت. تواصل مع المشرف مباشرة." }
-        Send-TelegramMessage -ChatId $ChatId -Text $msg
+        $msg = Get-UnauthorizedReplyText -ChatId $ChatId -Queued $queued
+        if ($msg) { Send-TelegramMessage -ChatId $ChatId -Text $msg }
         return
     }
     Update-UserLastActivity -UserId $UserId | Out-Null

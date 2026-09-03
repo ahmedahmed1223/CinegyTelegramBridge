@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.49.0'
+$script:BridgeVersion = '7.50.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -136,6 +136,13 @@ $script:DefaultSettings = [ordered]@{
     # --- security ---
     RequireUserLevelAuth       = $true   # authorize the user id, not just the chat id
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
+    BlockRejectedRequesters    = $true   # a rejected chat may not queue up again
+    JoinSecret                 = ''      # when set, a stranger must send it before any admin sees a request
+    JoinSecretMaxAttempts      = 3       # wrong codes allowed in a day before the chat is blocked
+    MaxAccessRequestsPerDay    = 3       # access requests one chat may make in 24 hours
+    DormantUserDays            = 60      # silence after which an authorized user is reported (0 to disable)
+    AutoDisableDormantUsers    = $false  # and disabled, not only reported
+    LeaveUnknownGroups         = $true   # walk out of any group the bot is added to
     EnableRawCommand           = $true   # allow the admin /أمر Device Cmd escape hatch
     EnableFullTemplateManagement = $false # permits structural template edits from Telegram
     TemplateRegistryImportMaxTemplates = 1000 # upper bound for one administrator template-registry import
@@ -418,6 +425,13 @@ $script:SettingDisplayMetadata = @{
     MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
+    BlockRejectedRequesters = @{ Unit = ''; Description = 'رفض الطلب يحظر المحادثة نهائيًا فلا تستطيع الطلب مجددًا. ارفع الحظر من 🚫 المحظورون' }
+    JoinSecret = @{ Unit = ''; Description = 'رمز يُطلب من الغريب قبل أن يصل طلبه إلى المشرفين. اتركه فارغًا لتعطيل الرمز، وأرسل - لمسحه' }
+    JoinSecretMaxAttempts = @{ Unit = 'محاولة'; Description = 'عدد المحاولات الخاطئة لرمز الانضمام في اليوم قبل حظر المحادثة (0 للتعطيل)' }
+    MaxAccessRequestsPerDay = @{ Unit = 'طلب'; Description = 'عدد طلبات الوصول المسموح بها من محادثة واحدة خلال ٢٤ ساعة (0 للتعطيل)' }
+    DormantUserDays = @{ Unit = 'يوم'; Description = 'مدة الصمت التي بعدها يُبلَّغ المشرفون عن المستخدم الخامل (0 للتعطيل)' }
+    AutoDisableDormantUsers = @{ Unit = ''; Description = 'تعطيل المستخدم الخامل تلقائيًا بدل الاكتفاء بالتبليغ عنه' }
+    LeaveUnknownGroups = @{ Unit = ''; Description = 'مغادرة أي مجموعة يُضاف إليها البوت ولم تُدرج في AllowedChatIds، مع إشعار المشرفين' }
     EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
     EnableFullTemplateManagement = @{ Unit = ''; Description = 'يسمح بتعديل بنية القوالب من تيليجرام لا بعرضها فقط' }
     EnableDpapiSecrets = @{ Unit = ''; Description = 'يخزّن الأسرار مشفّرة بـ Windows DPAPI لحساب التشغيل بدل نص صريح في config.json' }
@@ -538,6 +552,7 @@ $script:userFavoritesFile = Join-Path $logDir "favorites.json"
 $script:userAliasesFile = Join-Path $logDir "user-aliases.json"
 $script:disabledUsersFile = Join-Path $logDir "disabled-users.json"
 $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
+$script:accessGuardFile = Join-Path $logDir "access-guard.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
@@ -557,6 +572,11 @@ $script:NewsTickerDraft = $null
 
 
 
+# Who was turned away and who has been knocking, plus the groups the bot
+# has already walked out of, so it does not announce the same one twice.
+$script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+$script:LeftGroupChats = @{}
+$script:LastDormantSweep = $null
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
 $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
@@ -942,7 +962,8 @@ $script:HealthHistory = @{
 # Settings whose whole purpose is to restrict access. Turning one off from a
 # chat button - by accident or by someone who got hold of an admin's phone -
 # silently weakens the security model, so they require an explicit confirm.
-$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets')
+$script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets',
+    'BlockRejectedRequesters', 'LeaveUnknownGroups')
 
 # Allowed values for string settings. A typo here would silently stop graphics
 # updating, so the choice is constrained rather than free text.
@@ -979,7 +1000,9 @@ foreach ($entry in @(
         @{ Category = 'security'; Names = @(
                 'RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand',
                 'EnableFullTemplateManagement', 'EnableDpapiSecrets', 'MaxPendingApprovals',
-                'PendingApprovalExpiryHours', 'UserActivityRecentMinutes'
+                'PendingApprovalExpiryHours', 'UserActivityRecentMinutes',
+                'BlockRejectedRequesters', 'JoinSecret', 'JoinSecretMaxAttempts', 'MaxAccessRequestsPerDay',
+                'DormantUserDays', 'AutoDisableDormantUsers', 'LeaveUnknownGroups'
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
@@ -1106,6 +1129,13 @@ $script:SettingNavigationLabels = @{
     SceneMode = 'وضع المشاهد'
     RequireUserLevelAuth = 'التحقق من هوية المستخدم'
     EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
+    BlockRejectedRequesters = 'حظر من رُفض طلبه'
+    JoinSecret = 'رمز الانضمام'
+    JoinSecretMaxAttempts = 'محاولات رمز الانضمام'
+    MaxAccessRequestsPerDay = 'طلبات الوصول يوميًا'
+    DormantUserDays = 'أيام خمول المستخدم'
+    AutoDisableDormantUsers = 'تعطيل الخامل تلقائيًا'
+    LeaveUnknownGroups = 'مغادرة المجموعات المجهولة'
     EnableRawCommand = 'الأوامر الخام للمشرف'
     EnableFullTemplateManagement = 'الإدارة الكاملة للقوالب'
     UserActivityRecentMinutes = 'نافذة النشاط الحديث للمستخدم'
@@ -1498,6 +1528,7 @@ Import-UserFavorites
 Import-UserAliases
 Import-DisabledUsers
 Import-UserProfiles
+Import-AccessGuard
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues
@@ -1557,6 +1588,7 @@ try {
                 $chatId = [long]$message.chat.id
                 if (-not (Test-TelegramPrivateChat -Chat $message.chat)) {
                     Write-BridgeLog "Ignoring message from non-private chat $chatId" "WARN"
+                    Exit-UnknownGroupChat -Chat $message.chat | Out-Null
                     continue
                 }
                 $fromObj = Get-JsonProp $message 'from'
@@ -1638,6 +1670,9 @@ try {
                                 # The only flow a chat without access can reach; it
                                 # checks for itself that the chat is really waiting.
                                 'access_request_name' { Complete-AccessRequestName -ChatId $chatId -Value $text | Out-Null }
+                                # The other one, and it must come before the
+                                # authorization check for the same reason.
+                                'join_secret' { Complete-JoinSecret -ChatId $chatId -UserId $userId -Value $text -From $fromObj | Out-Null }
                                 'operation_reference' { Complete-OperationReferenceLookup -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }

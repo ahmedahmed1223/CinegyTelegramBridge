@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.50.0
+
+Five locks on a bot that strangers can find, each with its own switch.
+
+Rejecting a request now blocks the chat, because rejection used to remove the
+request and nothing else - the same chat could ask again a second later, for
+ever. Blocking is silent towards the blocked chat on purpose, so a Blocked
+screen carries the reason, the date and who did it, and lifts a block with one
+button. A join code, when set, is asked for before any administrator hears of
+the requester; wrong codes are counted, not explained, and enough of them in a
+day block the chat. A per-chat daily limit stops one stranger filling the queue
+by tapping start, in a window that restarts rather than slides. A daily report
+names the authorized users who have gone quiet, with an option to disable them
+- never the owner, and never someone with no recorded date, since no record is
+not evidence of absence. And the bot walks out of any group it is added to
+that nobody whitelisted, saying where it had been.
+
 ## Version 7.49.0
 
 A preview button on the bulletin screen shows every row's title and story in

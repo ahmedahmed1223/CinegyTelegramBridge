@@ -111,11 +111,12 @@ function Invoke-CallbackQuery {
     if (-not (Test-Authorized -ChatId $chatId -UserId $userId)) {
         Write-BridgeLog "Rejected callback from unauthorized chat $chatId / user $userId" "WARN"
         $queued = Request-Approval -ChatId $chatId -UserId $userId -From $fromObj
-        $msg = if ($queued) { "غير مصرح لك باستخدام هذا البوت بعد. تم إرسال طلب وصول إلى المشرف." }
-        else { "غير مصرح لك باستخدام هذا البوت. تواصل مع المشرف مباشرة." }
+        $msg = Get-UnauthorizedReplyText -ChatId $chatId -Queued $queued
         # On the button, not as a message: an unauthorised press should not
-        # leave anything behind in a chat its sender may not read again.
-        Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text $msg -Alert
+        # leave anything behind in a chat its sender may not read again. An
+        # empty reason means the join-code prompt has just gone out instead.
+        if ($msg) { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text $msg -Alert }
+        else { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id }
         return
     }
 
@@ -1146,6 +1147,23 @@ function Invoke-CallbackQuery {
         'menu:pending' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Send-TelegramMessage -ChatId $chatId -Text (Get-PendingApprovalsText) -ParseMode HTML -ReplyMarkup (Get-PendingKeyboard)
+            }
+            break
+        }
+        'menu:blocked' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-BlockedChatsText) -ParseMode HTML -ReplyMarkup (Get-BlockedChatsKeyboard)
+            }
+            break
+        }
+        'unblock:*' {
+            $target = 0L
+            if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
+                [long]::TryParse((Get-CallbackArg $data 'unblock:'), [ref]$target) -and $target -ne 0) {
+                if (Unblock-AccessChat -ChatId $target -ByUserId $userId) {
+                    Add-AuditEntry "👤 رفع حظر $target - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                }
+                Send-TelegramMessage -ChatId $chatId -Text (Get-BlockedChatsText) -ParseMode HTML -ReplyMarkup (Get-BlockedChatsKeyboard)
             }
             break
         }

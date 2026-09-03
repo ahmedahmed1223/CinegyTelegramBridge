@@ -85,6 +85,230 @@ function Update-UserLastActivity {
     return $true
 }
 
+function Import-AccessGuard {
+    <#
+        Who has been turned away, and who has been knocking.
+
+        A public bot is found by strangers. Rejecting one used to remove the
+        request and nothing else, so the same chat could ask again a second
+        later, for ever - MaxPendingApprovals caps how long the queue gets,
+        never how many times one person may join it.
+    #>
+    $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+    if (-not (Test-Path -LiteralPath $script:accessGuardFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:accessGuardFile -Raw | ConvertFrom-Json
+        foreach ($section in @('Blocked', 'Attempts')) {
+            $saved = Get-JsonProp $raw $section
+            if (-not $saved) { continue }
+            foreach ($prop in $saved.PSObject.Properties) { $script:AccessGuard[$section][$prop.Name] = $prop.Value }
+        }
+        Write-BridgeLog "Restored $($script:AccessGuard.Blocked.Count) blocked chat(s) from access-guard.json"
+    }
+    catch { Write-BridgeLog "Could not read access-guard.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-AccessGuard {
+    try {
+        $temporary = "$($script:accessGuardFile).tmp"
+        $script:AccessGuard | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:accessGuardFile -Force -ErrorAction Stop
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write access-guard.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Test-ChatBlocked {
+    param([Parameter(Mandatory)][long]$ChatId)
+    return $script:AccessGuard.Blocked.ContainsKey([string]$ChatId)
+}
+
+function Block-AccessChat {
+    <# Silently, always. Telling someone they are blocked tells them the bot
+       is worth a second account. #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Reason = '', [long]$ByUserId = 0)
+    $script:AccessGuard.Blocked[[string]$ChatId] = @{ At = (Get-Date).ToString('o'); By = $ByUserId; Reason = $Reason }
+    Write-BridgeLog "Access blocked for chat $ChatId ($Reason) by $ByUserId"
+    return (Save-AccessGuard)
+}
+
+function Unblock-AccessChat {
+    <# Clears the day's attempt count too: letting someone back in means
+       letting them ask, not letting them meet a stale limit. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$ByUserId = 0)
+    if (-not (Test-ChatBlocked -ChatId $ChatId)) { return $false }
+    $script:AccessGuard.Blocked.Remove([string]$ChatId)
+    $script:AccessGuard.Attempts.Remove([string]$ChatId)
+    Write-BridgeLog "Access unblocked for chat $ChatId by $ByUserId"
+    return (Save-AccessGuard)
+}
+
+function Get-BlockedAccessChats {
+    return @($script:AccessGuard.Blocked.Keys | Sort-Object { [long]$_ } | ForEach-Object {
+            $record = $script:AccessGuard.Blocked[$_]
+            [pscustomobject]@{
+                ChatId = [long]$_
+                At     = [string](Get-JsonProp $record 'At')
+                By     = [long](Get-JsonProp $record 'By')
+                Reason = [string](Get-JsonProp $record 'Reason')
+            }
+        })
+}
+
+function Get-AccessAttempt {
+    <# One rolling day per chat. The window restarts rather than sliding: a
+       counter that never resets turns one busy afternoon into a permanent
+       refusal nobody chose. #>
+    param([Parameter(Mandatory)][long]$ChatId, [datetime]$Now = (Get-Date))
+    $saved = $script:AccessGuard.Attempts[[string]$ChatId]
+    if ($saved) {
+        $firstAt = [datetime]::MinValue
+        if ([datetime]::TryParse([string](Get-JsonProp $saved 'FirstAt'), [ref]$firstAt) -and ($Now - $firstAt).TotalHours -lt 24) {
+            return @{
+                FirstAt      = [string](Get-JsonProp $saved 'FirstAt')
+                Requests     = [int](Get-JsonProp $saved 'Requests')
+                SecretFails  = [int](Get-JsonProp $saved 'SecretFails')
+                SecretPassed = [bool](Get-JsonProp $saved 'SecretPassed')
+            }
+        }
+    }
+    return @{ FirstAt = $Now.ToString('o'); Requests = 0; SecretFails = 0; SecretPassed = $false }
+}
+
+function Add-AccessAttempt {
+    param([Parameter(Mandatory)][long]$ChatId, [ValidateSet('request', 'secret')][string]$Kind = 'request', [datetime]$Now = (Get-Date))
+    $entry = Get-AccessAttempt -ChatId $ChatId -Now $Now
+    if ($Kind -eq 'request') { $entry.Requests = [int]$entry.Requests + 1 } else { $entry.SecretFails = [int]$entry.SecretFails + 1 }
+    $script:AccessGuard.Attempts[[string]$ChatId] = $entry
+    Save-AccessGuard | Out-Null
+    return $entry
+}
+
+function Set-AccessSecretPassed {
+    <# Remembered so the code is asked for once, not again on every message
+       sent while the request waits in the queue. #>
+    param([Parameter(Mandatory)][long]$ChatId, [datetime]$Now = (Get-Date))
+    $entry = Get-AccessAttempt -ChatId $ChatId -Now $Now
+    $entry.SecretPassed = $true
+    $script:AccessGuard.Attempts[[string]$ChatId] = $entry
+    return (Save-AccessGuard)
+}
+
+function Test-AccessSecretPassed {
+    param([Parameter(Mandatory)][long]$ChatId, [datetime]$Now = (Get-Date))
+    return [bool](Get-AccessAttempt -ChatId $ChatId -Now $Now).SecretPassed
+}
+
+function Test-JoinSecret {
+    <# An empty setting is not a secret that everything matches: it means the
+       check is off, and nothing passes it. #>
+    param([AllowEmptyString()][string]$Provided = '')
+    $expected = [string](Get-Setting 'JoinSecret')
+    if ([string]::IsNullOrWhiteSpace($expected)) { return $false }
+    return ([string]$Provided).Trim().Equals($expected.Trim(), [System.StringComparison]::Ordinal)
+}
+
+function Test-AccessRequestAllowed {
+    <#
+        May this chat put a request in front of the administrators at all?
+
+        Blocked chats never may. Everyone else gets a few tries a day: the
+        point is not to stop a colleague who mistyped, it is to stop one
+        stranger from filling the queue by tapping start.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [datetime]$Now = (Get-Date))
+    if (Test-ChatBlocked -ChatId $ChatId) { return $false }
+    $max = Get-SettingInt 'MaxAccessRequestsPerDay' 0
+    if ($max -le 0) { return $true }
+    $entry = Add-AccessAttempt -ChatId $ChatId -Kind request -Now $Now
+    if ([int]$entry.Requests -le $max) { return $true }
+    Write-BridgeLog "Access request from $ChatId dropped: $($entry.Requests) in 24h, limit $max" 'WARN'
+    return $false
+}
+
+function Get-UnauthorizedReplyText {
+    <# What an unauthorized chat is told, in one place because two callers
+       say it. Empty means say nothing: the join-code prompt has already gone
+       out, and a second line contradicting it only confuses. #>
+    param([Parameter(Mandatory)][long]$ChatId, [bool]$Queued)
+    if ($Queued) { return 'غير مصرح لك باستخدام هذا البوت بعد. تم إرسال طلب وصول إلى المشرف - ستصلك رسالة فور الموافقة.' }
+    $state = Get-PendingState -ChatId $ChatId
+    if ($state -and [string]$state.Mode -eq 'join_secret') { return '' }
+    return 'غير مصرح لك باستخدام هذا البوت. تواصل مع المشرف مباشرة.'
+}
+
+function Get-UserIdleDays {
+    <# Silence measured from the last interaction, or from the day access was
+       granted when there has never been one. A user with neither date is not
+       counted: no record is not evidence of absence. #>
+    param([Parameter(Mandatory)]$User, [datetime]$Now = (Get-Date))
+    $stamp = [string](Get-JsonProp $User 'LastActivityAt')
+    if ([string]::IsNullOrWhiteSpace($stamp)) { $stamp = [string](Get-JsonProp $User 'AddedAt') }
+    if ([string]::IsNullOrWhiteSpace($stamp)) { return -1 }
+    $parsed = [datetime]::MinValue
+    if (-not [datetime]::TryParse($stamp, [ref]$parsed)) { return -1 }
+    return [int][math]::Floor(($Now - $parsed).TotalDays)
+}
+
+function Get-DormantUsers {
+    <# Owners are never listed: the account that cannot be locked out is the
+       one a timer must not sweep away. #>
+    param([datetime]$Now = (Get-Date))
+    $days = Get-SettingInt 'DormantUserDays' 0
+    if ($days -le 0) { return @() }
+    return @(Get-AuthorizedUsers | Where-Object {
+            [string]$_.Role -ne 'owner' -and -not $_.Disabled -and (Get-UserIdleDays -User $_ -Now $Now) -ge $days
+        })
+}
+
+function Update-DormantUsers {
+    <# Once a day at most: this is a report about months of silence and
+       nothing in it is urgent. #>
+    param([datetime]$Now = (Get-Date), [switch]$Force)
+    $days = Get-SettingInt 'DormantUserDays' 0
+    if ($days -le 0) { return @() }
+    if (-not $Force -and $script:LastDormantSweep -and ($Now - $script:LastDormantSweep).TotalHours -lt 24) { return @() }
+    $script:LastDormantSweep = $Now
+    $dormant = @(Get-DormantUsers -Now $Now)
+    if ($dormant.Count -eq 0) { return @() }
+    $auto = [bool](Get-Setting 'AutoDisableDormantUsers')
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("😴 مستخدمون بلا نشاط منذ $days يومًا أو أكثر:")
+    foreach ($user in $dormant) {
+        $disabled = if ($auto -and (Set-UserDisabled -TargetUserId ([long]$user.UserId) -Disabled $true)) { ' · تم تعطيله' } else { '' }
+        $lines.Add("• $($user.Alias) ($($user.UserId)) · $(Get-UserIdleDays -User $user -Now $Now) يومًا$disabled")
+    }
+    $lines.Add($(if ($auto) { 'أعد التفعيل من 👥 المستخدمين عند الحاجة.' } else { 'التعطيل التلقائي مغلق؛ فعّل AutoDisableDormantUsers إن أردته.' }))
+    Send-AdminBroadcast -Text ($lines -join "`n") | Out-Null
+    Write-BridgeLog "Dormant sweep: $($dormant.Count) user(s) idle $days+ days, auto-disable=$auto"
+    return $dormant
+}
+
+function Exit-UnknownGroupChat {
+    <# The bridge is a one-to-one tool. Added to a group it used to sit there
+       ignoring every message - present, silent, and readable by whoever had
+       added it. It leaves instead, once, and says where it had been. #>
+    param($Chat)
+    if (-not (Get-Setting 'LeaveUnknownGroups')) { return $false }
+    if ([string](Get-JsonProp $Chat 'type') -notin @('group', 'supergroup', 'channel')) { return $false }
+    $groupId = [long](Get-JsonProp $Chat 'id')
+    # A group somebody deliberately whitelisted is not unknown.
+    if (@(Get-JsonProp $config 'AllowedChatIds') -contains $groupId) { return $false }
+    if ($script:LeftGroupChats.ContainsKey([string]$groupId)) { return $false }
+    $script:LeftGroupChats[[string]$groupId] = $true
+    $title = ([string](Get-JsonProp $Chat 'title') -replace '[\r\n\t]+', ' ').Trim()
+    if ($title.Length -gt 60) { $title = $title.Substring(0, 60) }
+    $result = Invoke-BridgeTelegramRequest -Uri "$apiBase/leaveChat" -Method Post -Body @{ chat_id = "$groupId" } `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)
+    if (-not $result.Success) {
+        Write-BridgeLog "Could not leave unknown chat $groupId : $($result.Error)" 'WARN'
+        return $false
+    }
+    Write-BridgeLog "Left unknown chat $groupId ($title)"
+    Send-AdminBroadcast -Text "🚪 غادر البوت محادثة جماعية غير معروفة: $title ($groupId)" | Out-Null
+    return $true
+}
+
 function Import-DisabledUsers {
     if (-not (Test-Path -LiteralPath $script:disabledUsersFile)) { return }
     try {

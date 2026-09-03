@@ -392,6 +392,9 @@ Describe 'The requester names themselves' {
         # the one this file's scope holds, and asserting on the wrong one
         # passes or fails for reasons that have nothing to do with the code.
         Deny-UserAccess -TargetChatId 555 -RejectedBy 101 -RejecterUserId 101 -ErrorAction SilentlyContinue | Out-Null
+        # And a rejection now blocks the chat, which is the point of it - so
+        # the guard is wiped after the dequeue, never before.
+        $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
     }
     AfterAll { $script:UserAliases.Clear() }
 
@@ -477,5 +480,290 @@ Describe 'The requester names themselves' {
 
         Get-PendingState -ChatId 555 | Should -BeNullOrEmpty
         Get-PendingApprovalsText | Should -Match '555'
+    }
+}
+
+
+Describe 'The access guard' {
+    BeforeEach {
+        # Through the functions, never by poking the table: that is the only
+        # way a test proves what the running bridge would do.
+        $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+        foreach ($pair in @(@('BlockRejectedRequesters', $true), @('JoinSecret', ''), @('JoinSecretMaxAttempts', 3),
+                @('MaxAccessRequestsPerDay', 3), @('DormantUserDays', 60), @('AutoDisableDormantUsers', $false),
+                @('LeaveUnknownGroups', $true), @('EnableSelfServiceRequests', $true), @('MaxPendingApprovals', 20))) {
+            $config.Settings | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1] -Force
+        }
+        Mock Send-TelegramMessage { $true }
+        Mock Send-AdminBroadcast { $true }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'lets a chat ask up to the daily limit and no further' {
+        1..3 | ForEach-Object { Test-AccessRequestAllowed -ChatId 500 | Should -BeTrue }
+        Test-AccessRequestAllowed -ChatId 500 | Should -BeFalse
+        # Another chat is unaffected: the limit is per chat, not global.
+        Test-AccessRequestAllowed -ChatId 501 | Should -BeTrue
+    }
+
+    It 'restarts the window a day later rather than refusing for ever' {
+        $start = Get-Date
+        1..4 | ForEach-Object { Test-AccessRequestAllowed -ChatId 502 -Now $start | Out-Null }
+        Test-AccessRequestAllowed -ChatId 502 -Now $start | Should -BeFalse
+        Test-AccessRequestAllowed -ChatId 502 -Now $start.AddHours(25) | Should -BeTrue
+    }
+
+    It 'treats a zero limit as no limit' {
+        $config.Settings | Add-Member -NotePropertyName 'MaxAccessRequestsPerDay' -NotePropertyValue 0 -Force
+        1..10 | ForEach-Object { Test-AccessRequestAllowed -ChatId 503 | Should -BeTrue }
+    }
+
+    It 'refuses a blocked chat whatever the limit says' {
+        Block-AccessChat -ChatId 504 -Reason 'rejected' -ByUserId 9 | Out-Null
+        Test-ChatBlocked -ChatId 504 | Should -BeTrue
+        Test-AccessRequestAllowed -ChatId 504 | Should -BeFalse
+        Request-Approval -ChatId 504 -UserId 504 -From $null | Should -BeFalse
+    }
+
+    It 'unblocks and clears the day the chat had spent' {
+        1..4 | ForEach-Object { Test-AccessRequestAllowed -ChatId 505 | Out-Null }
+        Block-AccessChat -ChatId 505 -Reason 'rejected' | Out-Null
+
+        Unblock-AccessChat -ChatId 505 -ByUserId 9 | Should -BeTrue
+        Test-ChatBlocked -ChatId 505 | Should -BeFalse
+        # The counter went with the block, so they can actually ask again.
+        Test-AccessRequestAllowed -ChatId 505 | Should -BeTrue
+        Unblock-AccessChat -ChatId 505 | Should -BeFalse
+    }
+
+    It 'survives a restart' {
+        Block-AccessChat -ChatId 506 -Reason 'join_secret' -ByUserId 7 | Out-Null
+        $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+        Import-AccessGuard
+
+        Test-ChatBlocked -ChatId 506 | Should -BeTrue
+        $record = @(Get-BlockedAccessChats | Where-Object { $_.ChatId -eq 506 })
+        $record.Count | Should -Be 1
+        $record[0].Reason | Should -Be 'join_secret'
+        $record[0].By | Should -Be 7
+    }
+}
+
+Describe 'The join code' {
+    BeforeEach {
+        foreach ($pair in @(@('JoinSecret', 'cinegy-2026'), @('JoinSecretMaxAttempts', 3), @('MaxAccessRequestsPerDay', 3),
+                @('EnableSelfServiceRequests', $true), @('MaxPendingApprovals', 20), @('AskRequesterName', $false),
+                # Off here so the dequeue below only dequeues.
+                @('BlockRejectedRequesters', $false))) {
+            $config.Settings | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1] -Force
+        }
+        Mock Send-TelegramMessage { $true }
+        Mock Send-AdminBroadcast { $true }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        # Emptied through the bridge's own path: this file's scope does not
+        # hold the same queue object the bridge functions write to, so
+        # removing a key here would leave the real one untouched.
+        Deny-UserAccess -TargetChatId 600 -RejectedBy 1 -RejecterUserId 1 -ErrorAction SilentlyContinue | Out-Null
+        $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+        Clear-PendingState -ChatId 600
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'JoinSecret' -NotePropertyValue '' -Force
+        Clear-PendingState -ChatId 600
+    }
+
+    It 'matches nothing at all when no code is set' {
+        $config.Settings | Add-Member -NotePropertyName 'JoinSecret' -NotePropertyValue '' -Force
+        Test-JoinSecret -Provided '' | Should -BeFalse
+        Test-JoinSecret -Provided 'anything' | Should -BeFalse
+    }
+
+    It 'asks for the code instead of queueing the request' {
+        Request-Approval -ChatId 600 -UserId 600 -From $null | Should -BeFalse
+        (Get-PendingState -ChatId 600).Mode | Should -Be 'join_secret'
+        # Nothing about a pending request reached the administrators.
+        Get-PendingApprovalsText | Should -Not -Match '600'
+    }
+
+    It 'says nothing more once the prompt has gone out' {
+        Request-Approval -ChatId 600 -UserId 600 -From $null | Out-Null
+        Get-UnauthorizedReplyText -ChatId 600 -Queued $false | Should -BeNullOrEmpty
+        Get-UnauthorizedReplyText -ChatId 601 -Queued $false | Should -Match 'تواصل مع المشرف'
+        Get-UnauthorizedReplyText -ChatId 601 -Queued $true | Should -Match 'فور الموافقة'
+    }
+
+    It 'queues the request when the code is right, and asks only once' {
+        Request-Approval -ChatId 600 -UserId 600 -From $null | Out-Null
+        Complete-JoinSecret -ChatId 600 -UserId 600 -Value ' cinegy-2026 ' -From $null | Should -BeTrue
+
+        Get-PendingApprovalsText | Should -Match '600'
+        Test-AccessSecretPassed -ChatId 600 | Should -BeTrue
+        # Asked once: a second request does not send them back to the prompt.
+        Deny-UserAccess -TargetChatId 600 -RejectedBy 1 -RejecterUserId 1
+        Request-Approval -ChatId 600 -UserId 600 -From $null | Should -BeTrue
+        Get-PendingState -ChatId 600 | Should -BeNullOrEmpty
+    }
+
+    It 'blocks the chat after enough wrong codes, and says nothing' {
+        Request-Approval -ChatId 600 -UserId 600 -From $null | Out-Null
+        1..2 | ForEach-Object { Complete-JoinSecret -ChatId 600 -UserId 600 -Value 'wrong' -From $null | Should -BeFalse }
+        Test-ChatBlocked -ChatId 600 | Should -BeFalse
+
+        Complete-JoinSecret -ChatId 600 -UserId 600 -Value 'wrong' -From $null | Should -BeFalse
+        Test-ChatBlocked -ChatId 600 | Should -BeTrue
+        Get-PendingState -ChatId 600 | Should -BeNullOrEmpty
+        # The third refusal is silent - only the first two were answered.
+        Should -Invoke Send-TelegramMessage -Times 2 -Exactly -ParameterFilter { $Text -like '*الرمز غير صحيح*' }
+    }
+
+    It 'does nothing when the chat is not at that prompt' {
+        Complete-JoinSecret -ChatId 600 -UserId 600 -Value 'cinegy-2026' -From $null | Should -BeFalse
+        Get-PendingApprovalsText | Should -Not -Match '600'
+    }
+}
+
+Describe 'Rejecting a request' {
+    BeforeEach {
+        $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+        foreach ($pair in @(@('BlockRejectedRequesters', $true), @('JoinSecret', ''), @('EnableSelfServiceRequests', $true),
+                @('MaxPendingApprovals', 20), @('MaxAccessRequestsPerDay', 3), @('AskRequesterName', $false))) {
+            $config.Settings | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1] -Force
+        }
+        Mock Send-TelegramMessage { $true }
+        Mock Send-AdminBroadcast { $true }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+    }
+
+    It 'blocks the chat so it cannot simply ask again' {
+        Request-Approval -ChatId 700 -UserId 700 -From $null | Out-Null
+        Deny-UserAccess -TargetChatId 700 -RejectedBy 1 -RejecterUserId 1
+
+        Test-ChatBlocked -ChatId 700 | Should -BeTrue
+        Request-Approval -ChatId 700 -UserId 700 -From $null | Should -BeFalse
+        Get-PendingApprovalsText | Should -Not -Match '700'
+    }
+
+    It 'leaves the chat free to ask again when the setting is off' {
+        $config.Settings | Add-Member -NotePropertyName 'BlockRejectedRequesters' -NotePropertyValue $false -Force
+        Request-Approval -ChatId 701 -UserId 701 -From $null | Out-Null
+        Deny-UserAccess -TargetChatId 701 -RejectedBy 1 -RejecterUserId 1
+
+        Test-ChatBlocked -ChatId 701 | Should -BeFalse
+        Request-Approval -ChatId 701 -UserId 701 -From $null | Should -BeTrue
+    }
+}
+
+Describe 'Dormant users' {
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'DormantUserDays' -NotePropertyValue 60 -Force
+        $config.Settings | Add-Member -NotePropertyName 'AutoDisableDormantUsers' -NotePropertyValue $false -Force
+        Mock Send-AdminBroadcast { $true }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'measures silence from the last interaction, then from the day access was granted' {
+        $now = Get-Date
+        $user = [pscustomobject]@{ LastActivityAt = $now.AddDays(-10).ToString('o'); AddedAt = $now.AddDays(-400).ToString('o') }
+        Get-UserIdleDays -User $user -Now $now | Should -Be 10
+
+        $never = [pscustomobject]@{ LastActivityAt = ''; AddedAt = $now.AddDays(-90).ToString('o') }
+        Get-UserIdleDays -User $never -Now $now | Should -Be 90
+    }
+
+    It 'counts nobody when there is no date at all' {
+        # No record is not evidence of absence.
+        Get-UserIdleDays -User ([pscustomobject]@{ LastActivityAt = ''; AddedAt = '' }) | Should -Be -1
+        Get-UserIdleDays -User ([pscustomobject]@{ LastActivityAt = 'not a date'; AddedAt = '' }) | Should -Be -1
+    }
+
+    It 'never lists the owner, the disabled, or the recently active' {
+        $now = Get-Date
+        $old = $now.AddDays(-200).ToString('o')
+        Mock Get-AuthorizedUsers {
+            @(
+                [pscustomobject]@{ UserId = 1; Alias = 'owner'; Role = 'owner'; Disabled = $false; AddedAt = $old; LastActivityAt = $old }
+                [pscustomobject]@{ UserId = 2; Alias = 'off'; Role = 'operator'; Disabled = $true; AddedAt = $old; LastActivityAt = $old }
+                [pscustomobject]@{ UserId = 3; Alias = 'quiet'; Role = 'operator'; Disabled = $false; AddedAt = $old; LastActivityAt = $old }
+                [pscustomobject]@{ UserId = 4; Alias = 'busy'; Role = 'operator'; Disabled = $false; AddedAt = $old; LastActivityAt = $now.ToString('o') }
+            )
+        }
+        @(Get-DormantUsers -Now $now).UserId | Should -Be @(3)
+    }
+
+    It 'reports without disabling, and disables when told to' {
+        $old = (Get-Date).AddDays(-200).ToString('o')
+        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId = 3; Alias = 'quiet'; Role = 'operator'; Disabled = $false; AddedAt = $old; LastActivityAt = $old }) }
+        Mock Set-UserDisabled { $true }
+
+        $script:LastDormantSweep = $null
+        @(Update-DormantUsers).Count | Should -Be 1
+        Should -Invoke Set-UserDisabled -Times 0 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+
+        $config.Settings | Add-Member -NotePropertyName 'AutoDisableDormantUsers' -NotePropertyValue $true -Force
+        $script:LastDormantSweep = $null
+        Update-DormantUsers | Out-Null
+        Should -Invoke Set-UserDisabled -Times 1 -Exactly -ParameterFilter { $TargetUserId -eq 3 -and $Disabled }
+    }
+
+    It 'sweeps once a day, not on every tick' {
+        $old = (Get-Date).AddDays(-200).ToString('o')
+        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId = 3; Alias = 'quiet'; Role = 'operator'; Disabled = $false; AddedAt = $old; LastActivityAt = $old }) }
+
+        $script:LastDormantSweep = $null
+        Update-DormantUsers | Out-Null
+        1..5 | ForEach-Object { Update-DormantUsers | Out-Null }
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'does nothing at all when the setting is zero' {
+        $config.Settings | Add-Member -NotePropertyName 'DormantUserDays' -NotePropertyValue 0 -Force
+        $script:LastDormantSweep = $null
+        @(Update-DormantUsers).Count | Should -Be 0
+        @(Get-DormantUsers).Count | Should -Be 0
+    }
+}
+
+Describe 'Unknown group chats' {
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'LeaveUnknownGroups' -NotePropertyValue $true -Force
+        $script:LeftGroupChats = @{}
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true; Response = $null; Error = ''; Attempts = 1 } }
+        Mock Send-AdminBroadcast { $true }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'leaves a group once and tells the administrators' {
+        $chat = [pscustomobject]@{ id = -1001; type = 'supergroup'; title = 'Random group' }
+        Exit-UnknownGroupChat -Chat $chat | Should -BeTrue
+        # A second message from the same group does not announce it again.
+        Exit-UnknownGroupChat -Chat $chat | Should -BeFalse
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'stays in a group somebody deliberately whitelisted' {
+        $config | Add-Member -NotePropertyName 'AllowedChatIds' -NotePropertyValue @(-1002) -Force
+        Exit-UnknownGroupChat -Chat ([pscustomobject]@{ id = -1002; type = 'group'; title = 'Newsroom' }) | Should -BeFalse
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+    }
+
+    It 'never leaves a private chat, and does nothing when the setting is off' {
+        Exit-UnknownGroupChat -Chat ([pscustomobject]@{ id = 12345; type = 'private'; title = '' }) | Should -BeFalse
+
+        $config.Settings | Add-Member -NotePropertyName 'LeaveUnknownGroups' -NotePropertyValue $false -Force
+        Exit-UnknownGroupChat -Chat ([pscustomobject]@{ id = -1003; type = 'supergroup'; title = 'Another' }) | Should -BeFalse
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+    }
+
+    It 'stays put when Telegram refuses to let it out' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Response = $null; Error = 'boom'; Attempts = 1 } }
+        Exit-UnknownGroupChat -Chat ([pscustomobject]@{ id = -1004; type = 'group'; title = 'Broken' }) | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
 }

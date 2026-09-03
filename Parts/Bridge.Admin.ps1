@@ -1917,6 +1917,17 @@ function Request-Approval {
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Get-Setting 'EnableSelfServiceRequests')) { return $false }
     if ($script:PendingApprovals.ContainsKey($ChatId)) { return $true }
+    if (Test-ChatBlocked -ChatId $ChatId) {
+        Write-BridgeLog "Dropped access request from blocked chat $ChatId" 'WARN'
+        return $false
+    }
+    # The code is asked for before the queue, so a stranger without it never
+    # reaches an administrator's screen at all.
+    if (-not [string]::IsNullOrWhiteSpace([string](Get-Setting 'JoinSecret')) -and -not (Test-AccessSecretPassed -ChatId $ChatId)) {
+        Request-JoinSecret -ChatId $ChatId -UserId $UserId | Out-Null
+        return $false
+    }
+    if (-not (Test-AccessRequestAllowed -ChatId $ChatId)) { return $false }
 
     $max = Get-SettingInt 'MaxPendingApprovals' 1
     if ($script:PendingApprovals.Count -ge $max) {
@@ -1949,6 +1960,47 @@ function Request-Approval {
         Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل اسمك كما تريده أن يظهر للمشرفين (مثل: أحمد - قسم الأخبار).' | Out-Null
     }
     return $true
+}
+
+function Request-JoinSecret {
+    <# Asked once per chat per day, and never told what the code is for
+       beyond that the bot is closed - the prompt is the whole hint. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'join_secret'; UserId = $UserId } | Out-Null
+    Send-TelegramMessage -ChatId $ChatId -Text '🔑 هذا البوت مغلق. أرسل رمز الانضمام للمتابعة.' | Out-Null
+    return $true
+}
+
+function Complete-JoinSecret {
+    <#
+        The code a stranger sends before any administrator hears of them.
+
+        Wrong codes are counted, not explained: after JoinSecretMaxAttempts in
+        one day the chat is blocked and told nothing more, because a refusal
+        that reports how close a guess came is a guessing game.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [AllowEmptyString()][string]$Value = '', $From)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'join_secret') { return $false }
+    if (Test-ChatBlocked -ChatId $ChatId) { Clear-PendingState -ChatId $ChatId; return $false }
+    if (-not (Test-JoinSecret -Provided $Value)) {
+        $entry = Add-AccessAttempt -ChatId $ChatId -Kind secret
+        $max = Get-SettingInt 'JoinSecretMaxAttempts' 0
+        if ($max -gt 0 -and [int]$entry.SecretFails -ge $max) {
+            Clear-PendingState -ChatId $ChatId
+            Block-AccessChat -ChatId $ChatId -Reason 'join_secret' | Out-Null
+            return $false
+        }
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ الرمز غير صحيح.' | Out-Null
+        return $false
+    }
+    Clear-PendingState -ChatId $ChatId
+    Set-AccessSecretPassed -ChatId $ChatId | Out-Null
+    Write-BridgeLog "Chat $ChatId passed the join code"
+    $queued = Request-Approval -ChatId $ChatId -UserId $UserId -From $From
+    if (-not $queued) { Send-TelegramMessage -ChatId $ChatId -Text 'تعذّر تسجيل طلبك الآن. حاول لاحقًا.' | Out-Null }
+    return $queued
 }
 
 function Complete-AccessRequestName {
@@ -2033,8 +2085,13 @@ function Deny-UserAccess {
     param([Parameter(Mandatory)][long]$TargetChatId, [Parameter(Mandatory)][long]$RejectedBy, [long]$RejecterUserId = 0)
     if ($RejecterUserId -eq 0) { $RejecterUserId = $RejectedBy }
     $script:PendingApprovals.Remove($TargetChatId)
-    Write-BridgeLog "User $RejecterUserId rejected access request from $TargetChatId"
+    Clear-PendingState -ChatId $TargetChatId
+    # Rejection used to remove the request and nothing else, so the same chat
+    # could ask again a second later, for ever.
+    $blocked = [bool](Get-Setting 'BlockRejectedRequesters') -and (Block-AccessChat -ChatId $TargetChatId -Reason 'rejected' -ByUserId $RejecterUserId)
+    Write-BridgeLog "User $RejecterUserId rejected access request from $TargetChatId (blocked=$blocked)"
     Add-AuditEntry "👤 رفض طلب $TargetChatId - بواسطة $(Format-UserAuditActor -UserId $RejecterUserId)"
-    Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
+    $note = if ($blocked) { " وحُظرت المحادثة من الطلب مجددًا." } else { "" }
+    Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId.$note" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "تم رفض طلب الوصول الخاص بك."
 }

@@ -24,6 +24,10 @@ function Update-PendingExpiry {
             Write-BridgeLog "Expired stale access request from $chatId"
         }
     }
+
+    # Rides along here because it is the same kind of housekeeping - who may
+    # still use the bot - and it rate-limits itself to once a day.
+    Update-DormantUsers | Out-Null
 }
 
 function Update-PostShowQueue {

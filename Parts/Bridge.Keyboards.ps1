@@ -950,7 +950,61 @@ function Get-PendingKeyboard {
         $rows += , $pager
     }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button "لا توجد طلبات معلّقة حاليًا" "menu") ) }
-    else { $rows += , @( (New-Button "⬅️ رجوع" "menu") ) }
+    $rows += , @( (New-Button "🚫 المحظورون" "menu:blocked"), (New-Button "⬅️ رجوع" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-BlockedAccessReasonText {
+    param([string]$Reason)
+    switch ($Reason) {
+        'rejected' { return 'رفض المشرف الطلب' }
+        'join_secret' { return 'رمز انضمام خاطئ متكرر' }
+        default { return 'بلا سبب مسجّل' }
+    }
+}
+
+function Get-BlockedChatsText {
+    <#
+        The chats that may no longer ask, and why.
+
+        Blocking is silent towards the blocked chat on purpose, so this screen
+        is the only record an administrator has of it - it carries the reason
+        and the date, because a list of bare numbers cannot be reviewed.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
+    $blocked = @(Get-BlockedAccessChats)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🚫 المحادثات المحظورة</b>')
+    if ($blocked.Count -eq 0) {
+        $lines.Add('<i>لا محادثة محظورة.</i>')
+        return ($lines -join "`n")
+    }
+    $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
+    $lines.Add("<i>$($blocked.Count) محادثة$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+    $lines.Add('')
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $entry = $blocked[$index]
+        $lines.Add("$($index + 1). <code>$($entry.ChatId)</code>")
+        $line = "   $(Get-BlockedAccessReasonText -Reason $entry.Reason)"
+        $at = [datetime]::MinValue
+        if ([datetime]::TryParse($entry.At, [ref]$at)) { $line += " · $($at.ToString('yyyy-MM-dd HH:mm'))" }
+        if ($entry.By -gt 0) { $line += " · بواسطة $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId $entry.By))" }
+        $lines.Add($line)
+    }
+    return ($lines -join "`n")
+}
+
+function Get-BlockedChatsKeyboard {
+    param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
+    $rows = @()
+    $blocked = @(Get-BlockedAccessChats)
+    $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $rows += , @( (New-Button "♻️ رفع الحظر عن $($blocked[$index].ChatId)" "unblock:$($blocked[$index].ChatId)") )
+        }
+    }
+    $rows += , @( (New-Button "👤 الطلبات المعلّقة" "menu:pending"), (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1465,12 +1519,19 @@ function Complete-SettingText {
         Clear-PendingState -ChatId $ChatId
         return
     }
+    # A credential cannot be emptied by sending nothing - the check above
+    # refuses that - so a lone dash means "no code any more".
+    if ($trimmed -eq '-' -and [string]$state.Name -match '(?i)token|secret|password|apikey') { $trimmed = '' }
     Clear-PendingState -ChatId $ChatId
     $previous = Get-Setting $state.Name
     Set-Setting -Name $state.Name -Value $trimmed
-    Write-BridgeLog "User $($state.UserId) set $($state.Name) = $trimmed"
-    Add-AuditEntry "⚙️ $($state.Name) = $trimmed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $previous -To $trimmed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
+    # The log and the audit trail are read by more people than the one who
+    # typed this, so a credential is recorded by its length, never its text.
+    $shownFrom = Format-ConfigDiffValue -Name ([string]$state.Name) -Value $previous
+    $shownTo = Format-ConfigDiffValue -Name ([string]$state.Name) -Value $trimmed
+    Write-BridgeLog "User $($state.UserId) set $($state.Name) = $shownTo"
+    Add-AuditEntry "⚙️ $($state.Name) = $shownTo - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $shownFrom -To $shownTo) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Set-SettingChoice {

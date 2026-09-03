@@ -534,39 +534,32 @@ function Get-AuthorizedUsersText {
 }
 
 function Get-UsersAdminKeyboard {
-    <# The promote/demote row is drawn only for an owner. An administrator who
-       cannot use it should not be looking at it: a button that always answers
-       "not allowed" is worse than no button at all. #>
+    <#
+        One row per person, not five.
+
+        The screen drew the toggle, the alias, the activity, the role change
+        and the revoke button for every user on the page - ten people made
+        fifty rows, and finding one person meant scrolling past nine others'
+        buttons with a revoke among them. The list names people; pressing one
+        opens their card, where those buttons live.
+    #>
     param(
         [long]$ViewerUserId = 0,
         [int]$Page = 0,
         [ValidateRange(1, 15)][int]$PageSize = 10
     )
-    $isOwner = $ViewerUserId -gt 0 -and (Test-Owner -ChatId $ViewerUserId -UserId $ViewerUserId)
     $rows = @()
     $users = @(Get-AuthorizedUsers)
     $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
     if ($window.EndIndex -ge $window.StartIndex) {
         foreach ($index in $window.StartIndex..$window.EndIndex) {
-        $user = $users[$index]
-        $role = switch ($user.Role) { 'owner' { '👑 مالك' } 'admin' { 'مشرف' } default { 'مشغّل' } }
-        $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
-        $rows += , @((New-Button "$($index + 1). $state · $($user.Alias) · $role" "usr:toggle:$($user.UserId)"))
-        $rows += , @((New-Button "✏️ Alias · $($user.Alias)" "usr:alias:$($user.UserId)"))
-        $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
-        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
-        $rows += , @((New-Button $activity.Label "usr:activity:$($user.UserId)"))
-        # No role button on the owner's own row: there is nothing to promote
-        # them to, and demoting them is refused anyway.
-        if ($isOwner -and $user.Role -ne 'owner') {
-            $rows += , @($(if ($user.Role -eq 'admin') {
-                        (New-Button "⬇️ خفض $($user.Alias) إلى مشغّل" "usr:demote:$($user.UserId)")
-                    }
-                    else {
-                        (New-Button "⬆️ ترقية $($user.Alias) إلى مشرف" "usr:promote:$($user.UserId)")
-                    }))
-        }
-        $rows += , @((New-Button "🗑 سحب صلاحية $($user.Alias)" "usr:revoke:$($user.UserId)" -Style danger))
+            $user = $users[$index]
+            $role = switch ([string]$user.Role) { 'owner' { '👑' } 'admin' { '🛡️' } default { '👤' } }
+            $state = if ($user.Disabled) { '⛔' } else { '✅' }
+            # Their own row is marked: whoever is about to disable somebody
+            # should be able to see when that somebody is them.
+            $you = if ($ViewerUserId -gt 0 -and [long]$user.UserId -eq $ViewerUserId) { ' (أنت)' } else { '' }
+            $rows += , @((New-Button "$($index + 1). $state $role $($user.Alias)$you" "usr:card:$($user.UserId):$($window.Page)"))
         }
     }
     if ($window.PageCount -gt 1) {
@@ -588,10 +581,82 @@ function Show-UsersAdminScreen {
     }
     else { '' }
     $text = (Get-AuthorizedUsersText -Page $Page) +
-    "`n`nاضغط المستخدم لتعطيله أو إعادة تفعيله، و✏️ Alias لتعديل اسمه التشغيلي، أو زر السحب مع التأكيد." +
+    "`n`nاضغط اسم المستخدم لفتح بطاقته: التعطيل والاسم والنشاط والسحب هناك." +
     "`n<i>حالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>$roleLine"
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML `
         -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
+}
+
+function Get-UserCardText {
+    <#
+        One person, in full - the screen the roster's one-line rows lead to.
+
+        It carries what the list has no room for: when they were added and by
+        whom, and how long they have been silent, which is what an
+        administrator wants before deciding whether to disable them.
+    #>
+    param([Parameter(Mandatory)][long]$TargetUserId)
+    $found = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
+    if ($found.Count -eq 0) { return '<i>المستخدم لم يعد ضمن قائمة المصرح لهم.</i>' }
+    $user = $found[0]
+    $role = switch ([string]$user.Role) { 'owner' { '👑 مالك الجسر' } 'admin' { '🛡️ مشرف' } default { '👤 مشغّل' } }
+    $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
+    $alias = [string]$user.Alias
+    if ($alias -eq [string]$user.UserId) { $alias = 'بلا اسم تشغيلي' }
+    if ($alias.Length -gt 40) { $alias = $alias.Substring(0, 39) + '…' }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $alias)</b>")
+    $lines.Add("<code>$([long]$user.UserId)</code> · $role · $state")
+    $lines.Add('')
+    $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+    $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
+    $lines.Add("📈 $(ConvertTo-TelegramHtmlText -Text ([string]$activity.Label))")
+    $idle = Get-UserIdleDays -User $user
+    if ($idle -ge 0) { $lines.Add("😴 بلا تفاعل منذ $idle يومًا") }
+    $addedAt = [datetime]::MinValue
+    if ([datetime]::TryParse([string]$user.AddedAt, [ref]$addedAt)) {
+        $by = if ([long]$user.AddedByUserId -gt 0) { " · بواسطة $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId ([long]$user.AddedByUserId)))" } else { '' }
+        $lines.Add("📅 أُضيف $($addedAt.ToString('yyyy-MM-dd'))$by")
+    }
+    return ($lines -join "`n")
+}
+
+function Get-UserCardKeyboard {
+    <# The buttons that used to sit on every roster row, on the one card they
+       belong to - so a press cannot land on the wrong person. #>
+    param([Parameter(Mandatory)][long]$TargetUserId, [long]$ViewerUserId = 0, [int]$Page = 0)
+    $found = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
+    $rows = @()
+    if ($found.Count -gt 0) {
+        $user = $found[0]
+        $rows += , @($(if ($user.Disabled) {
+                    (New-Button '✅ إعادة التفعيل' "usr:toggle:$TargetUserId" -Style success)
+                }
+                else {
+                    (New-Button '⛔ تعطيل مؤقت' "usr:toggle:$TargetUserId")
+                }))
+        $rows += , @( (New-Button '✏️ الاسم التشغيلي' "usr:alias:$TargetUserId"), (New-Button '📈 تفاصيل النشاط' "usr:activity:$TargetUserId") )
+        # No role button on the owner's card: there is nothing to promote them
+        # to, and demoting them is refused anyway.
+        if ($ViewerUserId -gt 0 -and (Test-Owner -ChatId $ViewerUserId -UserId $ViewerUserId) -and [string]$user.Role -ne 'owner') {
+            $rows += , @($(if ([string]$user.Role -eq 'admin') {
+                        (New-Button '⬇️ خفض إلى مشغّل' "usr:demote:$TargetUserId")
+                    }
+                    else {
+                        (New-Button '⬆️ ترقية إلى مشرف' "usr:promote:$TargetUserId")
+                    }))
+        }
+        $rows += , @((New-Button '🗑 سحب الصلاحية' "usr:revoke:$TargetUserId" -Style danger))
+    }
+    $rows += , @((New-Button '⬅️ قائمة المستخدمين' "userspage:$Page"))
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-UserCardScreen {
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    if ($UserId -le 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-UserCardText -TargetUserId $TargetUserId) -ParseMode HTML `
+        -ReplyMarkup (Get-UserCardKeyboard -TargetUserId $TargetUserId -ViewerUserId $UserId -Page $Page)
 }
 
 function Start-UserAliasEdit {
@@ -1409,26 +1474,48 @@ function Get-SettingPickItems {
 }
 
 function Get-SettingPickKeyboard {
-    <# Every candidate, ticked where it is already in the list. Addressed by
-       position, because a callback carries 64 bytes and a name does not
-       always fit in what is left. #>
-    param([Parameter(Mandatory)][string]$Name)
+    <#
+        Every candidate, ticked where it is already in the list. Addressed by
+        position, because a callback carries 64 bytes and a name does not
+        always fit in what is left.
+
+        Paged, and two to a row: a registry of a hundred templates drew a
+        hundred rows into one message, which Telegram will not send - so the
+        screen that says who may use a template stopped opening on exactly the
+        installations big enough to need it.
+    #>
+    param([Parameter(Mandatory)][string]$Name, [int]$Page = 0, [ValidateRange(2, 40)][int]$PageSize = 20)
     $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
     $items = @(Get-SettingPickItems -Name $Name)
+    $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize $PageSize
     $keyboard = @()
-    for ($index = 0; $index -lt $items.Count; $index++) {
-        $value = [string]$items[$index].Value
-        $mark = if (@($chosen | Where-Object { $_.Equals($value, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { '✅' } else { '⬜' }
-        $keyboard += , @((New-Button "$mark $([string]$items[$index].Label)" "cfgpick:$Name`:$index"))
+    $pair = @()
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $value = [string]$items[$index].Value
+            $mark = if (@($chosen | Where-Object { $_.Equals($value, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { '✅' } else { '⬜' }
+            # The page rides along so a tick returns to the page it was on
+            # instead of throwing the administrator back to the first.
+            $pair += (New-Button "$mark $([string]$items[$index].Label)" "cfgpick:$Name`:$index`:$($window.Page)")
+            if ($pair.Count -eq 2) { $keyboard += , $pair; $pair = @() }
+        }
     }
+    if ($pair.Count -gt 0) { $keyboard += , $pair }
     if ($items.Count -eq 0) { $keyboard += , @((New-Button 'لا توجد عناصر معرفة' 'cfgcat:templates')) }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "cfgpickpage:$Name`:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "cfgpickpage:$Name`:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "cfgpickpage:$Name`:$($window.Page + 1)") }
+        $keyboard += , $pager
+    }
     if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgpickclear:$Name" -Style danger)) }
     $keyboard += , @((New-Button '✅ تم' 'cfgcat:templates'))
     return @{ inline_keyboard = $keyboard }
 }
 
 function Get-SettingPickText {
-    param([Parameter(Mandatory)][string]$Name)
+    param([Parameter(Mandatory)][string]$Name, [int]$Page = 0, [ValidateRange(2, 40)][int]$PageSize = 20)
     $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
     # The same Arabic name the settings screen shows, falling back to the key
     # itself rather than to nothing.
@@ -1437,28 +1524,30 @@ function Get-SettingPickText {
     $lines += if ($chosen.Count -eq 0) {
         '<i>لا شيء محدد — متاح للجميع.</i>'
     }
-    else { "<i>المحدد: $(ConvertTo-TelegramHtmlText -Text ($chosen -join '، '))</i>" }
+    else { "<i>المحدد ($($chosen.Count)): $(ConvertTo-TelegramHtmlText -Text ($chosen -join '، '))</i>" }
+    $window = Get-BridgePageWindow -ItemCount (@(Get-SettingPickItems -Name $Name)).Count -Page $Page -PageSize $PageSize
+    if ($window.PageCount -gt 1) { $lines += "<i>صفحة $($window.Page + 1) من $($window.PageCount)</i>" }
     $lines += ''
     $lines += 'اضغط العنصر لإضافته أو إزالته.'
     return ($lines -join "`n")
 }
 
 function Show-SettingPicker {
-    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPickText -Name $Name) -ParseMode HTML `
-        -ReplyMarkup (Get-SettingPickKeyboard -Name $Name)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPickText -Name $Name -Page $Page) -ParseMode HTML `
+        -ReplyMarkup (Get-SettingPickKeyboard -Name $Name -Page $Page)
 }
 
 function Switch-SettingPick {
     <# One item in or out of the list, saved the way a typed value is saved so
        the log and the audit trail read alike either way. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][int]$Index,
-        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $items = @(Get-SettingPickItems -Name $Name)
-    if ($Index -lt 0 -or $Index -ge $items.Count) { Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId; return }
+    if ($Index -lt 0 -or $Index -ge $items.Count) { Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId -Page $Page; return }
     $value = [string]$items[$Index].Value
     $existing = @(Get-BridgeKeyList -Value ([string](Get-Setting $Name)))
     $chosen = [System.Collections.Generic.List[string]]::new()
@@ -1470,7 +1559,7 @@ function Switch-SettingPick {
     Set-Setting -Name $Name -Value $stored
     Write-BridgeLog "User $UserId set $Name = $stored"
     Add-AuditEntry "⚙️ $Name = $stored - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
+    Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId -Page $Page
 }
 
 function Clear-SettingPick {

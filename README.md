@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.51.0
+
+A graphic somebody starts in Cinegy now appears in the bot within seconds. The
+only periodic reconciliation ran without external discovery and without the
+layer dashboard, so it verified the layers the bridge had put up itself and
+nothing else - startup discovered external scenes, the status screen discovered
+them, and nothing in between did. The news strip was on air and the menu did
+not know it.
+
+The users screen draws one row per person instead of five. Ten people made
+fifty rows, and finding somebody meant scrolling past nine other people's
+buttons with a revoke among them; now the list names people and pressing one
+opens their card, where those buttons live and cannot land on the wrong person.
+The template-permission screen pages, two to a row: a hundred templates drew a
+hundred rows into one message, which Telegram will not send, so the screen
+stopped opening on exactly the installations big enough to need it.
+
+BridgeManager - the Windows Forms control program that starts and stops the
+bridge, tails its log and edits settings without opening config.json by hand -
+is now named in the release notes and documented, and AGENTS.md records how
+this repository is developed, documented and tested.
+
 ## Version 7.50.0
 
 Five locks on a bot that strangers can find, each with its own switch.

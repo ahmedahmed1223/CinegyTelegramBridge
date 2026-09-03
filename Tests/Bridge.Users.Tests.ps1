@@ -147,15 +147,17 @@ Describe 'Authorized user administration' {
         $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @(101) -Force
         $config.AdminUserIds = @(101, 202)
 
-        $ownerView = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard |
+        $ownerView = @((Get-UserCardKeyboard -TargetUserId 202 -ViewerUserId 101).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
-        $adminView = @((Get-UsersAdminKeyboard -ViewerUserId 202).inline_keyboard |
+        $adminView = @((Get-UserCardKeyboard -TargetUserId 202 -ViewerUserId 202).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $ownerView | Should -Contain 'usr:demote:202'
         $adminView | Should -Not -Contain 'usr:demote:202'
         # Nothing to promote the owner to, and demoting them is refused.
-        $ownerView | Should -Not -Contain 'usr:demote:101'
+        @((Get-UserCardKeyboard -TargetUserId 101 -ViewerUserId 101).inline_keyboard |
+                ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } }) |
+            Should -Not -Contain 'usr:demote:101'
         $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @() -Force
     }
 
@@ -217,12 +219,17 @@ Describe 'Authorized user administration' {
         $script:UserProfiles.ContainsKey('202') | Should -BeFalse
     }
 
-    It 'offers an alias action for every user in the management keyboard' {
-        $keyboard = Get-UsersAdminKeyboard
-        $buttons = @($keyboard.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_ })
+    It 'names every user in the roster and puts their actions on their card' {
+        $roster = @((Get-UsersAdminKeyboard).inline_keyboard | ForEach-Object { @($_) })
+        @($roster.callback_data) | Should -Contain 'usr:card:202:0'
+        # One row each: the roster no longer carries five buttons per person.
+        @($roster.callback_data) | Should -Not -Contain 'usr:alias:202'
 
-        @($buttons.callback_data) | Should -Contain 'usr:alias:202'
-        @($buttons.text) -join ' ' | Should -Match 'Alias'
+        $card = @((Get-UserCardKeyboard -TargetUserId 202 -ViewerUserId 101).inline_keyboard | ForEach-Object { @($_) })
+        @($card.callback_data) | Should -Contain 'usr:alias:202'
+        @($card.callback_data) | Should -Contain 'usr:revoke:202'
+        # And a way back to the page the roster was on.
+        @($card.callback_data) | Should -Contain 'userspage:0'
     }
 
     It 'edits and removes a user alias through the interactive admin flow' {
@@ -349,12 +356,32 @@ Describe 'Administrative user activity status' {
         (Get-UserActivityStatus -LastActivityAt '' -Now $now -ActiveWithinMinutes 5).State | Should -Be 'unknown'
     }
 
-    It 'shows the approximate activity state in administrator user rows' {
-        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId=202L; Alias='مخرج'; Role='operator'; Disabled=$false; LastActivityAt=(Get-Date).AddMinutes(-1).ToString('o') }) }
+    It 'shows the approximate activity state on the user card' {
+        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId=202L; Alias='مخرج'; Role='operator'; Disabled=$false; AddedAt=''; AddedByUserId=0L; LastActivityAt=(Get-Date).AddMinutes(-1).ToString('o') }) }
         Mock Test-Owner { $false }
-        $buttons = @((Get-UsersAdminKeyboard -ViewerUserId 101).inline_keyboard | ForEach-Object { @($_) })
-        @($buttons.text) -join ' ' | Should -Match 'نشط حديثًا'
-        @($buttons | Where-Object text -Match 'نشط حديثًا').callback_data | Should -Be 'usr:activity:202'
+        Get-UserCardText -TargetUserId 202 | Should -Match 'نشط حديثًا'
+        @((Get-UserCardKeyboard -TargetUserId 202 -ViewerUserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) |
+            Should -Contain 'usr:activity:202'
+    }
+
+    It 'says on the card what the roster has no room for' {
+        $added = (Get-Date).AddDays(-30)
+        Mock Get-AuthorizedUsers { @([pscustomobject]@{ UserId=202L; Alias='مخرج'; Role='admin'; Disabled=$true; AddedAt=$added.ToString('o'); AddedByUserId=0L; LastActivityAt=(Get-Date).AddDays(-9).ToString('o') }) }
+        $text = Get-UserCardText -TargetUserId 202
+        $text | Should -Match '202'
+        $text | Should -Match 'معطّل'
+        $text | Should -Match 'مشرف'
+        $text | Should -Match 'منذ 9 يومًا'
+        $text | Should -Match $added.ToString('yyyy-MM-dd')
+    }
+
+    It 'says plainly when the person is gone rather than drawing their buttons' {
+        Mock Get-AuthorizedUsers { @() }
+        Get-UserCardText -TargetUserId 202 | Should -Match 'لم يعد ضمن'
+        @((Get-UserCardKeyboard -TargetUserId 202 -ViewerUserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) |
+            Should -Not -Contain 'usr:revoke:202'
     }
 
     It 'discloses that the user-management activity labels are approximate' {

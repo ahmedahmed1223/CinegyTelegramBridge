@@ -1326,10 +1326,17 @@ Describe 'Version 6 bounded administrator catalogues' {
         $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
         $callbacks = @($buttons.callback_data)
 
-        $buttons.Count | Should -BeLessThan 100
-        $callbacks | Should -Contain 'usr:toggle:1010'
+        # One row per person now, so ten people are ten rows and not fifty:
+        # ten names, three pager buttons and the way back.
+        $buttons.Count | Should -BeLessOrEqual 14
+        $callbacks | Should -Contain 'usr:card:1010:1'
         $callbacks | Should -Contain 'userspage:0'
         $callbacks | Should -Contain 'userspage:2'
+        # And the actions live on that person's card, where a press cannot
+        # land on somebody else.
+        @((Get-UserCardKeyboard -TargetUserId 1010 -ViewerUserId 9999 -Page 1).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) |
+            Should -Contain 'usr:toggle:1010'
     }
 
     It 'keeps two hundred pending access requests bounded and sorted by id' {

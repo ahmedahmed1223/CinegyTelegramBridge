@@ -136,8 +136,10 @@ Describe 'Choosing the protected templates instead of typing them' {
         Show-SettingChoices -Name 'AdminOnlyTemplateKeys' -ChatId 100 -UserId 101
 
         Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+        # <setting>:<index>:<page> - the page rides along so a tick comes
+        # back to the page it was on.
         Should -Invoke Send-TelegramMessage -ParameterFilter {
-            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfgpick:AdminOnlyTemplateKeys:0'
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfgpick:AdminOnlyTemplateKeys:0:0'
         }
     }
 
@@ -765,5 +767,35 @@ Describe 'Unknown group chats' {
         Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Response = $null; Error = 'boom'; Attempts = 1 } }
         Exit-UnknownGroupChat -Chat ([pscustomobject]@{ id = -1004; type = 'group'; title = 'Broken' }) | Should -BeFalse
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}
+
+Describe 'A permission list longer than one message' {
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue '' -Force
+        Mock Send-TelegramMessage { $true }
+        # A hundred templates drew a hundred rows into one message, which
+        # Telegram will not send: the screen stopped opening on exactly the
+        # installations big enough to need it.
+        Mock Get-SettingPickItems { @(0..99 | ForEach-Object { @{ Value = "T$_"; Label = "T$_" } }) }
+    }
+
+    It 'pages instead of drawing every template at once' {
+        $rows = @((Get-SettingPickKeyboard -Name 'AdminOnlyTemplateKeys').inline_keyboard)
+        # Twenty items, two to a row, plus the pager and the done button.
+        $rows.Count | Should -BeLessOrEqual 12
+        @($rows | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) |
+            Should -Contain 'cfgpickpage:AdminOnlyTemplateKeys:1'
+    }
+
+    It 'addresses items by their absolute position, not their position on the page' {
+        $callbacks = @((Get-SettingPickKeyboard -Name 'AdminOnlyTemplateKeys' -Page 2).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Contain 'cfgpick:AdminOnlyTemplateKeys:40:2'
+        $callbacks | Should -Not -Contain 'cfgpick:AdminOnlyTemplateKeys:0:2'
+    }
+
+    It 'says which page it is on' {
+        Get-SettingPickText -Name 'AdminOnlyTemplateKeys' -Page 1 | Should -Match 'صفحة 2 من 5'
     }
 }

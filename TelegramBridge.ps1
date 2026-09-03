@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.50.0'
+$script:BridgeVersion = '7.51.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -277,6 +277,7 @@ $script:DefaultSettings = [ordered]@{
     RelayMaxRestarts           = 20
     RelayWatchdogSeconds       = 20
     CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
+    DiscoverExternalLayers     = $true   # and adopt layers started outside the bridge, so the menu shows them
     CinegyStateStaleSeconds    = 45      # age after which the last successful state sample is stale
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
@@ -375,6 +376,7 @@ $script:SettingDisplayMetadata = @{
     RelayMaxRestarts = @{ Unit = 'محاولة'; Description = 'الحد الأقصى لمحاولات إعادة تشغيل البث' }
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
     CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
+    DiscoverExternalLayers = @{ Unit = ''; Description = 'تبنّي الطبقات التي شُغّلت من خارج الجسر أثناء الفحص الدوري، فتظهر في القائمة ويمكن إخفاؤها. أطفئه ليقتصر الفحص على ما أرسله الجسر بنفسه' }
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     CinegyFrameLossTolerance = @{ Unit = 'إطار'; Description = 'الإطارات المفقودة المسموح بها في الدقيقة قبل اعتبار القناة غير سليمة' }
@@ -1046,7 +1048,7 @@ foreach ($entry in @(
                 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
                 'OutputMonitorFailureAlertThreshold', 'OutputBlackLuminance',
                 'OutputBlackConfirmSeconds', 'NotifyOperatorsOnBlackOutput',
-                'CinegyStateCheckSeconds', 'CinegyStateStaleSeconds',
+                'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
                 'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds',
                 'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent',
                 'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance',
@@ -1170,6 +1172,7 @@ $script:SettingNavigationLabels = @{
     CinegyReadErrorRateTolerance = 'نسبة أخطاء القراءة'
     CinegyStateBackoffMaxSeconds = 'أقصى تباعد عند التعذّر'
     CinegyStateCheckSeconds = 'فاصل فحص الطبقات'
+    DiscoverExternalLayers = 'تبنّي الطبقات الخارجية'
     ConfigBackupKeepFiles = 'نسخ الإعدادات المحفوظة'
     AskRequesterName = 'سؤال طالب الوصول عن اسمه'
     ConfirmLayerRemoval = 'تأكيد قبل الإخفاء'

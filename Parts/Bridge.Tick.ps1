@@ -1017,8 +1017,15 @@ function Update-CinegyStateWatchdog {
     if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt (Get-CinegyStateCheckInterval)) { return }
     $script:RuntimeState.Monitoring.LastCinegyStateCheck = $now
 
-    $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' `
-        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    # With no dashboard and no -DiscoverExternal this verified only the layers
+    # the bridge had put up itself, so a graphic somebody started in Cinegy
+    # after startup - the news strip, most often - never appeared in the menu
+    # and could not be hidden from it. Startup discovered such layers and the
+    # status screen discovered them; nothing in between did.
+    $discover = [bool](Get-Setting 'DiscoverExternalLayers')
+    $layerStatuses = if ($discover) { @(Get-CinegyLayerDashboard) } else { @() }
+    $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' -LayerStatuses $layerStatuses `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal:$discover
 
     # A layer that could not be verified means the engine did not answer. With
     # nothing tracked there is no request to fail, which counts as reachable.

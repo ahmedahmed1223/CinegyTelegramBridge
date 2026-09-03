@@ -673,8 +673,20 @@ function Invoke-CallbackQuery {
                 # serves all four permission lists.
                 $parts = ([string](Get-CallbackArg $data 'cfgpick:')) -split ':'
                 $pick = 0
+                $pickPage = 0
+                if ($parts.Count -ge 3) { [int]::TryParse($parts[2], [ref]$pickPage) | Out-Null }
                 if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$pick)) {
-                    Switch-SettingPick -Name ([string]$parts[0]) -Index $pick -ChatId $chatId -UserId $userId
+                    Switch-SettingPick -Name ([string]$parts[0]) -Index $pick -ChatId $chatId -UserId $userId -Page ([math]::Max(0, $pickPage))
+                }
+            }
+            break
+        }
+        'cfgpickpage:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $parts = ([string](Get-CallbackArg $data 'cfgpickpage:')) -split ':'
+                $pickPage = 0
+                if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$pickPage) -and $pickPage -ge 0) {
+                    Show-SettingPicker -Name ([string]$parts[0]) -ChatId $chatId -UserId $userId -Page $pickPage
                 }
             }
             break
@@ -785,6 +797,20 @@ function Invoke-CallbackQuery {
             if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
                 [int]::TryParse((Get-CallbackArg $data 'userspage:'), [ref]$page) -and $page -ge 0) {
                 Show-UsersAdminScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
+        'usr:card:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                # <userId>:<page> - the page rides along so the card's back
+                # button returns to the page the roster was on.
+                $parts = ([string](Get-CallbackArg $data 'usr:card:')) -split ':'
+                $cardUserId = 0L
+                $cardPage = 0
+                if ($parts.Count -ge 2) { [int]::TryParse($parts[1], [ref]$cardPage) | Out-Null }
+                if ([long]::TryParse([string]$parts[0], [ref]$cardUserId) -and $cardUserId -gt 0) {
+                    Show-UserCardScreen -TargetUserId $cardUserId -ChatId $chatId -UserId $userId -Page ([math]::Max(0, $cardPage))
+                }
             }
             break
         }

@@ -1270,7 +1270,13 @@ function Start-MojazLaterPrompt {
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_start_at'; UserId = $UserId; BulletinId = [string]$bulletin.Id }
-    Send-TelegramMessage -ChatId $ChatId -Text "🕒 متى يبدأ «$([string]$bulletin.Name)»؟`nمثل: +30 (بعد 30 دقيقة) · بعد 90 · 21:45 · غدًا 07:00" -ReplyMarkup (Get-CancelKeyboard)
+    # The same picker the template scheduling offers - the offsets that cover
+    # most cues and a calendar for the rest - rather than a second way of
+    # asking the same question. Typing still works; the buttons are another
+    # way in, not a replacement.
+    Send-TelegramMessage -ChatId $ChatId `
+        -Text "🕒 متى يبدأ «$([string]$bulletin.Name)»؟`nاختر من الأزرار، أو اكتب: +30 · بعد 90 · 21:45 · غدًا 07:00" `
+        -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
 }
 
 function Complete-MojazLater {
@@ -1284,17 +1290,26 @@ function Complete-MojazLater {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string](Get-JsonProp $moment 'Error'))" -ReplyMarkup (Get-CancelKeyboard)
         return
     }
+    Complete-MojazLaterAt -ChatId $ChatId -ScheduledAt ([datetimeoffset]$moment.ScheduledAt) | Out-Null
+}
+
+function Complete-MojazLaterAt {
+    <# Where a chosen moment becomes an appointment, whether it was typed or
+       picked off the calendar. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][datetimeoffset]$ScheduledAt)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'mojaz_start_at') { return $false }
     $userId = [long]$state.UserId
     $bulletinId = [string](Get-JsonProp $state 'BulletinId')
-    $scheduledAt = [datetimeoffset]$moment.ScheduledAt
-    if (-not (Add-MojazSchedule -BulletinId $bulletinId -ScheduledAt $scheduledAt -ChatId $ChatId -UserId $userId)) {
+    if (-not (Add-MojazSchedule -BulletinId $bulletinId -ScheduledAt $ScheduledAt -ChatId $ChatId -UserId $userId)) {
         Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الموعد. لم يتغيّر شيء.' -ReplyMarkup (Get-CancelKeyboard)
-        return
+        return $false
     }
     Clear-PendingState -ChatId $ChatId
-    Write-BridgeLog "Mojaz playback scheduled for $($scheduledAt.ToString('yyyy-MM-dd HH:mm')) by $userId"
-    Add-AuditEntry "🕒 موعد موجز $($scheduledAt.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+    Write-BridgeLog "Mojaz playback scheduled for $($ScheduledAt.ToString('yyyy-MM-dd HH:mm')) by $userId"
+    Add-AuditEntry "🕒 موعد موجز $($ScheduledAt.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
     Show-MojazScreen -ChatId $ChatId -UserId $userId
+    return $true
 }
 
 function Get-MojazSchedulesText {

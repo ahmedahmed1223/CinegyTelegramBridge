@@ -1425,3 +1425,58 @@ Describe 'The strip stands down for the bulletin and comes back after it' {
         $script:MojazTickerReturn.At | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'Booking a bulletin the way the templates are booked' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Get-MojazSceneTiming { $null }
+        $script:bulletin = New-TestMojazLibrary -Rows @((New-TestMojazRow -Id 'r_1' -Title 'أ'))
+    }
+    AfterAll { $script:MojazSchedules = @(); $script:MojazPlayback = $null }
+
+    It 'offers the same picker the template scheduling offers' {
+        # Not a second way of asking the same question: the offsets and the
+        # calendar come from one keyboard, so both flows stay in step.
+        Start-MojazLaterPrompt -ChatId 100 -UserId 101
+
+        Should -Invoke Send-TelegramMessage -ParameterFilter {
+            $callbacks = @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+            $callbacks -contains 'schrel:30' -and @($callbacks | Where-Object { $_ -like 'schcal:*' }).Count -eq 1
+        }
+    }
+
+    It 'books the moment the picker chose' {
+        Start-MojazLaterPrompt -ChatId 100 -UserId 101
+        $state = Get-PendingState -ChatId 100
+        $moment = [datetimeoffset]::Now.AddMinutes(30)
+
+        Set-BridgeChosenMoment -ChatId 100 -State $state -ScheduledAt $moment -TimeZoneId 'Asia/Baghdad'
+
+        @($script:MojazSchedules).Count | Should -Be 1
+        [string]$script:MojazSchedules[0].BulletinId | Should -Be ([string]$script:bulletin.Id)
+        # The flow is finished, not left waiting for a typed time as well.
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+    }
+
+    It 'still books a time that was typed rather than picked' {
+        Start-MojazLaterPrompt -ChatId 100 -UserId 101
+
+        Complete-MojazLater -ChatId 100 -Value '+30'
+
+        @($script:MojazSchedules).Count | Should -Be 1
+    }
+
+    It 'sends a picked moment for a template to the template flow, not this one' {
+        Mock Set-ScheduleMoment {}
+        $state = @{ Mode = 'schedule_time'; UserId = 101 }
+
+        Set-BridgeChosenMoment -ChatId 100 -State $state -ScheduledAt ([datetimeoffset]::Now.AddMinutes(30)) -TimeZoneId 'Asia/Baghdad'
+
+        Should -Invoke Set-ScheduleMoment -Times 1 -Exactly
+        @($script:MojazSchedules).Count | Should -Be 0
+    }
+}

@@ -890,14 +890,14 @@ function Invoke-CallbackQuery {
         # leaving three stale grids behind.
         'schcal:*' {
             $state = Get-PendingState -ChatId $chatId
-            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
                 -Text '📅 اختر اليوم:' -ReplyMarkup (Get-ScheduleCalendarKeyboard -Month (Get-CallbackArg $data 'schcal:')) | Out-Null
             break
         }
         'schday:*' {
             $state = Get-PendingState -ChatId $chatId
-            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $day = [string](Get-CallbackArg $data 'schday:')
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
                 -Text "🕒 $day — اختر الساعة:" -ReplyMarkup (Get-ScheduleHourKeyboard -Date $day) | Out-Null
@@ -905,7 +905,7 @@ function Invoke-CallbackQuery {
         }
         'schhour:*' {
             $state = Get-PendingState -ChatId $chatId
-            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $parts = ([string](Get-CallbackArg $data 'schhour:')) -split ':'
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
                 -Text "🕒 $($parts[0]) $($parts[1]) — اختر الدقيقة:" -ReplyMarkup (Get-ScheduleMinuteKeyboard -Date $parts[0] -Hour ([int]$parts[1])) | Out-Null
@@ -913,7 +913,7 @@ function Invoke-CallbackQuery {
         }
         'schmin:*' {
             $state = Get-PendingState -ChatId $chatId
-            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $parts = ([string](Get-CallbackArg $data 'schmin:')) -split ':'
             # Through the same parser the typed path uses, so the picker
             # cannot produce a moment the parser would have refused - a past
@@ -923,18 +923,18 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text "❌ $($parsed.Error)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
                 break
             }
-            Set-ScheduleMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
+            Set-BridgeChosenMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
             break
         }
         'schrel:*' {
             $state = Get-PendingState -ChatId $chatId
-            if (-not $state -or [string]$state.Mode -ne 'schedule_time') { break }
+            if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $parsed = ConvertFrom-OperatorScheduleTime -Text "+$(Get-CallbackArg $data 'schrel:')"
             if (-not $parsed.Success) {
                 Send-TelegramMessage -ChatId $chatId -Text "❌ $($parsed.Error)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
                 break
             }
-            Set-ScheduleMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
+            Set-BridgeChosenMoment -ChatId $chatId -State $state -ScheduledAt $parsed.ScheduledAt -TimeZoneId $parsed.TimeZoneId
             break
         }
         'schtpl:*' {

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.41.0
+
+"Start later" on a bulletin now asks the way template scheduling asks: the
++15/+30/+60 buttons and a calendar down to day, hour and minute. Typing still
+works. It is the same keyboard and the same parser the templates use, so the
+picker cannot produce a moment the parser would refuse and the two flows
+cannot drift; only where the chosen moment goes afterwards differs.
+
 ## Version 7.40.0
 
 The in-chat manual gets a chapter for the bulletin - open to every operator,

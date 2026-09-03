@@ -134,6 +134,23 @@ function Get-ScheduleTimePromptKeyboard {
         ) }
 }
 
+function Set-BridgeChosenMoment {
+    <# The day/hour/minute picker and the "+15" buttons are shared by the
+       template scheduling and the bulletin's "start later", because asking
+       for a moment twice in two different ways is how two answers to the same
+       question drift apart. Only where the answer goes differs. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
+        # Demanded here because the template branch demands it: a dispatcher
+        # that accepts less than its callee only moves the failure later.
+        [Parameter(Mandatory)][string]$TimeZoneId)
+    if ([string](Get-JsonProp $State 'Mode') -eq 'mojaz_start_at') {
+        Complete-MojazLaterAt -ChatId $ChatId -ScheduledAt $ScheduledAt | Out-Null
+        return
+    }
+    Set-ScheduleMoment -ChatId $ChatId -State $State -ScheduledAt $ScheduledAt -TimeZoneId $TimeZoneId
+}
+
 function Test-ScheduleClockParts {
     <# 25:00 and 21:70 parse as digits and then silently become tomorrow or
        the next hour if handed to AddHours/AddMinutes, so they are refused

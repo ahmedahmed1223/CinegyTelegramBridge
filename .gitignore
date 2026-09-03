@@ -30,3 +30,7 @@ artifacts/
 *.stackdump
 bridge-err.log
 bridge-run.log
+
+# BridgeManager (.NET) build output - published exe goes to dist/ instead.
+Manager/BridgeManager/bin/
+Manager/BridgeManager/obj/

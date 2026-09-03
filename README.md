@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.49.0
+
+A preview button on the bulletin screen shows every row's title and story in
+full, with the picture each will really display once inheritance is resolved.
+The table keeps trimming to 24 and 60 characters, which is what makes it four
+columns that fit a phone - but it was also the only place the copy appeared,
+so an editor could not read back what they had written. The preview pages
+itself, since a bulletin long enough to need checking is longer than one
+Telegram message.
+
 ## Version 7.48.0
 
 The row dwell joins the other two timings in frames, so one unit describes the
@@ -833,6 +843,7 @@ host that can reach the engine's control port.
 | `templates.example.json` | Named title templates (friendly key → `.cintitle` path, GFX layer, field list, optional `order` and `presets`). Copy to `templates.json` and edit. |
 | `scripts/Install-BridgeTask.ps1` / `scripts/Uninstall-BridgeTask.ps1` | Registers/removes a Windows Scheduled Task so the bridge auto-starts at boot and auto-restarts on crash — see "Make it run like a service" below. |
 | `scripts/Install-BridgeService-NSSM.ps1` / `scripts/Uninstall-BridgeService-NSSM.ps1` | Alternative to the above: registers/removes a real Windows Service via [NSSM](https://nssm.cc/), with its own stdout/stderr logs. |
+| `Manager/BridgeManager/` / `scripts/Build-BridgeManager.ps1` | A third alternative: a WinForms `BridgeManager.exe` with Start/Stop/Restart, a live log view, and a settings editor — for running the bridge without installing a service or opening PowerShell. See "A desktop manager app (BridgeManager.exe)" below. |
 | `Run-Checks.ps1` | Required-file and JSON validation + syntax check + PSScriptAnalyzer + Pester in one command. Run it after every change; it touches nothing live. |
 | `Tests\` | Pester suites, one file per subject (`Bridge.Templates`, `Bridge.OnAir`, `Bridge.Admin`, `Bridge.Cinegy`, `Bridge.NewsScreens`, `Bridge.SettingsScreens`, `Bridge.Users`, `Bridge.Schedule`, plus `Bridge.Tests.ps1` for the pure helpers). The shared bridge load lives in `Tests\Bridge.TestContext.ps1` and is dot-sourced by each of them. |
 | `docs/archive/` | Archived technical reviews and historical implementation logs retained for traceability. |
@@ -1075,6 +1086,35 @@ process stdout/stderr to `logs\service-stdout.log` / `logs\service-stderr.log`
 Only run **one** of the two options (Scheduled Task *or* NSSM service) at a
 time — running both would start two competing instances of the bridge
 polling the same bot token.
+
+#### Alternative: a desktop manager app (BridgeManager.exe)
+
+If you'd rather not install a service or open PowerShell at all, build the
+included WinForms supervisor once (requires the
+[.NET 9 SDK](https://dotnet.microsoft.com/download) on the build machine
+only — the published exe is self-contained and needs nothing installed to
+run it):
+
+```powershell
+.\scripts\Build-BridgeManager.ps1
+```
+
+This produces `dist\BridgeManager\BridgeManager.exe`. Run it, point it at
+`TelegramBridge.ps1` the first time it asks, and it gives you:
+
+- **Start / Stop / Restart** buttons, plus a tray icon so it keeps
+  supervising while minimized.
+- **Auto-restart on crash** (checkbox, on by default) — belt-and-suspenders
+  if you're not also running it as a service/task.
+- A **live view of everything the bridge prints** (the same lines that go to
+  `logs\bridge.log`), scrolling in the window as they happen.
+- An **⚙ الإعدادات** button to edit the bot token, Air Pro engine
+  address/channel, and the chat/user id whitelists — the only `config.json`
+  fields *not* already editable live from the bot's own in-chat Settings
+  screen.
+
+Do not run this alongside the Scheduled Task or NSSM service — pick one
+supervisor, not two.
 
 ## Chat controls: buttons, not typed commands (Arabic, primary)
 

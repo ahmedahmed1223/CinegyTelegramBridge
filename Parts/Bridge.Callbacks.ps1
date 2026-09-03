@@ -313,6 +313,7 @@ function Invoke-CallbackQuery {
         'mojaz:last' { Start-MojazTimingPrompt -Which last -ChatId $chatId -UserId $userId; break }
         'mojaz:later' { Start-MojazLaterPrompt -ChatId $chatId -UserId $userId; break }
         'mojaz:sync' { Switch-MojazSync -ChatId $chatId -UserId $userId; break }
+        'mojaz:preview' { Clear-PendingState -ChatId $chatId; Show-MojazPreviewScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:times' { Clear-PendingState -ChatId $chatId; Show-MojazSchedulesScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:unschedule:*' { Stop-MojazSchedule -ScheduleId (Get-CallbackArg $data 'mojaz:unschedule:') -ChatId $chatId -UserId $userId; break }
         'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }

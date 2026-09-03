@@ -736,12 +736,63 @@ function Get-MojazKeyboard {
         (New-Button '📋 نسخة منه' 'mojaz:copy')
         (New-Button '🗑 حذف الموجز' 'mojaz:drop' -Style danger)
     )
+    if ($rows.Count -gt 0) {
+        # The table is an index, four columns that fit a phone; this is where
+        # the copy can actually be read back before it goes out.
+        $keyboard += , @((New-Button '👁 معاينة النص كاملًا' 'mojaz:preview'))
+    }
     $keyboard += , @(
         (New-Button '🕒 المواعيد' 'mojaz:times')
         (New-Button '🔄 تحديث' 'mojaz:refresh')
         (New-Button '⬅️ الموجزات' 'mojaz:back')
     )
     return @{ inline_keyboard = $keyboard }
+}
+
+function Get-MojazPreviewText {
+    <#
+        Every row in full, for reading rather than scanning.
+
+        The table on the bulletin screen trims a title to 24 characters and a
+        story to 60, which is what makes it a table - four columns that line
+        up on a phone. But it was also the only place the copy appeared, so an
+        editor could not read back what they had written to check it. These
+        are the same rows with nothing cut.
+    #>
+    param($Bulletin)
+    if (-not $Bulletin) { return '' }
+    $rows = @(Get-JsonProp $Bulletin 'Rows')
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>👁 معاينة «$(ConvertTo-TelegramHtmlText -Text ([string]$Bulletin.Name))»</b>")
+    if ($rows.Count -eq 0) {
+        $lines.Add('<i>الجدول فارغ.</i>')
+        return ($lines -join "`n")
+    }
+    $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage (Get-MojazTemplateImage))
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $lines.Add('')
+        $lines.Add("<b>$($i + 1) · $(ConvertTo-TelegramHtmlText -Text (Get-MojazImageLabel -Row $rows[$i] -Index $i))</b>")
+        $lines.Add("📝 <b>$(ConvertTo-TelegramHtmlText -Text ([string]$rows[$i].Title))</b>")
+        $lines.Add("📰 $(ConvertTo-TelegramHtmlText -Text ([string]$rows[$i].Text))")
+        if ($effective.Count -gt $i -and $effective[$i]) {
+            $lines.Add("🖼 $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$i] -Leaf))")
+        }
+    }
+    $lines.Add('')
+    $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText -Bulletin $Bulletin))</i>")
+    return ($lines -join "`n")
+}
+
+function Show-MojazPreviewScreen {
+    <# Paged rather than sent whole: ten rows of four hundred characters is
+       past what Telegram takes in one message, and a bulletin that long is
+       exactly the one worth reading before it goes out. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    Send-TelegramPagedText -ChatId $ChatId -Text (Get-MojazPreviewText -Bulletin $bulletin) -ParseMode HTML `
+        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⬅️ الجدول' 'mojaz:refresh'))) }
 }
 
 function Show-MojazScreen {

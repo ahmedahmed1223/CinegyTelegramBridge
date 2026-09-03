@@ -1585,3 +1585,64 @@ Describe 'Telling the operator without being asked' {
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -match 'يبدأ بعد' }
     }
 }
+
+Describe 'Reading the bulletin back before it goes out' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramPagedText {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplateImage { '.\Mojaz\Pic01.png' }
+        $script:long = 'خبر طويل ' * 40
+        $script:bulletin = New-TestMojazLibrary -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'عنوان طويل جدًّا يتجاوز أربعة وعشرين حرفًا بكثير' -Text $script:long -Image '.\Mojaz\bot\a.jpg')
+            (New-TestMojazRow -Id 'r_2' -Title 'الثاني' -Text 'نص قصير')
+        )
+    }
+
+    It 'cuts nothing, where the table cuts at 24 and 60' {
+        $preview = Get-MojazPreviewText -Bulletin (Get-MojazSelected -ChatId 100)
+
+        $preview | Should -Match 'يتجاوز أربعة وعشرين حرفًا بكثير'
+        $preview | Should -Match ([regex]::Escape($script:long.Trim()))
+        $preview | Should -Not -Match '…'
+    }
+
+    It 'says which picture each row will really show' {
+        $preview = Get-MojazPreviewText -Bulletin (Get-MojazSelected -ChatId 100)
+
+        $preview | Should -Match 'a\.jpg'
+        # The second row inherits, so it shows the first row's picture.
+        @([regex]::Matches($preview, 'a\.jpg')).Count | Should -Be 2
+    }
+
+    It 'is offered from the bulletin screen, and pages itself' {
+        $callbacks = @((Get-MojazKeyboard -Bulletin (Get-MojazSelected -ChatId 100)).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Contain 'mojaz:preview'
+
+        Show-MojazPreviewScreen -ChatId 100 -UserId 101
+
+        # Paged, because ten rows of four hundred characters is past what
+        # Telegram takes in one message.
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' }
+    }
+
+    It 'offers no preview button for an empty table' {
+        New-TestMojazLibrary | Out-Null
+        $callbacks = @((Get-MojazKeyboard -Bulletin (Get-MojazSelected -ChatId 100)).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+
+        $callbacks | Should -Not -Contain 'mojaz:preview'
+    }
+
+    It 'escapes copy that would otherwise break the markup' {
+        $script:MojazLibrary.Bulletins[0].Rows = @((New-TestMojazRow -Title '<b>خطر</b>' -Text 'قوس > وآخر <'))
+
+        $preview = Get-MojazPreviewText -Bulletin (Get-MojazSelected -ChatId 100)
+
+        $preview | Should -Match '&lt;b&gt;خطر'
+        $preview | Should -Not -Match '<b>خطر'
+    }
+}

@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.40.0
+
+The in-chat manual gets a chapter for the bulletin - open to every operator,
+since writing one is the operator's job - covering the library, row editing,
+the three picture modes (including the inherit mode that lets one picture
+serve several rows), the timing and the loop sync, appointments and that they
+play the latest saved rows, and which of the bulletin and the urgent yields.
+The settings chapter now explains the show and hide permissions. Tests assert
+the manual mentions the parts an operator cannot guess from the buttons.
+
 ## Version 7.39.1
 
 The four permission settings were read by the show and hide paths but never

@@ -203,3 +203,40 @@ Describe 'The settings chapter' {
         }
     }
 }
+
+Describe 'The manual covers what the bridge actually grew' {
+    BeforeEach { Mock Test-Admin { $true } }
+
+    It 'gives the bulletin a chapter of its own, open to every operator' {
+        $chapters = @(Get-HelpChapters -ChatId 100 -UserId 202)
+        $chapters.Key | Should -Contain 'mojaz'
+        # Not admin-only: writing a bulletin is the operator's job.
+        @($chapters | Where-Object { $_.Key -eq 'mojaz' })[0].AdminOnly | Should -BeFalse
+    }
+
+    It 'explains the parts an operator cannot guess from the buttons' {
+        $body = (@(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'mojaz' })[0].Body) -join "`n"
+
+        # The three picture modes, and the one that is easy to misread.
+        $body | Should -Match 'صورة خاصة'
+        $body | Should -Match 'يتبع السابق'
+        $body | Should -Match 'صورة القالب'
+        # Why the loop length matters once sync is on.
+        $body | Should -Match 'مزامنة الظهور'
+        # Who yields to whom.
+        $body | Should -Match 'العاجل أولى'
+        # A saved appointment plays the latest rows, not the ones booked with.
+        $body | Should -Match 'آخر نسخة محفوظة'
+    }
+
+    It 'tells administrators how the show and hide permissions read' {
+        $body = (@(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'settings' })[0].Body) -join "`n"
+
+        $body | Should -Match 'قوالب للمشرفين'
+        $body | Should -Match 'طبقات للمالك'
+        # The two rules that are not obvious: empty means everyone, and an
+        # automatic hide is never refused.
+        $body | Should -Match 'فارغٌ يعني للجميع'
+        $body | Should -Match 'الإخفاء الآلي لا يُمنع'
+    }
+}

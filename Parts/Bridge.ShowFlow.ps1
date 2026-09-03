@@ -103,6 +103,12 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.36.0'; Items = @(
+                '🚨 الأولوية للعاجل: خروجه على الهواء يسحب الموجز تلقائيًا، أيًّا كان ما أرسله.'
+                '❓ قبل إرسال العاجل والموجز يعمل: يُسألك «الآن ويخرج الموجز» أم «بعد انتهائه»، ويخرج وحده في الحالتين.'
+                '❓ وقبل تشغيل الموجز والعاجل على الهواء: «بعد خروج العاجل» أم «ابدأ الآن رغمه».'
+                '⏳ الموعد المجدول ينتظر العاجل ولا يُلغى، ويبدأ فور خلوّ الهواء.'
+            ) }
         @{ Version = '7.35.0'; Items = @(
                 '🖼 صورة الصف تُفحص عند الرفع وتُقاس على لوحة القالب نفسها وتُحفظ PNG — سبب أن الصورة لم تكن تظهر على الهواء.'
                 '🚫 ملفٌّ ليس صورة يُرفض برسالة واضحة بدل أن يمرّ ويُخرج صفًّا فارغًا.'
@@ -1280,6 +1286,9 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+    # The urgent outranks the bulletin, whatever put it on air - a button, a
+    # schedule, a rollback. Every SHOW passes here, so the rule is stated once.
+    if ($Key -eq $script:MojazUrgentKey) { Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null }
     $attemptVariables = @{}
     foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
     $script:LastShowAttempts[[string]$UserId] = @{

@@ -1359,14 +1359,22 @@ function Update-MojazScheduleQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     $due = @(Get-MojazDueQueue -Schedules $script:MojazSchedules -Now $Now)
     if ($due.Count -eq 0) { return }
-    if ($script:MojazPlayback) {
+    # Two things hold a due bulletin back: another one already on air, and the
+    # urgent, which outranks it. Neither is a reason to drop the appointment.
+    $blockedByUrgent = Test-MojazUrgentOnAir
+    if ($script:MojazPlayback -or $blockedByUrgent) {
+        $reason = if ($script:MojazPlayback) { 'active_bulletin' } else { 'urgent_on_air' }
         foreach ($entry in $due) {
             if ([string](Get-JsonProp $entry 'Status') -ne 'scheduled') { continue }
             $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$entry.BulletinId)
             $waitingName = if ($bulletin) { [string]$bulletin.Name } else { 'الموجز المجدول' }
-            $activeName = if ([string]$script:MojazPlayback.BulletinName) { [string]$script:MojazPlayback.BulletinName } else { 'الموجز الحالي' }
-            if (Set-MojazScheduleStatus -ScheduleId ([string]$entry.Id) -Status 'queued' -Fields @{ DueAt = $Now.ToString('o'); DelayReason = 'active_bulletin' }) {
-                Send-TelegramMessage -ChatId ([long]$entry.ChatId) -Text "⏳ تأخّر «$waitingName» لأن «$activeName» ما زال على الهواء. سيبدأ بعد انتهائه."
+            $because = if ($script:MojazPlayback) {
+                $activeName = if ([string]$script:MojazPlayback.BulletinName) { [string]$script:MojazPlayback.BulletinName } else { 'الموجز الحالي' }
+                "«$activeName» ما زال على الهواء"
+            }
+            else { 'العاجل على الهواء' }
+            if (Set-MojazScheduleStatus -ScheduleId ([string]$entry.Id) -Status 'queued' -Fields @{ DueAt = $Now.ToString('o'); DelayReason = $reason }) {
+                Send-TelegramMessage -ChatId ([long]$entry.ChatId) -Text "⏳ تأخّر «$waitingName» لأن $because. سيبدأ بعد انتهائه."
             }
         }
         return
@@ -1375,7 +1383,9 @@ function Update-MojazScheduleQueue {
     $scheduleId = [string]$next.Id
     if (-not (Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'running' -Fields @{ StartedAt = $Now.ToString('o') })) { return }
     $script:MojazSelections[[string]$next.ChatId] = [string]$next.BulletinId
-    if (-not (Start-MojazPlayback -ChatId ([long]$next.ChatId) -UserId ([long]$next.CreatedBy) -ScheduleId $scheduleId)) {
+    # -Force: the urgent check above has already been made, and nobody is
+    # watching a scheduled start to answer a question.
+    if (-not (Start-MojazPlayback -ChatId ([long]$next.ChatId) -UserId ([long]$next.CreatedBy) -ScheduleId $scheduleId -Force)) {
         Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'failed' -Fields @{ LastError = 'playback_start_failed' } | Out-Null
     }
 }
@@ -1394,7 +1404,7 @@ function Start-MojazPlayback {
         maintenance mode, the layer policy, the live Cinegy check or the audit
         trail - a bulletin is still a graphic going on air.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '')
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:MojazPlayback) {
         Send-TelegramMessage -ChatId $ChatId -Text 'الموجز يعمل بالفعل.'
@@ -1403,6 +1413,16 @@ function Start-MojazPlayback {
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) {
         Send-TelegramMessage -ChatId $ChatId -Text 'الموجز غير موجود.'
+        return $false
+    }
+    # The urgent outranks the bulletin, so starting one underneath it is a
+    # decision the operator makes rather than one this screen makes for them.
+    # A scheduled start never reaches here while the urgent is up: the queue
+    # holds it, and passes -Force once the air is clear.
+    if (-not $Force -and (Test-MojazUrgentOnAir)) {
+        Send-TelegramMessage -ChatId $ChatId `
+            -Text "🚨 العاجل على الهواء الآن.`nمتى يبدأ «$([string]$bulletin.Name)»؟" `
+            -ReplyMarkup (Get-MojazUrgentWaitKeyboard)
         return $false
     }
     $schedule = if ($ScheduleId) { [pscustomobject]@{ Id = $ScheduleId } } else { $null }
@@ -1471,6 +1491,8 @@ function Stop-MojazPlayback {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
     if (-not $Quiet -and $ChatId -gt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
+    # An urgent that agreed to wait for this bulletin goes out now.
+    Update-MojazPendingUrgent | Out-Null
     return $true
 }
 
@@ -1478,6 +1500,135 @@ function Get-MojazElapsedSeconds {
     <# How long this run has been going, by a clock that cannot step. #>
     if (-not $script:MojazPlayback) { return 0.0 }
     return ([double]$script:MojazPlayback.Clock.Elapsed.TotalSeconds + [double]$script:MojazPlayback.ClockOffset)
+}
+
+function Get-MojazUrgentTemplate {
+    <# The template that outranks the bulletin. Named here for the same reason
+       the bulletin's own key is: this is that newsroom's arrangement, and a
+       rename in the registry is a change here. #>
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($script:MojazUrgentKey)) { return $null }
+    return $store.Map[$script:MojazUrgentKey]
+}
+
+function Test-MojazUrgentOnAir {
+    $template = Get-MojazUrgentTemplate
+    if (-not $template) { return $false }
+    return $script:OnAir.ContainsKey([int]$template.Layer)
+}
+
+function Clear-MojazForUrgent {
+    <#
+        The urgent wins, always.
+
+        Anything that puts the urgent on air takes the bulletin off first -
+        including a scheduled or automated one, which is why this lives in the
+        show pipeline and not behind a button. The operator is told, not
+        asked: the moment an urgent goes out is the wrong moment for a
+        question. The asking happens earlier, before the send.
+    #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if (-not $script:MojazPlayback) { return $false }
+    $name = [string]$script:MojazPlayback.BulletinName
+    Stop-MojazPlayback -UserId $UserId -Quiet | Out-Null
+    Write-BridgeLog 'Mojaz pulled: the urgent template takes the air.'
+    Add-AuditEntry "🚨 سُحب الموجز «$name» لصالح العاجل - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    if ($ChatId -gt 0) { Send-TelegramMessage -ChatId $ChatId -Text "🚨 خرج «$name» ليفسح المجال للعاجل." }
+    return $true
+}
+
+function Set-MojazPendingUrgent {
+    <# An urgent held back until the bulletin finishes. Held in memory only:
+       it is a wait of a minute or two, and a bridge that restarts in the
+       middle of one has no bulletin left to wait for. #>
+    param([Parameter(Mandatory)][string]$Key, [hashtable]$Variables = @{},
+        [int]$AutoHideSeconds = 0, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    $script:MojazPendingUrgent = @{
+        Key = $Key; Variables = $Variables; AutoHideSeconds = $AutoHideSeconds
+        ChatId = $ChatId; UserId = $UserId
+    }
+}
+
+function Update-MojazPendingUrgent {
+    <# Called where a run ends, however it ends. #>
+    if (-not $script:MojazPendingUrgent) { return $false }
+    $pending = $script:MojazPendingUrgent
+    $script:MojazPendingUrgent = $null
+    Send-TelegramMessage -ChatId ([long]$pending.ChatId) -Text '▶️ انتهى الموجز — يُرسل العاجل الآن.'
+    Invoke-ShowTemplateResult -Key ([string]$pending.Key) -Variables ([hashtable]$pending.Variables) `
+        -ChatId ([long]$pending.ChatId) -UserId ([long]$pending.UserId) -AutoHideSeconds ([int]$pending.AutoHideSeconds) | Out-Null
+    return $true
+}
+
+function Get-MojazUrgentConflictKeyboard {
+    <# Asked before the urgent goes out, while a bulletin is running. "Now" is
+       first because that is what an urgent usually means. #>
+    return @{ inline_keyboard = @(
+            , @( (New-Button '🚨 الآن — يخرج الموجز' 'urgent:now' -Style danger) )
+            , @( (New-Button '⏳ بعد انتهاء الموجز' 'urgent:after') )
+            , @( (New-Button '❌ إلغاء' 'cancel') )
+        ) }
+}
+
+function Get-MojazUrgentWaitKeyboard {
+    <# Asked before the bulletin starts, while the urgent is on air. Waiting
+       is first here: the bulletin is the thing that yields. #>
+    return @{ inline_keyboard = @(
+            , @( (New-Button '⏳ بعد خروج العاجل' 'mojaz:playafter' -Style success) )
+            , @( (New-Button '▶️ ابدأ الآن رغم العاجل' 'mojaz:playnow') )
+            , @( (New-Button '❌ إلغاء' 'mojaz:refresh') )
+        ) }
+}
+
+function Start-MojazAfterUrgent {
+    <#
+        "Start once the urgent is gone", booked as an ordinary appointment due
+        now. The queue already knows how to hold a due bulletin while the air
+        is busy and start it the moment it clears, so this needs no waiting
+        machinery of its own - and it survives a restart, and can be cancelled
+        from the appointments screen like any other.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return $false }
+    if (-not (Add-MojazSchedule -BulletinId ([string]$bulletin.Id) -ScheduledAt ([datetimeoffset]::Now) -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حجز الموعد. لم يتغيّر شيء.'
+        return $false
+    }
+    Add-AuditEntry "⏳ تأجيل «$([string]$bulletin.Name)» إلى ما بعد العاجل - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Send-TelegramMessage -ChatId $ChatId -Text "⏳ سيبدأ «$([string]$bulletin.Name)» فور خروج العاجل."
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+    return $true
+}
+
+function Send-MojazPendingUrgentNow {
+    <# The urgent goes out at once; the pipeline pulls the bulletin off as it
+       passes through. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not $script:MojazPendingUrgent) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد عاجل بانتظار الإرسال.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    $pending = $script:MojazPendingUrgent
+    $script:MojazPendingUrgent = $null
+    Invoke-ShowTemplateResult -Key ([string]$pending.Key) -Variables ([hashtable]$pending.Variables) `
+        -ChatId $ChatId -UserId $UserId -AutoHideSeconds ([int]$pending.AutoHideSeconds) | Out-Null
+    return $true
+}
+
+function Confirm-MojazPendingUrgent {
+    <# It waits. The bulletin's own ending sends it. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not $script:MojazPendingUrgent) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد عاجل بانتظار الإرسال.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    Add-AuditEntry "⏳ تأجيل العاجل إلى ما بعد الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Send-TelegramMessage -ChatId $ChatId -Text '⏳ ينتظر العاجل انتهاء الموجز، ثم يخرج وحده.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $true
 }
 
 function Test-MojazOnAirLayer {

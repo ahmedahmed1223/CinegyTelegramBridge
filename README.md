@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.36.0
+
+The urgent template outranks the bulletin. Anything that puts it on air - a
+button, a schedule, a rollback - pulls a running bulletin off first, stated
+once inside the show pipeline that every show passes through, so an automated
+urgent never waits on a question.
+
+The asking happens earlier, at the confirmation, where there is still time for
+it: send the urgent now and lose the bulletin, or hold it until the bulletin
+ends - held ones go out by themselves the moment it does. In the other
+direction, starting a bulletin while the urgent is up offers to wait for it,
+which books an ordinary appointment due now, so the queue that already holds
+work while the air is busy handles the waiting, survives a restart, and can be
+cancelled from the appointments screen.
+
 ## Version 7.35.0
 
 An uploaded picture is now checked and sized before it reaches the folder

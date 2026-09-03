@@ -316,6 +316,10 @@ function Invoke-CallbackQuery {
         'mojaz:times' { Clear-PendingState -ChatId $chatId; Show-MojazSchedulesScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:unschedule:*' { Stop-MojazSchedule -ScheduleId (Get-CallbackArg $data 'mojaz:unschedule:') -ChatId $chatId -UserId $userId; break }
         'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:playnow' { Start-MojazPlayback -ChatId $chatId -UserId $userId -Force | Out-Null; break }
+        'mojaz:playafter' { Start-MojazAfterUrgent -ChatId $chatId -UserId $userId | Out-Null; break }
+        'urgent:now' { Send-MojazPendingUrgentNow -ChatId $chatId -UserId $userId | Out-Null; break }
+        'urgent:after' { Confirm-MojazPendingUrgent -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:stop' { Stop-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
@@ -358,6 +362,16 @@ function Invoke-CallbackQuery {
             $variables = $state.Values
             $autoHideSeconds = [int]$state.AutoHideSeconds
             Clear-PendingState -ChatId $chatId
+            # Sending the urgent over a running bulletin is a choice, and this
+            # is the last moment it can be offered. The pipeline itself never
+            # asks - an automated urgent must not wait on a question.
+            if ($key -eq $script:MojazUrgentKey -and $script:MojazPlayback) {
+                Set-MojazPendingUrgent -Key $key -Variables $variables -AutoHideSeconds $autoHideSeconds -ChatId $chatId -UserId $userId
+                Send-TelegramMessage -ChatId $chatId `
+                    -Text "📑 «$([string]$script:MojazPlayback.BulletinName)» على الهواء الآن.`nمتى يخرج العاجل؟" `
+                    -ReplyMarkup (Get-MojazUrgentConflictKeyboard)
+                break
+            }
             Invoke-ShowTemplateResult -Key $key -Variables $variables -ChatId $chatId -UserId $userId -AutoHideSeconds $autoHideSeconds
             break
         }

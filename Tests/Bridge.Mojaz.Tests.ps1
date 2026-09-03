@@ -1213,3 +1213,104 @@ Describe 'Checking and sizing an uploaded picture' {
         Test-Path -LiteralPath $destination | Should -BeFalse
     }
 }
+
+Describe 'The urgent and the bulletin, and which one yields' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        Mock Get-MojazUrgentTemplate { @{ Key = 'Urgent'; Path = 'D:\cingy cg\urgent.cintitle'; Layer = 7 } }
+        New-TestMojazLibrary -DelaySeconds 4 -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'أ')
+            (New-TestMojazRow -Id 'r_2' -Title 'ب')
+        ) | Out-Null
+        $script:OnAir = @{}
+        $script:MojazPendingUrgent = $null
+    }
+    AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{}; $script:MojazPendingUrgent = $null }
+
+    It 'asks instead of starting a bulletin under a live urgent' {
+        $script:OnAir = @{ 7 = [pscustomobject]@{ Key = 'Urgent' } }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -ParameterFilter {
+            $Text -match 'العاجل على الهواء' -and
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'mojaz:playafter'
+        }
+    }
+
+    It 'starts anyway when the operator says so' {
+        $script:OnAir = @{ 7 = [pscustomobject]@{ Key = 'Urgent' } }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Should -BeTrue
+    }
+
+    It 'books a bulletin that agreed to wait, and holds it while the urgent is up' {
+        $script:OnAir = @{ 7 = [pscustomobject]@{ Key = 'Urgent' } }
+
+        Start-MojazAfterUrgent -ChatId 100 -UserId 101 | Should -BeTrue
+        @($script:MojazSchedules).Count | Should -Be 1
+
+        # Due now, but the urgent still holds the air.
+        Update-MojazScheduleQueue -Now ([datetimeoffset]::Now.AddMinutes(1))
+        [string]$script:MojazSchedules[0].Status | Should -Be 'queued'
+        [string]$script:MojazSchedules[0].DelayReason | Should -Be 'urgent_on_air'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+        # The urgent leaves; nobody has to press anything.
+        $script:OnAir = @{}
+        Update-MojazScheduleQueue -Now ([datetimeoffset]::Now.AddMinutes(2))
+
+        [string]$script:MojazSchedules[0].Status | Should -Be 'running'
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+    }
+
+    It 'pulls a running bulletin off when the urgent goes out' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+
+        Clear-MojazForUrgent -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+    }
+
+    It 'sends a held urgent the moment the bulletin ends' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+        Set-MojazPendingUrgent -Key 'Urgent' -Variables @{ 'text' = 'خبر عاجل' } -ChatId 100 -UserId 101
+
+        Stop-MojazPlayback -ChatId 100 -UserId 101 -Quiet | Out-Null
+
+        $script:MojazPendingUrgent | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'Urgent' }
+    }
+
+    It 'sends the held urgent at once when the operator will not wait' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+        Set-MojazPendingUrgent -Key 'Urgent' -Variables @{ 'text' = 'خبر' } -ChatId 100 -UserId 101
+
+        Send-MojazPendingUrgentNow -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:MojazPendingUrgent | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'Urgent' }
+    }
+
+    It 'leaves the bulletin alone when something other than the urgent goes out' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Clear-MojazForUrgent -ChatId 100 -UserId 101 | Out-Null
+        $script:MojazPlayback | Should -BeNullOrEmpty
+
+        # A second call with nothing running is a no-op, not an error.
+        Clear-MojazForUrgent -ChatId 100 -UserId 101 | Should -BeFalse
+    }
+}

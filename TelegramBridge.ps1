@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.35.0'
+$script:BridgeVersion = '7.36.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -810,6 +810,11 @@ $script:PagedText = @{}
 # The Mojaz bulletin: the saved table, the dwell it was saved with, and
 # the run in progress ($null when nothing is playing).
 $script:MojazTemplateKey = 'Mojaz'
+# The template that outranks the bulletin: putting it on air pulls a running
+# bulletin off, and a bulletin will not start underneath it unasked.
+$script:MojazUrgentKey = 'Urgent'
+# An urgent that agreed to wait for the running bulletin to finish.
+$script:MojazPendingUrgent = $null
 # Every saved bulletin, and the appointments that will play them. Rows live
 # here and nowhere else: an edit is a write to the library, so what a restart
 # reads back is exactly what the screen last showed.

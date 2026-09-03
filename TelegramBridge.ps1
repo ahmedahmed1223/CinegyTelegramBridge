@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.44.0'
+$script:BridgeVersion = '7.45.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -155,6 +155,7 @@ $script:DefaultSettings = [ordered]@{
     OwnerOnlyTemplateKeys      = ''     # templates only the owner may put on air or take off
     AdminOnlyLayers            = ''     # layers only administrators may put on air or take off
     OwnerOnlyLayers            = ''     # layers only the owner may put on air or take off
+    LayersScreenAccess         = 'all'  # who may open the layers screen: all, admin, owner
     DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW
     SensitiveTemplateKeys      = ''     # templates that must always receive an automatic hide timer
     SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
@@ -414,6 +415,7 @@ $script:SettingDisplayMetadata = @{
     OwnerOnlyTemplateKeys = @{ Unit = ''; Description = 'قوالب لا يعرضها ولا يخفيها إلا المالك. تعلو على قائمة المشرفين' }
     AdminOnlyLayers = @{ Unit = ''; Description = 'طبقات لا يُعرض عليها ولا يُخفى منها إلا بصلاحية مشرف، أيًّا كان القالب' }
     OwnerOnlyLayers = @{ Unit = ''; Description = 'طبقات لا يُعرض عليها ولا يُخفى منها إلا بصلاحية المالك. تعلو على طبقات المشرفين' }
+    LayersScreenAccess = @{ Unit = ''; Description = 'من يرى زر «الطبقات» ويفتح شاشته: الجميع، أو المشرفون، أو المالك. شاشة الطبقات أدوات خام — إخفاء وخروج وعرض على رقم طبقة' }
     ReshowClearsLayer = @{ Unit = ''; Description = 'يخفي الطبقة قبل إعادة العرض عليها فيظهر النص الجديد بدل القديم' }
     SetValuesAfterShow = @{ Unit = ''; Description = 'يعيد إرسال قيم الحقول بعد العرض مباشرة ليضمن ظهور النص الصحيح' }
     AutoHidePresetSeconds = @{ Unit = ''; Description = 'مدد الإخفاء الجاهزة المعروضة كأزرار في ⏱ العرض المؤقّت، مفصولة بفاصلة' }
@@ -934,6 +936,7 @@ $script:SettingChoices = @{
     NewsListLayout = @('text', 'stacked', 'inline', 'compact')
     NewsSheetSyncMode = @('manual', 'auto')
     NewsSheetNotifyScope = @('none', 'admins', 'all')
+    LayersScreenAccess = @('all', 'admin', 'owner')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -974,7 +977,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'templates'; Names = @(
                 'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
-                'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers',
+                'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
                 'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
                 'TemplateReminderFollowUpMinutes',
@@ -1039,6 +1042,7 @@ $script:SettingNavigationLabels = @{
     OwnerOnlyTemplateKeys = 'قوالب للمالك'
     AdminOnlyLayers = 'طبقات للمشرفين'
     OwnerOnlyLayers = 'طبقات للمالك'
+    LayersScreenAccess = 'من يرى زر الطبقات'
     DisabledTemplateKeys = 'القوالب المعطّلة'
     SensitiveTemplateKeys = 'القوالب الحساسة'
     LayerNames = 'أسماء الطبقات'

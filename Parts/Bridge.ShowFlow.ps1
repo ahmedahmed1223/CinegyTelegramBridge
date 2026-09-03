@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.45.0'; Items = @(
+                '📋 قائمة القوالب صارت تعرض ما يملك المستخدم صلاحيته فقط، بدل عرض قالب يُرفض عند الضغط.'
+                '🎚 «من يرى زر الطبقات»: الجميع أو المشرفون أو المالك — شاشة الطبقات أدوات خام يمكن قصرها على من يملك الرندَون.'
+            ) }
         @{ Version = '7.44.0'; Items = @(
                 '👁 تأكيد الإخفاء والخروج صار يعرض نص القالب المعروض: ترى ما ستسحبه قبل أن تسحبه.'
                 '🔒 الحقول الحسّاسة تُذكر بأسمائها دون قيمها، والخيار يُطفأ من ⚙️ الإعدادات.'
@@ -1267,6 +1271,20 @@ function Get-TemplateAccessLevel {
     if ((Test-BridgeListContains -Value (Get-Setting 'AdminOnlyTemplateKeys') -Item $Key) -or
         (Test-BridgeListContains -Value (Get-Setting 'AdminOnlyLayers') -Item $layerText)) { return 'admin' }
     return 'all'
+}
+
+function Test-LayersScreenAccess {
+    <# Who may open the layers screen, in the same words the other permissions
+       use: everyone, administrators, or the owner. It is a screen of raw
+       controls - hide, exit, push to a bare layer number - so a newsroom that
+       wants its operators working through templates alone can close it. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    switch ([string](Get-Setting 'LayersScreenAccess')) {
+        'owner' { return (Test-Owner -ChatId $ChatId -UserId $UserId) }
+        'admin' { return (Test-Admin -ChatId $ChatId -UserId $UserId) }
+    }
+    return $true
 }
 
 function Test-TemplateAccess {

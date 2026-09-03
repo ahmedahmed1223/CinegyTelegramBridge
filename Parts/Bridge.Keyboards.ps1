@@ -122,7 +122,13 @@ function Get-MainMenuKeyboard {
         $rows += , @( (New-Button "↩️ تراجع طبقة $layer ($secondsLeft ث)" "rollback:$layer") )
     }
 
-    $rows += , @( (New-Button "📋 القوالب" "menu:templates"), (New-Button "🎚 الطبقات" "menu:layers") )
+    $templateRow = @( (New-Button "📋 القوالب" "menu:templates") )
+    # Layers are the raw controls - hide, exit, push to a bare layer number -
+    # and a newsroom may want them kept to whoever owns the rundown.
+    if (Test-LayersScreenAccess -ChatId $ChatId -UserId $UserId) {
+        $templateRow += (New-Button "🎚 الطبقات" "menu:layers")
+    }
+    $rows += , $templateRow
     $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
     if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) {
         $rows += , @( (New-Button "📊 الحالة الكاملة" "menu:fullstatus") )
@@ -329,8 +335,15 @@ function Get-TemplateLastUsedLabel {
 
 function Get-TemplatesKeyboard {
     <# Prefix selects what tapping a template does: tpl = show now,
-       tplT = show with auto-hide, updtpl = pick a field to update. #>
-    param([string]$Prefix = 'tpl', [string]$Category = '', [string]$Query = '', [switch]$BrowseControls)
+       tplT = show with auto-hide, updtpl = pick a field to update.
+
+       A template the operator may not put on air is left out rather than
+       offered and then refused: a list that shows what pressing it will
+       reject teaches people to press and see, which is the opposite of a
+       permission. Called without a user nothing is filtered - that is the
+       registry's own view of itself. #>
+    param([string]$Prefix = 'tpl', [string]$Category = '', [string]$Query = '', [switch]$BrowseControls,
+        [long]$ChatId = 0, [long]$UserId = 0)
     $store = Get-TemplateStore
     $rows = @()
     if ($BrowseControls -and $Prefix -eq 'tpl') {
@@ -344,6 +357,7 @@ function Get-TemplatesKeyboard {
             $haystack = "$($t.Key) $($t.Description) $($t.Category)"
             if ($haystack.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
         }
+        if ($ChatId -gt 0 -and -not (Test-TemplateAccess -Key ([string]$t.Key) -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId).Allowed) { continue }
         $matched++
         # A lock badge here is the early warning: the operator sees the clash
         # before typing a single field, instead of after.

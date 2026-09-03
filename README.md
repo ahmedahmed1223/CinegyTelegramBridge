@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.45.0
+
+The template list is filtered by the permission of whoever opened it: a
+template an operator may not put on air is left out rather than offered and
+then refused, since a list that shows what pressing it will reject teaches
+people to press and see. Search, categories, timed shows, field updates and
+scheduling all filter the same way, so there is no back door to a protected
+template.
+
+The layers screen - hide, exit, push to a bare layer number - can be kept to
+administrators or the owner with one setting, and the callback refuses as well
+as the button disappearing, because someone with the old button in their chat
+history can still press it.
+
 ## Version 7.44.0
 
 The confirmation before hiding or exiting a graphic now shows what it says.

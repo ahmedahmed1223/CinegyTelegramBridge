@@ -436,7 +436,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:templates' {
-            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره أو استخدم البحث والتصنيفات:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl' -BrowseControls)
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لإظهاره أو استخدم البحث والتصنيفات:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tpl' -BrowseControls -ChatId $chatId -UserId $userId)
             break
         }
         'menu:templatesearch' {
@@ -455,14 +455,14 @@ function Invoke-CallbackQuery {
                 break
             }
             $category = [string]$categories[$categoryIndex]
-            Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$category':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $category -BrowseControls)
+            Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$category':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $category -BrowseControls -ChatId $chatId -UserId $userId)
             break
         }
         'tplinfo:*' {
             $templateIndex = [int](Get-CallbackArg $data 'tplinfo:')
             $template = Get-TemplateByIndex -Index $templateIndex
             if (-not $template) {
-                Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد متاحًا.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
+                Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد متاحًا.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls -ChatId $chatId -UserId $userId)
                 break
             }
             Send-TelegramMessage -ChatId $chatId -Text (Get-TemplatePreviewText -Template $template) -ReplyMarkup (Get-TemplatePreviewKeyboard -TemplateIndex $templateIndex)
@@ -493,7 +493,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:timed' {
-            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب، ثم حدّد مدة الإخفاء التلقائي:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tplT')
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب، ثم حدّد مدة الإخفاء التلقائي:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'tplT' -ChatId $chatId -UserId $userId)
             break
         }
         'menu:hide' {
@@ -517,7 +517,7 @@ function Invoke-CallbackQuery {
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
         'menu:update' {
-            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl')
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl' -ChatId $chatId -UserId $userId)
             break
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
@@ -577,6 +577,12 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:layers' {
+            # A hidden button is not a closed door: someone with the old
+            # callback in their chat history can still press it.
+            if (-not (Test-LayersScreenAccess -ChatId $chatId -UserId $userId)) {
+                Send-TelegramMessage -ChatId $chatId -Text '⛔ شاشة الطبقات ليست متاحة لك.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
             $layerStatuses = @(Get-CinegyLayerDashboard)
             $comparison = Update-OnAirStateFromCinegy -Reason 'operator-check' -LayerStatuses $layerStatuses `
                 -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
@@ -888,7 +894,7 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text "❌ ساعة الجهاز أو المنطقة الزمنية غير صالحة للجدولة." -ReplyMarkup (Get-ScheduleMenuKeyboard)
                 break
             }
-            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب المراد جدولته:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'schtpl')
+            Send-TelegramMessage -ChatId $chatId -Text "اختر القالب المراد جدولته:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'schtpl' -ChatId $chatId -UserId $userId)
             break
         }
         'schedule:list' {

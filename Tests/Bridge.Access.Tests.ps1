@@ -271,3 +271,105 @@ Describe 'Reading what is on air before taking it off' {
         $copy | Should -Match '…$'
     }
 }
+
+Describe 'The template list shows only what the operator may use' {
+    BeforeEach {
+        foreach ($name in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers')) {
+            $config.Settings | Add-Member -NotePropertyName $name -NotePropertyValue '' -Force
+        }
+        $config.Settings | Add-Member -NotePropertyName 'LayersScreenAccess' -NotePropertyValue 'all' -Force
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $false }
+        Mock Get-TemplateStore {
+            @{
+                Order = @('Urgent', 'logo', 'Mojaz')
+                Map = @{
+                    'Urgent' = @{ Key = 'Urgent'; Layer = 7; Description = ''; Category = ''; Presets = @(); Fields = @() }
+                    'logo' = @{ Key = 'logo'; Layer = 9; Description = ''; Category = ''; Presets = @(); Fields = @() }
+                    'Mojaz' = @{ Key = 'Mojaz'; Layer = 5; Description = ''; Category = ''; Presets = @(); Fields = @() }
+                }
+            }
+        }
+    }
+
+    It 'leaves out a template the operator cannot put on air' {
+        # Offered and then refused teaches people to press and see, which is
+        # the opposite of a permission.
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyTemplateKeys' -NotePropertyValue 'logo' -Force
+
+        $data = @((Get-TemplatesKeyboard -Prefix tpl -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['callback_data'] })
+
+        @($data | Where-Object { $_ -like 'tpl:*' }).Count | Should -Be 2
+    }
+
+    It 'leaves out a template whose layer is protected' {
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyLayers' -NotePropertyValue '9' -Force
+
+        $data = @((Get-TemplatesKeyboard -Prefix tpl -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['callback_data'] })
+
+        @($data | Where-Object { $_ -like 'tpl:*' }).Count | Should -Be 2
+    }
+
+    It 'shows an administrator everything again' {
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue 'logo' -Force
+        Mock Test-Admin { $true }
+
+        $data = @((Get-TemplatesKeyboard -Prefix tpl -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['callback_data'] })
+
+        @($data | Where-Object { $_ -like 'tpl:*' }).Count | Should -Be 3
+    }
+
+    It 'filters nothing when asked without a user' {
+        # The registry's own view of itself, for screens that are not a person
+        # choosing what to put on air.
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyTemplateKeys' -NotePropertyValue 'logo' -Force
+
+        $data = @((Get-TemplatesKeyboard -Prefix tpl).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['callback_data'] })
+
+        @($data | Where-Object { $_ -like 'tpl:*' }).Count | Should -Be 3
+    }
+}
+
+Describe 'Keeping the raw layer controls from ordinary operators' {
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'LayersScreenAccess' -NotePropertyValue 'all' -Force
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $false }
+    }
+
+    It 'is open to everyone by default' {
+        Test-LayersScreenAccess -ChatId 100 -UserId 101 | Should -BeTrue
+    }
+
+    It 'closes to an operator when set to administrators' {
+        $config.Settings | Add-Member -NotePropertyName 'LayersScreenAccess' -NotePropertyValue 'admin' -Force
+        Test-LayersScreenAccess -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Mock Test-Admin { $true }
+        Test-LayersScreenAccess -ChatId 100 -UserId 101 | Should -BeTrue
+    }
+
+    It 'closes to an administrator when set to the owner' {
+        $config.Settings | Add-Member -NotePropertyName 'LayersScreenAccess' -NotePropertyValue 'owner' -Force
+        Mock Test-Admin { $true }
+        Test-LayersScreenAccess -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Mock Test-Owner { $true }
+        Test-LayersScreenAccess -ChatId 100 -UserId 101 | Should -BeTrue
+    }
+
+    It 'takes the button out of the menu when it is closed' {
+        $config.Settings | Add-Member -NotePropertyName 'LayersScreenAccess' -NotePropertyValue 'admin' -Force
+
+        $data = @((Get-MainMenuKeyboard -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_['callback_data'] })
+
+        $data | Should -Not -Contain 'menu:layers'
+        # The templates button is not collateral damage.
+        $data | Should -Contain 'menu:templates'
+    }
+}

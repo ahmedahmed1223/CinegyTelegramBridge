@@ -809,15 +809,54 @@ function Get-ScheduleReviewKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-UpcomingScheduleText {
+    <#
+        The upcoming events, as one page of them.
+
+        HTML so each event carries a tg-time entity: the reader sees the
+        weekday, date and time in their own timezone rather than in the
+        bridge's. It is paged with the keyboard below and for the same reason -
+        a fortnight of daily events overran a Telegram message, and the list
+        arrived stripped of its markup.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 8)
+    $events = @(Get-UpcomingScheduleEvents)
+    if ($events.Count -eq 0) { return 'لا توجد أحداث قادمة.' }
+    $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
+    $heading = "📋 الأحداث القادمة ($($events.Count))"
+    if ($window.PageCount -gt 1) { $heading += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
+    $lines = @($heading)
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $lines += "• $(Format-ScheduleEventHtml -ScheduleEntry $events[$index])"
+    }
+    return ($lines -join "`n")
+}
+
 function Get-UpcomingScheduleKeyboard {
+    <# Three buttons per event, so this filled a message faster than any other
+       list here: a fortnight of daily events was already past what Telegram
+       will send, and the screen stopped opening. #>
+    param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 8)
+    $events = @(Get-UpcomingScheduleEvents)
+    $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
     $rows = @()
-    foreach ($scheduleEntry in @(Get-UpcomingScheduleEvents)) {
-        $at = [datetimeoffset]$scheduleEntry.ScheduledAt
-        $rows += , @(
-            (New-Button "✏️ $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schededit:$($scheduleEntry.Id)"),
-            (New-Button '📄 نسخ' "schedcopy:$($scheduleEntry.Id)"),
-            (New-Button '🗑' "schcancel:$($scheduleEntry.Id)")
-        )
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $scheduleEntry = $events[$index]
+            $at = [datetimeoffset]$scheduleEntry.ScheduledAt
+            $rows += , @(
+                (New-Button "✏️ $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schededit:$($scheduleEntry.Id)"),
+                (New-Button '📄 نسخ' "schedcopy:$($scheduleEntry.Id)"),
+                (New-Button '🗑' "schcancel:$($scheduleEntry.Id)")
+            )
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "schedupage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "schedupage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "schedupage:$($window.Page + 1)") }
+        $rows += , $pager
     }
     $rows += , @( (New-Button "⬅️ الجدولة" 'menu:schedule') )
     return @{ inline_keyboard = $rows }

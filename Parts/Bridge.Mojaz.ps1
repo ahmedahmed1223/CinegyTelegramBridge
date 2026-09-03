@@ -835,10 +835,26 @@ function Get-MojazLibraryText {
 }
 
 function Get-MojazLibraryKeyboard {
+    <# Paged: a newsroom that keeps its bulletins accumulates them, and a row
+       each is eventually more than Telegram will send in one message - so the
+       screen would stop opening for exactly the people using it most. #>
+    param([int]$Page = 0, [ValidateRange(1, 20)][int]$PageSize = 10)
+    $bulletins = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
+    $window = Get-BridgePageWindow -ItemCount $bulletins.Count -Page $Page -PageSize $PageSize
     $keyboard = @()
-    foreach ($bulletin in @(Get-JsonProp $script:MojazLibrary 'Bulletins')) {
-        $mark = if (Test-MojazOnAir -Bulletin $bulletin) { '▶️' } else { '📄' }
-        $keyboard += , @((New-Button "$mark $([string]$bulletin.Name)" "mojaz:open:$([string]$bulletin.Id)"))
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $bulletin = $bulletins[$index]
+            $mark = if (Test-MojazOnAir -Bulletin $bulletin) { '▶️' } else { '📄' }
+            $keyboard += , @((New-Button "$mark $([string]$bulletin.Name)" "mojaz:open:$([string]$bulletin.Id)"))
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "mojazpage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazpage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "mojazpage:$($window.Page + 1)") }
+        $keyboard += , $pager
     }
     $keyboard += , @((New-Button '➕ موجز جديد' 'mojaz:new' -Style success))
     $keyboard += , @((New-Button '🕒 المواعيد' 'mojaz:times'), (New-Button '🔄 تحديث' 'menu:mojaz'), (New-Button '🏠 القائمة' 'menu:main'))
@@ -846,14 +862,15 @@ function Get-MojazLibraryKeyboard {
 }
 
 function Show-MojazLibraryScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-MojazAvailable)) {
         Send-TelegramMessage -ChatId $ChatId -Text "قالب '$($script:MojazTemplateKey)' غير موجود في سجل القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $script:MojazSelections.Remove([string]$ChatId)
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazLibraryText) -ParseMode HTML -ReplyMarkup (Get-MojazLibraryKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazLibraryText) -ParseMode HTML `
+        -ReplyMarkup (Get-MojazLibraryKeyboard -Page $Page)
 }
 
 function Open-MojazBulletin {
@@ -1487,23 +1504,38 @@ function Get-MojazSchedulesText {
 }
 
 function Get-MojazSchedulesKeyboard {
+    <# Paged for the same reason as the library: a week of scheduled bulletins
+       is a list nobody sized this screen for. #>
+    param([int]$Page = 0, [ValidateRange(1, 20)][int]$PageSize = 10)
     $pending = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Status') -in @('scheduled', 'queued') } |
             Sort-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') })
+    $window = Get-BridgePageWindow -ItemCount $pending.Count -Page $Page -PageSize $PageSize
     $keyboard = @()
-    foreach ($entry in $pending) {
-        $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $entry 'BulletinId'))
-        $name = if ($bulletin) { [string]$bulletin.Name } else { 'موجز محذوف' }
-        $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
-        $keyboard += , @((New-Button "🚫 $($moment.ToString('HH:mm')) · $name" "mojaz:unschedule:$([string](Get-JsonProp $entry 'Id'))" -Style danger))
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $entry = $pending[$index]
+            $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string](Get-JsonProp $entry 'BulletinId'))
+            $name = if ($bulletin) { [string]$bulletin.Name } else { 'موجز محذوف' }
+            $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
+            $keyboard += , @((New-Button "🚫 $($moment.ToString('HH:mm')) · $name" "mojaz:unschedule:$([string](Get-JsonProp $entry 'Id'))" -Style danger))
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "mojazschedpage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazschedpage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "mojazschedpage:$($window.Page + 1)") }
+        $keyboard += , $pager
     }
     $keyboard += , @((New-Button '⬅️ الموجزات' 'menu:mojaz'), (New-Button '🏠 القائمة' 'menu:main'))
     return @{ inline_keyboard = $keyboard }
 }
 
 function Show-MojazSchedulesScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSchedulesText) -ParseMode HTML -ReplyMarkup (Get-MojazSchedulesKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSchedulesText) -ParseMode HTML `
+        -ReplyMarkup (Get-MojazSchedulesKeyboard -Page $Page)
 }
 
 function Set-MojazScheduleStatus {

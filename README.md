@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.55.0
+
+A consolidation pass after a run of feature work. Four dimensions were audited
+mechanically and one systemic fault came out of it: three screens built a
+keyboard from a collection that grows, with no paging - the bulletin library,
+its schedule list, and the upcoming-events list. The last of those draws three
+buttons per event, so it filled a message faster than anything else here: a
+fortnight of daily events was already past what Telegram will send, and its
+text went out stripped of markup for the same reason. All three page now.
+
+More to the point, that is the fourth time this same fault has been fixed in a
+different screen. Fixing it a fifth time by hand is not a plan, so the rule is
+enforced: a test walks every keyboard builder and fails any that loops over a
+collection without Get-BridgePageWindow. A screen whose collection cannot grow
+is exempted by name with the reason it cannot, and a second test fails any
+exemption naming a function that no longer exists, so an exemption cannot
+quietly become cover for the next offender.
+
+What the audit found clean, recorded so it is known to have been checked: all
+162 settings are read, labelled and categorised with no dead entries; no
+untrusted text reaches an HTML message unescaped; and no callback branch
+mutates anything without a permission gate.
+
 ## Version 7.54.0
 
 The claim is withdrawn at its source. Naming an unnamed item from the template

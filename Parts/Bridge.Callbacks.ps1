@@ -926,13 +926,16 @@ function Invoke-CallbackQuery {
             break
         }
         'schedule:list' {
-            $events = @(Get-UpcomingScheduleEvents)
-            # HTML so each event carries a tg-time entity: the reader sees the
-            # weekday, date and time in their own timezone rather than in the
-            # bridge's. An overlong list is de-marked-up by Send-TelegramMessage
-            # rather than showing its tags.
-            $text = if ($events.Count -eq 0) { 'لا توجد أحداث قادمة.' } else { "📋 الأحداث القادمة:`n" + (@($events | ForEach-Object { "• $(Format-ScheduleEventHtml -ScheduleEntry $_)" }) -join "`n") }
-            Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-UpcomingScheduleKeyboard) -ParseMode 'HTML'
+            Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText) -ParseMode 'HTML' `
+                -ReplyMarkup (Get-UpcomingScheduleKeyboard)
+            break
+        }
+        'schedupage:*' {
+            $page = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'schedupage:'), [ref]$page) -and $page -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText -Page $page) -ParseMode 'HTML' `
+                    -ReplyMarkup (Get-UpcomingScheduleKeyboard -Page $page)
+            }
             break
         }
         # The date/time picker. Every branch re-renders in place so the
@@ -1190,6 +1193,20 @@ function Invoke-CallbackQuery {
                     Add-AuditEntry "👤 رفع حظر $target - بواسطة $(Format-UserAuditActor -UserId $userId)"
                 }
                 Send-TelegramMessage -ChatId $chatId -Text (Get-BlockedChatsText) -ParseMode HTML -ReplyMarkup (Get-BlockedChatsKeyboard)
+            }
+            break
+        }
+        'mojazpage:*' {
+            $page = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojazpage:'), [ref]$page) -and $page -ge 0) {
+                Show-MojazLibraryScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
+        'mojazschedpage:*' {
+            $page = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojazschedpage:'), [ref]$page) -and $page -ge 0) {
+                Show-MojazSchedulesScreen -ChatId $chatId -UserId $userId -Page $page
             }
             break
         }

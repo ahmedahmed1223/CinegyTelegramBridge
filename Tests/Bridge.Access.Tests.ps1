@@ -90,3 +90,30 @@ Describe 'Per-template and per-layer permission' {
         Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'مالك الجسر' }
     }
 }
+
+Describe 'Every setting the code reads is a setting the bridge declares' {
+    It 'finds no name asked for that DefaultSettings has never heard of' {
+        # The bug this exists for: four permission settings were read by the
+        # show and hide paths but never added to DefaultSettings, so they had
+        # no value, no label, and no place on the settings screen - and the
+        # feature was silently inert while its own tests passed, because the
+        # tests set the values directly.
+        $root = Split-Path $PSScriptRoot -Parent
+        $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'Parts') -Filter '*.ps1' -File) +
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'Modules') -Filter '*.psm1' -File) +
+        @(Get-Item -LiteralPath (Join-Path $root 'TelegramBridge.ps1'))
+
+        $asked = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($file in $sources) {
+            $text = Get-Content -LiteralPath $file.FullName -Raw
+            foreach ($match in [regex]::Matches($text, "Get-Setting(?:Int)?\s+'([A-Za-z][A-Za-z0-9_]*)'")) {
+                $asked.Add($match.Groups[1].Value) | Out-Null
+            }
+        }
+
+        $asked.Count | Should -BeGreaterThan 20 -Because 'the scan itself has to be finding names'
+        $undeclared = @($asked | Where-Object { -not $script:DefaultSettings.Contains($_) } | Sort-Object)
+
+        $undeclared | Should -BeNullOrEmpty -Because "these are read but never declared: $($undeclared -join ', ')"
+    }
+}

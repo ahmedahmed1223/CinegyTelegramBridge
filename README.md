@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.39.1
+
+The four permission settings were read by the show and hide paths but never
+declared, so they had no value, no label and no place on the settings screen -
+the feature was inert while its own tests passed, because those set the values
+directly. Declared now, with an audit that scans every `Get-Setting` name in
+the source and fails on any the defaults table has never heard of.
+
 ## Version 7.39.0
 
 Showing and hiding a graphic can now be restricted per template and per layer:

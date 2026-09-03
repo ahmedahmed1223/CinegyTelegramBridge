@@ -26,8 +26,12 @@ internal sealed class ManagerSettings
 
     public void Save()
     {
-        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(SettingsFilePath, json);
+        try
+        {
+            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(SettingsFilePath, json);
+        }
+        catch { /* e.g. exe sitting in a write-protected folder - worst case, ask again next launch */ }
     }
 }
 
@@ -114,6 +118,14 @@ public sealed class MainForm : Form
 
         _restartTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         _restartTimer.Tick += (_, _) => { _restartTimer.Stop(); StartBridge(); };
+
+        _autoClearTimer = new System.Windows.Forms.Timer { Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds };
+        _autoClearTimer.Tick += (_, _) => { _output.Clear(); _outputLineCount = 0; AppendLine("--- مسح تلقائي للشاشة (كل 24 ساعة) ---"); };
+        _autoClearCheck.CheckedChanged += (_, _) =>
+        {
+            if (_autoClearCheck.Checked) _autoClearTimer.Start();
+            else _autoClearTimer.Stop();
+        };
 
         _trayIcon = new NotifyIcon
         {
@@ -218,7 +230,18 @@ public sealed class MainForm : Form
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) AppendLine(e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) AppendLine(e.Data); };
-        process.Exited += (_, _) => BeginInvoke(OnBridgeExited);
+        process.Exited += (_, _) =>
+        {
+            // The process's exit notification can arrive on a background thread
+            // after the form itself has already been torn down (app closing
+            // while the bridge is still shutting down) - BeginInvoke on a
+            // destroyed/disposed handle throws, which would surface as an
+            // unhandled exception right as the operator is closing the app.
+            if (IsDisposed) return;
+            // ObjectDisposedException derives from InvalidOperationException - one catch covers both.
+            try { BeginInvoke(OnBridgeExited); }
+            catch (InvalidOperationException) { }
+        };
 
         try
         {
@@ -289,7 +312,9 @@ public sealed class MainForm : Form
         {
             _stoppingIntentionally = true;
             try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
-            process.WaitForExit(5000);
+            // Not waiting for exit here: killing the tree can take a moment (ffmpeg
+            // children), and blocking the UI thread on it would freeze the window.
+            // The new instance's own -StopExisting handles any straggler.
         }
         StartBridge();
     }

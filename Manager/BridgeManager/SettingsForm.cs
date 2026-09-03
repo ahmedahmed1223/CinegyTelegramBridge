@@ -129,10 +129,10 @@ public sealed class SettingsForm : Form
         }
     }
 
-    private static string FormatIds(JsonNode? array) =>
+    internal static string FormatIds(JsonNode? array) =>
         array is JsonArray arr ? string.Join(", ", arr.Select(n => n?.ToString() ?? "")) : "";
 
-    private static JsonArray ParseIds(string text)
+    internal static JsonArray ParseIds(string text)
     {
         var arr = new JsonArray();
         foreach (var part in text.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries))

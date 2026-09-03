@@ -9,7 +9,9 @@
     <AssemblyName>BridgeManager</AssemblyName>
     <RootNamespace>BridgeManager</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- NOT InvariantGlobalization: this is an Arabic-first UI, and invariant
+         mode throws on any future culture-aware code (CultureInfo.GetCultureInfo,
+         culture-sensitive formatting/compare). The exe is self-contained either way. -->
     <!-- Single self-contained exe: runs on a bare playout box with no .NET install. -->
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

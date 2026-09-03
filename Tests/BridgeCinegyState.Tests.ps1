@@ -191,3 +191,79 @@ Describe 'External discovery needs positive evidence' {
         $decision.Action | Should -Not -Be 'remove'
     }
 }
+
+Describe 'Discovering a scene the engine will not name' {
+    BeforeAll {
+        # Taken from a live Cinegy Air channel: this engine names nothing it
+        # plays, so the old "a real scene always carries a describing name"
+        # rule refused every layer and discovery never fired at all.
+        $script:LiveItem = '<Item Id="{C10460C1-A7BC-11F1-96C0-C85EA97266A8}" LogId="{8FB7466B-0A63-476A-8BA0-1DB15AC060B6}" ScheduledAt="2026-09-03T17:27:45.222Z" Duration="24:00:00.000" Clocked="y" ManualEnd="y"/>'
+        # And the husk a spent item leaves behind on the same channel: no
+        # LogId, and the engine says IsEmpty outright.
+        $script:SpentItem = '<Item Id="{A30A691F-A7B1-11F1-96C0-C85EA97266A8}" ScheduledAt="2026-09-03T16:08:02.162Z" Duration="24:00:00.000" IsEmpty="y" Clocked="y" ManualEnd="y"/>'
+
+        function global:New-TestLayerStatus {
+            param([string]$ActiveXml, [string]$ActiveId = '{C10460C1-A7BC-11F1-96C0-C85EA97266A8}', [string]$Name = '')
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $true; ActiveId = $ActiveId
+                ActiveName = $Name; ActiveTemplateName = ''; ActiveDescription = ''
+                OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''
+                Error = ''; ActiveXml = $ActiveXml
+            }
+        }
+    }
+
+    It 'tells a playing item from the husk of a spent one' {
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml $script:LiveItem) | Should -BeTrue
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml $script:SpentItem) | Should -BeFalse
+    }
+
+    It 'refuses an item with no evidence at all' {
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml '') | Should -BeFalse
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml '<Item Id="{A}" />') | Should -BeFalse
+        # A live-looking item on an empty layer is still an empty layer.
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml $script:LiveItem -ActiveId '{00000000-0000-0000-0000-000000000000}') | Should -BeFalse
+        # A log identity with no schedule, and a schedule with no identity.
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml '<Item Id="{A}" LogId="{8FB7466B-0A63-476A-8BA0-1DB15AC060B6}"/>') | Should -BeFalse
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml '<Item Id="{A}" ScheduledAt="2026-09-03T17:27:45.222Z"/>') | Should -BeFalse
+        Test-BridgeCinegyActiveItem -Status (New-TestLayerStatus -ActiveXml '<Item Id="{A}" LogId="{00000000-0000-0000-0000-000000000000}" ScheduledAt="2026-09-03T17:27:45.222Z"/>') | Should -BeFalse
+    }
+
+    It 'adopts the unnamed scene under the name the registry already knew' {
+        $decision = Resolve-BridgeCinegyLayerState -Layer 8 -Status (New-TestLayerStatus -ActiveXml $script:LiveItem) `
+            -DiscoverExternal -RegisteredTemplateName 'News-Ticker'
+
+        $decision.Action | Should -Be 'add'
+        $decision.Record.Key | Should -Be 'News-Ticker'
+        # Named by the registry, but nobody pretends the bridge started it.
+        $decision.Record.Source | Should -Be 'cinegy'
+        $decision.Record.UserId | Should -Be 0
+    }
+
+    It 'invents nothing when the registry does not name that layer' {
+        # Two templates share the layer, or none does: guessing between them
+        # would be inventing a name, which is what put a phantom scene into
+        # onair.json before.
+        (Resolve-BridgeCinegyLayerState -Layer 8 -Status (New-TestLayerStatus -ActiveXml $script:LiveItem) `
+                -DiscoverExternal).Action | Should -Be 'ignore'
+    }
+
+    It 'refuses the husk even when the registry does name the layer' {
+        (Resolve-BridgeCinegyLayerState -Layer 7 -Status (New-TestLayerStatus -ActiveXml $script:SpentItem) `
+                -DiscoverExternal -RegisteredTemplateName 'Urgent').Action | Should -Be 'ignore'
+    }
+
+    It 'still prefers a name the engine gives over the registered one' {
+        $decision = Resolve-BridgeCinegyLayerState -Layer 4 `
+            -Status (New-TestLayerStatus -ActiveXml $script:LiveItem -Name 'Show L band - New.CinTitle on Layer 4') `
+            -DiscoverExternal -RegisteredTemplateName 'News-Ticker'
+        $decision.Action | Should -Be 'add'
+        $decision.Record.Key | Should -Be 'Show L band - New.CinTitle on Layer 4'
+    }
+
+    It 'never adopts a layer the bridge is already tracking' {
+        $tracked = @{ Key = 'News-Ticker'; At = (Get-Date); UserId = 5L; ActiveId = '{C10460C1-A7BC-11F1-96C0-C85EA97266A8}'; Source = 'bridge' }
+        (Resolve-BridgeCinegyLayerState -Layer 8 -TrackedRecord $tracked `
+                -Status (New-TestLayerStatus -ActiveXml $script:LiveItem) -DiscoverExternal).Action | Should -Be 'keep'
+    }
+}

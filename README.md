@@ -13,6 +13,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.52.0
+
+External discovery was not merely missing from the periodic check - it was
+dead everywhere. The resolver demanded positive evidence that a layer was
+really playing something, and the only evidence it accepted was a describing
+name; this engine names nothing it plays, returning every active element as
+`<Item Id=.. LogId=.. ScheduledAt=.. Duration=.. ManualEnd=../>` with no Name
+and no Description. So the rule refused every layer, and not one external
+scene had been discovered since it was written.
+
+There is a second route now, and it invents no name either: hard evidence that
+a real item is playing - a non-zero active id, a non-zero LogId, a parsable
+ScheduledAt, and no IsEmpty from the engine - plus a name the bridge already
+knew, the template registered for that layer. Without the evidence, or without
+exactly one template claiming the layer, nothing is added. Ambiguity still
+never adds a record. Measured live, the two cases separate cleanly: layers 5,
+8 and 9 carried a LogId and no IsEmpty; layer 7, the husk of a spent item,
+carried no LogId and said IsEmpty outright.
+
+The thirty-eight Telegram disconnections in one evening were not
+disconnections. Each was a long poll that outran its transport deadline,
+logged as an error, flipping the state to disconnected and back, and costing a
+full timeout of dead polling. The margin over the long poll is now a setting
+and defaults to twenty seconds rather than a fixed ten - it covers connection
+setup and the trip home as well - and a configurable number of consecutive
+late polls is tolerated before the connection counts as lost. A real failure
+still takes the old path on the first occurrence.
+
 ## Version 7.51.0
 
 A graphic somebody starts in Cinegy now appears in the bot within seconds. The

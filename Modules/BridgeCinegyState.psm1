@@ -23,6 +23,7 @@ function Resolve-BridgeCinegyLayerState {
         [hashtable]$TrackedRecord,
         [Parameter(Mandatory)]$Status,
         [switch]$DiscoverExternal,
+        [string]$RegisteredTemplateName='',
         [datetime]$Now=(Get-Date)
     )
     if(-not [bool](Get-CinegyStateProperty $Status Success)){
@@ -79,12 +80,60 @@ function Resolve-BridgeCinegyLayerState {
     # phantom scene into onair.json at startup: the bot claimed layer 7 was
     # live when the screen was blank. Ambiguity must never ADD a record. It
     # still never removes one either - that asymmetry is deliberate.
+    #
+    # Not every engine names what it plays, though, and this one names none of
+    # it: every Active element it returns is <Item Id=.. LogId=.. ScheduledAt=..
+    # Duration=.. ManualEnd=..> with no Name and no Description at all. So the
+    # rule above refused every layer and external discovery never once fired
+    # here - the news strip was on air, the engine said so, and the bot's menu
+    # did not list it, so nobody could hide it from the bot.
+    #
+    # Hence a second route, which invents nothing either: hard evidence that a
+    # real item is playing rather than the husk of a spent one, plus a name the
+    # caller already knew - the template registered for that layer. Missing
+    # either, this still ignores the layer. Ambiguity must never ADD a record.
     if([string]::IsNullOrWhiteSpace($name) -or $name -eq 'Item'){
-        return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
+        if([string]::IsNullOrWhiteSpace($RegisteredTemplateName) -or
+            -not (Test-BridgeCinegyActiveItem -Status $Status)){
+            return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
+        }
+        $name=$RegisteredTemplateName
     }
     $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
     if(-not [string]::IsNullOrWhiteSpace($cinegyEventName)){$record.CinegyEventName=$cinegyEventName}
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}
+}
+
+function Test-BridgeCinegyActiveItem {
+    <#
+        Is a real item playing on this layer, or is this the anonymous husk a
+        spent one leaves behind?
+
+        That husk is why the naming rule refused anything unnamed: it stays
+        Active for a moment after its item ends and reads like a live one. But
+        the two are not actually alike. A real item carries the engine's own
+        log identity and the moment it was scheduled; a placeholder carries
+        neither, and a genuinely empty layer reports the zero GUID.
+
+        All three must hold. Any one of them alone is how a phantom scene got
+        into onair.json and the bot claimed a blank layer was live.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Status)
+    $activeId=([string](Get-CinegyStateProperty $Status ActiveId)).Trim().Trim('{','}')
+    if([string]::IsNullOrWhiteSpace($activeId) -or $activeId -eq '00000000-0000-0000-0000-000000000000'){return $false}
+    $xml=[string](Get-CinegyStateProperty $Status ActiveXml)
+    if([string]::IsNullOrWhiteSpace($xml)){return $false}
+    # When the engine says so outright, believe it and stop.
+    if([regex]::IsMatch($xml,'IsEmpty\s*=\s*"y"','IgnoreCase')){return $false}
+    $logId=[regex]::Match($xml,'LogId\s*=\s*"([^"]*)"')
+    if(-not $logId.Success){return $false}
+    $normalizedLogId=$logId.Groups[1].Value.Trim().Trim('{','}')
+    if([string]::IsNullOrWhiteSpace($normalizedLogId) -or $normalizedLogId -eq '00000000-0000-0000-0000-000000000000'){return $false}
+    $scheduled=[regex]::Match($xml,'ScheduledAt\s*=\s*"([^"]*)"')
+    if(-not $scheduled.Success){return $false}
+    $parsed=[datetime]::MinValue
+    return [datetime]::TryParse($scheduled.Groups[1].Value,[ref]$parsed)
 }
 
 function Get-BridgeCinegyStateBackoff {
@@ -155,4 +204,4 @@ function Get-BridgeStaleOnAirLayers {
     }
     return @($stale)
 }
-Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff
+Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Test-BridgeCinegyActiveItem, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff

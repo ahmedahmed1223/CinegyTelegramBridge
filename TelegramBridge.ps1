@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.51.0'
+$script:BridgeVersion = '7.52.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -278,6 +278,8 @@ $script:DefaultSettings = [ordered]@{
     RelayWatchdogSeconds       = 20
     CinegyStateCheckSeconds    = 15      # reconcile tracked GFX layers for external changes
     DiscoverExternalLayers     = $true   # and adopt layers started outside the bridge, so the menu shows them
+    TelegramPollMarginSeconds  = 20      # transport slack over the long-poll timeout before the request is cut
+    TelegramPollTimeoutTolerance = 2     # late long polls tolerated before the connection counts as lost
     CinegyStateStaleSeconds    = 45      # age after which the last successful state sample is stale
     CinegyHealthCheckSeconds   = 60      # sample /metrics and alert only on transitions
     CinegyMonitorTimeoutSeconds = 3      # bounded, but enough for Air Pro to answer a status read
@@ -377,6 +379,8 @@ $script:SettingDisplayMetadata = @{
     RelayWatchdogSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص البث المباشر' }
     CinegyStateCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص تغير طبقات Cinegy' }
     DiscoverExternalLayers = @{ Unit = ''; Description = 'تبنّي الطبقات التي شُغّلت من خارج الجسر أثناء الفحص الدوري، فتظهر في القائمة ويمكن إخفاؤها. أطفئه ليقتصر الفحص على ما أرسله الجسر بنفسه' }
+    TelegramPollMarginSeconds = @{ Unit = 'ثانية'; Description = 'المهلة الإضافية فوق زمن الاستطلاع الطويل قبل قطع الطلب. ارفعها إن كثرت انقطاعات Telegram' }
+    TelegramPollTimeoutTolerance = @{ Unit = 'مرة'; Description = 'عدد مرات تأخر الاستطلاع المتتالية المحتملة قبل اعتبار الاتصال مفقودًا (0 = اعتبار أول تأخر انقطاعًا)' }
     CinegyHealthCheckSeconds = @{ Unit = 'ثانية'; Description = 'الفاصل بين فحوص صحة Cinegy' }
     CinegyMonitorTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة فحص حالة Cinegy' }
     CinegyFrameLossTolerance = @{ Unit = 'إطار'; Description = 'الإطارات المفقودة المسموح بها في الدقيقة قبل اعتبار القناة غير سليمة' }
@@ -577,6 +581,9 @@ $script:NewsTickerDraft = $null
 # Who was turned away and who has been knocking, plus the groups the bot
 # has already walked out of, so it does not announce the same one twice.
 $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
+# Consecutive long polls whose transport deadline passed, so a late
+# answer is not mistaken for a lost connection.
+$script:PollTimeoutStreak = 0
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
@@ -1049,6 +1056,7 @@ foreach ($entry in @(
                 'OutputMonitorFailureAlertThreshold', 'OutputBlackLuminance',
                 'OutputBlackConfirmSeconds', 'NotifyOperatorsOnBlackOutput',
                 'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
+                'TelegramPollMarginSeconds', 'TelegramPollTimeoutTolerance',
                 'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds',
                 'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent',
                 'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance',
@@ -1173,6 +1181,8 @@ $script:SettingNavigationLabels = @{
     CinegyStateBackoffMaxSeconds = 'أقصى تباعد عند التعذّر'
     CinegyStateCheckSeconds = 'فاصل فحص الطبقات'
     DiscoverExternalLayers = 'تبنّي الطبقات الخارجية'
+    TelegramPollMarginSeconds = 'مهلة الاستطلاع الإضافية'
+    TelegramPollTimeoutTolerance = 'تأخر الاستطلاع المحتمل'
     ConfigBackupKeepFiles = 'نسخ الإعدادات المحفوظة'
     AskRequesterName = 'سؤال طالب الوصول عن اسمه'
     ConfirmLayerRemoval = 'تأكيد قبل الإخفاء'
@@ -1567,6 +1577,7 @@ try {
             $updates = @(Get-TelegramUpdates -Offset $offset -TimeoutSeconds (Get-EffectivePollTimeout))
             Set-TelegramConnectionState -Connected:$true
             $backoffSeconds = 1
+            $script:PollTimeoutStreak = 0
 
             if ($updates.Count -gt 0) {
                 $highestUpdateId = ($updates | Measure-Object -Property update_id -Maximum).Maximum
@@ -1705,10 +1716,25 @@ try {
             }
         }
         catch {
-            Write-BridgeLog "Polling error: $($_.Exception.Message)" "ERROR"
-            Set-TelegramConnectionState -Connected:$false -ErrorMessage $_.Exception.Message
-            Start-Sleep -Seconds $backoffSeconds
-            $backoffSeconds = [Math]::Min($backoffSeconds * 2, 60)
+            # A long poll whose transport deadline passed is not a lost
+            # connection. Telegram holds the request open with nothing to say,
+            # and an answer that comes back a little late used to be logged as
+            # an ERROR and to flip the state to disconnected and back - 38
+            # times in one evening, each one costing a full timeout of dead
+            # polling. A real failure still takes the old path immediately.
+            $pollError = [string]$_.Exception.Message
+            $timedOut = $pollError -match 'HttpClient\.Timeout|The request was canceled|Task was canceled'
+            $script:PollTimeoutStreak = if ($timedOut) { [int]$script:PollTimeoutStreak + 1 } else { 0 }
+            $tolerated = Get-SettingInt 'TelegramPollTimeoutTolerance' 0
+            if ($timedOut -and $script:PollTimeoutStreak -le $tolerated) {
+                Write-BridgeLog "Long-poll timed out ($($script:PollTimeoutStreak) of $tolerated tolerated) - re-polling without backoff" 'WARN'
+            }
+            else {
+                Write-BridgeLog "Polling error: $pollError" "ERROR"
+                Set-TelegramConnectionState -Connected:$false -ErrorMessage $pollError
+                Start-Sleep -Seconds $backoffSeconds
+                $backoffSeconds = [Math]::Min($backoffSeconds * 2, 60)
+            }
         }
 
         Invoke-BridgeTick | Out-Null

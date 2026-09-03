@@ -380,7 +380,11 @@ function Get-TelegramUpdates {
        throws and lets the loop decide. #>
     param([long]$Offset, [int]$TimeoutSeconds)
     $uri = "$apiBase/getUpdates?timeout=$TimeoutSeconds&offset=$Offset"
-    $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec ($TimeoutSeconds + 10)
+    # The transport deadline has to clear the long poll with room to spare,
+    # because it also covers connection setup and the trip home. Ten seconds
+    # over a fifteen-second poll was cutting live requests off mid-answer.
+    $margin = [Math]::Max(5, (Get-SettingInt 'TelegramPollMarginSeconds' 10))
+    $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec ($TimeoutSeconds + $margin)
     if (-not (Get-JsonProp $response 'ok')) {
         $desc = [string](Get-JsonProp $response 'description')
         throw "Telegram getUpdates rejected the request: $desc"

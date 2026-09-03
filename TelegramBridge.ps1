@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.34.0'
+$script:BridgeVersion = '7.35.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -824,6 +824,9 @@ $script:MojazSceneTiming = $null
 $script:MojazSceneTimingKey = ''
 $script:MojazSceneImage = ''
 $script:MojazSceneImageKey = ''
+# The size the scene's own plate gives the picture, cached the same way.
+$script:MojazImageSize = $null
+$script:MojazImageSizeKey = ''
 # Which chat the picture keyboard is being drawn for.
 $script:MojazImageChatId = 0
 # Built on first use from the settings table: the manual mentions setting

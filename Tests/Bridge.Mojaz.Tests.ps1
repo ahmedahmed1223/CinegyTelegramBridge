@@ -1095,14 +1095,22 @@ Describe 'Taking the bulletin off air from the main menu' {
     }
     AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{} }
 
-    It 'offers the button in the main menu only while the bulletin is up' {
+    It 'keeps the button in the main menu whether or not the bulletin is up' {
+        # It stays in one place so the operator can learn where it is; only
+        # its colour follows what is actually on air.
         Test-MojazOnAirLayer | Should -BeFalse
+        $resting = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
+                Where-Object { $_['callback_data'] -eq 'mojaz:hide' })
+        @($resting).Count | Should -Be 1
+        $resting[0].ContainsKey('style') | Should -BeFalse
 
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
 
         Test-MojazOnAirLayer | Should -BeTrue
-        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
-                ForEach-Object { $_['callback_data'] }) | Should -Contain 'mojaz:hide'
+        $live = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
+                Where-Object { $_['callback_data'] -eq 'mojaz:hide' })
+        @($live).Count | Should -Be 1
+        [string]$live[0]['style'] | Should -Be 'danger'
     }
 
     It 'offers it for a scene left on the layer after a run ended' {
@@ -1144,5 +1152,64 @@ Describe 'Taking the bulletin off air from the main menu' {
         Stop-MojazForLayer -Layer 7 | Should -BeFalse
 
         $script:MojazPlayback | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Checking and sizing an uploaded picture' {
+    BeforeEach {
+        Mock Write-BridgeLog {}
+        $script:MojazImageSize = $null; $script:MojazImageSizeKey = ''
+    }
+    AfterAll { $script:MojazImageSize = $null; $script:MojazImageSizeKey = '' }
+
+    It 'takes the size from the plate that shows the picture' {
+        # Not a number in a setting: the scene says how big its own plate is.
+        $scene = Join-Path $TestDrive 'plate.cintitle'
+        @'
+<CinegyTitler><Scene Fps="25">
+<Plate Name="bg" Size="1920.00;1080.00" Source="File" File=".\Mojaz\bg.png" />
+<Plate Name="img 01" Size="525.38;291.61" Source="File" File="${mojaz_img}" />
+</Scene></CinegyTitler>
+'@ | Set-Content -LiteralPath $scene -Encoding utf8
+
+        $size = Get-MojazImageSize -Path $scene
+
+        $size.Width | Should -Be 525
+        $size.Height | Should -Be 292
+    }
+
+    It 'answers with nothing when no plate carries the picture' {
+        $scene = Join-Path $TestDrive 'noplate.cintitle'
+        '<CinegyTitler><Scene Fps="25"><Plate Name="bg" Size="10;10" File=".\a.png" /></Scene></CinegyTitler>' |
+            Set-Content -LiteralPath $scene -Encoding utf8
+
+        Get-MojazImageSize -Path $scene | Should -BeNullOrEmpty
+    }
+
+    It 'fills the plate exactly, cropping rather than squashing' {
+        Add-Type -AssemblyName System.Drawing
+        $source = Join-Path $TestDrive 'phone.jpg'
+        $wide = New-Object System.Drawing.Bitmap(1600, 900)
+        $wide.Save($source, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        $wide.Dispose()
+        $destination = Join-Path $TestDrive 'sized.png'
+
+        Convert-MojazPicture -SourcePath $source -DestinationPath $destination -Size ([pscustomobject]@{ Width = 525; Height = 292 }) | Should -BeTrue
+
+        $result = [System.Drawing.Image]::FromFile($destination)
+        try {
+            $result.Width | Should -Be 525
+            $result.Height | Should -Be 292
+        }
+        finally { $result.Dispose() }
+    }
+
+    It 'refuses a file that is not a picture' {
+        $notAPicture = Join-Path $TestDrive 'notes.txt'
+        'this is not a picture' | Set-Content -LiteralPath $notAPicture -Encoding utf8
+        $destination = Join-Path $TestDrive 'rejected.png'
+
+        { Convert-MojazPicture -SourcePath $notAPicture -DestinationPath $destination -Size $null } | Should -Throw
+        Test-Path -LiteralPath $destination | Should -BeFalse
     }
 }

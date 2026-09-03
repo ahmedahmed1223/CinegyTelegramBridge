@@ -244,6 +244,91 @@ function Get-MojazTemplateImage {
     return $image
 }
 
+function Get-MojazImageSize {
+    <#
+        How big the picture has to be, asked of the scene rather than guessed.
+
+        The plate that displays it declares its own size:
+
+            <Plate Name="img 01" Size="525.38;291.61" File="${mojaz_img}" />
+
+        A photo from a phone is 4000 pixels wide and the wrong shape; handing
+        that to the plate is how a picture ends up not appearing at all.
+        Resize the scene's plate and uploads follow it, with nothing to change
+        here.
+    #>
+    param([string]$Path = '')
+    if (-not $Path) {
+        $template = Get-MojazTemplate
+        if (-not $template) { return $null }
+        $Path = [string]$template.Path
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $stamp = (Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue).LastWriteTimeUtc
+    $key = "$Path|$stamp"
+    if ($script:MojazImageSizeKey -eq $key) { return $script:MojazImageSize }
+    $size = $null
+    try {
+        $document = [xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+        $token = '${' + $script:MojazImageVariable + '}'
+        $plate = @($document.SelectNodes('//Plate') | Where-Object { [string]$_.File -eq $token }) | Select-Object -First 1
+        if ($plate) {
+            $parts = ([string]$plate.Size) -split ';'
+            if ($parts.Count -ge 2) {
+                $width = [int][math]::Round([double]$parts[0])
+                $height = [int][math]::Round([double]$parts[1])
+                if ($width -ge 1 -and $height -ge 1) {
+                    $size = [pscustomobject]@{ Width = $width; Height = $height }
+                }
+            }
+        }
+    }
+    catch { Write-BridgeLog "Could not read the Mojaz picture size: $($_.Exception.Message)" 'WARN' }
+    $script:MojazImageSizeKey = $key
+    $script:MojazImageSize = $size
+    return $size
+}
+
+function Convert-MojazPicture {
+    <#
+        Check the upload is really a picture, then make it the plate's size.
+
+        Filled and centre-cropped rather than squashed: a phone photo is 16:9
+        or 3:4 and the plate is neither, and a stretched face is worse than a
+        trimmed one. Saved as PNG, which is what the scene's own picture is.
+
+        Returns $true only when a picture was written.
+    #>
+    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$DestinationPath, $Size)
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    # Throws for anything that is not a picture, which is the check.
+    $image = [System.Drawing.Image]::FromFile($SourcePath)
+    try {
+        $width = if ($Size) { [int]$Size.Width } else { [int]$image.Width }
+        $height = if ($Size) { [int]$Size.Height } else { [int]$image.Height }
+        $canvas = New-Object System.Drawing.Bitmap($width, $height)
+        try {
+            $graphics = [System.Drawing.Graphics]::FromImage($canvas)
+            try {
+                $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $scale = [math]::Max($width / [double]$image.Width, $height / [double]$image.Height)
+                $drawWidth = [double]$image.Width * $scale
+                $drawHeight = [double]$image.Height * $scale
+                $graphics.DrawImage($image,
+                    [single](($width - $drawWidth) / 2), [single](($height - $drawHeight) / 2),
+                    [single]$drawWidth, [single]$drawHeight)
+            }
+            finally { $graphics.Dispose() }
+            $canvas.Save($DestinationPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        finally { $canvas.Dispose() }
+    }
+    finally { $image.Dispose() }
+    return (Test-Path -LiteralPath $DestinationPath)
+}
+
 function Get-MojazRowVariables {
     <#
         One row as the scene's variables.
@@ -968,16 +1053,36 @@ function Receive-MojazPhoto {
         return $false
     }
     $safeExtension = if ($Extension -match '^\.[A-Za-z0-9]{1,5}$') { $Extension.ToLowerInvariant() } else { '.jpg' }
-    $name = "mojaz-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('N').Substring(0,8))$safeExtension"
+    $stem = "mojaz-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    # PNG, like the picture the scene ships with, whatever arrived.
+    $name = "$stem.png"
     $destination = Join-Path $directory $name
+    $staging = Join-Path ([System.IO.Path]::GetTempPath()) "$stem$safeExtension"
     try {
         New-Item -ItemType Directory -Path $directory -Force -ErrorAction Stop | Out-Null
-        Receive-TelegramDocument -FileId $FileId -DestinationPath $destination -MaximumBytes (10 * 1024 * 1024) | Out-Null
+        Receive-TelegramDocument -FileId $FileId -DestinationPath $staging -MaximumBytes (10 * 1024 * 1024) | Out-Null
     }
     catch {
         Write-BridgeLog "Mojaz photo download failed: $($_.Exception.Message)" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ الصورة: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-CancelKeyboard)
         return $false
+    }
+    # Only a real picture, and only at the plate's size, reaches the folder
+    # Cinegy reads: a file that is not a picture, or is thousands of pixels
+    # wide, is a row that shows nothing on air.
+    $size = Get-MojazImageSize
+    try {
+        Convert-MojazPicture -SourcePath $staging -DestinationPath $destination -Size $size | Out-Null
+        $measured = if ($size) { "$($size.Width)x$($size.Height)" } else { 'كما هي' }
+        Write-BridgeLog "Mojaz picture stored as '$name' ($measured)."
+    }
+    catch {
+        Write-BridgeLog "Mojaz picture rejected: $($_.Exception.Message)" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ هذا الملف ليس صورة يمكن قراءتها. أرسل صورة (JPG أو PNG).' -ReplyMarkup (Get-CancelKeyboard)
+        return $false
+    }
+    finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Force -ErrorAction SilentlyContinue }
     }
     # Relative to the scene's root folder, the way the template's own picture
     # paths are written - an absolute path would break if the project moves.

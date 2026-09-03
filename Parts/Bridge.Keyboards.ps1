@@ -98,8 +98,16 @@ function Get-MainMenuKeyboard {
     # A bulletin does not come off with the plain hide above it: that would cut
     # the scene and leave the run walking a table nobody can see. Its own
     # button stops the run and leaves by EXIT, so the outro plays.
-    if ((Test-MojazAvailable) -and (Test-MojazOnAirLayer)) {
-        $rows += , @( (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) )
+    #
+    # Always here, not only while it is up: the operator asked for it in the
+    # menu, and a button that appears and vanishes is one whose place cannot be
+    # learned. Coloured only when there is really something to take off, and it
+    # says so plainly when there is not.
+    if (Test-MojazAvailable) {
+        $rows += , @(
+            if (Test-MojazOnAirLayer) { (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) }
+            else { (New-Button "⏹ إخفاء الموجز" "mojaz:hide") }
+        )
     }
 
     # A rollback used to be reachable only from the message that offered it,

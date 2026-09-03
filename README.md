@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.35.0
+
+An uploaded picture is now checked and sized before it reaches the folder
+Cinegy reads. A phone photo arrives four thousand pixels wide in a shape the
+plate is not, which is a known reason for a picture never appearing on air, so
+the file lands in a temporary folder first, is decoded - which is the check -
+filled and centre-cropped to the plate's own declared size, and saved as PNG
+like the scene's own picture. The size comes from the scene:
+`<Plate Size="525.38;291.61" File="${mojaz_img}" />`, so resizing the plate in
+Titler resizes future uploads. A file that is not a picture is refused with a
+message rather than becoming a row that shows nothing.
+
+The main menu's hide button for the bulletin is now always present rather than
+appearing and vanishing, coloured only when there is really something on air.
+
 ## Version 7.34.0
 
 The main menu gets a hide button for the bulletin, shown while its layer is

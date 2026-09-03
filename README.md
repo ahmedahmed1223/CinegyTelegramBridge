@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.44.0
+
+The confirmation before hiding or exiting a graphic now shows what it says.
+It named the layer, the template, how long it had been up and who pushed it -
+everything except the words on screen, which are the one thing an operator can
+check against the output under pressure. Fields the template marks sensitive
+are named but not quoted. The copy is stored apart from the audit one, since
+that is gated by a setting because audit.jsonl is kept for ever while this is
+read once and thrown away with the record.
+
 ## Version 7.43.0
 
 The layer permission lists are picked too, and every layer shows by its name -

@@ -218,3 +218,56 @@ Describe 'Choosing the protected layers the same way' {
         (Test-TemplateAccess -Key 'logo' -Layer 8 -ChatId 100 -UserId 101).Allowed | Should -BeTrue
     }
 }
+
+Describe 'Reading what is on air before taking it off' {
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'ShowOnAirTextOnRemoval' -NotePropertyValue $true -Force
+        Mock Get-UserDisplayName { 'ابو حسام' }
+        Mock Get-TemplateStore {
+            @{ Order = @('Urgent'); Map = @{ 'Urgent' = @{ Key = 'Urgent'; Layer = 7; FieldSensitive = @('Ajel.secret') } } }
+        }
+        $script:OnAir = @{
+            7 = @{ Key = 'Urgent'; At = (Get-Date).AddMinutes(-4); UserId = 101; ScreenCopy = 'Ajel.center: قصف على غزة' }
+        }
+    }
+    AfterAll { $script:OnAir = @{} }
+
+    It 'shows the strap on the confirmation, not only the layer number' {
+        # A layer number cannot be checked against the screen under pressure;
+        # the words on it can.
+        $summary = Get-LayerRemovalSummary -Layer 7
+
+        $summary | Should -Match 'قصف على غزة'
+        $summary | Should -Match 'الطبقة 7'
+    }
+
+    It 'stays quiet about the text when the option is off' {
+        $config.Settings | Add-Member -NotePropertyName 'ShowOnAirTextOnRemoval' -NotePropertyValue $false -Force
+
+        Get-LayerRemovalSummary -Layer 7 | Should -Not -Match 'قصف على غزة'
+    }
+
+    It 'says the text is unrecorded rather than pretending the layer is empty' {
+        $script:OnAir = @{ 7 = @{ Key = 'Urgent'; At = (Get-Date); UserId = 101 } }
+
+        Get-LayerRemovalSummary -Layer 7 | Should -Match 'غير مسجّل'
+    }
+
+    It 'names a sensitive field without quoting it' {
+        $copy = Format-OnAirScreenCopy -Key 'Urgent' -Variables @{
+            'Ajel.center' = 'خبر عادي'
+            'Ajel.secret' = 'رقم هاتف المصدر'
+        }
+
+        $copy | Should -Match 'خبر عادي'
+        $copy | Should -Match 'Ajel.secret: •••'
+        $copy | Should -Not -Match 'رقم هاتف المصدر'
+    }
+
+    It 'keeps the copy short enough for a confirmation screen' {
+        $copy = Format-OnAirScreenCopy -Key 'Urgent' -Variables @{ 'Ajel.center' = ('ا' * 500) } -MaxChars 60
+
+        $copy.Length | Should -BeLessOrEqual 62
+        $copy | Should -Match '…$'
+    }
+}

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.43.0'
+$script:BridgeVersion = '7.44.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -229,6 +229,9 @@ $script:DefaultSettings = [ordered]@{
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this
     UploadRetentionMinutes     = 60      # delete staged operator uploads older than this; 0 keeps them
     ConfirmLayerRemoval        = $true   # ask before hiding something that IS on air, naming the template
+    # Shown on that confirmation: what the graphic says, so the operator reads
+    # the strap rather than trusting a layer number.
+    ShowOnAirTextOnRemoval     = $true
     ShowLayerLockBadge         = $false  # mark templates whose layer someone else is preparing
     RepeatWarningCount         = 3       # ask after this many pushes of one template in the window; 0 or 1 disables
     RepeatWarningWindowMinutes = 60      # the window the repeat count is measured over
@@ -320,6 +323,7 @@ $script:SettingDisplayMetadata = @{
     SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
+    ShowOnAirTextOnRemoval = @{ Unit = ''; Description = 'يعرض نص القالب المعروض عند تأكيد إخفائه أو الخروج منه، فيرى المستخدم ما سيسحبه قبل أن يسحبه. الحقول الحسّاسة تُذكر بأسمائها دون قيمها' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
     NewsListLayout = @{ Unit = ''; Description = 'شكل قائمة الأخبار: text نص فوق الأزرار · stacked الخبر بزر مستقل · inline الخبر داخل الصف · compact أرقام فقط (حتى 40 خبرًا في شاشة)' }
     NewsDraftTimeoutMinutes = @{ Unit = 'دقيقة'; Description = 'مهلة مسودة الأخبار قبل انتهاء صلاحيتها (0 = بلا مهلة)' }
@@ -964,7 +968,7 @@ foreach ($entry in @(
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
                 'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs',
-                'ConfirmLayerRemoval', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
+                'ConfirmLayerRemoval', 'ShowOnAirTextOnRemoval', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
                 'RelayAutoRestart', 'RelayMaxRestarts', 'RelayWatchdogSeconds',
                 'AllowRemoteRestart'
             ) },
@@ -1113,6 +1117,7 @@ $script:SettingNavigationLabels = @{
     CinegyStateCheckSeconds = 'فاصل فحص الطبقات'
     ConfigBackupKeepFiles = 'نسخ الإعدادات المحفوظة'
     ConfirmLayerRemoval = 'تأكيد قبل الإخفاء'
+    ShowOnAirTextOnRemoval = 'عرض النص قبل الإخفاء'
     DiskFreeWarningGB = 'تنبيه مساحة القرص'
     EnableButtonStyles = 'تلوين الأزرار'
     EnableSafeRollback = 'التراجع الآمن'

@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.44.0'; Items = @(
+                '👁 تأكيد الإخفاء والخروج صار يعرض نص القالب المعروض: ترى ما ستسحبه قبل أن تسحبه.'
+                '🔒 الحقول الحسّاسة تُذكر بأسمائها دون قيمها، والخيار يُطفأ من ⚙️ الإعدادات.'
+            ) }
         @{ Version = '7.43.0'; Items = @(
                 '☑️ «طبقات للمشرفين» و«طبقات للمالك» تُختار كذلك بالضغط: كل طبقة يعرفها الجسر باسمها لا برقمها وحده.'
                 '⚙️ الإعدادات وأدوات الإدارة تظهران للمشرفين فقط — إن غابتا عن قائمتك فحسابك ليس مشرفًا.'
@@ -1125,6 +1129,34 @@ function Get-TemplateTestReviewKeyboard {
     ) }
 }
 
+function Format-OnAirScreenCopy {
+    <#
+        What the graphic actually says, short enough for a confirmation.
+
+        A field the template marks sensitive is named but never quoted: the
+        point is to let an operator recognise what is on screen before taking
+        it off, and a name is enough for that where the value would be a leak.
+    #>
+    param([string]$Key = '', [hashtable]$Variables = @{}, [int]$MaxChars = 200)
+    if ($null -eq $Variables -or $Variables.Count -eq 0) { return '' }
+    $sensitive = @()
+    $store = Get-TemplateStore
+    if ($Key -and $store.Map.ContainsKey($Key)) {
+        $sensitive = @(Get-JsonProp $store.Map[$Key] 'FieldSensitive' | Where-Object { $null -ne $_ })
+    }
+    $parts = foreach ($name in @($Variables.Keys | Sort-Object)) {
+        if (@($sensitive | Where-Object { [string]$_ -eq [string]$name }).Count -gt 0) {
+            "${name}: •••"
+            continue
+        }
+        $value = ([string]$Variables[$name] -replace '[\r\n]+', ' ').Trim()
+        if ($value) { "${name}: $value" }
+    }
+    $text = (@($parts) -join ' · ')
+    if ($MaxChars -gt 0 -and $text.Length -gt $MaxChars) { $text = $text.Substring(0, $MaxChars) + '…' }
+    return $text
+}
+
 function Format-AuditTemplateValues {
     <# The text that actually reached the screen, folded into one short line
        for the audit record. Without it a report can only say which template
@@ -1544,6 +1576,11 @@ function Invoke-ShowTemplateResult {
             # number and nothing else, and the history could only report that
             # something was hidden - never which strap.
             AirCopy = (Format-AuditTemplateValues -Variables $Variables)
+            # What it says, for whoever is about to take it off. Kept apart
+            # from AirCopy on purpose: that one is gated by the audit setting
+            # because audit.jsonl is archived for ever, while this is read
+            # once on a confirmation screen and thrown away with the record.
+            ScreenCopy = (Format-OnAirScreenCopy -Key $Key -Variables $Variables)
         }
         Save-OnAirState
         Add-UsageCount -Key $Key

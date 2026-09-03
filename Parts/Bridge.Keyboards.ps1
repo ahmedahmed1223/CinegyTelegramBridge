@@ -252,6 +252,14 @@ function Get-LayerRemovalSummary {
     if ($record.At -is [datetime]) {
         $parts.Add("على الهواء منذ $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))")
     }
+    # What it says, when the operator has asked to be shown it. A layer
+    # number and a template name identify the graphic; the copy is what tells
+    # an operator whether this is the strap they meant to take off.
+    if (Get-Setting 'ShowOnAirTextOnRemoval') {
+        $copy = [string](Get-JsonProp $record 'ScreenCopy')
+        if ($copy) { $parts.Add("النص: $copy") }
+        else { $parts.Add('النص: غير مسجّل (عُرض قبل تفعيل الخيار أو من خارج الجسر)') }
+    }
     $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
     $parts.Add($(switch ($source) {
                 'cinegy' { 'المصدر: Cinegy (خارج الجسر)' }

@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.58.0
+
+Announcements. An administrator writes a notice and it reaches whoever they
+choose. The log and the audit trail record what the bridge did; this carries
+what a person needs the others to know, and it is the only message the bot
+sends that nobody asked for - so every part of it is bounded.
+
+Who: everyone, operators only, or administrators only, with the roster read at
+send time rather than frozen at composition, so somebody granted access this
+morning is reached and somebody whose access was revoked at noon is not. How
+long: one, six, twenty-four or seventy-two hours, after which it retires
+itself. How often: once, or every one, three, six or twelve hours - hours and
+never minutes, because this interrupts people who are working, and a notice
+that nags teaches them to dismiss the next one unread. A "read" button stops
+the repetition for whoever presses it, which is its whole purpose, and the
+screen says how many have. Pinning adds one line above the main menu for those
+who have not read it, capped at eighty characters because it sits on a screen
+used under pressure. It never reaches its own author, and a repeat falling
+inside quiet hours is held for the first sweep afterwards rather than dropped.
+The text was written by a person, not the bridge, so it is escaped like any
+other untrusted input.
+
 ## Version 7.57.0
 
 Settings gain a Notifications section. Everything that decides whether the bot

@@ -790,6 +790,47 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'menu:announcements' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-AnnouncementsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'annpage:*' {
+            $page = 0
+            if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
+                [int]::TryParse((Get-CallbackArg $data 'annpage:'), [ref]$page) -and $page -ge 0) {
+                Show-AnnouncementsScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
+        'ann:new' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-AnnouncementCompose -ChatId $chatId -UserId $userId }
+            break
+        }
+        'annopt:send' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Complete-AnnouncementSend -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'annopt:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Switch-AnnouncementOption -Option (Get-CallbackArg $data 'annopt:') -ChatId $chatId | Out-Null
+            }
+            break
+        }
+        'anncancel:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Stop-BridgeAnnouncement -AnnouncementId (Get-CallbackArg $data 'anncancel:') -UserId $userId | Out-Null
+                Show-AnnouncementsScreen -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'annack:*' {
+            # Any authorized user, not only an administrator: this is the
+            # button on the notice they were sent.
+            if (Confirm-AnnouncementRead -AnnouncementId (Get-CallbackArg $data 'annack:') -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text '✅ شكرًا، سُجّل اطّلاعك.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'menu:usersadmin' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId -UserId $userId }
             break

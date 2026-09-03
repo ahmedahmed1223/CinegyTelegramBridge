@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.57.0'
+$script:BridgeVersion = '7.58.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -103,6 +103,7 @@ foreach ($part in @(
         'Bridge.Callbacks'
         'Bridge.Tick'
         'Bridge.Reports'
+        'Bridge.Announcements'
     )) {
     . (Join-Path $scriptRoot "Parts/$part.ps1")
 }
@@ -136,6 +137,9 @@ $script:DefaultSettings = [ordered]@{
     # --- security ---
     RequireUserLevelAuth       = $true   # authorize the user id, not just the chat id
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
+    EnableAnnouncements        = $true   # administrators may send a notice to the people who use the bot
+    AnnouncementMaxLength      = 500     # longest notice, in characters
+    AnnouncementDefaultExpiryHours = 24  # how long a notice stays live when no other span is chosen
     NotifyAdminsOnAccessRequest = $true  # tell the admins when somebody asks for access
     NotifyAdminsOnBlockedChat  = $true   # and when the guard blocks one, which is otherwise silent
     BlockRejectedRequesters    = $true   # a rejected chat may not queue up again
@@ -435,6 +439,9 @@ $script:SettingDisplayMetadata = @{
     MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
+    EnableAnnouncements = @{ Unit = ''; Description = 'يسمح للمشرفين بإرسال تنويه إلى مستخدمي البوت من 📢 التنويهات' }
+    AnnouncementMaxLength = @{ Unit = 'حرف'; Description = 'أقصى طول لنص التنويه' }
+    AnnouncementDefaultExpiryHours = @{ Unit = 'ساعة'; Description = 'المدة الافتراضية لبقاء التنويه نشطًا قبل أن ينتهي وحده' }
     NotifyAdminsOnAccessRequest = @{ Unit = ''; Description = 'إشعار المشرفين بكل طلب وصول جديد. أطفئه لتقرأ الطلبات من 👤 طلبات الوصول وحدها' }
     NotifyAdminsOnBlockedChat = @{ Unit = ''; Description = 'إشعار المشرفين حين يحظر الحارس محادثة تلقائيًا. والحظر يبقى صامتًا تجاه المحظور دائمًا' }
     BlockRejectedRequesters = @{ Unit = ''; Description = 'رفض الطلب يحظر المحادثة نهائيًا فلا تستطيع الطلب مجددًا. ارفع الحظر من 🚫 المحظورون' }
@@ -593,6 +600,9 @@ $script:PollTimeoutStreak = 0
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
 $script:LastMojazImageSweep = $null
+# Notices an administrator wrote for everybody else.
+$script:Announcements = [System.Collections.Generic.List[object]]::new()
+$script:LastAnnouncementSweep = $null
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
 $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
@@ -1072,6 +1082,7 @@ foreach ($entry in @(
         # from the five categories these had been scattered across: an operator
         # asking "why did it wake me at 3am" was reading four screens.
         @{ Category = 'notifications'; Names = @(
+                'EnableAnnouncements', 'AnnouncementMaxLength', 'AnnouncementDefaultExpiryHours',
                 'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd',
                 'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat',
                 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
@@ -1157,6 +1168,9 @@ $script:SettingNavigationLabels = @{
     SceneMode = 'وضع المشاهد'
     RequireUserLevelAuth = 'التحقق من هوية المستخدم'
     EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
+    EnableAnnouncements = 'تنويهات المشرفين'
+    AnnouncementMaxLength = 'طول التنويه'
+    AnnouncementDefaultExpiryHours = 'مدة التنويه الافتراضية'
     NotifyAdminsOnAccessRequest = 'إشعار طلبات الوصول'
     NotifyAdminsOnBlockedChat = 'إشعار الحظر التلقائي'
     BlockRejectedRequesters = 'حظر من رُفض طلبه'
@@ -1563,6 +1577,7 @@ Import-UserAliases
 Import-DisabledUsers
 Import-UserProfiles
 Import-AccessGuard
+Import-BridgeAnnouncements
 Import-OnAirState
 Import-DraftStates
 Import-RecentFieldValues
@@ -1704,6 +1719,7 @@ try {
                                 'mojaz_name_copy' { Complete-MojazName -Which copy -ChatId $chatId -Value $text }
                                 # The only flow a chat without access can reach; it
                                 # checks for itself that the chat is really waiting.
+                                'announcement_text' { Complete-AnnouncementText -ChatId $chatId -Value $text | Out-Null }
                                 'access_request_name' { Complete-AccessRequestName -ChatId $chatId -Value $text | Out-Null }
                                 # The other one, and it must come before the
                                 # authorization check for the same reason.

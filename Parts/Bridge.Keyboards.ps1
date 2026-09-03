@@ -291,6 +291,7 @@ function Get-AdminToolsKeyboard {
     $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
     $rows += , @( (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
     $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
+    if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button "📢 التنويهات" "menu:announcements") ) }
     $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
 
     if (Get-Setting 'EnableLiveRelay') {

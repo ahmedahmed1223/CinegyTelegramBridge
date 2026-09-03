@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.37.1'
+$script:BridgeVersion = '7.38.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -204,6 +204,8 @@ $script:DefaultSettings = [ordered]@{
     MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
     MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
     MojazHidesTicker           = $false  # off: this newsroom keeps the strip up through a bulletin. Turn on to have it stand down and return
+    MojazImageWidth            = 538     # what the exporter really produces; 0 reads the size off the scene's plate instead
+    MojazImageHeight           = 303
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
@@ -384,6 +386,8 @@ $script:SettingDisplayMetadata = @{
     MojazSyncOffsetMs = @{ Unit = 'مللي ثانية'; Description = 'بعد التفاف اللوب بكم يُكتب الصف التالي، ليقع داخل حركة الظهور فتُخفيه' }
     MojazSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
     MojazHidesTicker = @{ Description = 'شريط الأخبار يخرج عند بدء الموجز ويعود بعد انتهائه، لأنهما يتقاسمان أسفل الشاشة. لا يُعاد شريط لم يكن على الهواء أصلًا' }
+    MojazImageWidth = @{ Unit = 'بكسل'; Description = 'عرض صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
+    MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
     EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
@@ -944,7 +948,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker',
+                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1071,6 +1075,8 @@ $script:SettingNavigationLabels = @{
     MojazSyncOffsetMs = 'لحظة الكتابة داخل الظهور'
     MojazSyncLeadMs = 'تعويض زمن الشبكة'
     MojazHidesTicker = 'إخفاء الشريط أثناء الموجز'
+    MojazImageWidth = 'عرض صورة الصف'
+    MojazImageHeight = 'ارتفاع صورة الصف'
     AirCommandTimeoutSeconds = 'مهلة أمر Cinegy'
     AllowRemoteRestart = 'إعادة التشغيل من البوت'
     AuditArchiveKeepFiles = 'أرشيفات التدقيق المحفوظة'

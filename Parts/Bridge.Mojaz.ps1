@@ -254,10 +254,19 @@ function Get-MojazImageSize {
 
         A photo from a phone is 4000 pixels wide and the wrong shape; handing
         that to the plate is how a picture ends up not appearing at all.
-        Resize the scene's plate and uploads follow it, with nothing to change
-        here.
+
+        The settings win where they are set, because the plate's size is in
+        scene units and the picture Titler actually exports is not always the
+        same count of pixels - 525x292 on the plate, 538x303 out of the
+        exporter. A measured number beats a derived one. Leave them at 0 and
+        the plate is read instead, so re-sizing it in Titler still carries.
     #>
     param([string]$Path = '')
+    $setWidth = Get-SettingInt 'MojazImageWidth' 0
+    $setHeight = Get-SettingInt 'MojazImageHeight' 0
+    if ($setWidth -ge 1 -and $setHeight -ge 1) {
+        return [pscustomobject]@{ Width = $setWidth; Height = $setHeight }
+    }
     if (-not $Path) {
         $template = Get-MojazTemplate
         if (-not $template) { return $null }

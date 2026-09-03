@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.38.0
+
+The row picture's size is a setting now - 538x303, what Titler's exporter
+really produces - rather than only what the plate declares in scene units
+(525.38x291.61). A measured number beats a derived one. Zero in either
+setting reads the plate again, so a template resize still carries for anyone
+who has not set it.
+
 ## Version 7.37.1
 
 The strip stays up through a bulletin by default: the newsroom tried the

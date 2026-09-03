@@ -1159,6 +1159,9 @@ Describe 'Checking and sizing an uploaded picture' {
     BeforeEach {
         Mock Write-BridgeLog {}
         $script:MojazImageSize = $null; $script:MojazImageSizeKey = ''
+        # 0 means "ask the scene", which is what the plate tests are about.
+        $config.Settings | Add-Member -NotePropertyName 'MojazImageWidth' -NotePropertyValue 0 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazImageHeight' -NotePropertyValue 0 -Force
     }
     AfterAll { $script:MojazImageSize = $null; $script:MojazImageSizeKey = '' }
 
@@ -1176,6 +1179,21 @@ Describe 'Checking and sizing an uploaded picture' {
 
         $size.Width | Should -Be 525
         $size.Height | Should -Be 292
+    }
+
+    It 'takes the exporter measurement over the plate when it is given' {
+        # The plate is 525x292 in scene units; Titler exports 538x303. The
+        # measured number is the one the picture has to match.
+        $config.Settings | Add-Member -NotePropertyName 'MojazImageWidth' -NotePropertyValue 538 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazImageHeight' -NotePropertyValue 303 -Force
+        $scene = Join-Path $TestDrive 'measured.cintitle'
+        '<CinegyTitler><Scene Fps="25"><Plate Name="img 01" Size="525.38;291.61" Source="File" File="${mojaz_img}" /></Scene></CinegyTitler>' |
+            Set-Content -LiteralPath $scene -Encoding utf8
+
+        $size = Get-MojazImageSize -Path $scene
+
+        $size.Width | Should -Be 538
+        $size.Height | Should -Be 303
     }
 
     It 'answers with nothing when no plate carries the picture' {

@@ -176,9 +176,9 @@ Describe 'Mojaz bulletin row editing' {
     It 'clears every row and validates timing bounds' {
         $library = (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'أ' -Text 'ن').Value
         @((Clear-MojazBulletinRows -Library $library -BulletinId $script:id).Value.Bulletins[0].Rows).Count | Should -Be 0
-        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 12).Value.Bulletins[0].DelaySeconds | Should -Be 12
-        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 0).ErrorCode | Should -Be 'out_of_range'
-        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelaySeconds 601).ErrorCode | Should -Be 'out_of_range'
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelayFrames 300).Value.Bulletins[0].DelayFrames | Should -Be 300
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelayFrames 0).ErrorCode | Should -Be 'out_of_range'
+        (Set-MojazBulletinTiming -Library $library -BulletinId $script:id -DelayFrames 15001).ErrorCode | Should -Be 'out_of_range'
     }
 
     It 'reports a missing bulletin instead of throwing' {

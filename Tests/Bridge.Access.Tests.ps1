@@ -373,3 +373,109 @@ Describe 'Keeping the raw layer controls from ordinary operators' {
         $data | Should -Contain 'menu:templates'
     }
 }
+
+Describe 'The requester names themselves' {
+    BeforeEach {
+        Mock Send-TelegramMessage {}
+        Mock Send-AdminBroadcast {}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Save-UserAliases { $true }
+        Mock Get-ApprovalKeyboard { @{ inline_keyboard = @() } }
+        $config.Settings | Add-Member -NotePropertyName 'AskRequesterName' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'EnableSelfServiceRequests' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'MaxPendingApprovals' -NotePropertyValue 10 -Force
+        $script:UserAliases.Clear()
+        Clear-PendingState -ChatId 555
+        # The queue is read back through the screen that shows it rather than
+        # through the table itself: the bridge's own copy of that table is not
+        # the one this file's scope holds, and asserting on the wrong one
+        # passes or fails for reasons that have nothing to do with the code.
+        Deny-UserAccess -TargetChatId 555 -RejectedBy 101 -RejecterUserId 101 -ErrorAction SilentlyContinue | Out-Null
+    }
+    AfterAll { $script:UserAliases.Clear() }
+
+    It 'asks for a name only after the request is already with the admins' {
+        # A requester who never answers must still have a request waiting.
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed'; username = 'ahmed' }) | Should -BeTrue
+
+        Get-PendingApprovalsText | Should -Match '555'
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+        [string](Get-PendingState -ChatId 555).Mode | Should -Be 'access_request_name'
+    }
+
+    It 'replaces the Telegram handle with what the person sent' {
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed'; username = 'ahmed' }) | Out-Null
+
+        Complete-AccessRequestName -ChatId 555 -Value '  أحمد - قسم الأخبار  ' | Should -BeTrue
+
+        Get-PendingApprovalsText | Should -Match 'أحمد - قسم الأخبار'
+        Get-PendingState -ChatId 555 | Should -BeNullOrEmpty
+    }
+
+    It 'refuses to answer a chat that is not waiting in the queue' {
+        # This is the one flow an unauthorized chat can reach, so it verifies
+        # for itself rather than trusting the pending state alone.
+        Set-PendingState -ChatId 556 -State @{ Mode = 'access_request_name'; UserId = 556 }
+
+        Complete-AccessRequestName -ChatId 556 -Value 'أي اسم' | Should -BeFalse
+
+        Get-PendingState -ChatId 556 | Should -BeNullOrEmpty
+        $script:UserAliases.Count | Should -Be 0
+    }
+
+    It 'caps the name and flattens what would break a roster line' {
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed' }) | Out-Null
+
+        Complete-AccessRequestName -ChatId 555 -Value ("أ`nب`tج" + ('د' * 200)) | Out-Null
+
+        $text = Get-PendingApprovalsText
+        $text | Should -Match 'أ ب ج'
+        # 200 identical letters would have run off the screen.
+        $text | Should -Not -Match ('د' * 70)
+    }
+
+    It 'keeps the prompt open on an empty name' {
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed' }) | Out-Null
+
+        Complete-AccessRequestName -ChatId 555 -Value '   ' | Should -BeFalse
+
+        [string](Get-PendingState -ChatId 555).Mode | Should -Be 'access_request_name'
+    }
+
+    It 'adopts that name as the alias when access is granted' {
+        Mock Test-Authorized { $false }
+        Mock Save-Config { $true }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-ConfigSaveWarning { '' }
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed' }) | Out-Null
+        Complete-AccessRequestName -ChatId 555 -Value 'أحمد - قسم الأخبار' | Out-Null
+
+        Grant-UserAccess -TargetChatId 555 -ApprovedBy 101 -ApproverUserId 101
+
+        Get-UserDisplayName -UserId 555 | Should -Be 'أحمد - قسم الأخبار'
+    }
+
+    It 'leaves an alias somebody already chose alone' {
+        Mock Test-Authorized { $false }
+        Mock Save-Config { $true }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-ConfigSaveWarning { '' }
+        $script:UserAliases['555'] = 'اسم اختاره المشرف'
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed' }) | Out-Null
+        Complete-AccessRequestName -ChatId 555 -Value 'أحمد' | Out-Null
+
+        Grant-UserAccess -TargetChatId 555 -ApprovedBy 101 -ApproverUserId 101
+
+        Get-UserDisplayName -UserId 555 | Should -Be 'اسم اختاره المشرف'
+    }
+
+    It 'does not ask when the option is off' {
+        $config.Settings | Add-Member -NotePropertyName 'AskRequesterName' -NotePropertyValue $false -Force
+
+        Request-Approval -ChatId 555 -UserId 555 -From ([pscustomobject]@{ first_name = 'Ahmed' }) | Should -BeTrue
+
+        Get-PendingState -ChatId 555 | Should -BeNullOrEmpty
+        Get-PendingApprovalsText | Should -Match '555'
+    }
+}

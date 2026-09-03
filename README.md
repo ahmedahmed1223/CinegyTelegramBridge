@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.48.0
+
+The row dwell joins the other two timings in frames, so one unit describes the
+whole bulletin, with a setting for the newsroom default; bulletins and legacy
+playlists holding seconds are converted rather than reset.
+
+Whoever asks for access is asked for their name, and that name becomes their
+alias the moment access is granted, so no administrator types it in. The
+question comes after the admins are told, never before, since a requester who
+never answers must still have a request waiting. It is the one flow a chat
+without access can reach, so it checks for itself that the chat is really in
+the queue, caps the text and flattens what would break a roster line - and an
+alias somebody already chose is left alone.
+
 ## Version 7.47.0
 
 Two notices the bulletin did not send: one when a run ends by itself, which is

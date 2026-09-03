@@ -49,7 +49,7 @@ function Test-MojazNameAvailable {
 function Add-MojazBulletin {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$Name,
-        [int]$DelaySeconds = 8,
+        [int]$DelayFrames = 200,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $normalized = ConvertTo-MojazName -Name $Name
     if ([string]::IsNullOrWhiteSpace($normalized)) { return (New-MojazResult $false $null 'invalid_name' 'اسم الموجز مطلوب.') }
@@ -59,8 +59,10 @@ function Add-MojazBulletin {
     $bulletin = [pscustomobject]@{
         Id = New-MojazId -Prefix b; Name = $normalized; Revision = 1
         CreatedAt = $Now.ToString('o'); UpdatedAt = $Now.ToString('o'); UpdatedBy = $UserId
-        DelaySeconds = [math]::Min(600, [math]::Max(1, $DelaySeconds))
-        IntroExtraSeconds = 0; LastRowSeconds = 0; Rows = @()
+        # Frames, like the two timings beside it: one unit for the whole
+        # bulletin rather than seconds here and frames there.
+        DelayFrames = [math]::Min(15000, [math]::Max(1, $DelayFrames))
+        IntroExtraFrames = 0; LastRowFrames = 0; Rows = @()
     }
     $copy.Bulletins = @($bulletins + $bulletin)
     return (New-MojazResult $true $copy)
@@ -394,12 +396,12 @@ function Set-MojazBulletinTiming {
        markers in the .cintitle already answer. #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [int]$DelaySeconds, [int]$IntroExtraFrames, [int]$LastRowFrames,
+        [int]$DelayFrames, [int]$IntroExtraFrames, [int]$LastRowFrames,
         [nullable[bool]]$SyncToLoop,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
-    if ($fields.ContainsKey('DelaySeconds') -and ($DelaySeconds -lt 1 -or $DelaySeconds -gt 600)) {
-        return (New-MojazResult $false $null 'out_of_range' 'المدة بين ١ و٦٠٠ ثانية.')
+    if ($fields.ContainsKey('DelayFrames') -and ($DelayFrames -lt 1 -or $DelayFrames -gt 15000)) {
+        return (New-MojazResult $false $null 'out_of_range' 'المدة بين ١ و١٥٠٠٠ إطار.')
     }
     # Frames, because that is the unit the animation is cut in. Ten minutes
     # at 25 fps is the ceiling, which is far past anything a bulletin needs.
@@ -411,8 +413,7 @@ function Set-MojazBulletinTiming {
     }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            if ($fields.ContainsKey('DelaySeconds')) { $bulletin.DelaySeconds = $DelaySeconds }
-            foreach ($pair in @(@('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames))) {
+            foreach ($pair in @(@('DelayFrames', $DelayFrames), @('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames))) {
                 if (-not $fields.ContainsKey($pair[0])) { continue }
                 # Bulletins written before frames existed carry neither field.
                 if ($bulletin.PSObject.Properties.Match($pair[0]).Count -eq 0) {

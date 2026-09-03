@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.47.0'
+$script:BridgeVersion = '7.48.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -207,7 +207,7 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
     # --- safety ---
-    MojazRowSeconds            = 8       # how long each Mojaz row stays before the next replaces it
+    MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
     # In frames, because that is how the animation is cut. 0 for either means
     # "take it from the scene's own entrance and exit".
     # The channel's frame rate, used wherever a scene cannot state its own.
@@ -237,6 +237,9 @@ $script:DefaultSettings = [ordered]@{
     SnapshotTimeoutSeconds     = 8       # hard kill ffmpeg after this
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this
     UploadRetentionMinutes     = 60      # delete staged operator uploads older than this; 0 keeps them
+    # Asked of whoever requests access, so the roster carries a name the
+    # person chose instead of one an administrator typed for them.
+    AskRequesterName           = $true
     ConfirmLayerRemoval        = $true   # ask before hiding something that IS on air, naming the template
     # Shown on that confirmation: what the graphic says, so the operator reads
     # the strap rather than trusting a layer number.
@@ -331,6 +334,7 @@ $script:SettingDisplayMetadata = @{
     SnapshotTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة التقاط صورة البث' }
     SnapshotRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بصور البث المؤقتة' }
     UploadRetentionMinutes = @{ Unit = 'دقيقة'; Description = 'مدة الاحتفاظ بالملفات التي يرفعها المستخدمون (0 للاحتفاظ الدائم)' }
+    AskRequesterName = @{ Unit = ''; Description = 'يسأل طالب الوصول عن اسمه للعرض، ويصير اسمه في السجل عند الموافقة دون أن يكتبه المشرف' }
     ConfirmLayerRemoval = @{ Unit = ''; Description = 'طلب تأكيد قبل الإخفاء والخروج مع عرض اسم القالب' }
     ShowOnAirTextOnRemoval = @{ Unit = ''; Description = 'يعرض نص القالب المعروض عند تأكيد إخفائه أو الخروج منه، فيرى المستخدم ما سيسحبه قبل أن يسحبه. الحقول الحسّاسة تُذكر بأسمائها دون قيمها' }
     ShowLayerLockBadge = @{ Unit = ''; Description = 'إظهار 🔒 على القوالب التي يجهّز طبقتها مشغّل آخر' }
@@ -401,7 +405,7 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
-    MojazRowSeconds = @{ Unit = 'ثانية'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي' }
+    MojazRowFrames = @{ Unit = 'إطار'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي، بالإطارات. تُستخدم لكل موجز جديد ولكل موجز لم يُحدَّد له رقم' }
     BroadcastFps = @{ Unit = 'إطار/ث'; Description = 'معدل إطارات القناة، يُستخدم في حساب المدد حين لا يذكر المشهد معدله. المشهد أولى بنفسه حين يذكره' }
     MojazIntroExtraFrames = @{ Unit = 'إطار'; Description = 'إطارات تُضاف إلى الصف الأول وحده بقدر حركة الدخول. صفر يعني أخذها من المشهد نفسه' }
     MojazLastRowFrames = @{ Unit = 'إطار'; Description = 'إطارات يبقاها الصف الأخير قبل أمر الخروج. صفر يعني أخذها من حركة خروج المشهد' }
@@ -979,12 +983,12 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazRowSeconds', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazRowFrames', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
                 'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs',
-                'ConfirmLayerRemoval', 'ShowOnAirTextOnRemoval', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
+                'ConfirmLayerRemoval', 'ShowOnAirTextOnRemoval', 'AskRequesterName', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
                 'RelayAutoRestart', 'RelayMaxRestarts', 'RelayWatchdogSeconds',
                 'AllowRemoteRestart'
             ) },
@@ -1107,7 +1111,7 @@ $script:SettingNavigationLabels = @{
     UserActivityRecentMinutes = 'نافذة النشاط الحديث للمستخدم'
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
-    MojazRowSeconds = 'مدة صف الموجز'
+    MojazRowFrames = 'إطارات صف الموجز'
     BroadcastFps = 'معدل إطارات القناة'
     MojazIntroExtraFrames = 'إطارات الصف الأول'
     MojazLastRowFrames = 'إطارات الصف الأخير'
@@ -1137,6 +1141,7 @@ $script:SettingNavigationLabels = @{
     CinegyStateBackoffMaxSeconds = 'أقصى تباعد عند التعذّر'
     CinegyStateCheckSeconds = 'فاصل فحص الطبقات'
     ConfigBackupKeepFiles = 'نسخ الإعدادات المحفوظة'
+    AskRequesterName = 'سؤال طالب الوصول عن اسمه'
     ConfirmLayerRemoval = 'تأكيد قبل الإخفاء'
     ShowOnAirTextOnRemoval = 'عرض النص قبل الإخفاء'
     DiskFreeWarningGB = 'تنبيه مساحة القرص'
@@ -1630,6 +1635,9 @@ try {
                                 'mojaz_name_new' { Complete-MojazName -Which new -ChatId $chatId -Value $text }
                                 'mojaz_name_rename' { Complete-MojazName -Which rename -ChatId $chatId -Value $text }
                                 'mojaz_name_copy' { Complete-MojazName -Which copy -ChatId $chatId -Value $text }
+                                # The only flow a chat without access can reach; it
+                                # checks for itself that the chat is really waiting.
+                                'access_request_name' { Complete-AccessRequestName -ChatId $chatId -Value $text | Out-Null }
                                 'operation_reference' { Complete-OperationReferenceLookup -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'layer_name' { Complete-LayerName -ChatId $chatId -Value $text | Out-Null }
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }

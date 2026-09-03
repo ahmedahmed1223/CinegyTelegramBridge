@@ -17,7 +17,9 @@ function global:New-TestMojazLibrary {
     $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الصباحي' -UserId 1
     $script:MojazLibrary = $created.Value
     $bulletin = $script:MojazLibrary.Bulletins[0]
-    $bulletin.DelaySeconds = $DelaySeconds
+    # The tests read better in seconds; the bulletin stores frames, so the
+    # helper converts at the boundary rather than every call site doing it.
+    $bulletin.DelayFrames = [int]($DelaySeconds * 25)
     $bulletin.Rows = @($Rows)
     $script:MojazSelections = @{ '100' = [string]$bulletin.Id }
     $script:MojazSchedules = @()
@@ -106,8 +108,8 @@ Describe 'The bulletin table' {
         $without['Subject.Text'] | Should -Be 'ن'
     }
 
-    It 'refuses a dwell outside one second to ten minutes' {
-        foreach ($value in @('0', '601')) {
+    It 'refuses a dwell outside one frame to ten minutes' {
+        foreach ($value in @('0', '15001')) {
             Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_delay'; UserId = 101; BulletinId = [string]$script:bulletin.Id }
             Complete-MojazTiming -Which delay -ChatId 100 -Value $value
             # Refused: the prompt is still open and the number has not moved.
@@ -115,9 +117,11 @@ Describe 'The bulletin table' {
         }
 
         Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_delay'; UserId = 101; BulletinId = [string]$script:bulletin.Id }
-        Complete-MojazTiming -Which delay -ChatId 100 -Value '7'
+        Complete-MojazTiming -Which delay -ChatId 100 -Value '175'
 
-        [int](Get-MojazSelected -ChatId 100).DelaySeconds | Should -Be 7
+        # 175 frames is the seven seconds this used to be typed as.
+        [int](Get-MojazSelected -ChatId 100).DelayFrames | Should -Be 175
+        Get-MojazDelaySeconds -Bulletin (Get-MojazSelected -ChatId 100) | Should -Be 7
     }
 
     It 'says the table is empty rather than drawing an empty one' {
@@ -379,7 +383,7 @@ Describe 'Adjusting the bulletin timings' {
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
         Mock Get-MojazSceneTiming { $null }
         $script:MojazLibrary.Bulletins[0].Rows = @((New-TestMojazRow -Title 'أ'), (New-TestMojazRow -Title 'ب'))
-        $script:MojazLibrary.Bulletins[0].LastRowSeconds = 15
+        $script:MojazLibrary.Bulletins[0].LastRowFrames = 375
 
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
         Step-TestMojazPlayback
@@ -440,8 +444,8 @@ Describe 'Timing read from the scene itself' {
 
     It 'still lets the bulletin override what the scene says' {
         Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 60; OutroSeconds = 6.72 } }
-        $script:bulletin.IntroExtraSeconds = 5
-        $script:bulletin.LastRowSeconds = 15
+        $script:bulletin.IntroExtraFrames = 125
+        $script:bulletin.LastRowFrames = 375
 
         Get-MojazIntroSeconds -Bulletin $script:bulletin | Should -Be 5
         Get-MojazLastRowSeconds -Bulletin $script:bulletin | Should -Be 15
@@ -513,9 +517,11 @@ Describe 'Persisting and migrating the Mojaz library' {
         $script:MojazLibrary.Bulletins.Count | Should -Be 1
         $bulletin = $script:MojazLibrary.Bulletins[0]
         $bulletin.Name | Should -Be 'الموجز الحالي'
-        $bulletin.DelaySeconds | Should -Be 12
-        $bulletin.IntroExtraSeconds | Should -Be 3
-        $bulletin.LastRowSeconds | Should -Be 5
+        # The legacy file spoke seconds; the library speaks frames, so the
+        # migration converts rather than dropping what was set.
+        $bulletin.DelayFrames | Should -Be 300
+        $bulletin.IntroExtraFrames | Should -Be 75
+        $bulletin.LastRowFrames | Should -Be 125
         $bulletin.Rows[0].ImageMode | Should -Be 'inherit'
         $bulletin.Rows[1].ImageMode | Should -Be 'new'
         Test-Path -LiteralPath $legacy | Should -BeFalse

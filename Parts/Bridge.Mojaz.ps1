@@ -88,11 +88,17 @@ function ConvertFrom-LegacyMojazPlaylist {
     $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الموجز الحالي' -UserId 0
     $bulletin = $created.Value.Bulletins[0]
     $delay = 0
-    if ([int]::TryParse([string](Get-JsonProp $Saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) { $bulletin.DelaySeconds = $delay }
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) {
+        $bulletin.DelayFrames = [int][math]::Round($delay * (Get-MojazFps))
+    }
     $intro = 0
-    if ([int]::TryParse([string](Get-JsonProp $Saved 'IntroExtraSeconds'), [ref]$intro) -and $intro -ge 0) { $bulletin.IntroExtraSeconds = $intro }
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'IntroExtraSeconds'), [ref]$intro) -and $intro -ge 0) {
+        $bulletin.IntroExtraFrames = [int][math]::Round($intro * (Get-MojazFps))
+    }
     $last = 0
-    if ([int]::TryParse([string](Get-JsonProp $Saved 'LastRowSeconds'), [ref]$last) -and $last -ge 0) { $bulletin.LastRowSeconds = $last }
+    if ([int]::TryParse([string](Get-JsonProp $Saved 'LastRowSeconds'), [ref]$last) -and $last -ge 0) {
+        $bulletin.LastRowFrames = [int][math]::Round($last * (Get-MojazFps))
+    }
     $bulletin.Rows = @(foreach ($row in @(Get-JsonProp $Saved 'Rows')) {
             if (-not $row) { continue }
             $image = [string](Get-JsonProp $row 'Image')
@@ -463,6 +469,28 @@ function Get-MojazFps {
     return 25.0
 }
 
+function Get-MojazDelayFrames {
+    <# How long each row holds, in frames. The bulletin's own number, then the
+       newsroom's default. Seconds are derived, so one unit describes the
+       whole bulletin instead of seconds here and frames beside it. #>
+    param($Bulletin)
+    if ($Bulletin) {
+        $own = [int](Get-JsonProp $Bulletin 'DelayFrames')
+        if ($own -gt 0) { return $own }
+        # Written before frames existed: its seconds still mean something.
+        $legacy = [double](Get-JsonProp $Bulletin 'DelaySeconds')
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+    }
+    $default = Get-SettingInt 'MojazRowFrames' 0
+    if ($default -gt 0) { return $default }
+    return [int][math]::Round(8 * (Get-MojazFps))
+}
+
+function Get-MojazDelaySeconds {
+    param($Bulletin)
+    return [math]::Round((Get-MojazDelayFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
+}
+
 function Get-MojazIntroFrames {
     <#
         What the first row gets on top of its dwell, in frames - the unit the
@@ -523,8 +551,8 @@ function Get-MojazLastRowFrames {
     if ($default -gt 0) { return $default }
     $sceneFrames = Get-MojazSceneFrames -Which outro
     if ($sceneFrames -gt 0) { return $sceneFrames }
-    $delay = if ($Bulletin) { [int](Get-JsonProp $Bulletin 'DelaySeconds') } else { 8 }
-    return [int][math]::Max((Get-MojazFps), [math]::Floor($delay / 2) * (Get-MojazFps))
+    # Half the dwell, in frames, when the scene has no exit to copy.
+    return [int][math]::Max((Get-MojazFps), [math]::Floor((Get-MojazDelayFrames -Bulletin $Bulletin) / 2))
 }
 
 function Get-MojazLastRowSeconds {
@@ -578,11 +606,11 @@ function Get-MojazPlanText {
         $total = [int][math]::Ceiling([double]$plan.ExitOffset + [double]$timing.OutroSeconds)
         return "كل صف لوب واحد ($($timing.LoopSeconds) ث) · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)`n$(Get-MojazSyncText -Bulletin $Bulletin)"
     }
-    $delay = [int]$Bulletin.DelaySeconds
+    $delay = Get-MojazDelaySeconds -Bulletin $Bulletin
     $intro = Get-MojazIntroSeconds -Bulletin $Bulletin
     $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
     $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
-    $line = "كل صف $delay ث · الأول +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار لحركة الدخول · الأخير $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total)))"
+    $line = "كل صف $(Get-MojazDelayFrames -Bulletin $Bulletin) إطار ($delay ث) · الأول +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار لحركة الدخول · الأخير $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total)))"
     $timing = Get-MojazSceneTiming
     if ($timing) {
         $line += "`nمن القالب: دخول $(Get-MojazSceneFrames -Which intro) إطار · لوب $([int](Get-JsonProp $timing 'LoopFrames')) إطار · خروج $(Get-MojazSceneFrames -Which outro) إطار (‏$(Get-MojazFps) إطارًا/ث)"
@@ -681,7 +709,7 @@ function Get-MojazKeyboard {
     }
     $keyboard += , @(
         (New-Button '➕ إضافة صف' 'mojaz:add')
-        (New-Button "⏱ المدة: $(if ($Bulletin) { [int]$Bulletin.DelaySeconds } else { 0 }) ث" 'mojaz:delay')
+        (New-Button "⏱ المدة: $(Get-MojazDelayFrames -Bulletin $Bulletin) إطار" 'mojaz:delay')
     )
     $keyboard += , @(
         (New-Button "⏩ الأول: +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار" 'mojaz:intro')
@@ -814,7 +842,7 @@ function Complete-MojazName {
     $result = switch ($Which) {
         # A new bulletin opens on the newsroom's usual dwell; the ⏱ button
         # changes it for this one without touching the setting.
-        'new' { Add-MojazBulletin -Library $script:MojazLibrary -Name $Value -DelaySeconds (Get-SettingInt 'MojazRowSeconds' 8) -UserId $userId }
+        'new' { Add-MojazBulletin -Library $script:MojazLibrary -Name $Value -DelayFrames (Get-MojazDelayFrames) -UserId $userId }
         'rename' { Rename-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
         'copy' { Copy-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
     }
@@ -1197,7 +1225,9 @@ function Start-MojazDelayPrompt {
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_delay'; UserId = $UserId; BulletinId = [string]$bulletin.Id }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏱ كم ثانية يبقى كل صف على الهواء؟ (1-600)`nالحالي: $([int]$bulletin.DelaySeconds) ث" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId `
+        -Text "⏱ كم إطارًا يبقى كل صف على الهواء؟`nالحالي: $(Get-MojazDelayFrames -Bulletin $bulletin) إطار ≈ $(Get-MojazDelaySeconds -Bulletin $bulletin) ث · المشهد $(Get-MojazFps) إطارًا في الثانية." `
+        -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-MojazTimingPrompt {
@@ -1227,13 +1257,13 @@ function Complete-MojazTiming {
     if (-not $state -or [string]$state.Mode -ne $mode) { return }
     $seconds = 0
     if (-not [int]::TryParse((ConvertTo-BridgeLatinDigits -Text ([string]$Value).Trim()), [ref]$seconds)) {
-        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'delay') { '❌ أرسل رقمًا بين 1 و600 ثانية.' } else { '❌ أرسل عدد إطارات بين 0 و15000.' }) -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'delay') { '❌ أرسل عدد إطارات بين 1 و15000.' } else { '❌ أرسل عدد إطارات بين 0 و15000.' }) -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     $bulletinId = [string](Get-JsonProp $state 'BulletinId')
     $userId = [long]$state.UserId
     $result = switch ($Which) {
-        'delay' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -DelaySeconds $seconds -UserId $userId }
+        'delay' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -DelayFrames $seconds -UserId $userId }
         'intro' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -IntroExtraFrames $seconds -UserId $userId }
         'last' { Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId $bulletinId -LastRowFrames $seconds -UserId $userId }
     }
@@ -1549,8 +1579,17 @@ function Start-MojazPlayback {
     # plan line promised. The saved bulletin is not touched - the copy carries
     # them into the snapshot, which owns the timing for this run alone.
     $resolved = $bulletin | ConvertTo-Json -Depth 12 | ConvertFrom-Json
-    $resolved.IntroExtraSeconds = Get-MojazIntroSeconds -Bulletin $bulletin
-    $resolved.LastRowSeconds = Get-MojazLastRowSeconds -Bulletin $bulletin
+    # Added rather than assigned: a bulletin stores frames now, so these
+    # seconds exist only on this copy, for the module to plan with.
+    foreach ($pair in @(
+            @('DelaySeconds', (Get-MojazDelaySeconds -Bulletin $bulletin)),
+            @('IntroExtraSeconds', (Get-MojazIntroSeconds -Bulletin $bulletin)),
+            @('LastRowSeconds', (Get-MojazLastRowSeconds -Bulletin $bulletin)))) {
+        if ($resolved.PSObject.Properties.Match($pair[0]).Count -eq 0) {
+            $resolved | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1]
+        }
+        else { $resolved.$($pair[0]) = $pair[1] }
+    }
     $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule -OffsetSeconds $syncOffset
     if (-not $snapshotResult.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text 'الجدول فارغ.' -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
@@ -1588,7 +1627,7 @@ function Start-MojazPlayback {
     # Now that the bulletin is really on air, the strip stands down: they
     # share the bottom of the screen, and it returns when this ends.
     Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null
-    Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $([int]$bulletin.DelaySeconds) s each)"
+    Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $(Get-MojazDelayFrames -Bulletin $bulletin) frames each)"
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true

@@ -1939,6 +1939,47 @@ function Request-Approval {
     $nameLine = if ($name) { "الاسم: $name`n" } else { "" }
     Send-AdminBroadcast -Text "🔔 طلب وصول جديد للبوت`n$($nameLine)رقم المحادثة: $ChatId`nرقم المستخدم: $UserId" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
     Write-BridgeLog "Access request from chat $ChatId / user $UserId ($name) sent to admins"
+    # Asked after the admins are told, never before: a requester who never
+    # answers still has a request waiting, which is the point of the queue.
+    # What they send replaces the Telegram handle as the name the roster shows.
+    if (Get-Setting 'AskRequesterName') {
+        # Out-Null on both: whatever they emit would ride out on this
+        # function's return value, and the caller reads that as "queued".
+        Set-PendingState -ChatId $ChatId -State @{ Mode = 'access_request_name'; UserId = $UserId } | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل اسمك كما تريده أن يظهر للمشرفين (مثل: أحمد - قسم الأخبار).' | Out-Null
+    }
+    return $true
+}
+
+function Complete-AccessRequestName {
+    <#
+        The name a requester gives for themselves, which becomes their alias
+        the moment access is granted - so no administrator types it in.
+
+        Guarded rather than trusted: this is the one flow a chat with no
+        access can reach, so it does nothing unless that chat really is
+        waiting in the queue, and the text is capped and stripped of the
+        characters that would break a roster line or an audit entry.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'access_request_name') { return $false }
+    if (-not $script:PendingApprovals.ContainsKey($ChatId)) {
+        Clear-PendingState -ChatId $ChatId
+        return $false
+    }
+    $clean = ([string]$Value -replace '[
+	]+', ' ').Trim()
+    if ($clean.Length -gt 60) { $clean = $clean.Substring(0, 60) }
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم فارغ. أرسل اسمك.'
+        return $false
+    }
+    Clear-PendingState -ChatId $ChatId
+    $script:PendingApprovals[$ChatId].Name = $clean
+    Write-BridgeLog "Access requester $ChatId gave the name '$clean'"
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ وصل اسمك: $clean`nطلبك عند المشرفين، وستصلك رسالة فور الموافقة."
+    Send-AdminBroadcast -Text "📝 طلب الوصول من $ChatId باسم: $clean" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
     return $true
 }
 
@@ -1946,7 +1987,11 @@ function Grant-UserAccess {
     param([Parameter(Mandatory)][long]$TargetChatId, [Parameter(Mandatory)][long]$ApprovedBy, [long]$ApproverUserId = 0)
     if ($ApproverUserId -eq 0) { $ApproverUserId = $ApprovedBy }
     $targetUserId = $TargetChatId
-    if ($script:PendingApprovals.ContainsKey($TargetChatId)) { $targetUserId = [long]$script:PendingApprovals[$TargetChatId].UserId }
+    $requestedName = ''
+    if ($script:PendingApprovals.ContainsKey($TargetChatId)) {
+        $targetUserId = [long]$script:PendingApprovals[$TargetChatId].UserId
+        $requestedName = [string]$script:PendingApprovals[$TargetChatId].Name
+    }
 
     # Idempotent: the approval buttons sit in a message that stays tappable,
     # and two admins (or one double-tap) previously re-ran the whole flow and
@@ -1970,6 +2015,15 @@ function Grant-UserAccess {
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"
+    # The name the person gave for themselves becomes their alias here, which
+    # is the whole reason for asking: the roster and every audit line read it
+    # from the first minute, with no administrator typing it in. An alias
+    # already set is left alone - somebody chose that one deliberately.
+    if ($requestedName -and -not $script:UserAliases.ContainsKey([string]$targetUserId)) {
+        if (Set-UserAlias -TargetUserId ([long]$targetUserId) -Alias $requestedName) {
+            Write-BridgeLog "Adopted '$requestedName' as the alias for user $targetUserId from their access request"
+        }
+    }
     Add-AuditEntry "👤 موافقة على $(Format-UserAuditActor -UserId ([long]$targetUserId)) - بواسطة $(Format-UserAuditActor -UserId $ApproverUserId)"
     Send-TelegramMessage -ChatId $ApprovedBy -Text "✅ تمت الموافقة على $TargetChatId وأُضيف إلى المستخدمين المصرح لهم.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "✅ تمت الموافقة على طلبك، يمكنك الآن استخدام البوت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)

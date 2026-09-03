@@ -1907,11 +1907,19 @@ function Confirm-MojazPendingUrgent {
 
 function Test-MojazOnAirLayer {
     <# Is the bulletin's layer occupied - by a run, or by a scene left up
-       after one? #>
+       after one?
+
+       A record the bridge merely inferred from Cinegy does not count. It says
+       a scene is loaded on the layer, not that a bulletin is showing, and an
+       exited bulletin leaves exactly such a record behind - which is how the
+       menu came to offer to hide a bulletin that had left the screen hours
+       earlier. The plain hide row still releases that layer. #>
     $template = Get-MojazTemplate
     if (-not $template) { return $false }
     if ($script:MojazPlayback) { return $true }
-    return $script:OnAir.ContainsKey([int]$template.Layer)
+    $layer = [int]$template.Layer
+    if (-not $script:OnAir.ContainsKey($layer)) { return $false }
+    return ([string](Get-JsonProp $script:OnAir[$layer] 'Source') -ne 'cinegy-unconfirmed')
 }
 
 function Stop-MojazForLayer {

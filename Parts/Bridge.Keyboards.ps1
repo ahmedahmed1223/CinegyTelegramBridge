@@ -73,7 +73,12 @@ function Get-MainMenuKeyboard {
     # every row above the fix is a row they must scroll past to reach it.
     if ($script:OnAir.Count -gt 0) {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
+            # 🔴 means the bridge knows this is live. A layer discovered from
+            # Cinegy carrying an unnamed item is not that: the engine will not
+            # say whether it is rendering, so the row offers the same release
+            # button under a mark that does not claim it is on screen.
+            $liveMark = if ([string](Get-JsonProp $script:OnAir[$layer] 'Source') -eq 'cinegy-unconfirmed') { '🟡' } else { '🔴' }
+            $liveRow = @( (New-Button "$liveMark إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
             # A timer can be attached to something already live, not just at
             # the moment it is put on air.
             if (Get-Setting 'EnableTimedShow') {
@@ -99,15 +104,12 @@ function Get-MainMenuKeyboard {
     # the scene and leave the run walking a table nobody can see. Its own
     # button stops the run and leaves by EXIT, so the outro plays.
     #
-    # Always here, not only while it is up: the operator asked for it in the
-    # menu, and a button that appears and vanishes is one whose place cannot be
-    # learned. Coloured only when there is really something to take off, and it
-    # says so plainly when there is not.
-    if (Test-MojazAvailable) {
-        $rows += , @(
-            if (Test-MojazOnAirLayer) { (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) }
-            else { (New-Button "⏹ إخفاء الموجز" "mojaz:hide") }
-        )
+    # Only while a bulletin is actually up. It used to sit here permanently,
+    # greyed when there was nothing to take off, so its place could be learned
+    # - but a button offering to hide something when nothing is on air reads as
+    # a claim that something is, which is the confusion it was meant to end.
+    if ((Test-MojazAvailable) -and (Test-MojazOnAirLayer)) {
+        $rows += , @( (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) )
     }
 
     # A rollback used to be reachable only from the message that offered it,

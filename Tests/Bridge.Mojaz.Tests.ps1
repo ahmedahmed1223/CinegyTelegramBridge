@@ -1125,14 +1125,15 @@ Describe 'Taking the bulletin off air from the main menu' {
     }
     AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{} }
 
-    It 'keeps the button in the main menu whether or not the bulletin is up' {
-        # It stays in one place so the operator can learn where it is; only
-        # its colour follows what is actually on air.
+    It 'shows the button only while a bulletin is really up' {
+        # It used to sit in the menu permanently so its place could be learned,
+        # greyed when there was nothing to hide - but offering to take
+        # something off air when nothing is on air reads as a claim that
+        # something is.
         Test-MojazOnAirLayer | Should -BeFalse
         $resting = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
                 Where-Object { $_['callback_data'] -eq 'mojaz:hide' })
-        @($resting).Count | Should -Be 1
-        $resting[0].ContainsKey('style') | Should -BeFalse
+        @($resting).Count | Should -Be 0
 
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
 
@@ -1144,9 +1145,23 @@ Describe 'Taking the bulletin off air from the main menu' {
     }
 
     It 'offers it for a scene left on the layer after a run ended' {
-        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'Mojaz' } }
+        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'Mojaz'; Source = 'bridge' } }
 
         Test-MojazOnAirLayer | Should -BeTrue
+    }
+
+    It 'does not count a layer the bridge only inferred from Cinegy' {
+        # That record says a scene is loaded, not that a bulletin is showing -
+        # and an exited bulletin leaves exactly such a record behind, which is
+        # how the menu came to offer to hide one that had left the screen.
+        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'Mojaz'; Source = 'cinegy-unconfirmed' } }
+
+        Test-MojazOnAirLayer | Should -BeFalse
+        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
+                Where-Object { $_['callback_data'] -eq 'mojaz:hide' }).Count | Should -Be 0
+        # The plain hide row still releases the layer.
+        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
+                Where-Object { $_['callback_data'] -eq 'hide:5' }).Count | Should -Be 1
     }
 
     It 'stops the run and leaves by exit, not by a cut' {

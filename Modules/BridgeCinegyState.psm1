@@ -92,14 +92,29 @@ function Resolve-BridgeCinegyLayerState {
     # real item is playing rather than the husk of a spent one, plus a name the
     # caller already knew - the template registered for that layer. Missing
     # either, this still ignores the layer. Ambiguity must never ADD a record.
+    $inferred=$false
     if([string]::IsNullOrWhiteSpace($name) -or $name -eq 'Item'){
         if([string]::IsNullOrWhiteSpace($RegisteredTemplateName) -or
             -not (Test-BridgeCinegyActiveItem -Status $Status)){
             return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
         }
         $name=$RegisteredTemplateName
+        $inferred=$true
     }
-    $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
+    # An unnamed item proves a scene is LOADED on the layer. It does not prove
+    # anything is rendering, and on this engine it cannot: EXIT_SCENE_LOOP ends
+    # the animation but leaves the playlist item Active under the same Id with
+    # no IsEmpty marker, so a layer that has played its way off the screen
+    # reads exactly like one still playing. Remove-OnAirRecord says the same
+    # thing from the other side - it is why the bridge drops its own record
+    # after an EXIT rather than trusting a later read.
+    #
+    # So it is adopted, because the operator still needs the button that
+    # releases the layer - but under a source that says the claim is
+    # unverified, and every screen showing it says so instead of calling it
+    # live.
+    $source=if($inferred){'cinegy-unconfirmed'}else{'cinegy'}
+    $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source=$source}
     if(-not [string]::IsNullOrWhiteSpace($cinegyEventName)){$record.CinegyEventName=$cinegyEventName}
     return [pscustomobject]@{Action='add';Record=$record;Change=$null}
 }

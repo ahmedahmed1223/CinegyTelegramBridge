@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.53.0
+
+The bot said a bulletin was on air when the screen was blank. It had been
+exited at 18:14 - the bridge dropped its own record then, correctly - and the
+new discovery adopted it again at the 21:19 restart.
+
+The reason was already written down in `Remove-OnAirRecord`: HIDE makes Cinegy
+mark the item `IsEmpty="y"`, but EXIT_SCENE_LOOP ends the animation and leaves
+the playlist item Active under the same Id with no marker at all, so a layer
+that has played its way off the screen reads exactly like one still playing.
+Measured: layer 5 (exited bulletin) and layer 8 (visible strip) were identical
+in every field the engine exposes - IsOnAir, ActiveId, LogId, ScheduledAt,
+Duration, ManualEnd, OutputState - and both `/status/active` and `/item/<id>`
+are 403 on this installation.
+
+With no evidence that separates them, the claim is corrected rather than
+withdrawn. An unnamed item proves a scene is loaded on the layer, not that
+anything is rendering, so it is still adopted - the operator needs the button
+that releases the layer - but under the source `cinegy-unconfirmed`: a yellow
+mark in the menu instead of the red one, and "loaded from Cinegy, may not be
+visible" on the status screen. A scene the engine names itself stays plain
+`cinegy`, because a name from the engine is evidence of a rendering scene.
+
 ## Version 7.52.0
 
 External discovery was not merely missing from the periodic check - it was

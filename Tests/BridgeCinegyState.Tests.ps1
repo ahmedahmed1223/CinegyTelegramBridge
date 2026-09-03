@@ -235,8 +235,9 @@ Describe 'Discovering a scene the engine will not name' {
 
         $decision.Action | Should -Be 'add'
         $decision.Record.Key | Should -Be 'News-Ticker'
-        # Named by the registry, but nobody pretends the bridge started it.
-        $decision.Record.Source | Should -Be 'cinegy'
+        # Named by the registry, so nobody pretends the bridge started it - and
+        # nobody pretends the engine confirmed anything is rendering either.
+        $decision.Record.Source | Should -Be 'cinegy-unconfirmed'
         $decision.Record.UserId | Should -Be 0
     }
 
@@ -265,5 +266,41 @@ Describe 'Discovering a scene the engine will not name' {
         $tracked = @{ Key = 'News-Ticker'; At = (Get-Date); UserId = 5L; ActiveId = '{C10460C1-A7BC-11F1-96C0-C85EA97266A8}'; Source = 'bridge' }
         (Resolve-BridgeCinegyLayerState -Layer 8 -TrackedRecord $tracked `
                 -Status (New-TestLayerStatus -ActiveXml $script:LiveItem) -DiscoverExternal).Action | Should -Be 'keep'
+    }
+}
+
+Describe 'A loaded layer is not a claim that anything is showing' {
+    BeforeAll {
+        # EXIT_SCENE_LOOP ends the animation and leaves the playlist item
+        # Active under the same Id with no IsEmpty marker, so a bulletin that
+        # has played its way off the screen reads exactly like a live one.
+        $script:ExitedItem = '<Item Id="{DCE287A8-A7A8-11F1-96C0-C85EA97266A8}" LogId="{C63E2EC6-8BFA-4133-B414-9FFC760E9C58}" ScheduledAt="2026-09-03T15:05:13.857Z" Duration="24:00:00.000" Clocked="y" ManualEnd="y"/>'
+    }
+
+    It 'adopts the layer so it can still be released' {
+        $decision = Resolve-BridgeCinegyLayerState -Layer 5 `
+            -Status (New-TestLayerStatus -ActiveXml $script:ExitedItem -ActiveId '{DCE287A8-A7A8-11F1-96C0-C85EA97266A8}') `
+            -DiscoverExternal -RegisteredTemplateName 'Mojaz'
+        $decision.Action | Should -Be 'add'
+        $decision.Record.Key | Should -Be 'Mojaz'
+    }
+
+    It 'marks the claim unverified rather than calling it on air' {
+        # The bug: the bot listed a bulletin as live for hours after it had
+        # left the screen, because an exited layer is indistinguishable from a
+        # playing one in everything the engine exposes.
+        $decision = Resolve-BridgeCinegyLayerState -Layer 5 `
+            -Status (New-TestLayerStatus -ActiveXml $script:ExitedItem -ActiveId '{DCE287A8-A7A8-11F1-96C0-C85EA97266A8}') `
+            -DiscoverExternal -RegisteredTemplateName 'Mojaz'
+        $decision.Record.Source | Should -Be 'cinegy-unconfirmed'
+    }
+
+    It 'keeps the plain external source when the engine named the scene itself' {
+        # A name from the engine IS evidence of a rendering scene, so that
+        # case is not downgraded.
+        $decision = Resolve-BridgeCinegyLayerState -Layer 4 `
+            -Status (New-TestLayerStatus -ActiveXml $script:ExitedItem -ActiveId '{DCE287A8-A7A8-11F1-96C0-C85EA97266A8}' -Name 'Show L band - New.CinTitle on Layer 4') `
+            -DiscoverExternal -RegisteredTemplateName 'Mojaz'
+        $decision.Record.Source | Should -Be 'cinegy'
     }
 }

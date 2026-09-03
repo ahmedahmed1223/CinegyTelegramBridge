@@ -1297,6 +1297,7 @@ Describe 'Layer removal confirmation' {
 
     It 'keeps the emergency path at one tap while confirmation is off' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hide:7')
@@ -1306,6 +1307,7 @@ Describe 'Layer removal confirmation' {
 
     It 'asks first when confirmation is on, and does not touch air yet' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hide:7')
@@ -1316,6 +1318,7 @@ Describe 'Layer removal confirmation' {
 
     It 'executes once the operator confirms' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hidego:7')
@@ -1325,6 +1328,7 @@ Describe 'Layer removal confirmation' {
 
     It 'confirms an exit the same way' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'exit:7')
@@ -1562,6 +1566,7 @@ Describe 'Confirming removal of a live graphic' {
         Mock Confirm-TelegramCallback {}
         Mock Update-UserLastActivity {}
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
     }
     AfterAll { $script:OnAir = @{} }
     BeforeAll {
@@ -1613,6 +1618,7 @@ Describe 'Confirming removal of a live graphic' {
 
     It 'can still be turned off for a room that wants one-tap hides' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers') }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
         Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')

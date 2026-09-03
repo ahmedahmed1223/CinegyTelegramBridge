@@ -103,6 +103,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.39.0'; Items = @(
+                '🔐 صلاحية العرض والإخفاء صارت لكل قالب على حدة: للجميع افتراضيًا، أو للمشرفين، أو للمالك وحده.'
+                '🎚 والطبقة كذلك: طبقة محمية لا يُعرض عليها ولا يُخفى منها إلا بالصلاحية، أيًّا كان القالب.'
+                '⚙️ تُضبط من الإعدادات: «قوالب للمشرفين» · «قوالب للمالك» · «طبقات للمشرفين» · «طبقات للمالك».'
+            ) }
         @{ Version = '7.38.0'; Items = @(
                 '🖼 مقاس صورة الصف صار إعدادًا: 538×303 كما يُصدّرها Titler فعلًا، لا كما تُحسب من لوحة القالب.'
             ) }
@@ -1130,6 +1135,59 @@ function Test-MaintenanceControl {
     return $false
 }
 
+function Get-BridgeKeyList {
+    <# One reading of the comma-or-newline lists these settings are written
+       in, so every list behaves the same way. #>
+    param([string]$Value = '')
+    return @([string]$Value -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Test-BridgeListContains {
+    param([string]$Value = '', [string]$Item = '')
+    if (-not $Item) { return $false }
+    return (@(Get-BridgeKeyList -Value $Value | Where-Object { $_.Equals($Item, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0)
+}
+
+function Get-TemplateAccessLevel {
+    <#
+        Who may put this graphic on air, and take it off: 'all', 'admin' or
+        'owner'.
+
+        A template can be named directly, and so can the layer it sits on - a
+        station logo is protected by where it lives as much as by what it is.
+        Where both apply the stricter wins, because a permission that loosens
+        when you add a second rule is not a permission.
+
+        Everything unnamed is 'all', which is what every template was before
+        any of these lists existed.
+    #>
+    param([string]$Key = '', [int]$Layer = 0)
+    $layerText = if ($Layer -gt 0) { [string]$Layer } else { '' }
+    if ((Test-BridgeListContains -Value (Get-Setting 'OwnerOnlyTemplateKeys') -Item $Key) -or
+        (Test-BridgeListContains -Value (Get-Setting 'OwnerOnlyLayers') -Item $layerText)) { return 'owner' }
+    if ((Test-BridgeListContains -Value (Get-Setting 'AdminOnlyTemplateKeys') -Item $Key) -or
+        (Test-BridgeListContains -Value (Get-Setting 'AdminOnlyLayers') -Item $layerText)) { return 'admin' }
+    return 'all'
+}
+
+function Test-TemplateAccess {
+    <# The same question for showing and for hiding: taking a protected
+       graphic off air changes the screen as much as putting it on. #>
+    param([string]$Key = '', [int]$Layer = 0, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $level = Get-TemplateAccessLevel -Key $Key -Layer $Layer
+    $what = if ($Key) { "القالب '$Key'" } else { "الطبقة $Layer" }
+    if ($level -eq 'owner') {
+        if (Test-Owner -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
+        return [pscustomobject]@{ Allowed = $false; Reason = "$what لمالك الجسر وحده."; Level = $level }
+    }
+    if ($level -eq 'admin') {
+        if (Test-Admin -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
+        return [pscustomobject]@{ Allowed = $false; Reason = "$what للمشرفين وحدهم."; Level = $level }
+    }
+    return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level }
+}
+
 function Test-TemplateShowPolicy {
     <# A reserved layer normally carries something that must not be disturbed -
        a station logo, a clock, a permanent ticker. Administrators may still
@@ -1304,6 +1362,12 @@ function Invoke-ShowTemplateResult {
     foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
     $script:LastShowAttempts[[string]$UserId] = @{
         Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
+    }
+    $access = Test-TemplateAccess -Key $Key -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
+    if (-not $access.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$access.Reason)
+        return [pscustomobject]@{ Success = $false; Error = [string]$access.Reason }
     }
     $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {

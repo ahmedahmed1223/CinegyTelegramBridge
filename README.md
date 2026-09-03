@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.39.0
+
+Showing and hiding a graphic can now be restricted per template and per layer:
+four settings name the templates and layers only administrators may touch, and
+those only the owner may touch. Empty means everyone, which is what the bridge
+did before. Where a template rule and a layer rule both apply the stricter
+wins, since a permission that loosens when you add a second rule is not one.
+
+Hiding is governed the same as showing - taking a protected graphic off air
+changes the screen as much as putting it on - but only where a person pressed
+the button. Auto-hide timers, hide-all and the bulletin's own exit are never
+refused: a blocked show leaves nothing on air, while a blocked hide leaves a
+graphic up, which is worse than what the permission guards against.
+
 ## Version 7.38.0
 
 The row picture's size is a setting now - 538x303, what Titler's exporter

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Win32;
 
 namespace BridgeManager;
 
@@ -44,6 +45,7 @@ public sealed class MainForm : Form
     private readonly Button _restartButton;
     private readonly CheckBox _autoRestartCheck;
     private readonly CheckBox _autoClearCheck;
+    private readonly CheckBox _startWithWindowsCheck;
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _restartTimer;
     private readonly System.Windows.Forms.Timer _autoClearTimer;
@@ -88,6 +90,7 @@ public sealed class MainForm : Form
         var clearButton = new Button { Text = "🧹 مسح الشاشة", Width = 110 };
         _autoRestartCheck = new CheckBox { Text = "إعادة التشغيل تلقائيًا عند التوقف", AutoSize = true, Checked = true, Padding = new Padding(12, 6, 0, 0) };
         _autoClearCheck = new CheckBox { Text = "مسح تلقائي للشاشة كل 24 ساعة", AutoSize = true, Checked = false, Padding = new Padding(12, 6, 0, 0) };
+        _startWithWindowsCheck = new CheckBox { Text = "🔁 تشغيل تلقائي مع بدء ويندوز", AutoSize = true, Checked = IsStartWithWindowsEnabled(), Padding = new Padding(12, 6, 0, 0) };
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
@@ -95,7 +98,8 @@ public sealed class MainForm : Form
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
 
-        toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck });
+        toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck, _startWithWindowsCheck });
+        _startWithWindowsCheck.CheckedChanged += (_, _) => SetStartWithWindows(_startWithWindowsCheck.Checked);
 
         _output = new RichTextBox
         {
@@ -139,7 +143,7 @@ public sealed class MainForm : Form
         trayMenu.Items.Add("إيقاف", null, (_, _) => { if (ConfirmStop()) StopBridge(manual: true); });
         trayMenu.Items.Add("إعادة تشغيل", null, (_, _) => RestartBridge());
         trayMenu.Items.Add(new ToolStripSeparator());
-        trayMenu.Items.Add("خروج", null, (_, _) => ExitFromTray());
+        trayMenu.Items.Add("❌ إغلاق البرنامج", null, (_, _) => ExitFromTray());
         _trayIcon.ContextMenuStrip = trayMenu;
         _trayIcon.DoubleClick += (_, _) => ShowFromTray();
 
@@ -337,6 +341,37 @@ public sealed class MainForm : Form
         return File.Exists(fallback) ? fallback : null;
     }
 
+    // ---- start with Windows -------------------------------------------------
+    // Per-user Run key: survives a reboot without needing admin rights or a
+    // separate service/task installer, closing the gap where a power cut or
+    // Windows update silently drops bridge supervision until someone notices.
+
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "CinegyTelegramBridgeManager";
+
+    private static bool IsStartWithWindowsEnabled()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+            return key?.GetValue(RunValueName) is string existing
+                && string.Equals(existing.Trim('"'), Application.ExecutablePath, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static void SetStartWithWindows(bool enabled)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
+                ?? Registry.CurrentUser.CreateSubKey(RunKeyPath);
+            if (enabled) key.SetValue(RunValueName, $"\"{Application.ExecutablePath}\"");
+            else key.DeleteValue(RunValueName, throwOnMissingValue: false);
+        }
+        catch { /* registry access denied in some locked-down environments - not fatal */ }
+    }
+
     // ---- UI helpers --------------------------------------------------------
 
     private void SetStatus(bool running)
@@ -351,7 +386,17 @@ public sealed class MainForm : Form
 
     private void AppendLine(string line)
     {
-        if (InvokeRequired) { BeginInvoke(() => AppendLine(line)); return; }
+        // Output/error data can still arrive from the child process's reader
+        // threads for a moment after the form is disposed (app closing while
+        // the bridge is mid-shutdown) - BeginInvoke on a dead handle throws on
+        // a background thread, which is unrecoverable and kills the process.
+        if (IsDisposed) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => AppendLine(line)); }
+            catch (InvalidOperationException) { }
+            return;
+        }
 
         _output.AppendText(line + Environment.NewLine);
         _outputLineCount++;

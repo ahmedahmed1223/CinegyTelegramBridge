@@ -11,10 +11,32 @@ internal static class Program
             return;
         }
 
+        // Stability: an unhandled exception in a button click or timer tick
+        // would otherwise take the whole supervisor down silently. Log it and
+        // keep running instead - the bridge process itself is unaffected
+        // either way, but losing the supervisor loses auto-restart/monitoring.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => ReportCrash(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => ReportCrash(e.ExceptionObject as Exception);
+
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new MainForm());
+    }
+
+    private static void ReportCrash(Exception? ex)
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "BridgeManager-crash.log");
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch { /* best effort - do not let logging the crash cause another one */ }
+
+        MessageBox.Show(
+            $"حدث خطأ غير متوقع في واجهة المدير:\n{ex?.Message}\n\nالتفاصيل في BridgeManager-crash.log بجانب البرنامج.\nالجسر نفسه (إن كان يعمل) لم يتأثر ويستمر بالعمل.",
+            "خطأ غير متوقع", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
 

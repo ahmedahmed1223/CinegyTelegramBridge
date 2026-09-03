@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.47.0
+
+Two notices the bulletin did not send: one when a run ends by itself, which is
+the only ending nothing else announces since it happens minutes after the
+operator stopped watching, and one a minute before a booked bulletin starts.
+The warning is marked on the appointment once sent, because the tick runs
+every second and an appointment sits inside the window for the whole minute.
+Each notice has its own setting rather than one switch for both.
+
 ## Version 7.46.0
 
 The bulletin's two animation-tied timings are set in frames, because that is

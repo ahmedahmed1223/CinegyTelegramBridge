@@ -1313,6 +1313,7 @@ function Add-MojazSchedule {
         CompletedAt = $null
         DelayReason = ''
         LastError = ''
+        NoticedAt = $null
     }
     return (Save-MojazSchedules -Schedules @(@($script:MojazSchedules) + $schedule))
 }
@@ -1436,6 +1437,32 @@ function Set-MojazScheduleStatus {
     return (Save-MojazSchedules -Schedules $candidate)
 }
 
+function Send-MojazScheduleNotices {
+    <#
+        A word before a booked bulletin starts by itself.
+
+        Marked once it is sent, because the tick runs every second and an
+        appointment sits inside the warning window for the whole minute
+        before it fires. Zero seconds turns it off.
+    #>
+    param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    $lead = Get-SettingInt 'MojazScheduleNoticeSeconds' 0
+    if ($lead -le 0) { return }
+    foreach ($entry in @($script:MojazSchedules)) {
+        if ([string](Get-JsonProp $entry 'Status') -ne 'scheduled') { continue }
+        if ([string](Get-JsonProp $entry 'NoticedAt')) { continue }
+        $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
+        $seconds = ($moment - $Now).TotalSeconds
+        if ($seconds -gt $lead -or $seconds -lt 0) { continue }
+        $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$entry.BulletinId)
+        $name = if ($bulletin) { [string]$bulletin.Name } else { 'موجز مجدول' }
+        if (Set-MojazScheduleStatus -ScheduleId ([string]$entry.Id) -Status 'scheduled' -Fields @{ NoticedAt = $Now.ToString('o') }) {
+            Send-TelegramMessage -ChatId ([long]$entry.ChatId) `
+                -Text "🔔 «$name» يبدأ بعد $(Format-DurationSeconds -Seconds ([int][math]::Max(0, $seconds))) — $($moment.ToString('HH:mm'))."
+        }
+    }
+}
+
 function Update-MojazScheduleQueue {
     <#
         The clock, checked from the tick.
@@ -1446,6 +1473,7 @@ function Update-MojazScheduleQueue {
         due - not the order they happened to be noticed.
     #>
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    Send-MojazScheduleNotices -Now $Now
     $due = @(Get-MojazDueQueue -Schedules $script:MojazSchedules -Now $Now)
     if ($due.Count -eq 0) { return }
     # Two things hold a due bulletin back: another one already on air, and the
@@ -1875,6 +1903,13 @@ function Update-MojazPlayback {
     }
     if ($isLast) {
         Write-BridgeLog "Mojaz playback finished after $($rows.Count) row(s)"
+        # Every other way a bulletin ends says so already - a button press, an
+        # urgent taking over, a failed row. This is the one that finishes on
+        # its own minutes after the operator stopped watching.
+        if (Get-Setting 'MojazNotifyOnFinish') {
+            $finishedName = [string]$script:MojazPlayback.BulletinName
+            Send-TelegramMessage -ChatId ([long]$script:MojazPlayback.ChatId) -Text "⏹ انتهى «$finishedName» وخرج عن الهواء."
+        }
         Stop-MojazPlayback -Quiet | Out-Null
         return
     }

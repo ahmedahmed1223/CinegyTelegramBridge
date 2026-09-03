@@ -1504,3 +1504,78 @@ Describe 'Booking a bulletin the way the templates are booked' {
         @($script:MojazSchedules).Count | Should -Be 0
     }
 }
+
+Describe 'Telling the operator without being asked' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        $config.Settings | Add-Member -NotePropertyName 'MojazNotifyOnFinish' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazScheduleNoticeSeconds' -NotePropertyValue 60 -Force
+        $config.Settings | Add-Member -NotePropertyName 'MojazHidesTicker' -NotePropertyValue $false -Force
+        $script:bulletin = New-TestMojazLibrary -DelaySeconds 4 -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'أ')
+            (New-TestMojazRow -Id 'r_2' -Title 'ب')
+        )
+        $script:OnAir = @{}
+    }
+    AfterAll { $script:MojazPlayback = $null; $script:MojazSchedules = @(); $script:OnAir = @{} }
+
+    It 'says so when the bulletin ends by itself' {
+        # The one ending nothing else announces: it finishes minutes after the
+        # operator stopped watching the screen.
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+        foreach ($step in 1..2) { Step-TestMojazPlayback }
+
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'وخرج عن الهواء' }
+    }
+
+    It 'stays quiet about the ending when the option is off' {
+        $config.Settings | Add-Member -NotePropertyName 'MojazNotifyOnFinish' -NotePropertyValue $false -Force
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+        foreach ($step in 1..2) { Step-TestMojazPlayback }
+
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -match 'وخرج عن الهواء' }
+    }
+
+    It 'warns once before a booked bulletin starts, not every second' {
+        $id = [string]$script:bulletin.Id
+        $script:MojazSchedules = @([pscustomobject]@{
+                Id = 'ms_soon'; BulletinId = $id; ScheduledAt = '2026-09-04T08:00:00+03:00'; CreatedAt = '2026-09-03T08:00:00+03:00'
+                CreatedBy = 101; ChatId = 100; Status = 'scheduled'; DueAt = $null; StartedAt = $null; CompletedAt = $null
+                DelayReason = ''; LastError = ''; NoticedAt = $null
+            })
+
+        # Too early for a word.
+        Send-MojazScheduleNotices -Now ([datetimeoffset]'2026-09-04T07:58:00+03:00')
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -match 'يبدأ بعد' }
+
+        # Inside the minute, twice.
+        Send-MojazScheduleNotices -Now ([datetimeoffset]'2026-09-04T07:59:30+03:00')
+        Send-MojazScheduleNotices -Now ([datetimeoffset]'2026-09-04T07:59:45+03:00')
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'يبدأ بعد' }
+        [string]$script:MojazSchedules[0].NoticedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'sends no warning when the lead is zero' {
+        $config.Settings | Add-Member -NotePropertyName 'MojazScheduleNoticeSeconds' -NotePropertyValue 0 -Force
+        $script:MojazSchedules = @([pscustomobject]@{
+                Id = 'ms_soon'; BulletinId = [string]$script:bulletin.Id; ScheduledAt = '2026-09-04T08:00:00+03:00'
+                CreatedAt = '2026-09-03T08:00:00+03:00'; CreatedBy = 101; ChatId = 100; Status = 'scheduled'
+                DueAt = $null; StartedAt = $null; CompletedAt = $null; DelayReason = ''; LastError = ''; NoticedAt = $null
+            })
+
+        Send-MojazScheduleNotices -Now ([datetimeoffset]'2026-09-04T07:59:30+03:00')
+
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -match 'يبدأ بعد' }
+    }
+}

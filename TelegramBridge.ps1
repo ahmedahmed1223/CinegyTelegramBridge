@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.46.0'
+$script:BridgeVersion = '7.47.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -216,6 +216,9 @@ $script:DefaultSettings = [ordered]@{
     MojazLastRowFrames         = 0       # how long the LAST row holds before EXIT plays the outro
     MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
     MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
+    # What the bulletin says to the operator without being asked.
+    MojazNotifyOnFinish        = $true   # tell the chat when a bulletin ends by itself
+    MojazScheduleNoticeSeconds = 60      # warn this long before a booked bulletin starts; 0 is off
     MojazHidesTicker           = $false  # off: this newsroom keeps the strip up through a bulletin. Turn on to have it stand down and return
     MojazImageWidth            = 538     # what the exporter really produces; 0 reads the size off the scene's plate instead
     MojazImageHeight           = 303
@@ -404,6 +407,8 @@ $script:SettingDisplayMetadata = @{
     MojazLastRowFrames = @{ Unit = 'إطار'; Description = 'إطارات يبقاها الصف الأخير قبل أمر الخروج. صفر يعني أخذها من حركة خروج المشهد' }
     MojazSyncOffsetMs = @{ Unit = 'مللي ثانية'; Description = 'بعد التفاف اللوب بكم يُكتب الصف التالي، ليقع داخل حركة الظهور فتُخفيه' }
     MojazSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
+    MojazNotifyOnFinish = @{ Unit = ''; Description = 'إشعار في المحادثة حين ينتهي الموجز وحده ويخرج عن الهواء. الطرق الأخرى لإنهائه تقول ذلك أصلًا' }
+    MojazScheduleNoticeSeconds = @{ Unit = 'ثانية'; Description = 'ينبّه قبل بدء موجز مجدول بهذه المدة. صفر يوقف التنبيه' }
     MojazHidesTicker = @{ Description = 'شريط الأخبار يخرج عند بدء الموجز ويعود بعد انتهائه، لأنهما يتقاسمان أسفل الشاشة. لا يُعاد شريط لم يكن على الهواء أصلًا' }
     MojazImageWidth = @{ Unit = 'بكسل'; Description = 'عرض صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
@@ -974,7 +979,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazRowSeconds', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazRowSeconds', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1108,6 +1113,8 @@ $script:SettingNavigationLabels = @{
     MojazLastRowFrames = 'إطارات الصف الأخير'
     MojazSyncOffsetMs = 'لحظة الكتابة داخل الظهور'
     MojazSyncLeadMs = 'تعويض زمن الشبكة'
+    MojazNotifyOnFinish = 'إشعار انتهاء الموجز'
+    MojazScheduleNoticeSeconds = 'تنبيه قبل الموعد'
     MojazHidesTicker = 'إخفاء الشريط أثناء الموجز'
     MojazImageWidth = 'عرض صورة الصف'
     MojazImageHeight = 'ارتفاع صورة الصف'

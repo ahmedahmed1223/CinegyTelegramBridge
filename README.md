@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.37.0
+
+The news strip and the bulletin share the bottom of the screen, so the strip
+stands down when a bulletin starts and comes back when it ends - by EXIT
+rather than a cut, so it leaves the way it was drawn to. The logo is not
+touched. The return waits out the bulletin's outro, read from the scene, since
+putting the strip back underneath a scene still playing its way off is the
+overlap the stand-down existed to prevent; booking it on the tick also keeps
+one show from running inside another. A strip that was not on air before the
+bulletin is never put on air after it.
+
 ## Version 7.36.0
 
 The urgent template outranks the bulletin. Anything that puts it on air - a

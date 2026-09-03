@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.36.0'
+$script:BridgeVersion = '7.37.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -203,6 +203,7 @@ $script:DefaultSettings = [ordered]@{
     MojazIntroExtraSeconds     = 2       # added to the FIRST row only: the entrance animation plays over it
     MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
     MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
+    MojazHidesTicker           = $true   # they share the bottom of the screen: the strip stands down for a bulletin and returns after it
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
@@ -382,6 +383,7 @@ $script:SettingDisplayMetadata = @{
     MojazIntroExtraSeconds = @{ Unit = 'ثانية'; Description = 'تُضاف إلى الصف الأول وحده، بقدر حركة دخول القالب' }
     MojazSyncOffsetMs = @{ Unit = 'مللي ثانية'; Description = 'بعد التفاف اللوب بكم يُكتب الصف التالي، ليقع داخل حركة الظهور فتُخفيه' }
     MojazSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
+    MojazHidesTicker = @{ Description = 'شريط الأخبار يخرج عند بدء الموجز ويعود بعد انتهائه، لأنهما يتقاسمان أسفل الشاشة. لا يُعاد شريط لم يكن على الهواء أصلًا' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
     EnableRawCommand = @{ Unit = ''; Description = 'يفتح 🛠 الأمر الخام للمشرف: إرسال أمر Cinegy مباشرة دون قالب' }
@@ -813,6 +815,10 @@ $script:MojazTemplateKey = 'Mojaz'
 # The template that outranks the bulletin: putting it on air pulls a running
 # bulletin off, and a bulletin will not start underneath it unasked.
 $script:MojazUrgentKey = 'Urgent'
+# The strip that shares the bulletin's segment and leaves with it.
+$script:MojazTickerKey = 'News-Ticker'
+# A strip stood down for a bulletin, and when to put it back.
+$script:MojazTickerReturn = $null
 # An urgent that agreed to wait for the running bulletin to finish.
 $script:MojazPendingUrgent = $null
 # Every saved bulletin, and the appointments that will play them. Rows live
@@ -938,7 +944,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs',
+                'MojazRowSeconds', 'MojazIntroExtraSeconds', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1064,6 +1070,7 @@ $script:SettingNavigationLabels = @{
     MojazIntroExtraSeconds = 'زيادة الصف الأول'
     MojazSyncOffsetMs = 'لحظة الكتابة داخل الظهور'
     MojazSyncLeadMs = 'تعويض زمن الشبكة'
+    MojazHidesTicker = 'إخفاء الشريط أثناء الموجز'
     AirCommandTimeoutSeconds = 'مهلة أمر Cinegy'
     AllowRemoteRestart = 'إعادة التشغيل من البوت'
     AuditArchiveKeepFiles = 'أرشيفات التدقيق المحفوظة'

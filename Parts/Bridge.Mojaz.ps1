@@ -1468,6 +1468,9 @@ function Start-MojazPlayback {
         ScheduleId = $ScheduleId
         TemplateImage = $templateImage
     }
+    # Now that the bulletin is really on air, the strip stands down: they
+    # share the bottom of the screen, and it returns when this ends.
+    Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $([int]$bulletin.DelaySeconds) s each)"
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
@@ -1490,6 +1493,8 @@ function Stop-MojazPlayback {
     if ([string]$playback.ScheduleId) {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
+    # The bulletin is off, so the strip may come back - after the outro.
+    Request-MojazTickerReturn | Out-Null
     if (-not $Quiet -and $ChatId -gt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
     # An urgent that agreed to wait for this bulletin goes out now.
     Update-MojazPendingUrgent | Out-Null
@@ -1515,6 +1520,68 @@ function Test-MojazUrgentOnAir {
     $template = Get-MojazUrgentTemplate
     if (-not $template) { return $false }
     return $script:OnAir.ContainsKey([int]$template.Layer)
+}
+
+function Get-MojazTickerTemplate {
+    <# The news strip, which shares the bulletin's segment. #>
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($script:MojazTickerKey)) { return $null }
+    return $store.Map[$script:MojazTickerKey]
+}
+
+function Hide-MojazTicker {
+    <#
+        The bulletin and the strip share the bottom of the screen, so the strip
+        stands down while a bulletin is on air and comes back after it.
+
+        Taken off by EXIT rather than a cut, so it leaves the way it was drawn
+        to leave. Only a strip that was actually up is remembered for return:
+        putting one on air that nobody had asked for would be this screen
+        deciding what the channel looks like.
+    #>
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    $script:MojazTickerReturn = $null
+    if (-not (Get-Setting 'MojazHidesTicker')) { return $false }
+    $template = Get-MojazTickerTemplate
+    if (-not $template) { return $false }
+    $layer = [int]$template.Layer
+    if (-not $script:OnAir.ContainsKey($layer)) { return $false }
+    $chat = if ($ChatId -gt 0) { $ChatId } else { [long](Get-JsonProp $script:OnAir[$layer] 'ChatId') }
+    if ($chat -le 0) { return $false }
+    Write-BridgeLog "Mojaz starting: standing the news strip down from layer $layer."
+    if (-not (Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $UserId)) { return $false }
+    $script:MojazTickerReturn = @{ At = $null; ChatId = $chat; UserId = $UserId }
+    return $true
+}
+
+function Request-MojazTickerReturn {
+    <#
+        The bulletin is over; the strip goes back, but not this instant.
+
+        The scene is still playing its outro, and putting the strip back
+        underneath it would have both on screen for those few seconds - the
+        overlap the stand-down existed to avoid. So the moment is booked and
+        the tick carries it out, which also keeps this off the stack of
+        whatever ended the bulletin.
+    #>
+    if (-not $script:MojazTickerReturn) { return $false }
+    $timing = Get-MojazSceneTiming
+    $after = if ($timing -and [double]$timing.OutroSeconds -gt 0) { [double]$timing.OutroSeconds } else { 1.0 }
+    $script:MojazTickerReturn.At = (Get-Date).AddSeconds($after)
+    return $true
+}
+
+function Update-MojazTickerReturn {
+    <# Puts the strip back when its moment arrives. Called from the tick. #>
+    if (-not $script:MojazTickerReturn -or -not $script:MojazTickerReturn.At) { return }
+    if ((Get-Date) -lt [datetime]$script:MojazTickerReturn.At) { return }
+    $pending = $script:MojazTickerReturn
+    $script:MojazTickerReturn = $null
+    $template = Get-MojazTickerTemplate
+    if (-not $template) { return }
+    Write-BridgeLog 'Mojaz finished: putting the news strip back.'
+    Invoke-ShowTemplateResult -Key $script:MojazTickerKey -Variables @{} `
+        -ChatId ([long]$pending.ChatId) -UserId ([long]$pending.UserId) | Out-Null
 }
 
 function Clear-MojazForUrgent {
@@ -1660,6 +1727,7 @@ function Stop-MojazForLayer {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
     Write-BridgeLog "Mojaz playback ended: layer $Layer was taken off air."
+    Request-MojazTickerReturn | Out-Null
     return $true
 }
 

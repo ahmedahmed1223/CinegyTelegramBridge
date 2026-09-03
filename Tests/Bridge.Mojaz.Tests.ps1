@@ -1314,3 +1314,91 @@ Describe 'The urgent and the bulletin, and which one yields' {
         Clear-MojazForUrgent -ChatId 100 -UserId 101 | Should -BeFalse
     }
 }
+
+Describe 'The strip stands down for the bulletin and comes back after it' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.2; LoopSeconds = 8; OutroSeconds = 6.72 } }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        Mock Get-MojazTickerTemplate { @{ Key = 'News-Ticker'; Path = 'D:\cingy cg\ticker.cintitle'; Layer = 8 } }
+        Mock Get-MojazUrgentTemplate { @{ Key = 'Urgent'; Path = 'D:\cingy cg\Urgent-Mov.cintitle'; Layer = 7 } }
+        $config.Settings | Add-Member -NotePropertyName 'MojazHidesTicker' -NotePropertyValue $true -Force
+        New-TestMojazLibrary -DelaySeconds 4 -Rows @((New-TestMojazRow -Id 'r_1' -Title 'أ')) | Out-Null
+        # The strip and the logo are up, as they are before a bulletin.
+        $script:OnAir = @{
+            8 = [pscustomobject]@{ Key = 'News-Ticker'; ChatId = 100 }
+            9 = [pscustomobject]@{ Key = 'logo'; ChatId = 100 }
+        }
+        $script:MojazTickerReturn = $null
+        $script:MojazPendingUrgent = $null
+    }
+    AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{}; $script:MojazTickerReturn = $null }
+
+    It 'takes the strip off as the bulletin goes up, and leaves the logo alone' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Should -BeTrue
+
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 8 }
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly -ParameterFilter { $Layer -eq 9 }
+        $script:MojazTickerReturn | Should -Not -BeNullOrEmpty
+    }
+
+    It 'puts it back after the bulletin, once the outro has run' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+        Stop-MojazPlayback -ChatId 100 -UserId 101 -Quiet | Out-Null
+
+        # Booked, not done: the scene is still playing its way out.
+        $script:MojazTickerReturn.At | Should -Not -BeNullOrEmpty
+        Update-MojazTickerReturn
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly -ParameterFilter { $Key -eq 'News-Ticker' }
+
+        $script:MojazTickerReturn.At = (Get-Date).AddSeconds(-1)
+        Update-MojazTickerReturn
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'News-Ticker' }
+        $script:MojazTickerReturn | Should -BeNullOrEmpty
+    }
+
+    It 'brings it back when the urgent cuts the bulletin short as well' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+
+        Clear-MojazForUrgent -ChatId 100 -UserId 101 | Out-Null
+
+        $script:MojazTickerReturn.At | Should -Not -BeNullOrEmpty
+    }
+
+    It 'never puts back a strip that was not on air to begin with' {
+        # Otherwise the bulletin decides what the channel looks like.
+        $script:OnAir = @{ 9 = [pscustomobject]@{ Key = 'logo'; ChatId = 100 } }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+        Stop-MojazPlayback -ChatId 100 -UserId 101 -Quiet | Out-Null
+        Update-MojazTickerReturn
+
+        $script:MojazTickerReturn | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly -ParameterFilter { $Key -eq 'News-Ticker' }
+    }
+
+    It 'leaves the strip alone when the setting is off' {
+        $config.Settings | Add-Member -NotePropertyName 'MojazHidesTicker' -NotePropertyValue $false -Force
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly -ParameterFilter { $Layer -eq 8 }
+        $script:MojazTickerReturn | Should -BeNullOrEmpty
+    }
+
+    It 'books the return when the bulletin layer is pulled by hand too' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
+
+        Stop-MojazForLayer -Layer 5 | Should -BeTrue
+
+        $script:MojazTickerReturn.At | Should -Not -BeNullOrEmpty
+    }
+}

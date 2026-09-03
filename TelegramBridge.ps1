@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.37.0'
+$script:BridgeVersion = '7.37.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -203,7 +203,7 @@ $script:DefaultSettings = [ordered]@{
     MojazIntroExtraSeconds     = 2       # added to the FIRST row only: the entrance animation plays over it
     MojazSyncOffsetMs          = 400     # how far into the scene's fade the next row is written, when synced
     MojazSyncLeadMs            = 120     # sent this early, so it arrives on the moment rather than after it
-    MojazHidesTicker           = $true   # they share the bottom of the screen: the strip stands down for a bulletin and returns after it
+    MojazHidesTicker           = $false  # off: this newsroom keeps the strip up through a bulletin. Turn on to have it stand down and return
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document

@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.37.1
+
+The strip stays up through a bulletin by default: the newsroom tried the
+stand-down and chose to keep it. The behaviour is unchanged and still there
+under the "hide the strip during a bulletin" setting.
+
 ## Version 7.37.0
 
 The news strip and the bulletin share the bottom of the screen, so the strip

@@ -1339,7 +1339,12 @@ Describe 'The strip stands down for the bulletin and comes back after it' {
         $script:MojazTickerReturn = $null
         $script:MojazPendingUrgent = $null
     }
-    AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{}; $script:MojazTickerReturn = $null }
+    AfterAll {
+        $script:MojazPlayback = $null; $script:OnAir = @{}; $script:MojazTickerReturn = $null
+        # One settings object for the suite: put it back rather than leaving
+        # it on for whatever runs next.
+        $config.Settings | Add-Member -NotePropertyName 'MojazHidesTicker' -NotePropertyValue $false -Force
+    }
 
     It 'takes the strip off as the bulletin goes up, and leaves the logo alone' {
         Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Should -BeTrue

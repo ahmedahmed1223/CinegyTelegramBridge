@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.34.0
+
+The main menu gets a hide button for the bulletin, shown while its layer is
+occupied - by a run, or by a scene left up after one. It stops the run and
+leaves by EXIT so the outro plays, where the plain hide above it would cut the
+scene. That plain hide also knew nothing about a bulletin: the layer came down
+while the run kept writing rows into a scene nobody could see, and sent an
+exit of its own minutes later. Any hide or exit of that layer now ends the run
+with it, guarded in the one place both paths pass through.
+
 ## Version 7.33.0
 
 The row change can now be hidden by the scene's own animation. At every loop

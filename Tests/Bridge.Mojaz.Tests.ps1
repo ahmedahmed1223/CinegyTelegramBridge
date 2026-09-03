@@ -1074,3 +1074,75 @@ Describe 'Hiding the change behind the scene fade' {
         Get-EffectivePollTimeout | Should -Be 1
     }
 }
+
+Describe 'Taking the bulletin off air from the main menu' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        New-TestMojazLibrary -DelaySeconds 4 -Rows @(
+            (New-TestMojazRow -Id 'r_1' -Title 'أ')
+            (New-TestMojazRow -Id 'r_2' -Title 'ب')
+        ) | Out-Null
+        $script:OnAir = @{}
+    }
+    AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{} }
+
+    It 'offers the button in the main menu only while the bulletin is up' {
+        Test-MojazOnAirLayer | Should -BeFalse
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Test-MojazOnAirLayer | Should -BeTrue
+        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard | ForEach-Object { @($_) } |
+                ForEach-Object { $_['callback_data'] }) | Should -Contain 'mojaz:hide'
+    }
+
+    It 'offers it for a scene left on the layer after a run ended' {
+        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'Mojaz' } }
+
+        Test-MojazOnAirLayer | Should -BeTrue
+    }
+
+    It 'stops the run and leaves by exit, not by a cut' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Hide-MojazOnAir -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+    }
+
+    It 'says so rather than exiting a layer that is already clear' {
+        Hide-MojazOnAir -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'ليس على الهواء' }
+    }
+
+    It 'ends the run when the layer is taken by anything else' {
+        # The bug this exists for: the plain hide and exit buttons knew nothing
+        # about a bulletin, so the run kept writing rows into a hidden scene
+        # and sent an exit of its own long afterwards.
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-MojazForLayer -Layer 5 | Should -BeTrue
+
+        $script:MojazPlayback | Should -BeNullOrEmpty
+    }
+
+    It 'leaves a run alone when a different layer comes down' {
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-MojazForLayer -Layer 7 | Should -BeFalse
+
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+    }
+}

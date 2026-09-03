@@ -1375,6 +1375,64 @@ function Get-MojazElapsedSeconds {
     return ([double]$script:MojazPlayback.Clock.Elapsed.TotalSeconds + [double]$script:MojazPlayback.ClockOffset)
 }
 
+function Test-MojazOnAirLayer {
+    <# Is the bulletin's layer occupied - by a run, or by a scene left up
+       after one? #>
+    $template = Get-MojazTemplate
+    if (-not $template) { return $false }
+    if ($script:MojazPlayback) { return $true }
+    return $script:OnAir.ContainsKey([int]$template.Layer)
+}
+
+function Stop-MojazForLayer {
+    <#
+        The bulletin's layer is being taken off air by something that is not
+        this screen - the hide button on the main menu, an exit, hide-all.
+
+        The run has to end with it. Left alone it would keep writing rows into
+        a scene nobody can see and then send an EXIT of its own, long after the
+        operator believed it was gone. The caller is already removing the
+        layer, so this does not exit again - it only closes the run.
+    #>
+    param([Parameter(Mandatory)][int]$Layer)
+    if (-not $script:MojazPlayback) { return $false }
+    $template = Get-MojazTemplate
+    if (-not $template -or [int]$template.Layer -ne $Layer) { return $false }
+    $playback = $script:MojazPlayback
+    $script:MojazPlayback = $null
+    if ([string]$playback.ScheduleId) {
+        Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
+    }
+    Write-BridgeLog "Mojaz playback ended: layer $Layer was taken off air."
+    return $true
+}
+
+function Hide-MojazOnAir {
+    <# The main menu's way out of a bulletin: stop the run if there is one, and
+       leave by EXIT so the scene plays its outro instead of being cut. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $template = Get-MojazTemplate
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد قالب للموجز.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    if ($script:MojazPlayback) {
+        # Stop-MojazPlayback exits the layer itself.
+        Stop-MojazPlayback -UserId $UserId -Quiet | Out-Null
+    }
+    elseif ($script:OnAir.ContainsKey([int]$template.Layer)) {
+        Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId | Out-Null
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز ليس على الهواء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
+    Add-AuditEntry "⏹ إخفاء الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Send-TelegramMessage -ChatId $ChatId -Text '⏹ خرج الموجز.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $true
+}
+
 function Update-MojazPlayback {
     <#
         One step of the bulletin, called from the tick.

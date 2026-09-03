@@ -317,6 +317,7 @@ function Invoke-CallbackQuery {
         'mojaz:unschedule:*' { Stop-MojazSchedule -ScheduleId (Get-CallbackArg $data 'mojaz:unschedule:') -ChatId $chatId -UserId $userId; break }
         'mojaz:play' { Start-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:stop' { Stop-MojazPlayback -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
         'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }
         'mojaz:down:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:down:') -Direction down -ChatId $chatId -UserId $userId; break }

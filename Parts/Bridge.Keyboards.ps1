@@ -95,6 +95,13 @@ function Get-MainMenuKeyboard {
         $rows += , $onAirTools
     }
 
+    # A bulletin does not come off with the plain hide above it: that would cut
+    # the scene and leave the run walking a table nobody can see. Its own
+    # button stops the run and leaves by EXIT, so the outro plays.
+    if ((Test-MojazAvailable) -and (Test-MojazOnAirLayer)) {
+        $rows += , @( (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) )
+    }
+
     # A rollback used to be reachable only from the message that offered it,
     # so navigating away lost it for the rest of its window. The fastest human
     # error is pressing the wrong template; undo has to survive a tap on the

@@ -103,6 +103,10 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.34.0'; Items = @(
+                '⏹ زر «إخفاء الموجز» في القائمة الرئيسية: يظهر ما دام الموجز على الهواء، ويوقف النشرة ويخرج بحركة الخروج.'
+                '🔒 أي إخفاء أو خروج للطبقة يُنهي النشرة معه، فلا تبقى تكتب صفوفًا في مشهد مخفيّ.'
+            ) }
         @{ Version = '7.33.0'; Items = @(
                 '🎬 زر «مزامنة الظهور»: يتبدّل الصف داخل حركة ظهور المشهد فلا يُرى وهو يتغيّر.'
                 '⏱ عند تشغيلها يصير طول اللوب هو مدّة الصف — تقصير LoopEndFrame في Titler يسرّع النشرة.'
@@ -1675,6 +1679,9 @@ function Invoke-HideLayer {
         [switch]$MaintenanceOverride
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
+    # A bulletin walking this layer has to stop with it, or it keeps writing
+    # rows into a scene nobody can see.
+    Stop-MojazForLayer -Layer $Layer | Out-Null
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
     # answer to "what did I just take down" is only available beforehand.
@@ -1714,6 +1721,9 @@ function Invoke-HideLayer {
 function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    # A bulletin walking this layer has to stop with it, or it keeps writing
+    # rows into a scene nobody can see.
+    Stop-MojazForLayer -Layer $Layer | Out-Null
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
     # answer to "what did I just take down" is only available beforehand.

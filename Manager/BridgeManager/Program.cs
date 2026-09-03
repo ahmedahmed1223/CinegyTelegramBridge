@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace BridgeManager;
 
 internal static class Program
@@ -8,6 +10,19 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--selftest")
         {
             Environment.Exit(SelfTest.Run() ? 0 : 1);
+            return;
+        }
+
+        // Two managers racing to supervise the same bridge process (both
+        // reacting to its Exited event, both able to -StopExisting the other's
+        // launch) is exactly the kind of instability this app exists to
+        // prevent. A second launch just points at the one already running.
+        using var singleInstance = new Mutex(initiallyOwned: true, "CinegyTelegramBridgeManager-SingleInstance", out var createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show(
+                "مدير الجسر يعمل بالفعل - تحقّق من أيقونات شريط النظام بجانب الساعة.",
+                "يعمل بالفعل", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 

@@ -104,7 +104,11 @@ public sealed class MainForm : Form
         logsButton.Click += (_, _) => OpenLogsFolder();
 
         toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck, _startWithWindowsCheck, _wordWrapCheck });
-        _startWithWindowsCheck.CheckedChanged += (_, _) => SetStartWithWindows(_startWithWindowsCheck.Checked);
+        _startWithWindowsCheck.CheckedChanged += (_, _) =>
+        {
+            SetStartWithWindows(_startWithWindowsCheck.Checked);
+            LogEvent($"تشغيل تلقائي مع بدء ويندوز: {(_startWithWindowsCheck.Checked ? "مفعّل" : "معطّل")}.");
+        };
 
         _output = new RichTextBox
         {
@@ -159,7 +163,7 @@ public sealed class MainForm : Form
         _trayIcon.ContextMenuStrip = trayMenu;
         _trayIcon.DoubleClick += (_, _) => ShowFromTray();
 
-        Load += (_, _) => EnsureBridgeScriptResolved();
+        Load += (_, _) => { if (EnsureBridgeScriptResolved()) LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion})."); };
         FormClosing += MainForm_FormClosing;
     }
 
@@ -242,6 +246,7 @@ public sealed class MainForm : Form
 
         _stoppingIntentionally = false;
         AppendLine($"--- بدء التشغيل: {scriptPath} ---");
+        LogEvent($"بدء تشغيل الجسر: {scriptPath}");
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) AppendLine(e.Data); };
@@ -267,13 +272,25 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            // A failure to even launch (missing pwsh at the exact moment,
+            // permission hiccup) is just as much a "quick failure" as an
+            // instant exit would be - it must go through the same
+            // retry/crash-loop-breaker path instead of silently giving up
+            // and leaving the operator to notice and click Start by hand.
             AppendLine($"--- فشل بدء التشغيل: {ex.Message} ---");
+            LogEvent($"فشل بدء التشغيل: {ex.Message}");
+            SetStatus(running: false);
+            // A failed launch never "started" at all - treat it as an
+            // instant (0-second) run so it counts as a quick failure below.
+            _lastStartAt = DateTime.UtcNow;
+            ScheduleRetryOrGiveUp();
             return;
         }
 
         _bridgeProcess = process;
         _lastStartAt = DateTime.UtcNow;
         SetStatus(running: true);
+        LogEvent("تم بدء تشغيل الجسر بنجاح.");
     }
 
     private void OnBridgeExited()
@@ -281,12 +298,23 @@ public sealed class MainForm : Form
         var exitCode = -1;
         try { exitCode = _bridgeProcess?.ExitCode ?? -1; } catch { /* process handle already gone */ }
         AppendLine($"--- توقف الجسر (رمز الخروج {exitCode}) ---");
+        LogEvent($"توقف الجسر - رمز الخروج {exitCode}.");
         _bridgeProcess = null;
         SetStatus(running: false);
 
         if (_exiting) return;
-        if (_stoppingIntentionally) { _consecutiveQuickFailures = 0; return; }
+        if (_stoppingIntentionally)
+        {
+            _consecutiveQuickFailures = 0;
+            LogEvent("إيقاف يدوي.");
+            return;
+        }
 
+        ScheduleRetryOrGiveUp();
+    }
+
+    private void ScheduleRetryOrGiveUp()
+    {
         _consecutiveQuickFailures = DateTime.UtcNow - _lastStartAt < QuickFailThreshold
             ? _consecutiveQuickFailures + 1
             : 0;
@@ -296,6 +324,7 @@ public sealed class MainForm : Form
         if (_consecutiveQuickFailures >= MaxQuickFailures)
         {
             AppendLine($"--- توقف {_consecutiveQuickFailures} مرات متتالية خلال ثوانٍ من كل تشغيل - تم إيقاف إعادة التشغيل التلقائي. راجع الإعدادات ثم اضغط ▶ تشغيل يدويًا. ---");
+            LogEvent($"توقف متكرر ({_consecutiveQuickFailures} مرات) - تم إيقاف إعادة التشغيل التلقائي.");
             _statusLabel.Text = "فشل متكرر - إعادة التشغيل التلقائي متوقفة";
             _statusLabel.ForeColor = Color.Red;
             _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
@@ -305,6 +334,7 @@ public sealed class MainForm : Form
         }
 
         AppendLine("--- إعادة التشغيل خلال 3 ثوانٍ... ---");
+        LogEvent($"سيُعاد التشغيل خلال 3 ثوانٍ (محاولة رقم {_consecutiveQuickFailures}).");
         _statusLabel.Text = "إعادة التشغيل خلال 3 ثوانٍ...";
         _statusLabel.ForeColor = Color.DarkOrange;
         _restartTimer.Start();
@@ -317,12 +347,14 @@ public sealed class MainForm : Form
     private void StopBridge(bool manual)
     {
         if (_bridgeProcess is not { HasExited: false } process) return;
+        if (manual) LogEvent("طلب المستخدم إيقاف الجسر يدويًا.");
         _stoppingIntentionally = manual;
         try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
     }
 
     private void RestartBridge()
     {
+        LogEvent("طلب المستخدم إعادة تشغيل الجسر.");
         _consecutiveQuickFailures = 0; // a deliberate restart always gets a fresh chance
         if (_bridgeProcess is { HasExited: false } process)
         {
@@ -423,13 +455,37 @@ public sealed class MainForm : Form
         _output.ScrollToCaret();
     }
 
+    /// <summary>
+    /// A persistent record of what the manager itself did - separate from the
+    /// bridge's own logs/bridge.log - so "why did it restart at 3am" is
+    /// answerable after the on-screen scrollback (capped, in-memory) is gone.
+    /// </summary>
+    private void LogEvent(string message)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)) return;
+        try
+        {
+            var logsDir = Path.Combine(BridgeRoot, "logs");
+            Directory.CreateDirectory(logsDir);
+            var path = Path.Combine(logsDir, "manager.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 5_000_000)
+            {
+                File.Copy(path, Path.Combine(logsDir, "manager.log.old"), overwrite: true);
+                File.Delete(path);
+            }
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [Manager] {message}{Environment.NewLine}");
+        }
+        catch { /* logging must never be the reason the app breaks */ }
+    }
+
     private void OpenSettings()
     {
         if (!EnsureBridgeScriptResolved()) return;
         using var form = new SettingsForm(ConfigPath, BridgeRoot);
-        if (form.ShowDialog(this) == DialogResult.OK && form.RestartRequested && _bridgeProcess is { HasExited: false })
+        if (form.ShowDialog(this) == DialogResult.OK)
         {
-            RestartBridge();
+            LogEvent("تم حفظ الإعدادات من واجهة المدير.");
+            if (form.RestartRequested && _bridgeProcess is { HasExited: false }) RestartBridge();
         }
     }
 

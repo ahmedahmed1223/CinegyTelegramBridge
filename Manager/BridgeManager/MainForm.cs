@@ -46,6 +46,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _autoRestartCheck;
     private readonly CheckBox _autoClearCheck;
     private readonly CheckBox _startWithWindowsCheck;
+    private readonly CheckBox _wordWrapCheck;
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _restartTimer;
     private readonly System.Windows.Forms.Timer _autoClearTimer;
@@ -94,6 +95,7 @@ public sealed class MainForm : Form
         _autoRestartCheck = new CheckBox { Text = "إعادة التشغيل تلقائيًا عند التوقف", AutoSize = true, Checked = true, Padding = new Padding(12, 6, 0, 0) };
         _autoClearCheck = new CheckBox { Text = "مسح تلقائي للشاشة كل 24 ساعة", AutoSize = true, Checked = false, Padding = new Padding(12, 6, 0, 0) };
         _startWithWindowsCheck = new CheckBox { Text = "🔁 تشغيل تلقائي مع بدء ويندوز", AutoSize = true, Checked = IsStartWithWindowsEnabled(), Padding = new Padding(12, 6, 0, 0) };
+        _wordWrapCheck = new CheckBox { Text = "التفاف الأسطر الطويلة", AutoSize = true, Checked = true, Padding = new Padding(12, 6, 0, 0) };
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
@@ -101,7 +103,7 @@ public sealed class MainForm : Form
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
 
-        toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck, _startWithWindowsCheck });
+        toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck, _startWithWindowsCheck, _wordWrapCheck });
         _startWithWindowsCheck.CheckedChanged += (_, _) => SetStartWithWindows(_startWithWindowsCheck.Checked);
 
         _output = new RichTextBox
@@ -114,10 +116,17 @@ public sealed class MainForm : Form
             // logs a lot of Arabic text, and Courier New/Consolas render it as
             // disconnected letters with no joining forms.
             Font = new Font("Segoe UI", 10f),
-            WordWrap = false,
-            ScrollBars = RichTextBoxScrollBars.Both
+            // Long lines (stack traces, JSON dumps in error output) would
+            // otherwise only be reachable by scrolling sideways.
+            WordWrap = true,
+            ScrollBars = RichTextBoxScrollBars.Vertical
         };
         clearButton.Click += (_, _) => { _output.Clear(); _outputLineCount = 0; };
+        _wordWrapCheck.CheckedChanged += (_, _) =>
+        {
+            _output.WordWrap = _wordWrapCheck.Checked;
+            _output.ScrollBars = _wordWrapCheck.Checked ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both;
+        };
 
         Controls.Add(_output);
         Controls.Add(toolbar);

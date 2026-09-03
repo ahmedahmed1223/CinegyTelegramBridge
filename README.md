@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.42.0
+
+The two template permission lists are picked from the registry rather than
+typed: a row per template, ticked or not, toggled by pressing it. A misspelled
+key reads as "not in the list", so a typed permission can protect nothing
+while looking set; a picked one cannot be misspelled. Saving goes through the
+same path the typed value used, so the log and the audit trail read alike
+either way. The layer lists stay typed - a layer number is short and hard to
+get wrong.
+
 ## Version 7.41.0
 
 "Start later" on a bulletin now asks the way template scheduling asks: the

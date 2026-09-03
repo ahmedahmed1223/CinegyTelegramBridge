@@ -117,3 +117,58 @@ Describe 'Every setting the code reads is a setting the bridge declares' {
         $undeclared | Should -BeNullOrEmpty -Because "these are read but never declared: $($undeclared -join ', ')"
     }
 }
+
+Describe 'Choosing the protected templates instead of typing them' {
+    BeforeEach {
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Set-Setting {}
+        Mock Get-TemplateStore {
+            @{ Order = @('Urgent', 'logo', 'News-Ticker', 'Mojaz'); Map = @{} }
+        }
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue '' -Force
+    }
+
+    It 'opens the registry rather than a text prompt' {
+        # The bug this prevents: a misspelled key reads as "not in the list",
+        # so the permission silently protects nothing.
+        Show-SettingChoices -Name 'AdminOnlyTemplateKeys' -ChatId 100 -UserId 101
+
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfgtpl:AdminOnlyTemplateKeys:0'
+        }
+    }
+
+    It 'ticks what is already protected and leaves the rest blank' {
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue 'logo' -Force
+
+        $labels = @((Get-SettingTemplatePickKeyboard -Name 'AdminOnlyTemplateKeys').inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['text'] })
+
+        $labels | Should -Contain '✅ logo'
+        $labels | Should -Contain '⬜ Urgent'
+    }
+
+    It 'adds a template on the first press and removes it on the second' {
+        $script:written = @()
+        Mock Set-Setting { $script:written += [string]$Value }
+
+        Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
+        $script:written[-1] | Should -Be 'Urgent'
+
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue 'Urgent' -Force
+        Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
+        $script:written[-1] | Should -Be ''
+    }
+
+    It 'ignores a position that is not in the registry' {
+        Mock Set-Setting { throw 'must not write' }
+        { Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 99 -ChatId 100 -UserId 101 } | Should -Not -Throw
+    }
+
+    It 'says plainly when nothing is protected' {
+        Get-SettingTemplatePickText -Name 'AdminOnlyTemplateKeys' | Should -Match 'متاحة للجميع'
+    }
+}

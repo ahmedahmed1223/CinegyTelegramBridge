@@ -659,6 +659,22 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Reset-SingleSettingToDefault -Name (Get-CallbackArg $data 'cfgrgo:') -ChatId $chatId -UserId $userId -Confirmed }
             break
         }
+        'cfgtpl:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                # <setting>:<index> - the setting names itself so one callback
+                # serves both permission lists.
+                $parts = ([string](Get-CallbackArg $data 'cfgtpl:')) -split ':'
+                $pick = 0
+                if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$pick)) {
+                    Switch-SettingTemplatePick -Name ([string]$parts[0]) -Index $pick -ChatId $chatId -UserId $userId
+                }
+            }
+            break
+        }
+        'cfgtplclear:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Clear-SettingTemplatePick -Name (Get-CallbackArg $data 'cfgtplclear:') -ChatId $chatId -UserId $userId }
+            break
+        }
         'cfgr:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Reset-SingleSettingToDefault -Name (Get-CallbackArg $data 'cfgr:') -ChatId $chatId -UserId $userId }
             break

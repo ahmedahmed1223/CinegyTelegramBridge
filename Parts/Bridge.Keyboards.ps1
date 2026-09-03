@@ -1309,11 +1309,95 @@ function Get-SettingChoiceKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
-function Show-SettingChoices {
-    <# String settings come in two flavours: a constrained list (AirVariableType)
-       gets a pick-list, anything else gets a free-text prompt. #>
+# Settings whose value is a set of template keys. Typed, a misspelling reads
+# as "not in the list", so a permission quietly protects nothing; picked from
+# the registry, it cannot be misspelled at all.
+$script:SettingTemplatePickers = @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys')
+
+function Get-SettingTemplatePickKeyboard {
+    <# Every template in the registry, ticked where it is already in the list.
+       Addressed by position, because a callback carries 64 bytes and a
+       template name does not always fit in what is left. #>
+    param([Parameter(Mandatory)][string]$Name)
+    $store = Get-TemplateStore
+    $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
+    $keyboard = @()
+    $order = @($store.Order)
+    for ($index = 0; $index -lt $order.Count; $index++) {
+        $key = [string]$order[$index]
+        $mark = if (@($chosen | Where-Object { $_.Equals($key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { '✅' } else { '⬜' }
+        $keyboard += , @((New-Button "$mark $key" "cfgtpl:$Name`:$index"))
+    }
+    if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgtplclear:$Name" -Style danger)) }
+    $keyboard += , @((New-Button '✅ تم' 'cfgcat:templates'))
+    return @{ inline_keyboard = $keyboard }
+}
+
+function Get-SettingTemplatePickText {
+    param([Parameter(Mandatory)][string]$Name)
+    $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
+    # The same Arabic name the settings screen shows, falling back to the
+    # key itself rather than to nothing.
+    $label = if ($script:SettingNavigationLabels.ContainsKey($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
+    $lines = @("<b>$(ConvertTo-TelegramHtmlText -Text $label)</b>")
+    $lines += if ($chosen.Count -eq 0) {
+        '<i>لا قالب محدد — القوالب كلها متاحة للجميع.</i>'
+    }
+    else { "<i>المحدد: $(ConvertTo-TelegramHtmlText -Text ($chosen -join '، '))</i>" }
+    $lines += ''
+    $lines += 'اضغط القالب لإضافته أو إزالته.'
+    return ($lines -join "`n")
+}
+
+function Show-SettingTemplatePicker {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    Clear-PendingState -ChatId $ChatId
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingTemplatePickText -Name $Name) -ParseMode HTML `
+        -ReplyMarkup (Get-SettingTemplatePickKeyboard -Name $Name)
+}
+
+function Switch-SettingTemplatePick {
+    <# One template in or out of the list, saved the way a typed value is
+       saved so the audit trail reads alike either way. #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $order = @((Get-TemplateStore).Order)
+    if ($Index -lt 0 -or $Index -ge $order.Count) { Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId; return }
+    $key = [string]$order[$Index]
+    $existing = @(Get-BridgeKeyList -Value ([string](Get-Setting $Name)))
+    $chosen = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $existing) {
+        if (-not $item.Equals($key, [StringComparison]::OrdinalIgnoreCase)) { $chosen.Add($item) }
+    }
+    if ($chosen.Count -eq $existing.Count) { $chosen.Add($key) }
+    $value = ($chosen -join ', ')
+    Set-Setting -Name $Name -Value $value
+    Write-BridgeLog "User $UserId set $Name = $value"
+    Add-AuditEntry "⚙️ $Name = $value - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+}
+
+function Clear-SettingTemplatePick {
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Set-Setting -Name $Name -Value ''
+    Write-BridgeLog "User $UserId cleared $Name"
+    Add-AuditEntry "⚙️ إفراغ $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+}
+
+function Show-SettingChoices {
+    <# String settings come in three flavours: a constrained list
+       (AirVariableType) gets a pick-list, a set of template keys gets the
+       registry to tick through, and anything else a free-text prompt. #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if ($script:SettingTemplatePickers -contains $Name) {
+        Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+        return
+    }
     if ($script:SettingChoices.ContainsKey($Name)) {
         Send-TelegramMessage -ChatId $ChatId -Text "اختر قيمة $Name`:" -ReplyMarkup (Get-SettingChoiceKeyboard -Name $Name)
         return

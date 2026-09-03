@@ -68,7 +68,10 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "مدير جسر تيليجرام - Cinegy Air Pro";
+        // Stamped from TelegramBridge.ps1's $script:BridgeVersion at publish
+        // time by scripts/Build-BridgeManager.ps1 (-p:Version=...); a plain
+        // `dotnet build` without that script falls back to .NET's default "1.0.0.0".
+        Text = $"مدير جسر تيليجرام - Cinegy Air Pro (v{Application.ProductVersion})";
         Width = 900;
         Height = 600;
         StartPosition = FormStartPosition.CenterScreen;

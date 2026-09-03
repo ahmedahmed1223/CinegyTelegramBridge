@@ -9,6 +9,9 @@
     <AssemblyName>BridgeManager</AssemblyName>
     <RootNamespace>BridgeManager</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Keep the version clean (e.g. "7.49.0") - without this the SDK appends
+         a "+<git-hash>" suffix to InformationalVersion/ProductVersion. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- NOT InvariantGlobalization: this is an Arabic-first UI, and invariant
          mode throws on any future culture-aware code (CultureInfo.GetCultureInfo,
          culture-sensitive formatting/compare). The exe is self-contained either way. -->

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.56.0'
+$script:BridgeVersion = '7.57.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -136,6 +136,8 @@ $script:DefaultSettings = [ordered]@{
     # --- security ---
     RequireUserLevelAuth       = $true   # authorize the user id, not just the chat id
     EnableSelfServiceRequests  = $true   # strangers may request access via the bot
+    NotifyAdminsOnAccessRequest = $true  # tell the admins when somebody asks for access
+    NotifyAdminsOnBlockedChat  = $true   # and when the guard blocks one, which is otherwise silent
     BlockRejectedRequesters    = $true   # a rejected chat may not queue up again
     JoinSecret                 = ''      # when set, a stranger must send it before any admin sees a request
     JoinSecretMaxAttempts      = 3       # wrong codes allowed in a day before the chat is blocked
@@ -433,6 +435,8 @@ $script:SettingDisplayMetadata = @{
     MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
     EnableSelfServiceRequests = @{ Unit = ''; Description = 'يسمح لغير المصرّح له بإرسال طلب وصول من البوت، يصلك في 👤 طلبات الوصول' }
+    NotifyAdminsOnAccessRequest = @{ Unit = ''; Description = 'إشعار المشرفين بكل طلب وصول جديد. أطفئه لتقرأ الطلبات من 👤 طلبات الوصول وحدها' }
+    NotifyAdminsOnBlockedChat = @{ Unit = ''; Description = 'إشعار المشرفين حين يحظر الحارس محادثة تلقائيًا. والحظر يبقى صامتًا تجاه المحظور دائمًا' }
     BlockRejectedRequesters = @{ Unit = ''; Description = 'رفض الطلب يحظر المحادثة نهائيًا فلا تستطيع الطلب مجددًا. ارفع الحظر من 🚫 المحظورون' }
     JoinSecret = @{ Unit = ''; Description = 'رمز يُطلب من الغريب قبل أن يصل طلبه إلى المشرفين. اتركه فارغًا لتعطيل الرمز، وأرسل - لمسحه' }
     JoinSecretMaxAttempts = @{ Unit = 'محاولة'; Description = 'عدد المحاولات الخاطئة لرمز الانضمام في اليوم قبل حظر المحادثة (0 للتعطيل)' }
@@ -1004,6 +1008,7 @@ $script:SettingCategoryDefinitions = @(
     [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅'; Summary = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.' }
     [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊'; Summary = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.' }
     [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️'; Summary = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.' }
+    [pscustomobject]@{ Key = 'notifications'; Label = 'الإشعارات والتنبيهات';   Icon = '🔔'; Summary = 'ما الذي يوقظك ومتى: تنبيهات الهواء والصحة والجدولة، وساعات الهدوء، والملخصات الدورية.' }
     [pscustomobject]@{ Key = 'advanced';   Label = 'خيارات متقدمة';           Icon = '🛠️'; Summary = 'تفاصيل التشخيص والسلوك الداخلي؛ لا يحتاجها التشغيل اليومي.' }
 )
 
@@ -1018,7 +1023,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1032,7 +1037,6 @@ foreach ($entry in @(
                 'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
                 'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
-                'TemplateReminderFollowUpMinutes',
                 'LayerNames', 'EnableFavorites', 'SharedFavoritesEnabled', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
                 'ShowLayerLockBadge', 'ButtonTextMaxLength', 'EnableButtonStyles'
@@ -1046,28 +1050,39 @@ foreach ($entry in @(
                 'NewsLockGrantHoldSeconds',
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
-                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds', 'NewsSheetNotifyScope',
+                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds',
                 'AllowOperatorsSheetPull'
             ) },
         @{ Category = 'schedule'; Names = @(
-                'ScheduleConflictWindowMinutes', 'SchedulePaused', 'SchedulePreNotifyMinutes',
+                'ScheduleConflictWindowMinutes', 'SchedulePaused',
                 'ScheduleMaxRetries', 'ScheduleRetryDelaySeconds', 'ScheduleRetryBackoffFactor',
-                'ScheduleRetryMaxDelaySeconds', 'NotifyOnScheduleOverwrite'
+                'ScheduleRetryMaxDelaySeconds'
             ) },
         @{ Category = 'monitoring'; Names = @(
                 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
-                'OutputMonitorFailureAlertThreshold', 'OutputBlackLuminance',
-                'OutputBlackConfirmSeconds', 'NotifyOperatorsOnBlackOutput',
+                'OutputBlackLuminance', 'OutputBlackConfirmSeconds',
                 'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
                 'TelegramPollMarginSeconds', 'TelegramPollTimeoutTolerance',
                 'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds',
                 'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent',
                 'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance',
-                'CinegyStateBackoffMaxSeconds', 'StaleOnAirAlertHours',
-                'HealthFailureAlertThreshold', 'MissedEventsHours', 'QuietHoursEnabled',
-                'QuietHoursStart', 'QuietHoursEnd', 'HeartbeatEnabled', 'HeartbeatHour',
+                'CinegyStateBackoffMaxSeconds'
+            ) },
+        # Everything that decides whether the bot speaks to somebody, gathered
+        # from the five categories these had been scattered across: an operator
+        # asking "why did it wake me at 3am" was reading four screens.
+        @{ Category = 'notifications'; Names = @(
+                'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd',
+                'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat',
                 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
-                'NotifyAdminsOnCinegyHealth', 'UsageDigestEnabled', 'UsageDigestDayOfWeek'
+                'NotifyAdminsOnCinegyHealth', 'NotifyOperatorsOnBlackOutput',
+                'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes',
+                'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds',
+                'NewsSheetNotifyScope', 'TemplateReminderFollowUpMinutes',
+                'StaleOnAirAlertHours', 'HealthFailureAlertThreshold',
+                'OutputMonitorFailureAlertThreshold', 'MissedEventsHours',
+                'HeartbeatEnabled', 'HeartbeatHour',
+                'UsageDigestEnabled', 'UsageDigestDayOfWeek'
             ) },
         @{ Category = 'storage'; Names = @(
                 'SnapshotRetentionMinutes', 'UploadRetentionMinutes', 'NewsBackupKeepFiles',
@@ -1142,6 +1157,8 @@ $script:SettingNavigationLabels = @{
     SceneMode = 'وضع المشاهد'
     RequireUserLevelAuth = 'التحقق من هوية المستخدم'
     EnableSelfServiceRequests = 'طلبات الوصول الذاتية'
+    NotifyAdminsOnAccessRequest = 'إشعار طلبات الوصول'
+    NotifyAdminsOnBlockedChat = 'إشعار الحظر التلقائي'
     BlockRejectedRequesters = 'حظر من رُفض طلبه'
     JoinSecret = 'رمز الانضمام'
     JoinSecretMaxAttempts = 'محاولات رمز الانضمام'

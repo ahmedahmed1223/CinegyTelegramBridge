@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.57.0
+
+Settings gain a Notifications section. Everything that decides whether the bot
+speaks to somebody was spread across five categories - monitoring, schedule,
+on-air, news and templates - so an operator asking why it woke them at 3am was
+reading four screens. Twenty-three settings now sit together: quiet hours, the
+five admin alerts, the schedule pre-notice, the bulletin notices, the forgotten
+template reminder, the heartbeat and the weekly digest.
+
+Two new switches. The access-request broadcast has one at last - the request is
+queued either way, and this decides only whether it also interrupts somebody.
+And the guard now tells the administrators when it blocks a chat: it used to
+block, write a log line, and nothing else, and a block nobody is told about is
+one nobody knows to lift. Administrators only - blocking stays silent towards
+the blocked chat, and a rejection an administrator just made is not news to
+them.
+
 ## Version 7.56.0
 
 Reports gain a bulletin section, which needed a record that did not exist: a

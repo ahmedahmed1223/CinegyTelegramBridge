@@ -116,6 +116,8 @@ function Get-ReportRecords {
         [void][int]::TryParse((Get-AuditRecordField $record 'count'), [ref]$count)
         $layer = 0
         [void][int]::TryParse((Get-AuditRecordField $record 'layer'), [ref]$layer)
+        $duration = 0L
+        [void][long]::TryParse((Get-AuditRecordField $record 'durationMs'), [ref]$duration)
         [pscustomobject]@{
             When   = $at
             Action = (Get-AuditRecordField $record 'action')
@@ -125,6 +127,11 @@ function Get-ReportRecords {
             Values = (Get-AuditRecordField $record 'values')
             Count  = $count
             Layer  = $layer
+            # Both are written by Write-AuditRecord and were dropped here, so a
+            # report that pairs a start with its end - the bulletin one - had
+            # nothing to pair on and matched nothing.
+            OperationId = (Get-AuditRecordField $record 'operationId')
+            DurationMs  = $duration
         }
     }
     return @{
@@ -238,7 +245,7 @@ function Get-MojazReportData {
     $scan = Get-ReportRecords -From $window.From -To $window.To -EventName 'mojaz_run'
     $byOperation = [ordered]@{}
     foreach ($record in @($scan.Records)) {
-        $id = [string](Get-JsonProp $record 'OperationId')
+        $id = [string]$record.OperationId
         if ([string]::IsNullOrWhiteSpace($id)) { $id = "$([string]$record.Target)|$(([datetime]$record.When).ToString('o'))" }
         if (-not $byOperation.Contains($id)) {
             $byOperation[$id] = [pscustomobject]@{
@@ -255,7 +262,7 @@ function Get-MojazReportData {
         }
         else {
             $run.EndedAt = $record.When
-            $run.DurationMs = [long](Get-JsonProp $record 'DurationMs')
+            $run.DurationMs = [long]$record.DurationMs
             if (-not $run.Name) { $run.Name = [string]$record.Target }
         }
     }
@@ -265,7 +272,11 @@ function Get-MojazReportData {
     return @{
         Label     = $window.Label
         Runs      = $runs
-        Rows      = [int](@($runs | Measure-Object -Property Rows -Sum).Sum)
+        # Measure-Object over an empty collection returns an object with no
+        # Sum at all, and StrictMode throws on reading it - which is what the
+        # report did on any period with no bulletin in it, meaning every
+        # quiet day.
+        Rows      = [int]$(if ($runs.Count -gt 0) { (@($runs) | Measure-Object -Property Rows -Sum).Sum } else { 0 })
         Operators = @($runs | Group-Object -Property UserId).Count
         Scheduled = @($runs | Where-Object { $_.Kind -eq 'scheduled' }).Count
         Truncated = $scan.Truncated

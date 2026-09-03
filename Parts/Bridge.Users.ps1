@@ -129,6 +129,13 @@ function Block-AccessChat {
     param([Parameter(Mandatory)][long]$ChatId, [string]$Reason = '', [long]$ByUserId = 0)
     $script:AccessGuard.Blocked[[string]$ChatId] = @{ At = (Get-Date).ToString('o'); By = $ByUserId; Reason = $Reason }
     Write-BridgeLog "Access blocked for chat $ChatId ($Reason) by $ByUserId"
+    # Silent towards the blocked chat, never towards the administrators: a
+    # block nobody is told about is one nobody knows to lift. Only the guard's
+    # own blocks announce themselves - a rejection an administrator just made
+    # is not news to them.
+    if ($ByUserId -le 0 -and (Get-Setting 'NotifyAdminsOnBlockedChat')) {
+        Send-AdminBroadcast -Text "🚫 حُظرت المحادثة $ChatId تلقائيًا ($(Get-BlockedAccessReasonText -Reason $Reason)).`nارفع الحظر من 👤 طلبات الوصول ← 🚫 المحظورون." | Out-Null
+    }
     return (Save-AccessGuard)
 }
 

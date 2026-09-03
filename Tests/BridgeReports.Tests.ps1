@@ -478,3 +478,74 @@ Describe 'The banner copy is kept, below the table' {
         @($details.blocks)[0].text | Should -Match 'عاجل: بيان الوزارة'
     }
 }
+
+Describe 'The bulletin report' {
+    BeforeAll {
+        function global:New-TestMojazAudit {
+            param([string]$Operation, [string]$Action, [datetime]$At, [string]$Name = 'موجز المساء',
+                [int]$Count = 3, [long]$DurationMs = 0, [string]$Values = 'manual', [string]$UserId = '42')
+            [pscustomobject]@{
+                timestampUtc = $At.ToUniversalTime().ToString('o'); operationId = $Operation
+                event = 'mojaz_run'; action = $Action; result = $(if ($Action -eq 'START') { 'started' } else { 'completed' })
+                userId = $UserId; target = $Name; count = $Count; durationMs = $DurationMs; values = $Values
+            }
+        }
+    }
+
+    It 'says so quietly when nothing ran, instead of throwing' {
+        # The bug: Measure-Object over an empty collection returns an object
+        # with no Sum, and StrictMode throws on reading it - so the report
+        # failed to open on every period with no bulletin in it, which is
+        # every quiet day. This file's own header warns about that trap.
+        Mock Read-AuditRecords { @() }
+
+        $blocks = @(Get-MojazReportBlocks -Period today)
+        $blocks[0].text | Should -Match 'تقرير الموجزات'
+        $blocks[1].text | Should -Match 'لم يُشغَّل أي موجز'
+        Get-MojazReportText -Period today | Should -Match 'لم يُشغَّل أي موجز'
+    }
+
+    It 'pairs a run start with its end by operation id' {
+        $start = (Get-Date).Date.AddHours(9)
+        Mock Read-AuditRecords {
+            @(
+                (New-TestMojazAudit -Operation 'mojaz-a' -Action START -At $start -Count 4)
+                (New-TestMojazAudit -Operation 'mojaz-a' -Action END -At $start.AddMinutes(6) -Count 4 -DurationMs 360000)
+            )
+        }
+
+        $data = Get-MojazReportData -Period today
+        @($data.Runs).Count | Should -Be 1
+        $data.Runs[0].Rows | Should -Be 4
+        $data.Rows | Should -Be 4
+        $data.Runs[0].EndedAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'says a run with no end is still on air rather than dropping it' {
+        Mock Read-AuditRecords { @((New-TestMojazAudit -Operation 'mojaz-b' -Action START -At (Get-Date).Date.AddHours(10))) }
+
+        $data = Get-MojazReportData -Period today
+        @($data.Runs).Count | Should -Be 1
+        Get-MojazRunDuration -Run $data.Runs[0] | Should -Match 'على الهواء'
+    }
+
+    It 'keeps two runs of the same bulletin apart' {
+        # Without the operation id they collapsed into one row, because the
+        # bulletin name and the row count are identical in both.
+        $start = (Get-Date).Date.AddHours(8)
+        Mock Read-AuditRecords {
+            @(
+                (New-TestMojazAudit -Operation 'mojaz-a' -Action START -At $start)
+                (New-TestMojazAudit -Operation 'mojaz-a' -Action END -At $start.AddMinutes(5) -DurationMs 300000)
+                (New-TestMojazAudit -Operation 'mojaz-b' -Action START -At $start.AddHours(2) -Values 'scheduled')
+                (New-TestMojazAudit -Operation 'mojaz-b' -Action END -At $start.AddHours(2).AddMinutes(4) -DurationMs 240000 -Values 'scheduled')
+            )
+        }
+
+        $data = Get-MojazReportData -Period today
+        @($data.Runs).Count | Should -Be 2
+        $data.Scheduled | Should -Be 1
+        # Ordered by when they started, not by the order the log holds them.
+        $data.Runs[0].StartedAt | Should -BeLessThan $data.Runs[1].StartedAt
+    }
+}

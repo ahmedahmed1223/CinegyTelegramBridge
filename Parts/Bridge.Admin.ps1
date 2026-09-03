@@ -1948,7 +1948,11 @@ function Request-Approval {
         return $true
     }
     $nameLine = if ($name) { "الاسم: $name`n" } else { "" }
-    Send-AdminBroadcast -Text "🔔 طلب وصول جديد للبوت`n$($nameLine)رقم المحادثة: $ChatId`nرقم المستخدم: $UserId" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
+    # The request is queued either way; this decides only whether it also
+    # interrupts somebody. A busy public bot can leave them to 👤 طلبات الوصول.
+    if (Get-Setting 'NotifyAdminsOnAccessRequest') {
+        Send-AdminBroadcast -Text "🔔 طلب وصول جديد للبوت`n$($nameLine)رقم المحادثة: $ChatId`nرقم المستخدم: $UserId" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
+    }
     Write-BridgeLog "Access request from chat $ChatId / user $UserId ($name) sent to admins"
     # Asked after the admins are told, never before: a requester who never
     # answers still has a request waiting, which is the point of the queue.

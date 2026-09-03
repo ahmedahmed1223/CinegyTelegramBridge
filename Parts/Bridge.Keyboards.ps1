@@ -1309,93 +1309,111 @@ function Get-SettingChoiceKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
-# Settings whose value is a set of template keys. Typed, a misspelling reads
-# as "not in the list", so a permission quietly protects nothing; picked from
-# the registry, it cannot be misspelled at all.
-$script:SettingTemplatePickers = @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys')
+# Settings whose value is a set of things the bridge already knows: template
+# keys, or layer numbers. Typed, a misspelling reads as "not in the list", so
+# a permission quietly protects nothing; picked from what exists it cannot be
+# mistyped at all.
+$script:SettingPickers = @{
+    AdminOnlyTemplateKeys = 'template'
+    OwnerOnlyTemplateKeys = 'template'
+    AdminOnlyLayers       = 'layer'
+    OwnerOnlyLayers       = 'layer'
+}
 
-function Get-SettingTemplatePickKeyboard {
-    <# Every template in the registry, ticked where it is already in the list.
-       Addressed by position, because a callback carries 64 bytes and a
-       template name does not always fit in what is left. #>
+function Get-SettingPickItems {
+    <# What this setting can hold, as it is stored and as it reads. A layer is
+       stored as its number but shown by its name, so the administrator picks
+       the logo rather than remembering that the logo is layer 9. #>
     param([Parameter(Mandatory)][string]$Name)
-    $store = Get-TemplateStore
-    $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
-    $keyboard = @()
-    $order = @($store.Order)
-    for ($index = 0; $index -lt $order.Count; $index++) {
-        $key = [string]$order[$index]
-        $mark = if (@($chosen | Where-Object { $_.Equals($key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { '✅' } else { '⬜' }
-        $keyboard += , @((New-Button "$mark $key" "cfgtpl:$Name`:$index"))
+    if ([string]$script:SettingPickers[$Name] -eq 'layer') {
+        return @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique | ForEach-Object {
+                @{ Value = [string]$_; Label = [string](Get-LayerDisplayName -Layer $_) } })
     }
-    if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgtplclear:$Name" -Style danger)) }
+    return @(@((Get-TemplateStore).Order) | ForEach-Object { @{ Value = [string]$_; Label = [string]$_ } })
+}
+
+function Get-SettingPickKeyboard {
+    <# Every candidate, ticked where it is already in the list. Addressed by
+       position, because a callback carries 64 bytes and a name does not
+       always fit in what is left. #>
+    param([Parameter(Mandatory)][string]$Name)
+    $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
+    $items = @(Get-SettingPickItems -Name $Name)
+    $keyboard = @()
+    for ($index = 0; $index -lt $items.Count; $index++) {
+        $value = [string]$items[$index].Value
+        $mark = if (@($chosen | Where-Object { $_.Equals($value, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { '✅' } else { '⬜' }
+        $keyboard += , @((New-Button "$mark $([string]$items[$index].Label)" "cfgpick:$Name`:$index"))
+    }
+    if ($items.Count -eq 0) { $keyboard += , @((New-Button 'لا توجد عناصر معرفة' 'cfgcat:templates')) }
+    if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgpickclear:$Name" -Style danger)) }
     $keyboard += , @((New-Button '✅ تم' 'cfgcat:templates'))
     return @{ inline_keyboard = $keyboard }
 }
 
-function Get-SettingTemplatePickText {
+function Get-SettingPickText {
     param([Parameter(Mandatory)][string]$Name)
     $chosen = @(Get-BridgeKeyList -Value (Get-Setting $Name))
-    # The same Arabic name the settings screen shows, falling back to the
-    # key itself rather than to nothing.
+    # The same Arabic name the settings screen shows, falling back to the key
+    # itself rather than to nothing.
     $label = if ($script:SettingNavigationLabels.ContainsKey($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
     $lines = @("<b>$(ConvertTo-TelegramHtmlText -Text $label)</b>")
     $lines += if ($chosen.Count -eq 0) {
-        '<i>لا قالب محدد — القوالب كلها متاحة للجميع.</i>'
+        '<i>لا شيء محدد — متاح للجميع.</i>'
     }
     else { "<i>المحدد: $(ConvertTo-TelegramHtmlText -Text ($chosen -join '، '))</i>" }
     $lines += ''
-    $lines += 'اضغط القالب لإضافته أو إزالته.'
+    $lines += 'اضغط العنصر لإضافته أو إزالته.'
     return ($lines -join "`n")
 }
 
-function Show-SettingTemplatePicker {
+function Show-SettingPicker {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingTemplatePickText -Name $Name) -ParseMode HTML `
-        -ReplyMarkup (Get-SettingTemplatePickKeyboard -Name $Name)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPickText -Name $Name) -ParseMode HTML `
+        -ReplyMarkup (Get-SettingPickKeyboard -Name $Name)
 }
 
-function Switch-SettingTemplatePick {
-    <# One template in or out of the list, saved the way a typed value is
-       saved so the audit trail reads alike either way. #>
+function Switch-SettingPick {
+    <# One item in or out of the list, saved the way a typed value is saved so
+       the log and the audit trail read alike either way. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][int]$Index,
         [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $order = @((Get-TemplateStore).Order)
-    if ($Index -lt 0 -or $Index -ge $order.Count) { Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId; return }
-    $key = [string]$order[$Index]
+    $items = @(Get-SettingPickItems -Name $Name)
+    if ($Index -lt 0 -or $Index -ge $items.Count) { Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId; return }
+    $value = [string]$items[$Index].Value
     $existing = @(Get-BridgeKeyList -Value ([string](Get-Setting $Name)))
     $chosen = [System.Collections.Generic.List[string]]::new()
     foreach ($item in $existing) {
-        if (-not $item.Equals($key, [StringComparison]::OrdinalIgnoreCase)) { $chosen.Add($item) }
+        if (-not $item.Equals($value, [StringComparison]::OrdinalIgnoreCase)) { $chosen.Add($item) }
     }
-    if ($chosen.Count -eq $existing.Count) { $chosen.Add($key) }
-    $value = ($chosen -join ', ')
-    Set-Setting -Name $Name -Value $value
-    Write-BridgeLog "User $UserId set $Name = $value"
-    Add-AuditEntry "⚙️ $Name = $value - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+    if ($chosen.Count -eq $existing.Count) { $chosen.Add($value) }
+    $stored = ($chosen -join ', ')
+    Set-Setting -Name $Name -Value $stored
+    Write-BridgeLog "User $UserId set $Name = $stored"
+    Add-AuditEntry "⚙️ $Name = $stored - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
 }
 
-function Clear-SettingTemplatePick {
+function Clear-SettingPick {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-Setting -Name $Name -Value ''
     Write-BridgeLog "User $UserId cleared $Name"
     Add-AuditEntry "⚙️ إفراغ $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+    Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
 }
 
 function Show-SettingChoices {
     <# String settings come in three flavours: a constrained list
-       (AirVariableType) gets a pick-list, a set of template keys gets the
-       registry to tick through, and anything else a free-text prompt. #>
+       (AirVariableType) gets a pick-list, a set of templates or layers gets
+       them to tick through, and anything else a free-text prompt. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if ($script:SettingTemplatePickers -contains $Name) {
-        Show-SettingTemplatePicker -Name $Name -ChatId $ChatId -UserId $UserId
+    if ($script:SettingPickers.ContainsKey($Name)) {
+        Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
         return
     }
     if ($script:SettingChoices.ContainsKey($Name)) {

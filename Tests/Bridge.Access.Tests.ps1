@@ -137,14 +137,14 @@ Describe 'Choosing the protected templates instead of typing them' {
 
         Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
         Should -Invoke Send-TelegramMessage -ParameterFilter {
-            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfgtpl:AdminOnlyTemplateKeys:0'
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'cfgpick:AdminOnlyTemplateKeys:0'
         }
     }
 
     It 'ticks what is already protected and leaves the rest blank' {
         $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue 'logo' -Force
 
-        $labels = @((Get-SettingTemplatePickKeyboard -Name 'AdminOnlyTemplateKeys').inline_keyboard |
+        $labels = @((Get-SettingPickKeyboard -Name 'AdminOnlyTemplateKeys').inline_keyboard |
                 ForEach-Object { @($_) } | ForEach-Object { $_['text'] })
 
         $labels | Should -Contain '✅ logo'
@@ -155,20 +155,66 @@ Describe 'Choosing the protected templates instead of typing them' {
         $script:written = @()
         Mock Set-Setting { $script:written += [string]$Value }
 
-        Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
+        Switch-SettingPick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
         $script:written[-1] | Should -Be 'Urgent'
 
         $config.Settings | Add-Member -NotePropertyName 'AdminOnlyTemplateKeys' -NotePropertyValue 'Urgent' -Force
-        Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
+        Switch-SettingPick -Name 'AdminOnlyTemplateKeys' -Index 0 -ChatId 100 -UserId 101
         $script:written[-1] | Should -Be ''
     }
 
     It 'ignores a position that is not in the registry' {
         Mock Set-Setting { throw 'must not write' }
-        { Switch-SettingTemplatePick -Name 'AdminOnlyTemplateKeys' -Index 99 -ChatId 100 -UserId 101 } | Should -Not -Throw
+        { Switch-SettingPick -Name 'AdminOnlyTemplateKeys' -Index 99 -ChatId 100 -UserId 101 } | Should -Not -Throw
     }
 
     It 'says plainly when nothing is protected' {
-        Get-SettingTemplatePickText -Name 'AdminOnlyTemplateKeys' | Should -Match 'متاحة للجميع'
+        Get-SettingPickText -Name 'AdminOnlyTemplateKeys' | Should -Match 'متاح للجميع'
+    }
+}
+
+Describe 'Choosing the protected layers the same way' {
+    BeforeEach {
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-BridgeLog {}
+        Mock Set-Setting {}
+        Mock Get-KnownLayers { @(5, 7, 8, 9) }
+        Mock Get-LayerDisplayName { "طبقة $Layer" }
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '' -Force
+    }
+
+    It 'lists every layer the bridge knows, by name not by number alone' {
+        # An administrator protects "the logo", not "9"; the number is what
+        # gets stored, the name is what gets read.
+        Mock Get-LayerDisplayName { if ($Layer -eq 9) { '9 · الشعار' } else { "طبقة $Layer" } }
+
+        $labels = @((Get-SettingPickKeyboard -Name 'OwnerOnlyLayers').inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { $_['text'] })
+
+        $labels | Should -Contain '⬜ 9 · الشعار'
+        @($labels | Where-Object { $_ -like '⬜*' }).Count | Should -Be 4
+    }
+
+    It 'stores the layer number, not the name it was shown under' {
+        $script:written = @()
+        Mock Set-Setting { $script:written += [string]$Value }
+
+        # Index 3 is layer 9 in the sorted list.
+        Switch-SettingPick -Name 'OwnerOnlyLayers' -Index 3 -ChatId 100 -UserId 101
+
+        $script:written[-1] | Should -Be '9'
+    }
+
+    It 'protects that layer once it is picked' {
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '9' -Force
+        foreach ($name in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers')) {
+            $config.Settings | Add-Member -NotePropertyName $name -NotePropertyValue '' -Force
+        }
+        Mock Test-Admin { $true }
+        Mock Test-Owner { $false }
+
+        (Test-TemplateAccess -Key 'logo' -Layer 9 -ChatId 100 -UserId 101).Allowed | Should -BeFalse
+        (Test-TemplateAccess -Key 'logo' -Layer 8 -ChatId 100 -UserId 101).Allowed | Should -BeTrue
     }
 }

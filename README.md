@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.43.0
+
+The layer permission lists are picked too, and every layer shows by its name -
+"9 · the logo" rather than "9" - because an administrator protects the logo,
+not a number; the number is what gets stored. One picker serves all four
+lists, differing only in where the candidates come from, since a second copy
+would drift from the first at the next change.
+
 ## Version 7.42.0
 
 The two template permission lists are picked from the registry rather than

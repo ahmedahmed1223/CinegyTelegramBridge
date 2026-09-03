@@ -19,6 +19,7 @@ $script:ReportMaxRecords = 5000
 function Get-ReportsMenuKeyboard {
     return @{ inline_keyboard = @(
             , @((New-Button '🖼 البنرات' 'rep:banners:today'), (New-Button '📰 الأخبار' 'rep:news:today'))
+            , @((New-Button '📑 الموجزات' 'rep:mojaz:today'))
             , @((New-Button '🏠 القائمة' 'menu:main'))
         )
     }
@@ -27,10 +28,14 @@ function Get-ReportsMenuKeyboard {
 function Get-ReportPeriodKeyboard {
     <# The period row doubles as the refresh control: tapping the current
        period re-runs it. #>
-    param([Parameter(Mandatory)][ValidateSet('banners', 'news')][string]$Kind, [string]$Period = 'today')
+    param([Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz')][string]$Kind, [string]$Period = 'today')
+    # The period being read is marked. Four identical buttons over a report
+    # that does not repeat its own window left the operator guessing which one
+    # they had pressed.
+    $mark = { param($Value, $Label) if ($Value -eq $Period) { "• $Label" } else { $Label } }
     return @{ inline_keyboard = @(
-            , @((New-Button 'اليوم' "rep:${Kind}:today"), (New-Button 'أمس' "rep:${Kind}:yesterday"))
-            , @((New-Button '7 أيام' "rep:${Kind}:week"), (New-Button '30 يومًا' "rep:${Kind}:month"))
+            , @((New-Button (& $mark 'today' 'اليوم') "rep:${Kind}:today"), (New-Button (& $mark 'yesterday' 'أمس') "rep:${Kind}:yesterday"))
+            , @((New-Button (& $mark 'week' '7 أيام') "rep:${Kind}:week"), (New-Button (& $mark 'month' '30 يومًا') "rep:${Kind}:month"))
             , @((New-Button '⬇️ تحميل الملف' "repdl:${Kind}:${Period}"))
             , @((New-Button '📊 التقارير' 'menu:reports'), (New-Button '🏠 القائمة' 'menu:main'))
         )
@@ -48,6 +53,7 @@ function Show-ReportsMenu {
 
 🖼 البنرات — ماذا ظهر، بأي نص، ومتى اختفى
 📰 الأخبار — تعديلات الشريط اليومي وحجم كل تعديل
+📑 الموجزات — أي نشرة شُغّلت، بكم صفًّا، ومن شغّلها
 "@
 }
 
@@ -58,7 +64,7 @@ function Show-Report {
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('banners', 'news')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz')][string]$Kind,
         [Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -68,18 +74,16 @@ function Show-Report {
     # Tried first and never depended on: an API without sendRichMessage, or a
     # shape it will not take, falls through to exactly the text this screen
     # has always sent.
-    $blocks = if ($Kind -eq 'news') {
-        Get-NewsReportBlocks -Period $Period -OnlyUserId $onlyUser
-    }
-    else {
-        Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser
+    $blocks = switch ($Kind) {
+        'news' { Get-NewsReportBlocks -Period $Period -OnlyUserId $onlyUser }
+        'mojaz' { Get-MojazReportBlocks -Period $Period -OnlyUserId $onlyUser }
+        default { Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser }
     }
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $markup) { return }
-    $text = if ($Kind -eq 'news') {
-        Get-NewsReportText -Period $Period -OnlyUserId $onlyUser
-    }
-    else {
-        Get-BannerReportText -Period $Period -OnlyUserId $onlyUser
+    $text = switch ($Kind) {
+        'news' { Get-NewsReportText -Period $Period -OnlyUserId $onlyUser }
+        'mojaz' { Get-MojazReportText -Period $Period -OnlyUserId $onlyUser }
+        default { Get-BannerReportText -Period $Period -OnlyUserId $onlyUser }
     }
     Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup $markup
 }
@@ -219,6 +223,134 @@ function Get-BannerReportData {
         Operators = @($sessions | Group-Object -Property UserId).Count
         Truncated = $scan.Truncated
     }
+}
+
+function Get-MojazReportData {
+    <#
+        Every bulletin run in the window, paired from its own audit trail.
+
+        A run writes START when the scene is up and END when it leaves, under
+        one operation id - so a run still on air has a start and no end, and
+        says so rather than being dropped or counted as finished.
+    #>
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $window = Get-ReportPeriod -Period $Period
+    $scan = Get-ReportRecords -From $window.From -To $window.To -EventName 'mojaz_run'
+    $byOperation = [ordered]@{}
+    foreach ($record in @($scan.Records)) {
+        $id = [string](Get-JsonProp $record 'OperationId')
+        if ([string]::IsNullOrWhiteSpace($id)) { $id = "$([string]$record.Target)|$(([datetime]$record.When).ToString('o'))" }
+        if (-not $byOperation.Contains($id)) {
+            $byOperation[$id] = [pscustomobject]@{
+                Name = [string]$record.Target; UserId = [string]$record.UserId; Rows = [int]$record.Count
+                StartedAt = $null; EndedAt = $null; Kind = [string]$record.Values; DurationMs = 0L
+            }
+        }
+        $run = $byOperation[$id]
+        if ([string]$record.Action -eq 'START') {
+            $run.StartedAt = $record.When
+            $run.Rows = [int]$record.Count
+            $run.UserId = [string]$record.UserId
+            $run.Kind = [string]$record.Values
+        }
+        else {
+            $run.EndedAt = $record.When
+            $run.DurationMs = [long](Get-JsonProp $record 'DurationMs')
+            if (-not $run.Name) { $run.Name = [string]$record.Target }
+        }
+    }
+    $runs = @(@($byOperation.Values) | Where-Object { $_.StartedAt -or $_.EndedAt } |
+            Sort-Object { if ($_.StartedAt) { $_.StartedAt } else { $_.EndedAt } })
+    if ($OnlyUserId -gt 0) { $runs = @($runs | Where-Object { $_.UserId -eq [string]$OnlyUserId }) }
+    return @{
+        Label     = $window.Label
+        Runs      = $runs
+        Rows      = [int](@($runs | Measure-Object -Property Rows -Sum).Sum)
+        Operators = @($runs | Group-Object -Property UserId).Count
+        Scheduled = @($runs | Where-Object { $_.Kind -eq 'scheduled' }).Count
+        Truncated = $scan.Truncated
+    }
+}
+
+function Get-MojazRunDuration {
+    <# How long the bulletin held the screen. The recorded elapsed time is
+       preferred over the gap between the two stamps: it is the playback's own
+       monotonic clock, and it is the number the newsroom asks about. #>
+    param([Parameter(Mandatory)]$Run)
+    if (-not $Run.EndedAt) { return '🔴 على الهواء' }
+    $seconds = if ([long]$Run.DurationMs -gt 0) { [int][math]::Round([long]$Run.DurationMs / 1000) }
+    elseif ($Run.StartedAt) { [int][math]::Round((([datetime]$Run.EndedAt) - ([datetime]$Run.StartedAt)).TotalSeconds) }
+    else { 0 }
+    return (Format-DurationSeconds -Seconds ([math]::Max(0, $seconds)))
+}
+
+function Get-MojazReportBlocks {
+    <# Four columns, like the banner report and for the same reason: Telegram
+       splits a table's width evenly, so a fifth column costs the bulletin name
+       the room it needs to be recognised. #>
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
+    $runs = @($data.Runs)
+
+    $blocks = @(@{ type = 'heading'; text = "📑 تقرير الموجزات — $($data.Label)"; size = 3 })
+    if ($runs.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لم يُشغَّل أي موجز في هذه الفترة.' }
+        return $blocks
+    }
+
+    $cells = @(, @(
+            @{ text = 'الموجز'; is_header = $true }
+            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = 'البداية'; is_header = $true }
+            @{ text = 'المدة'; is_header = $true }
+        ))
+    foreach ($run in $runs) {
+        $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
+        $who = Get-AuditOperatorName -UserId ([string]$run.UserId)
+        # The row count rides on the name: it is what tells two runs of the
+        # same bulletin apart, and it does not deserve a column of its own.
+        $mark = if ($run.Kind -eq 'scheduled') { '🕒 ' } else { '' }
+        $cells += , @(
+            @{ text = "$mark$([string]$run.Name) · $([int]$run.Rows) صف" }
+            @{ text = $(if ($who) { $who } else { '—' }) }
+            @{ text = $started }
+            @{ text = (Get-MojazRunDuration -Run $run) }
+        )
+    }
+
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $summary = "الإجمالي: $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا · $($data.Operators) مشغّلين"
+    if ([int]$data.Scheduled -gt 0) { $summary += " · $([int]$data.Scheduled) بالجدولة 🕒" }
+    $blocks += @{ type = 'paragraph'; text = $summary }
+    if ($data.Truncated) {
+        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+    }
+    return $blocks
+}
+
+function Get-MojazReportText {
+    <# The plain fallback, for an API that will not take the rich blocks. #>
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
+    $runs = @($data.Runs)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("📑 تقرير الموجزات — $($data.Label)")
+    $lines.Add('━━━━━━━━━━━━━━')
+    if ($runs.Count -eq 0) {
+        $lines.Add('لم يُشغَّل أي موجز في هذه الفترة.')
+        return ($lines -join "`n")
+    }
+    foreach ($run in $runs) {
+        $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
+        $who = Get-AuditOperatorName -UserId ([string]$run.UserId)
+        $mark = if ($run.Kind -eq 'scheduled') { '🕒 ' } else { '▶️ ' }
+        $lines.Add("$mark$started · $([string]$run.Name) · $([int]$run.Rows) صف · $(Get-MojazRunDuration -Run $run)")
+        if ($who) { $lines.Add("   المشغّل: $who") }
+    }
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("الإجمالي: $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا")
+    if ($data.Truncated) { $lines.Add("⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط.") }
+    return ($lines -join "`n")
 }
 
 function Get-NewsCountRange {
@@ -660,6 +792,27 @@ function Get-BannerReportHtml {
         -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
 }
 
+function Get-MojazReportHtml {
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
+    $runs = @($data.Runs)
+    $body = [System.Collections.Generic.List[string]]::new()
+    if ($runs.Count -eq 0) { $body.Add('<p>لم يُشغَّل أي موجز في هذه الفترة.</p>') }
+    foreach ($run in $runs) {
+        $who = Get-AuditOperatorName -UserId ([string]$run.UserId)
+        $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('yyyy/MM/dd HH:mm') } else { '&mdash;' }
+        $head = if ($run.EndedAt) { "$started &#8592; $(([datetime]$run.EndedAt).ToString('HH:mm')) &middot; $(Get-MojazRunDuration -Run $run)" }
+        else { '<span class="live">' + $started + ' &#8592; ما زال على الهواء</span>' }
+        $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$run.Name)) + "&raquo; &middot; $([int]$run.Rows) صفًّا"
+        if ($run.Kind -eq 'scheduled') { $sub += ' &middot; بالجدولة' }
+        if ($who) { $sub += ' &middot; ' + (ConvertTo-HtmlText $who) }
+        $body.Add('<div class="row"><div class="head">' + $head + '</div><div class="sub">' + $sub + '</div></div>')
+    }
+    $body.Add('<p class="totals">' + "الإجمالي: $($runs.Count) تشغيلًا &middot; $([int]$data.Rows) صفًّا &middot; $($data.Operators) مشغّلين" + '</p>')
+    return Get-ReportHtmlDocument -Title "تقرير الموجزات — $($data.Label)" -Body ($body -join "`n") `
+        -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
+}
+
 function Get-NewsReportHtml {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
@@ -684,21 +837,24 @@ function Export-BridgeReport {
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('banners', 'news')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz')][string]$Kind,
         [Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $onlyUser = if (Test-Admin -ChatId $ChatId -UserId $UserId) { 0 } else { $UserId }
     $path = Join-Path $script:logDir "report-$Kind-$Period-$((Get-Date).ToString('yyyyMMdd-HHmmss')).html"
     try {
-        $html = if ($Kind -eq 'news') {
-            Get-NewsReportHtml -Period $Period -OnlyUserId $onlyUser
-        }
-        else {
-            Get-BannerReportHtml -Period $Period -OnlyUserId $onlyUser
+        $html = switch ($Kind) {
+            'news' { Get-NewsReportHtml -Period $Period -OnlyUserId $onlyUser }
+            'mojaz' { Get-MojazReportHtml -Period $Period -OnlyUserId $onlyUser }
+            default { Get-BannerReportHtml -Period $Period -OnlyUserId $onlyUser }
         }
         [IO.File]::WriteAllText($path, $html, [Text.UTF8Encoding]::new($false))
-        $caption = if ($Kind -eq 'news') { '📰 تقرير الأخبار' } else { '🖼 تقرير البنرات' }
+        $caption = switch ($Kind) {
+            'news' { '📰 تقرير الأخبار' }
+            'mojaz' { '📑 تقرير الموجزات' }
+            default { '🖼 تقرير البنرات' }
+        }
         if (-not (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "$caption — افتحه في المتصفح، ويمكنك طباعته PDF من هناك.")) {
             Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر إرسال ملف التقرير.' -ReplyMarkup (Get-ReportPeriodKeyboard -Kind $Kind)
         }

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.55.0'
+$script:BridgeVersion = '7.56.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -215,6 +215,7 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsClearAllNews = $false
     # --- safety ---
     MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
+    MojazImageKeepHours        = 24      # how long an unreferenced Mojaz picture is kept before the sweep removes it (0 = for ever)
     # In frames, because that is how the animation is cut. 0 for either means
     # "take it from the scene's own entrance and exit".
     # The channel's frame rate, used wherever a scene cannot state its own.
@@ -418,6 +419,7 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
+    MojazImageKeepHours = @{ Unit = 'ساعة'; Description = 'مدة الاحتفاظ بصورة موجز لم يعد يشير إليها أي صف قبل حذفها تلقائيًا (0 = لا حذف)' }
     MojazRowFrames = @{ Unit = 'إطار'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي، بالإطارات. تُستخدم لكل موجز جديد ولكل موجز لم يُحدَّد له رقم' }
     BroadcastFps = @{ Unit = 'إطار/ث'; Description = 'معدل إطارات القناة، يُستخدم في حساب المدد حين لا يذكر المشهد معدله. المشهد أولى بنفسه حين يذكره' }
     MojazIntroExtraFrames = @{ Unit = 'إطار'; Description = 'إطارات تُضاف إلى الصف الأول وحده بقدر حركة الدخول. صفر يعني أخذها من المشهد نفسه' }
@@ -586,6 +588,7 @@ $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
 $script:PollTimeoutStreak = 0
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
+$script:LastMojazImageSweep = $null
 $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
 $script:AirOperationCounters = @{ Success = 0; Failed = 0; Blocked = 0 }
 $script:BridgeOperationLedger = New-BridgeOperationLedger -Capacity 4096
@@ -1015,7 +1018,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazRowFrames', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1152,6 +1155,7 @@ $script:SettingNavigationLabels = @{
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
     MojazRowFrames = 'إطارات صف الموجز'
+    MojazImageKeepHours = 'الاحتفاظ بصور الموجز'
     BroadcastFps = 'معدل إطارات القناة'
     MojazIntroExtraFrames = 'إطارات الصف الأول'
     MojazLastRowFrames = 'إطارات الصف الأخير'

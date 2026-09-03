@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.56.0
+
+Reports gain a bulletin section, which needed a record that did not exist: a
+bulletin reached air as an ordinary air_control SHOW of the Mojaz scene, saying
+that a graphic went up and nothing about which bulletin it was, how many
+stories it carried, or whether a person or a schedule started it. Every run now
+writes a permanent mojaz_run record at its start and another at its end under
+one operation id. The report pairs them, so a bulletin still on air has a start
+and no end and says so rather than being dropped or counted as finished, and
+the duration comes from the playback's own clock rather than the gap between
+two audit stamps. The run is closed from both endings - the bulletin's own stop
+and the layer being taken by something else - because closing it in only one
+would leave runs reading "still on air" for ever.
+
+The period you are reading is now marked in the report buttons: four identical
+buttons above a report that does not repeat its own window left the operator
+guessing which they had pressed.
+
+The Mojaz picture sweep was verified and tightened. Its conditions were already
+right - only files the bridge named itself, inside the bulletin picture folder,
+unreferenced by any saved row or running snapshot, and older than a day - but
+it walked the directory on the polling thread every time round the loop, for a
+job whose whole premise is that nothing has touched those files in a day. It
+runs hourly now, and its window is a setting (MojazImageKeepHours, 24; zero
+keeps every picture).
+
 ## Version 7.55.0
 
 A consolidation pass after a run of feature work. Four dimensions were audited

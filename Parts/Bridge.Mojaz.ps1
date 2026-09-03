@@ -1710,10 +1710,41 @@ function Start-MojazPlayback {
     # Now that the bulletin is really on air, the strip stands down: they
     # share the bottom of the screen, and it returns when this ends.
     Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null
+    # The permanent trail. A bulletin reached air as a plain air_control SHOW
+    # of the Mojaz scene, which says a graphic went up and nothing about which
+    # bulletin it was, how many stories it carried, or whether a person or a
+    # schedule started it - so a report had nothing to report.
+    $script:MojazPlayback.OperationId = "mojaz-$([guid]::NewGuid().ToString('N'))"
+    Write-AuditRecord -OperationId ([string]$script:MojazPlayback.OperationId) -EventName mojaz_run -Result started `
+        -UserId $UserId -UserName (Get-UserDisplayName -UserId $UserId) -ChatId $ChatId -Action START `
+        -Layer ([int](Get-MojazTemplate).Layer) -Target ([string]$snapshot.BulletinName) -Count ($rows.Count) `
+        -Values $(if ([string]$snapshot.ScheduleId) { 'scheduled' } else { 'manual' })
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $(Get-MojazDelayFrames -Bulletin $bulletin) frames each)"
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true
+}
+
+function Write-MojazRunEnd {
+    <#
+        Closes the run that Start-MojazPlayback opened, so a report can say how
+        long a bulletin actually held the screen and not merely that it began.
+
+        Called from BOTH endings - the bulletin's own stop, and the layer being
+        taken by something else - because a run closed in only one of them
+        would sit in the report reading "still on air" for ever.
+    #>
+    param([Parameter(Mandatory)]$Playback, [long]$UserId = 0, [long]$ChatId = 0)
+    $user = if ($UserId -gt 0) { $UserId } else { [long](Get-JsonProp $Playback 'UserId') }
+    $chat = if ($ChatId -gt 0) { $ChatId } else { [long](Get-JsonProp $Playback 'ChatId') }
+    # The playback's own monotonic clock, which is the number the newsroom asks
+    # about: the two audit stamps would also count a slow write between them.
+    $clock = Get-JsonProp $Playback 'Clock'
+    $ranMs = if ($clock) { [long]([double]$clock.Elapsed.TotalMilliseconds + [double](Get-JsonProp $Playback 'ClockOffset') * 1000) } else { 0 }
+    Write-AuditRecord -OperationId ([string](Get-JsonProp $Playback 'OperationId')) -EventName mojaz_run -Result completed `
+        -UserId $user -UserName (Get-UserDisplayName -UserId $user) -ChatId $chat -Action END `
+        -Target ([string](Get-JsonProp $Playback 'BulletinName')) -Count (@(Get-JsonProp $Playback 'Rows').Count) `
+        -DurationMs $ranMs -Values $(if ([string](Get-JsonProp $Playback 'ScheduleId')) { 'scheduled' } else { 'manual' })
 }
 
 function Stop-MojazPlayback {
@@ -1729,6 +1760,7 @@ function Stop-MojazPlayback {
         $user = if ($UserId -gt 0) { $UserId } else { [long]$playback.UserId }
         Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user | Out-Null
     }
+    Write-MojazRunEnd -Playback $playback -UserId $UserId -ChatId $ChatId
     if ([string]$playback.ScheduleId) {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
@@ -1962,6 +1994,7 @@ function Stop-MojazForLayer {
     if (-not $template -or [int]$template.Layer -ne $Layer) { return $false }
     $playback = $script:MojazPlayback
     $script:MojazPlayback = $null
+    Write-MojazRunEnd -Playback $playback
     if ([string]$playback.ScheduleId) {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
@@ -2061,7 +2094,16 @@ function Update-MojazImageCleanup {
         are a day old - long enough that a picture uploaded for a row still
         being written is never taken out from under it.
     #>
-    param([int]$MinimumAgeHours = 24)
+    param([int]$MinimumAgeHours = 0, [switch]$Force)
+    # Once an hour, not once a tick. This walks a directory, and it was doing
+    # so on the polling thread every time round the loop - for a job whose
+    # whole premise is that nothing has touched those files in a day.
+    if (-not $Force -and $script:LastMojazImageSweep -and ((Get-Date) - $script:LastMojazImageSweep).TotalMinutes -lt 60) { return 0 }
+    $script:LastMojazImageSweep = Get-Date
+    if ($MinimumAgeHours -le 0) { $MinimumAgeHours = Get-SettingInt 'MojazImageKeepHours' 24 }
+    # Zero turns the sweep off: a newsroom that wants to keep every picture it
+    # ever uploaded is allowed to.
+    if ($MinimumAgeHours -le 0) { return 0 }
     $directory = Get-MojazUploadDirectory
     if (-not $directory -or -not (Test-Path -LiteralPath $directory)) { return 0 }
     $referenced = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)

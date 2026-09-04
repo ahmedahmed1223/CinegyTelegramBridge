@@ -482,6 +482,37 @@ function Write-BridgeLog {
     }
 }
 
+function Write-BridgeLivenessStamp {
+    <# Rewrites logs/bridge.liveness with the current UTC time, once per poll
+       loop, so BridgeManager.exe can tell a working bridge from a hung one.
+
+       Neither of the two obvious signals works. The process staying alive says
+       nothing: a long poll that never returns keeps it alive forever, which is
+       exactly the failure worth catching. And silence on stdout is worse than
+       useless - on this installation's own bridge.log a perfectly healthy
+       bridge printed nothing between 22:30 and 09:00 night after night, once
+       for a stretch of 17.8 hours, so a supervisor watching for silence would
+       have restarted a working bridge on air every night.
+
+       Best effort by design. A locked file, a full disk or a read-only log
+       folder must never be able to interrupt polling: the worst outcome of a
+       failed write here is that the manager reports the watchdog inactive. #>
+    if (-not $script:livenessFile) { return }
+    try {
+        Set-Content -LiteralPath $script:livenessFile -Value ([datetime]::UtcNow.ToString('o')) -Encoding utf8 -ErrorAction Stop
+        $script:LivenessWriteFailed = $false
+    }
+    catch {
+        # Said once per run, not once per loop: a read-only log folder would
+        # otherwise repeat this every thirty seconds for as long as the bridge
+        # lives, and drown the log it is complaining about.
+        if (-not $script:LivenessWriteFailed) {
+            $script:LivenessWriteFailed = $true
+            Write-BridgeLog "Could not write the liveness stamp ($($_.Exception.Message)) - the manager will report its hang watchdog inactive." 'WARN'
+        }
+    }
+}
+
 function Get-AuditArchiveFiles {
     <# Rotated audit files, newest first. Named by the moment they were
        closed, so the order is the name's order and nothing has to be renamed

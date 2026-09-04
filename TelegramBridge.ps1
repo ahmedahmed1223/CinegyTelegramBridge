@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.62.0'
+$script:BridgeVersion = '7.63.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -575,6 +575,13 @@ New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue 
 $script:logDir = $logDir
 $script:logPath = $logPath
 
+# A stamp rewritten once per poll loop, read by BridgeManager.exe to tell a
+# working bridge from a hung one. Process liveness cannot answer that (a stuck
+# long poll keeps the process alive), and neither can log silence: measured on
+# this installation's own bridge.log, a healthy bridge prints nothing for 10 to
+# 18 hours overnight, so any silence threshold short enough to catch a hang
+# would restart a working bridge every night.
+$script:livenessFile = Join-Path $logDir "bridge.liveness"
 $script:relayPidFile = Join-Path $logDir "relay.pid"
 $script:usageFile = Join-Path $logDir "usage.json"
 $script:userFavoritesFile = Join-Path $logDir "favorites.json"
@@ -607,6 +614,10 @@ $script:AccessGuard = @{ Blocked = @{}; Attempts = @{} }
 # Consecutive long polls whose transport deadline passed, so a late
 # answer is not mistaken for a lost connection.
 $script:PollTimeoutStreak = 0
+# Whether the liveness stamp has already failed to write. Set-StrictMode
+# -Version Latest throws on reading an unset $script: variable, and
+# Write-BridgeLivenessStamp tests this one before its very first write.
+$script:LivenessWriteFailed = $false
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
 $script:LastMojazImageSweep = $null
@@ -1796,6 +1807,11 @@ try {
 
         Invoke-BridgeTick | Out-Null
 
+        # After the tick, not before: this says "a full loop completed", which
+        # is the claim the manager's hang watchdog actually needs. Stamping at
+        # the top would keep reporting health while the tick itself was stuck.
+        Write-BridgeLivenessStamp
+
         # Leaving the loop rather than exiting in place, so the finally block
         # below still stops the relay, saves counters and releases the mutex.
         if ($script:RestartRequested) {
@@ -1805,6 +1821,11 @@ try {
     }
 }
 finally {
+    # A stamp left behind by a bridge that has stopped is not evidence of
+    # anything. The manager already refuses to treat a stamp older than the
+    # current run as liveness, so this is belt and braces - but it keeps the
+    # log folder honest about what is actually running.
+    if ($script:livenessFile) { Remove-Item -LiteralPath $script:livenessFile -Force -ErrorAction SilentlyContinue }
     Save-UsageCounts -Force
     foreach ($job in @($script:SnapshotJobs)) {
         if ($job.Proc -and -not $job.Proc.HasExited) { Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue }

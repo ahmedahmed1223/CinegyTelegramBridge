@@ -1,13 +1,34 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Win32;
 
 namespace BridgeManager;
 
-/// <summary>Local, portable persistence for the one thing this app needs to remember: where TelegramBridge.ps1 lives.</summary>
+/// <summary>Local, portable persistence for what this app must remember between runs.</summary>
 internal sealed class ManagerSettings
 {
     public string? BridgeScriptPath { get; set; }
+
+    // These toggles used to be born from hardcoded defaults on every launch, so
+    // a deliberate decision silently undid itself: an operator who turned
+    // auto-restart off to work on the Air engine found it back on after simply
+    // closing the window, and the bridge restarting under their hands.
+    public bool AutoRestart { get; set; } = true;
+    public bool AutoClearDaily { get; set; }
+    public bool WordWrap { get; set; } = true;
+
+    // The hang watchdog is deliberately a file-only knob: the on/off switch
+    // belongs on the toolbar, but the threshold is a number nobody should be
+    // nudging from the UI during a broadcast.
+    public bool HangWatchdog { get; set; } = true;
+    public int HangWatchdogMinutes { get; set; } = 5;
+
+    // Light unless asked otherwise: this window sits among Explorer, Notepad
+    // and the Cinegy client during the day, and a lone black one among them
+    // reads as a different application every time it is opened.
+    public bool DarkMode { get; set; }
 
     private static string SettingsFilePath => Path.Combine(AppContext.BaseDirectory, "BridgeManager.settings.json");
 
@@ -36,10 +57,20 @@ internal sealed class ManagerSettings
     }
 }
 
+/// <summary>How a log line should read at a glance. Pure classification, so `--selftest` can check it.</summary>
+internal enum LogLineKind { Manager, Error, Warning, Debug, Normal }
+
 public sealed class MainForm : Form
 {
     private readonly RichTextBox _output;
-    private readonly Label _statusLabel;
+    private readonly Panel _accentBar;
+    private readonly Panel _header;
+    private readonly Panel _filterBar;
+    private readonly Panel _statusBar;
+    private readonly FlowLayoutPanel _actionBar;
+    private readonly FlowLayoutPanel _optionsBar;
+    private readonly Label _stateLabel;
+    private readonly Label _stateDetail;
     private readonly Button _startButton;
     private readonly Button _stopButton;
     private readonly Button _restartButton;
@@ -47,15 +78,42 @@ public sealed class MainForm : Form
     private readonly CheckBox _autoClearCheck;
     private readonly CheckBox _startWithWindowsCheck;
     private readonly CheckBox _wordWrapCheck;
+    private readonly CheckBox _watchdogCheck;
+    private readonly CheckBox _errorsOnlyCheck;
+    private readonly CheckBox _darkModeCheck;
+    private readonly TextBox _filterBox;
+    private readonly Label _lineCountLabel;
+    private readonly Label _livenessLabel;
+    private readonly Label _pathLabel;
+    private readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 200 };
     private readonly NotifyIcon _trayIcon;
+    private readonly Icon _appIcon;
     private readonly System.Windows.Forms.Timer _restartTimer;
     private readonly System.Windows.Forms.Timer _autoClearTimer;
+    private readonly System.Windows.Forms.Timer _drainTimer;
+    private readonly System.Windows.Forms.Timer _watchdogTimer;
+    private readonly System.Windows.Forms.Timer _clockTimer;
+    private readonly System.Windows.Forms.Timer _startupTimer;
 
-    private ManagerSettings _settings;
+    private readonly ManagerSettings _settings;
     private Process? _bridgeProcess;
     private bool _stoppingIntentionally;
     private bool _exiting;
-    private int _outputLineCount;
+
+    // Start-with-Windows launches the manager with --autostart: it comes up
+    // straight into the tray and starts the bridge itself. Without that the
+    // registry entry only ever restored the supervisor, not what it supervises
+    // - the machine came back from a power cut with the window sitting on the
+    // playout screen and the bridge still stopped.
+    private readonly bool _autoStartBridge;
+    private readonly bool _startHidden;
+    private bool _firstShowSuppressed;
+
+    // The on-screen scrollback is kept as text, not just as pixels, so the
+    // filter box can re-render a subset without losing what came before - and
+    // so the line count is counted rather than estimated.
+    private readonly List<string> _lines = new();
+    private readonly ConcurrentQueue<string> _pending = new();
     private const int MaxOutputLines = 3000;
 
     // Crash-loop breaker: a bad config (bad token, unreachable engine) makes the
@@ -67,104 +125,353 @@ public sealed class MainForm : Form
     private const int MaxQuickFailures = 5;
     private static readonly TimeSpan QuickFailThreshold = TimeSpan.FromSeconds(10);
 
-    public MainForm()
+    // Hang detection. A bridge that is stuck - a long poll that never returns,
+    // a deadlock - keeps its process alive, so Process.Exited never fires and
+    // the supervisor called it healthy forever. Silence on stdout cannot stand
+    // in for a heartbeat: measured against this installation's own bridge.log,
+    // a perfectly healthy bridge goes 10 to 18 hours without printing a single
+    // line overnight, so any silence threshold short enough to catch a hang
+    // would have restarted a working bridge every night. The bridge therefore
+    // stamps logs/bridge.liveness once per poll loop, and this watches that.
+    private DateTime? _lastLivenessSeen;
+    private bool _watchdogInactiveLogged;
+    private static readonly TimeSpan LivenessGrace = TimeSpan.FromMinutes(3);
+
+    private bool _running;
+
+    private const int WM_SETREDRAW = 0x000B;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    public MainForm(bool autoStart = false)
     {
+        _autoStartBridge = autoStart;
+        _startHidden = autoStart;
+
         // Stamped from TelegramBridge.ps1's $script:BridgeVersion at publish
         // time by scripts/Build-BridgeManager.ps1 (-p:Version=...); a plain
         // `dotnet build` without that script falls back to .NET's default "1.0.0.0".
         Text = $"مدير جسر تيليجرام - Cinegy Air Pro (v{Application.ProductVersion})";
-        Width = 900;
-        Height = 600;
+        Width = 1000;
+        Height = 660;
+        MinimumSize = new Size(760, 480);
         StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Theme.Background;
+        ForeColor = Theme.Text;
+        Font = Theme.Ui;
+        // The whole UI is Arabic, so the chrome, the button flow and every
+        // MessageBox this form owns should read right-to-left. The log pane
+        // below opts back out on purpose.
+        RightToLeft = RightToLeft.Yes;
+        RightToLeftLayout = true;
         // Pull the icon baked into this exe (ApplicationIcon in the csproj) rather
         // than shipping/loading a separate .ico file at runtime.
-        var appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
-        Icon = appIcon;
+        _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+        Icon = _appIcon;
 
         _settings = ManagerSettings.Load();
+        // Before a single control is built: every factory below reads the
+        // palette at construction time.
+        Theme.SetMode(_settings.DarkMode);
 
-        _statusLabel = new Label { Text = "متوقف", AutoSize = false, Dock = DockStyle.Top, Height = 32, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(Font.FontFamily, 11, FontStyle.Bold), ForeColor = Color.DarkRed, Padding = new Padding(8, 0, 0, 0) };
+        // ---- header: the one thing readable from across the room ----------
+        // A 16pt state word against a colour-coded bar, with the quieter
+        // detail (uptime, version) under it. The old window said "متوقف" in an
+        // 11pt label wedged between the title bar and a row of eleven buttons.
+        _header = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Theme.Surface };
+        // Right, not left: this window is right-to-left, so the leading edge -
+        // where the eye starts and where the state text is aligned - is the right
+        // one. On the left the bar trailed the text it belongs to.
+        _accentBar = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Theme.Stopped };
+        var headerText = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 12) };
+        _stateDetail = new Label { Dock = DockStyle.Top, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleLeft };
+        _stateLabel = new Label { Dock = DockStyle.Top, Height = 30, Text = "متوقف", Font = Theme.Title, ForeColor = Theme.Stopped, TextAlign = ContentAlignment.MiddleLeft };
+        headerText.Controls.Add(_stateDetail);
+        headerText.Controls.Add(_stateLabel);
+        _header.Controls.Add(headerText);
+        _header.Controls.Add(_accentBar);
 
-        var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4) };
-        _startButton = new Button { Text = "▶ تشغيل", Width = 100 };
-        _stopButton = new Button { Text = "⏹ إيقاف", Width = 100, Enabled = false };
-        _restartButton = new Button { Text = "♻ إعادة تشغيل", Width = 120, Enabled = false };
-        var settingsButton = new Button { Text = "⚙ الإعدادات", Width = 110 };
-        var logsButton = new Button { Text = "📁 مجلد السجلات", Width = 130 };
-        var clearButton = new Button { Text = "🧹 مسح الشاشة", Width = 110 };
-        _autoRestartCheck = new CheckBox { Text = "إعادة التشغيل تلقائيًا عند التوقف", AutoSize = true, Checked = true, Padding = new Padding(12, 6, 0, 0) };
-        _autoClearCheck = new CheckBox { Text = "مسح تلقائي للشاشة كل 24 ساعة", AutoSize = true, Checked = false, Padding = new Padding(12, 6, 0, 0) };
-        _startWithWindowsCheck = new CheckBox { Text = "🔁 تشغيل تلقائي مع بدء ويندوز", AutoSize = true, Checked = IsStartWithWindowsEnabled(), Padding = new Padding(12, 6, 0, 0) };
-        _wordWrapCheck = new CheckBox { Text = "التفاف الأسطر الطويلة", AutoSize = true, Checked = true, Padding = new Padding(12, 6, 0, 0) };
+        // ---- action bar: three things that change the air, then the rest ---
+        _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
+        _startButton = Theme.PrimaryButton("▶  تشغيل", () => Theme.Running);
+        _startButton.Width = 118;
+        _stopButton = Theme.PrimaryButton("⏹  إيقاف", () => Theme.Stopped);
+        _stopButton.Width = 118;
+        _stopButton.Enabled = false;
+        _restartButton = Theme.PrimaryButton("♻  إعادة تشغيل", () => Theme.Pending);
+        _restartButton.Width = 140;
+        _restartButton.Enabled = false;
+
+        // A gap, not a divider: the eye groups by spacing before it groups by
+        // lines, and this is the seam between "changes the air" and "does not".
+        var gap = new Panel { Width = 22, Height = 1, BackColor = Color.Transparent, Margin = new Padding(0) };
+
+        var settingsButton = Theme.QuietButton("⚙  الإعدادات");
+        settingsButton.Width = 120;
+        var logsButton = Theme.QuietButton("📁  مجلد السجلات");
+        logsButton.Width = 140;
+        var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
+        clearButton.Width = 130;
+
+        _tips.SetToolTip(_startButton, "يشغّل TelegramBridge.ps1 ويتابعه.");
+        _tips.SetToolTip(_stopButton, "يوقف الجسر - يتوقف التحكم بالرسومات على الهواء.");
+        _tips.SetToolTip(_restartButton, "إيقاف ثم تشغيل، لتطبيق تغييرات الإعدادات.");
+        _tips.SetToolTip(settingsButton, "الحقول التي لا تُحرَّر من داخل البوت: الرمز، عنوان المحرّك، قوائم الصلاحيات.");
+        _tips.SetToolTip(logsButton, "يفتح مجلد logs في المستكشف.");
+        _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.");
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
-        _restartButton.Click += (_, _) => RestartBridge();
+        _restartButton.Click += (_, _) => { if (ConfirmRestart()) RestartBridge(); };
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
+        clearButton.Click += (_, _) => ClearOutput();
 
-        toolbar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, settingsButton, logsButton, clearButton, _autoRestartCheck, _autoClearCheck, _startWithWindowsCheck, _wordWrapCheck });
+        _actionBar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, gap, settingsButton, logsButton, clearButton });
+
+        // ---- options: switches, which are not actions ----------------------
+        _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
+        _autoRestartCheck = Theme.ToggleChip("إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
+        _autoRestartCheck.Checked = _settings.AutoRestart;
+        _watchdogCheck = Theme.ToggleChip("🩺 كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
+        _watchdogCheck.Checked = _settings.HangWatchdog;
+        _startWithWindowsCheck = Theme.ToggleChip("🔁 مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
+        _startWithWindowsCheck.Checked = IsStartWithWindowsEnabled();
+        _autoClearCheck = Theme.ToggleChip("مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم - لا يمسّ logs\bridge.log.", _tips);
+        _autoClearCheck.Checked = _settings.AutoClearDaily;
+        _wordWrapCheck = Theme.ToggleChip("التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
+        _wordWrapCheck.Checked = _settings.WordWrap;
+        _darkModeCheck = Theme.ToggleChip("🌙 الوضع الليلي",
+            "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
+        _darkModeCheck.Checked = _settings.DarkMode;
+        _optionsBar.Controls.AddRange(new Control[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck, _autoClearCheck, _wordWrapCheck, _darkModeCheck });
+
+        // ---- filter row, sitting directly on top of what it filters --------
+        _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
+        var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false };
+        _filterBox = Theme.Input(300);
+        _filterBox.PlaceholderText = "🔎  تصفية الأسطر…  (Ctrl+F)";
+        _errorsOnlyCheck = Theme.ToggleChip("الأخطاء والتحذيرات فقط", "يخفي كل ما عدا أسطر [ERROR] و[WARN].", _tips);
+        _errorsOnlyCheck.Margin = new Padding(12, 0, 0, 0);
+        _filterBox.Margin = new Padding(0, 5, 0, 0);
+        filterFlow.Controls.AddRange(new Control[] { _filterBox, _errorsOnlyCheck });
+        _filterBar.Controls.Add(filterFlow);
+
+        _output = new RichTextBox
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            BackColor = Theme.LogBackground,
+            ForeColor = Theme.LogNormal,
+            BorderStyle = BorderStyle.None,
+            // Segoe UI (not a monospace font) shapes Arabic correctly - the bridge
+            // logs a lot of Arabic text, and Courier New/Consolas render it as
+            // disconnected letters with no joining forms.
+            Font = Theme.Mono,
+            // Long lines (stack traces, JSON dumps in error output) would
+            // otherwise only be reachable by scrolling sideways.
+            WordWrap = _settings.WordWrap,
+            ScrollBars = _settings.WordWrap ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both,
+            // Deliberately NOT right-to-left, even though the form is: every
+            // bridge log line opens with "2026-09-04 14:06:02 [INFO]" and only
+            // then turns Arabic. Mirroring the pane pushes that timestamp to
+            // the right edge and makes the log much harder to scan; leaving the
+            // control LTR lets each line's own bidi run place the Arabic
+            // correctly inside it.
+            RightToLeft = RightToLeft.No
+        };
+
+        // ---- status bar: the facts nobody should have to hunt for ----------
+        // A plain panel rather than a StatusStrip: the strip renderers fight a
+        // dark palette and win.
+        _statusBar = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = Theme.Surface, Padding = new Padding(14, 5, 14, 5) };
+        var statusFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false, WrapContents = false };
+        _lineCountLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
+        _livenessLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
+        _pathLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 0, 0) };
+        statusFlow.Controls.AddRange(new Control[] { _lineCountLabel, _livenessLabel, _pathLabel });
+        _statusBar.Controls.Add(statusFlow);
+
+        _wordWrapCheck.CheckedChanged += (_, _) =>
+        {
+            _output.WordWrap = _wordWrapCheck.Checked;
+            _output.ScrollBars = _wordWrapCheck.Checked ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both;
+            _settings.WordWrap = _wordWrapCheck.Checked;
+            _settings.Save();
+        };
+        _filterBox.TextChanged += (_, _) => RenderAll();
+        _errorsOnlyCheck.CheckedChanged += (_, _) => RenderAll();
+        KeyPreview = true;
+        KeyDown += (_, e) =>
+        {
+            if (e.Control && e.KeyCode == Keys.F) { _filterBox.Focus(); _filterBox.SelectAll(); e.Handled = true; }
+            if (e.KeyCode == Keys.Escape && _filterBox.Focused && _filterBox.Text.Length > 0) { _filterBox.Clear(); e.Handled = true; }
+        };
+
+        // Docked Top stacks in reverse order of adding, so this reads
+        // bottom-of-the-window first.
+        Controls.Add(_output);
+        Controls.Add(_filterBar);
+        Controls.Add(_optionsBar);
+        Controls.Add(_actionBar);
+        Controls.Add(_header);
+        Controls.Add(_statusBar);
+
+        _restartTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        _restartTimer.Tick += (_, _) => { _restartTimer.Stop(); StartBridge(); };
+
+        _autoClearTimer = new System.Windows.Forms.Timer { Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds };
+        _autoClearTimer.Tick += (_, _) => { ClearOutput(); AppendLine("--- مسح تلقائي للشاشة (كل 24 ساعة) ---"); };
+        _autoClearCheck.CheckedChanged += (_, _) =>
+        {
+            if (_autoClearCheck.Checked) _autoClearTimer.Start();
+            else _autoClearTimer.Stop();
+            _settings.AutoClearDaily = _autoClearCheck.Checked;
+            _settings.Save();
+        };
+        if (_autoClearCheck.Checked) _autoClearTimer.Start();
+
+        _autoRestartCheck.CheckedChanged += (_, _) =>
+        {
+            if (!ConfirmSafetyOff(_autoRestartCheck,
+                    "إن توقّف الجسر فلن يُعاد تشغيله تلقائيًا، وستبقى الرسومات بلا تحكّم حتى ينتبه أحد.\n\nإيقاف إعادة التشغيل التلقائي؟")) return;
+            _settings.AutoRestart = _autoRestartCheck.Checked;
+            _settings.Save();
+            LogEvent($"إعادة التشغيل التلقائي: {(_autoRestartCheck.Checked ? "مفعّلة" : "معطّلة")}.");
+        };
+        _watchdogCheck.CheckedChanged += (_, _) =>
+        {
+            if (!ConfirmSafetyOff(_watchdogCheck,
+                    "لن يُكتشف الجسر المعلّق بعد الآن: سيبدو «يعمل» وهو لا يستجيب.\n\nإيقاف كشف التعليق؟")) return;
+            _settings.HangWatchdog = _watchdogCheck.Checked;
+            _settings.Save();
+            UpdateStatusBar();
+            LogEvent($"كشف التعليق: {(_watchdogCheck.Checked ? "مفعّل" : "معطّل")}.");
+        };
+        _darkModeCheck.CheckedChanged += (_, _) =>
+        {
+            _settings.DarkMode = _darkModeCheck.Checked;
+            _settings.Save();
+            ApplyTheme();
+            LogEvent($"المظهر: {(_darkModeCheck.Checked ? "ليلي" : "فاتح")}.");
+        };
         _startWithWindowsCheck.CheckedChanged += (_, _) =>
         {
             SetStartWithWindows(_startWithWindowsCheck.Checked);
             LogEvent($"تشغيل تلقائي مع بدء ويندوز: {(_startWithWindowsCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
 
-        _output = new RichTextBox
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            BackColor = Color.Black,
-            ForeColor = Color.Gainsboro,
-            // Segoe UI (not a monospace font) shapes Arabic correctly - the bridge
-            // logs a lot of Arabic text, and Courier New/Consolas render it as
-            // disconnected letters with no joining forms.
-            Font = new Font("Segoe UI", 10f),
-            // Long lines (stack traces, JSON dumps in error output) would
-            // otherwise only be reachable by scrolling sideways.
-            WordWrap = true,
-            ScrollBars = RichTextBoxScrollBars.Vertical
-        };
-        clearButton.Click += (_, _) => { _output.Clear(); _outputLineCount = 0; };
-        _wordWrapCheck.CheckedChanged += (_, _) =>
-        {
-            _output.WordWrap = _wordWrapCheck.Checked;
-            _output.ScrollBars = _wordWrapCheck.Checked ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both;
-        };
+        // One coalescing pump instead of a BeginInvoke per line: the bridge can
+        // emit hundreds of lines in a burst (startup, a template dump, a stack
+        // trace), and a marshalled call plus a ScrollToCaret for every one of
+        // them flooded the message queue and froze the window while it drained.
+        _drainTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _drainTimer.Tick += (_, _) => DrainPending();
+        _drainTimer.Start();
 
-        Controls.Add(_output);
-        Controls.Add(toolbar);
-        Controls.Add(_statusLabel);
+        _watchdogTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _watchdogTimer.Tick += (_, _) => CheckLiveness();
+        _watchdogTimer.Start();
 
-        _restartTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        _restartTimer.Tick += (_, _) => { _restartTimer.Stop(); StartBridge(); };
-
-        _autoClearTimer = new System.Windows.Forms.Timer { Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds };
-        _autoClearTimer.Tick += (_, _) => { _output.Clear(); _outputLineCount = 0; AppendLine("--- مسح تلقائي للشاشة (كل 24 ساعة) ---"); };
-        _autoClearCheck.CheckedChanged += (_, _) =>
-        {
-            if (_autoClearCheck.Checked) _autoClearTimer.Start();
-            else _autoClearTimer.Stop();
-        };
+        // Uptime and heartbeat age are only worth showing if they move.
+        _clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _clockTimer.Tick += (_, _) => { UpdateStateDetail(); UpdateStatusBar(); };
+        _clockTimer.Start();
 
         _trayIcon = new NotifyIcon
         {
-            Icon = appIcon,
+            Icon = _appIcon,
             Text = "مدير جسر تيليجرام - متوقف",
             Visible = true
         };
-        var trayMenu = new ContextMenuStrip();
+        var trayMenu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes };
         trayMenu.Items.Add("عرض النافذة", null, (_, _) => ShowFromTray());
+        trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("تشغيل", null, (_, _) => StartBridge(manual: true));
         trayMenu.Items.Add("إيقاف", null, (_, _) => { if (ConfirmStop()) StopBridge(manual: true); });
-        trayMenu.Items.Add("إعادة تشغيل", null, (_, _) => RestartBridge());
+        trayMenu.Items.Add("إعادة تشغيل", null, (_, _) => { if (ConfirmRestart()) RestartBridge(); });
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("❌ إغلاق البرنامج", null, (_, _) => ExitFromTray());
         _trayIcon.ContextMenuStrip = trayMenu;
         _trayIcon.DoubleClick += (_, _) => ShowFromTray();
 
-        Load += (_, _) => { if (EnsureBridgeScriptResolved()) LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion})."); };
+        // Not the Load event: with --autostart the window is never shown, so
+        // Load would never fire and the bridge would never be started. A
+        // one-shot timer runs as soon as the message loop turns over, whether
+        // there is a visible window or not.
+        _startupTimer = new System.Windows.Forms.Timer { Interval = 1 };
+        _startupTimer.Tick += (_, _) => { _startupTimer.Stop(); OnStartup(); };
+        _startupTimer.Start();
+
         FormClosing += MainForm_FormClosing;
+        SetStatus(running: false);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyTitleBar(Handle);
+    }
+
+    /// <summary>
+    /// Repaints the whole window in the current palette, live. Theme.Apply
+    /// walks the tree and runs each control's own restyle delegate; the
+    /// surfaces below are this form's own and are set here. RenderAll at the
+    /// end is not optional - every line already in the RichTextBox carries a
+    /// colour baked in from whichever palette was current when it arrived.
+    /// </summary>
+    private void ApplyTheme()
+    {
+        Theme.SetMode(_settings.DarkMode);
+        SuspendLayout();
+        BackColor = Theme.Background;
+        ForeColor = Theme.Text;
+        _header.BackColor = Theme.Surface;
+        _actionBar.BackColor = Theme.Background;
+        _optionsBar.BackColor = Theme.Background;
+        _filterBar.BackColor = Theme.Surface;
+        _statusBar.BackColor = Theme.Surface;
+        _output.BackColor = Theme.LogBackground;
+        _output.ForeColor = Theme.LogNormal;
+        _lineCountLabel.ForeColor = Theme.TextMuted;
+        _livenessLabel.ForeColor = Theme.TextMuted;
+        _pathLabel.ForeColor = Theme.TextMuted;
+        _stateDetail.ForeColor = Theme.TextMuted;
+        Theme.Apply(this);
+        ResumeLayout();
+        Theme.ApplyTitleBar(Handle);
+        SetStatus(_running);
+        RenderAll();
+    }
+
+    /// <summary>
+    /// Swallows only the very first show, so `--autostart` comes up straight
+    /// into the tray instead of throwing a window over whatever is on the
+    /// playout screen at boot. Every later Show() (tray double-click, menu)
+    /// behaves normally.
+    /// </summary>
+    protected override void SetVisibleCore(bool value)
+    {
+        if (_startHidden && !_firstShowSuppressed)
+        {
+            _firstShowSuppressed = true;
+            base.SetVisibleCore(false);
+            return;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    private void OnStartup()
+    {
+        UpdateStatusBar();
+        // An empty black pane tells a new operator nothing. One muted line
+        // costs nothing and answers "what now?".
+        if (!_autoStartBridge) AppendLine("--- جاهز. اضغط ▶ تشغيل لبدء الجسر. ---");
+        if (!EnsureBridgeScriptResolved()) return;
+        UpdateStatusBar();
+        LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : "")}.");
+        if (_autoStartBridge) StartBridge();
     }
 
     // ---- locating the bridge --------------------------------------------
@@ -184,6 +491,10 @@ public sealed class MainForm : Form
             return true;
         }
 
+        // A file picker owned by a window that is hidden in the tray opens
+        // behind everything else and reads as a hang. Come forward first.
+        if (!Visible) ShowFromTray();
+
         using var dialog = new OpenFileDialog
         {
             Title = "اختر ملف TelegramBridge.ps1",
@@ -201,6 +512,14 @@ public sealed class MainForm : Form
 
     private string BridgeRoot => Path.GetDirectoryName(_settings.BridgeScriptPath!) ?? "";
     private string ConfigPath => Path.Combine(BridgeRoot, "config.json");
+
+    /// <summary>
+    /// Where the bridge stamps its poll loop. Deliberately the default logs
+    /// folder rather than anything read out of config.json: an installation
+    /// that relocated its logs simply produces no file here, and a missing
+    /// stamp switches the watchdog off instead of restarting a healthy bridge.
+    /// </summary>
+    private string LivenessPath => Path.Combine(BridgeRoot, "logs", "bridge.liveness");
 
     // ---- process supervision ---------------------------------------------
 
@@ -224,8 +543,7 @@ public sealed class MainForm : Form
         var pwsh = ResolvePwsh();
         if (pwsh is null)
         {
-            MessageBox.Show(this,
-                "لم يتم العثور على pwsh.exe (PowerShell 7).\nثبّته من https://aka.ms/powershell-release ثم أعد المحاولة.",
+            Ask("لم يتم العثور على pwsh.exe (PowerShell 7).\nثبّته من https://aka.ms/powershell-release ثم أعد المحاولة.",
                 "PowerShell 7 غير موجود", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             SetStatus(running: false);
             return;
@@ -289,6 +607,7 @@ public sealed class MainForm : Form
             // and leaving the operator to notice and click Start by hand.
             AppendLine($"--- فشل بدء التشغيل: {ex.Message} ---");
             LogEvent($"فشل بدء التشغيل: {ex.Message}");
+            process.Dispose();
             SetStatus(running: false);
             // A failed launch never "started" at all - treat it as an
             // instant (0-second) run so it counts as a quick failure below.
@@ -297,8 +616,14 @@ public sealed class MainForm : Form
             return;
         }
 
+        // Every Process is a live OS handle; replacing the field without
+        // disposing the old one leaked one per restart, and a crash-looping
+        // bridge restarts a lot.
+        _bridgeProcess?.Dispose();
         _bridgeProcess = process;
         _lastStartAt = DateTime.UtcNow;
+        _lastLivenessSeen = null;
+        _watchdogInactiveLogged = false;
         SetStatus(running: true);
         LogEvent("تم بدء تشغيل الجسر بنجاح.");
     }
@@ -315,6 +640,7 @@ public sealed class MainForm : Form
         AppendLine($"--- توقف الجسر (رمز الخروج {exitCode}) ---");
         LogEvent($"توقف الجسر - رمز الخروج {exitCode}.");
         _bridgeProcess = null;
+        exitedProcess.Dispose();
         SetStatus(running: false);
 
         if (_exiting) return;
@@ -340,8 +666,7 @@ public sealed class MainForm : Form
         {
             AppendLine($"--- توقف {_consecutiveQuickFailures} مرات متتالية خلال ثوانٍ من كل تشغيل - تم إيقاف إعادة التشغيل التلقائي. راجع الإعدادات ثم اضغط ▶ تشغيل يدويًا. ---");
             LogEvent($"توقف متكرر ({_consecutiveQuickFailures} مرات) - تم إيقاف إعادة التشغيل التلقائي.");
-            _statusLabel.Text = "فشل متكرر - إعادة التشغيل التلقائي متوقفة";
-            _statusLabel.ForeColor = Color.Red;
+            SetHeader("فشل متكرر", Theme.Stopped, "توقف الجسر مرارًا خلال ثوانٍ من كل تشغيل - إعادة التشغيل التلقائي متوقفة.");
             _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
                 "الجسر يتوقف بشكل متكرر بعد كل تشغيل. تم إيقاف إعادة التشغيل التلقائي - راجع الإعدادات ثم شغّله يدويًا.",
                 ToolTipIcon.Error);
@@ -350,13 +675,127 @@ public sealed class MainForm : Form
 
         AppendLine("--- إعادة التشغيل خلال 3 ثوانٍ... ---");
         LogEvent($"سيُعاد التشغيل خلال 3 ثوانٍ (محاولة رقم {_consecutiveQuickFailures}).");
-        _statusLabel.Text = "إعادة التشغيل خلال 3 ثوانٍ...";
-        _statusLabel.ForeColor = Color.DarkOrange;
+        SetHeader("إعادة التشغيل…", Theme.Pending, "خلال 3 ثوانٍ.");
         _restartTimer.Start();
     }
 
+    // ---- hang detection ----------------------------------------------------
+
+    /// <summary>
+    /// Pure decision, so `--selftest` can pin the three cases that must all
+    /// answer "not hung": a bridge still booting, a bridge too old to publish
+    /// a stamp at all, and a stamp left behind by a previous run. Restarting a
+    /// healthy bridge is worse than missing a hang, so every uncertainty here
+    /// resolves towards doing nothing.
+    /// </summary>
+    internal static bool IsHung(DateTime? lastLivenessUtc, DateTime startedUtc, DateTime nowUtc, TimeSpan grace, TimeSpan threshold)
+    {
+        if (nowUtc - startedUtc < grace) return false;
+        if (lastLivenessUtc is null) return false;
+        // An older bridge, or a stamp file left over from the previous run: it
+        // never advances past this run's start, so it can never be evidence.
+        if (lastLivenessUtc.Value < startedUtc) return false;
+        return nowUtc - lastLivenessUtc.Value > threshold;
+    }
+
+    /// <summary>Reads the stamp the bridge writes once per poll loop. Null when absent or unreadable.</summary>
+    private DateTime? ReadLivenessStamp()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)) return null;
+            var path = LivenessPath;
+            if (!File.Exists(path)) return null;
+            var text = File.ReadAllText(path).Trim();
+            if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                return parsed.ToUniversalTime();
+            // Content unreadable but the file is still being touched - the
+            // write time alone already says the loop turned over.
+            return File.GetLastWriteTimeUtc(path);
+        }
+        catch { return null; }
+    }
+
+    private void CheckLiveness()
+    {
+        if (!_watchdogCheck.Checked || _exiting) return;
+        if (_bridgeProcess is not { HasExited: false }) return;
+
+        var stamp = ReadLivenessStamp();
+        if (stamp is not null) _lastLivenessSeen = stamp;
+
+        var now = DateTime.UtcNow;
+        var threshold = TimeSpan.FromMinutes(Math.Max(2, _settings.HangWatchdogMinutes));
+
+        // Say so once, rather than sitting there looking like a working
+        // watchdog that never fires: an older bridge publishes no stamp, so
+        // there is nothing to watch and nothing will ever restart on its
+        // account.
+        if (!_watchdogInactiveLogged && now - _lastStartAt > LivenessGrace
+            && (_lastLivenessSeen is null || _lastLivenessSeen < _lastStartAt))
+        {
+            _watchdogInactiveLogged = true;
+            AppendLine("--- كشف التعليق غير فعّال: هذه النسخة من الجسر لا تكتب نبضة logs/bridge.liveness. ---");
+            LogEvent("كشف التعليق غير فعّال - لا نبضة من الجسر (نسخة أقدم).");
+            return;
+        }
+
+        if (!IsHung(_lastLivenessSeen, _lastStartAt, now, LivenessGrace, threshold)) return;
+
+        var silentFor = (int)(now - _lastLivenessSeen!.Value).TotalMinutes;
+        AppendLine($"--- الجسر يعمل لكنه توقف عن النبض منذ {silentFor} دقيقة - يُعاد تشغيله. ---");
+        LogEvent($"كشف تعليق: لا نبضة منذ {silentFor} دقيقة - إعادة تشغيل تلقائية.");
+        _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+            $"الجسر معلّق (لا استجابة منذ {silentFor} دقيقة). تتم إعادة تشغيله الآن.", ToolTipIcon.Warning);
+        _lastLivenessSeen = null;
+        RestartBridge();
+    }
+
+    // ---- stop / restart ----------------------------------------------------
+
+    private DialogResult Ask(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon)
+    {
+        // Owned by a window that is hidden in the tray, a MessageBox opens
+        // behind whatever is on screen and the app looks frozen. Come forward
+        // first, so the question appears where the operator is already looking.
+        if (!Visible) ShowFromTray();
+        return MessageBox.Show(this, text, caption, buttons, icon);
+    }
+
+    /// <summary>
+    /// Asked at the button, never inside RestartBridge: the hang watchdog and
+    /// "save and restart" both call that method too, and a confirmation box
+    /// nobody is standing in front of would leave a hung bridge hung.
+    /// </summary>
+    private bool ConfirmRestart() =>
+        Ask("سيتوقف الجسر ثوانٍ حتى يعود، ولن يتحكّم بالرسومات على الهواء خلالها.\n\nمتابعة؟",
+            "تأكيد إعادة التشغيل", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+
+    /// <summary>
+    /// Confirms only the direction that removes a safety net. Turning one back
+    /// on needs no ceremony, and a box that appears both ways teaches people
+    /// to dismiss it without reading. Declining puts the switch back without
+    /// re-entering this handler.
+    /// </summary>
+    private bool _revertingToggle;
+
+    private bool ConfirmSafetyOff(CheckBox toggle, string question)
+    {
+        if (_revertingToggle) return false;
+        if (toggle.Checked) return true;
+
+        if (Ask(question, "تأكيد", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            return true;
+
+        _revertingToggle = true;
+        toggle.Checked = true;
+        _revertingToggle = false;
+        return false;
+    }
+
     private bool ConfirmStop() =>
-        MessageBox.Show(this, "سيتوقف الجسر عن التحكم بالرسومات على الهواء. متابعة؟",
+        Ask("سيتوقف الجسر عن التحكم بالرسومات على الهواء.\n\nمتابعة؟",
             "تأكيد الإيقاف", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
 
     private void StopBridge(bool manual)
@@ -405,9 +844,29 @@ public sealed class MainForm : Form
     // Per-user Run key: survives a reboot without needing admin rights or a
     // separate service/task installer, closing the gap where a power cut or
     // Windows update silently drops bridge supervision until someone notices.
+    // The --autostart argument is what actually closes it: before it, the
+    // manager came back from a reboot but the bridge stayed stopped.
 
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "CinegyTelegramBridgeManager";
+    internal const string AutoStartArgument = "--autostart";
+
+    /// <summary>
+    /// Pulls the exe out of a Run-key command line, which now carries an
+    /// argument after it. Comparing the whole stored string against the exe
+    /// path would report "not enabled" for an entry this very app just wrote.
+    /// </summary>
+    internal static string ExtractExePath(string command)
+    {
+        command = command.Trim();
+        if (command.StartsWith('"'))
+        {
+            var end = command.IndexOf('"', 1);
+            if (end > 0) return command[1..end];
+        }
+        var space = command.IndexOf(' ');
+        return space > 0 ? command[..space] : command;
+    }
 
     private static bool IsStartWithWindowsEnabled()
     {
@@ -415,7 +874,7 @@ public sealed class MainForm : Form
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
             return key?.GetValue(RunValueName) is string existing
-                && string.Equals(existing.Trim('"'), Application.ExecutablePath, StringComparison.OrdinalIgnoreCase);
+                && string.Equals(ExtractExePath(existing), Application.ExecutablePath, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
@@ -426,22 +885,72 @@ public sealed class MainForm : Form
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
                 ?? Registry.CurrentUser.CreateSubKey(RunKeyPath);
-            if (enabled) key.SetValue(RunValueName, $"\"{Application.ExecutablePath}\"");
+            if (enabled) key.SetValue(RunValueName, $"\"{Application.ExecutablePath}\" {AutoStartArgument}");
             else key.DeleteValue(RunValueName, throwOnMissingValue: false);
         }
         catch { /* registry access denied in some locked-down environments - not fatal */ }
     }
 
-    // ---- UI helpers --------------------------------------------------------
+    // ---- header and status -------------------------------------------------
+
+    private void SetHeader(string state, Color colour, string detail)
+    {
+        _stateLabel.Text = state;
+        _stateLabel.ForeColor = colour;
+        _accentBar.BackColor = colour;
+        _stateDetail.Text = detail;
+    }
 
     private void SetStatus(bool running)
     {
-        _statusLabel.Text = running ? "يعمل" : "متوقف";
-        _statusLabel.ForeColor = running ? Color.DarkGreen : Color.DarkRed;
+        _running = running;
+        SetHeader(running ? "يعمل" : "متوقف",
+            running ? Theme.Running : Theme.Stopped,
+            running ? "" : "الجسر لا يتحكم بالرسومات على الهواء الآن.");
+        UpdateStateDetail();
         _startButton.Enabled = !running;
         _stopButton.Enabled = running;
         _restartButton.Enabled = running;
         _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
+        UpdateStatusBar();
+    }
+
+    private void UpdateStateDetail()
+    {
+        if (!_running || _bridgeProcess is not { HasExited: false }) return;
+        var up = DateTime.UtcNow - _lastStartAt;
+        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  الإصدار v{Application.ProductVersion}";
+    }
+
+    private static string FormatSpan(TimeSpan span)
+    {
+        if (span.TotalMinutes < 1) return $"{Math.Max(0, (int)span.TotalSeconds)} ثانية";
+        if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} دقيقة";
+        if (span.TotalDays < 1) return $"{(int)span.TotalHours} ساعة و{span.Minutes} دقيقة";
+        return $"{(int)span.TotalDays} يوم و{span.Hours} ساعة";
+    }
+
+    private void UpdateStatusBar()
+    {
+        var filtering = _errorsOnlyCheck.Checked || !string.IsNullOrWhiteSpace(_filterBox.Text);
+        _lineCountLabel.Text = filtering
+            ? $"📄 معروض {_lines.Count(l => ShouldShow(l, _filterBox.Text, _errorsOnlyCheck.Checked))} من {_lines.Count}"
+            : $"📄 {_lines.Count} سطرًا";
+
+        if (!_watchdogCheck.Checked) _livenessLabel.Text = "🩺 كشف التعليق: معطّل";
+        else if (!_running) _livenessLabel.Text = "🩺 كشف التعليق: مفعّل";
+        else
+        {
+            var stamp = ReadLivenessStamp();
+            if (stamp is not null) _lastLivenessSeen = stamp;
+            _livenessLabel.Text = _lastLivenessSeen is null || _lastLivenessSeen < _lastStartAt
+                ? "🩺 بانتظار أول نبضة…"
+                : $"🩺 آخر نبضة قبل {FormatSpan(DateTime.UtcNow - _lastLivenessSeen.Value)}";
+        }
+
+        _pathLabel.Text = string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)
+            ? "📂 لم يُحدَّد مسار الجسر بعد"
+            : $"📂 {BridgeRoot}";
     }
 
     /// <summary>
@@ -459,31 +968,113 @@ public sealed class MainForm : Form
         _restartButton.Enabled = false;
     }
 
-    private void AppendLine(string line)
+    // ---- the log pane ------------------------------------------------------
+
+    internal static LogLineKind ClassifyLine(string line)
     {
-        // Output/error data can still arrive from the child process's reader
-        // threads for a moment after the form is disposed (app closing while
-        // the bridge is mid-shutdown) - BeginInvoke on a dead handle throws on
-        // a background thread, which is unrecoverable and kills the process.
-        if (IsDisposed) return;
-        if (InvokeRequired)
+        if (line.StartsWith("---", StringComparison.Ordinal)) return LogLineKind.Manager;
+        if (line.Contains("[ERROR]", StringComparison.Ordinal)) return LogLineKind.Error;
+        if (line.Contains("[WARN]", StringComparison.Ordinal)) return LogLineKind.Warning;
+        if (line.Contains("[DEBUG]", StringComparison.Ordinal)) return LogLineKind.Debug;
+        return LogLineKind.Normal;
+    }
+
+    private static Color ColorFor(LogLineKind kind) => kind switch
+    {
+        LogLineKind.Manager => Theme.LogManager,
+        LogLineKind.Error => Theme.LogError,
+        LogLineKind.Warning => Theme.LogWarning,
+        LogLineKind.Debug => Theme.LogDebug,
+        _ => Theme.LogNormal
+    };
+
+    /// <summary>Pure, so `--selftest` can pin it: an empty filter shows everything.</summary>
+    internal static bool ShouldShow(string line, string filter, bool errorsOnly)
+    {
+        if (errorsOnly)
         {
-            try { BeginInvoke(() => AppendLine(line)); }
-            catch (InvalidOperationException) { }
+            var kind = ClassifyLine(line);
+            if (kind != LogLineKind.Error && kind != LogLineKind.Warning) return false;
+        }
+        if (string.IsNullOrWhiteSpace(filter)) return true;
+        return line.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Queues a line from any thread. The UI pump picks it up on the next tick.</summary>
+    private void AppendLine(string line) => _pending.Enqueue(line);
+
+    private void DrainPending()
+    {
+        if (IsDisposed || _pending.IsEmpty) return;
+
+        var filter = _filterBox.Text;
+        var errorsOnly = _errorsOnlyCheck.Checked;
+        var appended = false;
+        var trimNeeded = false;
+
+        while (_pending.TryDequeue(out var line))
+        {
+            _lines.Add(line);
+            if (_lines.Count > MaxOutputLines) trimNeeded = true;
+            if (ShouldShow(line, filter, errorsOnly)) { WriteLine(line); appended = true; }
+        }
+
+        if (trimNeeded)
+        {
+            _lines.RemoveRange(0, _lines.Count - (MaxOutputLines * 3 / 4));
+            RenderAll();
             return;
         }
 
-        _output.AppendText(line + Environment.NewLine);
-        _outputLineCount++;
-        if (_outputLineCount > MaxOutputLines)
+        if (appended)
         {
-            var text = _output.Text;
-            var cut = text.IndexOf('\n', text.Length / 4);
-            if (cut > 0) _output.Text = text[(cut + 1)..];
-            _outputLineCount = MaxOutputLines * 3 / 4;
+            _output.SelectionStart = _output.TextLength;
+            _output.ScrollToCaret();
         }
+        UpdateStatusBar();
+    }
+
+    private void WriteLine(string line)
+    {
+        _output.SelectionStart = _output.TextLength;
+        _output.SelectionLength = 0;
+        _output.SelectionColor = ColorFor(ClassifyLine(line));
+        _output.AppendText(line + Environment.NewLine);
+    }
+
+    private void RenderAll()
+    {
+        var filter = _filterBox.Text;
+        var errorsOnly = _errorsOnlyCheck.Checked;
+
+        // Repainting per line while rebuilding a couple of thousand of them is
+        // the difference between a flicker-free redraw and a window that
+        // visibly stutters every time a letter is typed into the filter box.
+        SendMessage(_output.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        try
+        {
+            _output.Clear();
+            foreach (var line in _lines)
+            {
+                if (ShouldShow(line, filter, errorsOnly)) WriteLine(line);
+            }
+        }
+        finally
+        {
+            SendMessage(_output.Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+            _output.Invalidate();
+        }
+
         _output.SelectionStart = _output.TextLength;
         _output.ScrollToCaret();
+        UpdateStatusBar();
+    }
+
+    private void ClearOutput()
+    {
+        _lines.Clear();
+        _output.Clear();
+        UpdateStatusBar();
     }
 
     /// <summary>
@@ -512,7 +1103,7 @@ public sealed class MainForm : Form
     private void OpenSettings()
     {
         if (!EnsureBridgeScriptResolved()) return;
-        using var form = new SettingsForm(ConfigPath, BridgeRoot);
+        using var form = new SettingsForm(ConfigPath, BridgeRoot, _bridgeProcess is { HasExited: false });
         if (form.ShowDialog(this) == DialogResult.OK)
         {
             LogEvent("تم حفظ الإعدادات من واجهة المدير.");
@@ -539,8 +1130,7 @@ public sealed class MainForm : Form
     {
         if (_bridgeProcess is { HasExited: false })
         {
-            var confirm = MessageBox.Show(this,
-                "سيتم إيقاف الجسر أيضًا عند الخروج. متابعة؟",
+            var confirm = Ask("سيتم إيقاف الجسر أيضًا عند الخروج.\n\nمتابعة؟",
                 "تأكيد الخروج", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
         }
@@ -553,8 +1143,43 @@ public sealed class MainForm : Form
     private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
         if (_exiting) return;
-        // Closing the window just hides it to the tray - the bridge keeps running/supervised.
+
+        // Windows shutting down, or Task Manager ending the task, is not a
+        // request to hide: cancelling it makes Windows put up the "this app is
+        // preventing shutdown" wall and then kill the process anyway - with no
+        // log line written and the tray icon left as a ghost until something
+        // happens to hover over it.
+        if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing or CloseReason.ApplicationExitCall)
+        {
+            _exiting = true;
+            _trayIcon.Visible = false;
+            LogEvent($"إغلاق النظام ({e.CloseReason}) - يتم إيقاف الجسر.");
+            StopBridge(manual: true);
+            return;
+        }
+
+        // Closing the window just hides it to the tray - the bridge keeps
+        // running and supervised. Said out loud once, because a window that
+        // refuses to close without explanation reads as a bug.
         e.Cancel = true;
         Hide();
+        _trayIcon.ShowBalloonTip(4000, "لا يزال يعمل",
+            "المدير يتابع الجسر من شريط النظام. للإغلاق نهائيًا: زر يمين على الأيقونة ← إغلاق البرنامج.",
+            ToolTipIcon.Info);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // A NotifyIcon that is never disposed leaves a dead icon sitting in
+            // the tray until the mouse happens to pass over it.
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _appIcon.Dispose();
+            _tips.Dispose();
+            _bridgeProcess?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

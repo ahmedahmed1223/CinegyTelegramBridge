@@ -13,6 +13,98 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.63.0
+
+A full review of `BridgeManager.exe`, the desktop control program. Every change
+below fixes something that was wrong, not something merely missing.
+
+"Start with Windows" only ever brought back the supervisor: the machine
+returned from a power cut with the manager window sitting over the playout
+screen and the bridge still stopped — the exact gap the checkbox exists to
+close. Its Run-key entry now carries `--autostart`, so the manager comes up
+straight into the tray and starts the bridge itself.
+
+Editing the chat/user id whitelists while the bridge was running was reverted
+in silence. `Save-Config` lists `AllowedChatIds`, `AdminChatIds`,
+`AllowedUserIds` and `AdminUserIds` as bridge-managed and writes its in-memory
+copy over whatever is on disk, so an id added from the manager disappeared at
+the bridge's next save, with no message anywhere — and plain "Save" is the
+dialog's accept button, so pressing Enter took that path. The form now compares
+what was edited against what it loaded and, if one of those four changed while
+the bridge runs, offers the restart that makes it stick.
+
+The bot token was displayed in clear text, which `AGENTS.md` forbids outright.
+It is masked now, behind a "show" toggle. Where DPAPI protection is enabled the
+file holds `dpapi:BotToken`, and the form used to present that as though it
+were the token — inviting an operator to "fix" it by pasting the real one, and
+putting a plaintext secret on disk in an installation that had deliberately
+encrypted it. The field is disabled in that case, with a note pointing at
+`scripts\Protect-BridgeSecrets.ps1`.
+
+Config writes are atomic. The bridge writes via a temp file and keeps backups
+because a truncated `config.json` stops it from starting at all; the manager
+used a plain `File.WriteAllText`. It now writes `.tmp` then `File.Replace`
+(which keeps a `.bak` and preserves the file's existing permissions), and
+applies the same user/SYSTEM/Administrators ACL as `Protect-BridgePathAcl` when
+it creates the file.
+
+Windows shutdown is no longer cancelled — that produced the "app is preventing
+shutdown" wall, a forced kill with nothing logged, and a ghost tray icon.
+Toolbar toggles persist between runs, so turning auto-restart off for a
+maintenance window stays off.
+
+The manager now also detects a *hung* bridge, not just a stopped one. It
+deliberately does not infer this from log silence: measured against this
+installation's own `bridge.log`, a healthy bridge prints nothing from about
+22:30 to 09:00 night after night, once for a continuous 17.8 hours, so any
+silence threshold short enough to catch a hang would have restarted a working
+bridge on air every night. The bridge instead stamps `logs/bridge.liveness`
+after each poll loop and the manager watches that. Every ambiguity resolves
+towards doing nothing: a bridge still booting, an older bridge that publishes
+no stamp, or a stamp left by a previous run all count as healthy, and the
+second case is announced once rather than looking like a watchdog that works.
+The threshold lives in `BridgeManager.settings.json` as `HangWatchdogMinutes`
+(default 5); the on/off switch is the 🩺 checkbox on the toolbar.
+
+The log pane colours errors and warnings, filters by text or "errors and
+warnings only" (Ctrl+F), and counts its lines instead of estimating them.
+Output is batched every 100ms rather than marshalled per line, process and icon
+handles are disposed, dialogs raised from the tray bring the window forward
+first, and the single-instance lock is now global so two Windows sessions
+cannot supervise one bridge.
+
+The window itself was redesigned. Eleven controls sat in one row at equal
+visual weight - "Stop" looked like "Clear screen" - and the bridge's state was
+an 11pt word wedged between them. There is now a header that states the state
+in 16pt against a colour-coded bar, readable across a room, with uptime and pid
+under it; a real hierarchy between the buttons that change what is on air and
+the ones that merely open something; a status bar carrying line count, the age
+of the last heartbeat and the bridge path; and a tooltip on every control.
+
+**Light is the default and dark is a toggle** (the 🌙 chip), applied live
+without a restart. The manager is opened during the day beside Explorer and the
+Cinegy client, where a lone black window reads as a different application; dark
+stays for whoever is sitting next to a programme monitor at night.
+
+Permissions are now a list rather than five boxes of comma-separated numbers.
+Each account is a row with its role and kind, added through a field and a role
+picker, removed behind a confirmation that names the ids losing access. Only
+one direction is rejected: a negative id in a *user* role names a group where a
+person is required. A positive id in a *chat* role is not an error - Telegram
+gives a private chat the same id as the person in it, and this installation's
+`AllowedChatIds` is full of them.
+
+Anything that weakens control now asks first: restart, switching off
+auto-restart, switching off hang detection, and removing accounts. Only in the
+switching-off direction - a box that appears both ways teaches people to
+dismiss it - and never on the paths the watchdog or "save and restart" take,
+where nobody is standing in front of the screen.
+
+Finally, `--selftest` actually runs. It had existed for releases without being
+called by `Run-Checks.ps1`, `Build-BridgeManager.ps1` or CI, which is the same
+as not existing; the build script now runs it after every publish and fails the
+build on a non-zero exit. It grew from 6 checks to 30.
+
 ## Version 7.62.0
 
 The bridge now says when the logo or the news strip is not on air. These are
@@ -1415,16 +1507,38 @@ This produces `dist\BridgeManager\BridgeManager.exe`. Run it, point it at
 - **Start / Stop / Restart** buttons, plus a tray icon so it keeps
   supervising while minimized.
 - **Auto-restart on crash** (checkbox, on by default) — belt-and-suspenders
-  if you're not also running it as a service/task.
+  if you're not also running it as a service/task. A crash-loop breaker stops
+  after 5 restarts that each died within seconds, so a bad token or an
+  unreachable engine surfaces instead of hammering Telegram forever.
+- **🩺 Hang detection** (checkbox, on by default). A stuck bridge keeps its
+  process alive, so watching for exit is not enough. The bridge stamps
+  `logs\bridge.liveness` after every poll loop and the manager restarts it if
+  that stamp goes stale — 5 minutes by default, changed with
+  `HangWatchdogMinutes` in `BridgeManager.settings.json`. It deliberately does
+  *not* infer a hang from log silence: a healthy bridge is routinely silent for
+  10+ hours overnight. Against an older bridge that publishes no stamp, the
+  watchdog says so once and stays out of the way.
+- **🔁 Start with Windows** (per-user Run key, no admin rights). The manager
+  comes back straight into the tray and starts the bridge with it, so a power
+  cut or a Windows update does not leave the bridge stopped until somebody
+  notices.
 - A **live view of everything the bridge prints** (the same lines that go to
-  `logs\bridge.log`), scrolling in the window as they happen.
+  `logs\bridge.log`), with errors and warnings coloured, a filter box and an
+  "errors and warnings only" toggle (Ctrl+F).
 - An **⚙ الإعدادات** button to edit the bot token, Air Pro engine
   address/channel, and the chat/user id whitelists — the only `config.json`
   fields *not* already editable live from the bot's own in-chat Settings
-  screen.
+  screen. The token is masked; where DPAPI protection is on it is not editable
+  here at all (use `scripts\Protect-BridgeSecrets.ps1`). Because the bridge
+  owns the four id lists while it runs, editing one of them offers a restart —
+  without it the bridge's next save would quietly put its own copy back.
+- Its own log of what the *manager* did, in `logs\manager.log`, so "why did it
+  restart at 3am" is answerable after the on-screen scrollback is gone.
 
 Do not run this alongside the Scheduled Task or NSSM service — pick one
-supervisor, not two.
+supervisor, not two. Only one manager runs at a time, machine-wide: a second
+launch (including from another Windows session) points at the one already
+running rather than starting a rival supervisor.
 
 ## Chat controls: buttons, not typed commands (Arabic, primary)
 

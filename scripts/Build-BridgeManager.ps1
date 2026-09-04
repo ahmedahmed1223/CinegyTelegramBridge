@@ -40,4 +40,18 @@ Write-Host "Bridge major version: $version" -ForegroundColor Cyan
 dotnet publish $project -c Release -r win-x64 --self-contained true -o $outDir "-p:Version=$version"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
-Write-Host "Built: $outDir\BridgeManager.exe (v$version)" -ForegroundColor Green
+$exe = Join-Path $outDir "BridgeManager.exe"
+
+# The selftest existed for months and nothing ever ran it, which is the same as
+# not having it. Start-Process -Wait rather than calling the exe directly:
+# BridgeManager is a WinExe, so PowerShell does not wait for it and $LASTEXITCODE
+# would be read before the process had finished deciding.
+Write-Host "Running BridgeManager selftest..." -ForegroundColor Cyan
+$selftest = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+$report = Join-Path $outDir "BridgeManager-selftest.log"
+if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report | ForEach-Object { Write-Host "  $_" } }
+if ($selftest.ExitCode -ne 0) {
+    throw "BridgeManager selftest failed (exit $($selftest.ExitCode)). See $report."
+}
+
+Write-Host "Built: $exe (v$version)" -ForegroundColor Green

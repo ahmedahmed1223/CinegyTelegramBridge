@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.61.0
+
+Unreferenced bulletin pictures are kept for forty-eight hours rather than
+twenty-four. That is a change of default only: a running installation already
+holds the value in config.json, so the live one is changed from Settings ->
+On air -> picture retention, or by resetting that one setting after upgrading.
+
+The bulletin is now timed from the engine's clock. Researched first: Cinegy
+exposes no loop counter and no timeline position - only /metrics,
+/gfx_N/status and /gfx_N/status/active answer here, everything else is 403,
+and /metrics is channel health rather than the position of any scene. But the
+active item carries ScheduledAt to the millisecond and it does not move while
+the scene loops, so it is the one true zero, replacing a stopwatch that
+started when the SHOW request returned - a round trip later and jittered by
+the poll loop. An anchor that is not believable is refused, because a wrong
+one moves every write out of the 1.2s fade, which is worse than the jitter it
+removes. The anchor is kept with the run, so a bulletin resumed after a
+restart recovers the scene's real loop phase instead of approximating it.
+
+Groundwork for the generated row screen also lands: what a row is asked for
+now comes from the design - editorial order from the registry, Arabic wording
+from its fields list, and a variable no element consumes left out because
+filling it would put the value nowhere. Reading a row tries its field bag and
+falls back to the three properties it has always had, so a bulletin written
+before designs existed plays on one without being rewritten.
+
 ## Version 7.60.0
 
 Sync-to-loop is now explicable from the screen rather than from watching air.

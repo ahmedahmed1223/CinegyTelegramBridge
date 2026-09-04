@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.60.0'
+$script:BridgeVersion = '7.61.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -224,7 +224,7 @@ $script:DefaultSettings = [ordered]@{
     MojazHoldFollowsClip       = $true   # an uploaded clip's own length becomes the hold, unless the operator set one
     MojazMultiDesign           = $false  # bulletins may be bound to different designs; off keeps the single built-in one
     MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
-    MojazImageKeepHours        = 24      # how long an unreferenced Mojaz picture is kept before the sweep removes it (0 = for ever)
+    MojazImageKeepHours        = 48      # how long an unreferenced Mojaz picture is kept before the sweep removes it (0 = for ever)
     # In frames, because that is how the animation is cut. 0 for either means
     # "take it from the scene's own entrance and exit".
     # The channel's frame rate, used wherever a scene cannot state its own.

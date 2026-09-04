@@ -2605,7 +2605,7 @@ function Update-MojazImageCleanup {
     # whole premise is that nothing has touched those files in a day.
     if (-not $Force -and $script:LastMojazImageSweep -and ((Get-Date) - $script:LastMojazImageSweep).TotalMinutes -lt 60) { return 0 }
     $script:LastMojazImageSweep = Get-Date
-    if ($MinimumAgeHours -le 0) { $MinimumAgeHours = Get-SettingInt 'MojazImageKeepHours' 24 }
+    if ($MinimumAgeHours -le 0) { $MinimumAgeHours = Get-SettingInt 'MojazImageKeepHours' 48 }
     # Zero turns the sweep off: a newsroom that wants to keep every picture it
     # ever uploaded is allowed to.
     if ($MinimumAgeHours -le 0) { return 0 }

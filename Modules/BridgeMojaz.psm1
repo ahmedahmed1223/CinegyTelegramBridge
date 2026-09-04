@@ -169,6 +169,13 @@ function New-MojazRunSnapshot {
     # Doubles, not ints: these come from frame counts divided by a frame
     # rate, and rounding 1.2 seconds down to 1 was throwing away a fifth of
     # the entrance animation.
+    # An outright hold, set by the operator, from the moment the scene is up
+    # until EXIT. A bulletin of several stories is timed by its rows; one that
+    # carries a single story - a video report - has nothing to walk through,
+    # and asking somebody to express "keep it up for forty seconds" as a row
+    # dwell plus an intro plus a last-row hold is asking them to do arithmetic
+    # to say something simple. Zero leaves the row timing in charge.
+    $holdOverride = [double](Get-MojazProperty $Bulletin 'HoldSeconds' 0)
     $introOverride = [double](Get-MojazProperty $Bulletin 'IntroExtraSeconds' 0)
     $lastOverride = [double](Get-MojazProperty $Bulletin 'LastRowSeconds' 0)
     $intro = if ($introOverride -gt 0) { $introOverride } elseif ($SceneTiming) { [double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0) } else { 0.0 }
@@ -192,7 +199,10 @@ function New-MojazRunSnapshot {
         }
         $at += $hold
     }
-    $exitAt = if ($loopPlan) { [double]$loopPlan.ExitOffset } else { $at }
+    $exitAt = if ($holdOverride -gt 0) { $holdOverride } elseif ($loopPlan) { [double]$loopPlan.ExitOffset } else { $at }
+    # The hold is the whole run, so a row may not be scheduled past it: a plan
+    # that writes after the scene has been told to leave writes into nothing.
+    if ($holdOverride -gt 0) { $plan = @($plan | Where-Object { [double]$_.AtSeconds -lt $holdOverride }) }
     $snapshot = [pscustomobject]@{
         Id = New-MojazId -Prefix run
         BulletinId = [string](Get-MojazProperty $Bulletin 'Id' '')
@@ -204,6 +214,7 @@ function New-MojazRunSnapshot {
         SyncToLoop = [bool]$loopPlan
         LoopSeconds = $(if ($loopPlan) { [double]$loopPlan.LoopSeconds } else { 0 })
         FadeSeconds = $(if ($loopPlan) { [double]$loopPlan.FadeSeconds } else { 0 })
+        HoldSeconds = $holdOverride
         ExitAtSeconds = $exitAt
         TotalSeconds = [int][math]::Ceiling($exitAt)
     }
@@ -451,12 +462,15 @@ function Set-MojazBulletinTiming {
        markers in the .cintitle already answer. #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [int]$DelayFrames, [int]$IntroExtraFrames, [int]$LastRowFrames,
+        [int]$DelayFrames, [int]$IntroExtraFrames, [int]$LastRowFrames, [int]$HoldFrames,
         [nullable[bool]]$SyncToLoop,
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
     if ($fields.ContainsKey('DelayFrames') -and ($DelayFrames -lt 1 -or $DelayFrames -gt 15000)) {
         return (New-MojazResult $false $null 'out_of_range' 'المدة بين ١ و١٥٠٠٠ إطار.')
+    }
+    if ($fields.ContainsKey('HoldFrames') -and ($HoldFrames -lt 0 -or $HoldFrames -gt 90000)) {
+        return (New-MojazResult $false $null 'out_of_range' 'مدة البقاء بين ٠ و٩٠٠٠٠ إطار (٠ = تتبع الصفوف).')
     }
     # Frames, because that is the unit the animation is cut in. Ten minutes
     # at 25 fps is the ceiling, which is far past anything a bulletin needs.
@@ -468,7 +482,7 @@ function Set-MojazBulletinTiming {
     }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            foreach ($pair in @(@('DelayFrames', $DelayFrames), @('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames))) {
+            foreach ($pair in @(@('DelayFrames', $DelayFrames), @('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames), @('HoldFrames', $HoldFrames))) {
                 if (-not $fields.ContainsKey($pair[0])) { continue }
                 # Bulletins written before frames existed carry neither field.
                 if ($bulletin.PSObject.Properties.Match($pair[0]).Count -eq 0) {
@@ -518,9 +532,10 @@ function Test-BridgeSceneUsable {
 
           - something to fill. A variable that no element consumes is not a
             field; a scene with none has nothing for a row to change.
-          - somewhere to fill it. The whole mechanism is enter, then update
-            inside a loop, then leave. A scene with no loop plays once and is
-            gone, and the rows after the first would have nowhere to go.
+        A loop is reported, not required: SupportsRows says whether the scene
+        can hold while row after row is written into it. Without one the design
+        still works - it carries a single story, which is what a video report
+        is - so the caller offers one row and an operator-set moment to leave.
 
         Everything else - whether it wants a headline, a picture, both, or
         neither - is the design's business, to be discovered and asked for,
@@ -530,14 +545,17 @@ function Test-BridgeSceneUsable {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Xml)
     $fields = @(Get-BridgeSceneFields -Xml $Xml | Where-Object { $_.Consumed })
     if ($fields.Count -eq 0) {
-        return [pscustomobject]@{ Usable = $false; Reason = 'لا يحمل هذا المشهد حقلًا واحدًا يُحدَّث، فلا شيء يعرضه الموجز.'; Fields = @() }
+        return [pscustomobject]@{ Usable = $false; Reason = 'لا يحمل هذا المشهد حقلًا واحدًا يُحدَّث، فلا شيء يعرضه الموجز.'; Fields = @(); SupportsRows = $false }
     }
     $start = [regex]::Match($Xml, 'LoopStartFrame\s*=\s*"([0-9]+)"')
     $end = [regex]::Match($Xml, 'LoopEndFrame\s*=\s*"([0-9]+)"')
-    if (-not $start.Success -or -not $end.Success -or [int]$end.Groups[1].Value -le [int]$start.Groups[1].Value) {
-        return [pscustomobject]@{ Usable = $false; Reason = 'لا لوب في هذا المشهد: يدخل ويخرج مرة واحدة، فلا مكان لصفوف بعد الأول.'; Fields = $fields }
-    }
-    return [pscustomobject]@{ Usable = $true; Reason = ''; Fields = $fields }
+    $hasLoop = $start.Success -and $end.Success -and [int]$end.Groups[1].Value -gt [int]$start.Groups[1].Value
+    # A loop is what lets one scene hold while row after row is written into
+    # it. A design without one is not thereby unusable - it is a design that
+    # carries ONE story: a video report is a single item, and it enters, plays
+    # and leaves. Refusing it was the third time I mistook the news design's
+    # shape for the shape of every bulletin.
+    return [pscustomobject]@{ Usable = $true; Reason = ''; Fields = $fields; SupportsRows = $hasLoop }
 }
 
 function Get-BridgeSceneFields {

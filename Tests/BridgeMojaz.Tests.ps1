@@ -453,12 +453,14 @@ Describe 'A design that is not the news design' {
         $verdict.Reason | Should -Match 'حقلًا واحدًا'
     }
 
-    It 'refuses a scene with no loop to fill it in' {
-        # Enter, update inside the loop, leave. With no loop the scene plays
-        # once and every row after the first has nowhere to go.
+    It 'reports a missing loop rather than refusing the design' {
+        # A loop is what lets one scene hold while row after row is written
+        # into it. Without one the design still works - it carries a single
+        # story, which is what a video report is - so this says "no rows"
+        # instead of "no".
         $verdict = Test-BridgeSceneUsable -Xml '<Scene><Var Name="clip" Type="File" /><Plate File="${clip}" /></Scene>'
-        $verdict.Usable | Should -BeFalse
-        $verdict.Reason | Should -Match 'لوب'
+        $verdict.Usable | Should -BeTrue
+        $verdict.SupportsRows | Should -BeFalse
     }
 
     It 'accepts the built-in news design unchanged' {
@@ -517,5 +519,78 @@ Describe 'A row that carries a design its fields' {
         (Get-MojazFieldValues -Fields $null).Count | Should -Be 0
         # And reads a bag that has been through JSON, not only a hashtable.
         (Get-MojazFieldValues -Fields ([pscustomobject]@{ a = 'x'; b = '' })).Keys | Should -Be @('a')
+    }
+}
+
+Describe 'A bulletin that carries one story' {
+    BeforeAll {
+        # A video report: one item, no loop to walk. Enter, play, leave.
+        $script:VideoScene = '<Scene><Var Name="clip" Type="File" /><Plate Size="1920.00;1080.00" File="${clip}" /></Scene>'
+        $script:LoopScene = '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="clip" Type="File" /><Plate File="${clip}" /></Scene>'
+    }
+
+    It 'is a usable design even with no loop, and says it cannot walk rows' {
+        # The rule this replaces refused it outright, which would have made a
+        # video report impossible to put on air at all.
+        $verdict = Test-BridgeSceneUsable -Xml $script:VideoScene
+        $verdict.Usable | Should -BeTrue
+        $verdict.SupportsRows | Should -BeFalse
+        (Test-BridgeSceneUsable -Xml $script:LoopScene).SupportsRows | Should -BeTrue
+    }
+
+    It 'leaves when the operator said to, not when the row arithmetic says' {
+        $bulletin = [pscustomobject]@{
+            Id = 'b_1'; Name = 'تقرير'; Revision = 1; DelaySeconds = 8
+            HoldSeconds = 40
+            Rows = @([pscustomobject]@{ Id = 'r_1'; Title = 'خبر'; Text = 'نص'; ImageMode = 'inherit'; Image = '' })
+        }
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin).Value
+
+        $snapshot.ExitAtSeconds | Should -Be 40
+        $snapshot.HoldSeconds | Should -Be 40
+        $snapshot.TotalSeconds | Should -Be 40
+    }
+
+    It 'never schedules a row past the moment it was told to leave' {
+        # A write after EXIT writes into nothing.
+        $bulletin = [pscustomobject]@{
+            Id = 'b_2'; Name = 'تقرير'; Revision = 1; DelaySeconds = 30
+            HoldSeconds = 20
+            Rows = @(
+                [pscustomobject]@{ Id = 'r_1'; Title = 'أ'; Text = 'ن'; ImageMode = 'inherit'; Image = '' }
+                [pscustomobject]@{ Id = 'r_2'; Title = 'ب'; Text = 'ن'; ImageMode = 'inherit'; Image = '' }
+            )
+        }
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin).Value
+
+        $snapshot.ExitAtSeconds | Should -Be 20
+        @($snapshot.Plan | Where-Object { [double]$_.AtSeconds -ge 20 }).Count | Should -Be 0
+    }
+
+    It 'leaves the row timing in charge when no hold was set' {
+        $bulletin = [pscustomobject]@{
+            Id = 'b_3'; Name = 'موجز'; Revision = 1; DelaySeconds = 8; HoldSeconds = 0
+            Rows = @(
+                [pscustomobject]@{ Id = 'r_1'; Title = 'أ'; Text = 'ن'; ImageMode = 'inherit'; Image = '' }
+                [pscustomobject]@{ Id = 'r_2'; Title = 'ب'; Text = 'ن'; ImageMode = 'inherit'; Image = '' }
+            )
+        }
+        $snapshot = (New-MojazRunSnapshot -Bulletin $bulletin).Value
+
+        $snapshot.HoldSeconds | Should -Be 0
+        $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
+        @($snapshot.Plan).Count | Should -Be 2
+    }
+
+    It 'bounds the hold like every other timing here' {
+        $library = New-MojazLibrary
+        $library = (Add-MojazBulletin -Library $library -Name 'تقرير').Value
+        $id = $library.Bulletins[0].Id
+
+        (Set-MojazBulletinTiming -Library $library -BulletinId $id -HoldFrames -1).ErrorCode | Should -Be 'out_of_range'
+        (Set-MojazBulletinTiming -Library $library -BulletinId $id -HoldFrames 90001).ErrorCode | Should -Be 'out_of_range'
+        $ok = Set-MojazBulletinTiming -Library $library -BulletinId $id -HoldFrames 1000
+        $ok.Success | Should -BeTrue
+        $ok.Value.Bulletins[0].HoldFrames | Should -Be 1000
     }
 }

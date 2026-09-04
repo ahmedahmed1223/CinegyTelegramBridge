@@ -206,8 +206,17 @@ public sealed class MainForm : Form
 
     private void StartBridge(bool manual = false)
     {
-        if (_bridgeProcess is { HasExited: false }) return;
-        if (!EnsureBridgeScriptResolved()) return;
+        // Disable immediately, before anything else: a burst of clicks queued
+        // faster than the UI thread can react would otherwise each run this
+        // method in turn (once per queued click), each one restarting what
+        // the previous click just started. A disabled button drops any
+        // already-queued click messages instead of turning them into more
+        // Restart calls. SetStatus() below restores the right enabled state
+        // on every exit path once the outcome (running or not) is known.
+        SetButtonsBusy();
+
+        if (_bridgeProcess is { HasExited: false }) { SetStatus(running: true); return; }
+        if (!EnsureBridgeScriptResolved()) { SetStatus(running: false); return; }
         // A deliberate click always gets a fresh chance, even after the
         // crash-loop breaker gave up on automatic restarts.
         if (manual) _consecutiveQuickFailures = 0;
@@ -218,6 +227,7 @@ public sealed class MainForm : Form
             MessageBox.Show(this,
                 "لم يتم العثور على pwsh.exe (PowerShell 7).\nثبّته من https://aka.ms/powershell-release ثم أعد المحاولة.",
                 "PowerShell 7 غير موجود", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            SetStatus(running: false);
             return;
         }
 
@@ -260,7 +270,7 @@ public sealed class MainForm : Form
             // unhandled exception right as the operator is closing the app.
             if (IsDisposed) return;
             // ObjectDisposedException derives from InvalidOperationException - one catch covers both.
-            try { BeginInvoke(OnBridgeExited); }
+            try { BeginInvoke(() => OnBridgeExited(process)); }
             catch (InvalidOperationException) { }
         };
 
@@ -293,10 +303,15 @@ public sealed class MainForm : Form
         LogEvent("تم بدء تشغيل الجسر بنجاح.");
     }
 
-    private void OnBridgeExited()
+    private void OnBridgeExited(Process exitedProcess)
     {
+        // A rapid restart can leave an old process's Exited event arriving
+        // after a newer one has already taken its place - acting on it here
+        // would null out tracking of the process that is actually running now.
+        if (!ReferenceEquals(exitedProcess, _bridgeProcess)) return;
+
         var exitCode = -1;
-        try { exitCode = _bridgeProcess?.ExitCode ?? -1; } catch { /* process handle already gone */ }
+        try { exitCode = exitedProcess.ExitCode; } catch { /* process handle already gone */ }
         AppendLine($"--- توقف الجسر (رمز الخروج {exitCode}) ---");
         LogEvent($"توقف الجسر - رمز الخروج {exitCode}.");
         _bridgeProcess = null;
@@ -346,7 +361,8 @@ public sealed class MainForm : Form
 
     private void StopBridge(bool manual)
     {
-        if (_bridgeProcess is not { HasExited: false } process) return;
+        SetButtonsBusy(); // see the comment in StartBridge - same rapid-click concern
+        if (_bridgeProcess is not { HasExited: false } process) { SetStatus(running: false); return; }
         if (manual) LogEvent("طلب المستخدم إيقاف الجسر يدويًا.");
         _stoppingIntentionally = manual;
         try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
@@ -426,6 +442,21 @@ public sealed class MainForm : Form
         _stopButton.Enabled = running;
         _restartButton.Enabled = running;
         _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
+    }
+
+    /// <summary>
+    /// Disables Start/Stop/Restart the instant one of them is clicked, before
+    /// doing anything else. A click already queued by the time the control
+    /// goes disabled is simply dropped by Windows rather than firing another
+    /// Click - this is what actually stops a mashed button from running the
+    /// operation once per queued click. SetStatus() restores the correct
+    /// enabled state once the real outcome (running or not) is known.
+    /// </summary>
+    private void SetButtonsBusy()
+    {
+        _startButton.Enabled = false;
+        _stopButton.Enabled = false;
+        _restartButton.Enabled = false;
     }
 
     private void AppendLine(string line)

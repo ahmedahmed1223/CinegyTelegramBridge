@@ -92,6 +92,62 @@ function Get-FfmpegPath {
     return $null
 }
 
+function Get-FfprobePath {
+    <# ffprobe ships beside ffmpeg in every distribution of it, so the one
+       already resolved for the output monitor finds this one too. #>
+    $cmd = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $ffmpeg = Get-FfmpegPath
+    if ($ffmpeg) {
+        $beside = Join-Path (Split-Path -Parent $ffmpeg) 'ffprobe.exe'
+        if (Test-Path -LiteralPath $beside) { return $beside }
+    }
+    return $null
+}
+
+function Get-BridgeMediaDurationSeconds {
+    <#
+        How long a clip runs, asked of the file itself.
+
+        Returns 0 for anything it cannot answer - no ffprobe installed, a
+        still image, a file it cannot read - and 0 means "unknown", which the
+        caller treats as "the operator's own timing applies". A wrong number
+        here would take a bulletin off air early, so a refusal to guess is the
+        only safe failure.
+    #>
+    param([Parameter(Mandatory)][string]$Path, [int]$TimeoutSeconds = 15)
+    if (-not (Test-Path -LiteralPath $Path)) { return 0.0 }
+    $ffprobe = Get-FfprobePath
+    if (-not $ffprobe) { return 0.0 }
+    $output = Join-Path ([IO.Path]::GetTempPath()) "probe-$([guid]::NewGuid().ToString('N')).txt"
+    try {
+        $arguments = ConvertTo-ProcessArgumentLine -Arguments @(
+            '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', $Path
+        )
+        $process = Start-Process -FilePath $ffprobe -ArgumentList $arguments -NoNewWindow -PassThru `
+            -RedirectStandardOutput $output -RedirectStandardError ([IO.Path]::GetTempFileName())
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch { Write-BridgeLog "Could not stop a hung ffprobe: $($_.Exception.Message)" 'WARN' }
+            return 0.0
+        }
+        if ($process.ExitCode -ne 0) { return 0.0 }
+        $seconds = 0.0
+        $text = (Get-Content -LiteralPath $output -Raw -ErrorAction SilentlyContinue)
+        if (-not [double]::TryParse(([string]$text).Trim(), [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture, [ref]$seconds)) { return 0.0 }
+        # A still image reports a nominal duration in some containers; a
+        # bulletin is not going to be a tenth of a second long either way.
+        if ($seconds -lt 0.5 -or $seconds -gt 86400) { return 0.0 }
+        return [math]::Round($seconds, 2)
+    }
+    catch {
+        Write-BridgeLog "Could not measure '$([IO.Path]::GetFileName($Path))': $($_.Exception.Message)" 'WARN'
+        return 0.0
+    }
+    finally { Remove-Item -LiteralPath $output -Force -ErrorAction SilentlyContinue }
+}
+
 function ConvertTo-ProcessArgumentLine {
     <# Start-Process -ArgumentList joins an array with spaces and does NOT quote
        elements that contain spaces. With a script path like

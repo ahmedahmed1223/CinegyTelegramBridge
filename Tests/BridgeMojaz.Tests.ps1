@@ -594,3 +594,42 @@ Describe 'A bulletin that carries one story' {
         $ok.Value.Bulletins[0].HoldFrames | Should -Be 1000
     }
 }
+
+Describe 'How long a clip stays up' {
+    function global:New-TestClipBulletin {
+        param([double]$Hold = 0, [double]$MediaSeconds = 0, [double]$Delay = 8)
+        [pscustomobject]@{
+            Id = 'b_clip'; Name = 'تقرير'; Revision = 1; DelaySeconds = $Delay; HoldSeconds = $Hold
+            Rows = @([pscustomobject]@{ Id = 'r_1'; Title = 'خبر'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = $MediaSeconds })
+        }
+    }
+
+    It 'follows the clip when the operator set nothing' {
+        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin -MediaSeconds 42.5)).Value
+        $snapshot.ExitAtSeconds | Should -Be 42.5
+        $snapshot.HoldFromClip | Should -BeTrue
+    }
+
+    It 'never second-guesses a duration the operator typed' {
+        # Even a clip twice as long: they said twenty, so twenty it is.
+        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin -Hold 20 -MediaSeconds 42.5)).Value
+        $snapshot.ExitAtSeconds | Should -Be 20
+        $snapshot.HoldFromClip | Should -BeFalse
+    }
+
+    It 'takes the longest clip so a second one is not cut short' {
+        $bulletin = New-TestClipBulletin -MediaSeconds 10
+        $bulletin.Rows = @(
+            [pscustomobject]@{ Id = 'r_1'; Title = 'أ'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = 10 }
+            [pscustomobject]@{ Id = 'r_2'; Title = 'ب'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = 31 }
+        )
+        (New-MojazRunSnapshot -Bulletin $bulletin).Value.ExitAtSeconds | Should -Be 31
+    }
+
+    It 'falls back to the row timing when nothing knows a duration' {
+        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin)).Value
+        $snapshot.HoldSeconds | Should -Be 0
+        $snapshot.HoldFromClip | Should -BeFalse
+        $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
+    }
+}

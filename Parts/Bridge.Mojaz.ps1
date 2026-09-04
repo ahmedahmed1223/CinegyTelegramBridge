@@ -1703,6 +1703,9 @@ function Start-MojazPlayback {
         SyncToLoop = [bool]$snapshot.SyncToLoop
         BulletinId = [string]$snapshot.BulletinId
         BulletinName = [string]$snapshot.BulletinName
+        # Wall clock, not the stopwatch: after a restart the stopwatch is gone
+        # and this is the only thing that says how far in the run had got.
+        StartedAt = (Get-Date).ToString('o')
         BulletinRevision = [int]$snapshot.BulletinRevision
         ScheduleId = $ScheduleId
         TemplateImage = $templateImage
@@ -1719,6 +1722,7 @@ function Start-MojazPlayback {
         -UserId $UserId -UserName (Get-UserDisplayName -UserId $UserId) -ChatId $ChatId -Action START `
         -Layer ([int](Get-MojazTemplate).Layer) -Target ([string]$snapshot.BulletinName) -Count ($rows.Count) `
         -Values $(if ([string]$snapshot.ScheduleId) { 'scheduled' } else { 'manual' })
+    Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $(Get-MojazDelayFrames -Bulletin $bulletin) frames each)"
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
@@ -1754,6 +1758,7 @@ function Stop-MojazPlayback {
     if (-not $script:MojazPlayback) { return $false }
     $playback = $script:MojazPlayback
     $script:MojazPlayback = $null
+    Clear-MojazPlaybackState
     $template = Get-MojazTemplate
     if ($template) {
         $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$playback.ChatId }
@@ -1994,6 +1999,7 @@ function Stop-MojazForLayer {
     if (-not $template -or [int]$template.Layer -ne $Layer) { return $false }
     $playback = $script:MojazPlayback
     $script:MojazPlayback = $null
+    Clear-MojazPlaybackState
     Write-MojazRunEnd -Playback $playback
     if ([string]$playback.ScheduleId) {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
@@ -2026,6 +2032,128 @@ function Hide-MojazOnAir {
     }
     Add-AuditEntry "⏹ إخفاء الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Send-TelegramMessage -ChatId $ChatId -Text '⏹ خرج الموجز.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $true
+}
+
+function Get-MojazPlaybackFile {
+    return (Join-Path $logDir 'mojaz-playback.json')
+}
+
+function Save-MojazPlaybackState {
+    <#
+        The run, on disk, so a restart does not abandon a bulletin on air.
+
+        Everything else the bridge holds survives a restart - what is on air,
+        the auto-hide timers, the reminders, the schedule - and the bulletin
+        playback was the one exception. When the bridge went down mid-run the
+        scene stayed exactly where it was, looping, with nobody left to write
+        the next row into it or to send the EXIT that ends it; an operator had
+        to take it off by hand.
+
+        Written once at the start, not on every row: the plan holds absolute
+        moments measured from StartedAt, so where a run has got to is a
+        subtraction, not a thing to keep writing down.
+    #>
+    if (-not $script:MojazPlayback) { return $false }
+    try {
+        $playback = $script:MojazPlayback
+        $state = [ordered]@{
+            StartedAt = [string]$playback.StartedAt
+            BulletinId = [string]$playback.BulletinId
+            BulletinName = [string]$playback.BulletinName
+            ScheduleId = [string](Get-JsonProp $playback 'ScheduleId')
+            OperationId = [string](Get-JsonProp $playback 'OperationId')
+            ChatId = [long]$playback.ChatId
+            UserId = [long]$playback.UserId
+            ExitAtSeconds = [double]$playback.ExitAtSeconds
+            SyncToLoop = [bool]$playback.SyncToLoop
+            Rows = @($playback.Rows)
+            Plan = @($playback.Plan)
+        }
+        $path = Get-MojazPlaybackFile
+        $temporary = "$path.tmp"
+        $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write mojaz-playback.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Clear-MojazPlaybackState {
+    Remove-Item -LiteralPath (Get-MojazPlaybackFile) -Force -ErrorAction SilentlyContinue
+}
+
+function Restore-MojazPlayback {
+    <#
+        Picks a bulletin back up where the clock says it should be.
+
+        The plan's moments are absolute from the start of the run, which is
+        what makes this possible at all: elapsed time alone says which row is
+        due, so the run rejoins its own schedule instead of restarting.
+
+        Three endings. The layer is no longer the bulletin's - somebody dealt
+        with it already - so the file is dropped. The run is past its exit -
+        the scene is looping with nobody to end it - so it is ended. Otherwise
+        it resumes, and the administrators are told either way, because a
+        bulletin that carried on across a restart is not something to discover
+        from the screen.
+    #>
+    param([datetime]$Now = (Get-Date))
+    $path = Get-MojazPlaybackFile
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    try { $state = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+    catch {
+        Write-BridgeLog "Could not read mojaz-playback.json: $($_.Exception.Message)" 'WARN'
+        Clear-MojazPlaybackState
+        return $false
+    }
+    Clear-MojazPlaybackState
+    $startedAt = [datetime]::MinValue
+    if (-not [datetime]::TryParse([string](Get-JsonProp $state 'StartedAt'), [ref]$startedAt)) { return $false }
+    $template = Get-MojazTemplate
+    if (-not $template) { return $false }
+    $layer = [int]$template.Layer
+    # Only if the bulletin's scene is still the thing on that layer. Anything
+    # else means it has already been dealt with, and this must not touch a
+    # layer that now belongs to something else.
+    if (-not $script:OnAir.ContainsKey($layer) -or
+        [string](Get-JsonProp $script:OnAir[$layer] 'Key') -ne [string]$script:MojazTemplateKey) {
+        return $false
+    }
+    $elapsed = ($Now - $startedAt).TotalSeconds
+    $exitAt = [double](Get-JsonProp $state 'ExitAtSeconds')
+    $name = [string](Get-JsonProp $state 'BulletinName')
+    $chat = [long](Get-JsonProp $state 'ChatId')
+    $user = [long](Get-JsonProp $state 'UserId')
+    if ($elapsed -ge $exitAt) {
+        Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
+        Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user | Out-Null
+        Request-MojazTickerReturn | Out-Null
+        Send-AdminBroadcast -Text "⏹ كان الموجز «$name» على الهواء لحظة إعادة التشغيل وقد تجاوز وقت خروجه، فأُخرج الآن." | Out-Null
+        return $true
+    }
+    $rows = @(Get-JsonProp $state 'Plan')
+    $index = @($rows | Where-Object { [double](Get-JsonProp $_ 'AtSeconds') -le $elapsed }).Count - 1
+    if ($index -lt 0) { $index = 0 }
+    $script:MojazPlayback = @{
+        Index = $index; ChatId = $chat; UserId = $user
+        Clock = [System.Diagnostics.Stopwatch]::StartNew()
+        # The run rejoins its own timeline: the clock starts at zero now, and
+        # the offset carries everything that happened before the restart.
+        ClockOffset = $elapsed
+        Rows = @(Get-JsonProp $state 'Rows')
+        Plan = @(Get-JsonProp $state 'Plan')
+        ExitAtSeconds = $exitAt
+        SyncToLoop = [bool](Get-JsonProp $state 'SyncToLoop')
+        BulletinId = [string](Get-JsonProp $state 'BulletinId')
+        BulletinName = $name
+        ScheduleId = [string](Get-JsonProp $state 'ScheduleId')
+        OperationId = [string](Get-JsonProp $state 'OperationId')
+        StartedAt = [string](Get-JsonProp $state 'StartedAt')
+    }
+    Save-MojazPlaybackState | Out-Null
+    Write-BridgeLog "Resumed the bulletin '$name' after a restart at row $($index + 1) of $(@($script:MojazPlayback.Rows).Count), $([int]$elapsed)s in."
+    Send-AdminBroadcast -Text "▶️ استُؤنف الموجز «$name» بعد إعادة التشغيل عند الصف $($index + 1)." | Out-Null
     return $true
 }
 

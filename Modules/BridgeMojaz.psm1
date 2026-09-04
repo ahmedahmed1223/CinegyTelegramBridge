@@ -176,6 +176,18 @@ function New-MojazRunSnapshot {
     # dwell plus an intro plus a last-row hold is asking them to do arithmetic
     # to say something simple. Zero leaves the row timing in charge.
     $holdOverride = [double](Get-MojazProperty $Bulletin 'HoldSeconds' 0)
+    # Both, in that order. What the operator typed is never second-guessed;
+    # with nothing typed, a clip that knows its own length says how long to
+    # stay, which is the answer they would have typed anyway. The longest clip
+    # governs, so a design showing two of them does not cut the second short.
+    if ($holdOverride -le 0) {
+        $clipSeconds = 0.0
+        foreach ($row in $rows) {
+            $measured = [double](Get-MojazProperty $row 'MediaSeconds' 0)
+            if ($measured -gt $clipSeconds) { $clipSeconds = $measured }
+        }
+        if ($clipSeconds -gt 0) { $holdOverride = $clipSeconds }
+    }
     $introOverride = [double](Get-MojazProperty $Bulletin 'IntroExtraSeconds' 0)
     $lastOverride = [double](Get-MojazProperty $Bulletin 'LastRowSeconds' 0)
     $intro = if ($introOverride -gt 0) { $introOverride } elseif ($SceneTiming) { [double](Get-MojazProperty $SceneTiming 'IntroSeconds' 0) } else { 0.0 }
@@ -215,6 +227,7 @@ function New-MojazRunSnapshot {
         LoopSeconds = $(if ($loopPlan) { [double]$loopPlan.LoopSeconds } else { 0 })
         FadeSeconds = $(if ($loopPlan) { [double]$loopPlan.FadeSeconds } else { 0 })
         HoldSeconds = $holdOverride
+        HoldFromClip = ([double](Get-MojazProperty $Bulletin 'HoldSeconds' 0) -le 0 -and $holdOverride -gt 0)
         ExitAtSeconds = $exitAt
         TotalSeconds = [int][math]::Ceiling($exitAt)
     }

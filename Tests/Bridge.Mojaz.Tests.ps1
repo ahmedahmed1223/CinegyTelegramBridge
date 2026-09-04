@@ -1647,3 +1647,75 @@ Describe 'Reading the bulletin back before it goes out' {
         $preview | Should -Not -Match '<b>خطر'
     }
 }
+
+Describe 'A bulletin that was on air when the bridge restarted' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-AdminBroadcast { $true }
+        Mock Invoke-ExitLayer { $true }
+        Mock Request-MojazTickerReturn { $true }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        $script:MojazPlayback = $null
+        $script:OnAir = @{ 5 = @{ Key = 'Mojaz'; Source = 'bridge' } }
+        Clear-MojazPlaybackState
+    }
+    AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{}; Clear-MojazPlaybackState }
+
+    function global:Write-TestPlaybackState {
+        param([datetime]$StartedAt, [double]$ExitAtSeconds = 80)
+        [ordered]@{
+            StartedAt = $StartedAt.ToString('o'); BulletinId = 'b_1'; BulletinName = 'موجز المساء'
+            ScheduleId = ''; OperationId = 'mojaz-test'; ChatId = 100; UserId = 101
+            ExitAtSeconds = $ExitAtSeconds; SyncToLoop = $false
+            Rows = @(1..4 | ForEach-Object { @{ Id = "r_$_"; Title = "عنوان $_"; Text = 'نص'; ImageMode = 'inherit'; Image = '' } })
+            Plan = @(0..3 | ForEach-Object { @{ Index = $_; RowId = "r_$($_ + 1)"; AtSeconds = ($_ * 20.0); HoldSeconds = 20 } })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-MojazPlaybackFile) -Encoding utf8
+    }
+
+    It 'picks the run up at the row the clock says, not at the first' {
+        # This is the incident: the bridge was restarted three minutes into a
+        # bulletin, the scene kept looping on the row it was on, and nothing
+        # was left to write the next row or send the exit.
+        Write-TestPlaybackState -StartedAt (Get-Date).AddSeconds(-50)
+
+        Restore-MojazPlayback | Should -BeTrue
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+        # 50s in, with a row every 20s: rows at 0, 20 and 40 have gone.
+        $script:MojazPlayback.Index | Should -Be 2
+        # A range, not a number: this is measured against a wall clock and
+        # the second it lands in depends on how long the test itself took.
+        [double]$script:MojazPlayback.ClockOffset | Should -BeGreaterOrEqual 50
+        [double]$script:MojazPlayback.ClockOffset | Should -BeLessThan 60
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'takes off a bulletin that is already past its end' {
+        Write-TestPlaybackState -StartedAt (Get-Date).AddSeconds(-500)
+
+        Restore-MojazPlayback | Should -BeTrue
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 5 }
+    }
+
+    It 'leaves a layer alone when the bulletin is no longer what is on it' {
+        # Somebody dealt with it while the bridge was down. Touching that layer
+        # now would take off whatever took its place.
+        $script:OnAir = @{ 5 = @{ Key = 'Urgent'; Source = 'bridge' } }
+        Write-TestPlaybackState -StartedAt (Get-Date).AddSeconds(-500)
+
+        Restore-MojazPlayback | Should -BeFalse
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'does nothing at all when no run was in flight' {
+        Restore-MojazPlayback | Should -BeFalse
+        $script:MojazPlayback | Should -BeNullOrEmpty
+    }
+
+    It 'drops the file once it has been acted on, so it resumes only once' {
+        Write-TestPlaybackState -StartedAt (Get-Date).AddSeconds(-500)
+        Restore-MojazPlayback | Out-Null
+        # The resume rewrites it only when the run continues; an ended one goes.
+        Test-Path -LiteralPath (Get-MojazPlaybackFile) | Should -BeFalse
+    }
+}

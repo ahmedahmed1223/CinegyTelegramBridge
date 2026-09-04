@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.60.0
+
+Sync-to-loop is now explicable from the screen rather than from watching air.
+The button said yes or no and nothing else, for an option that governs the
+pace of the whole bulletin: it now says what it does - pace from the loop, or
+pace from your dwell - the plan line states the cost outright when it is on,
+with the loop's length in seconds beside it, and the help chapter explains the
+mechanism. The scene loops, and at the wrap the content drops to nothing and
+fades back; off, a row is written when its time comes and may be seen
+changing; on, it is written inside that fade and arrives looking as though it
+had just entered. The price is that the pace becomes the loop's length rather
+than the dwell you typed, and it is changed by re-cutting LoopEndFrame in
+Titler.
+
+The first step of the creation wizard lands behind the option that ships off:
+a new bulletin is asked for its design before its name, because the design
+decides what a row will be asked for at all. The question appears only when
+there is a choice - one design is not a choice - and a template becomes a
+design by declaring itself one rather than by having a loop and a text field.
+Each is read from its own scene: how many media and text fields, and whether
+it walks a list or carries a single story. A declared design that cannot be
+read stays in the list with the reason, because somebody who declared it and
+cannot find it deserves to be told why. Swapping the design of a bulletin
+that is on air is refused.
+
 ## Version 7.59.0
 
 A bulletin on air now survives a restart of the bridge. Reported as "the last

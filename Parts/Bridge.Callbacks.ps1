@@ -1239,6 +1239,27 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'mojazdesign:*' {
+            # Chosen during creation, or swapped later on an existing one.
+            $designKey = [string](Get-CallbackArg $data 'mojazdesign:')
+            $designState = Get-PendingState -ChatId $chatId
+            if ($designState -and [string]$designState.Mode -eq 'mojaz_design_new') {
+                Set-PendingState -ChatId $chatId -State @{ Mode = 'mojaz_name_new'; UserId = $userId; DesignKey = $designKey } | Out-Null
+                Send-TelegramMessage -ChatId $chatId -Text '📝 أرسل اسم الموجز الجديد.' -ReplyMarkup (Get-CancelKeyboard)
+            }
+            elseif ($designState -and [string]$designState.Mode -eq 'mojaz_design_set') {
+                Clear-PendingState -ChatId $chatId
+                Set-MojazBulletinDesign -BulletinId ([string]$designState.BulletinId) -TemplateKey $designKey -ChatId $chatId -UserId $userId | Out-Null
+            }
+            break
+        }
+        'mojazdesignpage:*' {
+            $page = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojazdesignpage:'), [ref]$page) -and $page -ge 0) {
+                Show-MojazDesignScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
         'mojazpage:*' {
             $page = 0
             if ([int]::TryParse((Get-CallbackArg $data 'mojazpage:'), [ref]$page) -and $page -ge 0) {

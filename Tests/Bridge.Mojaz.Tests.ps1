@@ -1719,3 +1719,98 @@ Describe 'A bulletin that was on air when the bridge restarted' {
         Test-Path -LiteralPath (Get-MojazPlaybackFile) | Should -BeFalse
     }
 }
+
+Describe 'Choosing which design a bulletin plays on' {
+    BeforeEach {
+        Mock Send-TelegramMessage { $true }
+        Mock Write-BridgeLog { }
+        $config.Settings | Add-Member -NotePropertyName 'MojazMultiDesign' -NotePropertyValue $true -Force
+        $script:MojazPlayback = $null
+        $script:MojazDesignCache = @{}
+        # Two designs: the news one, and a single-video report with no loop.
+        $newsScene = Join-Path $TestDrive 'news.cintitle'
+        $videoScene = Join-Path $TestDrive 'report.cintitle'
+        Set-Content -LiteralPath $newsScene -Encoding utf8 -Value '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="mojaz_img" Type="File" /><Var Name="title.Text" Type="String" /><Plate Size="525.38;291.61" File="${mojaz_img}" /><Text Size="400;81" Text="${title.Text}" /></Scene>'
+        Set-Content -LiteralPath $videoScene -Encoding utf8 -Value '<Scene><Var Name="clip" Type="File" /><Plate Size="1920.00;1080.00" File="${clip}" /></Scene>'
+        Mock Get-TemplateStore {
+            @{
+                Order = @('Mojaz', 'Mojaz-Report', 'Urgent')
+                Map = @{
+                    'Mojaz' = @{ Key = 'Mojaz'; Path = $newsScene; Layer = 5 }
+                    'Mojaz-Report' = @{ Key = 'Mojaz-Report'; Path = $videoScene; Layer = 5; Bulletin = $true }
+                    # Not a design: nobody marked it as one.
+                    'Urgent' = @{ Key = 'Urgent'; Path = $newsScene; Layer = 7 }
+                }
+            }
+        }
+    }
+    AfterAll { $config.Settings | Add-Member -NotePropertyName 'MojazMultiDesign' -NotePropertyValue $false -Force }
+
+    It 'offers only the templates declared as designs' {
+        $keys = @(Get-MojazDesigns).Key
+        $keys | Should -Contain 'Mojaz'
+        $keys | Should -Contain 'Mojaz-Report'
+        # A loop and a text field do not make a template a bulletin design.
+        $keys | Should -Not -Contain 'Urgent'
+    }
+
+    It 'reads each design its own fields, and says which can walk rows' {
+        $designs = @(Get-MojazDesigns)
+        $news = $designs | Where-Object Key -eq 'Mojaz'
+        $report = $designs | Where-Object Key -eq 'Mojaz-Report'
+
+        @($news.Fields).Count | Should -Be 2
+        $news.SupportsRows | Should -BeTrue
+        # One video, no loop: a single story, and it says so rather than
+        # being refused.
+        @($report.Fields).Count | Should -Be 1
+        $report.Usable | Should -BeTrue
+        $report.SupportsRows | Should -BeFalse
+    }
+
+    It 'keeps a design that cannot be read, with the reason' {
+        Mock Get-TemplateStore {
+            @{ Order = @('Mojaz-Gone'); Map = @{ 'Mojaz-Gone' = @{ Key = 'Mojaz-Gone'; Path = 'D:\nowhere\missing.cintitle'; Layer = 5; Bulletin = $true } } }
+        }
+        $design = @(Get-MojazDesigns)[0]
+        $design.Usable | Should -BeFalse
+        $design.Reason | Should -Match 'غير موجود'
+    }
+
+    It 'asks which design only when there is a choice to make' {
+        Test-MojazDesignChoiceNeeded | Should -BeTrue
+
+        # One design is not a choice.
+        Mock Get-TemplateStore { @{ Order = @('Mojaz'); Map = @{ 'Mojaz' = @{ Key = 'Mojaz'; Path = (Join-Path $TestDrive 'news.cintitle'); Layer = 5 } } } }
+        Test-MojazDesignChoiceNeeded | Should -BeFalse
+    }
+
+    It 'never asks while the option is off' {
+        $config.Settings | Add-Member -NotePropertyName 'MojazMultiDesign' -NotePropertyValue $false -Force
+        Test-MojazDesignChoiceNeeded | Should -BeFalse
+        $config.Settings | Add-Member -NotePropertyName 'MojazMultiDesign' -NotePropertyValue $true -Force
+    }
+
+    It 'asks for the design before the name when creating' {
+        Clear-PendingState -ChatId 100
+        Start-MojazNamePrompt -Which new -ChatId 100 -UserId 101
+
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'mojaz_design_new'
+        Should -Invoke Send-TelegramMessage -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'mojazdesign:Mojaz-Report'
+        }
+    }
+
+    It 'refuses to swap the design of a bulletin that is on air' {
+        # The rows being written would land in variables the new design has
+        # never heard of.
+        $script:MojazPlayback = @{ BulletinId = 'b_live' }
+        Set-MojazBulletinDesign -BulletinId 'b_live' -TemplateKey 'Mojaz-Report' -ChatId 100 -UserId 101 | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'على الهواء' }
+    }
+
+    It 'falls back to the built-in design for a bulletin that names none' {
+        Get-MojazBulletinDesignKey -Bulletin ([pscustomobject]@{ Id = 'b_1' }) | Should -Be 'Mojaz'
+        Get-MojazBulletinDesignKey -Bulletin ([pscustomobject]@{ Id = 'b_2'; TemplateKey = 'Mojaz-Report' }) | Should -Be 'Mojaz-Report'
+    }
+}

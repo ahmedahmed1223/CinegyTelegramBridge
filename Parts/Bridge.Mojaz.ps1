@@ -397,6 +397,183 @@ function Format-MojazCell {
     return $value
 }
 
+function Get-MojazDesignFields {
+    <#
+        The fields a design asks for, read from its own scene file.
+
+        Cached on path plus write time exactly as the scene's clock is: this
+        opens a file, and the bulletin screens ask for it on every draw.
+        Re-saving the scene in Titler invalidates the entry by itself.
+
+        Returns an empty list rather than throwing for a path that cannot be
+        read - a design whose file has moved is a design with no fields, which
+        the caller reports instead of crashing on.
+    #>
+    param([string]$TemplateKey = '')
+    $template = if ($TemplateKey) { (Get-TemplateStore).Map[$TemplateKey] } else { Get-MojazTemplate }
+    if (-not $template) { return @() }
+    $path = [string](Get-JsonProp $template 'Path')
+    if (-not $path -or -not (Test-Path -LiteralPath $path)) { return @() }
+    try { $stamp = (Get-Item -LiteralPath $path).LastWriteTimeUtc.Ticks } catch { return @() }
+    $key = "$path|$stamp"
+    if ($null -eq $script:MojazDesignCache) { $script:MojazDesignCache = @{} }
+    if ($script:MojazDesignCache.ContainsKey($key)) { return @($script:MojazDesignCache[$key]) }
+    try { $fields = @(Get-BridgeSceneFields -Xml (Get-Content -LiteralPath $path -Raw)) }
+    catch {
+        Write-BridgeLog "Could not read the fields of '$path': $($_.Exception.Message)" 'WARN'
+        return @()
+    }
+    $script:MojazDesignCache[$key] = $fields
+    return @($fields)
+}
+
+function Test-MojazDesignTemplate {
+    <# Is this template offered as a bulletin design at all?
+
+       Declared, not guessed: a scene cannot say "I am a bulletin", and every
+       template with a loop and a text field is not one. The built-in key is a
+       design by definition, so nothing existing has to be relabelled. #>
+    param([Parameter(Mandatory)][string]$Key, $Template = $null)
+    if ($Key -eq $script:MojazTemplateKey) { return $true }
+    if (-not $Template) { $Template = (Get-TemplateStore).Map[$Key] }
+    if (-not $Template) { return $false }
+    return [bool](Get-JsonProp $Template 'Bulletin')
+}
+
+function Get-MojazDesigns {
+    <#
+        The designs a bulletin may be bound to, each with what its scene
+        declares and whether it can walk rows.
+
+        A design whose scene cannot be read, or has nothing to fill, is
+        returned marked unusable rather than silently dropped: an operator who
+        marked a template as a bulletin design and cannot find it in the list
+        deserves to be told why.
+    #>
+    $store = Get-TemplateStore
+    $designs = foreach ($key in @($store.Order)) {
+        $template = $store.Map[$key]
+        if (-not (Test-MojazDesignTemplate -Key $key -Template $template)) { continue }
+        $path = [string](Get-JsonProp $template 'Path')
+        $verdict = if ($path -and (Test-Path -LiteralPath $path)) {
+            try { Test-BridgeSceneUsable -Xml (Get-Content -LiteralPath $path -Raw) }
+            catch { [pscustomobject]@{ Usable = $false; Reason = 'تعذّرت قراءة ملف المشهد.'; Fields = @(); SupportsRows = $false } }
+        }
+        else { [pscustomobject]@{ Usable = $false; Reason = 'ملف المشهد غير موجود في مساره.'; Fields = @(); SupportsRows = $false } }
+        [pscustomobject]@{
+            Key = [string]$key
+            Layer = [int](Get-JsonProp $template 'Layer')
+            Description = [string](Get-JsonProp $template 'Description')
+            Usable = [bool]$verdict.Usable
+            Reason = [string]$verdict.Reason
+            SupportsRows = [bool]$verdict.SupportsRows
+            Fields = @($verdict.Fields)
+        }
+    }
+    return @($designs)
+}
+
+function Get-MojazUsableDesigns {
+    return @(Get-MojazDesigns | Where-Object { $_.Usable })
+}
+
+function Test-MojazDesignChoiceNeeded {
+    <# Ask only when there is something to ask. One design is not a choice,
+       and the option being off means the built-in one is the only design
+       there is. #>
+    if (-not (Get-Setting 'MojazMultiDesign')) { return $false }
+    return (@(Get-MojazUsableDesigns).Count -gt 1)
+}
+
+function Format-MojazDesignSummary {
+    <# What a design is, in the one line a button has room for: what it asks
+       to be given, and whether it walks a list or carries one story. #>
+    param([Parameter(Mandatory)]$Design)
+    $media = @($Design.Fields | Where-Object { $_.Kind -eq 'media' }).Count
+    $text = @($Design.Fields | Where-Object { $_.Kind -eq 'text' }).Count
+    $parts = @()
+    if ($media -gt 0) { $parts += "$media وسائط" }
+    if ($text -gt 0) { $parts += "$text نص" }
+    if ($parts.Count -eq 0) { $parts += 'بلا حقول' }
+    $parts += $(if ($Design.SupportsRows) { 'عدة أخبار' } else { 'خبر واحد' })
+    return ($parts -join ' · ')
+}
+
+function Get-MojazDesignKeyboard {
+    <# The designs, and the reason beside any that cannot be used - a design
+       an operator declared and cannot select is a question, and the screen
+       answers it rather than leaving a gap. #>
+    param([int]$Page = 0, [ValidateRange(1, 20)][int]$PageSize = 8)
+    $designs = @(Get-MojazDesigns)
+    $window = Get-BridgePageWindow -ItemCount $designs.Count -Page $Page -PageSize $PageSize
+    $rows = @()
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $design = $designs[$index]
+            if ($design.Usable) {
+                $rows += , @( (New-Button "🎬 $($design.Key) · $(Format-MojazDesignSummary -Design $design)" "mojazdesign:$($design.Key)") )
+            }
+            else {
+                $rows += , @( (New-Button "⛔ $($design.Key) — $($design.Reason)" 'menu:mojaz') )
+            }
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "mojazdesignpage:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazdesignpage:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "mojazdesignpage:$($window.Page + 1)") }
+        $rows += , $pager
+    }
+    $rows += , @( (New-Button '❌ إلغاء' 'menu:mojaz') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-MojazDesignScreen {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-MojazDesignKeyboard -Page $Page) -Text @"
+🎬 <b>تصميم الموجز</b>
+
+اختر التصميم الذي تُبثّ عليه هذه النشرة.
+<i>الحقول تُقرأ من المشهد نفسه، فما يطلبه التصميم هو ما ستُسأل عنه.</i>
+"@
+}
+
+function Set-MojazBulletinDesign {
+    <# Binds a bulletin to a design, refusing while it is on air: changing the
+       scene under a running bulletin would leave the rows being written into
+       variables the new design has never heard of. #>
+    param([Parameter(Mandatory)][string]$BulletinId, [Parameter(Mandatory)][string]$TemplateKey,
+        [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if ($script:MojazPlayback -and [string]$script:MojazPlayback.BulletinId -eq $BulletinId) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا يُبدَّل تصميم موجز وهو على الهواء. أوقفه أولًا.' | Out-Null
+        return $false
+    }
+    $design = @(Get-MojazUsableDesigns | Where-Object { $_.Key -eq $TemplateKey } | Select-Object -First 1)
+    if ($design.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ هذا التصميم غير صالح أو لم يعد موجودًا.' | Out-Null
+        return $false
+    }
+    $result = Update-MojazBulletinIn -Library $script:MojazLibrary -BulletinId $BulletinId -UserId $UserId -Change {
+        param($bulletin)
+        $bulletin | Add-Member -NotePropertyName TemplateKey -NotePropertyValue $TemplateKey -Force
+    }
+    Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
+    return [bool]$result.Success
+}
+
+function Get-MojazBulletinDesignKey {
+    <# Which design plays this bulletin: its own, or the built-in one. Every
+       bulletin written before designs existed says nothing, and nothing means
+       the one they were all written for. #>
+    param($Bulletin)
+    $key = [string](Get-JsonProp $Bulletin 'TemplateKey')
+    if ($key) { return $key }
+    return [string]$script:MojazTemplateKey
+}
+
 function Get-MojazSceneTiming {
     <#
         The scene's own clock, read from the .cintitle rather than guessed.
@@ -615,6 +792,14 @@ function Get-MojazPlanText {
     if ($timing) {
         $line += "`nمن القالب: دخول $(Get-MojazSceneFrames -Which intro) إطار · لوب $([int](Get-JsonProp $timing 'LoopFrames')) إطار · خروج $(Get-MojazSceneFrames -Which outro) إطار (‏$(Get-MojazFps) إطارًا/ث)"
     }
+    if (Test-MojazSyncToLoop -Bulletin $Bulletin) {
+        $loopSeconds = if ($timing) { [double](Get-JsonProp $timing 'LoopSeconds') } else { 0 }
+        $line += "`n🎬 المزامنة مفعّلة: كل خبر يُكتب داخل فيضة اللوب فلا يُرى وهو يتبدّل"
+        if ($loopSeconds -gt 0) {
+            $line += "، والإيقاع يصير طول اللوب ($(Format-DurationSeconds -Seconds ([int][math]::Round($loopSeconds)))) لا المدة أعلاه"
+        }
+        $line += '.'
+    }
     return $line
 }
 
@@ -716,7 +901,7 @@ function Get-MojazKeyboard {
         (New-Button "⏹ الأخير: $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار" 'mojaz:last')
     )
     $keyboard += , @(
-        (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم' } else { 'لا' })" 'mojaz:sync')
+        (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم · الإيقاع من اللوب' } else { 'لا · الإيقاع من المدة' })" 'mojaz:sync')
     )
     # A line per row: delete it, or move it up or down the rundown. Numbered
     # like the table above, so the button and the story line up by eye.
@@ -891,6 +1076,15 @@ function Start-MojazNamePrompt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $bulletinId = Get-MojazSelectedId -ChatId $ChatId
     if ($Which -ne 'new' -and -not $bulletinId) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    # The design comes before the name, because it decides what a row of this
+    # bulletin will even be asked for. Only when there is a choice to make:
+    # one design is not a choice, and with the option off there is only ever
+    # the built-in one.
+    if ($Which -eq 'new' -and (Test-MojazDesignChoiceNeeded)) {
+        Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_design_new'; UserId = $UserId } | Out-Null
+        Show-MojazDesignScreen -ChatId $ChatId -UserId $UserId
+        return
+    }
     $prompt = switch ($Which) {
         'new' { '📝 أرسل اسم الموجز الجديد، مثل: الموجز الصباحي.' }
         'rename' { '✏️ أرسل الاسم الجديد لهذا الموجز.' }
@@ -910,7 +1104,13 @@ function Complete-MojazName {
     $result = switch ($Which) {
         # A new bulletin opens on the newsroom's usual dwell; the ⏱ button
         # changes it for this one without touching the setting.
-        'new' { Add-MojazBulletin -Library $script:MojazLibrary -Name $Value -DelayFrames (Get-MojazDelayFrames) -UserId $userId }
+        'new' {
+            # The wizard puts the chosen design in the pending state before
+            # asking for the name; with no choice offered this is empty, which
+            # is the built-in design.
+            Add-MojazBulletin -Library $script:MojazLibrary -Name $Value -DelayFrames (Get-MojazDelayFrames) `
+                -TemplateKey ([string](Get-JsonProp $state 'DesignKey')) -UserId $userId
+        }
         'rename' { Rename-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
         'copy' { Copy-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId -Name $Value -UserId $userId }
     }

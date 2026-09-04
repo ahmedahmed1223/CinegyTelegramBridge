@@ -50,6 +50,9 @@ function Add-MojazBulletin {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$Name,
         [int]$DelayFrames = 200,
+        # Which design plays this bulletin. Empty is the built-in one, which
+        # is what every existing bulletin says and what the option ships off.
+        [string]$TemplateKey = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $normalized = ConvertTo-MojazName -Name $Name
     if ([string]::IsNullOrWhiteSpace($normalized)) { return (New-MojazResult $false $null 'invalid_name' 'اسم الموجز مطلوب.') }
@@ -61,6 +64,7 @@ function Add-MojazBulletin {
         CreatedAt = $Now.ToString('o'); UpdatedAt = $Now.ToString('o'); UpdatedBy = $UserId
         # Frames, like the two timings beside it: one unit for the whole
         # bulletin rather than seconds here and frames there.
+        TemplateKey = ([string]$TemplateKey).Trim()
         DelayFrames = [math]::Min(15000, [math]::Max(1, $DelayFrames))
         IntroExtraFrames = 0; LastRowFrames = 0; Rows = @()
     }
@@ -288,15 +292,56 @@ function Get-MojazUsedImages {
     return $seen.ToArray()
 }
 
+function Get-MojazFieldValues {
+    <# The filled entries of a field bag, whatever shape it arrived in - a
+       hashtable from the bridge, a PSCustomObject once it has been through
+       JSON. Blank values are not entries: an untouched field is not data. #>
+    [CmdletBinding()]
+    param($Fields)
+    if (-not $Fields) { return @{} }
+    $values = @{}
+    $pairs = if ($Fields -is [hashtable]) {
+        @($Fields.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $Fields[$_] } })
+    }
+    else {
+        @($Fields.PSObject.Properties | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } })
+    }
+    foreach ($pair in $pairs) {
+        $text = ([string]$pair.Value).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $values[$pair.Name] = $text
+    }
+    return $values
+}
+
 function Add-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [string]$Image = '', [string]$Title = '', [string]$Text = '',
+        # The design's own fields, keyed by the scene's variable names. Absent
+        # for the built-in design, whose three are named above and unchanged.
+        $Fields,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $rowTitle = ([string]$Title).Trim()
     $rowText = ([string]$Text).Trim()
-    if ([string]::IsNullOrWhiteSpace($rowTitle) -and [string]::IsNullOrWhiteSpace($rowText)) {
+    # A design carries whatever fields it declares, so emptiness is "nothing
+    # in any of them" rather than "no title and no story". The old rule was
+    # the news design's shape, and it would have refused a row on a
+    # video-only design outright.
+    # Resolved out here and given a name of its own, because the -Change
+    # block below is invoked with & and is therefore dynamically scoped:
+    # $PSBoundParameters inside it is Update-MojazBulletinIn's, not this
+    # function's, so asking it there always answers no.
+    $rowFields = if ($PSBoundParameters.ContainsKey('Fields')) { Get-MojazFieldValues -Fields $Fields } else { $null }
+    if ($null -ne $rowFields) {
+        # Not @($hashtable).Count - that wraps the table in a one-element
+        # array and answers 1 however empty the table is.
+        if ($rowFields.Count -eq 0) {
+            return (New-MojazResult $false $null 'empty_row' 'الصف فارغ: لم يُملأ أي حقل من حقول التصميم.')
+        }
+    }
+    elseif ([string]::IsNullOrWhiteSpace($rowTitle) -and [string]::IsNullOrWhiteSpace($rowText)) {
         return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
     }
     $rowImage = ([string]$Image).Trim()
@@ -310,6 +355,16 @@ function Add-MojazBulletinRow {
                 Id = New-MojazId -Prefix r
                 ImageMode = $rowMode
                 Image = $rowImage; Title = $rowTitle; Text = $rowText
+            }
+            # Carried alongside the built-in three rather than instead of
+            # them: a bulletin moved from one design to another keeps what the
+            # new design has no field for, so moving it back loses nothing.
+            if ($null -ne $rowFields) {
+                $bag = [pscustomobject]@{}
+                foreach ($entry in $rowFields.GetEnumerator()) {
+                    $bag | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value -Force
+                }
+                $row | Add-Member -NotePropertyName Fields -NotePropertyValue $bag -Force
             }
             $bulletin.Rows = @(@(Get-MojazProperty $bulletin 'Rows' @()) + $row)
         })
@@ -449,6 +504,42 @@ function Get-MojazBulletin {
     return (@(@(Get-MojazProperty $Library 'Bulletins' @()) | Where-Object { [string]$_.Id -eq $BulletinId }) | Select-Object -First 1)
 }
 
+function Test-BridgeSceneUsable {
+    <#
+        May a bulletin play on this scene at all?
+
+        Deliberately narrow, and narrower than the rule this replaced. That one
+        demanded a picture, a title and a story - the shape of the news
+        bulletin that happened to be built first - which would have refused a
+        design that is a single video, and a video-only bulletin is a
+        perfectly good bulletin.
+
+        Only two things are true of every design:
+
+          - something to fill. A variable that no element consumes is not a
+            field; a scene with none has nothing for a row to change.
+          - somewhere to fill it. The whole mechanism is enter, then update
+            inside a loop, then leave. A scene with no loop plays once and is
+            gone, and the rows after the first would have nowhere to go.
+
+        Everything else - whether it wants a headline, a picture, both, or
+        neither - is the design's business, to be discovered and asked for,
+        never required.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Xml)
+    $fields = @(Get-BridgeSceneFields -Xml $Xml | Where-Object { $_.Consumed })
+    if ($fields.Count -eq 0) {
+        return [pscustomobject]@{ Usable = $false; Reason = 'لا يحمل هذا المشهد حقلًا واحدًا يُحدَّث، فلا شيء يعرضه الموجز.'; Fields = @() }
+    }
+    $start = [regex]::Match($Xml, 'LoopStartFrame\s*=\s*"([0-9]+)"')
+    $end = [regex]::Match($Xml, 'LoopEndFrame\s*=\s*"([0-9]+)"')
+    if (-not $start.Success -or -not $end.Success -or [int]$end.Groups[1].Value -le [int]$start.Groups[1].Value) {
+        return [pscustomobject]@{ Usable = $false; Reason = 'لا لوب في هذا المشهد: يدخل ويخرج مرة واحدة، فلا مكان لصفوف بعد الأول.'; Fields = $fields }
+    }
+    return [pscustomobject]@{ Usable = $true; Reason = ''; Fields = $fields }
+}
+
 function Get-BridgeSceneFields {
     <#
         What a Cinegy scene asks to be given, read from the scene itself.
@@ -527,4 +618,4 @@ Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBul
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
     Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow,
-    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields
+    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues

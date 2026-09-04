@@ -429,3 +429,93 @@ Describe 'Reading a design contract out of the scene' {
         @(Get-BridgeSceneFields -Xml '<Scene />').Count | Should -Be 0
     }
 }
+
+Describe 'A design that is not the news design' {
+    BeforeAll {
+        $script:NewsScene = '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="mojaz_img" Type="File" /><Var Name="title.Text" Type="String" /><Plate Size="525.38;291.61" File="${mojaz_img}" /><Text Size="400;81" Text="${title.Text}" /></Scene>'
+        # One video and nothing else. A perfectly good bulletin, and the rule
+        # this replaced - picture AND title AND story - would have refused it.
+        $script:VideoScene = '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="clip" Type="File" /><Plate Size="1920.00;1080.00" Source="File" File="${clip}" /></Scene>'
+    }
+
+    It 'accepts a design that is a single video' {
+        $verdict = Test-BridgeSceneUsable -Xml $script:VideoScene
+        $verdict.Usable | Should -BeTrue
+        @($verdict.Fields).Count | Should -Be 1
+        $verdict.Fields[0].Kind | Should -Be 'media'
+        $verdict.Fields[0].Width | Should -Be 1920
+    }
+
+    It 'refuses a scene with nothing to fill' {
+        # A variable no element consumes is not a field.
+        $verdict = Test-BridgeSceneUsable -Xml '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="unused" Type="String" /></Scene>'
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'حقلًا واحدًا'
+    }
+
+    It 'refuses a scene with no loop to fill it in' {
+        # Enter, update inside the loop, leave. With no loop the scene plays
+        # once and every row after the first has nowhere to go.
+        $verdict = Test-BridgeSceneUsable -Xml '<Scene><Var Name="clip" Type="File" /><Plate File="${clip}" /></Scene>'
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'لوب'
+    }
+
+    It 'accepts the built-in news design unchanged' {
+        (Test-BridgeSceneUsable -Xml $script:NewsScene).Usable | Should -BeTrue
+    }
+}
+
+Describe 'A row that carries a design its fields' {
+    BeforeEach { $script:Library = New-MojazLibrary }
+
+    It 'takes a row with no title and no story when the design has neither' {
+        $script:Library = (Add-MojazBulletin -Library $script:Library -Name 'موجز فيديو' -TemplateKey 'Mojaz-Video').Value
+        $bulletin = $script:Library.Bulletins[0]
+        $result = Add-MojazBulletinRow -Library $script:Library -BulletinId $bulletin.Id -Fields @{ clip = 'D:\clips\a.mp4' }
+
+        $result.Success | Should -BeTrue
+        $row = @($result.Value.Bulletins[0].Rows)[0]
+        $row.Fields.clip | Should -Be 'D:\clips\a.mp4'
+    }
+
+    It 'still refuses a row where nothing at all was filled' {
+        $script:Library = (Add-MojazBulletin -Library $script:Library -Name 'موجز فيديو' -TemplateKey 'Mojaz-Video').Value
+        $bulletin = $script:Library.Bulletins[0]
+        $result = Add-MojazBulletinRow -Library $script:Library -BulletinId $bulletin.Id -Fields @{ clip = '   ' }
+
+        $result.Success | Should -BeFalse
+        $result.ErrorCode | Should -Be 'empty_row'
+    }
+
+    It 'leaves the built-in design exactly as it was' {
+        # The option ships off, and with no field bag the old rule is the rule.
+        $script:Library = (Add-MojazBulletin -Library $script:Library -Name 'موجز').Value
+        $bulletin = $script:Library.Bulletins[0]
+        $bulletin.TemplateKey | Should -Be ''
+        (Add-MojazBulletinRow -Library $script:Library -BulletinId $bulletin.Id -Title '' -Text '').ErrorCode | Should -Be 'empty_row'
+
+        $ok = Add-MojazBulletinRow -Library $script:Library -BulletinId $bulletin.Id -Title 'عنوان' -Text 'نص'
+        $ok.Success | Should -BeTrue
+        @($ok.Value.Bulletins[0].Rows)[0].PSObject.Properties.Name | Should -Not -Contain 'Fields'
+    }
+
+    It 'keeps a value the current design has no field for' {
+        # Moving a bulletin between designs must not quietly destroy copy: the
+        # editor stops asking for it, and moving back finds it still there.
+        $script:Library = (Add-MojazBulletin -Library $script:Library -Name 'موجز' -TemplateKey 'A').Value
+        $bulletin = $script:Library.Bulletins[0]
+        $result = Add-MojazBulletinRow -Library $script:Library -BulletinId $bulletin.Id `
+            -Fields @{ 'title.Text' = 'عنوان'; 'source.Text' = 'وكالة' }
+
+        $row = @($result.Value.Bulletins[0].Rows)[0]
+        $row.Fields.'source.Text' | Should -Be 'وكالة'
+    }
+
+    It 'counts only the fields somebody actually filled' {
+        (Get-MojazFieldValues -Fields @{ a = 'x'; b = ''; c = '   ' }).Keys | Should -Be @('a')
+        (Get-MojazFieldValues -Fields $null).Count | Should -Be 0
+        # And reads a bag that has been through JSON, not only a hashtable.
+        (Get-MojazFieldValues -Fields ([pscustomobject]@{ a = 'x'; b = '' })).Keys | Should -Be @('a')
+    }
+}

@@ -220,6 +220,7 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
     # --- safety ---
+    MojazMultiDesign           = $false  # bulletins may be bound to different designs; off keeps the single built-in one
     MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
     MojazImageKeepHours        = 24      # how long an unreferenced Mojaz picture is kept before the sweep removes it (0 = for ever)
     # In frames, because that is how the animation is cut. 0 for either means
@@ -425,6 +426,7 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
+    MojazMultiDesign = @{ Unit = ''; Description = 'يسمح بربط كل موجز بتصميم مختلف وقراءة حقوله من المشهد. مطفأ = التصميم الواحد الحالي بحقوله الثلاثة' }
     MojazImageKeepHours = @{ Unit = 'ساعة'; Description = 'مدة الاحتفاظ بصورة موجز لم يعد يشير إليها أي صف قبل حذفها تلقائيًا (0 = لا حذف)' }
     MojazRowFrames = @{ Unit = 'إطار'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي، بالإطارات. تُستخدم لكل موجز جديد ولكل موجز لم يُحدَّد له رقم' }
     BroadcastFps = @{ Unit = 'إطار/ث'; Description = 'معدل إطارات القناة، يُستخدم في حساب المدد حين لا يذكر المشهد معدله. المشهد أولى بنفسه حين يذكره' }
@@ -1033,7 +1035,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazMultiDesign', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1185,6 +1187,7 @@ $script:SettingNavigationLabels = @{
     UserActivityRecentMinutes = 'نافذة النشاط الحديث للمستخدم'
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
+    MojazMultiDesign = 'موجز متعدد التصاميم'
     MojazRowFrames = 'إطارات صف الموجز'
     MojazImageKeepHours = 'الاحتفاظ بصور الموجز'
     BroadcastFps = 'معدل إطارات القناة'

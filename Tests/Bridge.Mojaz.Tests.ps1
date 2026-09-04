@@ -1814,3 +1814,81 @@ Describe 'Choosing which design a bulletin plays on' {
         Get-MojazBulletinDesignKey -Bulletin ([pscustomobject]@{ Id = 'b_2'; TemplateKey = 'Mojaz-Report' }) | Should -Be 'Mojaz-Report'
     }
 }
+
+Describe 'What a row on a design is asked for' {
+    BeforeEach {
+        $script:MojazDesignCache = @{}
+        $scene = Join-Path $TestDrive 'design.cintitle'
+        # Declared in the scene in this order: picture, story, headline.
+        Set-Content -LiteralPath $scene -Encoding utf8 -Value '<Scene LoopStartFrame="30" LoopEndFrame="1530"><Var Name="mojaz_img" Type="File" /><Var Name="Subject.Text" Type="String" /><Var Name="title.Text" Type="String" /><Var Name="orphan" Type="String" /><Plate Size="525.38;291.61" File="${mojaz_img}" /><Text Size="479;385" Text="${Subject.Text}" /><Text Size="400;81" Text="${title.Text}" /></Scene>'
+        Mock Get-TemplateStore {
+            @{
+                Order = @('Mojaz')
+                Map = @{ 'Mojaz' = @{
+                        Key = 'Mojaz'; Path = $scene; Layer = 5
+                        # The registry says the editorial order and the words.
+                        Fields = @(
+                            @{ Name = 'title.Text'; Label = 'العنوان' }
+                            @{ Name = 'Subject.Text'; Label = 'الخبر' }
+                        )
+                    } }
+            }
+        }
+    }
+
+    It 'asks in the registry order, not the order the scene happens to declare' {
+        # The scene lists the story before the headline; an editor writes the
+        # headline first.
+        @(Get-MojazRowFieldPrompts -TemplateKey 'Mojaz').Name |
+            Should -Be @('title.Text', 'Subject.Text', 'mojaz_img')
+    }
+
+    It 'uses the registry wording and falls back to the variable name' {
+        $prompts = @(Get-MojazRowFieldPrompts -TemplateKey 'Mojaz')
+        ($prompts | Where-Object Name -eq 'title.Text').Label | Should -Be 'العنوان'
+        # Nobody named the picture, so it is asked for by the only true name
+        # available rather than by an invented one.
+        ($prompts | Where-Object Name -eq 'mojaz_img').Label | Should -Be 'mojaz_img'
+    }
+
+    It 'leaves out a variable no element consumes' {
+        # Filling it would put the value nowhere on screen.
+        @(Get-MojazRowFieldPrompts -TemplateKey 'Mojaz').Name | Should -Not -Contain 'orphan'
+    }
+
+    It 'carries the media size the design was drawn for' {
+        $picture = @(Get-MojazRowFieldPrompts -TemplateKey 'Mojaz') | Where-Object Name -eq 'mojaz_img'
+        $picture.Kind | Should -Be 'media'
+        $picture.Width | Should -Be 525
+        $picture.Height | Should -Be 292
+    }
+
+    It 'reads a row written before designs existed' {
+        # No field bag at all - the three properties it has always had. This
+        # is what lets an old bulletin play on a design without a rewrite.
+        $row = [pscustomobject]@{ Id = 'r_1'; Title = 'عنوان'; Text = 'خبر'; Image = 'D:\pics\a.png'; ImageMode = 'new' }
+        Get-MojazRowFieldValue -Row $row -FieldName 'title.Text' | Should -Be 'عنوان'
+        Get-MojazRowFieldValue -Row $row -FieldName 'Subject.Text' | Should -Be 'خبر'
+        Get-MojazRowFieldValue -Row $row -FieldName 'mojaz_img' | Should -Be 'D:\pics\a.png'
+    }
+
+    It 'prefers the field bag when the row has one' {
+        $row = [pscustomobject]@{
+            Id = 'r_1'; Title = 'قديم'; Text = 'قديم'; Image = ''; ImageMode = 'inherit'
+            Fields = [pscustomobject]@{ 'title.Text' = 'جديد'; 'source.Text' = 'وكالة' }
+        }
+        Get-MojazRowFieldValue -Row $row -FieldName 'title.Text' | Should -Be 'جديد'
+        # A field this design does not ask for is still readable, so moving
+        # the bulletin back finds it.
+        Get-MojazRowFieldValue -Row $row -FieldName 'source.Text' | Should -Be 'وكالة'
+        # And one nobody filled reads empty rather than throwing.
+        Get-MojazRowFieldValue -Row $row -FieldName 'nothing' | Should -Be ''
+    }
+
+    It 'gives the whole row as the design sees it' {
+        $row = [pscustomobject]@{ Id = 'r_1'; Title = 'عنوان'; Text = 'خبر'; Image = ''; ImageMode = 'inherit' }
+        $values = Get-MojazRowValues -Row $row -TemplateKey 'Mojaz'
+        @($values.Keys) | Should -Be @('title.Text', 'Subject.Text', 'mojaz_img')
+        $values['title.Text'] | Should -Be 'عنوان'
+    }
+}

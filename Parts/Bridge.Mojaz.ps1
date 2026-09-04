@@ -473,6 +473,98 @@ function Get-MojazDesigns {
     return @($designs)
 }
 
+function Get-MojazFieldLabel {
+    <#
+        What to call a field when asking somebody to fill it.
+
+        The scene declares the contract; it cannot declare Arabic. So the
+        wording comes from the template registry's own fields list - the same
+        one every ordinary template already uses for its prompts - and falls
+        back to the variable's name, which is at least true.
+    #>
+    param([Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][string]$FieldName)
+    $template = (Get-TemplateStore).Map[$TemplateKey]
+    foreach ($declared in @(Get-JsonProp $template 'Fields')) {
+        if ([string](Get-JsonProp $declared 'Name') -ne $FieldName) { continue }
+        $label = [string](Get-JsonProp $declared 'Label')
+        if ($label) { return $label }
+    }
+    return $FieldName
+}
+
+function Get-MojazRowFieldPrompts {
+    <#
+        What a row on this design asks for, in the order it will be asked.
+
+        The registry's order wins where it says one, because that order is
+        editorial - headline before story - and the scene lists its variables
+        in whatever order they were declared, which is not the same thing.
+        Fields the registry does not mention follow, so a variable added in
+        Titler and not yet named still gets asked for rather than vanishing.
+
+        A variable no element consumes is left out: filling it would put the
+        value nowhere.
+    #>
+    param([Parameter(Mandatory)][string]$TemplateKey)
+    $fields = @(Get-MojazDesignFields -TemplateKey $TemplateKey | Where-Object { $_.Consumed })
+    if ($fields.Count -eq 0) { return @() }
+    $declaredOrder = @(@(Get-JsonProp ((Get-TemplateStore).Map[$TemplateKey]) 'Fields') |
+            ForEach-Object { [string](Get-JsonProp $_ 'Name') } | Where-Object { $_ })
+    $ordered = @()
+    foreach ($name in $declaredOrder) {
+        $match = @($fields | Where-Object { $_.Name -eq $name } | Select-Object -First 1)
+        if ($match.Count -gt 0) { $ordered += $match[0] }
+    }
+    foreach ($field in $fields) {
+        if ($ordered | Where-Object { $_.Name -eq $field.Name }) { continue }
+        $ordered += $field
+    }
+    return @($ordered | ForEach-Object {
+            [pscustomobject]@{
+                Name = [string]$_.Name
+                Kind = [string]$_.Kind
+                Label = Get-MojazFieldLabel -TemplateKey $TemplateKey -FieldName ([string]$_.Name)
+                Width = [int]$_.Width
+                Height = [int]$_.Height
+            }
+        })
+}
+
+function Get-MojazRowFieldValue {
+    <#
+        One field's value on one row.
+
+        A row written for the built-in design has no field bag at all - it has
+        the three properties it has always had - so those three names read
+        from where they have always lived. Anything else reads from the bag.
+        This is what lets a bulletin written before designs existed play on a
+        design without being rewritten.
+    #>
+    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$FieldName)
+    $bag = Get-JsonProp $Row 'Fields'
+    if ($bag) {
+        $value = [string](Get-JsonProp $bag $FieldName)
+        if ($value) { return $value }
+    }
+    switch ($FieldName) {
+        $script:MojazImageVariable { return [string](Get-JsonProp $Row 'Image') }
+        $script:MojazTitleVariable { return [string](Get-JsonProp $Row 'Title') }
+        $script:MojazTextVariable { return [string](Get-JsonProp $Row 'Text') }
+        default { return '' }
+    }
+}
+
+function Get-MojazRowValues {
+    <# Everything this design asks for, as it stands on this row: what to send
+       to the postbox, and what to show an editor who is filling it in. #>
+    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$TemplateKey)
+    $values = [ordered]@{}
+    foreach ($prompt in @(Get-MojazRowFieldPrompts -TemplateKey $TemplateKey)) {
+        $values[$prompt.Name] = Get-MojazRowFieldValue -Row $Row -FieldName $prompt.Name
+    }
+    return $values
+}
+
 function Get-MojazUsableDesigns {
     return @(Get-MojazDesigns | Where-Object { $_.Usable })
 }

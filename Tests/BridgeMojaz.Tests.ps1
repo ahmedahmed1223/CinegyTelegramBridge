@@ -360,3 +360,72 @@ Describe 'Timing a bulletin against the loop it plays in' {
         $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
     }
 }
+
+Describe 'Reading a design contract out of the scene' {
+    BeforeAll {
+        # Taken verbatim from mojaz.cintitle: the variable declares the name
+        # and the type, and the element that consumes it declares the shape.
+        $script:SceneXml = @'
+<Scene Fps="25.000" Duration="1698" LoopStartFrame="30" LoopEndFrame="1530">
+  <Var Name="mojaz_img" Type="File" UpdateType="Instant" Value=".\Mojaz\Pic01.png" />
+  <Var Name="title.Text" Type="String" UpdateType="Instant" Value="قطاع غزة" />
+  <Var Name="Subject.Text" Type="String" UpdateType="Instant" Value="نص الخبر" />
+  <Plate Name="img 01" Start="30" Size="525.38;291.61" Source="File" File="${mojaz_img}" />
+  <Text Name="title" Size="400.00;81.00" Text="${title.Text}" />
+  <Text Name="subject" Size="479.00;385.00" Text="${Subject.Text}" />
+</Scene>
+'@
+    }
+
+    It 'names every field the design asks to be given' {
+        @(Get-BridgeSceneFields -Xml $script:SceneXml).Name |
+            Should -Be @('mojaz_img', 'title.Text', 'Subject.Text')
+    }
+
+    It 'tells media from text by the declared type' {
+        $fields = @(Get-BridgeSceneFields -Xml $script:SceneXml)
+        ($fields | Where-Object Name -eq 'mojaz_img').Kind | Should -Be 'media'
+        ($fields | Where-Object Name -eq 'title.Text').Kind | Should -Be 'text'
+    }
+
+    It 'reads the size from the element that consumes the variable' {
+        # This is the number a picture must be resized to, and it belongs to
+        # this design - a second design with a wider box needs its own, which
+        # is why a single global setting could never be right for both.
+        $picture = @(Get-BridgeSceneFields -Xml $script:SceneXml) | Where-Object Name -eq 'mojaz_img'
+        $picture.Width | Should -Be 525
+        $picture.Height | Should -Be 292
+        $picture.Element | Should -Be 'Plate'
+    }
+
+    It 'matches a variable whose name contains a dot to its own element' {
+        # 'title.Text' and 'Subject.Text' both end in .Text; an unescaped dot
+        # in the lookup would let one match the other's element and report the
+        # wrong box size.
+        $fields = @(Get-BridgeSceneFields -Xml $script:SceneXml)
+        ($fields | Where-Object Name -eq 'title.Text').Height | Should -Be 81
+        ($fields | Where-Object Name -eq 'Subject.Text').Height | Should -Be 385
+    }
+
+    It 'flags a variable no element consumes rather than hiding it' {
+        # A field an operator would be asked to fill whose value then appears
+        # nowhere on screen. Better said out loud at registration.
+        $orphan = Get-BridgeSceneFields -Xml '<Scene><Var Name="unused" Type="String" /></Scene>'
+        @($orphan).Count | Should -Be 1
+        $orphan[0].Consumed | Should -BeFalse
+        $orphan[0].Width | Should -Be 0
+    }
+
+    It 'discovers element types nobody enumerated in advance' {
+        # ticker.cintitle feeds a Marquee. Reading the scene finds that;
+        # a hand-written list of known element types would not have.
+        $marquee = Get-BridgeSceneFields -Xml '<Scene><Var Name="New File" Type="File" /><Marquee Size="1699.00;75.00" File="${New File}" /></Scene>'
+        $marquee[0].Element | Should -Be 'Marquee'
+        $marquee[0].Width | Should -Be 1699
+    }
+
+    It 'returns nothing for a scene that declares nothing, without throwing' {
+        @(Get-BridgeSceneFields -Xml '').Count | Should -Be 0
+        @(Get-BridgeSceneFields -Xml '<Scene />').Count | Should -Be 0
+    }
+}

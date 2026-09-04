@@ -481,6 +481,18 @@ Describe 'The banner copy is kept, below the table' {
 
 Describe 'The bulletin report' {
     BeforeAll {
+        # Anchored to now, never to a fixed hour of the day. Placing a
+        # record at "today at 10:00" puts it in the FUTURE when the suite runs
+        # in the morning, and the report window ends at now - so the record
+        # vanished and these tests passed at night and failed at 09:47.
+        function global:Get-TestReportAnchor {
+            param([int]$MinutesAgo = 180)
+            $at = (Get-Date).AddMinutes(-1 * $MinutesAgo)
+            $startOfDay = (Get-Date).Date.AddMinutes(1)
+            if ($at -lt $startOfDay) { return $startOfDay }
+            return $at
+        }
+
         function global:New-TestMojazAudit {
             param([string]$Operation, [string]$Action, [datetime]$At, [string]$Name = 'موجز المساء',
                 [int]$Count = 3, [long]$DurationMs = 0, [string]$Values = 'manual', [string]$UserId = '42')
@@ -506,7 +518,7 @@ Describe 'The bulletin report' {
     }
 
     It 'pairs a run start with its end by operation id' {
-        $start = (Get-Date).Date.AddHours(9)
+        $start = Get-TestReportAnchor -MinutesAgo 90
         Mock Read-AuditRecords {
             @(
                 (New-TestMojazAudit -Operation 'mojaz-a' -Action START -At $start -Count 4)
@@ -522,7 +534,7 @@ Describe 'The bulletin report' {
     }
 
     It 'says a run with no end is still on air rather than dropping it' {
-        Mock Read-AuditRecords { @((New-TestMojazAudit -Operation 'mojaz-b' -Action START -At (Get-Date).Date.AddHours(10))) }
+        Mock Read-AuditRecords { @((New-TestMojazAudit -Operation 'mojaz-b' -Action START -At (Get-TestReportAnchor -MinutesAgo 60))) }
 
         $data = Get-MojazReportData -Period today
         @($data.Runs).Count | Should -Be 1
@@ -532,13 +544,13 @@ Describe 'The bulletin report' {
     It 'keeps two runs of the same bulletin apart' {
         # Without the operation id they collapsed into one row, because the
         # bulletin name and the row count are identical in both.
-        $start = (Get-Date).Date.AddHours(8)
+        $start = Get-TestReportAnchor -MinutesAgo 120
         Mock Read-AuditRecords {
             @(
                 (New-TestMojazAudit -Operation 'mojaz-a' -Action START -At $start)
                 (New-TestMojazAudit -Operation 'mojaz-a' -Action END -At $start.AddMinutes(5) -DurationMs 300000)
-                (New-TestMojazAudit -Operation 'mojaz-b' -Action START -At $start.AddHours(2) -Values 'scheduled')
-                (New-TestMojazAudit -Operation 'mojaz-b' -Action END -At $start.AddHours(2).AddMinutes(4) -DurationMs 240000 -Values 'scheduled')
+                (New-TestMojazAudit -Operation 'mojaz-b' -Action START -At $start.AddMinutes(40) -Values 'scheduled')
+                (New-TestMojazAudit -Operation 'mojaz-b' -Action END -At $start.AddMinutes(44) -DurationMs 240000 -Values 'scheduled')
             )
         }
 

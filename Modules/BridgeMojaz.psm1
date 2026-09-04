@@ -449,8 +449,82 @@ function Get-MojazBulletin {
     return (@(@(Get-MojazProperty $Library 'Bulletins' @()) | Where-Object { [string]$_.Id -eq $BulletinId }) | Select-Object -First 1)
 }
 
+function Get-BridgeSceneFields {
+    <#
+        What a Cinegy scene asks to be given, read from the scene itself.
+
+        A bulletin design declares its own contract and there is no reason to
+        mirror that declaration by hand in JSON: a hand-written copy drifts the
+        first time somebody renames a variable in Cinegy, and it drifts
+        silently - the bulletin goes to air with an empty box and nothing
+        complains. So the scene is the single source of truth for WHICH fields
+        exist and WHAT SHAPE each one is.
+
+            <Var  Name="mojaz_img"  Type="File" />
+            <Plate Name="img 01" Size="525.38;291.61" File="${mojaz_img}">
+
+        The variable gives the name and the type; the element that consumes it
+        gives the kind and, for media, the exact pixel size the design was
+        drawn for - which is a better number than any global setting, because
+        it is this design's number.
+
+        What the scene CANNOT say is what to call a field in Arabic, what order
+        to ask in, or whether it may be left empty. Those are editorial and
+        come from the template registry. This returns the contract, not the
+        wording.
+
+        A variable no element consumes is still returned, with Consumed false:
+        it is a field an operator would be asked to fill whose value would then
+        appear nowhere, and the caller should say so rather than hide it.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Xml)
+
+    if ([string]::IsNullOrWhiteSpace($Xml)) { return @() }
+    $fields = [System.Collections.Generic.List[object]]::new()
+    foreach ($match in [regex]::Matches($Xml, '<Var\s[^>]*?/?>')) {
+        $declaration = $match.Value
+        $name = [regex]::Match($declaration, 'Name\s*=\s*"([^"]*)"')
+        if (-not $name.Success -or [string]::IsNullOrWhiteSpace($name.Groups[1].Value)) { continue }
+        $variable = $name.Groups[1].Value
+        $type = [regex]::Match($declaration, 'Type\s*=\s*"([^"]*)"')
+        $declaredType = if ($type.Success) { $type.Groups[1].Value } else { 'String' }
+
+        # The element that reads ${variable}. Escaped, because a variable name
+        # may hold a dot - 'title.Text' is the common case here, and an
+        # unescaped dot would match a different variable's element.
+        $consumer = [regex]::Match($Xml, '<(?<element>[A-Za-z]+)\s[^>]*\$\{' + [regex]::Escape($variable) + '\}[^>]*>')
+        $element = if ($consumer.Success) { $consumer.Groups['element'].Value } else { '' }
+
+        $width = 0.0
+        $height = 0.0
+        if ($consumer.Success) {
+            $size = [regex]::Match($consumer.Value, 'Size\s*=\s*"([0-9.]+)\s*;\s*([0-9.]+)"')
+            if ($size.Success) {
+                [void][double]::TryParse($size.Groups[1].Value, [ref]$width)
+                [void][double]::TryParse($size.Groups[2].Value, [ref]$height)
+            }
+        }
+
+        $fields.Add([pscustomobject]@{
+                Name     = $variable
+                Type     = $declaredType
+                # 'media' rather than 'image': every scene here holds its
+                # pictures and its movies in the same Plate with a file
+                # source, so the scene cannot tell the two apart and neither
+                # can this. What arrives decides, and the caller bounds it.
+                Kind     = if ($declaredType -eq 'File') { 'media' } else { 'text' }
+                Element  = $element
+                Consumed = $consumer.Success
+                Width    = [int][math]::Round($width)
+                Height   = [int][math]::Round($height)
+            })
+    }
+    return @($fields)
+}
+
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
     Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow,
-    Clear-MojazBulletinRows, Set-MojazBulletinTiming
+    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields

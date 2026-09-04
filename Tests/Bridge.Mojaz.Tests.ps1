@@ -1892,3 +1892,50 @@ Describe 'What a row on a design is asked for' {
         $values['title.Text'] | Should -Be 'عنوان'
     }
 }
+
+Describe 'Timing the bulletin from the engine rather than the bridge' {
+    BeforeEach { Mock Write-BridgeLog { } }
+
+    function global:New-TestLayerStatusXml {
+        param([datetime]$StartedAtUtc, [switch]$NoSchedule)
+        $item = if ($NoSchedule) { '<Item Id="{A}" />' }
+        else { '<Item Id="{A}" LogId="{B}" ScheduledAt="' + $StartedAtUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ') + '" Duration="24:00:00.000" />' }
+        [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{A}'; ActiveXml = $item }
+    }
+
+    It 'reads the moment the engine says the item went on air' {
+        $started = [datetime]::UtcNow.AddSeconds(-3)
+        Mock Get-TitlerLayerStatus { New-TestLayerStatusXml -StartedAtUtc $started }
+
+        $read = Get-CinegyLayerStartedAtUtc -Layer 5
+        $read | Should -Not -BeNullOrEmpty
+        # Parsed as UTC, not reinterpreted as local: an hours-out anchor would
+        # put every write outside the fade.
+        [math]::Abs(($read - $started).TotalSeconds) | Should -BeLessThan 1
+    }
+
+    It 'says nothing when the engine gives no schedule' {
+        Mock Get-TitlerLayerStatus { New-TestLayerStatusXml -StartedAtUtc ([datetime]::UtcNow) -NoSchedule }
+        Get-CinegyLayerStartedAtUtc -Layer 5 | Should -BeNullOrEmpty
+
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $false; ActiveXml = '' } }
+        Get-CinegyLayerStartedAtUtc -Layer 5 | Should -BeNullOrEmpty
+    }
+
+    It 'turns a believable moment into the run offset' {
+        $now = [datetime]::UtcNow
+        Get-MojazAirClockOffset -StartedAtUtc $now.AddSeconds(-2) -Now $now | Should -BeGreaterThan 1.5
+        Get-MojazAirClockOffset -StartedAtUtc $now.AddSeconds(-2) -Now $now | Should -BeLessThan 2.5
+    }
+
+    It 'refuses an anchor that cannot be this show' {
+        $now = [datetime]::UtcNow
+        # That layer has held something for an hour: it is not what was just
+        # sent, and anchoring to it moves every write out of the fade.
+        Get-MojazAirClockOffset -StartedAtUtc $now.AddHours(-1) -Now $now | Should -Be 0
+        # And clocks that disagree about the present.
+        Get-MojazAirClockOffset -StartedAtUtc $now.AddSeconds(30) -Now $now | Should -Be 0
+        # And nothing at all.
+        Get-MojazAirClockOffset -StartedAtUtc $null -Now $now | Should -Be 0
+    }
+}

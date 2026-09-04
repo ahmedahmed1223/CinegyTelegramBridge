@@ -220,6 +220,7 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsRestoreNews  = $false
     AllowOperatorsClearAllNews = $false
     # --- safety ---
+    MojazAnchorToAirClock      = $true   # time the bulletin from Cinegy's own ScheduledAt rather than the bridge's stopwatch
     MojazHoldFollowsClip       = $true   # an uploaded clip's own length becomes the hold, unless the operator set one
     MojazMultiDesign           = $false  # bulletins may be bound to different designs; off keeps the single built-in one
     MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
@@ -427,6 +428,7 @@ $script:SettingDisplayMetadata = @{
     RuntimeStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم ملفات التشغيل والسجلات' }
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
+    MojazAnchorToAirClock = @{ Unit = ''; Description = 'ضبط زمن الموجز على لحظة البدء التي يقولها Cinegy بدل ساعة الجسر، فتصيب المزامنة الفيضة بدقة أعلى' }
     MojazHoldFollowsClip = @{ Unit = ''; Description = 'مدة بقاء الموجز تتبع طول المقطع المرفوع تلقائيًا. ما يكتبه المستخدم يعلو عليها دائمًا' }
     MojazMultiDesign = @{ Unit = ''; Description = 'يسمح بربط كل موجز بتصميم مختلف وقراءة حقوله من المشهد. مطفأ = التصميم الواحد الحالي بحقوله الثلاثة' }
     MojazImageKeepHours = @{ Unit = 'ساعة'; Description = 'مدة الاحتفاظ بصورة موجز لم يعد يشير إليها أي صف قبل حذفها تلقائيًا (0 = لا حذف)' }
@@ -1037,7 +1039,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazMultiDesign', 'MojazHoldFollowsClip', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazMultiDesign', 'MojazHoldFollowsClip', 'MojazAnchorToAirClock', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1191,6 +1193,7 @@ $script:SettingNavigationLabels = @{
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
     MojazMultiDesign = 'موجز متعدد التصاميم'
     MojazHoldFollowsClip = 'المدة تتبع المقطع'
+    MojazAnchorToAirClock = 'ضبط الزمن من Cinegy'
     MojazRowFrames = 'إطارات صف الموجز'
     MojazImageKeepHours = 'الاحتفاظ بصور الموجز'
     BroadcastFps = 'معدل إطارات القناة'

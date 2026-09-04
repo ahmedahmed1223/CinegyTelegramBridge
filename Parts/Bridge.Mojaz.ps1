@@ -1982,13 +1982,25 @@ function Start-MojazPlayback {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
+    # Asked once, before the state is built: it is an HTTP round trip on the
+    # path a bulletin takes to air, and asking twice would double both the
+    # delay and the chance of it failing. $template is not in scope inside the
+    # table below, which is why this is resolved out here and named.
+    $airStartedAt = if (Get-Setting 'MojazAnchorToAirClock') { Get-CinegyLayerStartedAtUtc -Layer ([int](Get-MojazTemplate).Layer) } else { $null }
+    $airOffset = Get-MojazAirClockOffset -StartedAtUtc $airStartedAt
+    # Refused by the rule above means refused here too: an anchor not good
+    # enough to time this run is not good enough to resume it either.
+    if ($airOffset -le 0) { $airStartedAt = $null }
     $script:MojazPlayback = @{
         Index = 0; ChatId = $ChatId; UserId = $UserId
         # Monotonic, and started the moment the scene is actually up: every
         # row's moment is measured from here, so a slow send delays that row
         # and no other. ClockOffset exists so a test can move time.
         Clock = [System.Diagnostics.Stopwatch]::StartNew()
-        ClockOffset = 0.0
+        # Anchored to the engine's own start moment when it gave one, so the
+        # SHOW's round trip is not counted as part of the scene.
+        ClockOffset = $airOffset
+        AirStartedAt = $(if ($airStartedAt) { $airStartedAt.ToString('o') } else { '' })
         Rows = $rows
         Plan = @($snapshot.Plan)
         ExitAtSeconds = [double]$snapshot.ExitAtSeconds
@@ -2067,6 +2079,70 @@ function Stop-MojazPlayback {
     # An urgent that agreed to wait for this bulletin goes out now.
     Update-MojazPendingUrgent | Out-Null
     return $true
+}
+
+function Get-CinegyLayerStartedAtUtc {
+    <#
+        When the engine says the item on this layer actually went on air.
+
+        The active item carries ScheduledAt to the millisecond, in the
+        engine's own reckoning, and it does not move while the scene loops - a
+        logo shown three days ago still reports the moment it started. That
+        makes it the one true zero for anything timed against the scene.
+
+        The bridge's own clock starts when the SHOW request returns, which is
+        a round trip later and jittered by whatever the poll loop was doing.
+        Inside a fade of 1.2 seconds that has been good enough; it is still
+        the wrong zero, and it is unavailable altogether to a bridge that has
+        just restarted.
+
+        Returns $null when the engine will not say - a blocked endpoint, a
+        layer that is not up - and $null means "use the local clock", which is
+        what every run did before this.
+    #>
+    param([Parameter(Mandatory)][int]$Layer, [int]$TimeoutSec = 0)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-AirTimeout }
+    try {
+        $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec $TimeoutSec
+    }
+    catch { return $null }
+    if (-not $status -or -not [bool](Get-JsonProp $status 'Success')) { return $null }
+    $xml = [string](Get-JsonProp $status 'ActiveXml')
+    if ([string]::IsNullOrWhiteSpace($xml)) { return $null }
+    $match = [regex]::Match($xml, 'ScheduledAt\s*=\s*"([^"]+)"')
+    if (-not $match.Success) { return $null }
+    $at = [datetime]::MinValue
+    # RoundtripKind so the trailing Z is honoured rather than read as local
+    # time, which would put the anchor hours out.
+    if (-not [datetime]::TryParse($match.Groups[1].Value, [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$at)) { return $null }
+    return $at.ToUniversalTime()
+}
+
+function Get-MojazAirClockOffset {
+    <#
+        How far into the scene the engine says we already are, used as the
+        run's starting offset so every moment afterwards is measured from the
+        engine's zero rather than the bridge's.
+
+        Takes the moment rather than reading it, so the rule lives in one
+        place and the caller pays for exactly one round trip.
+
+        Refused when it is not believable: a negative offset means the two
+        clocks disagree about the present, and a large one means the item on
+        that layer is not the one just shown. Either way the local clock is
+        used, because a wrong anchor moves every write out of the fade, which
+        is worse than the small error it was meant to remove.
+    #>
+    param([AllowNull()]$StartedAtUtc, [double]$MaximumSeconds = 10.0, [datetime]$Now = [datetime]::UtcNow)
+    if (-not $StartedAtUtc) { return 0.0 }
+    $offset = ($Now - ([datetime]$StartedAtUtc).ToUniversalTime()).TotalSeconds
+    if ($offset -lt 0 -or $offset -gt $MaximumSeconds) {
+        Write-BridgeLog "Ignoring the engine's start time - it is $([math]::Round($offset, 2))s away, which is not this SHOW." 'WARN'
+        return 0.0
+    }
+    return $offset
 }
 
 function Get-MojazElapsedSeconds {
@@ -2355,6 +2431,7 @@ function Save-MojazPlaybackState {
             BulletinName = [string]$playback.BulletinName
             ScheduleId = [string](Get-JsonProp $playback 'ScheduleId')
             OperationId = [string](Get-JsonProp $playback 'OperationId')
+            AirStartedAt = [string](Get-JsonProp $playback 'AirStartedAt')
             ChatId = [long]$playback.ChatId
             UserId = [long]$playback.UserId
             ExitAtSeconds = [double]$playback.ExitAtSeconds
@@ -2413,6 +2490,14 @@ function Restore-MojazPlayback {
         return $false
     }
     $elapsed = ($Now - $startedAt).TotalSeconds
+    # The engine's own start beats the bridge's note of it: it survives the
+    # restart intact, and it is what the scene's loop is actually running to.
+    $engineStart = [datetime]::MinValue
+    if ([datetime]::TryParse([string](Get-JsonProp $state 'AirStartedAt'), [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$engineStart)) {
+        $fromEngine = ([datetime]::UtcNow - $engineStart.ToUniversalTime()).TotalSeconds
+        if ($fromEngine -ge 0) { $elapsed = $fromEngine }
+    }
     $exitAt = [double](Get-JsonProp $state 'ExitAtSeconds')
     $name = [string](Get-JsonProp $state 'BulletinName')
     $chat = [long](Get-JsonProp $state 'ChatId')

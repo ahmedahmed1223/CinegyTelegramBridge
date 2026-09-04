@@ -1991,6 +1991,16 @@ function Start-MojazPlayback {
     # Refused by the rule above means refused here too: an anchor not good
     # enough to time this run is not good enough to resume it either.
     if ($airOffset -le 0) { $airStartedAt = $null }
+    # Said out loud, once per run. A feature whose whole claim is millisecond
+    # accuracy has to report what it actually did: without this the log shows
+    # a refusal but never an acceptance, so "the anchor was used" and "the
+    # engine said nothing and we fell back" look identical from the outside.
+    if ($airStartedAt) {
+        Write-BridgeLog "Bulletin timed from Cinegy's own start: offset $([math]::Round($airOffset * 1000))ms (the SHOW round trip), fade window $([math]::Round((Get-MojazSceneFrames -Which intro) / (Get-MojazFps) * 1000))ms."
+    }
+    elseif (Get-Setting 'MojazAnchorToAirClock') {
+        Write-BridgeLog "Bulletin timed from the bridge's own clock: Cinegy gave no usable start moment for this SHOW." 'WARN'
+    }
     $script:MojazPlayback = @{
         Index = 0; ChatId = $ChatId; UserId = $UserId
         # Monotonic, and started the moment the scene is actually up: every

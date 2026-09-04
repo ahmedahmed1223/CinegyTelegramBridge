@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.62.0
+
+The bridge now says when the logo or the news strip is not on air. These are
+graphics nobody expects to come down, and their absence was noticeable only by
+looking at the screen.
+
+It asks Cinegy rather than its own record, which is the whole point: what
+matters is that the graphic is gone, not who took it, and the bridge's record
+only ever describes what the bridge itself did - an absence caused from
+outside would have passed unnoticed. The set needs no new setting either: a
+template marked longRunning is exactly one nobody expects to take down, and
+the logo and the strip already carry that mark.
+
+It waits for the miss to be confirmed, because a permanent graphic is
+legitimately down for the seconds a swap takes and an alert on every such
+moment is one nobody reads. It says so once, and once more when the graphic
+returns. A layer the engine did not answer for says nothing about what is on
+it, so it is left alone. It costs no extra request: it reads the layer sweep
+the Cinegy watchdog already performs.
+
+The log also now records where a bulletin took its timing from - the engine's
+clock or the bridge's. It logged the refusal of an anchor but never its
+acceptance, so "anchored" and "the engine said nothing, we fell back" looked
+identical from outside. A feature whose claim is millisecond accuracy has to
+report what it actually did.
+
 ## Version 7.61.0
 
 Unreferenced bulletin pictures are kept for forty-eight hours rather than

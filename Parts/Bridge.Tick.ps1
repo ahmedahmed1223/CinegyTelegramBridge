@@ -1012,6 +1012,80 @@ function Get-CinegyStateCheckInterval {
     return [Math]::Max($interval, [int]$script:RuntimeState.Monitoring.CinegyStateBackoffSeconds)
 }
 
+function Get-BridgePermanentGraphics {
+    <#
+        The graphics that are meant to be on air all the time.
+
+        Declared already, and nowhere new: a template marked longRunning is one
+        nobody expects to take down - the channel logo, the news strip - which
+        is exactly the set worth noticing the absence of. A second setting
+        listing them again would be a second place to forget.
+    #>
+    $store = Get-TemplateStore
+    $graphics = foreach ($key in @($store.Order)) {
+        $template = $store.Map[$key]
+        if (-not [bool](Get-JsonProp $template 'LongRunning')) { continue }
+        $layer = [int](Get-JsonProp $template 'Layer')
+        if ($layer -le 0) { continue }
+        [pscustomobject]@{ Key = [string]$key; Layer = $layer }
+    }
+    return @($graphics)
+}
+
+function Update-MissingGraphicWatchdog {
+    <#
+        Says when the logo or the strip is not on air.
+
+        Asked of Cinegy, never of onair.json: the point is to catch a graphic
+        that is gone, and it does not matter in the slightest whether it went
+        from this bot or from somebody's hand in Air. The bridge's own record
+        could only ever describe what the bridge itself did.
+
+        Confirmed before it speaks, because a permanent graphic is legitimately
+        down for the seconds it takes to replace one, and an alert on every
+        such moment is an alert nobody reads. It says so once when it goes and
+        once when it returns: a repeating alarm for a state somebody is already
+        dealing with is noise.
+    #>
+    param([object[]]$LayerStatuses = @())
+    if (-not (Get-Setting 'NotifyAdminsOnMissingGraphic')) { return }
+    $required = @(Get-BridgePermanentGraphics)
+    if ($required.Count -eq 0) { return }
+    # Reuse the sweep the layer watchdog has already paid for; read again only
+    # when it had nothing to hand over.
+    $statuses = @($LayerStatuses)
+    if ($statuses.Count -eq 0) { $statuses = @(Get-CinegyLayerDashboard) }
+    if ($statuses.Count -eq 0) { return }
+    $byLayer = @{}
+    foreach ($status in $statuses) {
+        $statusLayer = 0
+        if ([int]::TryParse([string](Get-JsonProp $status 'Layer'), [ref]$statusLayer)) { $byLayer[$statusLayer] = $status }
+    }
+    $threshold = [math]::Max(1, (Get-SettingInt 'MissingGraphicConfirmChecks' 2))
+    foreach ($graphic in $required) {
+        $status = $byLayer[[int]$graphic.Layer]
+        # An engine that did not answer is not a graphic that is missing.
+        if (-not $status -or -not [bool](Get-JsonProp $status 'Success')) { continue }
+        $key = [string]$graphic.Key
+        $state = if ($script:MissingGraphicState.ContainsKey($key)) { $script:MissingGraphicState[$key] } else { @{ Misses = 0; Alerted = $false } }
+        if ([bool](Get-JsonProp $status 'IsOnAir')) {
+            if ([bool]$state.Alerted) {
+                Send-AdminBroadcast -Text "✅ عاد «$key» إلى الهواء على $(Get-LayerDisplayName -Layer ([int]$graphic.Layer))." | Out-Null
+                Write-BridgeLog "The permanent graphic '$key' is back on layer $($graphic.Layer)."
+            }
+            $script:MissingGraphicState[$key] = @{ Misses = 0; Alerted = $false }
+            continue
+        }
+        $state.Misses = [int]$state.Misses + 1
+        if (-not [bool]$state.Alerted -and [int]$state.Misses -ge $threshold) {
+            $state.Alerted = $true
+            Write-BridgeLog "The permanent graphic '$key' is not on air on layer $($graphic.Layer) after $($state.Misses) check(s)." 'WARN'
+            Send-AdminBroadcast -Text "⚠️ «$key» ليس على الهواء على $(Get-LayerDisplayName -Layer ([int]$graphic.Layer)).`nيُفترض أن يبقى دائمًا؛ أعِده من 📋 القوالب أو من 🎚 الطبقات." | Out-Null
+        }
+        $script:MissingGraphicState[$key] = $state
+    }
+}
+
 function Update-CinegyStateWatchdog {
     $now = Get-Date
     if (($now - $script:RuntimeState.Monitoring.LastCinegyStateCheck).TotalSeconds -lt (Get-CinegyStateCheckInterval)) { return }
@@ -1026,6 +1100,8 @@ function Update-CinegyStateWatchdog {
     $layerStatuses = if ($discover) { @(Get-CinegyLayerDashboard) } else { @() }
     $sync = Update-OnAirStateFromCinegy -Reason 'watchdog' -LayerStatuses $layerStatuses `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal:$discover
+    # Handed the sweep this function has already paid for.
+    Update-MissingGraphicWatchdog -LayerStatuses $layerStatuses
 
     # A layer that could not be verified means the engine did not answer. With
     # nothing tracked there is no request to fail, which counts as reachable.

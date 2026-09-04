@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.61.0'
+$script:BridgeVersion = '7.62.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -142,6 +142,8 @@ $script:DefaultSettings = [ordered]@{
     AnnouncementDefaultExpiryHours = 24  # how long a notice stays live when no other span is chosen
     NotifyAdminsOnAccessRequest = $true  # tell the admins when somebody asks for access
     NotifyAdminsOnBlockedChat  = $true   # and when the guard blocks one, which is otherwise silent
+    NotifyAdminsOnMissingGraphic = $true # and when a permanently-on-air graphic (logo, strip) is not on air
+    MissingGraphicConfirmChecks = 2      # consecutive checks before saying so, so a swap does not raise one
     BlockRejectedRequesters    = $true   # a rejected chat may not queue up again
     JoinSecret                 = ''      # when set, a stranger must send it before any admin sees a request
     JoinSecretMaxAttempts      = 3       # wrong codes allowed in a day before the chat is blocked
@@ -449,6 +451,8 @@ $script:SettingDisplayMetadata = @{
     AnnouncementMaxLength = @{ Unit = 'حرف'; Description = 'أقصى طول لنص التنويه' }
     AnnouncementDefaultExpiryHours = @{ Unit = 'ساعة'; Description = 'المدة الافتراضية لبقاء التنويه نشطًا قبل أن ينتهي وحده' }
     NotifyAdminsOnAccessRequest = @{ Unit = ''; Description = 'إشعار المشرفين بكل طلب وصول جديد. أطفئه لتقرأ الطلبات من 👤 طلبات الوصول وحدها' }
+    NotifyAdminsOnMissingGraphic = @{ Unit = ''; Description = 'تنبيه المشرفين حين لا يكون قالب دائم (اللوغو، الشريط) على الهواء. يُسأل Cinegy مباشرة، فيُكشف الغياب سواء أُخفي من البوت أو من خارجه' }
+    MissingGraphicConfirmChecks = @{ Unit = 'فحص'; Description = 'عدد الفحوص المتتالية قبل الإبلاغ عن غياب قالب دائم، حتى لا يُنبَّه أثناء استبدال يستغرق ثوانٍ' }
     NotifyAdminsOnBlockedChat = @{ Unit = ''; Description = 'إشعار المشرفين حين يحظر الحارس محادثة تلقائيًا. والحظر يبقى صامتًا تجاه المحظور دائمًا' }
     BlockRejectedRequesters = @{ Unit = ''; Description = 'رفض الطلب يحظر المحادثة نهائيًا فلا تستطيع الطلب مجددًا. ارفع الحظر من 🚫 المحظورون' }
     JoinSecret = @{ Unit = ''; Description = 'رمز يُطلب من الغريب قبل أن يصل طلبه إلى المشرفين. اتركه فارغًا لتعطيل الرمز، وأرسل - لمسحه' }
@@ -606,6 +610,9 @@ $script:PollTimeoutStreak = 0
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
 $script:LastMojazImageSweep = $null
+# Whether each permanently-on-air graphic is missing, and whether that
+# has already been said. Keyed by template.
+$script:MissingGraphicState = @{}
 # Notices an administrator wrote for everybody else.
 $script:Announcements = [System.Collections.Generic.List[object]]::new()
 $script:LastAnnouncementSweep = $null
@@ -1091,6 +1098,7 @@ foreach ($entry in @(
                 'EnableAnnouncements', 'AnnouncementMaxLength', 'AnnouncementDefaultExpiryHours',
                 'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd',
                 'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat',
+                'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks',
                 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
                 'NotifyAdminsOnCinegyHealth', 'NotifyOperatorsOnBlackOutput',
                 'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes',
@@ -1179,6 +1187,8 @@ $script:SettingNavigationLabels = @{
     AnnouncementDefaultExpiryHours = 'مدة التنويه الافتراضية'
     NotifyAdminsOnAccessRequest = 'إشعار طلبات الوصول'
     NotifyAdminsOnBlockedChat = 'إشعار الحظر التلقائي'
+    NotifyAdminsOnMissingGraphic = 'تنبيه غياب قالب دائم'
+    MissingGraphicConfirmChecks = 'فحوص تأكيد الغياب'
     BlockRejectedRequesters = 'حظر من رُفض طلبه'
     JoinSecret = 'رمز الانضمام'
     JoinSecretMaxAttempts = 'محاولات رمز الانضمام'

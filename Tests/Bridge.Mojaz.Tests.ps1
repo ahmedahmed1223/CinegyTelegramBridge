@@ -1939,3 +1939,59 @@ Describe 'Timing the bulletin from the engine rather than the bridge' {
         Get-MojazAirClockOffset -StartedAtUtc $null -Now $now | Should -Be 0
     }
 }
+
+Describe 'The timing anchor reports what it did' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Write-AuditRecord {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Write-BridgeLog { }
+        $config.Settings | Add-Member -NotePropertyName 'MojazAnchorToAirClock' -NotePropertyValue $true -Force
+        $script:MojazPlayback = $null
+        New-TestMojazLibrary -DelaySeconds 4 -Rows @((New-TestMojazRow -Title 'أول'), (New-TestMojazRow -Title 'ثانٍ')) | Out-Null
+    }
+    AfterAll { $script:MojazPlayback = $null; Clear-MojazPlaybackState }
+
+    It 'records the offset it applied when the engine gives a start moment' {
+        # The engine says the scene began 600ms ago - the SHOW round trip -
+        # so the run is timed from there and the log says so.
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{A}'
+                ActiveXml = '<Item Id="{A}" LogId="{B}" ScheduledAt="' + [datetime]::UtcNow.AddMilliseconds(-600).ToString('yyyy-MM-ddTHH:mm:ss.fffZ') + '" />' }
+        }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        [double]$script:MojazPlayback.ClockOffset | Should -BeGreaterThan 0.4
+        [double]$script:MojazPlayback.ClockOffset | Should -BeLessThan 1.0
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Message -match "timed from Cinegy" }
+    }
+
+    It 'says plainly when it fell back to the local clock' {
+        # Silence here is what made "anchored" and "fell back" look identical
+        # from outside.
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{A}'; ActiveXml = '<Item Id="{A}" />' } }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        [double]$script:MojazPlayback.ClockOffset | Should -Be 0
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Message -match "timed from the bridge" }
+    }
+
+    It 'keeps the engine start with the run, so a restart can use it' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{A}'
+                ActiveXml = '<Item Id="{A}" LogId="{B}" ScheduledAt="' + [datetime]::UtcNow.AddMilliseconds(-400).ToString('yyyy-MM-ddTHH:mm:ss.fffZ') + '" />' }
+        }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
+
+        [string]$script:MojazPlayback.AirStartedAt | Should -Not -BeNullOrEmpty
+    }
+}

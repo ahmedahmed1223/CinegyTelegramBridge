@@ -1708,3 +1708,85 @@ Describe 'What came off air is named and quoted' {
         }
     }
 }
+
+Describe 'Noticing that the logo or the strip is gone' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-AdminBroadcast { $true }
+        Mock Get-LayerDisplayName { "طبقة $Layer" }
+        $script:MissingGraphicState = @{}
+        $config.Settings | Add-Member -NotePropertyName 'NotifyAdminsOnMissingGraphic' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'MissingGraphicConfirmChecks' -NotePropertyValue 2 -Force
+        Mock Get-TemplateStore {
+            @{
+                Order = @('logo', 'News-Ticker', 'Urgent')
+                Map = @{
+                    'logo' = @{ Key = 'logo'; Layer = 9; LongRunning = $true }
+                    'News-Ticker' = @{ Key = 'News-Ticker'; Layer = 8; LongRunning = $true }
+                    # Not permanent: nobody expects it to sit there.
+                    'Urgent' = @{ Key = 'Urgent'; Layer = 7; LongRunning = $false }
+                }
+            }
+        }
+    }
+
+    function global:New-TestLayerState {
+        param([int]$Layer, [bool]$OnAir = $true, [bool]$Success = $true)
+        [pscustomobject]@{ Layer = $Layer; Success = $Success; IsOnAir = $OnAir }
+    }
+
+    It 'counts only the templates declared permanent' {
+        @(Get-BridgePermanentGraphics).Key | Should -Be @('logo', 'News-Ticker')
+    }
+
+    It 'stays quiet while both are up' {
+        Update-MissingGraphicWatchdog -LayerStatuses @((New-TestLayerState -Layer 9), (New-TestLayerState -Layer 8))
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'waits for the miss to be confirmed before saying anything' {
+        # A permanent graphic is legitimately down for the seconds a swap
+        # takes, and an alert on every such moment is one nobody reads.
+        $gone = @((New-TestLayerState -Layer 9 -OnAir $false), (New-TestLayerState -Layer 8))
+
+        Update-MissingGraphicWatchdog -LayerStatuses $gone
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+
+        Update-MissingGraphicWatchdog -LayerStatuses $gone
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'logo' -and $Text -match 'ليس على الهواء' }
+    }
+
+    It 'says it once, not on every check afterwards' {
+        $gone = @((New-TestLayerState -Layer 9 -OnAir $false), (New-TestLayerState -Layer 8))
+        1..6 | ForEach-Object { Update-MissingGraphicWatchdog -LayerStatuses $gone }
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'says so again when it comes back' {
+        $gone = @((New-TestLayerState -Layer 9 -OnAir $false), (New-TestLayerState -Layer 8))
+        1..2 | ForEach-Object { Update-MissingGraphicWatchdog -LayerStatuses $gone }
+
+        Update-MissingGraphicWatchdog -LayerStatuses @((New-TestLayerState -Layer 9), (New-TestLayerState -Layer 8))
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'عاد' }
+    }
+
+    It 'treats an engine that did not answer as no news, not as missing' {
+        # The layer read failed; that says nothing about what is on it.
+        $unknown = @((New-TestLayerState -Layer 9 -OnAir $false -Success $false), (New-TestLayerState -Layer 8))
+        1..5 | ForEach-Object { Update-MissingGraphicWatchdog -LayerStatuses $unknown }
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'ignores a template nobody said was permanent' {
+        $gone = @((New-TestLayerState -Layer 9), (New-TestLayerState -Layer 8), (New-TestLayerState -Layer 7 -OnAir $false))
+        1..4 | ForEach-Object { Update-MissingGraphicWatchdog -LayerStatuses $gone }
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'says nothing at all when the option is off' {
+        $config.Settings | Add-Member -NotePropertyName 'NotifyAdminsOnMissingGraphic' -NotePropertyValue $false -Force
+        $gone = @((New-TestLayerState -Layer 9 -OnAir $false), (New-TestLayerState -Layer 8 -OnAir $false))
+        1..4 | ForEach-Object { Update-MissingGraphicWatchdog -LayerStatuses $gone }
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}

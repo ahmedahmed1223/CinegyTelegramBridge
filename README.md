@@ -13,6 +13,41 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.59.0
+
+A bulletin on air now survives a restart of the bridge. Reported as "the last
+one stuck looping on story eight and I had to take it off by hand"; the log
+said the bridge had been restarted three minutes and forty seconds into a five
+minute run, which at thirty seconds a row is story eight. Cinegy knew nothing
+about that, so the scene stayed exactly where it was, looping - what died was
+the plan that walks the rows and sends the EXIT.
+
+Everything else the bridge holds already survived a restart: what is on air,
+the auto-hide timers, the template reminders, the schedule. The bulletin
+playback was the one exception. It is now written when a run starts and
+dropped when it ends, and on startup a run still within its time is picked up
+at the row the clock says - the plan holds absolute moments from the start, so
+elapsed time alone says which row is due and the run rejoins its own schedule
+rather than restarting. Past its exit it is taken off instead. If the layer no
+longer belongs to the bulletin nothing is touched, because somebody dealt with
+it while the bridge was down and acting there would remove whatever replaced
+it.
+
+An operator can also set the exit outright. A video report is one story, not a
+list: it has nothing to walk through, and asking somebody to express "keep it
+up for forty seconds" as a row dwell plus an intro plus a last-row hold is
+asking them to do arithmetic to say something simple. Zero leaves the row
+timing in charge, which is every bulletin that exists today. And an uploaded
+clip that knows its own length supplies that duration when none was typed -
+never over one that was.
+
+Behind an option that ships off, the bridge now reads a design's fields out of
+the scene file itself rather than from a hand-written mirror that drifts
+silently. Two rules I had written and got wrong were corrected with it: a
+design need not have a title and a story, since a video-only design is a
+perfectly good bulletin, and it need not have a loop, since one carrying a
+single story enters, plays and leaves.
+
 ## Version 7.58.0
 
 Announcements. An administrator writes a notice and it reaches whoever they

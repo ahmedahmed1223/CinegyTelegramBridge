@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.65.0
+
+The manager's live log now highlights the timestamp, level, Air operation id,
+layer and result without exposing settings secrets. Its display queue is bounded
+and drained in short batches, so a burst cannot freeze the UI; warnings and
+errors run ahead of ordinary output, very long display lines are shortened, and
+filtering waits briefly for typing to pause.
+
+Telegram's 429 retry outbox is also bounded to 200 messages and sends at most
+three due messages per poll cycle, prioritising warning/error notifications.
+This keeps long-running monitoring and scheduled work responsive after a flood
+limit clears. The settings window is resizable on short screens, and its manual
+config editor is unavailable while the bridge owns `config.json`.
+
 ## Version 7.64.0
 
 This reliability release rechecks authorization at the final step of pending

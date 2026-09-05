@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -60,6 +61,11 @@ internal sealed class ManagerSettings
 /// <summary>How a log line should read at a glance. Pure classification, so `--selftest` can check it.</summary>
 internal enum LogLineKind { Manager, Error, Warning, Debug, Normal }
 
+/// <summary>Semantic pieces of a bridge log line that deserve a separate colour.</summary>
+internal enum LogHighlightKind { Timestamp, Level, OperationId, Layer, Success, Failure }
+internal readonly record struct LogHighlight(int Start, int Length, LogHighlightKind Kind, string Text);
+internal readonly record struct PendingDrainPlan(int ProcessNow, bool KeepWarningAndError);
+
 public sealed class MainForm : Form
 {
     private readonly RichTextBox _output;
@@ -94,6 +100,7 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _watchdogTimer;
     private readonly System.Windows.Forms.Timer _clockTimer;
     private readonly System.Windows.Forms.Timer _startupTimer;
+    private readonly System.Windows.Forms.Timer _filterTimer;
 
     private readonly ManagerSettings _settings;
     private Process? _bridgeProcess;
@@ -114,8 +121,18 @@ public sealed class MainForm : Form
     // filter box can re-render a subset without losing what came before - and
     // so the line count is counted rather than estimated.
     private readonly List<string> _lines = new();
-    private readonly ConcurrentQueue<string> _pending = new();
+    private readonly ConcurrentQueue<string> _pendingPriority = new();
+    private readonly ConcurrentQueue<string> _pendingInformational = new();
+    private readonly object _pendingGate = new();
     private const int MaxOutputLines = 3000;
+    private const int MaxPendingInformationalLines = 8000;
+    private const int MaxPendingPriorityLines = 2000;
+    private const int MaxLinesPerUiDrain = 300;
+    private const int MaxDisplayedLineLength = 8192;
+    private int _pendingInformationalCount;
+    private int _pendingPriorityCount;
+    private int _droppedInformationalLines;
+    private int _droppedPriorityLines;
 
     // Crash-loop breaker: a bad config (bad token, unreachable engine) makes the
     // bridge exit within seconds of every launch. Without a cap, auto-restart
@@ -194,25 +211,21 @@ public sealed class MainForm : Form
         _header.Controls.Add(_accentBar);
 
         // ---- action bar: three things that change the air, then the rest ---
-        _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
-        _startButton = Theme.PrimaryButton("▶  تشغيل", () => Theme.Running);
+        _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
+        _startButton = Theme.PrimaryButton("تشغيل", () => Theme.Running);
         _startButton.Width = 118;
-        _stopButton = Theme.PrimaryButton("⏹  إيقاف", () => Theme.Stopped);
+        _stopButton = Theme.PrimaryButton("إيقاف", () => Theme.Stopped);
         _stopButton.Width = 118;
         _stopButton.Enabled = false;
-        _restartButton = Theme.PrimaryButton("♻  إعادة تشغيل", () => Theme.Pending);
+        _restartButton = Theme.PrimaryButton("إعادة تشغيل", () => Theme.Pending);
         _restartButton.Width = 140;
         _restartButton.Enabled = false;
 
-        // A gap, not a divider: the eye groups by spacing before it groups by
-        // lines, and this is the seam between "changes the air" and "does not".
-        var gap = new Panel { Width = 22, Height = 1, BackColor = Color.Transparent, Margin = new Padding(0) };
-
-        var settingsButton = Theme.QuietButton("⚙  الإعدادات");
+        var settingsButton = Theme.QuietButton("الإعدادات");
         settingsButton.Width = 120;
-        var logsButton = Theme.QuietButton("📁  مجلد السجلات");
+        var logsButton = Theme.QuietButton("مجلد السجلات");
         logsButton.Width = 140;
-        var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
+        var clearButton = Theme.QuietButton("مسح الشاشة");
         clearButton.Width = 130;
 
         _tips.SetToolTip(_startButton, "يشغّل TelegramBridge.ps1 ويتابعه.");
@@ -229,21 +242,28 @@ public sealed class MainForm : Form
         logsButton.Click += (_, _) => OpenLogsFolder();
         clearButton.Click += (_, _) => ClearOutput();
 
-        _actionBar.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton, gap, settingsButton, logsButton, clearButton });
+        // Keep each group intact when the manager reaches its minimum width.
+        // A lone "clear" control beside a live stop button is too easy to misread
+        // during an on-air incident.
+        var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
+        operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
+        var utilityActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 6) };
+        utilityActions.Controls.AddRange(new Control[] { settingsButton, logsButton, clearButton });
+        _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
 
         // ---- options: switches, which are not actions ----------------------
         _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
         _autoRestartCheck = Theme.ToggleChip("إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
         _autoRestartCheck.Checked = _settings.AutoRestart;
-        _watchdogCheck = Theme.ToggleChip("🩺 كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
+        _watchdogCheck = Theme.ToggleChip("كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
         _watchdogCheck.Checked = _settings.HangWatchdog;
-        _startWithWindowsCheck = Theme.ToggleChip("🔁 مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
+        _startWithWindowsCheck = Theme.ToggleChip("مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
         _startWithWindowsCheck.Checked = IsStartWithWindowsEnabled();
         _autoClearCheck = Theme.ToggleChip("مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم - لا يمسّ logs\bridge.log.", _tips);
         _autoClearCheck.Checked = _settings.AutoClearDaily;
         _wordWrapCheck = Theme.ToggleChip("التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
         _wordWrapCheck.Checked = _settings.WordWrap;
-        _darkModeCheck = Theme.ToggleChip("🌙 الوضع الليلي",
+        _darkModeCheck = Theme.ToggleChip("الوضع الليلي",
             "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
         _darkModeCheck.Checked = _settings.DarkMode;
         _optionsBar.Controls.AddRange(new Control[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck, _autoClearCheck, _wordWrapCheck, _darkModeCheck });
@@ -252,7 +272,9 @@ public sealed class MainForm : Form
         _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
         var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false };
         _filterBox = Theme.Input(300);
-        _filterBox.PlaceholderText = "🔎  تصفية الأسطر…  (Ctrl+F)";
+        _filterBox.PlaceholderText = "تصفية الأسطر…  (Ctrl+F)";
+        _filterBox.AccessibleName = "تصفية السجل";
+        _filterBox.AccessibleDescription = "يبحث في النص المعروض من سجل الجسر.";
         _errorsOnlyCheck = Theme.ToggleChip("الأخطاء والتحذيرات فقط", "يخفي كل ما عدا أسطر [ERROR] و[WARN].", _tips);
         _errorsOnlyCheck.Margin = new Padding(12, 0, 0, 0);
         _filterBox.Margin = new Padding(0, 5, 0, 0);
@@ -301,7 +323,9 @@ public sealed class MainForm : Form
             _settings.WordWrap = _wordWrapCheck.Checked;
             _settings.Save();
         };
-        _filterBox.TextChanged += (_, _) => RenderAll();
+        _filterTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        _filterTimer.Tick += (_, _) => { _filterTimer.Stop(); RenderAll(); };
+        _filterBox.TextChanged += (_, _) => { _filterTimer.Stop(); _filterTimer.Start(); };
         _errorsOnlyCheck.CheckedChanged += (_, _) => RenderAll();
         KeyPreview = true;
         KeyDown += (_, e) =>
@@ -473,7 +497,7 @@ public sealed class MainForm : Form
         UpdateStatusBar();
         // An empty black pane tells a new operator nothing. One muted line
         // costs nothing and answers "what now?".
-        if (!_autoStartBridge) AppendLine("--- جاهز. اضغط ▶ تشغيل لبدء الجسر. ---");
+        if (!_autoStartBridge) AppendLine("--- جاهز. اضغط تشغيل لبدء الجسر. ---");
         if (!EnsureBridgeScriptResolved()) return;
         UpdateStatusBar();
         LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : "")}.");
@@ -677,7 +701,7 @@ public sealed class MainForm : Form
 
         if (_consecutiveQuickFailures >= MaxQuickFailures)
         {
-            AppendLine($"--- توقف {_consecutiveQuickFailures} مرات متتالية خلال ثوانٍ من كل تشغيل - تم إيقاف إعادة التشغيل التلقائي. راجع الإعدادات ثم اضغط ▶ تشغيل يدويًا. ---");
+            AppendLine($"--- توقف {_consecutiveQuickFailures} مرات متتالية خلال ثوانٍ من كل تشغيل - تم إيقاف إعادة التشغيل التلقائي. راجع الإعدادات ثم اضغط تشغيل يدويًا. ---");
             LogEvent($"توقف متكرر ({_consecutiveQuickFailures} مرات) - تم إيقاف إعادة التشغيل التلقائي.");
             SetHeader("فشل متكرر", Theme.Stopped, "توقف الجسر مرارًا خلال ثوانٍ من كل تشغيل - إعادة التشغيل التلقائي متوقفة.");
             _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
@@ -949,23 +973,23 @@ public sealed class MainForm : Form
     {
         var filtering = _errorsOnlyCheck.Checked || !string.IsNullOrWhiteSpace(_filterBox.Text);
         _lineCountLabel.Text = filtering
-            ? $"📄 معروض {_lines.Count(l => ShouldShow(l, _filterBox.Text, _errorsOnlyCheck.Checked))} من {_lines.Count}"
-            : $"📄 {_lines.Count} سطرًا";
+            ? $"المعروض: {_lines.Count(l => ShouldShow(l, _filterBox.Text, _errorsOnlyCheck.Checked))} من {_lines.Count}"
+            : $"الأسطر: {_lines.Count}";
 
-        if (!_watchdogCheck.Checked) _livenessLabel.Text = "🩺 كشف التعليق: معطّل";
-        else if (!_running) _livenessLabel.Text = "🩺 كشف التعليق: مفعّل";
+        if (!_watchdogCheck.Checked) _livenessLabel.Text = "كشف التعليق: معطّل";
+        else if (!_running) _livenessLabel.Text = "كشف التعليق: مفعّل";
         else
         {
             var stamp = ReadLivenessStamp();
             if (stamp is not null) _lastLivenessSeen = stamp;
             _livenessLabel.Text = _lastLivenessSeen is null || _lastLivenessSeen < _lastStartAt
-                ? "🩺 بانتظار أول نبضة…"
-                : $"🩺 آخر نبضة قبل {FormatSpan(DateTime.UtcNow - _lastLivenessSeen.Value)}";
+                ? "كشف التعليق: بانتظار أول نبضة…"
+                : $"آخر نبضة: قبل {FormatSpan(DateTime.UtcNow - _lastLivenessSeen.Value)}";
         }
 
         _pathLabel.Text = string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)
-            ? "📂 لم يُحدَّد مسار الجسر بعد"
-            : $"📂 {BridgeRoot}";
+            ? "مسار الجسر: غير محدد"
+            : $"مسار الجسر: {BridgeRoot}";
     }
 
     /// <summary>
@@ -1003,6 +1027,43 @@ public sealed class MainForm : Form
         _ => Theme.LogNormal
     };
 
+    private static Color ColorFor(LogHighlightKind kind) => kind switch
+    {
+        LogHighlightKind.Timestamp => Theme.LogTimestamp,
+        LogHighlightKind.Level => Theme.LogLevel,
+        LogHighlightKind.OperationId => Theme.LogOperation,
+        LogHighlightKind.Layer => Theme.LogField,
+        LogHighlightKind.Success => Theme.Running,
+        LogHighlightKind.Failure => Theme.LogError,
+        _ => Theme.LogNormal
+    };
+
+    internal static IReadOnlyList<LogHighlight> GetLogHighlights(string line)
+    {
+        var highlights = new List<LogHighlight>();
+        AddMatches(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", LogHighlightKind.Timestamp);
+        AddMatches(@"\[(?:ERROR|WARN|INFO|DEBUG)\]", LogHighlightKind.Level);
+        AddMatches(@"\bair-[a-f0-9]{8,}\b", LogHighlightKind.OperationId);
+        AddMatches(@"\b(?:layer|طبقة)\s*[=:]?\s*\d+", LogHighlightKind.Layer);
+        AddMatches(@"\b(?:success|succeeded|healthy|running)\b", LogHighlightKind.Success);
+        AddMatches(@"\b(?:failed|failure|blocked|error|timeout|unhealthy)\b", LogHighlightKind.Failure);
+        return highlights;
+
+        void AddMatches(string pattern, LogHighlightKind kind)
+        {
+            foreach (Match match in Regex.Matches(line, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                highlights.Add(new LogHighlight(match.Index, match.Length, kind, match.Value));
+        }
+    }
+
+    internal static PendingDrainPlan GetPendingDrainPlan(int pendingCount, int warningCount, int errorCount) =>
+        new(Math.Min(Math.Max(0, pendingCount), MaxLinesPerUiDrain), warningCount > 0 || errorCount > 0);
+
+    internal static string LimitDisplayedLogLine(string line) =>
+        line.Length <= MaxDisplayedLineLength
+            ? line
+            : line[..MaxDisplayedLineLength] + " … [السطر قُصّر في العرض؛ راجع bridge.log للنص الكامل]";
+
     /// <summary>Pure, so `--selftest` can pin it: an empty filter shows everything.</summary>
     internal static bool ShouldShow(string line, string filter, bool errorsOnly)
     {
@@ -1015,20 +1076,52 @@ public sealed class MainForm : Form
         return line.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Queues a line from any thread. The UI pump picks it up on the next tick.</summary>
-    private void AppendLine(string line) => _pending.Enqueue(line);
+    /// <summary>Queues a line from any thread without letting a noisy INFO burst own the UI's memory.</summary>
+    private void AppendLine(string line)
+    {
+        line = LimitDisplayedLogLine(line);
+        var kind = ClassifyLine(line);
+        var priority = kind is LogLineKind.Error or LogLineKind.Warning or LogLineKind.Manager;
+        var queue = priority ? _pendingPriority : _pendingInformational;
+        var limit = priority ? MaxPendingPriorityLines : MaxPendingInformationalLines;
+        lock (_pendingGate)
+        {
+            var count = priority ? _pendingPriorityCount : _pendingInformationalCount;
+            if (count >= limit)
+            {
+                // Keep the newest operating evidence. The full bridge log remains
+                // on disk; this is only the bounded, live dashboard scrollback.
+                queue.TryDequeue(out _);
+                if (priority) _droppedPriorityLines++;
+                else _droppedInformationalLines++;
+            }
+            else if (priority) _pendingPriorityCount++;
+            else _pendingInformationalCount++;
+            queue.Enqueue(line);
+        }
+    }
 
     private void DrainPending()
     {
-        if (IsDisposed || _pending.IsEmpty) return;
+        if (IsDisposed) return;
 
         var filter = _filterBox.Text;
         var errorsOnly = _errorsOnlyCheck.Checked;
         var appended = false;
         var trimNeeded = false;
 
-        while (_pending.TryDequeue(out var line))
+        int pendingCount;
+        int priorityCount;
+        lock (_pendingGate)
         {
+            pendingCount = _pendingPriorityCount + _pendingInformationalCount;
+            priorityCount = _pendingPriorityCount;
+        }
+        var plan = GetPendingDrainPlan(pendingCount, warningCount: priorityCount, errorCount: 0);
+        var processed = 0;
+        while (processed < plan.ProcessNow && TryDequeuePending(out var line))
+        {
+            processed++;
             _lines.Add(line);
             if (_lines.Count > MaxOutputLines) trimNeeded = true;
             if (ShouldShow(line, filter, errorsOnly)) { WriteLine(line); appended = true; }
@@ -1041,6 +1134,21 @@ public sealed class MainForm : Form
             return;
         }
 
+        int droppedPriority;
+        int droppedInformational;
+        lock (_pendingGate)
+        {
+            droppedPriority = _droppedPriorityLines;
+            droppedInformational = _droppedInformationalLines;
+            _droppedPriorityLines = 0;
+            _droppedInformationalLines = 0;
+        }
+        if (droppedPriority + droppedInformational > 0)
+        {
+            var summary = $"--- خفّض المدير ضغط السجل: حُذفت {droppedInformational} رسالة معلومات و{droppedPriority} رسالة تحذير/خطأ قديمة من العرض. السجل الكامل محفوظ في bridge.log. ---";
+            _lines.Add(summary);
+            if (ShouldShow(summary, filter, errorsOnly)) { WriteLine(summary); appended = true; }
+        }
         if (appended)
         {
             _output.SelectionStart = _output.TextLength;
@@ -1049,12 +1157,40 @@ public sealed class MainForm : Form
         UpdateStatusBar();
     }
 
+    private bool TryDequeuePending(out string line)
+    {
+        lock (_pendingGate)
+        {
+            if (_pendingPriority.TryDequeue(out line!))
+            {
+                _pendingPriorityCount--;
+                return true;
+            }
+            if (_pendingInformational.TryDequeue(out line!))
+            {
+                _pendingInformationalCount--;
+                return true;
+            }
+        }
+        line = string.Empty;
+        return false;
+    }
+
     private void WriteLine(string line)
     {
-        _output.SelectionStart = _output.TextLength;
+        var start = _output.TextLength;
+        _output.SelectionStart = start;
         _output.SelectionLength = 0;
         _output.SelectionColor = ColorFor(ClassifyLine(line));
         _output.AppendText(line + Environment.NewLine);
+        foreach (var highlight in GetLogHighlights(line))
+        {
+            _output.SelectionStart = start + highlight.Start;
+            _output.SelectionLength = highlight.Length;
+            _output.SelectionColor = ColorFor(highlight.Kind);
+        }
+        _output.SelectionStart = _output.TextLength;
+        _output.SelectionLength = 0;
     }
 
     private void RenderAll()
@@ -1089,6 +1225,15 @@ public sealed class MainForm : Form
     {
         _lines.Clear();
         _output.Clear();
+        lock (_pendingGate)
+        {
+            while (_pendingPriority.TryDequeue(out _)) { }
+            while (_pendingInformational.TryDequeue(out _)) { }
+            _pendingPriorityCount = 0;
+            _pendingInformationalCount = 0;
+            _droppedPriorityLines = 0;
+            _droppedInformationalLines = 0;
+        }
         UpdateStatusBar();
     }
 
@@ -1187,6 +1332,8 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
+            _filterTimer.Stop();
+            _filterTimer.Dispose();
             // A NotifyIcon that is never disposed leaves a dead icon sitting in
             // the tray until the mouse happens to pass over it.
             _trayIcon.Visible = false;

@@ -59,9 +59,10 @@ function Save-UserProfiles {
     if (-not $script:UserProfilesDirty) { return $true }
     if (-not $Force -and ((Get-Date) - $script:LastUserProfilesFlush).TotalSeconds -lt 60) { return $true }
     try {
-        $temporary = "$($script:userProfilesFile).tmp"
-        $script:UserProfiles | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:userProfilesFile -Force -ErrorAction Stop
+        $json = $script:UserProfiles | ConvertTo-Json -Depth 5
+        if (-not (Write-BridgeValidatedJson -Path $script:userProfilesFile -Json $json)) {
+            throw 'Validated JSON write failed.'
+        }
         $script:UserProfilesDirty = $false; $script:LastUserProfilesFlush = Get-Date
         return $true
     }

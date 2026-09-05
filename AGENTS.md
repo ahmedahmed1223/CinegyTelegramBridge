@@ -20,7 +20,7 @@
 |---|---|
 | `TelegramBridge.ps1` | نقطة الدخول: التهيئة المرتّبة، الإعدادات، حلقة الاستطلاع الطويل. **PowerShell 7**. |
 | `Parts/*.ps1` | تعريفات دوال تُحمَّل بـ dot-source داخل نطاق السكربت نفسه. **ليست وحدات**. |
-| `Modules/*.psm1` | منطق صافٍ قابل للاختبار وحده: لا Telegram ولا قرص ولا Cinegy. |
+| `Modules/*.psm1` | وحدات مجال وتخزين قابلة للاختبار وحدها؛ منطق المجال لا يتصل بـ Telegram أو Cinegy، ووحدات التخزين هي الاستثناء المعلن للقرص. |
 | `Tests/*.Tests.ps1` | Pester 5+. كل ملف يبدأ بـ `. (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')`. |
 | `Manager/BridgeManager/` | **برنامج التحكم**: تطبيق Windows Forms (C#/.NET) يشغّل الجسر ويوقفه، ويعرض السجل والحالة، ويحرّر الإعدادات دون فتح `config.json` بيد. |
 | `Run-Checks.ps1` | بوابة الإصدار: صحة التركيب + PSScriptAnalyzer + Pester. |
@@ -77,10 +77,11 @@ pwsh -File Run-Checks.ps1
 
 ### ملف حالة جديد
 
-اتبع نمط `logs/user-profiles.json` حرفيًا: متغيّر مسار في `TelegramBridge.ps1`،
-دالتا `Import-*` و`Save-*` في الجزء المناسب، كتابة إلى `.tmp` ثم `Move-Item -Force`،
-تواريخ بصيغة `'o'`، وقراءة كل حقل عبر `Get-JsonProp` (فـ `Set-StrictMode -Version
-Latest` يرمي على الخاصية الغائبة)، واستدعاء `Import-*` في كتلة التهيئة المرتّبة.
+اتبع نمط `logs/user-profiles.json`: متغيّر مسار في `TelegramBridge.ps1`، دالتا
+`Import-*` و`Save-*` في الجزء المناسب، وملف مؤقت **فريد** في المجلد نفسه ثم نسخة
+احتياطية صالحة واستبدال ذري، وتواريخ بصيغة `'o'`، وقراءة كل حقل عبر `Get-JsonProp`
+(فـ `Set-StrictMode -Version Latest` يرمي على الخاصية الغائبة)، واستدعاء `Import-*`
+في كتلة التهيئة المرتّبة.
 
 ## مصائد PowerShell التي كلّفتنا إصدارات
 
@@ -164,6 +165,9 @@ dotnet build Manager/BridgeManager/BridgeManager.csproj
 - **`logs/bridge.liveness`** نبضة يكتبها الجسر بعد كل دورة استطلاع ويقرؤها
   المدير لكشف التعليق. لا تجعل الكشف يعتمد على صمت السجل: الجسر السليم يصمت
   ١٠–١٨ ساعة كل ليلة، وقياس ذلك موجود في `CHANGELOG.md` تحت 7.63.0.
+- **السجل الحي محدود.** احتفظ بعدد ثابت من الأسطر المعروضة والمعلّقة، وفرّغ
+  دفعة محدودة في كل نبضة واجهة، وقدّم `WARN` و`ERROR` على `INFO` و`DEBUG`؛ لا
+  تلوّن نصًا حساسًا ولا تسجله لهذا الغرض. أضف اختبار `SelfTest` لكل سياسة جديدة.
 
 ## قبل أن تقول «تم»
 

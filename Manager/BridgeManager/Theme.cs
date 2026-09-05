@@ -47,6 +47,10 @@ internal static class Theme
     public static Color LogWarning => IsDark ? Color.FromArgb(240, 186, 88) : Color.FromArgb(148, 98, 8);
     public static Color LogDebug => IsDark ? Color.FromArgb(126, 126, 138) : Color.FromArgb(132, 138, 148);
     public static Color LogManager => IsDark ? Color.FromArgb(112, 178, 255) : Color.FromArgb(28, 105, 216);
+    public static Color LogTimestamp => IsDark ? Color.FromArgb(155, 155, 170) : Color.FromArgb(92, 98, 110);
+    public static Color LogLevel => IsDark ? Color.FromArgb(183, 149, 255) : Color.FromArgb(103, 63, 178);
+    public static Color LogOperation => IsDark ? Color.FromArgb(114, 207, 255) : Color.FromArgb(0, 104, 160);
+    public static Color LogField => IsDark ? Color.FromArgb(208, 208, 220) : Color.FromArgb(66, 70, 78);
 
     // ---- chip fills, which cannot simply be the accent in both modes ------
     // A dark-blue fill under dark text is unreadable on a light form, and a
@@ -215,11 +219,14 @@ internal static class Theme
             Margin = new Padding(0, 0, 8, 4),
             UseVisualStyleBackColor = false
         };
+        box.AccessibleName = text;
+        box.AccessibleRole = AccessibleRole.CheckButton;
         box.FlatAppearance.BorderSize = 1;
 
         void Apply()
         {
             var on = box.Checked;
+            box.Text = on ? "  ✓ " + text + "  " : "  " + text + "  ";
             box.BackColor = on ? ChipOnFill : Surface;
             box.ForeColor = on ? ChipOnFore : TextMuted;
             box.FlatAppearance.BorderColor = on ? Accent : Border;

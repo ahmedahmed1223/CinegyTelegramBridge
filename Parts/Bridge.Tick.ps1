@@ -430,6 +430,7 @@ function Get-BridgeStatsText {
     $lines.Add('')
     $lines.Add("عمليات الهواء: $total (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
     $lines.Add("رسائل رفضها Telegram لتجاوز الحد (429): $($script:TelegramRateLimitHits)")
+    $lines.Add("رسائل مؤجلة أسقطها حد طابور Telegram: $($script:TelegramOutboxDropped)")
     $lines.Add("اتصال Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)")
     $lines.Add("صحة Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState)")
 

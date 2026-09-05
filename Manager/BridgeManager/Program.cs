@@ -186,6 +186,20 @@ internal static class SelfTest
         Check("filter excludes a non-match", !MainForm.ShouldShow("2026 [INFO] Bridge starting", "ffmpeg", false));
         Check("errors-only hides INFO", !MainForm.ShouldShow("2026 [INFO] fine", "", true));
         Check("errors-only keeps WARN", MainForm.ShouldShow("2026 [WARN] careful", "", true));
+        Check("highlights the operation id without changing the surrounding text",
+            MainForm.GetLogHighlights("2026-09-05 [INFO] AIR_OP id=air-a8f9daa3 action=SHOW layer=4 result=success")
+                .Any(h => h.Kind == LogHighlightKind.OperationId && h.Text == "air-a8f9daa3"));
+        Check("highlights the error-bearing result",
+            MainForm.GetLogHighlights("2026-09-05 [ERROR] AIR_OP result=failed error=timeout")
+                .Any(h => h.Kind == LogHighlightKind.Failure));
+        Check("keeps queued warnings when a long burst must be reduced",
+            MainForm.GetPendingDrainPlan(pendingCount: 9000, warningCount: 3, errorCount: 2).KeepWarningAndError);
+        Check("caps one UI drain so a log burst cannot monopolise the message loop",
+            MainForm.GetPendingDrainPlan(pendingCount: 9000, warningCount: 0, errorCount: 0).ProcessNow < 9000);
+        Check("shortens a pathological log line before it reaches the UI buffer",
+            MainForm.LimitDisplayedLogLine(new string('x', 9000)).Contains("bridge.log", StringComparison.Ordinal));
+        Check("does not classify a token-shaped setting as a colourable log field",
+            MainForm.GetLogHighlights("BotToken=123456:AAExampleSecretValue").Count == 0);
 
         // --- hang detection -------------------------------------------------
         // Measured against this installation's own bridge.log, a healthy bridge

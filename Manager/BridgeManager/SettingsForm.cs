@@ -149,9 +149,10 @@ public sealed class SettingsForm : Form
         Text = "إعدادات الجسر";
         Width = 780;
         Height = 900;
+        MinimumSize = new Size(620, 560);
         StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         MinimizeBox = false;
         BackColor = Theme.Background;
         ForeColor = Theme.Text;
@@ -190,7 +191,7 @@ public sealed class SettingsForm : Form
 
         // ---- header --------------------------------------------------------
         var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
-        var headerHint = new Label { Dock = DockStyle.Top, Height = 18, Text = "هنا فقط ما لا يمكن تعديله من داخل البوت. باقي الإعدادات في ⚙️ الإعدادات داخل تيليجرام.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
+        var headerHint = new Label { Dock = DockStyle.Top, Height = 18, Text = "هنا فقط ما لا يمكن تعديله من داخل البوت. باقي الإعدادات في إعدادات تيليجرام.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
         var headerTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "إعدادات الجسر (config.json)", Font = Theme.SectionHeading, ForeColor = Theme.Text };
         header.Controls.Add(headerHint);
         header.Controls.Add(headerTitle);
@@ -233,7 +234,7 @@ public sealed class SettingsForm : Form
         layout.Controls.Add(Theme.Hint("حساب واحد في كل صف. حدّده ثم اضبط صلاحياته بالأزرار أسفل القائمة."));
 
         _newId.PlaceholderText = "الرقم التعريفي…";
-        var addButton = Theme.QuietButton("＋  أضف");
+        var addButton = Theme.QuietButton("أضف");
         addButton.Width = 110;
         addButton.Click += (_, _) => AddAccount();
         // Enter inside the id box adds a row instead of hitting the form's
@@ -270,7 +271,7 @@ public sealed class SettingsForm : Form
         _accounts.KeyDown += (_, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
         layout.Controls.Add(_accounts);
 
-        var removeButton = Theme.QuietButton("🗑  احذف المحدَّد");
+        var removeButton = Theme.QuietButton("احذف المحدَّد");
         removeButton.Width = 155;
         removeButton.Click += (_, _) => RemoveSelected();
         layout.Controls.Add(removeButton);
@@ -292,7 +293,7 @@ public sealed class SettingsForm : Form
         {
             layout.Controls.Add(new Label
             {
-                Text = "⚠  الجسر يعمل الآن. أربعًا من هذه الصلاحيات يديرها الجسر بنفسه،\n"
+                Text = "الجسر يعمل الآن. أربعًا من هذه الصلاحيات يديرها الجسر بنفسه،\n"
                      + "     فتعديلها يحتاج إعادة تشغيل ليثبت - وسيُعرض عليك ذلك عند الحفظ.",
                 AutoSize = true,
                 ForeColor = Theme.Pending,
@@ -314,6 +315,8 @@ public sealed class SettingsForm : Form
         cancelButton.DialogResult = DialogResult.Cancel;
         var openFileButton = Theme.QuietButton("فتح الملف في المفكرة");
         openFileButton.Width = 175;
+        openFileButton.Enabled = !_bridgeRunning;
+        if (_bridgeRunning) openFileButton.Text = "أوقف الجسر لفتح الملف";
 
         saveButton.Click += (_, _) => { if (Save(restarting: false)) DialogResult = DialogResult.OK; };
         saveRestartButton.Click += (_, _) => { if (Save(restarting: true)) { RestartRequested = true; DialogResult = DialogResult.OK; } };
@@ -333,6 +336,11 @@ public sealed class SettingsForm : Form
         CancelButton = cancelButton;
 
         Load += (_, _) => LoadValues();
+        Shown += (_, _) =>
+        {
+            var workingArea = Screen.FromControl(this).WorkingArea;
+            Size = new Size(Math.Min(Width, workingArea.Width), Math.Min(Height, workingArea.Height));
+        };
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -482,7 +490,7 @@ public sealed class SettingsForm : Form
             return;
         }
         _accountsSummary.Text = withNone > 0
-            ? $"{_model.Count} حسابًا — {joined}   ⚠ {withNone} بلا أي صلاحية"
+            ? $"{_model.Count} حسابًا — {joined}   {withNone} بلا أي صلاحية"
             : $"{_model.Count} حسابًا — {joined}";
         _accountsSummary.ForeColor = withNone > 0 ? Theme.Pending : Theme.TextMuted;
     }
@@ -526,7 +534,7 @@ public sealed class SettingsForm : Form
                 _botToken.Enabled = false;
                 _showToken.Enabled = false;
                 _botToken.PlaceholderText = "محمي بـ DPAPI";
-                _tokenNote.Text = "🔒 الرمز محمي بـ DPAPI ولا يُحرَّر من هنا - استخدم scripts\\Protect-BridgeSecrets.ps1.";
+                _tokenNote.Text = "الرمز محمي بـ DPAPI ولا يُحرَّر من هنا - استخدم scripts\\Protect-BridgeSecrets.ps1.";
                 _tokenNote.ForeColor = Theme.Running;
             }
             else

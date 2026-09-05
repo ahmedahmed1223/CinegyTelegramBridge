@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.64.0'
+$script:BridgeVersion = '7.65.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -799,6 +799,7 @@ $script:LastUsageFlush = [datetime]::MinValue
 # on air.
 $script:PendingState = @{}
 $script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
+$script:TelegramOutboxDropped = 0
 
 # Layer -> @{ ChatId; UserId; Key; StartedAt }. A lock exists only while an
 # operator is preparing a SHOW flow; it prevents two drafts racing toward the

@@ -987,6 +987,52 @@ Describe 'An overlong HTML message loses its markup, not its meaning' {
     }
 }
 
+Describe 'Telegram flood-limit outbox' {
+    BeforeEach {
+        $script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
+        $script:TelegramOutboxDropped = 0
+        Mock Write-BridgeLog { }
+    }
+
+    It 'makes room for a warning before it drops a warning' {
+        foreach ($number in 1..200) {
+            Add-TelegramOutboxItem -Body @{ chat_id = 101; text = "ordinary $number" } -DueAt (Get-Date).AddMinutes(1) -Attempts 0 | Out-Null
+        }
+
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = '⚠ urgent operator warning' } -DueAt (Get-Date).AddMinutes(1) -Attempts 0 | Should -BeTrue
+
+        $script:TelegramOutbox.Count | Should -Be 200
+        @($script:TelegramOutbox | Where-Object { $_.Priority }).Count | Should -Be 1
+        $script:TelegramOutboxDropped | Should -Be 1
+    }
+
+    It 'sends a small fixed batch, leaving the rest for the next bridge tick' {
+        foreach ($number in 1..4) {
+            Add-TelegramOutboxItem -Body @{ chat_id = 101; text = "ordinary $number" } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        }
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' } }
+
+        Update-TelegramOutbox
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 3 -Exactly
+        $script:TelegramOutbox.Count | Should -Be 1
+    }
+
+    It 'sends a due warning ahead of ordinary deferred navigation' {
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = 'ordinary first' } -DueAt (Get-Date).AddMinutes(-2) -Attempts 0 | Out-Null
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = '⚠ urgent warning' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        $script:TelegramOutboxSentTexts = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-BridgeTelegramRequest {
+            $script:TelegramOutboxSentTexts.Add([string]$Body.text)
+            @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' }
+        }
+
+        Update-TelegramOutbox
+
+        $script:TelegramOutboxSentTexts[0] | Should -Be '⚠ urgent warning'
+    }
+}
+
 Describe 'The handover screen answers its first question first' {
     BeforeEach {
         $script:OnAir.Clear()

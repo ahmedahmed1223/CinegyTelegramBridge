@@ -156,8 +156,9 @@ function Send-TelegramMessage {
             if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
                 $script:TelegramRateLimitHits++
                 $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
-                $script:TelegramOutbox.Add(@{ DueAt = (Get-Date).AddMilliseconds($retryMs); Body = $body; Attempts = 0 }) | Out-Null
-                Write-BridgeLog "Deferred Telegram message to $ChatId for $retryMs ms after rate limit" "WARN"
+                if (Add-TelegramOutboxItem -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0) {
+                    Write-BridgeLog "Deferred Telegram message to $ChatId for $retryMs ms after rate limit" "WARN"
+                }
                 continue
             }
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
@@ -165,11 +166,60 @@ function Send-TelegramMessage {
     }
 }
 
+function Test-TelegramOutboxPriority {
+    <# Send-TelegramMessage has no caller-supplied severity. The bridge's own
+       alerts carry one of these stable markers, so reserve the scarce queue
+       slots for them before ordinary screen navigation. #>
+    param([Parameter(Mandatory)][hashtable]$Body)
+    $text = [string](Get-JsonProp $Body 'text')
+    return $text -match '(?i)\[ERROR\]|\[WARN\]|❌|⚠|فشل|تحذير'
+}
+
+function Add-TelegramOutboxItem {
+    <# Bounded in-memory retry queue. It is deliberately not persistent: an
+       old interaction after a process restart is less useful than a timely
+       current one, and persistence would retain operator-facing text. #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Body,
+        [Parameter(Mandatory)][datetime]$DueAt,
+        [ValidateRange(0,4)][int]$Attempts
+    )
+    $maximumItems = 200
+    $priority = Test-TelegramOutboxPriority -Body $Body
+    if ($script:TelegramOutbox.Count -ge $maximumItems) {
+        $removeAt = -1
+        for ($index = 0; $index -lt $script:TelegramOutbox.Count; $index++) {
+            $queuedPriority = [bool](Get-JsonProp $script:TelegramOutbox[$index] 'Priority')
+            if (-not $queuedPriority) { $removeAt = $index; break }
+        }
+        if ($removeAt -lt 0 -and -not $priority) {
+            $script:TelegramOutboxDropped++
+            return $false
+        }
+        if ($removeAt -lt 0) { $removeAt = 0 }
+        $script:TelegramOutbox.RemoveAt($removeAt)
+        $script:TelegramOutboxDropped++
+        # Log only every 25th discard: a log entry per rejected low-priority
+        # notification would itself create the burst this limit contains.
+        if (($script:TelegramOutboxDropped % 25) -eq 1) {
+            Write-BridgeLog "Telegram deferred-message queue is full; lower-priority message discarded" 'WARN'
+        }
+    }
+    $script:TelegramOutbox.Add(@{ DueAt = $DueAt; Body = $Body; Attempts = $Attempts; Priority = $priority }) | Out-Null
+    return $true
+}
+
 function Update-TelegramOutbox {
     if (-not $script:TelegramOutbox -or $script:TelegramOutbox.Count -eq 0) { return }
     $now = Get-Date
-    foreach ($item in @($script:TelegramOutbox.ToArray())) {
-        if ([datetime]$item.DueAt -gt $now) { continue }
+    # Three bounded sends leave time in every polling cycle for liveness,
+    # scheduled safety work, and incoming operator commands. Priority is only
+    # inside the deferred queue; it never reorders direct button responses.
+    $dueItems = @($script:TelegramOutbox.ToArray() |
+        Where-Object { [datetime]$_.DueAt -le $now } |
+        Sort-Object @{ Expression = { [bool](Get-JsonProp $_ 'Priority') }; Descending = $true }, @{ Expression = { [datetime]$_.DueAt }; Descending = $false } |
+        Select-Object -First 3)
+    foreach ($item in $dueItems) {
         $script:TelegramOutbox.Remove($item) | Out-Null
         $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $item.Body `
             -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
@@ -177,10 +227,12 @@ function Update-TelegramOutbox {
         if ([int](Get-JsonProp $request 'StatusCode') -eq 429 -and [int]$item.Attempts -lt 4) {
             $item.Attempts = [int]$item.Attempts + 1
             $item.DueAt = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
-            $script:TelegramOutbox.Add($item) | Out-Null
+            Add-TelegramOutboxItem -Body $item.Body -DueAt $item.DueAt -Attempts $item.Attempts | Out-Null
         }
         else { Write-BridgeLog "Dropped deferred Telegram message after retry failure: $($request.Error)" 'ERROR' }
-        break
+        # A new flood limit applies to the entire bot; do not spend this tick
+        # proving the same point on the rest of the due messages.
+        if ([int](Get-JsonProp $request 'StatusCode') -eq 429) { break }
     }
 }
 
@@ -378,9 +430,10 @@ function Confirm-TelegramCallback {
     # at arm's length in a gallery. A refusal has to be read to be acted on,
     # so it gets a dialog the operator dismisses.
     if ($Alert) { $body.show_alert = $true }
-    # Routed through the shared request wrapper like every other send, so a
-    # flood-limited acknowledgement honours retry_after instead of being
-    # dropped and leaving the operator's button spinning.
+    # The shared wrapper reports Telegram's retry_after consistently. A
+    # callback acknowledgement is deliberately not put in the message outbox:
+    # Telegram may expire its query before the delay, so a late answer cannot
+    # reliably clear the client's spinner and must not block this tick.
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerCallbackQuery" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
     if (-not $request.Success) {

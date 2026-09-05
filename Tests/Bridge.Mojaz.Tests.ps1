@@ -1653,6 +1653,8 @@ Describe 'A bulletin that was on air when the bridge restarted' {
         Mock Write-BridgeLog { }
         Mock Send-AdminBroadcast { $true }
         Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{RESTORED}' } }
         Mock Request-MojazTickerReturn { $true }
         Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
         $script:MojazPlayback = $null
@@ -1665,7 +1667,7 @@ Describe 'A bulletin that was on air when the bridge restarted' {
         param([datetime]$StartedAt, [double]$ExitAtSeconds = 80)
         [ordered]@{
             StartedAt = $StartedAt.ToString('o'); BulletinId = 'b_1'; BulletinName = 'موجز المساء'
-            ScheduleId = ''; OperationId = 'mojaz-test'; ChatId = 100; UserId = 101
+            ScheduleId = ''; OperationId = 'mojaz-test'; ChatId = 100; UserId = 101; ActiveId = '{RESTORED}'; ActiveIdConfirmed = $true
             ExitAtSeconds = $ExitAtSeconds; SyncToLoop = $false
             Rows = @(1..4 | ForEach-Object { @{ Id = "r_$_"; Title = "عنوان $_"; Text = 'نص'; ImageMode = 'inherit'; Image = '' } })
             Plan = @(0..3 | ForEach-Object { @{ Index = $_; RowId = "r_$($_ + 1)"; AtSeconds = ($_ * 20.0); HoldSeconds = 20 } })
@@ -1682,11 +1684,26 @@ Describe 'A bulletin that was on air when the bridge restarted' {
         $script:MojazPlayback | Should -Not -BeNullOrEmpty
         # 50s in, with a row every 20s: rows at 0, 20 and 40 have gone.
         $script:MojazPlayback.Index | Should -Be 2
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter { $Values['title.Text'] -eq 'عنوان 3' }
         # A range, not a number: this is measured against a wall clock and
         # the second it lands in depends on how long the test itself took.
         [double]$script:MojazPlayback.ClockOffset | Should -BeGreaterOrEqual 50
         [double]$script:MojazPlayback.ClockOffset | Should -BeLessThan 60
         Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'persists and restores the template image used by later rows' {
+        $script:MojazPlayback = @{
+            Index=0; ChatId=1L; UserId=2L; Clock=[Diagnostics.Stopwatch]::StartNew(); ClockOffset=0.0
+            Rows=@((New-TestMojazRow -Title 'أول'), (New-TestMojazRow -Title 'ثانٍ'))
+            Plan=@(@{AtSeconds=0.0},@{AtSeconds=20.0}); ExitAtSeconds=40.0; SyncToLoop=$false
+            BulletinId='b'; BulletinName='نشرة'; ScheduleId=''; OperationId='op'; StartedAt=(Get-Date).ToString('o')
+            TemplateImage='.\Mojaz\Pic01.png'; ActiveId='{A}'; ActiveIdConfirmed=$true
+        }
+        Save-MojazPlaybackState | Should -BeTrue
+        $saved = Get-Content -LiteralPath (Get-MojazPlaybackFile) -Raw | ConvertFrom-Json
+        $saved.TemplateImage | Should -Be '.\Mojaz\Pic01.png'
+        $saved.ActiveId | Should -Be '{A}'
     }
 
     It 'takes off a bulletin that is already past its end' {

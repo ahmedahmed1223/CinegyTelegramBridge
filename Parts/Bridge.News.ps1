@@ -604,12 +604,15 @@ function Invoke-NewsSheetSync {
         # Straight into the draft so the sheet can be read, reordered, or
         # corrected before any of it reaches air. Routed through the ordinary
         # draft import so the same length, count, and duplicate rules apply.
+        $text = ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))
+        $validated = ConvertFrom-NewsTickerText -Text $text -Separator ([string](Get-Setting 'NewsItemSeparator')) `
+            -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+        if (-not $validated.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($validated.Error)") }
         if ($draft -and [long]$draft.OwnerUserId -ne $UserId) { Remove-NewsTickerDraft }
         if (-not (Get-NewsTickerDraft -UserId $UserId)) {
             $started = Start-NewsTickerDraft -ChatId $ChatId -UserId $UserId
             if (-not $started.Success) { return (& $stop $started.Error) }
         }
-        $text = ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))
         $import = Import-NewsTickerTextToDraft -UserId $UserId -Text $text -Mode replace
         if (-not $import.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($import.Error)") }
         return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false; Drafted = $true

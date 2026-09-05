@@ -95,7 +95,7 @@ function Get-ReportPeriod {
     $now = Get-Date
     switch ($Period) {
         'today' { return @{ From = $now.Date; To = $now; Label = 'اليوم' } }
-        'yesterday' { return @{ From = $now.Date.AddDays(-1); To = $now.Date; Label = 'أمس' } }
+        'yesterday' { return @{ From = $now.Date.AddDays(-1); To = $now.Date.AddTicks(-1); Label = 'أمس' } }
         'week' { return @{ From = $now.Date.AddDays(-6); To = $now; Label = 'آخر 7 أيام' } }
         default { return @{ From = $now.Date.AddDays(-29); To = $now; Label = 'آخر 30 يومًا' } }
     }

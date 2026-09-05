@@ -164,7 +164,7 @@ Describe 'Authorized user administration' {
     It 'refuses to revoke the final administrator' {
         $result = Revoke-AuthorizedUser -TargetUserId 101
         $result.Success | Should -BeFalse
-        $result.Error | Should -Match 'آخر مشرف'
+        $result.Error | Should -Match 'آخر مشرف|المالك'
         $config.AdminUserIds | Should -Contain 101
     }
 
@@ -179,6 +179,24 @@ Describe 'Authorized user administration' {
         $config.AllowedChatIds | Should -Not -Contain 202
         $config.AllowedUserIds | Should -Not -Contain 202
         Should -Invoke Save-Config -Times 1 -Exactly
+    }
+
+    It 'refuses to revoke an explicitly configured owner' {
+        $originalOwners = @(Get-JsonProp $config 'OwnerUserIds')
+        try {
+            $config | Add-Member -NotePropertyName OwnerUserIds -NotePropertyValue @(202) -Force
+            $result = Revoke-AuthorizedUser -TargetUserId 202
+            $result.Success | Should -BeFalse
+            $result.Error | Should -Match 'المالك'
+            $config.AllowedUserIds | Should -Contain 202
+        }
+        finally { $config | Add-Member -NotePropertyName OwnerUserIds -NotePropertyValue $originalOwners -Force }
+    }
+
+    It 'clears every pending flow owned by a revoked user' {
+        Set-PendingState -ChatId 202 -State @{ Mode = 'update_field'; UserId = 202; Field = 'headline' }
+        Revoke-AuthorizedUser -TargetUserId 202 | Out-Null
+        Get-PendingState -ChatId 202 | Should -BeNullOrEmpty
     }
 
     It 'lists unique users with alias role and disabled state' {

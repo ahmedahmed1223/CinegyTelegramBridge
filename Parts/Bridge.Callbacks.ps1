@@ -1363,8 +1363,22 @@ function Invoke-CallbackQuery {
         # a layer number is not something an operator can check against the
         # screen under pressure. Off by default so the emergency path keeps
         # its single tap.
-        'hidego:*' { Invoke-HideLayer -Layer ([int](Get-CallbackArg $data 'hidego:')) -ChatId $chatId -UserId $userId | Out-Null; break }
-        'exitgo:*' { Invoke-ExitLayer -Layer ([int](Get-CallbackArg $data 'exitgo:')) -ChatId $chatId -UserId $userId; break }
+        'hidego:*' {
+            $targetLayer = [int](Get-CallbackArg $data 'hidego:')
+            $onAirKey = if ($script:OnAir.ContainsKey($targetLayer)) { [string](Get-JsonProp $script:OnAir[$targetLayer] 'Key') } else { '' }
+            $access = Test-TemplateAccess -Key $onAirKey -Layer $targetLayer -ChatId $chatId -UserId $userId
+            if ($access.Allowed) { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
+            else { Send-TelegramMessage -ChatId $chatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) }
+            break
+        }
+        'exitgo:*' {
+            $targetLayer = [int](Get-CallbackArg $data 'exitgo:')
+            $onAirKey = if ($script:OnAir.ContainsKey($targetLayer)) { [string](Get-JsonProp $script:OnAir[$targetLayer] 'Key') } else { '' }
+            $access = Test-TemplateAccess -Key $onAirKey -Layer $targetLayer -ChatId $chatId -UserId $userId
+            if ($access.Allowed) { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
+            else { Send-TelegramMessage -ChatId $chatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) }
+            break
+        }
         'hide:*' {
             $targetLayer = [int](Get-CallbackArg $data 'hide:')
             $onAirKey = if ($script:OnAir.ContainsKey($targetLayer)) { [string](Get-JsonProp $script:OnAir[$targetLayer] 'Key') } else { '' }

@@ -71,7 +71,9 @@ function Set-OutputMonitorFallbackActive {
             $script:RelayState.NotifyChatId = 0
         }
         catch {
-            $script:RelayState.ShouldRun = $false
+            # A manual start failure is final. A failed automatic attempt keeps
+            # ShouldRun set so the watchdog can spend the remaining retry budget.
+            if ($notify) { $script:RelayState.ShouldRun = $false }
             Write-BridgeLog "Live relay source switch failed: $($_.Exception.Message)" 'ERROR'
             Send-AdminBroadcast -Text '❌ تعذرت إعادة تشغيل البث بعد تبديل المصدر.' -Urgent
         }
@@ -847,4 +849,3 @@ function Complete-StreamUrl {
     Write-BridgeLog "User $($state.UserId) updated LiveStream.RtmpDestination"
     Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ رابط البث.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
 }
-

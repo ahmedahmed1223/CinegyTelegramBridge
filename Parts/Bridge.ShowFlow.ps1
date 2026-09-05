@@ -93,6 +93,26 @@ function Clear-PendingState {
     if ($state) { Complete-PendingStateCleanup -ChatId $ChatId -State $state }
 }
 
+function Clear-PendingStatesForUser {
+    param([Parameter(Mandatory)][long]$UserId)
+    foreach ($entry in @($script:PendingState.GetEnumerator())) {
+        if ([long](Get-JsonProp $entry.Value 'UserId') -eq $UserId) {
+            Clear-PendingState -ChatId ([long]$entry.Key)
+        }
+    }
+}
+
+function Test-PendingStateAdmission {
+    param([Parameter(Mandatory)][hashtable]$State, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if ([long](Get-JsonProp $State 'UserId') -ne $UserId) { return $false }
+    $mode = [string](Get-JsonProp $State 'Mode')
+    if ($mode -in @('access_request_name', 'join_secret', 'announcement_text')) { return $true }
+    if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return $false }
+    $adminModes = @('setting_value','setting_text','settings_search','stream_url','layer_name','user_alias_edit','template_definition_json','preset_admin_name','preset_admin_values')
+    if ($mode -in $adminModes -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    return $true
+}
+
 function Get-WhatsNewSections {
     <#
         Operator-facing release notes, held here rather than parsed out of
@@ -103,6 +123,13 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.64.0'; Items = @(
+                '🛡 تُلغى الخطوة المفتوحة فور سحب صلاحية صاحبها، ولا يمكن سحب صلاحية مالك الجسر.'
+                '♻️ إعادة التشغيل تنتظر توقف النسخة القديمة، وحفظ الإعدادات لم يعد يتسابق بين المدير والبوت.'
+                '📰 استيراد شيت غير صالح لا يمسح مسودة محرر آخر، وتقرير «أمس» لا يضم اليوم.'
+                '📡 انتظار Telegram عند الازدحام صار في الخلفية كي تبقى المراقبة مستجيبة.'
+                '🎬 استعادة الموجز تتحقق من المشهد الفعلي وتكتب الصف الصحيح.'
+            ) }
         @{ Version = '7.63.0'; Items = @(
                 '🖥 برنامج التحكم صار يعود مع ويندوز ومعه الجسر — كان يعود وحده والجسر متوقف حتى ينتبه أحد.'
                 '🩺 وصار يكشف الجسر المعلّق (يعمل ولا يستجيب) ويعيد تشغيله، لا الجسر المتوقف وحده.'
@@ -2630,4 +2657,3 @@ function Invoke-TemplatesCommand {
     if ($store.Errors.Count -gt 0) { $text += "`n`n⚠️ " + ($store.Errors -join "`n⚠️ ") }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
-

@@ -98,6 +98,7 @@ public sealed class MainForm : Form
     private readonly ManagerSettings _settings;
     private Process? _bridgeProcess;
     private bool _stoppingIntentionally;
+    private bool _restartAfterExit;
     private bool _exiting;
 
     // Start-with-Windows launches the manager with --autostart: it comes up
@@ -319,7 +320,11 @@ public sealed class MainForm : Form
         Controls.Add(_statusBar);
 
         _restartTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        _restartTimer.Tick += (_, _) => { _restartTimer.Stop(); StartBridge(); };
+        _restartTimer.Tick += (_, _) =>
+        {
+            _restartTimer.Stop();
+            if (_autoRestartCheck.Checked) StartBridge();
+        };
 
         _autoClearTimer = new System.Windows.Forms.Timer { Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds };
         _autoClearTimer.Tick += (_, _) => { ClearOutput(); AppendLine("--- مسح تلقائي للشاشة (كل 24 ساعة) ---"); };
@@ -337,6 +342,7 @@ public sealed class MainForm : Form
             if (!ConfirmSafetyOff(_autoRestartCheck,
                     "إن توقّف الجسر فلن يُعاد تشغيله تلقائيًا، وستبقى الرسومات بلا تحكّم حتى ينتبه أحد.\n\nإيقاف إعادة التشغيل التلقائي؟")) return;
             _settings.AutoRestart = _autoRestartCheck.Checked;
+            if (!_autoRestartCheck.Checked) _restartTimer.Stop();
             _settings.Save();
             LogEvent($"إعادة التشغيل التلقائي: {(_autoRestartCheck.Checked ? "مفعّلة" : "معطّلة")}.");
         };
@@ -644,6 +650,13 @@ public sealed class MainForm : Form
         SetStatus(running: false);
 
         if (_exiting) return;
+        if (_restartAfterExit)
+        {
+            _restartAfterExit = false;
+            _stoppingIntentionally = false;
+            StartBridge();
+            return;
+        }
         if (_stoppingIntentionally)
         {
             _consecutiveQuickFailures = 0;
@@ -800,6 +813,7 @@ public sealed class MainForm : Form
 
     private void StopBridge(bool manual)
     {
+        _restartAfterExit = false;
         SetButtonsBusy(); // see the comment in StartBridge - same rapid-click concern
         if (_bridgeProcess is not { HasExited: false } process) { SetStatus(running: false); return; }
         if (manual) LogEvent("طلب المستخدم إيقاف الجسر يدويًا.");
@@ -813,11 +827,12 @@ public sealed class MainForm : Form
         _consecutiveQuickFailures = 0; // a deliberate restart always gets a fresh chance
         if (_bridgeProcess is { HasExited: false } process)
         {
+            _restartAfterExit = true;
             _stoppingIntentionally = true;
             try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
-            // Not waiting for exit here: killing the tree can take a moment (ffmpeg
-            // children), and blocking the UI thread on it would freeze the window.
-            // The new instance's own -StopExisting handles any straggler.
+            // OnBridgeExited starts the replacement after the old process and
+            // its ffmpeg children are actually gone, without freezing the UI.
+            return;
         }
         StartBridge();
     }

@@ -621,16 +621,26 @@ public sealed class SettingsForm : Form
 
         try
         {
+            var changedKeys = ChangedKeys().ToHashSet(StringComparer.Ordinal);
+            using var configMutex = new Mutex(false, @"Global\CinegyTelegramBridge.Config");
+            try
+            {
+                if (!configMutex.WaitOne(TimeSpan.FromSeconds(10)))
+                    throw new IOException("انتهت مهلة انتظار ملف الإعدادات؛ حاول الحفظ مرة أخرى.");
+            }
+            catch (AbandonedMutexException) { /* the previous writer died; ownership is ours */ }
             var root = LoadRoot();
             // A DPAPI-protected token is left exactly as it sits on disk. Any
             // other value round-trips as before.
             if (!_tokenIsDpapiReference) root["BotToken"] = _botToken.Text.Trim();
             root["AirServerAddress"] = _airServer.Text.Trim();
             root["AirChannelNumber"] = (int)_airChannel.Value;
-            foreach (var role in Roles) root[role.Key] = IdsFor(role.Key);
+            foreach (var role in Roles)
+                if (changedKeys.Contains(role.Key)) root[role.Key] = IdsFor(role.Key);
 
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
             WriteConfigAtomically(json);
+            configMutex.ReleaseMutex();
             return true;
         }
         catch (Exception ex)
@@ -651,7 +661,7 @@ public sealed class SettingsForm : Form
     /// </summary>
     private void WriteConfigAtomically(string json)
     {
-        var tempPath = _configPath + ".tmp";
+        var tempPath = _configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         // No BOM: PowerShell 7's `Set-Content -Encoding utf8` writes BOM-less
         // UTF-8, and the bridge re-reads this file on every save.
         File.WriteAllText(tempPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));

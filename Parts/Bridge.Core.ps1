@@ -55,6 +55,16 @@ function Save-Config {
         $script:LastConfigSaveFailed = $false
         return
     }
+    $configMutex = [Threading.Mutex]::new($false, 'Global\CinegyTelegramBridge.Config')
+    $configLockHeld = $false
+    try { $configLockHeld = $configMutex.WaitOne([timespan]::FromSeconds(10)) }
+    catch [Threading.AbandonedMutexException] { $configLockHeld = $true }
+    if (-not $configLockHeld) {
+        $script:LastConfigSaveFailed = $true
+        $configMutex.Dispose()
+        Write-BridgeLog "Timed out waiting for the config write lock. Change applies to this session only." "ERROR"
+        return
+    }
     $managed = @('AllowedChatIds', 'AdminChatIds', 'AllowedUserIds', 'AdminUserIds', 'Settings', 'LiveStream')
     $target = $null
     try { $target = Get-Content -Path $Path -Raw | ConvertFrom-Json }
@@ -131,6 +141,10 @@ function Save-Config {
         $script:LastConfigSaveFailed = $true
         Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
         Write-BridgeLog "Could not write $Path : $($_.Exception.Message). Change applies to this session only." "ERROR"
+    }
+    finally {
+        if ($configLockHeld) { $configMutex.ReleaseMutex() }
+        $configMutex.Dispose()
     }
 }
 
@@ -833,4 +847,3 @@ function Split-TelegramText {
     if ($current.Length -gt 0) { $chunks.Add($current.ToString()) }
     return $chunks.ToArray()
 }
-

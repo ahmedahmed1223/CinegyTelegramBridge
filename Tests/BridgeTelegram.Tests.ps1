@@ -85,4 +85,17 @@ Describe 'Telegram 429 retry delay' {
         $err = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'connection refused' } }
         Get-BridgeTelegramRetryDelayMs -ErrorRecord $err -DefaultDelayMs 400 | Should -Be 400
     }
+
+    It 'returns a flood wait to the tick loop instead of sleeping inside the request' {
+        $exception = [Exception]::new('Telegram returned 429')
+        $exception | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{ StatusCode = 429 })
+        $errorRecord = [Management.Automation.ErrorRecord]::new($exception, 'RateLimited', 'InvalidOperation', $null)
+        $errorRecord.ErrorDetails = [Management.Automation.ErrorDetails]::new('{"parameters":{"retry_after":7}}')
+        Mock Invoke-RestMethod { throw $errorRecord } -ModuleName BridgeTelegram
+        Mock Start-Sleep { } -ModuleName BridgeTelegram
+        $result = Invoke-BridgeTelegramRequest -Uri 'https://example.invalid/sendMessage' -Method Post -Body @{} -TimeoutSec 3 -MaxAttempts 3
+        $result.StatusCode | Should -Be 429
+        $result.RetryAfterMs | Should -Be 7000
+        Should -Invoke Start-Sleep -ModuleName BridgeTelegram -Times 0 -Exactly
+    }
 }

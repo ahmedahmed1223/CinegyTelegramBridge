@@ -153,9 +153,34 @@ function Send-TelegramMessage {
         if (-not $request.Success) {
             # Counted separately: a flood limit is a capacity problem, not a bug,
             # and telling them apart is the point of /stats.
-            if ($request.Error -match '429') { $script:TelegramRateLimitHits++ }
+            if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
+                $script:TelegramRateLimitHits++
+                $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
+                $script:TelegramOutbox.Add(@{ DueAt = (Get-Date).AddMilliseconds($retryMs); Body = $body; Attempts = 0 }) | Out-Null
+                Write-BridgeLog "Deferred Telegram message to $ChatId for $retryMs ms after rate limit" "WARN"
+                continue
+            }
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
         }
+    }
+}
+
+function Update-TelegramOutbox {
+    if (-not $script:TelegramOutbox -or $script:TelegramOutbox.Count -eq 0) { return }
+    $now = Get-Date
+    foreach ($item in @($script:TelegramOutbox.ToArray())) {
+        if ([datetime]$item.DueAt -gt $now) { continue }
+        $script:TelegramOutbox.Remove($item) | Out-Null
+        $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $item.Body `
+            -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
+        if ($request.Success) { continue }
+        if ([int](Get-JsonProp $request 'StatusCode') -eq 429 -and [int]$item.Attempts -lt 4) {
+            $item.Attempts = [int]$item.Attempts + 1
+            $item.DueAt = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
+            $script:TelegramOutbox.Add($item) | Out-Null
+        }
+        else { Write-BridgeLog "Dropped deferred Telegram message after retry failure: $($request.Error)" 'ERROR' }
+        break
     }
 }
 
@@ -379,7 +404,8 @@ function Get-TelegramUpdates {
        square the delay and stall the bridge on a transient blip. It therefore
        throws and lets the loop decide. #>
     param([long]$Offset, [int]$TimeoutSeconds)
-    $uri = "$apiBase/getUpdates?timeout=$TimeoutSeconds&offset=$Offset"
+    $allowed = '%5B%22message%22%2C%22callback_query%22%5D'
+    $uri = "$apiBase/getUpdates?timeout=$TimeoutSeconds&offset=$Offset&allowed_updates=$allowed"
     # The transport deadline has to clear the long poll with room to spare,
     # because it also covers connection setup and the trip home. Ten seconds
     # over a fifteen-second poll was cutting live requests off mid-answer.
@@ -402,19 +428,22 @@ function Clear-PendingTelegramUpdates {
 
        Returns the offset to start polling from. #>
     try {
-        $probe = Invoke-RestMethod -Uri "$apiBase/getUpdates?offset=-1&timeout=0" -Method Get -TimeoutSec 20
+        $allowed = '%5B%22message%22%2C%22callback_query%22%5D'
+        $probe = Invoke-RestMethod -Uri "$apiBase/getUpdates?offset=-1&timeout=0&allowed_updates=$allowed" -Method Get -TimeoutSec 20
         $pending = @(Get-JsonProp $probe 'result')
         if ($pending.Count -eq 0) { return 0 }
         $nextOffset = [long]$pending[-1].update_id + 1
         # Re-requesting with the advanced offset is what actually acknowledges
         # the backlog to Telegram.
-        Invoke-RestMethod -Uri "$apiBase/getUpdates?offset=$nextOffset&timeout=0" -Method Get -TimeoutSec 20 | Out-Null
+        Invoke-RestMethod -Uri "$apiBase/getUpdates?offset=$nextOffset&timeout=0&allowed_updates=$allowed" -Method Get -TimeoutSec 20 | Out-Null
         Write-BridgeLog "Discarded queued Telegram updates from before startup (offset now $nextOffset)" "WARN"
         return $nextOffset
     }
     catch {
         Write-BridgeLog "Could not drain pending updates: $($_.Exception.Message)" "WARN"
-        return 0
+        # Zero is a valid empty-backlog offset. A distinct failure value keeps
+        # startup from processing stale commands after a transient outage.
+        return -1
     }
 }
 

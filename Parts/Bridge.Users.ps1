@@ -343,7 +343,11 @@ function Set-UserDisabled {
         $activeAdmins = @($adminIds | Where-Object { -not (Test-UserDisabled -UserId ([long]$_)) })
         if ($adminIds -contains $TargetUserId -and $activeAdmins.Count -le 1) { return $false }
     }
-    if ($Disabled) { $script:DisabledUserIds[[string]$TargetUserId] = $true }
+    if ($Disabled -and (Get-OwnerIds) -contains $TargetUserId) { return $false }
+    if ($Disabled) {
+        $script:DisabledUserIds[[string]$TargetUserId] = $true
+        Clear-PendingStatesForUser -UserId $TargetUserId
+    }
     else { $script:DisabledUserIds.Remove([string]$TargetUserId) }
     return Save-DisabledUsers
 }
@@ -355,6 +359,9 @@ function Test-UserDisabled {
 
 function Revoke-AuthorizedUser {
     param([Parameter(Mandatory)][long]$TargetUserId)
+    if ((Get-OwnerIds) -contains $TargetUserId) {
+        return [pscustomobject]@{ Success = $false; Error = 'لا يمكن سحب صلاحية المالك.' }
+    }
     $admins = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
     if ($admins -contains $TargetUserId -and $admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن سحب صلاحية آخر مشرف.' } }
     foreach ($name in @('AllowedChatIds', 'AllowedUserIds', 'AdminChatIds', 'AdminUserIds')) {
@@ -362,6 +369,7 @@ function Revoke-AuthorizedUser {
         $config | Add-Member -NotePropertyName $name -NotePropertyValue $remaining -Force
     }
     $script:DisabledUserIds.Remove([string]$TargetUserId)
+    Clear-PendingStatesForUser -UserId $TargetUserId
     $script:UserProfiles.Remove([string]$TargetUserId); $script:UserProfilesDirty = $true
     Save-DisabledUsers | Out-Null; Save-UserProfiles -Force | Out-Null; Save-Config
     return [pscustomobject]@{ Success = $true; Error = '' }
@@ -576,4 +584,3 @@ function Test-TelegramPrivateChat {
     param($Chat)
     return Test-BridgePrivateChat -Chat $Chat
 }
-

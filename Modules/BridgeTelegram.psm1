@@ -54,11 +54,17 @@ function Invoke-BridgeTelegramRequest {
             elseif ($null -ne $Body) { $request.Body=$Body }
             if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $request.ContentType=$ContentType }
             $response = Invoke-RestMethod @request
-            return [pscustomobject]@{ Success=$true; Response=$response; Error=''; Attempts=$attempt }
+            return [pscustomobject]@{ Success=$true; Response=$response; Error=''; Attempts=$attempt; StatusCode=200; RetryAfterMs=0 }
         }
         catch {
+            $status = 0
+            try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = 0 }
+            if ($status -eq 429) {
+                $delay = Get-BridgeTelegramRetryDelayMs -ErrorRecord $_ -DefaultDelayMs $RetryDelayMs -MaximumDelayMs 300000
+                return [pscustomobject]@{ Success=$false; Response=$null; Error=$_.Exception.Message; Attempts=$attempt; StatusCode=429; RetryAfterMs=$delay }
+            }
             if ($attempt -ge $MaxAttempts) {
-                return [pscustomobject]@{ Success=$false; Response=$null; Error=$_.Exception.Message; Attempts=$attempt }
+                return [pscustomobject]@{ Success=$false; Response=$null; Error=$_.Exception.Message; Attempts=$attempt; StatusCode=$status; RetryAfterMs=0 }
             }
             $delay = Get-BridgeTelegramRetryDelayMs -ErrorRecord $_ -DefaultDelayMs $RetryDelayMs
             if ($delay -gt 0) { Start-Sleep -Milliseconds $delay }

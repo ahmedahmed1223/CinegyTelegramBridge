@@ -40,4 +40,15 @@ Describe 'Validated JSON storage module' {
     It 'returns null when neither primary nor backup exists' {
         Read-BridgeValidatedJson -Path (Join-Path $TestDrive 'missing.json') | Should -BeNullOrEmpty
     }
+
+    It 'does not commit the new primary when preparing the backup fails' {
+        $path = Join-Path $TestDrive 'locked-backup.json'
+        Write-BridgeValidatedJson -Path $path -Json '{"version":1}' | Out-Null
+        $lock = [IO.File]::Open("$path.bak", [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            Write-BridgeValidatedJson -Path $path -Json '{"version":2}' | Should -BeFalse
+            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).version | Should -Be 1
+        }
+        finally { $lock.Dispose() }
+    }
 }

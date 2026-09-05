@@ -2023,6 +2023,8 @@ function Start-MojazPlayback {
         BulletinRevision = [int]$snapshot.BulletinRevision
         ScheduleId = $ScheduleId
         TemplateImage = $templateImage
+        ActiveId = [string](Get-JsonProp $result 'ActiveId')
+        ActiveIdConfirmed = [bool](Get-JsonProp $result 'ActiveIdConfirmed')
     }
     # Now that the bulletin is really on air, the strip stands down: they
     # share the bottom of the screen, and it returns when this ends.
@@ -2442,6 +2444,9 @@ function Save-MojazPlaybackState {
             ScheduleId = [string](Get-JsonProp $playback 'ScheduleId')
             OperationId = [string](Get-JsonProp $playback 'OperationId')
             AirStartedAt = [string](Get-JsonProp $playback 'AirStartedAt')
+            TemplateImage = [string](Get-JsonProp $playback 'TemplateImage')
+            ActiveId = [string](Get-JsonProp $playback 'ActiveId')
+            ActiveIdConfirmed = [bool](Get-JsonProp $playback 'ActiveIdConfirmed')
             ChatId = [long]$playback.ChatId
             UserId = [long]$playback.UserId
             ExitAtSeconds = [double]$playback.ExitAtSeconds
@@ -2513,6 +2518,15 @@ function Restore-MojazPlayback {
     $chat = [long](Get-JsonProp $state 'ChatId')
     $user = [long](Get-JsonProp $state 'UserId')
     if ($elapsed -ge $exitAt) {
+        $expectedId = ([string](Get-JsonProp $state 'ActiveId')).Trim().Trim('{', '}')
+        $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $layer -TimeoutSec (Get-AirTimeout)
+        $liveId = ([string](Get-JsonProp $live 'ActiveId')).Trim().Trim('{', '}')
+        if (-not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-BridgeLog "Refused to exit restored bulletin '$name': live scene identity could not be matched." 'WARN'
+            Send-AdminBroadcast -Text "⚠️ لم يُخرج الموجز «$name» بعد إعادة التشغيل لأن هوية المشهد على الطبقة تغيّرت أو تعذّر التحقق منها." | Out-Null
+            return $false
+        }
         Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
         Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user | Out-Null
         Request-MojazTickerReturn | Out-Null
@@ -2537,6 +2551,19 @@ function Restore-MojazPlayback {
         ScheduleId = [string](Get-JsonProp $state 'ScheduleId')
         OperationId = [string](Get-JsonProp $state 'OperationId')
         StartedAt = [string](Get-JsonProp $state 'StartedAt')
+        AirStartedAt = [string](Get-JsonProp $state 'AirStartedAt')
+        TemplateImage = [string](Get-JsonProp $state 'TemplateImage')
+        ActiveId = [string](Get-JsonProp $state 'ActiveId')
+        ActiveIdConfirmed = [bool](Get-JsonProp $state 'ActiveIdConfirmed')
+    }
+    $currentValues = Get-MojazRowVariables -Row $script:MojazPlayback.Rows[$index] `
+        -TemplateImage ([string]$script:MojazPlayback.TemplateImage)
+    $resumeResult = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Values $currentValues -TimeoutSec (Get-AirTimeout)
+    if (-not $resumeResult.Success) {
+        Write-BridgeLog "Could not restore bulletin '$name' row $($index + 1): $($resumeResult.Error)" 'WARN'
+        $script:MojazPlayback = $null
+        return $false
     }
     Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Resumed the bulletin '$name' after a restart at row $($index + 1) of $(@($script:MojazPlayback.Rows).Count), $([int]$elapsed)s in."

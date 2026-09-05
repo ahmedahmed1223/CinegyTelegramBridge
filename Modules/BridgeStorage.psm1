@@ -6,9 +6,10 @@ function Write-BridgeValidatedJson {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Json
     )
-    $temporary = "$Path.tmp"
+    $suffix = [guid]::NewGuid().ToString('N')
+    $temporary = "$Path.$suffix.tmp"
     $backup = "$Path.bak"
-    $backupTemporary = "$backup.tmp"
+    $backupTemporary = "$backup.$suffix.tmp"
     try {
         $Json | ConvertFrom-Json -ErrorAction Stop | Out-Null
         $parent = Split-Path $Path -Parent
@@ -17,9 +18,15 @@ function Write-BridgeValidatedJson {
         }
         Set-Content -LiteralPath $temporary -Value $Json -Encoding utf8 -ErrorAction Stop
         Get-Content -LiteralPath $temporary -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop | Out-Null
+        if (Test-Path -LiteralPath $Path) {
+            Copy-Item -LiteralPath $temporary -Destination $backupTemporary -Force -ErrorAction Stop
+            Move-Item -LiteralPath $backupTemporary -Destination $backup -Force -ErrorAction Stop
+        }
         Move-Item -LiteralPath $temporary -Destination $Path -Force -ErrorAction Stop
-        Copy-Item -LiteralPath $Path -Destination $backupTemporary -Force -ErrorAction Stop
-        Move-Item -LiteralPath $backupTemporary -Destination $backup -Force -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $backup)) {
+            Copy-Item -LiteralPath $Path -Destination $backupTemporary -Force -ErrorAction Stop
+            Move-Item -LiteralPath $backupTemporary -Destination $backup -Force -ErrorAction Stop
+        }
         return $true
     }
     catch {

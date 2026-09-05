@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.64.0
+
+This reliability release rechecks authorization at the final step of pending
+flows and on-air callbacks, protects the configured owner, and verifies the
+live Cinegy item before Mojaz recovery resumes or exits it. Telegram flood
+waits are deferred through the tick so polling and watchdogs remain responsive.
+
+Manager restarts wait for the old process to exit. Config writers share a lock
+and unique temporary files, invalid sheet imports preserve another editor's
+draft, and yesterday's report stops before today begins.
+
 ## Version 7.63.0
 
 A full review of `BridgeManager.exe`, the desktop control program. Every change

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.63.0'
+$script:BridgeVersion = '7.64.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -798,6 +798,7 @@ $script:LastUsageFlush = [datetime]::MinValue
 # abandoned flow can never swallow an unrelated message days later and put it
 # on air.
 $script:PendingState = @{}
+$script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
 
 # Layer -> @{ ChatId; UserId; Key; StartedAt }. A lock exists only while an
 # operator is preparing a SHOW flow; it prevents two drafts racing toward the
@@ -1635,7 +1636,15 @@ foreach ($e in $store.Errors) { Write-BridgeLog "Template warning: $e" "WARN" }
 Send-BridgeStartupNotification
 
 $offset = 0
-if (Get-Setting 'DropPendingUpdatesOnStart') { $offset = Clear-PendingTelegramUpdates }
+if (Get-Setting 'DropPendingUpdatesOnStart') {
+    do {
+        $offset = Clear-PendingTelegramUpdates
+        if ($offset -lt 0) {
+            Invoke-BridgeTick
+            Start-Sleep -Seconds 2
+        }
+    } while ($offset -lt 0)
+}
 $backoffSeconds = 1
 
 try {
@@ -1728,6 +1737,11 @@ try {
                     else {
                         $state = Get-PendingState -ChatId $chatId
                         if ($state -and -not $text.StartsWith('/')) {
+                            if (-not (Test-PendingStateAdmission -State $state -ChatId $chatId -UserId $userId)) {
+                                Clear-PendingState -ChatId $chatId
+                                Send-TelegramMessage -ChatId $chatId -Text '⛔ انتهت صلاحية هذه العملية. افتح الشاشة من جديد.'
+                                continue
+                            }
                             switch ($state.Mode) {
                                 'show_fields' { Resume-ShowFlow -ChatId $chatId -Value $text | Out-Null }
                                 'update_field' { Complete-UpdateField -ChatId $chatId -Value $text | Out-Null }

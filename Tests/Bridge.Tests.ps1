@@ -1031,6 +1031,17 @@ Describe 'Telegram flood-limit outbox' {
 
         $script:TelegramOutboxSentTexts[0] | Should -Be '⚠ urgent warning'
     }
+
+    It 'replays a deferred upload through its original Telegram endpoint' {
+        Add-TelegramOutboxItem -Uri 'https://api.example/sendPhoto' -Form @{ chat_id = '101'; photo = 'test.jpg' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' } }
+
+        Update-TelegramOutbox
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'https://api.example/sendPhoto' -and $Form.photo -eq 'test.jpg'
+        }
+    }
 }
 
 Describe 'The handover screen answers its first question first' {

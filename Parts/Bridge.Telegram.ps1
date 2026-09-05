@@ -180,12 +180,15 @@ function Add-TelegramOutboxItem {
        old interaction after a process restart is less useful than a timely
        current one, and persistence would retain operator-facing text. #>
     param(
-        [Parameter(Mandatory)][hashtable]$Body,
+        [string]$Uri = "$apiBase/sendMessage",
+        [hashtable]$Body,
+        [hashtable]$Form,
         [Parameter(Mandatory)][datetime]$DueAt,
         [ValidateRange(0,4)][int]$Attempts
     )
+    if (-not $Body -and -not $Form) { throw 'A deferred Telegram request needs a body or form.' }
     $maximumItems = 200
-    $priority = Test-TelegramOutboxPriority -Body $Body
+    $priority = if ($Body) { Test-TelegramOutboxPriority -Body $Body } else { $false }
     if ($script:TelegramOutbox.Count -ge $maximumItems) {
         $removeAt = -1
         for ($index = 0; $index -lt $script:TelegramOutbox.Count; $index++) {
@@ -205,7 +208,7 @@ function Add-TelegramOutboxItem {
             Write-BridgeLog "Telegram deferred-message queue is full; lower-priority message discarded" 'WARN'
         }
     }
-    $script:TelegramOutbox.Add(@{ DueAt = $DueAt; Body = $Body; Attempts = $Attempts; Priority = $priority }) | Out-Null
+    $script:TelegramOutbox.Add(@{ DueAt = $DueAt; Uri = $Uri; Body = $Body; Form = $Form; Attempts = $Attempts; Priority = $priority }) | Out-Null
     return $true
 }
 
@@ -221,13 +224,14 @@ function Update-TelegramOutbox {
         Select-Object -First 3)
     foreach ($item in $dueItems) {
         $script:TelegramOutbox.Remove($item) | Out-Null
-        $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $item.Body `
-            -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
+        $arguments = @{ Uri = [string]$item.Uri; Method = 'Post'; TimeoutSec = (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1); MaxAttempts = 1 }
+        if ($item.Form) { $arguments.Form = $item.Form } else { $arguments.Body = $item.Body }
+        $request = Invoke-BridgeTelegramRequest @arguments
         if ($request.Success) { continue }
         if ([int](Get-JsonProp $request 'StatusCode') -eq 429 -and [int]$item.Attempts -lt 4) {
             $item.Attempts = [int]$item.Attempts + 1
             $item.DueAt = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
-            Add-TelegramOutboxItem -Body $item.Body -DueAt $item.DueAt -Attempts $item.Attempts | Out-Null
+            Add-TelegramOutboxItem -Uri $item.Uri -Body $item.Body -Form $item.Form -DueAt $item.DueAt -Attempts $item.Attempts | Out-Null
         }
         else { Write-BridgeLog "Dropped deferred Telegram message after retry failure: $($request.Error)" 'ERROR' }
         # A new flood limit applies to the entire bot; do not spend this tick
@@ -360,6 +364,12 @@ function Send-TelegramRichMessage {
         Register-RichBlocksAccepted -Blocks $Blocks
         return $true
     }
+    if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
+        $script:TelegramRateLimitHits++
+        $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
+        Add-TelegramOutboxItem -Uri "$apiBase/sendRichMessage" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
+        return $true
+    }
     Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'sendRichMessage'
     return $false
 }
@@ -396,6 +406,12 @@ function Edit-TelegramRichMessage {
         Register-RichBlocksAccepted -Blocks $Blocks
         return $true
     }
+    if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
+        $script:TelegramRateLimitHits++
+        $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
+        Add-TelegramOutboxItem -Uri "$apiBase/editMessageText" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
+        return $true
+    }
     Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'editMessageText'
     return $false
 }
@@ -413,6 +429,12 @@ function Send-TelegramPhoto {
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendPhoto" -Method Post -Form $form `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
     if (-not $request.Success) {
+        if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
+            $script:TelegramRateLimitHits++
+            $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
+            Add-TelegramOutboxItem -Uri "$apiBase/sendPhoto" -Form $form -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
+            return
+        }
         Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($request.Error)" "ERROR"
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($request.Error)"
     }

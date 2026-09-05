@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.65.1
+
+Flood-limit deferral now includes photo, document, rich-message and rich-edit
+requests, replayed through their original Telegram endpoint. Callback answers
+remain immediate because their query may expire before a deferred retry.
+
 ## Version 7.65.0
 
 The manager's live log now highlights the timestamp, level, Air operation id,

@@ -234,19 +234,43 @@ function Get-MainMenuIntro {
         default { 'لم يتم التحقّق بعد' }
     }
     # The menu is the screen an operator lands on, so it carries the answer
-    # rather than a pointer to it: what is on air, how fresh that claim is,
-    # and which engine and channel it is talking about. Before this the whole
-    # screen was one on-air line, and the message above it said only that the
-    # menu existed.
+    # rather than a pointer to it: a verdict, what is on air, how fresh that
+    # claim is, and which engine and channel it is talking about. Before this
+    # the whole screen was one on-air line, and the message above it said only
+    # that the menu existed.
+    #
+    # Laid out in three separated blocks - verdict, air, machine - because run
+    # together they read as one paragraph an operator has to parse under
+    # pressure, and the first two lines are the ones that matter at a glance.
+    $sep = '━━━━━━━━━━━━━━━━━'
+
+    # The same verdict wording as ℹ️ الحالة, but read off the stored freshness
+    # rather than a live Cinegy sweep: this screen opens on every menu press
+    # and must not pay for a round trip to the engine each time.
+    #
+    # Green is claimed only on a confirmed reading. Anything else - stale,
+    # unreachable, or never checked at all - is an unknown, and a bridge that
+    # has not yet reached Cinegy once saying "all clear" is the same false
+    # comfort as a stale "on air" that reads like a fresh one.
+    $verdict = if ($freshness.State -ne 'connected') { '🟠 تعذّر تأكيد الحالة من Cinegy' }
+    elseif ($script:OnAir.Count -gt 0) { '🟠 طبقات على الهواء' }
+    else { '🟢 كل شيء سليم' }
+
     $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add($verdict)
+    $lines.Add($sep)
+
     if ($script:OnAir.Count -eq 0) { $lines.Add('⚫️ لا شيء على الهواء') }
     else {
-        $names = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            "$layer · $($script:OnAir[$layer].Key)"
+        $lines.Add("🔴 على الهواء ($($script:OnAir.Count)):")
+        # One layer per line. Joined with a separator they became a single run
+        # of text that had to be read word by word to find one layer in it.
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $lines.Add(" • طبقة $layer · $($script:OnAir[$layer].Key)")
         }
-        $lines.Add("🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')")
     }
-    $lines.Add($age)
+    $lines.Add("🔄 $age")
+    $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)")
     return ($lines -join "`n")
 }

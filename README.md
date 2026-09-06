@@ -13,6 +13,26 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.71.0
+
+Formatting for the menu screen, and a fault the formatting test then found.
+
+The screen is three separated blocks now — the verdict, what is on air, then
+the engine and channel. Run together they read as one paragraph an operator has
+to take apart under pressure, and the first line is the one that gets looked at
+in a glance. Each on-air layer gets its own line, too; joined with a separator
+they were a single run of text you had to read word by word to find one layer.
+
+The verdict is the same wording ℹ️ الحالة uses, read off the stored freshness
+rather than a live Cinegy sweep, because this screen opens on every menu press
+and cannot pay for a round trip to the engine each time.
+
+And "all clear" is now claimed only on a confirmed reading. The test written
+for the formatting caught it: a bridge that had never reached Cinegy once still
+announced 🟢 all clear — an assertion with nothing behind it, and the same false
+comfort as a stale "on air" that reads like a fresh one. Green requires a
+confirmed check; stale, unreachable and not-yet-checked all say so instead.
+
 ## Version 7.70.0
 
 Pressing the menu used to produce two messages, and the first carried nothing.

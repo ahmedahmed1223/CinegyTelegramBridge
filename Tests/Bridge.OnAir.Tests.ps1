@@ -1193,6 +1193,35 @@ Describe 'Main menu on-air priority' {
         Get-MainMenuIntro | Should -Match '8 · ticker'
     }
 
+    It 'separates the verdict, the air and the machine' {
+        # Run together the three read as one paragraph an operator has to
+        # parse under pressure; the verdict is what matters at a glance.
+        $script:OnAir.Clear()
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = (Get-Date)
+        $text = Get-MainMenuIntro
+        @($text -split "`n")[0] | Should -Match 'كل شيء سليم'
+        $text | Should -Match '━━━'
+
+        $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        @((Get-MainMenuIntro) -split "`n")[0] | Should -Match 'طبقات على الهواء'
+    }
+
+    It 'gives each on-air layer its own line' {
+        $script:OnAir.Clear()
+        $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        $script:OnAir[7] = @{ Key = 'Logo'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        $onAirLines = @((Get-MainMenuIntro) -split "`n" | Where-Object { $_ -match '^ • طبقة' })
+        $onAirLines.Count | Should -Be 2
+        $onAirLines[0] | Should -Match '4 · Urgent'
+        $onAirLines[1] | Should -Match '7 · Logo'
+    }
+
+    It 'says the verdict is unconfirmed when the Cinegy reading is stale' {
+        $script:OnAir.Clear()
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = [datetime]::MinValue
+        Get-MainMenuIntro | Should -Match 'تعذّر تأكيد الحالة'
+    }
+
     It 'names the engine and channel the claim is about' {
         # The menu is where an operator lands, so it answers rather than
         # pointing: which Air engine and channel these layers belong to.

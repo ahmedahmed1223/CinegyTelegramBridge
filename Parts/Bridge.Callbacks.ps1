@@ -516,6 +516,7 @@ function Invoke-CallbackQuery {
         'rep:banners:*' { Show-Report -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'rep:banners:'); break }
         'rep:news:*' { Show-Report -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'rep:news:'); break }
         'rep:mojaz:*' { Show-Report -ChatId $chatId -UserId $userId -Kind mojaz -Period (Get-CallbackArg $data 'rep:mojaz:'); break }
+        'rep:work:*' { Show-Report -ChatId $chatId -UserId $userId -Kind work -Period (Get-CallbackArg $data 'rep:work:'); break }
         'repdl:mojaz:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind mojaz -Period (Get-CallbackArg $data 'repdl:mojaz:'); break }
         'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }

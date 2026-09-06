@@ -20,6 +20,7 @@ function Get-ReportsMenuKeyboard {
     return @{ inline_keyboard = @(
             , @((New-Button '🖼 البنرات' 'rep:banners:today'), (New-Button '📰 الأخبار' 'rep:news:today'))
             , @((New-Button '📑 الموجزات' 'rep:mojaz:today'))
+            , @((New-Button '👥 تقرير العمل' 'rep:work:today'))
             , @((New-Button '🏠 القائمة' 'menu:main'))
         )
     }
@@ -28,7 +29,7 @@ function Get-ReportsMenuKeyboard {
 function Get-ReportPeriodKeyboard {
     <# The period row doubles as the refresh control: tapping the current
        period re-runs it. #>
-    param([Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz')][string]$Kind, [string]$Period = 'today')
+    param([Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz', 'work')][string]$Kind, [string]$Period = 'today')
     # The period being read is marked. Four identical buttons over a report
     # that does not repeat its own window left the operator guessing which one
     # they had pressed.
@@ -36,7 +37,7 @@ function Get-ReportPeriodKeyboard {
     return @{ inline_keyboard = @(
             , @((New-Button (& $mark 'today' 'اليوم') "rep:${Kind}:today"), (New-Button (& $mark 'yesterday' 'أمس') "rep:${Kind}:yesterday"))
             , @((New-Button (& $mark 'week' '7 أيام') "rep:${Kind}:week"), (New-Button (& $mark 'month' '30 يومًا') "rep:${Kind}:month"))
-            , @((New-Button '⬇️ تحميل الملف' "repdl:${Kind}:${Period}"))
+            $(if ($Kind -ne 'work') { , @((New-Button '⬇️ تحميل الملف' "repdl:${Kind}:${Period}")) })
             , @((New-Button '📊 التقارير' 'menu:reports'), (New-Button '🏠 القائمة' 'menu:main'))
         )
     }
@@ -54,6 +55,7 @@ function Show-ReportsMenu {
 🖼 البنرات — ماذا ظهر، بأي نص، ومتى اختفى
 📰 الأخبار — تعديلات الشريط اليومي وحجم كل تعديل
 📑 الموجزات — أي نشرة شُغّلت، بكم صفًّا، ومن شغّلها
+👥 تقرير العمل — حصيلة كل مشغّل من عمليات الهواء
 "@
 }
 
@@ -64,7 +66,7 @@ function Show-Report {
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('banners', 'news', 'mojaz', 'work')][string]$Kind,
         [Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -77,12 +79,14 @@ function Show-Report {
     $blocks = switch ($Kind) {
         'news' { Get-NewsReportBlocks -Period $Period -OnlyUserId $onlyUser }
         'mojaz' { Get-MojazReportBlocks -Period $Period -OnlyUserId $onlyUser }
+        'work' { Get-WorkReportBlocks -Period $Period -OnlyUserId $onlyUser }
         default { Get-BannerReportBlocks -Period $Period -OnlyUserId $onlyUser }
     }
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $markup) { return }
     $text = switch ($Kind) {
         'news' { Get-NewsReportText -Period $Period -OnlyUserId $onlyUser }
         'mojaz' { Get-MojazReportText -Period $Period -OnlyUserId $onlyUser }
+        'work' { Get-WorkReportText -Period $Period -OnlyUserId $onlyUser }
         default { Get-BannerReportText -Period $Period -OnlyUserId $onlyUser }
     }
     Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup $markup
@@ -138,6 +142,52 @@ function Get-ReportRecords {
         Records   = @($records)
         Truncated = ($raw.Count -ge $script:ReportMaxRecords)
     }
+}
+
+function Get-WorkReportData {
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $window = Get-ReportPeriod -Period $Period
+    $scan = Get-ReportRecords -From $window.From -To $window.To -EventName 'air_control'
+    $records = @($scan.Records | Where-Object { $_.UserId })
+    if ($OnlyUserId -gt 0) { $records = @($records | Where-Object { $_.UserId -eq [string]$OnlyUserId }) }
+    $people = foreach ($group in @($records | Group-Object -Property UserId | Sort-Object Count -Descending)) {
+        $items = @($group.Group)
+        [pscustomobject]@{
+            UserId = [string]$group.Name
+            Total = $items.Count
+            Success = @($items | Where-Object { $_.Result -eq 'success' }).Count
+            Failed = @($items | Where-Object { $_.Result -in @('failed', 'blocked') }).Count
+        }
+    }
+    return @{ Label = $window.Label; People = @($people); Truncated = $scan.Truncated }
+}
+
+function Get-WorkReportText {
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-WorkReportData -Period $Period -OnlyUserId $OnlyUserId
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("👥 تقرير العمل — $($data.Label)")
+    if ($data.People.Count -eq 0) { $lines.Add('لا توجد عمليات هواء مسجلة في هذه الفترة.'); return ($lines -join "`n") }
+    foreach ($person in $data.People) {
+        $name = Get-AuditOperatorName -UserId $person.UserId
+        $lines.Add("• ${name}: $($person.Total) عملية · ✅ $($person.Success) · ⚠️ $($person.Failed)")
+    }
+    $note = Get-ReportTruncationNote -Truncated ([bool]$data.Truncated)
+    if ($note) { $lines.Add(''); $lines.Add("⚠️ $note") }
+    return ($lines -join "`n")
+}
+
+function Get-WorkReportBlocks {
+    param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
+    $data = Get-WorkReportData -Period $Period -OnlyUserId $OnlyUserId
+    $blocks = @(@{ type = 'heading'; text = "👥 تقرير العمل — $($data.Label)"; size = 3 })
+    if ($data.People.Count -eq 0) { return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد عمليات هواء مسجلة في هذه الفترة.' }) }
+    $cells = @(, @(@{ text = 'المشغّل'; is_header = $true }, @{ text = 'العمليات'; is_header = $true }, @{ text = 'النتيجة'; is_header = $true }))
+    foreach ($person in $data.People) {
+        $cells += , @(@{ text = (Get-AuditOperatorName -UserId $person.UserId) }, @{ text = [string]$person.Total }, @{ text = "✅ $($person.Success) · ⚠️ $($person.Failed)" })
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    return $blocks
 }
 
 function Get-NewsReportDays {

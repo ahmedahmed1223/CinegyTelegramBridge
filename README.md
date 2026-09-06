@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.66.0
+
+The weekly usage digest now reads the last seven days of audit records instead
+of process-local counters, so restarts do not erase its estimate. Reports gain
+a Work report that groups successful and unsuccessful on-air actions per operator.
+
 ## Version 7.65.2
 
 Saving permissions in an already-open manager window now preserves a newer

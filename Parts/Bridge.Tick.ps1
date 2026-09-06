@@ -894,6 +894,13 @@ function Get-UsageDigestText {
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
     $lines.Add('')
     $lines.Add("عمليات الهواء منذ آخر تشغيل: $total")
+    # The scheduled weekly digest cannot use the process counters: a restart
+    # at handover made a quiet week look empty. Audit is the durable source.
+    $week = Get-ReportRecords -From ((Get-Date).Date.AddDays(-6)) -To (Get-Date) -EventName 'air_control'
+    $weeklyOperations = @($week.Records).Count
+    $completedDays = 7
+    $dailyAverage = [math]::Round($weeklyOperations / $completedDays, 1)
+    $lines.Add("تقدير أسبوعي: $weeklyOperations عملية في آخر 7 أيام · متوسط $dailyAverage يوميًا")
     $lines.Add("✅ ناجحة $($counters.Success) · ❌ فاشلة $($counters.Failed) · ⛔ مرفوضة $($counters.Blocked)")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
         $lines.Add('راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.')

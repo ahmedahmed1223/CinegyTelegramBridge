@@ -218,6 +218,7 @@ function Get-BridgeReadinessSummary {
 }
 
 function Get-MainMenuIntro {
+    param([long]$UserId = 0)
     <# The line above the main menu. It used to read "اختر من القائمة:", which
        tells the operator nothing they cannot already see. Saying what is on
        air instead answers the question they actually opened the menu with,
@@ -272,6 +273,10 @@ function Get-MainMenuIntro {
     $lines.Add("🔄 $age")
     $lines.Add($sep)
     $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)")
+    # Format-UserAuditActor, the same helper ℹ️ الحالة uses, so one operator is
+    # written one way on both screens - and so the bracketed id stays pinned
+    # LTR after an Arabic name instead of rendering as ")8201739556(".
+    if ($UserId -gt 0) { $lines.Add("👤 $(Format-UserAuditActor -UserId $UserId)") }
     return ($lines -join "`n")
 }
 

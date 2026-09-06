@@ -1222,6 +1222,17 @@ Describe 'Main menu on-air priority' {
         Get-MainMenuIntro | Should -Match 'تعذّر تأكيد الحالة'
     }
 
+    It 'names the operator the screen was built for' {
+        # The same helper ℹ️ الحالة uses, so one person is written one way on
+        # both screens, with the bracketed id pinned LTR after an Arabic name.
+        $withUser = Get-MainMenuIntro -UserId 122238225
+        $withUser | Should -Match '👤'
+        $withUser | Should -Match '122238225'
+        # Asked for without an operator - as the tests above do - it stays out
+        # rather than printing a bare zero.
+        Get-MainMenuIntro | Should -Not -Match '👤'
+    }
+
     It 'names the engine and channel the claim is about' {
         # The menu is where an operator lands, so it answers rather than
         # pointing: which Air engine and channel these layers belong to.

@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.72.0
+
+The menu screen now names the operator it was built for. A `👤` line at the
+foot of it, built with the same `Format-UserAuditActor` helper ℹ️ الحالة uses
+rather than a second piece of formatting — so one person is written one way on
+both screens, and the bracketed id stays pinned left-to-right after an Arabic
+name instead of rendering as `)8201739556(`. Asked for without an operator, the
+line stays out rather than printing a bare zero.
+
 ## Version 7.71.0
 
 Formatting for the menu screen, and a fault the formatting test then found.

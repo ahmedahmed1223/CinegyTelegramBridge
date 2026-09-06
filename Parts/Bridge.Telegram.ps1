@@ -767,7 +767,7 @@ function Show-MainMenu {
         Send-TelegramMessage -ChatId $ChatId -Text "استخدم زر 🏠 القائمة أسفل الشاشة في أي وقت للرجوع إلى هنا." -ReplyMarkup (Get-PersistentReplyKeyboard)
         $script:PersistentKeyboardPinned[$ChatId] = $true
     }
-    if ([string]::IsNullOrWhiteSpace($Intro)) { $Intro = Get-MainMenuIntro }
+    if ([string]::IsNullOrWhiteSpace($Intro)) { $Intro = Get-MainMenuIntro -UserId $UserId }
     Send-TelegramMessage -ChatId $ChatId -Text $Intro -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

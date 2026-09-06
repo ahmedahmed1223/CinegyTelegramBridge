@@ -1193,6 +1193,34 @@ Describe 'Main menu on-air priority' {
         Get-MainMenuIntro | Should -Match '8 · ticker'
     }
 
+    It 'names the engine and channel the claim is about' {
+        # The menu is where an operator lands, so it answers rather than
+        # pointing: which Air engine and channel these layers belong to.
+        Get-MainMenuIntro | Should -Match ([regex]::Escape($config.AirServerAddress))
+        Get-MainMenuIntro | Should -Match 'القناة'
+    }
+
+    It 'pins the persistent keyboard once per chat, not once per menu press' {
+        # Telegram keeps a reply keyboard until it is replaced, so re-sending
+        # it put a message saying only "the menu exists" above every single
+        # menu the operator opened.
+        $script:PersistentKeyboardPinned = @{}
+        Mock Send-TelegramMessage { }
+        Mock Clear-PendingState { }
+
+        Show-MainMenu -ChatId 909 -UserId 909
+        Show-MainMenu -ChatId 909 -UserId 909
+        Show-MainMenu -ChatId 909 -UserId 909
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'أسفل الشاشة'
+        }
+        # The menu itself still arrives every time it is asked for.
+        Should -Invoke Send-TelegramMessage -Times 3 -Exactly -ParameterFilter {
+            $Text -notmatch 'أسفل الشاشة'
+        }
+    }
+
     It 'states how old the on-air claim is, not just what it claims' {
         # A stale "on air" that reads identically to a fresh one is what let an
         # exited scene sit unnoticed for an hour and a half.

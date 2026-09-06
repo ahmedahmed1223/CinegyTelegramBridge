@@ -233,11 +233,22 @@ function Get-MainMenuIntro {
         'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
         default { 'لم يتم التحقّق بعد' }
     }
-    if ($script:OnAir.Count -eq 0) { return "⚫️ لا شيء على الهواء — $age" }
-    $names = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-        "$layer · $($script:OnAir[$layer].Key)"
+    # The menu is the screen an operator lands on, so it carries the answer
+    # rather than a pointer to it: what is on air, how fresh that claim is,
+    # and which engine and channel it is talking about. Before this the whole
+    # screen was one on-air line, and the message above it said only that the
+    # menu existed.
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($script:OnAir.Count -eq 0) { $lines.Add('⚫️ لا شيء على الهواء') }
+    else {
+        $names = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            "$layer · $($script:OnAir[$layer].Key)"
+        }
+        $lines.Add("🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')")
     }
-    return "🔴 على الهواء ($($script:OnAir.Count)): $((@($names)) -join ' | ')`n$age"
+    $lines.Add($age)
+    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)")
+    return ($lines -join "`n")
 }
 
 function Get-LayerRemovalSummary {

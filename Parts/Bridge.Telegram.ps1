@@ -758,8 +758,14 @@ function Show-MainMenu {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Intro = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
-    if (Get-Setting 'EnablePersistentMenuButton') {
+    # Once per chat, not once per menu press. Telegram keeps a reply keyboard
+    # pinned until it is replaced, so re-sending it every time bought nothing
+    # and cost the operator a data-free message at the top of the screen on
+    # every single press - the menu they opened for an answer led with a line
+    # telling them the menu exists.
+    if ((Get-Setting 'EnablePersistentMenuButton') -and -not $script:PersistentKeyboardPinned.ContainsKey($ChatId)) {
         Send-TelegramMessage -ChatId $ChatId -Text "استخدم زر 🏠 القائمة أسفل الشاشة في أي وقت للرجوع إلى هنا." -ReplyMarkup (Get-PersistentReplyKeyboard)
+        $script:PersistentKeyboardPinned[$ChatId] = $true
     }
     if ([string]::IsNullOrWhiteSpace($Intro)) { $Intro = Get-MainMenuIntro }
     Send-TelegramMessage -ChatId $ChatId -Text $Intro -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)

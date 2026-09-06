@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.69.0'
+$script:BridgeVersion = '7.70.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -618,6 +618,10 @@ $script:PollTimeoutStreak = 0
 # -Version Latest throws on reading an unset $script: variable, and
 # Write-BridgeLivenessStamp tests this one before its very first write.
 $script:LivenessWriteFailed = $false
+# Chats whose persistent 🏠 keyboard has already been pinned this run. Telegram
+# keeps a reply keyboard until it is replaced, so pinning it again on every menu
+# press bought nothing and cost the operator a data-free message above the menu.
+$script:PersistentKeyboardPinned = @{}
 $script:LeftGroupChats = @{}
 $script:LastDormantSweep = $null
 $script:LastMojazImageSweep = $null

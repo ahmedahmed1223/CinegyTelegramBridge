@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.70.0
+
+Pressing the menu used to produce two messages, and the first carried nothing.
+
+That first message said only "use the 🏠 menu button below to come back here",
+and existed purely to pin the persistent reply keyboard. Telegram keeps a reply
+keyboard until it is replaced, so re-sending it on every press bought nothing
+and cost the operator a message telling them the menu exists, sitting directly
+above the menu they had just opened. It is pinned once per chat now, so what
+someone sees when they press the menu is the menu.
+
+The menu screen also answers instead of pointing. It was a single on-air line;
+it now carries what is on air, how old the last Cinegy check is — a stale "on
+air" reads identically to a fresh one, which is what let an exited scene sit
+unnoticed — and which Air engine and channel the claim is about. An operator
+who opens the menu gets the answer there, without spending a tap on ℹ️ الحالة.
+
 ## Version 7.69.0
 
 Finishes what adoption left half-done in 7.68.0, and answers a question the

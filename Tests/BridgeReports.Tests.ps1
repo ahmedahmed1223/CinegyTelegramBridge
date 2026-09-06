@@ -561,3 +561,86 @@ Describe 'The bulletin report' {
         $data.Runs[0].StartedAt | Should -BeLessThan $data.Runs[1].StartedAt
     }
 }
+
+Describe 'Work report' {
+    BeforeEach {
+        # One refused operator, one operator the engine failed, so the two can
+        # be told apart - which is the whole point of counting them separately.
+        $stamp = { param($MinutesAgo) (Get-Date).ToUniversalTime().AddMinutes(-$MinutesAgo).ToString('o') }
+        Mock Read-AuditRecords {
+            @(
+                [pscustomobject]@{ timestampUtc = (& $stamp 50); event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $stamp 40); event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $stamp 30); event = 'air_control'; action = 'HIDE'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $stamp 20); event = 'air_control'; action = 'SHOW'; result = 'blocked'; userId = '42'; target = 'News-Ticker'; layer = '8' }
+                [pscustomobject]@{ timestampUtc = (& $stamp 10); event = 'air_control'; action = 'SHOW'; result = 'failed'; userId = '77'; target = 'شعار'; layer = '2' }
+            )
+        }
+    }
+
+    It 'counts a refusal apart from an engine failure' {
+        # Merged, a shift of permission refusals read exactly like a shift of
+        # Cinegy errors, and the two need opposite responses.
+        $data = Get-WorkReportData -Period today
+        $ahmed = @($data.People | Where-Object { $_.UserId -eq '42' })[0]
+        $ahmed.Blocked | Should -Be 1
+        $ahmed.Failed | Should -Be 0
+
+        $mohammed = @($data.People | Where-Object { $_.UserId -eq '77' })[0]
+        $mohammed.Blocked | Should -Be 0
+        $mohammed.Failed | Should -Be 1
+    }
+
+    It 'counts only the shows that actually reached air' {
+        $ahmed = @((Get-WorkReportData -Period today).People | Where-Object { $_.UserId -eq '42' })[0]
+        # Four operations, three of them successful, but a hide is not air time
+        # and the blocked show never left the building.
+        $ahmed.Total | Should -Be 4
+        $ahmed.OnAir | Should -Be 2
+    }
+
+    It 'names the template the operator spent the shift on' {
+        $ahmed = @((Get-WorkReportData -Period today).People | Where-Object { $_.UserId -eq '42' })[0]
+        $ahmed.TopTarget | Should -Be 'عاجل'
+    }
+
+    It 'adds every operator up so the shift has one number' {
+        $totals = (Get-WorkReportData -Period today).Totals
+        $totals.Operators | Should -Be 2
+        $totals.Total | Should -Be 5
+        $totals.OnAir | Should -Be 2
+        $totals.Blocked | Should -Be 1
+        $totals.Failed | Should -Be 1
+    }
+
+    It 'stays silent about problems that did not happen' {
+        # A "0 blocked, 0 failed" on every clean line teaches the reader to
+        # skip the symbols that matter on the line that is not clean.
+        Get-WorkReportProblemSuffix -Blocked 0 -Failed 0 | Should -BeExactly ''
+        Get-WorkReportProblemSuffix -Blocked 2 -Failed 0 | Should -Match 'مرفوضة'
+        Get-WorkReportProblemSuffix -Blocked 2 -Failed 0 | Should -Not -Match 'فاشلة'
+        Get-WorkReportProblemSuffix -Blocked 0 -Failed 3 | Should -Match 'فاشلة'
+    }
+
+    It 'shows the operator what they did, not just how much' {
+        $text = Get-WorkReportText -Period today
+        $text | Should -Match 'على الهواء'
+        $text | Should -Match 'الأكثر: عاجل'
+        $text | Should -Match 'الإجمالي:'
+        $text | Should -Match 'مرفوضة'
+    }
+
+    It 'says so plainly when nobody touched the air' {
+        Mock Read-AuditRecords { @() }
+        Get-WorkReportText -Period today | Should -Match 'لا توجد عمليات'
+    }
+
+    It 'gives the table the same numbers as the text' {
+        $blocks = @(Get-WorkReportBlocks -Period today)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+        $table | Should -Not -BeNullOrEmpty
+        # Header, two operators, and a totals row.
+        @($table.cells).Count | Should -Be 4
+        @($table.cells)[0].Count | Should -Be 7
+    }
+}

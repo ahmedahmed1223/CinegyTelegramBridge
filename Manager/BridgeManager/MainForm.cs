@@ -502,7 +502,85 @@ public sealed class MainForm : Form
         if (!EnsureBridgeScriptResolved()) return;
         UpdateStatusBar();
         LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : "")}.");
+        // Adopt before starting: a bridge left running by a previous manager is
+        // already on air, and launching a second one would take the graphics
+        // down for the seconds -StopExisting needs to kill the first.
+        if (TryAdoptRunningBridge()) return;
         if (_autoStartBridge) StartBridge();
+    }
+
+    /// <summary>
+    /// Picks up a bridge that is already running without a supervisor.
+    ///
+    /// Closing the manager leaves the bridge alive on purpose, so reopening it
+    /// used to show "stopped" beside a bridge that was plainly on air - and
+    /// worse, auto-restart and hang detection both sat idle, because they watch
+    /// a process this window never started. The heartbeat file carries the
+    /// bridge's process id precisely so that gap can be closed without asking
+    /// the operator to restart something that is working.
+    ///
+    /// The one thing adoption cannot recover is the log pane: stdout belongs to
+    /// whoever launched the process, so the window says so rather than looking
+    /// broken.
+    /// </summary>
+    private bool TryAdoptRunningBridge()
+    {
+        var pid = ReadLivenessPid();
+        if (pid is null) return false;
+
+        var stamp = ReadLivenessStamp();
+        // A stale heartbeat means the id belongs to a bridge that has already
+        // gone; the pid could since have been reused by anything at all.
+        if (stamp is null || DateTime.UtcNow - stamp.Value > TimeSpan.FromMinutes(2)) return false;
+
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(pid.Value);
+            if (process.HasExited) return false;
+            process.EnableRaisingEvents = true;
+        }
+        catch { return false; }
+
+        process.Exited += (_, _) =>
+        {
+            if (IsDisposed) return;
+            try { BeginInvoke(() => OnBridgeExited(process)); }
+            catch (InvalidOperationException) { }
+        };
+
+        _bridgeProcess?.Dispose();
+        _bridgeProcess = process;
+        _stoppingIntentionally = false;
+        _consecutiveQuickFailures = 0;
+        // Its real start time, so the header does not claim an uptime of zero
+        // for a bridge that has been up for days.
+        try { _lastStartAt = process.StartTime.ToUniversalTime(); }
+        catch { _lastStartAt = DateTime.UtcNow; }
+        _lastLivenessSeen = stamp;
+        _watchdogInactiveLogged = false;
+
+        AppendLine($"--- تم استلام جسر يعمل بالفعل (المعرّف {pid}). سجله لا يظهر هنا لأنه بدأ خارج هذا البرنامج - راجع logs\\bridge.log. ---");
+        LogEvent($"استلام جسر يعمل بالفعل (المعرّف {pid}).");
+        SetStatus(running: true);
+        return true;
+    }
+
+    /// <summary>The bridge process id from the heartbeat file, when it carries one.</summary>
+    private int? ReadLivenessPid()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)) return null;
+            var path = LivenessPath;
+            if (!File.Exists(path)) return null;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            var lines = reader.ReadToEnd().Split('\n');
+            if (lines.Length < 2) return null;
+            return int.TryParse(lines[1].Trim(), out var pid) && pid > 0 ? pid : null;
+        }
+        catch { return null; }
     }
 
     // ---- locating the bridge --------------------------------------------
@@ -744,8 +822,19 @@ public sealed class MainForm : Form
             if (string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)) return null;
             var path = LivenessPath;
             if (!File.Exists(path)) return null;
-            var text = File.ReadAllText(path).Trim();
-            if (DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+            // FileShare.ReadWrite, because File.ReadAllText opens with
+            // FileShare.Read and that denies the writer: the bridge's own log
+            // showed "Could not write the liveness stamp ... used by another
+            // process" every time a read landed on a write. The bridge retried
+            // on its next loop so nothing broke, but a reader has no business
+            // blocking the heartbeat it is only observing.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            var text = reader.ReadToEnd().Trim();
+            // Line 1 is the stamp; a second line, when present, is the bridge's
+            // process id. Older bridges wrote only the stamp.
+            var firstLine = text.Split('\n')[0].Trim();
+            if (DateTime.TryParse(firstLine, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
                 return parsed.ToUniversalTime();
             // Content unreadable but the file is still being touched - the

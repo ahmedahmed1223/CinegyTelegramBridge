@@ -286,7 +286,11 @@ function Get-MojazImageSize {
     try {
         $document = [xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
         $token = '${' + $script:MojazImageVariable + '}'
-        $plate = @($document.SelectNodes('//Plate') | Where-Object { [string]$_.File -eq $token }) | Select-Object -First 1
+        # Matched in XPath, not by reading .File off every node: a <Plate>
+        # carrying no File attribute threw under Set-StrictMode -Version Latest,
+        # so one unrelated plate in the template cost the whole measurement and
+        # the bulletin picture silently fell back to a default size.
+        $plate = @($document.SelectNodes("//Plate[@File=`"$token`"]")) | Select-Object -First 1
         if ($plate) {
             $parts = ([string]$plate.Size) -split ';'
             if ($parts.Count -ge 2) {

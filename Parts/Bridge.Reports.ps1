@@ -152,14 +152,71 @@ function Get-WorkReportData {
     if ($OnlyUserId -gt 0) { $records = @($records | Where-Object { $_.UserId -eq [string]$OnlyUserId }) }
     $people = foreach ($group in @($records | Group-Object -Property UserId | Sort-Object Count -Descending)) {
         $items = @($group.Group)
+        # Blocked is counted apart from failed on purpose. They were one number
+        # and they are two different conversations: blocked is a person being
+        # refused (wrong permission, maintenance window), failed is the engine
+        # not doing what it was told. Merged, a shift full of refusals looked
+        # exactly like a shift full of Cinegy errors.
+        $shows = @($items | Where-Object { $_.Action -eq 'SHOW' -and $_.Result -eq 'success' }).Count
+        $lastAt = @($items | Sort-Object When -Descending | Select-Object -First 1).When
+        $topTarget = ''
+        $named = @($items | Where-Object { $_.Target })
+        if ($named.Count -gt 0) {
+            $topTarget = [string](@($named | Group-Object -Property Target | Sort-Object Count -Descending)[0].Name)
+        }
         [pscustomobject]@{
-            UserId = [string]$group.Name
-            Total = $items.Count
-            Success = @($items | Where-Object { $_.Result -eq 'success' }).Count
-            Failed = @($items | Where-Object { $_.Result -in @('failed', 'blocked') }).Count
+            UserId    = [string]$group.Name
+            Total     = $items.Count
+            Success   = @($items | Where-Object { $_.Result -eq 'success' }).Count
+            Blocked   = @($items | Where-Object { $_.Result -eq 'blocked' }).Count
+            Failed    = @($items | Where-Object { $_.Result -eq 'failed' }).Count
+            OnAir     = $shows
+            LastAt    = $lastAt
+            TopTarget = $topTarget
         }
     }
-    return @{ Label = $window.Label; People = @($people); Truncated = $scan.Truncated }
+    $people = @($people)
+    # Measure-Object over an empty set returns no object at all, and reading
+    # .Sum off that throws under Set-StrictMode -Version Latest. It took the
+    # bulletin report down on a quiet day once already (see the same guard
+    # below); a quiet day is exactly when a report is opened to check.
+    $totals = if ($people.Count -eq 0) {
+        [pscustomobject]@{ Operators = 0; Total = 0; Success = 0; Blocked = 0; Failed = 0; OnAir = 0 }
+    }
+    else {
+        [pscustomobject]@{
+            Operators = $people.Count
+            Total     = [int](@($people | Measure-Object -Property Total -Sum).Sum)
+            Success   = [int](@($people | Measure-Object -Property Success -Sum).Sum)
+            Blocked   = [int](@($people | Measure-Object -Property Blocked -Sum).Sum)
+            Failed    = [int](@($people | Measure-Object -Property Failed -Sum).Sum)
+            OnAir     = [int](@($people | Measure-Object -Property OnAir -Sum).Sum)
+        }
+    }
+    return @{ Label = $window.Label; People = $people; Totals = $totals; Truncated = $scan.Truncated }
+}
+
+function Get-WorkReportProblemSuffix {
+    <# Names only the problems that actually happened. A line reading
+       "🚫 0 · ⚠️ 0" on every clean shift trains the reader to skip the very
+       symbols that matter on the shift that is not clean. #>
+    param([int]$Blocked = 0, [int]$Failed = 0)
+    $parts = @()
+    if ($Blocked -gt 0) { $parts += "🚫 $Blocked مرفوضة" }
+    if ($Failed -gt 0) { $parts += "⚠️ $Failed فاشلة" }
+    if ($parts.Count -eq 0) { return '' }
+    return ' · ' + ($parts -join ' · ')
+}
+
+function Get-WorkReportDetailLine {
+    <# The second line under an operator: what actually reached the screen,
+       what they worked on most, and when they were last active - the three
+       questions a supervisor asks after "how many". #>
+    param([int]$OnAir = 0, [string]$TopTarget = '', $LastAt = $null)
+    $parts = @("🔴 $OnAir على الهواء")
+    if ($TopTarget) { $parts += "الأكثر: $TopTarget" }
+    if ($LastAt -is [datetime]) { $parts += "آخر نشاط $($LastAt.ToString('HH:mm'))" }
+    return ($parts -join ' · ')
 }
 
 function Get-WorkReportText {
@@ -170,7 +227,13 @@ function Get-WorkReportText {
     if ($data.People.Count -eq 0) { $lines.Add('لا توجد عمليات هواء مسجلة في هذه الفترة.'); return ($lines -join "`n") }
     foreach ($person in $data.People) {
         $name = Get-AuditOperatorName -UserId $person.UserId
-        $lines.Add("• ${name}: $($person.Total) عملية · ✅ $($person.Success) · ⚠️ $($person.Failed)")
+        $lines.Add("• ${name}: $($person.Total) عملية · ✅ $($person.Success)$(Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed)")
+        $lines.Add("   $(Get-WorkReportDetailLine -OnAir $person.OnAir -TopTarget $person.TopTarget -LastAt $person.LastAt)")
+    }
+    if ($data.People.Count -gt 1) {
+        $t = $data.Totals
+        $lines.Add('')
+        $lines.Add("الإجمالي: $($t.Total) عملية · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed) · $($t.Operators) مشغّلين")
     }
     $note = Get-ReportTruncationNote -Truncated ([bool]$data.Truncated)
     if ($note) { $lines.Add(''); $lines.Add("⚠️ $note") }
@@ -182,9 +245,38 @@ function Get-WorkReportBlocks {
     $data = Get-WorkReportData -Period $Period -OnlyUserId $OnlyUserId
     $blocks = @(@{ type = 'heading'; text = "👥 تقرير العمل — $($data.Label)"; size = 3 })
     if ($data.People.Count -eq 0) { return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد عمليات هواء مسجلة في هذه الفترة.' }) }
-    $cells = @(, @(@{ text = 'المشغّل'; is_header = $true }, @{ text = 'العمليات'; is_header = $true }, @{ text = 'النتيجة'; is_header = $true }))
+    $cells = @(, @(
+            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = 'العمليات'; is_header = $true }
+            @{ text = 'على الهواء'; is_header = $true }
+            @{ text = 'مرفوضة'; is_header = $true }
+            @{ text = 'فاشلة'; is_header = $true }
+            @{ text = 'الأكثر'; is_header = $true }
+            @{ text = 'آخر نشاط'; is_header = $true }
+        ))
     foreach ($person in $data.People) {
-        $cells += , @(@{ text = (Get-AuditOperatorName -UserId $person.UserId) }, @{ text = [string]$person.Total }, @{ text = "✅ $($person.Success) · ⚠️ $($person.Failed)" })
+        $last = if ($person.LastAt -is [datetime]) { $person.LastAt.ToString('MM-dd HH:mm') } else { '—' }
+        $cells += , @(
+            @{ text = (Get-AuditOperatorName -UserId $person.UserId) }
+            @{ text = [string]$person.Total }
+            @{ text = [string]$person.OnAir }
+            @{ text = [string]$person.Blocked }
+            @{ text = [string]$person.Failed }
+            @{ text = $(if ($person.TopTarget) { [string]$person.TopTarget } else { '—' }) }
+            @{ text = $last }
+        )
+    }
+    if ($data.People.Count -gt 1) {
+        $t = $data.Totals
+        $cells += , @(
+            @{ text = 'الإجمالي'; is_header = $true }
+            @{ text = [string]$t.Total; is_header = $true }
+            @{ text = [string]$t.OnAir; is_header = $true }
+            @{ text = [string]$t.Blocked; is_header = $true }
+            @{ text = [string]$t.Failed; is_header = $true }
+            @{ text = '—'; is_header = $true }
+            @{ text = '—'; is_header = $true }
+        )
     }
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
     return $blocks

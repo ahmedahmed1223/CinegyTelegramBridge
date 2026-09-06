@@ -13,6 +13,50 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.68.0
+
+Three fixes a review of three days of logs found, rather than a user report.
+
+The work report counted a refusal and an engine failure as the same number.
+`blocked` means a person was stopped — a missing permission, a maintenance
+window — and `failed` means Cinegy did not do what it was told; merged, a shift
+full of refusals read exactly like a shift full of engine errors, and the two
+call for opposite responses. They are separate now, and neither is printed when
+it is zero: a "0 blocked, 0 failed" on every clean line teaches the reader to
+skip the symbols that matter on the line that is not clean. The report also
+answers the three questions a supervisor asks after "how many": how many
+operations actually reached air (a successful SHOW — a hide is not air time and
+a blocked show never left the building), which template the operator spent the
+shift on, and when they were last active, plus a shift total once more than one
+operator is involved.
+
+That report shipped in 7.66.0 with no test at all. It has eight now, and the
+first of them immediately caught a `.Sum`-on-an-empty-collection throw that had
+just been reintroduced in the totals line — the same fault that took the
+bulletin report down on a quiet day once before. A quiet day is exactly when a
+report gets opened to check.
+
+The manager reported "stopped" beside a bridge that was plainly on air. Closing
+the manager leaves the bridge running by design, but reopening it showed
+"stopped", and both auto-restart and hang detection sat idle because they watch
+a process that window never started. The bridge now writes its process id as a
+second line in `logs/bridge.liveness` — an older reader still sees the stamp on
+line one — and the manager adopts a live bridge on open instead of taking the
+graphics down for the seconds a restart would cost. The one thing adoption
+cannot recover is the log pane: stdout belongs to whoever launched the process,
+so the window says so rather than looking broken.
+
+Reading that heartbeat no longer blocks writing it. `File.ReadAllText` opens
+with `FileShare.Read`, which denies the writer, and the bridge log carried
+"Could not write the liveness stamp … used by another process" three times in
+three days. Nothing broke — the bridge rewrote it on its next loop — but an
+observer has no business blocking what it observes.
+
+Finally, one `<Plate>` without a `File` attribute no longer costs the whole
+bulletin picture measurement. Reading `.File` off every node throws under
+`Set-StrictMode -Version Latest`; the plate is selected in XPath now, so an
+absent attribute is simply not a match.
+
 ## Version 7.67.0
 
 Bulletin recovery verifies the confirmed live scene identity before resuming

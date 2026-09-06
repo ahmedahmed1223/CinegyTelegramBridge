@@ -513,7 +513,13 @@ function Write-BridgeLivenessStamp {
        failed write here is that the manager reports the watchdog inactive. #>
     if (-not $script:livenessFile) { return }
     try {
-        Set-Content -LiteralPath $script:livenessFile -Value ([datetime]::UtcNow.ToString('o')) -Encoding utf8 -ErrorAction Stop
+        # Two lines: the stamp, then this process id. The id is what lets a
+        # manager started after the bridge adopt it instead of reporting
+        # "stopped" beside a bridge that is plainly on air - which is what an
+        # operator saw after the manager was closed and reopened. A reader that
+        # only knows the old single-line file still reads the first line.
+        Set-Content -LiteralPath $script:livenessFile -Encoding utf8 -ErrorAction Stop `
+            -Value @([datetime]::UtcNow.ToString('o'), [string]$PID)
         $script:LivenessWriteFailed = $false
     }
     catch {

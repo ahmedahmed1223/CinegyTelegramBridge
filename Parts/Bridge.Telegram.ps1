@@ -200,6 +200,7 @@ function Add-TelegramOutboxItem {
             return $false
         }
         if ($removeAt -lt 0) { $removeAt = 0 }
+        Remove-TelegramOutboxFiles -Item $script:TelegramOutbox[$removeAt]
         $script:TelegramOutbox.RemoveAt($removeAt)
         $script:TelegramOutboxDropped++
         # Log only every 25th discard: a log entry per rejected low-priority
@@ -208,36 +209,101 @@ function Add-TelegramOutboxItem {
             Write-BridgeLog "Telegram deferred-message queue is full; lower-priority message discarded" 'WARN'
         }
     }
-    $script:TelegramOutbox.Add(@{ DueAt = $DueAt; Uri = $Uri; Body = $Body; Form = $Form; Attempts = $Attempts; Priority = $priority }) | Out-Null
+    $item = @{ DueAt = $DueAt; Uri = $Uri; Body = $Body; Form = $Form; Attempts = $Attempts; Priority = $priority; OwnedFiles = @(); UploadBytes = 0L }
+    if ($Form) {
+        $item.Form = $Form.Clone()
+        # Callers own the source (report exporters delete theirs in finally).
+        # Queue entries own separate copies, bounded across queued + active sends.
+        $retainedBytes = 0L
+        foreach ($queued in $script:TelegramOutbox) { $retainedBytes += [long](Get-JsonProp $queued 'UploadBytes') }
+        if ($script:TelegramOutboxActiveItem) { $retainedBytes += [long]$script:TelegramOutboxActiveItem.UploadBytes }
+        try {
+            foreach ($field in @($Form.Keys)) {
+                if ($Form[$field] -isnot [IO.FileInfo]) { continue }
+                $sourceFile = Get-Item -LiteralPath $Form[$field].FullName -ErrorAction Stop
+                if (($retainedBytes + $item.UploadBytes + $sourceFile.Length) -gt 64MB) { throw 'Deferred upload storage limit reached.' }
+                New-Item -ItemType Directory -Path $script:TelegramOutboxDirectory -Force -ErrorAction Stop | Out-Null
+                $copyPath = Join-Path $script:TelegramOutboxDirectory "$([guid]::NewGuid().ToString('N'))-$($sourceFile.Name)"
+                $item.OwnedFiles += $copyPath
+                Copy-Item -LiteralPath $sourceFile.FullName -Destination $copyPath -ErrorAction Stop
+                $copyFile = Get-Item -LiteralPath $copyPath -ErrorAction Stop
+                $item.UploadBytes += $copyFile.Length
+                if (($retainedBytes + $item.UploadBytes) -gt 64MB) { throw 'Deferred upload storage limit reached.' }
+                $item.Form[$field] = $copyFile
+            }
+        }
+        catch {
+            Remove-TelegramOutboxFiles -Item $item
+            $script:TelegramOutboxDropped++
+            Write-BridgeLog 'Could not retain a deferred Telegram upload; request discarded.' 'WARN'
+            return $false
+        }
+    }
+    $script:TelegramOutbox.Add($item) | Out-Null
     return $true
 }
 
+function Remove-TelegramOutboxFiles {
+    param([Parameter(Mandatory)][hashtable]$Item)
+    foreach ($ownedFile in @(Get-JsonProp $Item 'OwnedFiles')) {
+        if ($ownedFile) { Remove-Item -LiteralPath $ownedFile -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Clear-TelegramOutbox {
+    # Shutdown only: cancellation may wait for the HTTP stack, never in tick.
+    if ($script:TelegramOutboxWorker) {
+        try { Stop-BridgeTelegramRequestWorker -Worker $script:TelegramOutboxWorker }
+        catch { Write-BridgeLog 'Could not cancel the deferred Telegram worker during shutdown.' 'WARN' }
+        $script:TelegramOutboxWorker = $null
+    }
+    if ($script:TelegramOutboxActiveItem) {
+        Remove-TelegramOutboxFiles -Item $script:TelegramOutboxActiveItem
+        $script:TelegramOutboxActiveItem = $null
+    }
+    foreach ($item in $script:TelegramOutbox) { Remove-TelegramOutboxFiles -Item $item }
+    $script:TelegramOutbox.Clear()
+    if (Test-Path -LiteralPath $script:TelegramOutboxDirectory) {
+        try { [IO.Directory]::Delete($script:TelegramOutboxDirectory, $false) }
+        catch { Write-BridgeLog 'Deferred upload directory could not be removed during shutdown.' 'WARN' }
+    }
+}
+
 function Update-TelegramOutbox {
-    if (-not $script:TelegramOutbox -or $script:TelegramOutbox.Count -eq 0) { return }
+    if ($script:TelegramOutboxWorker) {
+        $request = Receive-BridgeTelegramRequestWorker -Worker $script:TelegramOutboxWorker
+        if (-not $request) { return }
+        $item = $script:TelegramOutboxActiveItem
+        $script:TelegramOutboxWorker = $null
+        $script:TelegramOutboxActiveItem = $null
+        $flooded = [int](Get-JsonProp $request 'StatusCode') -eq 429
+        if ($flooded) {
+            $script:TelegramOutboxNotBefore = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
+        }
+        if (-not $request.Success -and $flooded -and [int]$item.Attempts -lt 4 -and $script:TelegramOutbox.Count -lt 200) {
+            $item.Attempts++
+            $item.DueAt = $script:TelegramOutboxNotBefore
+            $script:TelegramOutbox.Add($item) | Out-Null
+        }
+        else {
+            Remove-TelegramOutboxFiles -Item $item
+            if (-not $request.Success) { Write-BridgeLog 'Dropped deferred Telegram request after retry failure.' 'ERROR' }
+        }
+    }
     $now = Get-Date
-    # Three bounded sends leave time in every polling cycle for liveness,
-    # scheduled safety work, and incoming operator commands. Priority is only
-    # inside the deferred queue; it never reorders direct button responses.
+    if ($script:TelegramOutbox.Count -eq 0 -or $now -lt $script:TelegramOutboxNotBefore) { return }
     $dueItems = @($script:TelegramOutbox.ToArray() |
         Where-Object { [datetime]$_.DueAt -le $now } |
         Sort-Object @{ Expression = { [bool](Get-JsonProp $_ 'Priority') }; Descending = $true }, @{ Expression = { [datetime]$_.DueAt }; Descending = $false } |
-        Select-Object -First 3)
-    foreach ($item in $dueItems) {
-        $script:TelegramOutbox.Remove($item) | Out-Null
-        $arguments = @{ Uri = [string]$item.Uri; Method = 'Post'; TimeoutSec = (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1); MaxAttempts = 1 }
-        if ($item.Form) { $arguments.Form = $item.Form } else { $arguments.Body = $item.Body }
-        $request = Invoke-BridgeTelegramRequest @arguments
-        if ($request.Success) { continue }
-        if ([int](Get-JsonProp $request 'StatusCode') -eq 429 -and [int]$item.Attempts -lt 4) {
-            $item.Attempts = [int]$item.Attempts + 1
-            $item.DueAt = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
-            Add-TelegramOutboxItem -Uri $item.Uri -Body $item.Body -Form $item.Form -DueAt $item.DueAt -Attempts $item.Attempts | Out-Null
-        }
-        else { Write-BridgeLog "Dropped deferred Telegram message after retry failure: $($request.Error)" 'ERROR' }
-        # A new flood limit applies to the entire bot; do not spend this tick
-        # proving the same point on the rest of the due messages.
-        if ([int](Get-JsonProp $request 'StatusCode') -eq 429) { break }
-    }
+        Select-Object -First 1)
+    if ($dueItems.Count -eq 0) { return }
+    $item = $dueItems[0]
+    $arguments = @{ Uri = [string]$item.Uri; Method = 'Post'; TimeoutSec = (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1); MaxAttempts = 1 }
+    if ($item.Form) { $arguments.Form = $item.Form } else { $arguments.Body = $item.Body }
+    # BeginInvoke returns immediately; only this polling thread owns the queue.
+    $script:TelegramOutboxWorker = Start-BridgeTelegramRequestWorker -Request $arguments
+    $script:TelegramOutboxActiveItem = $item
+    $script:TelegramOutbox.Remove($item) | Out-Null
 }
 
 function Get-RichBlockTypes {

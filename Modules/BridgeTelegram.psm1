@@ -72,4 +72,44 @@ function Invoke-BridgeTelegramRequest {
     }
 }
 
-Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramRetryDelayMs
+function Start-BridgeTelegramRequestWorker {
+    <# A private runspace owns only one HTTP request. It never receives bridge
+       state or Cinegy functions, so a stalled upload cannot hold the air clock. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Request)
+    $pipeline = [powershell]::Create()
+    try {
+        $pipeline.AddScript({
+            param($transportModule, $requestArguments)
+            Import-Module $transportModule -ErrorAction Stop
+            Invoke-BridgeTelegramRequest @requestArguments
+        }).AddArgument((Join-Path $PSScriptRoot 'BridgeTelegram.psm1')).AddArgument($Request) | Out-Null
+        return @{ Pipeline = $pipeline; Handle = $pipeline.BeginInvoke(); Disposed = $false }
+    }
+    catch { $pipeline.Dispose(); throw }
+}
+
+function Receive-BridgeTelegramRequestWorker {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Worker)
+    if ($Worker.Disposed -or -not $Worker.Handle.IsCompleted) { return $null }
+    try {
+        $results = @($Worker.Pipeline.EndInvoke($Worker.Handle))
+        if ($results.Count -eq 0) { throw 'Deferred Telegram transport returned no result.' }
+        return $results[-1]
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Response = $null; Error = 'Deferred Telegram transport failed.'; StatusCode = 0; RetryAfterMs = 0 }
+    }
+    finally { $Worker.Pipeline.Dispose(); $Worker.Disposed = $true }
+}
+
+function Stop-BridgeTelegramRequestWorker {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Worker)
+    if ($Worker.Disposed) { return }
+    try { $Worker.Pipeline.Stop() }
+    finally { $Worker.Pipeline.Dispose(); $Worker.Disposed = $true }
+}
+
+Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker

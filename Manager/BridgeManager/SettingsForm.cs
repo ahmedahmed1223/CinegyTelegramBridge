@@ -33,6 +33,7 @@ public sealed class SettingsForm : Form
     private readonly string _configPath;
     private readonly string _bridgeRoot;
     private readonly bool _bridgeRunning;
+    private readonly Func<bool>? _stopBeforeSave;
 
     private readonly TextBox _botToken = Theme.Input(400);
     private readonly CheckBox _showToken;
@@ -145,11 +146,12 @@ public sealed class SettingsForm : Form
 
     public bool RestartRequested { get; private set; }
 
-    public SettingsForm(string configPath, string bridgeRoot, bool bridgeRunning = false)
+    public SettingsForm(string configPath, string bridgeRoot, bool bridgeRunning = false, Func<bool>? stopBeforeSave = null)
     {
         _configPath = configPath;
         _bridgeRoot = bridgeRoot;
         _bridgeRunning = bridgeRunning;
+        _stopBeforeSave = stopBeforeSave;
 
         Text = "إعدادات الجسر";
         Width = 780;
@@ -190,7 +192,7 @@ public sealed class SettingsForm : Form
                 File.Copy(Path.Combine(_bridgeRoot, "config.example.json"), _configPath);
                 // Freshly created from a template, it inherits the folder's
                 // permissions - and it is about to hold the bot token.
-                TryProtectConfigAcl(_configPath);
+                ProtectConfigAcl(_configPath);
             }
         }
 
@@ -632,35 +634,44 @@ public sealed class SettingsForm : Form
                 "إلغاء = العودة للتحرير.",
                 "التعديل قد لا يثبت", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
             if (answer == DialogResult.Cancel) return false;
-            if (answer == DialogResult.Yes) RestartRequested = true;
+            if (answer == DialogResult.Yes) restarting = true;
         }
 
         try
         {
             var changedKeys = ChangedKeys().ToHashSet(StringComparer.Ordinal);
-            using var configMutex = new Mutex(false, @"Global\CinegyTelegramBridge.Config");
-            try
+            RestartRequested = false;
+            VerifyStoppedForSave(restarting, _stopBeforeSave ?? (() => !_bridgeRunning));
+            WithConfigLock(@"Global\CinegyTelegramBridge.Config", () =>
             {
-                if (!configMutex.WaitOne(TimeSpan.FromSeconds(10)))
-                    throw new IOException("انتهت مهلة انتظار ملف الإعدادات؛ حاول الحفظ مرة أخرى.");
-            }
-            catch (AbandonedMutexException) { /* the previous writer died; ownership is ours */ }
-            var root = LoadRoot();
-            // A DPAPI-protected token is left exactly as it sits on disk. Any
-            // other value round-trips as before.
-            if (!_tokenIsDpapiReference && ShouldWriteLoadedValue(_loadedScalars["BotToken"], _botToken.Text.Trim()))
-                root["BotToken"] = _botToken.Text.Trim();
-            if (ShouldWriteLoadedValue(_loadedScalars["AirServerAddress"], _airServer.Text.Trim()))
-                root["AirServerAddress"] = _airServer.Text.Trim();
-            var channel = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
-            if (ShouldWriteLoadedValue(_loadedScalars["AirChannelNumber"], channel))
-                root["AirChannelNumber"] = (int)_airChannel.Value;
-            foreach (var role in Roles)
-                if (changedKeys.Contains(role.Key)) root[role.Key] = IdsFor(role.Key);
+                var root = LoadRoot();
+                // A DPAPI-protected token is left exactly as it sits on disk. Any
+                // other value round-trips as before.
+                // Only fields this operator actually edited are written back, so
+                // a value the bridge changed on disk while the dialog was open
+                // survives instead of being overwritten with a stale reading.
+                if (!_tokenIsDpapiReference && ShouldWriteLoadedValue(_loadedScalars["BotToken"], _botToken.Text.Trim()))
+                {
+                    root["BotToken"] = _botToken.Text.Trim();
+                }
+                if (ShouldWriteLoadedValue(_loadedScalars["AirServerAddress"], _airServer.Text.Trim()))
+                {
+                    root["AirServerAddress"] = _airServer.Text.Trim();
+                }
+                var channel = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
+                if (ShouldWriteLoadedValue(_loadedScalars["AirChannelNumber"], channel))
+                {
+                    root["AirChannelNumber"] = (int)_airChannel.Value;
+                }
+                foreach (var role in Roles)
+                {
+                    if (changedKeys.Contains(role.Key)) root[role.Key] = IdsFor(role.Key);
+                }
 
-            var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-            WriteConfigAtomically(json);
-            configMutex.ReleaseMutex();
+                var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                WriteConfigAtomically(json);
+            });
+            RestartRequested = restarting;
             return true;
         }
         catch (Exception ex)
@@ -679,53 +690,62 @@ public sealed class SettingsForm : Form
     /// all. File.Replace also keeps the destination's existing permissions,
     /// which a delete-and-recreate would throw away.
     /// </summary>
-    private void WriteConfigAtomically(string json)
-    {
-        var tempPath = _configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        // No BOM: PowerShell 7's `Set-Content -Encoding utf8` writes BOM-less
-        // UTF-8, and the bridge re-reads this file on every save.
-        File.WriteAllText(tempPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    private void WriteConfigAtomically(string json) => WriteConfigFile(_configPath, json);
 
-        if (File.Exists(_configPath))
-        {
-            File.Replace(tempPath, _configPath, _configPath + ".bak", ignoreMetadataErrors: true);
-        }
-        else
-        {
-            File.Move(tempPath, _configPath);
-            TryProtectConfigAcl(_configPath);
-        }
+    internal static void VerifyStoppedForSave(bool restarting, Func<bool> stop)
+    {
+        if (restarting && !stop())
+            throw new IOException("تعذّر التحقق من توقف الجسر؛ لم تُحفظ الإعدادات.");
     }
-
-    /// <summary>
-    /// Mirrors Protect-BridgePathAcl in Modules/BridgeSecurity.psm1: inheritance
-    /// off, full control for this user, LOCAL SYSTEM and Administrators, nobody
-    /// else. Best effort on purpose - unlike the bridge, which throws, a
-    /// manager that refused to save because a locked-down machine would not let
-    /// it rewrite an ACL would be worse than one that saved and left the
-    /// permissions for the bridge's own next save to fix.
-    /// </summary>
-    private static void TryProtectConfigAcl(string path)
+    internal static void WithConfigLock(string mutexName, Action write)
     {
+        using var mutex = new Mutex(false, mutexName);
+        var acquired = false;
         try
         {
-            if (!OperatingSystem.IsWindows()) return;
-            var sids = new List<IdentityReference>();
-            using (var identity = WindowsIdentity.GetCurrent())
-            {
-                if (identity.User is not null) sids.Add(identity.User);
-            }
-            sids.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
-            sids.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
-
-            var security = new FileSecurity();
-            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            foreach (var sid in sids.Distinct())
-            {
-                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
-            }
-            new FileInfo(path).SetAccessControl(security);
+            try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired) throw new IOException("انتهت مهلة انتظار ملف الإعدادات؛ حاول الحفظ مرة أخرى.");
+            write();
         }
-        catch { /* see the summary above - never the reason a save fails */ }
+        finally { if (acquired) mutex.ReleaseMutex(); }
+    }
+
+    internal static void WriteConfigFile(string path, string json, Action<string>? protect = null)
+    {
+        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            // Create an empty file, restrict access, then introduce credentials.
+            // ACL failure must leave both the original and its backup untouched.
+            using (new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            (protect ?? ProtectConfigAcl)(tempPath);
+            File.WriteAllText(tempPath, json, new UTF8Encoding(false));
+            if (File.Exists(path))
+            {
+                ProtectConfigAcl(path);
+                if (File.Exists(path + ".bak")) ProtectConfigAcl(path + ".bak");
+                File.Replace(tempPath, path, path + ".bak", ignoreMetadataErrors: false);
+            }
+            else File.Move(tempPath, path);
+        }
+        finally { if (File.Exists(tempPath)) File.Delete(tempPath); }
+    }
+
+    private static void ProtectConfigAcl(string path)
+    {
+        var sids = new List<IdentityReference>();
+        using (var identity = WindowsIdentity.GetCurrent())
+        {
+            if (identity.User is null) throw new IOException("تعذّر تحديد مالك ملف الإعدادات.");
+            sids.Add(identity.User);
+        }
+        sids.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
+        sids.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in sids.Distinct())
+            security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
     }
 }

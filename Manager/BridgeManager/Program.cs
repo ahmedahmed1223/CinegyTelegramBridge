@@ -1,3 +1,4 @@
+using System.Security.AccessControl;
 using System.Text;
 using System.Threading;
 
@@ -223,6 +224,70 @@ internal static class SelfTest
         Check("a stamp from the previous run is never evidence",
             !MainForm.IsHung(started.AddMinutes(-30), started, started.AddHours(9), grace, threshold));
 
+        // A failed replacement must not leave a second readable copy of credentials.
+        var fixture = Path.Combine(Path.GetTempPath(), "BridgeManager-selftest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        try
+        {
+            var target = Path.Combine(fixture, "blocked.json");
+            Directory.CreateDirectory(target);
+            var form = (SettingsForm)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(SettingsForm));
+            typeof(SettingsForm).GetField("_configPath", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(form, target);
+            try
+            {
+                typeof(SettingsForm).GetMethod("WriteConfigAtomically", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(form, new object[] { "{\"fixture\":true}" });
+            }
+            catch (System.Reflection.TargetInvocationException) { }
+            Check("failed config replacement removes the credential staging file", Directory.GetFiles(fixture, "*.tmp").Length == 0);
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
+        Check("earlier information remains before a later warning", !MainForm.PriorityComesFirst(2, 1));
+        Check("earlier warning remains before later information", MainForm.PriorityComesFirst(1, 2));
+        Check("priority queue drains when information is empty", MainForm.PriorityComesFirst(1, null));
+        var stopRefused = false;
+        try { SettingsForm.VerifyStoppedForSave(true, () => false); }
+        catch (IOException) { stopRefused = true; }
+        Check("save and restart refuses an unverified stop", stopRefused);
+        var stopCalls = 0;
+        SettingsForm.VerifyStoppedForSave(false, () => { stopCalls++; return true; });
+        Check("ordinary save does not stop the bridge", stopCalls == 0);
+        SettingsForm.VerifyStoppedForSave(true, () => { stopCalls++; return true; });
+        Check("save and restart verifies stop before proceeding", stopCalls == 1);
+        var testMutexName = "BridgeManager-selftest-" + Guid.NewGuid().ToString("N");
+        using var observingWriter = new Mutex(false, testMutexName);
+        try { SettingsForm.WithConfigLock(testMutexName, () => throw new IOException("fixture")); }
+        catch (IOException) { }
+        var lockRecovered = Task.Run(() =>
+        {
+            using var contender = new Mutex(false, testMutexName);
+            var owned = contender.WaitOne(TimeSpan.FromSeconds(2));
+            if (owned) contender.ReleaseMutex();
+            return owned;
+        }).GetAwaiter().GetResult();
+        Check("another writer can acquire the lock after a failed save", lockRecovered);
+        Directory.CreateDirectory(fixture);
+        try
+        {
+            var path = Path.Combine(fixture, "settings.json");
+            File.WriteAllText(path, "original");
+            var emptyWhenProtected = false;
+            try
+            {
+                SettingsForm.WriteConfigFile(path, "fixture credentials", staged =>
+                {
+                    emptyWhenProtected = new FileInfo(staged).Length == 0;
+                    throw new UnauthorizedAccessException("fixture");
+                });
+            }
+            catch (UnauthorizedAccessException) { }
+            Check("credentials are not written before protection succeeds", emptyWhenProtected);
+            Check("ACL failure preserves the existing configuration", File.ReadAllText(path) == "original");
+            Check("ACL failure removes the empty staging file", Directory.GetFiles(fixture, "*.tmp").Length == 0);
+            SettingsForm.WriteConfigFile(path, "replacement");
+            Check("successful save replaces the file and preserves its backup", File.ReadAllText(path) == "replacement" && File.ReadAllText(path + ".bak") == "original");
+            Check("configuration and backup have protected ACLs", new FileInfo(path).GetAccessControl().AreAccessRulesProtected && new FileInfo(path + ".bak").GetAccessControl().AreAccessRulesProtected);
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
         var report = new StringBuilder();
         report.AppendLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} BridgeManager selftest");
         foreach (var f in failures) report.AppendLine($"FAIL: {f}");

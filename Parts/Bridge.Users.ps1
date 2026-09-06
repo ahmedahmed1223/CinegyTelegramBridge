@@ -21,8 +21,7 @@ function Send-TelegramDocument {
         if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
             $script:TelegramRateLimitHits++
             $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
-            Add-TelegramOutboxItem -Uri "$apiBase/sendDocument" -Form $form -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
-            return $true
+            return (Add-TelegramOutboxItem -Uri "$apiBase/sendDocument" -Form $form -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0)
         }
         Write-BridgeLog "Failed to send Telegram document to $ChatId : $($request.Error)" 'ERROR'
         return $false

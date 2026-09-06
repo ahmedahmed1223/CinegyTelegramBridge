@@ -991,8 +991,16 @@ Describe 'Telegram flood-limit outbox' {
     BeforeEach {
         $script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
         $script:TelegramOutboxDropped = 0
+        $script:TelegramOutboxWorker = $null
+        $script:TelegramOutboxActiveItem = $null
+        $script:TelegramOutboxNotBefore = [datetime]::MinValue
+        $script:TelegramOutboxDirectory = Join-Path $TestDrive 'outbox'
+        Mock Start-BridgeTelegramRequestWorker { @{ TestWorker = $true } }
+        Mock Receive-BridgeTelegramRequestWorker { $null }
+        Mock Stop-BridgeTelegramRequestWorker { }
         Mock Write-BridgeLog { }
     }
+    AfterEach { Clear-TelegramOutbox }
 
     It 'makes room for a warning before it drops a warning' {
         foreach ($number in 1..200) {
@@ -1006,41 +1014,74 @@ Describe 'Telegram flood-limit outbox' {
         $script:TelegramOutboxDropped | Should -Be 1
     }
 
-    It 'sends a small fixed batch, leaving the rest for the next bridge tick' {
+    It 'keeps one request in flight while later ticks return without another send' {
         foreach ($number in 1..4) {
             Add-TelegramOutboxItem -Body @{ chat_id = 101; text = "ordinary $number" } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
         }
-        Mock Invoke-BridgeTelegramRequest { @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' } }
-
+        Update-TelegramOutbox
         Update-TelegramOutbox
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Times 3 -Exactly
-        $script:TelegramOutbox.Count | Should -Be 1
+        Should -Invoke Start-BridgeTelegramRequestWorker -Times 1 -Exactly
+        $script:TelegramOutbox.Count | Should -Be 3
+        $script:TelegramOutboxActiveItem.Body.text | Should -Be 'ordinary 1'
     }
 
     It 'sends a due warning ahead of ordinary deferred navigation' {
         Add-TelegramOutboxItem -Body @{ chat_id = 101; text = 'ordinary first' } -DueAt (Get-Date).AddMinutes(-2) -Attempts 0 | Out-Null
         Add-TelegramOutboxItem -Body @{ chat_id = 101; text = '⚠ urgent warning' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
-        $script:TelegramOutboxSentTexts = [System.Collections.Generic.List[string]]::new()
-        Mock Invoke-BridgeTelegramRequest {
-            $script:TelegramOutboxSentTexts.Add([string]$Body.text)
-            @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' }
-        }
-
         Update-TelegramOutbox
 
-        $script:TelegramOutboxSentTexts[0] | Should -Be '⚠ urgent warning'
+        $script:TelegramOutboxActiveItem.Body.text | Should -Be '⚠ urgent warning'
     }
 
     It 'replays a deferred upload through its original Telegram endpoint' {
         Add-TelegramOutboxItem -Uri 'https://api.example/sendPhoto' -Form @{ chat_id = '101'; photo = 'test.jpg' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
-        Mock Invoke-BridgeTelegramRequest { @{ Success = $true; StatusCode = 200; RetryAfterMs = 0; Error = '' } }
-
         Update-TelegramOutbox
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter {
-            $Uri -eq 'https://api.example/sendPhoto' -and $Form.photo -eq 'test.jpg'
+        Should -Invoke Start-BridgeTelegramRequestWorker -Times 1 -Exactly -ParameterFilter {
+            $Request.Uri -eq 'https://api.example/sendPhoto' -and $Request.Form.photo -eq 'test.jpg'
         }
+    }
+
+    It 'retains an uploaded report after caller cleanup then deletes its owned copy on success' {
+        $source = Join-Path $TestDrive 'report.html'
+        Set-Content -LiteralPath $source -Value 'report body'
+        Add-TelegramOutboxItem -Form @{ document = Get-Item $source } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Should -BeTrue
+        $copy = $script:TelegramOutbox[0].Form.document.FullName
+        Remove-Item -LiteralPath $source
+        Get-Content -LiteralPath $copy -Raw | Should -Match 'report body'
+        Update-TelegramOutbox
+        Mock Receive-BridgeTelegramRequestWorker { @{ Success = $true; StatusCode = 200; Error = '' } }
+        Update-TelegramOutbox
+        Test-Path -LiteralPath $copy | Should -BeFalse
+    }
+
+    It 'pauses the entire deferred queue after another flood response without copying the file again' {
+        $source = Join-Path $TestDrive 'retry.html'
+        Set-Content -LiteralPath $source -Value 'report'
+        Add-TelegramOutboxItem -Form @{ document = Get-Item $source } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        $copy = $script:TelegramOutbox[0].Form.document.FullName
+        Update-TelegramOutbox
+        Add-TelegramOutboxItem -Body @{ text = 'next' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        Mock Receive-BridgeTelegramRequestWorker { @{ Success = $false; StatusCode = 429; RetryAfterMs = 60000; Error = 'flood' } }
+        Update-TelegramOutbox
+        Update-TelegramOutbox
+        Should -Invoke Start-BridgeTelegramRequestWorker -Times 1 -Exactly
+        @($script:TelegramOutbox | Where-Object { $_.Form }).Count | Should -Be 1
+        Test-Path -LiteralPath $copy | Should -BeTrue
+        Clear-TelegramOutbox
+        Test-Path -LiteralPath $copy | Should -BeFalse
+        Test-Path -LiteralPath $source | Should -BeTrue
+    }
+
+    It 'removes the owned upload when queue pressure evicts it' {
+        $source = Join-Path $TestDrive 'evicted.html'
+        Set-Content -LiteralPath $source -Value 'report'
+        Add-TelegramOutboxItem -Form @{ document = Get-Item $source } -DueAt (Get-Date).AddDays(1) -Attempts 0 | Out-Null
+        $copy = $script:TelegramOutbox[0].Form.document.FullName
+        foreach ($number in 1..200) { Add-TelegramOutboxItem -Body @{ text = "message $number" } -DueAt (Get-Date).AddDays(1) -Attempts 0 | Out-Null }
+        Test-Path -LiteralPath $copy | Should -BeFalse
+        Test-Path -LiteralPath $source | Should -BeTrue
     }
 }
 

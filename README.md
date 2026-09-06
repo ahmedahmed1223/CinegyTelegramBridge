@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.67.0
+
+Bulletin recovery verifies the confirmed live scene identity before resuming
+row updates or exiting a scene. Deferred Telegram retries now use one background
+request, keeping network timeouts out of the air timing loop. Queued uploads own
+temporary copies (64 MiB total per run), so report cleanup cannot invalidate a
+retry; copies are removed when sent, discarded, or during normal shutdown.
+
+Manager save-and-restart verifies that the bridge has stopped before writing
+permissions. Failed writes release the configuration lock and clean private
+staging files; a failed save leaves the bridge stopped. The live log retains
+arrival order while preferentially preserving warnings under load. Manager
+builds now carry the full bridge version and support isolated output for checks.
+
 ## Version 7.66.0
 
 The weekly usage digest now reads the last seven days of audit records instead

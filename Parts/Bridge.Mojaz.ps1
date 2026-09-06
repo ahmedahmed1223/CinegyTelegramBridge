@@ -2510,23 +2510,28 @@ function Restore-MojazPlayback {
     $engineStart = [datetime]::MinValue
     if ([datetime]::TryParse([string](Get-JsonProp $state 'AirStartedAt'), [System.Globalization.CultureInfo]::InvariantCulture,
             [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$engineStart)) {
-        $fromEngine = ([datetime]::UtcNow - $engineStart.ToUniversalTime()).TotalSeconds
+        $fromEngine = ($Now.ToUniversalTime() - $engineStart.ToUniversalTime()).TotalSeconds
         if ($fromEngine -ge 0) { $elapsed = $fromEngine }
     }
     $exitAt = [double](Get-JsonProp $state 'ExitAtSeconds')
     $name = [string](Get-JsonProp $state 'BulletinName')
     $chat = [long](Get-JsonProp $state 'ChatId')
     $user = [long](Get-JsonProp $state 'UserId')
+    # A template key can be reused by a newer run. Both postbox writes and exit
+    # must belong to the engine identity confirmed for this saved run, never
+    # the unconfirmed client EventId retained when SHOW verification failed.
+    $expectedId = ([string](Get-JsonProp $state 'ActiveId')).Trim().Trim('{', '}')
+    $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $layer -TimeoutSec (Get-AirTimeout)
+    $liveId = ([string](Get-JsonProp $live 'ActiveId')).Trim().Trim('{', '}')
+    if (-not [bool](Get-JsonProp $state 'ActiveIdConfirmed') -or
+        -not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId -or
+        -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-BridgeLog "Refused to restore bulletin '$name': live scene identity could not be matched." 'WARN'
+        Send-AdminBroadcast -Text "⚠️ لم يُستأنف الموجز «$name» أو يُخرج بعد إعادة التشغيل لأن هوية المشهد على الطبقة تغيّرت أو تعذّر التحقق منها." | Out-Null
+        return $false
+    }
     if ($elapsed -ge $exitAt) {
-        $expectedId = ([string](Get-JsonProp $state 'ActiveId')).Trim().Trim('{', '}')
-        $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Layer $layer -TimeoutSec (Get-AirTimeout)
-        $liveId = ([string](Get-JsonProp $live 'ActiveId')).Trim().Trim('{', '}')
-        if (-not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
-            Write-BridgeLog "Refused to exit restored bulletin '$name': live scene identity could not be matched." 'WARN'
-            Send-AdminBroadcast -Text "⚠️ لم يُخرج الموجز «$name» بعد إعادة التشغيل لأن هوية المشهد على الطبقة تغيّرت أو تعذّر التحقق منها." | Out-Null
-            return $false
-        }
         Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
         Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user | Out-Null
         Request-MojazTickerReturn | Out-Null

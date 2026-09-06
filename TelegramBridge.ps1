@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.66.0'
+$script:BridgeVersion = '7.67.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -800,6 +800,10 @@ $script:LastUsageFlush = [datetime]::MinValue
 $script:PendingState = @{}
 $script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
 $script:TelegramOutboxDropped = 0
+$script:TelegramOutboxWorker = $null
+$script:TelegramOutboxActiveItem = $null
+$script:TelegramOutboxNotBefore = [datetime]::MinValue
+$script:TelegramOutboxDirectory = Join-Path $logDir "telegram-outbox-$([guid]::NewGuid().ToString('N'))"
 
 # Layer -> @{ ChatId; UserId; Key; StartedAt }. A lock exists only while an
 # operator is preparing a SHOW flow; it prevents two drafts racing toward the
@@ -1841,6 +1845,7 @@ finally {
     # current run as liveness, so this is belt and braces - but it keeps the
     # log folder honest about what is actually running.
     if ($script:livenessFile) { Remove-Item -LiteralPath $script:livenessFile -Force -ErrorAction SilentlyContinue }
+    Clear-TelegramOutbox
     Save-UsageCounts -Force
     foreach ($job in @($script:SnapshotJobs)) {
         if ($job.Proc -and -not $job.Proc.HasExited) { Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue }

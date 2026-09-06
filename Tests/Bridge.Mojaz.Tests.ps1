@@ -1664,14 +1664,49 @@ Describe 'A bulletin that was on air when the bridge restarted' {
     AfterAll { $script:MojazPlayback = $null; $script:OnAir = @{}; Clear-MojazPlaybackState }
 
     function global:Write-TestPlaybackState {
-        param([datetime]$StartedAt, [double]$ExitAtSeconds = 80)
+        param([datetime]$StartedAt, [double]$ExitAtSeconds = 80, [string]$ActiveId = '{RESTORED}',
+            [bool]$ActiveIdConfirmed = $true, [string]$AirStartedAt = '')
         [ordered]@{
             StartedAt = $StartedAt.ToString('o'); BulletinId = 'b_1'; BulletinName = 'موجز المساء'
-            ScheduleId = ''; OperationId = 'mojaz-test'; ChatId = 100; UserId = 101; ActiveId = '{RESTORED}'; ActiveIdConfirmed = $true
+            ScheduleId = ''; OperationId = 'mojaz-test'; ChatId = 100; UserId = 101; ActiveId = $ActiveId; ActiveIdConfirmed = $ActiveIdConfirmed
+            AirStartedAt = $AirStartedAt
             ExitAtSeconds = $ExitAtSeconds; SyncToLoop = $false
             Rows = @(1..4 | ForEach-Object { @{ Id = "r_$_"; Title = "عنوان $_"; Text = 'نص'; ImageMode = 'inherit'; Image = '' } })
             Plan = @(0..3 | ForEach-Object { @{ Index = $_; RowId = "r_$($_ + 1)"; AtSeconds = ($_ * 20.0); HoldSeconds = 20 } })
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-MojazPlaybackFile) -Encoding utf8
+    }
+
+    It 'leaves the layer untouched when recovery cannot prove scene ownership (<Reason>, <Elapsed>s)' -ForEach @(
+        foreach ($elapsed in @(50, 500)) {
+            @{ Reason='replacement'; Elapsed=$elapsed; SavedId='{RESTORED}'; Confirmed=$true; LiveId='{NEW}'; Success=$true }
+            @{ Reason='status failure'; Elapsed=$elapsed; SavedId='{RESTORED}'; Confirmed=$true; LiveId='{RESTORED}'; Success=$false }
+            @{ Reason='missing live identity'; Elapsed=$elapsed; SavedId='{RESTORED}'; Confirmed=$true; LiveId=''; Success=$true }
+            @{ Reason='missing saved identity'; Elapsed=$elapsed; SavedId=''; Confirmed=$true; LiveId='{RESTORED}'; Success=$true }
+            @{ Reason='unconfirmed saved identity'; Elapsed=$elapsed; SavedId='{RESTORED}'; Confirmed=$false; LiveId='{RESTORED}'; Success=$true }
+        }
+    ) {
+        $now = [datetime]'2026-01-02T12:00:00Z'
+        Write-TestPlaybackState -StartedAt $now.AddSeconds(-$Elapsed) -ActiveId $SavedId -ActiveIdConfirmed $Confirmed
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$Success; IsOnAir=$true; ActiveId=$LiveId } }
+
+        Restore-MojazPlayback -Now $now | Should -BeFalse
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        Should -Invoke Request-MojazTickerReturn -Times 0 -Exactly
+        Test-Path -LiteralPath (Get-MojazPlaybackFile) | Should -BeFalse
+    }
+
+    It 'uses the supplied recovery time with the engine start and accepts normalized identity' {
+        $now = [datetime]'2026-01-02T12:00:00Z'
+        Write-TestPlaybackState -StartedAt $now.AddSeconds(-500) -AirStartedAt $now.AddSeconds(-50).ToString('o')
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId=' restored ' } }
+
+        Restore-MojazPlayback -Now $now | Should -BeTrue
+        $script:MojazPlayback.Index | Should -Be 2
+        $script:MojazPlayback.ClockOffset | Should -Be 50
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
     }
 
     It 'picks the run up at the row the clock says, not at the first' {

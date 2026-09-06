@@ -49,6 +49,38 @@ Describe 'Telegram HTTP transport module' {
     }
 }
 
+Describe 'Deferred Telegram transport stays off the air clock' {
+    It 'returns control while the server is silent and collects the eventual response' {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+        $listener.Start()
+        $worker = $null
+        $client = $null
+        try {
+            $port = $listener.LocalEndpoint.Port
+            $worker = Start-BridgeTelegramRequestWorker -Request @{
+                Uri = "http://127.0.0.1:$port/"; Method = 'Post'; Body = @{ text = 'test' }; TimeoutSec = 5; MaxAttempts = 1
+            }
+            $accept = $listener.AcceptTcpClientAsync()
+            $accept.Wait(4000) | Should -BeTrue
+            $client = $accept.Result
+            # The server deliberately has not answered. A synchronous send
+            # cannot reach this assertion until its network timeout expires.
+            Receive-BridgeTelegramRequestWorker -Worker $worker | Should -BeNullOrEmpty
+            $reply = [Text.Encoding]::UTF8.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/json`r`nContent-Length: 11`r`nConnection: close`r`n`r`n" + '{"ok":true}')
+            $client.GetStream().Write($reply, 0, $reply.Length)
+            $worker.Handle.AsyncWaitHandle.WaitOne(4000) | Should -BeTrue
+            $result = Receive-BridgeTelegramRequestWorker -Worker $worker
+            $result.Success | Should -BeTrue
+            $result.Response.ok | Should -BeTrue
+        }
+        finally {
+            if ($worker) { Stop-BridgeTelegramRequestWorker -Worker $worker }
+            if ($client) { $client.Dispose() }
+            $listener.Stop()
+        }
+    }
+}
+
 Describe 'Telegram 429 retry delay' {
     BeforeAll {
         function New-FakeTelegramError {

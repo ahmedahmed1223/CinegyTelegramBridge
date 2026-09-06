@@ -121,9 +121,10 @@ public sealed class MainForm : Form
     // filter box can re-render a subset without losing what came before - and
     // so the line count is counted rather than estimated.
     private readonly List<string> _lines = new();
-    private readonly ConcurrentQueue<string> _pendingPriority = new();
-    private readonly ConcurrentQueue<string> _pendingInformational = new();
+    private readonly ConcurrentQueue<(long Sequence, string Text)> _pendingPriority = new();
+    private readonly ConcurrentQueue<(long Sequence, string Text)> _pendingInformational = new();
     private readonly object _pendingGate = new();
+    private long _pendingSequence;
     private const int MaxOutputLines = 3000;
     private const int MaxPendingInformationalLines = 8000;
     private const int MaxPendingPriorityLines = 2000;
@@ -1097,7 +1098,7 @@ public sealed class MainForm : Form
             }
             else if (priority) _pendingPriorityCount++;
             else _pendingInformationalCount++;
-            queue.Enqueue(line);
+            queue.Enqueue((++_pendingSequence, line));
         }
     }
 
@@ -1157,18 +1158,23 @@ public sealed class MainForm : Form
         UpdateStatusBar();
     }
 
+    internal static bool PriorityComesFirst(long? prioritySequence, long? informationalSequence) =>
+        prioritySequence.HasValue && (!informationalSequence.HasValue || prioritySequence.Value < informationalSequence.Value);
+
     private bool TryDequeuePending(out string line)
     {
         lock (_pendingGate)
         {
-            if (_pendingPriority.TryDequeue(out line!))
+            var hasPriority = _pendingPriority.TryPeek(out var priority);
+            var hasInfo = _pendingInformational.TryPeek(out var informational);
+            // Retention has separate caps; display merges surviving entries in arrival order.
+            var takePriority = PriorityComesFirst(hasPriority ? priority.Sequence : null, hasInfo ? informational.Sequence : null);
+            var queue = takePriority ? _pendingPriority : _pendingInformational;
+            if (queue.TryDequeue(out var entry))
             {
-                _pendingPriorityCount--;
-                return true;
-            }
-            if (_pendingInformational.TryDequeue(out line!))
-            {
-                _pendingInformationalCount--;
+                if (takePriority) _pendingPriorityCount--;
+                else _pendingInformationalCount--;
+                line = entry.Text;
                 return true;
             }
         }
@@ -1260,14 +1266,35 @@ public sealed class MainForm : Form
         catch { /* logging must never be the reason the app breaks */ }
     }
 
+    private bool StopForSettingsSave()
+    {
+        _restartTimer.Stop();
+        _restartAfterExit = false;
+        _stoppingIntentionally = true;
+        if (_bridgeProcess is not { } process) return true;
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.WaitForExit(10000)) return false;
+            // Consume the exit now: its queued UI callback must not stop a replacement.
+            OnBridgeExited(process);
+            SetHeader("الجسر متوقف", Theme.Stopped, "جارٍ حفظ الإعدادات؛ عند فشل الحفظ يبقى الجسر متوقفًا.");
+            return true;
+        }
+        catch
+        {
+            SetHeader("تعذّر الإيقاف", Theme.Pending, "لم تُحفظ الإعدادات؛ تحقّق من حالة الجسر.");
+            return false;
+        }
+    }
     private void OpenSettings()
     {
         if (!EnsureBridgeScriptResolved()) return;
-        using var form = new SettingsForm(ConfigPath, BridgeRoot, _bridgeProcess is { HasExited: false });
+        using var form = new SettingsForm(ConfigPath, BridgeRoot, _bridgeProcess is { HasExited: false }, StopForSettingsSave);
         if (form.ShowDialog(this) == DialogResult.OK)
         {
             LogEvent("تم حفظ الإعدادات من واجهة المدير.");
-            if (form.RestartRequested && _bridgeProcess is { HasExited: false }) RestartBridge();
+            if (form.RestartRequested) StartBridge(manual: true);
         }
     }
 

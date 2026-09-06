@@ -173,6 +173,29 @@ internal static class SelfTest
             SettingsForm.ReadIds(System.Text.Json.Nodes.JsonNode.Parse("[1, \"x\", -2]")).SequenceEqual(new long[] { 1, -2 }));
         Check("reads a missing array as empty", SettingsForm.ReadIds(null).Count == 0);
 
+        // --- the heartbeat file, which adoption reads -----------------------
+        // Set-Content writes CRLF on Windows, so every one of these arrives
+        // with a carriage return the parser has to shed. A pid left as "25884\r"
+        // is the difference between adopting a running bridge and telling the
+        // operator it is stopped while it is on air.
+        var (crlfStamp, crlfPid) = MainForm.ParseLiveness("2026-09-06T14:54:41.9006845Z\r\n25884\r\n");
+        Check("reads the stamp past a carriage return", crlfStamp is not null);
+        Check("reads the pid past a carriage return", crlfPid == 25884);
+        Check("keeps the stamp in UTC", crlfStamp is not null && crlfStamp.Value.Kind == DateTimeKind.Utc);
+
+        var (oldStamp, oldPid) = MainForm.ParseLiveness("2026-09-06T14:54:41.9006845Z\r\n");
+        Check("still reads a single-line file from an older bridge", oldStamp is not null);
+        Check("reports no pid when the older bridge wrote none", oldPid is null);
+
+        Check("an empty file yields nothing", MainForm.ParseLiveness("").Pid is null);
+        Check("null content yields nothing", MainForm.ParseLiveness(null).Stamp is null);
+        Check("junk on the stamp line is not a stamp", MainForm.ParseLiveness("not-a-date\r\n25884").Stamp is null);
+        Check("junk on the pid line is not a pid", MainForm.ParseLiveness("2026-09-06T14:54:41Z\r\nabc").Pid is null);
+        Check("a zero pid is refused", MainForm.ParseLiveness("2026-09-06T14:54:41Z\r\n0").Pid is null);
+        Check("a negative pid is refused", MainForm.ParseLiveness("2026-09-06T14:54:41Z\r\n-7").Pid is null);
+        Check("a pid still parses when the stamp does not",
+            MainForm.ParseLiveness("garbage\r\n25884").Pid == 25884);
+
         // --- Run-key command line ------------------------------------------
         Check("extracts a quoted exe with an argument",
             MainForm.ExtractExePath("\"C:\\Bridge\\BridgeManager.exe\" --autostart") == "C:\\Bridge\\BridgeManager.exe");

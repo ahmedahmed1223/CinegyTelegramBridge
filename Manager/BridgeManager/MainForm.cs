@@ -576,9 +576,7 @@ public sealed class MainForm : Form
             if (!File.Exists(path)) return null;
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream);
-            var lines = reader.ReadToEnd().Split('\n');
-            if (lines.Length < 2) return null;
-            return int.TryParse(lines[1].Trim(), out var pid) && pid > 0 ? pid : null;
+            return ParseLiveness(reader.ReadToEnd()).Pid;
         }
         catch { return null; }
     }
@@ -830,18 +828,39 @@ public sealed class MainForm : Form
             // blocking the heartbeat it is only observing.
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream);
-            var text = reader.ReadToEnd().Trim();
-            // Line 1 is the stamp; a second line, when present, is the bridge's
-            // process id. Older bridges wrote only the stamp.
-            var firstLine = text.Split('\n')[0].Trim();
-            if (DateTime.TryParse(firstLine, System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                return parsed.ToUniversalTime();
+            var stamp = ParseLiveness(reader.ReadToEnd()).Stamp;
             // Content unreadable but the file is still being touched - the
             // write time alone already says the loop turned over.
-            return File.GetLastWriteTimeUtc(path);
+            return stamp ?? File.GetLastWriteTimeUtc(path);
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Splits the heartbeat file into its stamp and the bridge's process id.
+    ///
+    /// Pure, because adoption decides whether to take over a live bridge on
+    /// what this returns, and the file has three shapes to survive: the
+    /// single-line form older bridges wrote, the two-line form with the pid,
+    /// and either of those carrying the CRLF that Set-Content writes on
+    /// Windows - a stray carriage return left on the pid is the whole
+    /// difference between adopting a running bridge and reporting it stopped.
+    /// </summary>
+    internal static (DateTime? Stamp, int? Pid) ParseLiveness(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return (null, null);
+        var lines = content.Split('\n');
+
+        DateTime? stamp = null;
+        if (DateTime.TryParse(lines[0].Trim(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+            stamp = parsed.ToUniversalTime();
+
+        int? pid = null;
+        if (lines.Length > 1 && int.TryParse(lines[1].Trim(), out var parsedPid) && parsedPid > 0)
+            pid = parsedPid;
+
+        return (stamp, pid);
     }
 
     private void CheckLiveness()

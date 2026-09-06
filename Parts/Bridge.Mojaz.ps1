@@ -759,6 +759,47 @@ function Get-MojazDelayFrames {
     return [int][math]::Round(8 * (Get-MojazFps))
 }
 
+function Get-MojazLoopFitNote {
+    <#
+        Says out loud what a row hold does against the scene's own loop.
+
+        Both numbers were already on the bulletin screen - the hold, and the
+        template's loop length - and nobody compared them. A bulletin held 1500
+        frames against a 750-frame loop played every headline twice on air, and
+        read to the operator as a bulletin stuck on one item. The screen showed
+        both figures and left the arithmetic to a person watching a live
+        transmission.
+
+        Silent when the two already agree, when there is no scene timing to
+        compare against, and when the bulletin syncs to the loop - that setting
+        takes its pace from the loop and cannot drift from it.
+    #>
+    param([int]$DelayFrames, [int]$LoopFrames)
+    if ($LoopFrames -le 0 -or $DelayFrames -le 0) { return '' }
+
+    # Two frames of slack: a hold typed in seconds and converted back lands a
+    # frame either side of the loop without meaning anything different.
+    $remainder = $DelayFrames % $LoopFrames
+    $aligned = ($remainder -le 2) -or (($LoopFrames - $remainder) -le 2)
+
+    if ($aligned) {
+        $times = [int][math]::Round($DelayFrames / $LoopFrames)
+        if ($times -le 1) { return '' }
+        return "⚠️ المدة $times أضعاف طول اللوب ($LoopFrames إطار) — سيُعرض كل خبر $times مرات. اجعلها $LoopFrames إطارًا أو فعّل «مزامنة الظهور»."
+    }
+    return "⚠️ المدة لا توافق طول اللوب ($LoopFrames إطار) — سيتبدّل الخبر في منتصف الحركة. اجعلها من مضاعفات $LoopFrames أو فعّل «مزامنة الظهور»."
+}
+
+function Get-MojazBulletinLoopFitNote {
+    <# The note for one bulletin, with the scene timing looked up for it. #>
+    param($Bulletin)
+    if (Test-MojazSyncToLoop -Bulletin $Bulletin) { return '' }
+    $timing = Get-MojazSceneTiming
+    if (-not $timing) { return '' }
+    return (Get-MojazLoopFitNote -DelayFrames (Get-MojazDelayFrames -Bulletin $Bulletin) `
+            -LoopFrames ([int](Get-JsonProp $timing 'LoopFrames')))
+}
+
 function Get-MojazDelaySeconds {
     param($Bulletin)
     return [math]::Round((Get-MojazDelayFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
@@ -887,6 +928,10 @@ function Get-MojazPlanText {
     $timing = Get-MojazSceneTiming
     if ($timing) {
         $line += "`nمن القالب: دخول $(Get-MojazSceneFrames -Which intro) إطار · لوب $([int](Get-JsonProp $timing 'LoopFrames')) إطار · خروج $(Get-MojazSceneFrames -Which outro) إطار (‏$(Get-MojazFps) إطارًا/ث)"
+        # Directly under the two figures it compares, because that is where an
+        # operator was left to do the arithmetic themselves.
+        $fit = Get-MojazBulletinLoopFitNote -Bulletin $Bulletin
+        if ($fit) { $line += "`n$fit" }
     }
     if (Test-MojazSyncToLoop -Bulletin $Bulletin) {
         $loopSeconds = if ($timing) { [double](Get-JsonProp $timing 'LoopSeconds') } else { 0 }
@@ -1590,7 +1635,7 @@ function Start-MojazDelayPrompt {
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'mojaz_delay'; UserId = $UserId; BulletinId = [string]$bulletin.Id }
     Send-TelegramMessage -ChatId $ChatId `
-        -Text "⏱ كم إطارًا يبقى كل صف على الهواء؟`nالحالي: $(Get-MojazDelayFrames -Bulletin $bulletin) إطار ≈ $(Get-MojazDelaySeconds -Bulletin $bulletin) ث · المشهد $(Get-MojazFps) إطارًا في الثانية." `
+        -Text "⏱ كم إطارًا يبقى كل صف على الهواء؟`nالحالي: $(Get-MojazDelayFrames -Bulletin $bulletin) إطار ≈ $(Get-MojazDelaySeconds -Bulletin $bulletin) ث · المشهد $(Get-MojazFps) إطارًا في الثانية.$(if ($fit = Get-MojazBulletinLoopFitNote -Bulletin $bulletin) { "`n$fit" })" `
         -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -2044,6 +2089,10 @@ function Start-MojazPlayback {
         -Values $(if ([string]$snapshot.ScheduleId) { 'scheduled' } else { 'manual' })
     Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $(Get-MojazDelayFrames -Bulletin $bulletin) frames each)"
+    # On the record too: "every headline played twice" is a question asked
+    # after the bulletin, when the screen that warned is long gone.
+    $fitNote = Get-MojazBulletinLoopFitNote -Bulletin $bulletin
+    if ($fitNote) { Write-BridgeLog "Mojaz row hold does not fit the scene loop: $fitNote" 'WARN' }
     Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true

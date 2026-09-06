@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.OnAir.Tests.ps1 - On-air records, layers, hide/exit, and timers.
 
@@ -1188,9 +1188,38 @@ Describe 'Main menu on-air priority' {
     }
 
     It 'reports what is on air instead of a static prompt' {
-        Get-MainMenuIntro | Should -Match 'لا شيء على الهواء'
+        # Read as the operator sees it: the screen is HTML now, so the
+        # assertions go against the rendered text rather than the markup.
+        ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match 'لا شيء على الهواء'
         $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date); UserId = 1; Source = 'cinegy' }
-        Get-MainMenuIntro | Should -Match '8 · ticker'
+        ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match '8 · ticker'
+    }
+
+    It 'sends the menu screen as HTML, with the verdict carrying the weight' {
+        # The verdict is the one line that has to land in a glance; the
+        # engine address and the channel are <code> so they stay LTR and
+        # tap-to-copy for an operator quoting them in a fault report.
+        $script:OnAir.Clear()
+        $text = Get-MainMenuIntro
+        @($text -split "`n")[0] | Should -Match '^<b>.+</b>$'
+        $text | Should -Match ('<code>' + [regex]::Escape($config.AirServerAddress) + '</code>')
+
+        Mock Send-TelegramMessage { }
+        Mock Clear-PendingState { }
+        Show-MainMenu -ChatId 909 -UserId 909
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ParseMode -eq 'HTML'
+        }
+    }
+
+    It 'escapes a template name that would otherwise be read as a tag' {
+        # An unescaped '<' makes Telegram refuse the whole message with a
+        # 400, which on the phone reads as the menu button doing nothing.
+        $script:OnAir.Clear()
+        $script:OnAir[3] = @{ Key = '<b>Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        $text = Get-MainMenuIntro
+        $text | Should -Match '&lt;b&gt;Urgent'
+        ConvertFrom-TelegramHtmlText $text | Should -Match '<b>Urgent'
     }
 
     It 'separates the verdict, the air and the machine' {
@@ -1204,13 +1233,15 @@ Describe 'Main menu on-air priority' {
 
         $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         @((Get-MainMenuIntro) -split "`n")[0] | Should -Match 'طبقات على الهواء'
+        # Still three blocks after the HTML rebuild, not three tag soups.
     }
 
     It 'gives each on-air layer its own line' {
         $script:OnAir.Clear()
         $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         $script:OnAir[7] = @{ Key = 'Logo'; At = (Get-Date); UserId = 1; Source = 'bridge' }
-        $onAirLines = @((Get-MainMenuIntro) -split "`n" | Where-Object { $_ -match '^ • طبقة' })
+        $onAirLines = @((ConvertFrom-TelegramHtmlText (Get-MainMenuIntro)) -split "`n" |
+                Where-Object { $_ -match '^ • طبقة' })
         $onAirLines.Count | Should -Be 2
         $onAirLines[0] | Should -Match '4 · Urgent'
         $onAirLines[1] | Should -Match '7 · Logo'
@@ -1236,7 +1267,7 @@ Describe 'Main menu on-air priority' {
     It 'names the engine and channel the claim is about' {
         # The menu is where an operator lands, so it answers rather than
         # pointing: which Air engine and channel these layers belong to.
-        Get-MainMenuIntro | Should -Match ([regex]::Escape($config.AirServerAddress))
+        ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match ([regex]::Escape($config.AirServerAddress))
         Get-MainMenuIntro | Should -Match 'القناة'
     }
 
@@ -1258,6 +1289,20 @@ Describe 'Main menu on-air priority' {
         # The menu itself still arrives every time it is asked for.
         Should -Invoke Send-TelegramMessage -Times 3 -Exactly -ParameterFilter {
             $Text -notmatch 'أسفل الشاشة'
+        }
+    }
+
+    It 'leads with a greeting but still shows the status under it' {
+        # /بدء and /إلغاء passed an -Intro that replaced the screen, so the
+        # two most-used doors into the bridge still ended at "اختر من
+        # القائمة:" - the data-free line this screen was rebuilt to stop
+        # showing.
+        $script:PersistentKeyboardPinned = @{ 909 = $true }
+        Mock Send-TelegramMessage { }
+        Mock Clear-PendingState { }
+        Show-MainMenu -ChatId 909 -UserId 909 -Intro 'أهلاً!'
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'أهلاً!' -and $Text -match 'الهواء'
         }
     }
 

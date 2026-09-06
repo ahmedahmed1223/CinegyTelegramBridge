@@ -767,8 +767,12 @@ function Show-MainMenu {
         Send-TelegramMessage -ChatId $ChatId -Text "استخدم زر 🏠 القائمة أسفل الشاشة في أي وقت للرجوع إلى هنا." -ReplyMarkup (Get-PersistentReplyKeyboard)
         $script:PersistentKeyboardPinned[$ChatId] = $true
     }
-    if ([string]::IsNullOrWhiteSpace($Intro)) { $Intro = Get-MainMenuIntro -UserId $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text $Intro -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    # An -Intro leads the screen, it does not replace it. "أهلاً! اختر من
+    # القائمة:" on its own is the data-free line this screen was rebuilt to
+    # stop showing, and /بدء and /إلغاء were the two doors still leading to it.
+    $status = Get-MainMenuIntro -UserId $UserId
+    $text = if ([string]::IsNullOrWhiteSpace($Intro)) { $status } else { "$Intro`n`n$status" }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Import-UserProfiles {

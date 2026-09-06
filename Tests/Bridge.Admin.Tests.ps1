@@ -238,10 +238,14 @@ Describe 'Simple and full status reports' {
 
         Should -Invoke Get-AirTelemetryStatus -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 200 -and $Text -match 'القناة' -and $Text -match [regex]::Escape([string]$config.AirServerAddress) -and
+            # The screen goes out as HTML, so it is read the way the operator
+            # sees it rather than through the markup.
+            $rendered = ConvertFrom-TelegramHtmlText $Text
+            $ChatId -eq 200 -and $ParseMode -eq 'HTML' -and
+                $rendered -match 'القناة' -and $rendered -match [regex]::Escape([string]$config.AirServerAddress) -and
                 # Relative first, because the question being asked is "is this
                 # current?"; the clock time stays in brackets for log comparison.
-                $Text -match 'آخر فحص ناجح: (منذ .+|الآن) \(11:20:00\)' -and $Text -notmatch 'صحة الخدمات'
+                $rendered -match 'آخر فحص ناجح: (منذ .+|الآن) \(11:20:00\)' -and $rendered -notmatch 'صحة الخدمات'
         }
     }
 
@@ -299,10 +303,15 @@ Describe 'Simple and full status reports' {
         Invoke-CallbackQuery -CallbackQuery $callback
 
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 100 -and $Text -match 'الحالة الكاملة' -and $Text -match 'Telegram.*ms' -and $Text -match 'Cinegy.*ms' -and $Text -match 'طبقة 4' -and
-                $Text -match '📺 المشاهد النشطة' -and $Text -match '🎛 اتصال Cinegy' -and
-                $Text -match '🩺 صحة الخدمات' -and $Text -match '⚙️ التشغيل والجدولة' -and $Text -match '👥 الوصول' -and
-                $Text -match 'وضع المشاهد المختار: Single'
+            # The six section headings are bold now, so the assertions read the
+            # rendered screen; that the tags are there at all is pinned below.
+            $rendered = ConvertFrom-TelegramHtmlText $Text
+            $ChatId -eq 100 -and $ParseMode -eq 'HTML' -and
+                $rendered -match 'الحالة الكاملة' -and $rendered -match 'Telegram.*ms' -and $rendered -match 'Cinegy.*ms' -and $rendered -match 'طبقة 4' -and
+                $rendered -match '📺 المشاهد النشطة' -and $rendered -match '🎛 اتصال Cinegy' -and
+                $rendered -match '🩺 صحة الخدمات' -and $rendered -match '⚙️ التشغيل والجدولة' -and $rendered -match '👥 الوصول' -and
+                $rendered -match 'وضع المشاهد المختار: Single' -and
+                $Text -match '<b>🎛 اتصال Cinegy</b>'
         }
     }
 

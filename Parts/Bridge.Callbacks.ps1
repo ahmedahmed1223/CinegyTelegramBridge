@@ -346,7 +346,7 @@ function Invoke-CallbackQuery {
         'mojaz:dropconfirm' { Remove-MojazBulletinAndSchedules -ChatId $chatId -UserId $userId | Out-Null; break }
         { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'cancel' {
@@ -709,7 +709,7 @@ function Invoke-CallbackQuery {
                 $script:PendingCancelReason = $null
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'سُجّل، شكرًا.'
             }
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'menu:digest' {

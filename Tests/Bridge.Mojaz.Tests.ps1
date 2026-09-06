@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Mojaz.Tests.ps1 - the bulletin library: the tables, what is saved,
     and the playback that walks one of them.
@@ -2045,5 +2045,55 @@ Describe 'The timing anchor reports what it did' {
         Start-MojazPlayback -ChatId 100 -UserId 101 | Out-Null
 
         [string]$script:MojazPlayback.AirStartedAt | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Warning when the row hold does not fit the scene loop' {
+    # A live bulletin held every row 1500 frames against a 750-frame loop, so
+    # each headline played twice and read on air as a bulletin stuck on one
+    # item. Both numbers were already on the screen; nobody compared them.
+
+    It 'says how many times a headline will repeat' {
+        $note = Get-MojazLoopFitNote -DelayFrames 1500 -LoopFrames 750
+        $note | Should -Match '2 أضعاف'
+        $note | Should -Match '750'
+    }
+
+    It 'stays quiet when the hold is exactly one loop' {
+        Get-MojazLoopFitNote -DelayFrames 750 -LoopFrames 750 | Should -BeNullOrEmpty
+    }
+
+    It 'allows a frame either side, because a hold typed in seconds lands there' {
+        Get-MojazLoopFitNote -DelayFrames 751 -LoopFrames 750 | Should -BeNullOrEmpty
+        Get-MojazLoopFitNote -DelayFrames 749 -LoopFrames 750 | Should -BeNullOrEmpty
+    }
+
+    It 'warns differently when the hold cuts the animation mid-way' {
+        # Not a repeat count - there is no whole number of loops to report -
+        # so the note has to name the other failure: a headline swapped while
+        # the scene is still moving.
+        $note = Get-MojazLoopFitNote -DelayFrames 1100 -LoopFrames 750
+        $note | Should -Match 'منتصف الحركة'
+        $note | Should -Not -Match 'أضعاف'
+    }
+
+    It 'says nothing when there is no timing to compare against' {
+        Get-MojazLoopFitNote -DelayFrames 1500 -LoopFrames 0 | Should -BeNullOrEmpty
+        Get-MojazLoopFitNote -DelayFrames 0 -LoopFrames 750 | Should -BeNullOrEmpty
+    }
+
+    It 'stays quiet for a bulletin that syncs to the loop' {
+        # That setting takes its pace from the loop and cannot drift from it,
+        # so the warning would be telling the operator to fix what is already
+        # correct - the fastest way to teach them to ignore warnings.
+        New-TestMojazLibrary -DelaySeconds 60 | Out-Null
+        $bulletin = $script:MojazLibrary.Bulletins[0]
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ LoopFrames = 750; LoopSeconds = 30 } }
+
+        # The bulletin object has no SyncToLoop until the setter adds it, so
+        # the test turns the setting on the way the screen does.
+        $synced = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -SyncToLoop $true -UserId 1
+        Get-MojazBulletinLoopFitNote -Bulletin $synced.Value.Bulletins[0] | Should -BeNullOrEmpty
+        Get-MojazBulletinLoopFitNote -Bulletin $bulletin | Should -Match 'أضعاف'
     }
 }

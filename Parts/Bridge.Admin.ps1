@@ -148,20 +148,29 @@ function Invoke-StatusCommand {
     $sep = '━━━━━━━━━━━━━━━━━'
     $now = Get-Date
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("ℹ️ الحالة — v$($script:BridgeVersion)")
-    $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
-    $lines.Add($overall)
+    # Built as parse_mode=HTML from here down. This fallback is the screen an
+    # operator actually reads - sendRichMessage is Bot API 10.1 and most
+    # servers refuse it - so it is the design rather than a degraded copy, and
+    # it was going out as one flat undifferentiated column of text.
+    #
+    # <code> on the clock, the address and the counts is not decoration: it
+    # renders monospace and left-to-right, which stops digits reordering
+    # against the Arabic around them, and Telegram makes each one tap-to-copy
+    # for an operator quoting it in a fault report.
+    $lines.Add("<b>ℹ️ الحالة</b> — <code>v$($script:BridgeVersion)</code>")
+    $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
+    $lines.Add("<b>$overall</b>")
     # Format-UserAuditActor, not a bare id: it resolves the alias when there is
     # one and pins the bracketed digits to LTR, so an Arabic name followed by
     # an id does not render as ")8201739556(".
-    $identityLine = "👤 معرّفك: $(Format-UserAuditActor -UserId $UserId)"
+    $identityLine = "👤 معرّفك: $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))"
     $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
-        $sharedText = @($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | '
+        $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | ')
         # Not 'allowed' - a Cinegy GFX layer holds one scene, so templates
         # sharing a layer can never be on air together. Calling that harmless
         # is how a logo and a ticker end up silently evicting each other.
@@ -170,7 +179,7 @@ function Invoke-StatusCommand {
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
-    $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
+    $lines.Add("📶 حالة بيانات Cinegy: <b>$(ConvertTo-TelegramHtmlText ([string]$freshness.Label))</b>")
     if ($lastSuccessfulAt) {
         # "منذ 12 ثانية" answers the question being asked - is this current? -
         # which a bare timestamp leaves the reader to work out against a clock.
@@ -179,9 +188,9 @@ function Invoke-StatusCommand {
         $agoSeconds = [math]::Max(0, [int]($now - $checkedAt).TotalSeconds)
         # "منذ 0 ثانية" is a strange way to say "just now".
         $ago = if ($agoSeconds -lt 5) { 'الآن' } else { "منذ $(Format-DurationSeconds -Seconds $agoSeconds)" }
-        $lines.Add("🔄 آخر فحص ناجح: $ago ($($checkedAt.ToString('HH:mm:ss')))")
+        $lines.Add("🔄 آخر فحص ناجح: <i>$ago</i> (<code>$($checkedAt.ToString('HH:mm:ss'))</code>)")
     }
-    $lines.Add((Get-OnAirSummary))
+    $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
     if ($sync.Failed.Count -gt 0) {
@@ -193,7 +202,7 @@ function Invoke-StatusCommand {
     else {
         $lines.Add("✅ الحالة متزامنة مع Cinegy.")
     }
-    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
+    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     # The same lines, reshaped: the verdict as a heading, what is on air
     # as a table, and the machine detail folded under it. The leading
@@ -201,10 +210,15 @@ function Invoke-StatusCommand {
     # Skip 4: the blocks already carry the title, the clock, the verdict and
     # now the identity line, and repeating them inside the details would print
     # each of those facts twice on one screen.
-    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall -Identity $identityLine `
-        -DetailLines @($lines | Select-Object -Skip 4) -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
+    # The block renderer lays text out itself and has no tag syntax, so the
+    # HTML is stripped back on the way in rather than kept as a second
+    # parallel copy that would drift from the one operators actually read.
+    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall `
+        -Identity (ConvertFrom-TelegramHtmlText $identityLine) `
+        -DetailLines @($lines | Select-Object -Skip 4 | ForEach-Object { ConvertFrom-TelegramHtmlText ([string]$_) }) `
+        -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $statusMenu
 }
 
 function Request-HideAllConfirmation {
@@ -624,40 +638,46 @@ function Invoke-FullStatusCommand {
 
     $now = Get-Date
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("📊 الحالة الكاملة — v$($script:BridgeVersion)")
-    $lines.Add("🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)")
-    $lines.Add($overall)
-    $identityLine = "👤 معرّفك: $(Format-UserAuditActor -UserId $UserId)"
+    # parse_mode=HTML, same reasoning as ℹ️ الحالة: this screen is thirty-odd
+    # lines long and went out as one flat column, so the six section
+    # headings are bold and every figure an operator quotes is a
+    # tap-to-copy <code> span. Anything a person typed - a template name,
+    # an alias, a store error - is escaped, because a single "<" in a
+    # template name would cost the whole screen a 400.
+    $lines.Add("<b>📊 الحالة الكاملة</b> — <code>v$($script:BridgeVersion)</code>")
+    $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
+    $lines.Add("<b>$overall</b>")
+    $identityLine = "👤 معرّفك: $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))"
     $lines.Add($identityLine)
     $lines.Add('')
-    $lines.Add((Get-OnAirSummary))
+    $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
-    $lines.Add('🎛 اتصال Cinegy')
-    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber) · القوالب: $($store.Order.Count)")
+    $lines.Add('<b>🎛 اتصال Cinegy</b>')
+    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     $configuredSceneMode = [string](Get-Setting 'SceneMode')
     $sceneCapabilities = Get-CinegySceneCapabilities -SceneItems $layerStatuses -LayerTargetSupported $true
     $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
     $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
-    $lines.Add("🧩 وضع المشاهد المختار: $configuredSceneMode · $verification")
+    $lines.Add("🧩 وضع المشاهد المختار: <code>$(ConvertTo-TelegramHtmlText $configuredSceneMode)</code> · $verification")
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
-    $lines.Add("📶 حالة بيانات Cinegy: $($freshness.Label)")
-    $lines.Add((Format-CinegyLayerDashboard -LayerStatuses $layerStatuses))
+    $lines.Add("📶 حالة بيانات Cinegy: <b>$(ConvertTo-TelegramHtmlText ([string]$freshness.Label))</b>")
+    $lines.Add((ConvertTo-TelegramHtmlText (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)))
     $lines.Add('')
-    $lines.Add('🩺 صحة الخدمات')
-    $lines.Add($health.Text)
+    $lines.Add('<b>🩺 صحة الخدمات</b>')
+    $lines.Add((ConvertTo-TelegramHtmlText ([string]$health.Text)))
     $lines.Add('')
-    $lines.Add($outputMonitor.Text)
+    $lines.Add((ConvertTo-TelegramHtmlText ([string]$outputMonitor.Text)))
     $lines.Add('')
-    $lines.Add('⚙️ التشغيل والجدولة')
-    $lines.Add("📡 البث المباشر: $(Get-LiveRelayStatusText)")
-    $lines.Add("🖼 الصور المعلّقة: $($script:SnapshotJobs.Count) · مؤقتات الإخفاء: $($script:AutoHideQueue.Count) · تنبيهات الظهور: $($script:TemplateReminderQueue.Count)")
-    $lines.Add("🗓 الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count)")
+    $lines.Add('<b>⚙️ التشغيل والجدولة</b>')
+    $lines.Add("📡 البث المباشر: $(ConvertTo-TelegramHtmlText (Get-LiveRelayStatusText))")
+    $lines.Add("🖼 الصور المعلّقة: <code>$($script:SnapshotJobs.Count)</code> · مؤقتات الإخفاء: <code>$($script:AutoHideQueue.Count)</code> · تنبيهات الظهور: <code>$($script:TemplateReminderQueue.Count)</code>")
+    $lines.Add("🗓 الأحداث المجدولة القادمة: <code>$(@(Get-UpcomingScheduleEvents).Count)</code>")
     $lines.Add('')
-    $lines.Add('👥 الوصول')
-    $lines.Add("🔐 المستخدمون المصرح لهم: $(@(Get-JsonProp $config 'AllowedChatIds').Count) محادثة / $(@(Get-JsonProp $config 'AllowedUserIds').Count) مستخدم")
-    $lines.Add("🔔 طلبات الوصول المعلّقة: $($script:PendingApprovals.Count)")
+    $lines.Add('<b>👥 الوصول</b>')
+    $lines.Add("🔐 المستخدمون المصرح لهم: <code>$(@(Get-JsonProp $config 'AllowedChatIds').Count)</code> محادثة / <code>$(@(Get-JsonProp $config 'AllowedUserIds').Count)</code> مستخدم")
+    $lines.Add("🔔 طلبات الوصول المعلّقة: <code>$($script:PendingApprovals.Count)</code>")
     $lines.Add('')
     if ($sync.Failed.Count -gt 0) {
         $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
@@ -666,17 +686,19 @@ function Invoke-FullStatusCommand {
         $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
     }
     else { $lines.Add("✅ حالة Cinegy متزامنة.") }
-    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + ($store.Errors -join "`n⚠️ ")) }
+    if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     # The same lines, reshaped: the verdict as a heading, what is on air
     # as a table, and the machine detail folded under it. The leading
     # lines are skipped because the blocks already carry them.
     # Skip 6 rather than 5: the identity line joined the header block, so the
     # count of lines the blocks already carry moved with it.
-    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall -Identity $identityLine `
-        -DetailLines @($lines | Select-Object -Skip 6) -DetailSummary '🔍 التفاصيل الكاملة'
+    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
+        -Identity (ConvertFrom-TelegramHtmlText $identityLine) `
+        -DetailLines @($lines | Select-Object -Skip 6 | ForEach-Object { ConvertFrom-TelegramHtmlText ([string]$_) }) `
+        -DetailSummary '🔍 التفاصيل الكاملة'
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $statusMenu
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $statusMenu
 }
 
 function Invoke-HealthCommand {

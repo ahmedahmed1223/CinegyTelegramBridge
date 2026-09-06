@@ -13,6 +13,39 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.73.0
+
+The status screens are built as `parse_mode=HTML` now, and the bulletin warns
+when a row hold does not fit the template's loop.
+
+ℹ️ الحالة, 📊 الحالة الكاملة and the menu screen were flat columns of text. The
+verdict is bold now, because it is the one line that has to land in a glance,
+and the six section headings in the full status separate thirty-odd lines that
+were read as one block. This text path is the screen an operator actually sees:
+`sendRichMessage` is Bot API 10.1 and most servers refuse it, so the fallback is
+the design rather than a degraded copy of it — and it was going out with no
+formatting at all.
+
+Every figure an operator quotes — the engine address, the channel, the clock,
+the counters — is a `<code>` span. Not decoration: monospace renders
+left-to-right, which stops digits reordering against the Arabic around them, and
+Telegram makes each one tap-to-copy for someone writing a fault report.
+Everything a person typed — a template name, an alias, a store error — is
+escaped, because a single `<` in a template name would cost the whole screen a
+400, which reads on the phone as the menu button doing nothing.
+
+`/بدء` and `/إلغاء` passed an intro that replaced the screen, so the two
+most-used doors into the bridge still ended at "اختر من القائمة:" — the
+data-free line this screen was rebuilt to stop showing. An intro leads the
+screen now; it does not replace it.
+
+A live bulletin held every row 1500 frames against a 750-frame loop, so each
+headline played twice and read on air as a bulletin stuck on one item. Both
+numbers were already on the screen and nobody compared them. The bulletin says
+it now — under the two figures, on the duration prompt, and in the log at
+playback start — and stays quiet when «مزامنة الظهور» is on, because that
+setting takes its pace from the loop and cannot drift from it.
+
 ## Version 7.72.0
 
 The menu screen now names the operator it was built for. A `👤` line at the

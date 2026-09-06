@@ -219,10 +219,27 @@ function Get-BridgeReadinessSummary {
 
 function Get-MainMenuIntro {
     param([long]$UserId = 0)
-    <# The line above the main menu. It used to read "اختر من القائمة:", which
-       tells the operator nothing they cannot already see. Saying what is on
-       air instead answers the question they actually opened the menu with,
-       without spending a tap on ℹ️ الحالة. #>
+    <#
+        The screen above the main menu, built as parse_mode=HTML.
+
+        It used to read "اختر من القائمة:", which tells the operator nothing
+        they cannot already see, and then as flat text - one undifferentiated
+        column an operator had to read line by line to find the one fact they
+        opened the menu for.
+
+        HTML earns its place three times here rather than for decoration:
+        the verdict is bold because it is the one line that must land in a
+        glance; every number an operator quotes or copies - layer, channel,
+        engine address - is a <code> span, which Telegram renders monospace,
+        makes tap-to-copy, and keeps left-to-right so digits stop reordering
+        against the Arabic around them; and the freshness line is italic so
+        it reads as a footnote to the air block rather than another claim.
+
+        Everything typed by a person - a template name, an operator's display
+        name - is escaped. An unescaped "<" in a template name would make
+        Telegram reject the whole menu with a 400, which reads on the phone
+        as the menu button doing nothing.
+    #>
     $freshness = Get-CinegyStateFreshness `
         -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
         -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
@@ -234,12 +251,6 @@ function Get-MainMenuIntro {
         'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
         default { 'لم يتم التحقّق بعد' }
     }
-    # The menu is the screen an operator lands on, so it carries the answer
-    # rather than a pointer to it: a verdict, what is on air, how fresh that
-    # claim is, and which engine and channel it is talking about. Before this
-    # the whole screen was one on-air line, and the message above it said only
-    # that the menu existed.
-    #
     # Laid out in three separated blocks - verdict, air, machine - because run
     # together they read as one paragraph an operator has to parse under
     # pressure, and the first two lines are the ones that matter at a glance.
@@ -258,25 +269,28 @@ function Get-MainMenuIntro {
     else { '🟢 كل شيء سليم' }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add($verdict)
+    # Bold, not an emoji alone: the emoji carries the colour, the weight
+    # carries the priority, and the two together survive a phone glanced at
+    # from arm's length in a gallery.
+    $lines.Add("<b>$verdict</b>")
     $lines.Add($sep)
 
     if ($script:OnAir.Count -eq 0) { $lines.Add('⚫️ لا شيء على الهواء') }
     else {
-        $lines.Add("🔴 على الهواء ($($script:OnAir.Count)):")
+        $lines.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>:")
         # One layer per line. Joined with a separator they became a single run
         # of text that had to be read word by word to find one layer in it.
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $lines.Add(" • طبقة $layer · $($script:OnAir[$layer].Key)")
+            $lines.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$script:OnAir[$layer].Key))</b>")
         }
     }
-    $lines.Add("🔄 $age")
+    $lines.Add("🔄 <i>$age</i>")
     $lines.Add($sep)
-    $lines.Add("🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)")
+    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code>")
     # Format-UserAuditActor, the same helper ℹ️ الحالة uses, so one operator is
     # written one way on both screens - and so the bracketed id stays pinned
     # LTR after an Arabic name instead of rendering as ")8201739556(".
-    if ($UserId -gt 0) { $lines.Add("👤 $(Format-UserAuditActor -UserId $UserId)") }
+    if ($UserId -gt 0) { $lines.Add("👤 $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))") }
     return ($lines -join "`n")
 }
 

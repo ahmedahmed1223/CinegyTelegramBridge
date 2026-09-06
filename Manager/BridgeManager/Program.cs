@@ -196,6 +196,54 @@ internal static class SelfTest
         Check("a pid still parses when the stamp does not",
             MainForm.ParseLiveness("garbage\r\n25884").Pid == 25884);
 
+        // --- following an adopted bridge's log ------------------------------
+        var whole = MainForm.SplitCompleteLines("first\nsecond\n", out var noRemainder);
+        Check("returns every complete line", whole.SequenceEqual(new[] { "first", "second" }));
+        Check("leaves nothing over when the chunk ends on a newline", noRemainder == "");
+
+        // A write caught mid-line: rendering the half now would render it again
+        // in full on the next tick.
+        var partial = MainForm.SplitCompleteLines("first\nhalf-writ", out var leftover);
+        Check("holds back a half-written line", partial.SequenceEqual(new[] { "first" }));
+        Check("keeps the half for the next read", leftover == "half-writ");
+
+        Check("a chunk with no newline yields no lines",
+            MainForm.SplitCompleteLines("no newline yet", out _).Length == 0);
+        Check("an empty chunk yields no lines", MainForm.SplitCompleteLines("", out _).Length == 0);
+        Check("strips the carriage return the bridge writes",
+            MainForm.SplitCompleteLines("line\r\n", out _).SequenceEqual(new[] { "line" }));
+        Check("drops blank lines rather than printing gaps",
+            MainForm.SplitCompleteLines("a\n\n\nb\n", out _).SequenceEqual(new[] { "a", "b" }));
+
+        // bridge.log rotates at LogMaxSizeMB; reading on from the old offset
+        // would skip the whole beginning of the new file.
+        Check("spots a rotated log", MainForm.WasLogRotated(5000, 120));
+        Check("a growing log is not a rotated one", !MainForm.WasLogRotated(5000, 9000));
+        Check("an unchanged log is not a rotated one", !MainForm.WasLogRotated(5000, 5000));
+
+        // --- what the bridge is connected to --------------------------------
+        // "Running" only says the process is alive; a bridge refused by
+        // Telegram or unable to reach the Air engine is alive and useless.
+        var tg = MainForm.ParseHealthLine("2026-09-06 17:54:23 [INFO] Telegram connection changed from unknown to connected");
+        Check("reads a Telegram transition", tg is not null && tg.Value.Kind == "telegram" && tg.Value.State == "connected");
+        var cg = MainForm.ParseHealthLine("2026-09-06 17:54:26 [INFO] Cinegy health changed from unknown to healthy");
+        Check("reads a Cinegy transition", cg is not null && cg.Value.Kind == "cinegy" && cg.Value.State == "healthy");
+        var lost = MainForm.ParseHealthLine("2026-09-06 04:11:00 [WARN] Telegram connection changed from connected to disconnected");
+        Check("reads the transition's destination, not its origin", lost is not null && lost.Value.State == "disconnected");
+        Check("an ordinary line is not a health line",
+            MainForm.ParseHealthLine("2026-09-06 17:54:07 [INFO] Bridge v7.68.0 starting.") is null);
+        Check("an empty line is not a health line", MainForm.ParseHealthLine("") is null);
+
+        Check("connected reads as healthy", MainForm.IsHealthyState("connected"));
+        Check("healthy reads as healthy", MainForm.IsHealthyState("healthy"));
+        Check("unknown is neither healthy nor faulted",
+            !MainForm.IsHealthyState("unknown") && !MainForm.IsFaultedState("unknown"));
+        Check("disconnected reads as faulted", MainForm.IsFaultedState("disconnected"));
+        Check("unhealthy reads as faulted", MainForm.IsFaultedState("unhealthy"));
+        Check("names the state in Arabic", MainForm.HealthText("telegram", "connected") == "تيليجرام: متصل");
+        Check("keeps Cinegy's own name", MainForm.HealthText("cinegy", "healthy") == "Cinegy: سليم");
+        Check("shows a dash rather than the word unknown", MainForm.HealthText("cinegy", "unknown") == "Cinegy: —");
+
         // --- Run-key command line ------------------------------------------
         Check("extracts a quoted exe with an argument",
             MainForm.ExtractExePath("\"C:\\Bridge\\BridgeManager.exe\" --autostart") == "C:\\Bridge\\BridgeManager.exe");

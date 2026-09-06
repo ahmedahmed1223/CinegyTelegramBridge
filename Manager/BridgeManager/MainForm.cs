@@ -77,6 +77,8 @@ public sealed class MainForm : Form
     private readonly FlowLayoutPanel _optionsBar;
     private readonly Label _stateLabel;
     private readonly Label _stateDetail;
+    private readonly Label _telegramPill;
+    private readonly Label _cinegyPill;
     private readonly Button _startButton;
     private readonly Button _stopButton;
     private readonly Button _restartButton;
@@ -208,7 +210,27 @@ public sealed class MainForm : Form
         _stateLabel = new Label { Dock = DockStyle.Top, Height = 30, Text = "متوقف", Font = Theme.Title, ForeColor = Theme.Stopped, TextAlign = ContentAlignment.MiddleLeft };
         headerText.Controls.Add(_stateDetail);
         headerText.Controls.Add(_stateLabel);
+
+        // The empty half of the header, which is where the eye goes after the
+        // state word. Left, because the state text and the accent bar already
+        // own the right edge in this right-to-left window.
+        var healthPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Left,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            Padding = new Padding(16, 14, 8, 10),
+            BackColor = Color.Transparent
+        };
+        _telegramPill = new Label { AutoSize = true, Font = Theme.Ui, ForeColor = Theme.TextMuted, Margin = new Padding(0, 0, 0, 2) };
+        _cinegyPill = new Label { AutoSize = true, Font = Theme.Ui, ForeColor = Theme.TextMuted, Margin = new Padding(0) };
+        _tips.SetToolTip(_telegramPill, "حالة اتصال الجسر بتيليجرام، كما يعلنها في سجله.");
+        _tips.SetToolTip(_cinegyPill, "حالة محرّك Cinegy Air كما يراها الجسر.");
+        healthPanel.Controls.AddRange(new Control[] { _telegramPill, _cinegyPill });
+
         _header.Controls.Add(headerText);
+        _header.Controls.Add(healthPanel);
         _header.Controls.Add(_accentBar);
 
         // ---- action bar: three things that change the air, then the rest ---
@@ -407,7 +429,7 @@ public sealed class MainForm : Form
 
         // Uptime and heartbeat age are only worth showing if they move.
         _clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-        _clockTimer.Tick += (_, _) => { UpdateStateDetail(); UpdateStatusBar(); };
+        _clockTimer.Tick += (_, _) => { UpdateStateDetail(); UpdateStatusBar(); PumpBridgeLogTail(); };
         _clockTimer.Start();
 
         _trayIcon = new NotifyIcon
@@ -560,7 +582,8 @@ public sealed class MainForm : Form
         _lastLivenessSeen = stamp;
         _watchdogInactiveLogged = false;
 
-        AppendLine($"--- تم استلام جسر يعمل بالفعل (المعرّف {pid}). سجله لا يظهر هنا لأنه بدأ خارج هذا البرنامج - راجع logs\\bridge.log. ---");
+        AppendLine($"--- تم استلام جسر يعمل بالفعل (المعرّف {pid}). سجله يُتابَع من logs\\bridge.log لأنه بدأ خارج هذا البرنامج. ---");
+        StartTailingBridgeLog();
         LogEvent($"استلام جسر يعمل بالفعل (المعرّف {pid}).");
         SetStatus(running: true);
         return true;
@@ -628,6 +651,169 @@ public sealed class MainForm : Form
     /// </summary>
     private string LivenessPath => Path.Combine(BridgeRoot, "logs", "bridge.liveness");
 
+    private string BridgeLogPath => Path.Combine(BridgeRoot, "logs", "bridge.log");
+
+    // ---- what the bridge is connected to -----------------------------------
+    // "Running" only ever meant the process is alive. A bridge whose Telegram
+    // poll is refused or whose Air engine is unreachable is alive and useless,
+    // and saying so took reading log lines. It announces both transitions
+    // itself, so the header reads them as they go past and keeps the answer on
+    // screen instead of in the scrollback.
+
+    /// <summary>The kind and the new state named by a health transition line, or null for any other line.</summary>
+    internal static (string Kind, string State)? ParseHealthLine(string line)
+    {
+        string kind;
+        if (line.Contains("Telegram connection changed from", StringComparison.Ordinal)) kind = "telegram";
+        else if (line.Contains("Cinegy health changed from", StringComparison.Ordinal)) kind = "cinegy";
+        else return null;
+
+        const string toMarker = " to ";
+        var at = line.LastIndexOf(toMarker, StringComparison.Ordinal);
+        if (at < 0) return null;
+
+        var state = line[(at + toMarker.Length)..].Trim().TrimEnd('.');
+        return state.Length == 0 ? null : (kind, state.ToLowerInvariant());
+    }
+
+    internal static string HealthText(string kind, string state)
+    {
+        var name = kind == "telegram" ? "تيليجرام" : "Cinegy";
+        var word = state switch
+        {
+            "connected" => "متصل",
+            "disconnected" => "منقطع",
+            "healthy" => "سليم",
+            "unhealthy" => "متعثّر",
+            "degraded" => "متعثّر",
+            "unknown" => "—",
+            _ => state
+        };
+        return $"{name}: {word}";
+    }
+
+    internal static bool IsHealthyState(string state) => state is "connected" or "healthy";
+
+    internal static bool IsFaultedState(string state) => state is "disconnected" or "unhealthy" or "degraded";
+
+    private void ApplyHealthLine(string line)
+    {
+        var parsed = ParseHealthLine(line);
+        if (parsed is null) return;
+
+        var (kind, state) = parsed.Value;
+        var pill = kind == "telegram" ? _telegramPill : _cinegyPill;
+        pill.Text = HealthText(kind, state);
+        pill.ForeColor = IsHealthyState(state) ? Theme.Running
+            : IsFaultedState(state) ? Theme.Stopped
+            : Theme.TextMuted;
+    }
+
+    private void ResetHealthPills()
+    {
+        _telegramPill.Text = HealthText("telegram", "unknown");
+        _cinegyPill.Text = HealthText("cinegy", "unknown");
+        _telegramPill.ForeColor = Theme.TextMuted;
+        _cinegyPill.ForeColor = Theme.TextMuted;
+    }
+
+    // ---- following an adopted bridge's log ---------------------------------
+    // A bridge this window did not start owns its own stdout, so the log pane
+    // came up blank and sent the operator to a file in Explorer - the last
+    // thing adoption left half-done. The bridge writes every one of those same
+    // lines to logs/bridge.log, so the pane follows the file instead.
+
+    private long _tailOffset;
+    private bool _tailingAdopted;
+    private string _tailRemainder = "";
+
+    /// <summary>
+    /// A write can land mid-line, and half a line rendered now would be
+    /// rendered again in full on the next tick. Returns the complete lines and
+    /// hands back whatever followed the last newline to prepend next time.
+    /// </summary>
+    internal static string[] SplitCompleteLines(string chunk, out string remainder)
+    {
+        remainder = "";
+        if (string.IsNullOrEmpty(chunk)) return Array.Empty<string>();
+
+        var lastBreak = chunk.LastIndexOf('\n');
+        if (lastBreak < 0) { remainder = chunk; return Array.Empty<string>(); }
+
+        remainder = chunk[(lastBreak + 1)..];
+        return chunk[..lastBreak]
+            .Split('\n')
+            .Select(l => l.TrimEnd('\r'))
+            .Where(l => l.Length > 0)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// True when the file has been rotated out from under us. bridge.log is
+    /// rotated at LogMaxSizeMB, and reading from the old offset into a fresh
+    /// file would skip the whole start of the new one.
+    /// </summary>
+    internal static bool WasLogRotated(long offset, long length) => length < offset;
+
+    private void StartTailingBridgeLog()
+    {
+        try
+        {
+            var path = BridgeLogPath;
+            if (!File.Exists(path)) return;
+
+            // Seed with recent history rather than an empty pane: a bridge can
+            // sit quiet for hours, and "nothing here yet" is indistinguishable
+            // from "not working" at a glance.
+            foreach (var line in ReadLastLines(path, 100)) AppendLine(line);
+            _tailOffset = new FileInfo(path).Length;
+            _tailRemainder = "";
+            _tailingAdopted = true;
+        }
+        catch { /* the pane simply stays as it is - never worth a crash */ }
+    }
+
+    private static IEnumerable<string> ReadLastLines(string path, int count)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        var tail = new Queue<string>(count);
+        while (reader.ReadLine() is { } line)
+        {
+            if (tail.Count == count) tail.Dequeue();
+            tail.Enqueue(line);
+        }
+        return tail;
+    }
+
+    private void PumpBridgeLogTail()
+    {
+        if (!_tailingAdopted) return;
+        try
+        {
+            var path = BridgeLogPath;
+            if (!File.Exists(path)) return;
+
+            var length = new FileInfo(path).Length;
+            if (WasLogRotated(_tailOffset, length)) { _tailOffset = 0; _tailRemainder = ""; }
+            if (length == _tailOffset) return;
+
+            // FileShare.ReadWrite for the same reason the heartbeat reader uses
+            // it: the bridge is writing this file and must not be blocked by
+            // something only watching it.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            stream.Seek(_tailOffset, SeekOrigin.Begin);
+            using var reader = new StreamReader(stream);
+            var chunk = _tailRemainder + reader.ReadToEnd();
+            _tailOffset = length;
+
+            var lines = SplitCompleteLines(chunk, out var remainder);
+            foreach (var line in lines) AppendLine(line);
+            _tailRemainder = remainder;
+        }
+        catch { /* a locked or vanished log is not worth interrupting supervision */ }
+    }
+
     // ---- process supervision ---------------------------------------------
 
     private void StartBridge(bool manual = false)
@@ -680,6 +866,10 @@ public sealed class MainForm : Form
         psi.ArgumentList.Add("-StopExisting");
 
         _stoppingIntentionally = false;
+        ResetHealthPills();
+        // From here the pane gets this process's own stdout, so following the
+        // file as well would print every line twice.
+        _tailingAdopted = false;
         AppendLine($"--- بدء التشغيل: {scriptPath} ---");
         LogEvent($"بدء تشغيل الجسر: {scriptPath}");
 
@@ -1232,6 +1422,7 @@ public sealed class MainForm : Form
         {
             processed++;
             _lines.Add(line);
+            ApplyHealthLine(line);
             if (_lines.Count > MaxOutputLines) trimNeeded = true;
             if (ShouldShow(line, filter, errorsOnly)) { WriteLine(line); appended = true; }
         }

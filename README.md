@@ -13,6 +13,37 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.69.0
+
+Finishes what adoption left half-done in 7.68.0, and answers a question the
+header was never answering.
+
+"Running" only ever meant the *process* was alive. A bridge Telegram has
+refused, or one that cannot reach the Air engine, is alive and useless at the
+same time, and telling those apart meant reading log lines. The bridge
+announces both transitions itself, so the header now reads those lines as they
+go past and keeps the answer on screen: **Telegram: connected** and **Cinegy:
+healthy**, green while they hold and red when they drop. Both reset to a dash
+on every restart, so a previous bridge's state is never shown as the present
+one's.
+
+The log pane is no longer blank after adoption. A bridge this window did not
+start owns its stdout, so the pane came up empty and sent the operator to a
+file in Explorer — the last thing adoption left unfinished. The bridge writes
+those same lines to `logs/bridge.log`, so the pane follows the file instead:
+seeded with the last hundred lines, because an empty pane for a bridge that has
+been quiet for hours is indistinguishable from a broken one, then appended to
+every second. A read that lands mid-line holds the fragment back rather than
+drawing half a line and then drawing it again in full, and a rotation — the
+file shrinking under the read offset — restarts from the top instead of
+skipping the whole beginning of the new file. Following stops the moment a
+bridge is started from this window, whose stdout the pane already has, so no
+line is ever printed twice.
+
+The manager self-test grew from 77 checks to 101, all of them on the new pure
+logic: splitting complete lines, spotting a rotation, and reading a health
+line's destination rather than its origin.
+
 ## Version 7.68.0
 
 Three fixes a review of three days of logs found, rather than a user report.

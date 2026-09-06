@@ -126,6 +126,10 @@ internal static class SelfTest
         Check("OwnerUserIds is not bridge-managed",
             !SettingsForm.NeedsRestartToPersist(true, new[] { "OwnerUserIds" }));
         Check("no edit needs nothing", !SettingsForm.NeedsRestartToPersist(true, Array.Empty<string>()));
+        Check("an untouched manager field preserves a newer disk value",
+            !SettingsForm.ShouldWriteLoadedValue("127.0.0.1", "127.0.0.1"));
+        Check("an edited manager field replaces its loaded value",
+            SettingsForm.ShouldWriteLoadedValue("127.0.0.1", "10.0.0.5"));
 
         // --- accounts and permissions --------------------------------------
         // All five arrays share one id space: Telegram gives a private chat

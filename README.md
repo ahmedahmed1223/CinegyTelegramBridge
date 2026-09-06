@@ -13,6 +13,11 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.65.2
+
+Saving permissions in an already-open manager window now preserves a newer
+BotToken, Air server address, or channel value written to disk by the bridge.
+
 ## Version 7.65.1
 
 Flood-limit deferral now includes photo, document, rich-message and rich-edit

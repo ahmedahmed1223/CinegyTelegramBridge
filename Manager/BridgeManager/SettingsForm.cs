@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -131,12 +132,16 @@ public sealed class SettingsForm : Form
     internal static bool NeedsRestartToPersist(bool bridgeRunning, IEnumerable<string> changedKeys) =>
         bridgeRunning && changedKeys.Any(k => BridgeManagedKeys.Contains(k, StringComparer.Ordinal));
 
+    internal static bool ShouldWriteLoadedValue(string loadedValue, string currentValue) =>
+        !string.Equals(loadedValue, currentValue, StringComparison.Ordinal);
+
     /// <summary>id -> the permissions it holds. The list and the chips are both views of this.</summary>
     private readonly SortedDictionary<long, HashSet<string>> _model = new();
 
     private bool _tokenIsDpapiReference;
     private bool _syncingChips;
     private readonly Dictionary<string, string> _loaded = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _loadedScalars = new(StringComparer.Ordinal);
 
     public bool RestartRequested { get; private set; }
 
@@ -545,6 +550,9 @@ public sealed class SettingsForm : Form
 
             _airServer.Text = (string?)root["AirServerAddress"] ?? "127.0.0.1";
             _airChannel.Value = Math.Clamp((int?)root["AirChannelNumber"] ?? 0, 0, 999);
+            _loadedScalars["BotToken"] = rawToken;
+            _loadedScalars["AirServerAddress"] = _airServer.Text.Trim();
+            _loadedScalars["AirChannelNumber"] = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
 
             _model.Clear();
             foreach (var role in Roles)
@@ -640,9 +648,13 @@ public sealed class SettingsForm : Form
             var root = LoadRoot();
             // A DPAPI-protected token is left exactly as it sits on disk. Any
             // other value round-trips as before.
-            if (!_tokenIsDpapiReference) root["BotToken"] = _botToken.Text.Trim();
-            root["AirServerAddress"] = _airServer.Text.Trim();
-            root["AirChannelNumber"] = (int)_airChannel.Value;
+            if (!_tokenIsDpapiReference && ShouldWriteLoadedValue(_loadedScalars["BotToken"], _botToken.Text.Trim()))
+                root["BotToken"] = _botToken.Text.Trim();
+            if (ShouldWriteLoadedValue(_loadedScalars["AirServerAddress"], _airServer.Text.Trim()))
+                root["AirServerAddress"] = _airServer.Text.Trim();
+            var channel = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
+            if (ShouldWriteLoadedValue(_loadedScalars["AirChannelNumber"], channel))
+                root["AirChannelNumber"] = (int)_airChannel.Value;
             foreach (var role in Roles)
                 if (changedKeys.Contains(role.Key)) root[role.Key] = IdsFor(role.Key);
 

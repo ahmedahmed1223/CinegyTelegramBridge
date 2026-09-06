@@ -123,6 +123,7 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.65.2'; Items = @('🧩 حفظ الإعدادات من المدير لا يعيد قيمة اتصال قديمة فوق تعديل أحدث في الجسر.') }
         @{ Version = '7.65.1'; Items = @(
                 '📨 عند ازدحام Telegram، الصور والملفات والرسائل الغنية وتحديث الشاشة تنتظر دورها بدل أن تضيع.'
             ) }

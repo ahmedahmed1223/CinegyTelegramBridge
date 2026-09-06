@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -512,24 +512,35 @@ function Write-BridgeLivenessStamp {
        folder must never be able to interrupt polling: the worst outcome of a
        failed write here is that the manager reports the watchdog inactive. #>
     if (-not $script:livenessFile) { return }
-    try {
-        # Two lines: the stamp, then this process id. The id is what lets a
-        # manager started after the bridge adopt it instead of reporting
-        # "stopped" beside a bridge that is plainly on air - which is what an
-        # operator saw after the manager was closed and reopened. A reader that
-        # only knows the old single-line file still reads the first line.
-        Set-Content -LiteralPath $script:livenessFile -Encoding utf8 -ErrorAction Stop `
-            -Value @([datetime]::UtcNow.ToString('o'), [string]$PID)
-        $script:LivenessWriteFailed = $false
-    }
-    catch {
-        # Said once per run, not once per loop: a read-only log folder would
-        # otherwise repeat this every thirty seconds for as long as the bridge
-        # lives, and drown the log it is complaining about.
-        if (-not $script:LivenessWriteFailed) {
-            $script:LivenessWriteFailed = $true
-            Write-BridgeLog "Could not write the liveness stamp ($($_.Exception.Message)) - the manager will report its hang watchdog inactive." 'WARN'
+    # Two lines: the stamp, then this process id. The id is what lets a manager
+    # started after the bridge adopt it instead of reporting "stopped" beside a
+    # bridge that is plainly on air - which is what an operator saw after the
+    # manager was closed and reopened. A reader that only knows the old
+    # single-line file still reads the first line.
+    $value = @([datetime]::UtcNow.ToString('o'), [string]$PID)
+    $lastError = ''
+    # Retried once before anything is said, because the failure this file
+    # actually sees is a reader landing on the instant of the write. Four of
+    # them in a fortnight on this installation, every one gone by the next
+    # loop, and each logged as though the watchdog had stopped - which teaches
+    # an operator reviewing the log that this line means nothing.
+    foreach ($attempt in 1, 2) {
+        try {
+            Set-Content -LiteralPath $script:livenessFile -Encoding utf8 -ErrorAction Stop -Value $value
+            $script:LivenessWriteFailed = $false
+            return
         }
+        catch {
+            $lastError = [string]$_.Exception.Message
+            if ($attempt -eq 1) { Start-Sleep -Milliseconds 120 }
+        }
+    }
+    # Said once per run, not once per loop: a read-only log folder would
+    # otherwise repeat this every thirty seconds for as long as the bridge
+    # lives, and drown the log it is complaining about.
+    if (-not $script:LivenessWriteFailed) {
+        $script:LivenessWriteFailed = $true
+        Write-BridgeLog "Could not write the liveness stamp, twice ($lastError) - if it keeps failing the manager reports its hang watchdog inactive." 'WARN'
     }
 }
 

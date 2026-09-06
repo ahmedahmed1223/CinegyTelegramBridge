@@ -13,6 +13,38 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.74.0
+
+A shorter menu, a log pane that is never left blank, and a heartbeat that
+retries before it complains.
+
+The admin menu was sixteen rows — a wall on a phone, and every row above the
+on-air controls is a row to scroll past while a wrong graphic is live. Three
+pairs now share a row, paired by meaning rather than to save space: the two
+status screens are one question at two depths, the schedule and the reports are
+both "what is coming / what happened", and the ticker and the bulletin are the
+words going out under the picture. One-hand mode still splits every pair back
+apart — the pairing is a layout choice, and an operator saying they are holding
+the phone in one hand outranks it.
+
+An empty log pane is not neutral: this window's whole job is to say whether the
+bridge is alive, so a blank column reads as "it stopped logging". Typing a
+filter that matches nothing produced exactly that, with only a small
+"المعروض: 0 من 1842" at the foot of the window to say otherwise. The pane now
+says which of the three situations it is in and how to get out: nothing has
+arrived yet, the filter excluded everything, or the errors-only chip did — and
+that last one says a clean log is the point, not a fault.
+
+`F5` restarts and `Ctrl+L` clears the pane. Both go through the same buttons the
+mouse uses, so the confirmation is the same, and `F5` does nothing while its
+button is disabled — otherwise a keyboard restarts a bridge already stopping.
+
+The heartbeat write is retried once before anything is logged. The failure this
+file actually sees is a reader landing on the instant of the write: four in a
+fortnight on this installation, every one gone by the next loop, each logged as
+though the watchdog had stopped — which teaches an operator reviewing the log
+that the line means nothing.
+
 ## Version 7.73.0
 
 The status screens are built as `parse_mode=HTML` now, and the bulletin warns

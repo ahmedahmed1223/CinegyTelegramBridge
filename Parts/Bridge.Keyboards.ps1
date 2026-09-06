@@ -126,10 +126,16 @@ function Get-MainMenuKeyboard {
         $templateRow += (New-Button "🎚 الطبقات" "menu:layers")
     }
     $rows += , $templateRow
-    $rows += , @( (New-Button "ℹ️ الحالة" "menu:status") )
+    # Paired rather than stacked, and paired by meaning rather than to save
+    # space: these two answer the same question at two depths. Sixteen rows
+    # for an administrator is a wall on a phone, and every row above the live
+    # controls is a row to scroll past while a wrong graphic is on air.
+    # OneHandMode splits every pair back apart for a thumb, as before.
+    $statusRow = @( (New-Button "ℹ️ الحالة" "menu:status") )
     if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) {
-        $rows += , @( (New-Button "📊 الحالة الكاملة" "menu:fullstatus") )
+        $statusRow += (New-Button "📊 الحالة الكاملة" "menu:fullstatus")
     }
+    $rows += , $statusRow
 
     if (Get-Setting 'EnableFavorites') {
         # @() is mandatory, not decoration: a PowerShell function that returns
@@ -162,15 +168,21 @@ function Get-MainMenuKeyboard {
     $fourthRow = @( (New-Button "✏️ تحديث نص" "menu:update") )
     if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button "⏱ عرض مؤقّت" "menu:timed") }
     $rows += , $fourthRow
-    $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule') )
+    $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule'), (New-Button "📊 تقارير" 'menu:reports') )
     $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops'), (New-Button "🕘 ماذا فاتني" 'menu:digest') )
-    $rows += , @( (New-Button "📊 تقارير" 'menu:reports') )
-    if (Get-Setting 'EnableNewsTickerManagement') {
-        $rows += , @( (New-Button "📰 إدارة شريط الأخبار" 'menu:news') )
-    }
+    # The ticker and the bulletin are one job - the words going out under the
+    # picture - so they read as one row. Each is optional, so the row may
+    # carry one of them or neither.
+    #
+    # "إدارة شريط الأخبار" became "شريط الأخبار" to fit beside the bulletin.
+    # The screen it opens is the management screen; the word was label length,
+    # not information.
+    $contentRow = @()
+    if (Get-Setting 'EnableNewsTickerManagement') { $contentRow += (New-Button "📰 شريط الأخبار" 'menu:news') }
     # Offered only where the template exists: the screen is that scene's, and
     # a bridge without it has nothing to play.
-    if (Test-MojazAvailable) { $rows += , @( (New-Button '📑 الموجز' 'menu:mojaz') ) }
+    if (Test-MojazAvailable) { $contentRow += (New-Button '📑 الموجز' 'menu:mojaz') }
+    if ($contentRow.Count -gt 0) { $rows += , $contentRow }
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )

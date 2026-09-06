@@ -1276,3 +1276,62 @@ Describe 'Every button on screen goes somewhere' {
         $dead | Should -BeNullOrEmpty
     }
 }
+
+Describe 'The heartbeat the hang watchdog reads' {
+    BeforeEach {
+        $script:livenessFile = Join-Path $TestDrive "bridge-$([guid]::NewGuid().ToString('N')).liveness"
+        $script:LivenessWriteFailed = $false
+        Mock Write-BridgeLog {}
+    }
+
+    It 'writes the stamp and this process id, in that order' {
+        # The stamp says the loop turned over; the id is what lets a manager
+        # started after the bridge adopt it instead of reporting "stopped"
+        # beside a bridge that is plainly on air.
+        Write-BridgeLivenessStamp
+
+        $lines = @(Get-Content -LiteralPath $script:livenessFile)
+        [datetime]::Parse($lines[0], [cultureinfo]::InvariantCulture, 'RoundtripKind') |
+            Should -BeOfType [datetime]
+        [int]$lines[1] | Should -Be $PID
+    }
+
+    It 'retries a collision instead of announcing it' {
+        # The failure this file actually sees is a reader landing on the
+        # instant of the write - four in a fortnight on this installation,
+        # every one gone by the next loop. Announced, each one reads in the
+        # log as though the watchdog had stopped.
+        $script:LivenessAttempts = 0
+        Mock Set-Content {
+            $script:LivenessAttempts++
+            if ($script:LivenessAttempts -eq 1) { throw 'The process cannot access the file' }
+        }
+
+        Write-BridgeLivenessStamp
+
+        $script:LivenessAttempts | Should -Be 2
+        $script:LivenessWriteFailed | Should -BeFalse
+        Should -Invoke Write-BridgeLog -Times 0 -Exactly
+    }
+
+    It 'says it once when both attempts fail, not once per loop' {
+        # A read-only log folder would otherwise repeat this every thirty
+        # seconds for as long as the bridge lives, drowning the log it is
+        # complaining about.
+        Mock Set-Content { throw 'Access to the path is denied' }
+
+        Write-BridgeLivenessStamp
+        Write-BridgeLivenessStamp
+        Write-BridgeLivenessStamp
+
+        $script:LivenessWriteFailed | Should -BeTrue
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+            $Message -match 'twice' -and $Message -match 'Access to the path is denied'
+        }
+    }
+
+    It 'does nothing at all when no heartbeat path is configured' {
+        $script:livenessFile = ''
+        { Write-BridgeLivenessStamp } | Should -Not -Throw
+    }
+}

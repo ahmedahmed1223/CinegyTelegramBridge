@@ -1,4 +1,4 @@
-using System.Security.AccessControl;
+﻿using System.Security.AccessControl;
 using System.Text;
 using System.Threading;
 
@@ -262,6 +262,24 @@ internal static class SelfTest
         Check("filter excludes a non-match", !MainForm.ShouldShow("2026 [INFO] Bridge starting", "ffmpeg", false));
         Check("errors-only hides INFO", !MainForm.ShouldShow("2026 [INFO] fine", "", true));
         Check("errors-only keeps WARN", MainForm.ShouldShow("2026 [WARN] careful", "", true));
+
+        // An empty log pane reads as "the bridge stopped logging" - this
+        // window's whole job is to say otherwise, so no path may leave it
+        // blank without a sentence naming why and the way out.
+        Check("nothing is said while there are lines on screen",
+            MainForm.EmptyStateMessage(totalLines: 100, shownLines: 12, filter: "", errorsOnly: false) is null);
+        Check("an empty pane before any output says output is still to come",
+            MainForm.EmptyStateMessage(0, 0, "", false)?.Contains("فور تشغيله") == true);
+        Check("a filter that matches nothing names the filter and Esc",
+            MainForm.EmptyStateMessage(1842, 0, "ffmpeg", false) is string m
+                && m.Contains("ffmpeg") && m.Contains("1842") && m.Contains("Esc"));
+        Check("a clean log under errors-only says so is the point, not a fault",
+            MainForm.EmptyStateMessage(1842, 0, "", true)?.Contains("وهذا هو المطلوب") == true);
+        Check("both filters together name both ways out",
+            MainForm.EmptyStateMessage(1842, 0, "ffmpeg", true) is string both
+                && both.Contains("ffmpeg") && both.Contains("Esc") && both.Contains("الأخطاء والتحذيرات"));
+        Check("a filter of only spaces counts as no filter",
+            MainForm.EmptyStateMessage(1842, 0, "   ", true)?.Contains("وهذا هو المطلوب") == true);
         Check("highlights the operation id without changing the surrounding text",
             MainForm.GetLogHighlights("2026-09-05 [INFO] AIR_OP id=air-a8f9daa3 action=SHOW layer=4 result=success")
                 .Any(h => h.Kind == LogHighlightKind.OperationId && h.Text == "air-a8f9daa3"));

@@ -1181,6 +1181,38 @@ Describe 'Main menu on-air priority' {
         $hideAllIndex | Should -BeLessThan $templatesIndex
     }
 
+    It 'pairs the same-family screens onto one row instead of stacking them' {
+        # Sixteen rows for an administrator is a wall on a phone, and every row
+        # above the live controls is a row to scroll past while a wrong graphic
+        # is on air. Paired by meaning: two depths of one question, and the two
+        # screens for the words going out under the picture.
+        Mock Test-StatusViewer { $true }
+        Mock Test-MojazAvailable { $true }
+        $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+        $rowOf = { param($data) @($rows | Where-Object { @($_ | ForEach-Object { $_['callback_data'] }) -contains $data })[0] }
+
+        @((& $rowOf 'menu:status') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('menu:status', 'menu:fullstatus')
+        @((& $rowOf 'menu:schedule') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('menu:schedule', 'menu:reports')
+        @((& $rowOf 'menu:mojaz') | ForEach-Object { $_['callback_data'] }) |
+            Should -Contain 'menu:news'
+    }
+
+    It 'splits every pair back apart for a thumb in one-hand mode' {
+        # The pairing is a layout choice; OneHandMode is the operator saying
+        # they are holding the phone in one hand, and it still wins.
+        $original = Get-Setting 'OneHandMode'
+        try {
+            $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $true -Force
+            $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+            @($rows | Where-Object { @($_).Count -gt 1 }) | Should -BeNullOrEmpty
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $original -Force
+        }
+    }
+
     It 'still offers hide-all when nothing is tracked as live' {
         $flat = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })

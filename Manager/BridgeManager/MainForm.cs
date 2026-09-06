@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -155,6 +155,9 @@ public sealed class MainForm : Form
     // would have restarted a working bridge every night. The bridge therefore
     // stamps logs/bridge.liveness once per poll loop, and this watches that.
     private DateTime? _lastLivenessSeen;
+    // Whether the log pane currently holds an empty-state note rather than log
+    // lines; see EmptyStateMessage.
+    private bool _showingEmptyState;
     private bool _watchdogInactiveLogged;
     private static readonly TimeSpan LivenessGrace = TimeSpan.FromMinutes(3);
 
@@ -236,11 +239,14 @@ public sealed class MainForm : Form
         // ---- action bar: three things that change the air, then the rest ---
         _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
         _startButton = Theme.PrimaryButton("تشغيل", () => Theme.Running);
+        _startButton.AccessibleName = "تشغيل الجسر";
         _startButton.Width = 118;
         _stopButton = Theme.PrimaryButton("إيقاف", () => Theme.Stopped);
+        _stopButton.AccessibleName = "إيقاف الجسر";
         _stopButton.Width = 118;
         _stopButton.Enabled = false;
         _restartButton = Theme.PrimaryButton("إعادة تشغيل", () => Theme.Pending);
+        _restartButton.AccessibleName = "إعادة تشغيل الجسر (F5)";
         _restartButton.Width = 140;
         _restartButton.Enabled = false;
 
@@ -355,6 +361,13 @@ public sealed class MainForm : Form
         {
             if (e.Control && e.KeyCode == Keys.F) { _filterBox.Focus(); _filterBox.SelectAll(); e.Handled = true; }
             if (e.KeyCode == Keys.Escape && _filterBox.Focused && _filterBox.Text.Length > 0) { _filterBox.Clear(); e.Handled = true; }
+            // Ctrl+L clears the pane the way it clears a terminal, and F5
+            // restarts - both go through the same buttons, so the confirmation
+            // an operator gets from the mouse is the one they get here too.
+            // Enabled-checked first: a shortcut that fires a disabled button is
+            // how a keyboard restarts a bridge that is already stopping.
+            if (e.Control && e.KeyCode == Keys.L) { ClearOutput(); e.Handled = true; }
+            if (e.KeyCode == Keys.F5 && _restartButton.Enabled) { _restartButton.PerformClick(); e.Handled = true; }
         };
 
         // Docked Top stacks in reverse order of adding, so this reads
@@ -1364,6 +1377,43 @@ public sealed class MainForm : Form
             : line[..MaxDisplayedLineLength] + " … [السطر قُصّر في العرض؛ راجع bridge.log للنص الكامل]";
 
     /// <summary>Pure, so `--selftest` can pin it: an empty filter shows everything.</summary>
+    /// <summary>
+    /// What to put in the log pane when nothing has been written into it, or
+    /// null when there is something to show.
+    /// </summary>
+    /// <remarks>
+    /// An empty pane is not neutral: this window's whole job is to say whether
+    /// the bridge is alive, so a blank column reads as "it stopped logging" -
+    /// the same confusion a manager showed after adopting a running bridge and
+    /// leaving its pane empty. Typing a filter that matches nothing produced
+    /// exactly that, with only a small "المعروض: 0 من 1842" at the foot of the
+    /// window to say otherwise.
+    ///
+    /// The three empty panes are three different situations and get three
+    /// different sentences: nothing has arrived yet, the filter excluded
+    /// everything, or the errors-only chip did. Each names the way out.
+    /// </remarks>
+    internal static string? EmptyStateMessage(int totalLines, int shownLines, string filter, bool errorsOnly)
+    {
+        if (shownLines > 0) return null;
+        if (totalLines == 0)
+            return "لا توجد أسطر بعد. تظهر هنا مخرجات الجسر فور تشغيله.";
+
+        var hasFilter = !string.IsNullOrWhiteSpace(filter);
+        if (hasFilter && errorsOnly)
+            return $"لا سطر يطابق «{filter.Trim()}» ضمن الأخطاء والتحذيرات، من {totalLines} سطرًا. "
+                 + "امسح التصفية (Esc) أو ألغِ «الأخطاء والتحذيرات فقط».";
+        if (hasFilter)
+            return $"لا سطر يطابق «{filter.Trim()}» من {totalLines} سطرًا. امسح التصفية بمفتاح Esc.";
+        if (errorsOnly)
+            return $"لا أخطاء ولا تحذيرات ضمن {totalLines} سطرًا — وهذا هو المطلوب. "
+                 + "ألغِ «الأخطاء والتحذيرات فقط» لرؤية بقية السجل.";
+
+        // Every line filtered out with nothing filtering: not reachable today,
+        // but a blank pane must never be the answer.
+        return $"لا شيء معروض من {totalLines} سطرًا.";
+    }
+
     internal static bool ShouldShow(string line, string filter, bool errorsOnly)
     {
         if (errorsOnly)
@@ -1424,7 +1474,14 @@ public sealed class MainForm : Form
             _lines.Add(line);
             ApplyHealthLine(line);
             if (_lines.Count > MaxOutputLines) trimNeeded = true;
-            if (ShouldShow(line, filter, errorsOnly)) { WriteLine(line); appended = true; }
+            if (!ShouldShow(line, filter, errorsOnly)) continue;
+            // The pane is holding "لا سطر يطابق…" and a line just arrived that
+            // does. Appending under the note would leave the note contradicting
+            // the line right below it, so the pane is rebuilt once on the way
+            // out of the empty state - a transition, not a per-line cost.
+            if (_showingEmptyState) { RenderAll(); return; }
+            WriteLine(line);
+            appended = true;
         }
 
         if (trimNeeded)
@@ -1498,6 +1555,17 @@ public sealed class MainForm : Form
         _output.SelectionLength = 0;
     }
 
+    /// <summary>A note from the manager itself, not a line off the bridge.</summary>
+    private void WriteMutedLine(string text)
+    {
+        _output.SelectionStart = _output.TextLength;
+        _output.SelectionLength = 0;
+        _output.SelectionColor = Theme.TextMuted;
+        _output.AppendText(text + Environment.NewLine);
+        _output.SelectionStart = _output.TextLength;
+        _output.SelectionLength = 0;
+    }
+
     private void RenderAll()
     {
         var filter = _filterBox.Text;
@@ -1510,10 +1578,18 @@ public sealed class MainForm : Form
         try
         {
             _output.Clear();
+            var shown = 0;
             foreach (var line in _lines)
             {
-                if (ShouldShow(line, filter, errorsOnly)) WriteLine(line);
+                if (!ShouldShow(line, filter, errorsOnly)) continue;
+                WriteLine(line);
+                shown++;
             }
+            // Said in the pane itself, not only in the small count at the foot
+            // of the window: the pane is where the operator is looking.
+            var empty = EmptyStateMessage(_lines.Count, shown, filter, errorsOnly);
+            _showingEmptyState = empty is not null;
+            if (empty is not null) WriteMutedLine(empty);
         }
         finally
         {

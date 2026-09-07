@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.86.0
+
+The remaining screens take the health centre's design.
+
+The usage summary's tail was three sentences in three different shapes after a
+carefully built ranking — a week's estimate, a run total and an outcome tally,
+none of them resembling the others or the list above. The two figures the screen
+is opened for lead now, with the outcome breakdown quoted under them.
+
+All four reports follow: work, bulletins, news, banners. Totals first, the
+per-row detail in a blockquote that folds itself past three rows. In the work
+report the shift total had been *below* the people it summarises — on a busy day
+the line an operator had to scroll past eleven others to reach.
+
+Not one `━━━` divider is left in the repository. A blockquote separates for real,
+and folds; a row of dashes was a picture of separating.
+
+The reports go out as `parse_mode=HTML` now, with every field escaped through
+`ConvertTo-HtmlText` — the escaper already living in the reports file, because
+these screens are built almost entirely out of what people typed: operator
+names, template and bulletin names, and the banner copy itself.
+
 ## Version 7.85.1
 
 The fixed-width table made the text small, and that trade went the wrong way.

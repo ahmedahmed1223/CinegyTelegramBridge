@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 BeforeAll {
     # The bridge runs under StrictMode, and without it here these tests pass
     # on code that throws in production: reading .Sum off an empty
@@ -626,7 +626,10 @@ Describe 'Work report' {
         $text = Get-WorkReportText -Period today
         $text | Should -Match 'على الهواء'
         $text | Should -Match 'الأكثر: عاجل'
-        $text | Should -Match 'الإجمالي:'
+        # The shift total moved above the people it summarises - on a busy
+        # day it was the line an operator had to scroll past eleven others
+        # to reach - and carries its label in bold rather than a colon.
+        $text | Should -Match 'الإجمالي</b> —'
         $text | Should -Match 'مرفوضة'
     }
 

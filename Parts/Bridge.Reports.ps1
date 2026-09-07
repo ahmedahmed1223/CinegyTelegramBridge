@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -89,7 +89,7 @@ function Show-Report {
         'work' { Get-WorkReportText -Period $Period -OnlyUserId $onlyUser }
         default { Get-BannerReportText -Period $Period -OnlyUserId $onlyUser }
     }
-    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup $markup
+    Send-TelegramPagedText -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $markup
 }
 
 function Get-ReportPeriod {
@@ -223,20 +223,32 @@ function Get-WorkReportText {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-WorkReportData -Period $Period -OnlyUserId $OnlyUserId
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("👥 تقرير العمل — $($data.Label)")
-    if ($data.People.Count -eq 0) { $lines.Add('لا توجد عمليات هواء مسجلة في هذه الفترة.'); return ($lines -join "`n") }
-    foreach ($person in $data.People) {
-        $name = Get-AuditOperatorName -UserId $person.UserId
-        $lines.Add("• ${name}: $($person.Total) عملية · ✅ $($person.Success)$(Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed)")
-        $lines.Add("   $(Get-WorkReportDetailLine -OnAir $person.OnAir -TopTarget $person.TopTarget -LastAt $person.LastAt)")
-    }
+    # parse_mode=HTML, in the grammar 🩺 مركز صحة النظام uses: the totals that
+    # answer the screen come first, the per-operator detail is quoted under
+    # them. Operator and template names are typed by people, so every one is
+    # escaped - this report is built out of almost nothing else.
+    $lines.Add("<b>👥 تقرير العمل</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
+    if ($data.People.Count -eq 0) { $lines.Add('<i>لا توجد عمليات هواء مسجلة في هذه الفترة.</i>'); return ($lines -join "`n") }
+
+    # The shift total above the people, not below. On a busy day it was the
+    # line an operator had to scroll past eleven others to reach.
     if ($data.People.Count -gt 1) {
         $t = $data.Totals
+        $lines.Add("🎬 <b>الإجمالي</b> — $($t.Total) عملية · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed))")
+        $lines.Add("👥 <b>المشغّلون</b> — $($t.Operators)")
         $lines.Add('')
-        $lines.Add("الإجمالي: $($t.Total) عملية · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed) · $($t.Operators) مشغّلين")
     }
+
+    $personLines = @(foreach ($person in $data.People) {
+            $name = ConvertTo-HtmlText (Get-AuditOperatorName -UserId $person.UserId)
+            "👤 <b>$name</b> — $($person.Total) عملية · ✅ $($person.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed))"
+            "     $(ConvertTo-HtmlText (Get-WorkReportDetailLine -OnAir $person.OnAir -TopTarget $person.TopTarget -LastAt $person.LastAt))"
+        })
+    $tag = if ($data.People.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($personLines -join "`n")</blockquote>")
+
     $note = Get-ReportTruncationNote -Truncated ([bool]$data.Truncated)
-    if ($note) { $lines.Add(''); $lines.Add("⚠️ $note") }
+    if ($note) { $lines.Add(''); $lines.Add("<i>⚠️ $(ConvertTo-HtmlText $note)</i>") }
     return ($lines -join "`n")
 }
 
@@ -487,22 +499,26 @@ function Get-MojazReportText {
     $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
     $runs = @($data.Runs)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("📑 تقرير الموجزات — $($data.Label)")
-    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("<b>📑 تقرير الموجزات</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
     if ($runs.Count -eq 0) {
-        $lines.Add('لم يُشغَّل أي موجز في هذه الفترة.')
+        $lines.Add('<i>لم يُشغَّل أي موجز في هذه الفترة.</i>')
         return ($lines -join "`n")
     }
-    foreach ($run in $runs) {
-        $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
-        $who = Get-AuditOperatorName -UserId ([string]$run.UserId)
-        $mark = if ($run.Kind -eq 'scheduled') { '🕒 ' } else { '▶️ ' }
-        $lines.Add("$mark$started · $([string]$run.Name) · $([int]$run.Rows) صف · $(Get-MojazRunDuration -Run $run)")
-        if ($who) { $lines.Add("   المشغّل: $who") }
-    }
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الإجمالي: $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا")
-    if ($data.Truncated) { $lines.Add("⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط.") }
+    # Totals first, runs quoted under them. The two rows of "━━━" were a
+    # drawing of the separation a blockquote actually makes.
+    $lines.Add("📊 <b>الإجمالي</b> — $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا")
+    $lines.Add('')
+
+    $runLines = @(foreach ($run in $runs) {
+            $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
+            $who = ConvertTo-HtmlText (Get-AuditOperatorName -UserId ([string]$run.UserId))
+            $mark = if ($run.Kind -eq 'scheduled') { '🕒' } else { '▶️' }
+            "$mark $started · <b>$(ConvertTo-HtmlText ([string]$run.Name))</b> · $([int]$run.Rows) صف · $(ConvertTo-HtmlText (Get-MojazRunDuration -Run $run))"
+            if ($who) { "     المشغّل: $who" }
+        })
+    $tag = if ($runs.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($runLines -join "`n")</blockquote>")
+    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط.</i>") }
     return ($lines -join "`n")
 }
 
@@ -681,22 +697,22 @@ function Get-NewsReportText {
     $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("📰 تقرير الأخبار — $($data.Label)")
-    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("<b>📰 تقرير الأخبار</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
     if ([int]$data.Publishes -eq 0) {
-        $lines.Add('لم يُنشر شريط أخبار في هذه الفترة.')
+        $lines.Add('<i>لم يُنشر شريط أخبار في هذه الفترة.</i>')
         return ($lines -join "`n")
     }
+    $lines.Add("📊 <b>الإجمالي</b> — $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا")
+    $lines.Add('')
 
-    foreach ($day in @($data.Days)) {
-        $lines.Add("• $($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) تعديلًا · على الهواء $($day.Items) · $(Get-NewsEditTrail -Counts $day.Counts)")
-        if ($day.Tally.Breakdown) { $lines.Add("   ↳ $($day.Tally.Breakdown)") }
-        elseif ($day.Tally.Single) { $lines.Add("   ↳ $($day.Tally.Single)") }
-    }
-
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا")
-    if ($data.Truncated) { $lines.Add("⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.") }
+    $dayLines = @(foreach ($day in @($data.Days)) {
+            "📆 <b>$($day.Date.ToString('yyyy/MM/dd'))</b> — $($day.Publishes) تعديلًا · على الهواء $($day.Items) · $(ConvertTo-HtmlText (Get-NewsEditTrail -Counts $day.Counts))"
+            if ($day.Tally.Breakdown) { "     ↳ $(ConvertTo-HtmlText ([string]$day.Tally.Breakdown))" }
+            elseif ($day.Tally.Single) { "     ↳ $(ConvertTo-HtmlText ([string]$day.Tally.Single))" }
+        })
+    $tag = if (@($data.Days).Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($dayLines -join "`n")</blockquote>")
+    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.</i>") }
     return ($lines -join "`n")
 }
 
@@ -816,36 +832,42 @@ function Get-BannerReportText {
     $sessions = @($data.Sessions)
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("🖼 تقرير البنرات — $($data.Label)")
-    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("<b>🖼 تقرير البنرات</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
     if ($sessions.Count -eq 0) {
-        $lines.Add('لم يُعرض أي بنر في هذه الفترة.')
+        $lines.Add('<i>لم يُعرض أي بنر في هذه الفترة.</i>')
         return ($lines -join "`n")
     }
 
-    foreach ($session in $sessions) {
-        $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
-        $start = ([datetime]$session.StartedAt).ToString('HH:mm')
-        if ($session.EndedAt) {
-            $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
-            $span = "$start ← $(([datetime]$session.EndedAt).ToString('HH:mm')) · $minutes دقيقة"
-            $icon = '✅'
-        }
-        else {
-            $span = "$start ← ما زال على الهواء"
-            $icon = '🔴'
-        }
-        $lines.Add("$icon $span")
-        $detail = "   «$($session.Target)» على الطبقة $($session.Layer)"
-        if ($who) { $detail += " — $who" }
-        $lines.Add($detail)
-        if ($session.Values) { $lines.Add("   📝 $($session.Values)") }
-        else { $lines.Add('   📝 النص غير مسجَّل لهذه العملية') }
-    }
+    # Totals first, sessions quoted under them - the grammar the health centre
+    # and the other three reports now share.
+    $lines.Add("📊 <b>الإجمالي</b> — $($sessions.Count) بنرًا · $($data.Operators) مشغّلين")
+    $lines.Add('')
 
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الإجمالي: $($sessions.Count) بنرًا · $($data.Operators) مشغّلين")
-    if ($data.Truncated) { $lines.Add("⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.") }
+    # Every field here is operator input, the banner copy most of all, so all
+    # of it is escaped: this report is the one screen built almost entirely
+    # out of what people typed into the bot.
+    $sessionLines = @(foreach ($session in $sessions) {
+            $who = ConvertTo-HtmlText (Get-AuditOperatorName -UserId ([string]$session.UserId))
+            $start = ([datetime]$session.StartedAt).ToString('HH:mm')
+            if ($session.EndedAt) {
+                $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
+                $span = "$start ← $(([datetime]$session.EndedAt).ToString('HH:mm')) · $minutes دقيقة"
+                $icon = '✅'
+            }
+            else {
+                $span = "$start ← ما زال على الهواء"
+                $icon = '🔴'
+            }
+            $detail = "     «<b>$(ConvertTo-HtmlText ([string]$session.Target))</b>» على الطبقة $($session.Layer)"
+            if ($who) { $detail += " — $who" }
+            "$icon $span"
+            $detail
+            if ($session.Values) { "     📝 $(ConvertTo-HtmlText ([string]$session.Values))" }
+            else { '     📝 <i>النص غير مسجَّل لهذه العملية</i>' }
+        })
+    $tag = if ($sessions.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($sessionLines -join "`n")</blockquote>")
+    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.</i>") }
     return ($lines -join "`n")
 }
 

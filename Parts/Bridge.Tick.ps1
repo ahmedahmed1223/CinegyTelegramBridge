@@ -937,10 +937,10 @@ function Get-UsageDigestText {
     $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code> (محلي)")
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
-    if ($ranked.Count -eq 0) { $lines.Add('<i>• لم تُستخدم أي قوالب بعد.</i>') }
+    if ($ranked.Count -eq 0) { $lines.Add('<i>لم تُستخدم أي قوالب بعد.</i>') }
     else {
         $lines.Add('')
-        $lines.Add('<b>الأكثر استخدامًا:</b>')
+        $lines.Add('<b>🏆 الأكثر استخدامًا</b>')
         # The reports screens' own vocabulary: the name in bold and the
         # figures after a "·", at full size - where a <pre> ranking would be
         # aligned and small.
@@ -959,24 +959,35 @@ function Get-UsageDigestText {
 
     $counters = $script:AirOperationCounters
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
-    $lines.Add('')
-    $lines.Add("<b>عمليات الهواء منذ آخر تشغيل:</b> <code>$total</code>")
     # The scheduled weekly digest cannot use the process counters: a restart
     # at handover made a quiet week look empty. Audit is the durable source.
     $week = Get-ReportRecords -From ((Get-Date).Date.AddDays(-6)) -To (Get-Date) -EventName 'air_control'
     $weeklyOperations = @($week.Records).Count
     $completedDays = 7
     $dailyAverage = [math]::Round($weeklyOperations / $completedDays, 1)
-    $lines.Add("تقدير أسبوعي: <code>$weeklyOperations</code> عملية في آخر 7 أيام · متوسط <code>$dailyAverage</code> يوميًا")
-    $lines.Add("✅ ناجحة <code>$($counters.Success)</code> · ❌ فاشلة <code>$($counters.Failed)</code> · ⛔ مرفوضة <code>$($counters.Blocked)</code>")
+
+    # The same grammar as 🩺 مركز صحة النظام: the figures that answer the
+    # screen lead, each line opening with its own glyph, and the outcome
+    # breakdown follows as the detail behind them.
+    #
+    # The tail used to be three sentences of three different shapes after a
+    # carefully built ranking - a week's estimate, a run total and an outcome
+    # tally, none of them looking like the others or like the list above.
+    $lines.Add('')
+    $lines.Add("🎬 <b>منذ آخر تشغيل</b> — $total عملية")
+    $lines.Add("📆 <b>آخر 7 أيام</b> — $weeklyOperations عملية · متوسط $dailyAverage يوميًا")
+    $lines.Add('')
+    $lines.Add("<blockquote>✅ ناجحة — $($counters.Success)
+❌ فاشلة — $($counters.Failed)
+⛔ مرفوضة — $($counters.Blocked)</blockquote>")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
         $lines.Add('<i>راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.</i>')
     }
     if ($script:CancelReasons.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('<b>أسباب التراجع المسجّلة:</b>')
+        $lines.Add('<b>↩️ أسباب التراجع المسجّلة</b>')
         $reasonLines = @(@($script:CancelReasons.Keys | Sort-Object) | ForEach-Object {
-                "• $(ConvertTo-TelegramHtmlText (Get-CancelReasonLabel -Reason $_)): <code>$($script:CancelReasons[$_])</code>"
+                "$(ConvertTo-TelegramHtmlText (Get-CancelReasonLabel -Reason $_)) — $($script:CancelReasons[$_])"
             })
         $lines.Add("<blockquote>$($reasonLines -join "`n")</blockquote>")
     }

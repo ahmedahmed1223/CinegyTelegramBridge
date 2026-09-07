@@ -825,8 +825,10 @@ Describe 'Usage digest' {
         $script:UsageCounts = @{ 'ticker' = 1 }
         $script:AirOperationCounters = @{ Success = 10; Failed = 2; Blocked = 1 }
         $text = ConvertFrom-TelegramHtmlText (Get-UsageDigestText)
-        $text | Should -Match 'فاشلة 2'
-        $text | Should -Match 'مرفوضة 1'
+        # The outcome breakdown is one line per outcome now, quoted under
+        # the two figures the screen is opened for.
+        $text | Should -Match 'فاشلة — 2'
+        $text | Should -Match 'مرفوضة — 1'
         $text | Should -Match 'السجل'
     }
 
@@ -1052,7 +1054,7 @@ Describe 'Cancel reasons' {
         $script:AirOperationCounters = @{ Success = 1; Failed = 0; Blocked = 0 }
         $script:CancelReasons = @{ 'template' = 3 }
 
-        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match 'قالب خاطئ: 3'
+        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match 'قالب خاطئ — 3'
     }
 }
 

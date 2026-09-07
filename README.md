@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.83.0
+
+The reporting screens take the grammar الحالة الكاملة already used: a verdict
+first, the evidence under it.
+
+The health centre now leads with one. It was answering its only question — is
+anything wrong? — by making the operator read seven rows and notice a colour.
+The verdict is read off the icons the rows carry rather than recomputed, so the
+heading can never say "all clear" over a red row, which is the exact failure a
+verdict is added to prevent.
+
+The operating numbers get one too. That screen was figures only: someone opening
+it because "something feels off" had to already know what a bad number looks
+like. It is judged on uptime — a bridge up for eleven minutes has been
+restarting — with Telegram's flood limit beside it, the other thing that can be
+wrong while every individual figure still looks ordinary.
+
+The runtime-file health screen lifts what needs attention above the fold and
+folds the rest behind a count. Sixteen lines of "not written yet" gave a healthy
+install the same weight on screen as a broken one, which is the opposite of what
+a health screen is for.
+
+Every reporting screen carries its own clock now, so a screenshot sent to a
+colleague says when it was taken instead of being asked.
+
 ## Version 7.82.0
 
 A secret that could have left in an error message.

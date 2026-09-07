@@ -432,7 +432,20 @@ function Get-BridgeStatsText {
     # Bold and code sit side by side, never one inside the other: the two
     # cannot be combined on the same characters and the API refuses the whole
     # message if they are.
+    # A verdict first, like ℹ️ الحالة and 📊 الحالة الكاملة. This screen was
+    # figures only: an administrator opening it because "something feels off"
+    # had to already know what a bad number looks like before the screen could
+    # answer them. It is judged on uptime, because that is what this screen
+    # exists to show - a bridge up for eleven minutes has been restarting -
+    # with Telegram's flood limit beside it, the other thing that is wrong
+    # while every individual figure still looks ordinary.
+    $verdict = if ($uptime.TotalMinutes -lt 15) { '🟠 التشغيل حديث — قد يكون الجسر يُعاد تشغيله' }
+    elseif ([int]$script:TelegramRateLimitHits -gt 0) { '🟠 تيليجرام يحدّ من الإرسال' }
+    else { '🟢 تشغيل مستقر' }
+
     $lines.Add("<b>📈 أرقام التشغيل</b> — <code>v$($script:BridgeVersion)</code>")
+    $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
+    $lines.Add("<b>$verdict</b>")
     $lines.Add('')
     $lines.Add("<b>مدة التشغيل:</b> <code>$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د</code>")
     $lines.Add("منذ: <code>$($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))</code>")
@@ -914,6 +927,7 @@ function Get-UsageDigestText {
     # one is escaped; the ranking sits in a blockquote because it is a list
     # inside a summary rather than the summary itself.
     $lines.Add('<b>📊 ملخص الاستخدام</b>')
+    $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code> (محلي)")
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
     if ($ranked.Count -eq 0) { $lines.Add('<i>• لم تُستخدم أي قوالب بعد.</i>') }

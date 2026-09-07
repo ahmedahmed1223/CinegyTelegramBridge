@@ -241,6 +241,7 @@ function Get-RuntimeFileHealthText {
     $lines.Add('')
 
     $fileLines = [System.Collections.Generic.List[string]]::new()
+    $quietLines = [System.Collections.Generic.List[string]]::new()
     foreach ($record in $Records) {
         $icon = switch ([string]$record.State) {
             'healthy' { '🟢' }
@@ -254,6 +255,17 @@ function Get-RuntimeFileHealthText {
             'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
             default { 'تالف ولا توجد نسخة احتياطية' }
         }
+        # A file that is fine, or has simply never been written, costs one
+        # line and no explanation. Only the ones needing something get the
+        # second line saying what.
+        #
+        # Sixteen lines of "لم يُكتب بعد" gave a healthy install the same weight
+        # on screen as a broken one, which is the opposite of what a health
+        # screen is for.
+        if ([string]$record.State -in @('healthy', 'absent')) {
+            $quietLines.Add("$icon <code>$(ConvertTo-TelegramHtmlText ([string]$record.Name))</code>")
+            continue
+        }
         # The file name is <code>: it is a path an administrator retypes or
         # copies into a shell, and monospace keeps it left-to-right whole.
         $fileLines.Add("$icon <code>$(ConvertTo-TelegramHtmlText ([string]$record.Name))</code>")
@@ -263,9 +275,14 @@ function Get-RuntimeFileHealthText {
     # gives that spacing cannot: the verdict above it and the advice below it
     # both stay on the first screen of a phone instead of being scrolled past.
     # Two lines per file, so the threshold is counted in files.
-    if ($fileLines.Count -gt 0) {
-        $tag = if ($fileLines.Count -gt 10) { '<blockquote expandable>' } else { '<blockquote>' }
-        $lines.Add("$tag$($fileLines -join "`n")</blockquote>")
+    # What needs attention first, and outside the quote: it is this screen's
+    # answer, not evidence under one. The rest is folded away behind a count.
+    if ($fileLines.Count -gt 0) { $lines.Add($fileLines -join "`n") }
+    if ($quietLines.Count -gt 0) {
+        if ($fileLines.Count -gt 0) { $lines.Add('') }
+        $lines.Add("<b>سليمة أو لم تُكتب بعد ($($quietLines.Count)):</b>")
+        $tag = if ($quietLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
+        $lines.Add("$tag$($quietLines -join "`n")</blockquote>")
     }
 
     if ($faults.Count -gt 0) {
@@ -432,9 +449,22 @@ function Get-BridgeHealthCenterText {
     $rowLines = @($rows | ForEach-Object {
             "$($_.Icon) <b>$(ConvertTo-TelegramHtmlText ([string]$_.Name))</b>: $(ConvertTo-TelegramHtmlText ([string]$_.Detail))"
         })
+    # The verdict the seven rows already imply, said once at the top. This
+    # screen is opened to answer one question - is anything wrong? - and it
+    # answered only by making the operator read every row and notice a colour.
+    # The rows stay underneath as the evidence for it.
+    #
+    # Read off the icons the rows carry rather than recomputed, so the heading
+    # and the rows can never disagree about the same reading.
+    $icons = @($rows | ForEach-Object { [string]$_.Icon })
+    $verdict = if ($icons -contains '🔴') { '🔴 عطلٌ يحتاج تدخلًا' }
+    elseif ($icons -contains '🟠') { '🟠 يحتاج مراجعة' }
+    else { '🟢 كل شيء سليم' }
+
     return @(
         '<b>🩺 مركز صحة النظام</b>'
-        "Bridge <code>v$script:BridgeVersion</code>"
+        "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
+        "<b>$verdict</b>"
         ''
         "$(if ($rowLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' })$($rowLines -join "`n")</blockquote>"
         "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"

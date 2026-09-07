@@ -136,3 +136,52 @@ Describe 'Operator-visible operation reference' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '1fbf8e20' }
     }
 }
+
+Describe 'The reporting screens lead with a verdict' {
+    It 'says whether anything is wrong before listing the rows that prove it' {
+        # The health centre is opened to answer one question. It used to answer
+        # it only by making the operator read seven rows and notice a colour.
+        $healthy = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText `
+                -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
+        @($healthy -split "`n" | Where-Object { $_ -match '🟢|🟠|🔴' })[0] |
+            Should -Match 'كل شيء سليم|يحتاج مراجعة|عطلٌ يحتاج تدخلًا'
+    }
+
+    It 'takes the verdict from the rows, so the two cannot disagree' {
+        # Recomputing the judgement would let the heading say "all clear" over
+        # a red row - the exact failure the verdict was added to prevent.
+        Mock Get-BridgeHealthRows {
+            @(
+                [pscustomobject]@{ Icon = '🟢'; Name = 'أ'; Detail = 'سليم' }
+                [pscustomobject]@{ Icon = '🔴'; Name = 'ب'; Detail = 'معطّل' }
+            )
+        }
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText `
+                -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
+        $text | Should -Match 'عطلٌ يحتاج تدخلًا'
+    }
+
+    It 'folds the files that are fine and leaves the ones that are not on top' {
+        # Sixteen lines of "not written yet" gave a healthy install the same
+        # weight on screen as a broken one.
+        $records = @(1..6 | ForEach-Object {
+                [pscustomobject]@{ Name = "ok$_.json"; State = 'healthy'; SizeText = '1 KB'; ModifiedAt = (Get-Date) }
+            }) + @([pscustomobject]@{ Name = 'broken.json'; State = 'broken'; SizeText = '0 KB'; ModifiedAt = (Get-Date) })
+
+        $raw = Get-RuntimeFileHealthText -Records $records
+        $text = ConvertFrom-TelegramHtmlText $raw
+
+        # The broken file is above the fold, outside any quote.
+        $lines = @($text -split "`n")
+        $brokenAt = [array]::FindIndex($lines, [Predicate[string]] { param($l) $l -match 'broken.json' })
+        $quietAt = [array]::FindIndex($lines, [Predicate[string]] { param($l) $l -match 'سليمة أو لم تُكتب' })
+        $brokenAt | Should -BeGreaterThan -1
+        $brokenAt | Should -BeLessThan $quietAt
+        # And the six that are fine are folded behind a count.
+        $text | Should -Match 'سليمة أو لم تُكتب بعد \(6\)'
+        # HTML validity for this screen is pinned by the gate in
+        # Bridge.Tests.ps1, which owns Test-BridgeTelegramHtml; asserting it
+        # here too would make this file depend on that one's load order.
+        $raw | Should -Match '<blockquote expandable>'
+    }
+}

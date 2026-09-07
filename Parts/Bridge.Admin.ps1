@@ -817,18 +817,21 @@ function Get-RuntimeFileHealthText {
     if ($null -eq $Records) { $Records = @(Get-RuntimeFileHealth -Files (Get-BridgeRuntimeFiles)) }
     $Records = @($Records)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('🗂 صحة ملفات التشغيل')
-    $lines.Add('━━━━━━━━━━━━━━')
+    # parse_mode=HTML. The verdict is the only line that has to be read here -
+    # everything under it is the evidence for it - so it is bold, and the file
+    # list becomes a blockquote instead of a row of "━━━" drawn above it.
+    $lines.Add('<b>🗂 صحة ملفات التشغيل</b>')
 
     $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
     if ($faults.Count -eq 0) {
-        $lines.Add('🟢 كل ملفات التشغيل سليمة.')
+        $lines.Add('<b>🟢 كل ملفات التشغيل سليمة.</b>')
     }
     else {
-        $lines.Add("🔴 ملفات تحتاج انتباهك: $($faults.Count)")
+        $lines.Add("<b>🔴 ملفات تحتاج انتباهك: <code>$($faults.Count)</code></b>")
     }
     $lines.Add('')
 
+    $fileLines = [System.Collections.Generic.List[string]]::new()
     foreach ($record in $Records) {
         $icon = switch ([string]$record.State) {
             'healthy' { '🟢' }
@@ -842,14 +845,17 @@ function Get-RuntimeFileHealthText {
             'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
             default { 'تالف ولا توجد نسخة احتياطية' }
         }
-        $lines.Add("$icon $($record.Name)")
-        $lines.Add("      $detail")
+        # The file name is <code>: it is a path an administrator retypes or
+        # copies into a shell, and monospace keeps it left-to-right whole.
+        $fileLines.Add("$icon <code>$(ConvertTo-TelegramHtmlText ([string]$record.Name))</code>")
+        $fileLines.Add("      <i>$(ConvertTo-TelegramHtmlText $detail)</i>")
     }
+    if ($fileLines.Count -gt 0) { $lines.Add("<blockquote>$($fileLines -join "`n")</blockquote>") }
 
     if ($faults.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('↳ الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل.')
-        $lines.Add('↳ التالف بلا نسخة يبدأ فارغًا؛ خذ نسخة من المجلد قبل إعادة التشغيل إن كان محتواه مهمًا.')
+        $lines.Add('<i>↳ الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل.</i>')
+        $lines.Add('<i>↳ التالف بلا نسخة يبدأ فارغًا؛ خذ نسخة من المجلد قبل إعادة التشغيل إن كان محتواه مهمًا.</i>')
     }
     return ($lines -join "`n")
 }
@@ -857,7 +863,7 @@ function Get-RuntimeFileHealthText {
 function Invoke-RuntimeFileHealthCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-RuntimeFileHealthText) -ReplyMarkup (Get-HealthCenterKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-RuntimeFileHealthText) -ParseMode HTML -ReplyMarkup (Get-HealthCenterKeyboard)
 }
 
 function Get-BridgeUsageMetrics {
@@ -1002,12 +1008,20 @@ function Get-BridgeHealthCenterText {
     }
     $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot $DiagnosticsSnapshot -Warnings @($Warnings))
     $usage = Get-BridgeUsageMetrics
+    # parse_mode=HTML. Each row is a name and a verdict, and in flat text the
+    # name was indistinguishable from the verdict beside it; bold on the name
+    # is what lets the column be read down. Row names and details come from
+    # Get-BridgeHealthRows, built out of settings and paths the station
+    # controls, so both are escaped.
+    $rowLines = @($rows | ForEach-Object {
+            "$($_.Icon) <b>$(ConvertTo-TelegramHtmlText ([string]$_.Name))</b>: $(ConvertTo-TelegramHtmlText ([string]$_.Detail))"
+        })
     return @(
-        '🩺 مركز صحة النظام'
-        "Bridge v$script:BridgeVersion"
+        '<b>🩺 مركز صحة النظام</b>'
+        "Bridge <code>v$script:BridgeVersion</code>"
         ''
-    ) + @($rows | ForEach-Object { "$($_.Icon) $($_.Name): $($_.Detail)" }) + @(
-        "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء"
+        "<blockquote>$($rowLines -join "`n")</blockquote>"
+        "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
     ) -join "`n"
 }
 
@@ -1018,7 +1032,7 @@ function Invoke-HealthCenterCommand {
     # Table first so the state column can be read down; the lines remain
     # the fallback, and they are built from the same rows.
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-BridgeHealthCenterBlocks) -ReplyMarkup $healthKeyboard) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeHealthCenterText) -ReplyMarkup $healthKeyboard
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeHealthCenterText) -ParseMode HTML -ReplyMarkup $healthKeyboard
 }
 
 function Start-TemplateTestReview {

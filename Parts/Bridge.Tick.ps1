@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -643,11 +643,20 @@ function Get-MissedEventsText {
     # waiting to disagree.
     $records = @(Get-MissedEventsRecords -Hours $Hours)
 
+    # parse_mode=HTML. This is the screen an operator opens at handover, and
+    # it was one flat column of forty-odd lines with two rows of "━━━" drawn
+    # across it. The section headings are bold so the four questions it
+    # answers - what went to air, what came off, what is worth knowing, what
+    # failed - can be found without reading every line, and each clock time is
+    # a <code> span so the digits stay left-to-right beside the Arabic.
+    #
+    # Everything a person typed is escaped: template names, operator display
+    # names, and the audit messages, which are free text from a dozen call
+    # sites.
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("🕘 ماذا فاتني — آخر $Hours ساعة")
-    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("<b>🕘 ماذا فاتني</b> — آخر <code>$Hours</code> ساعة")
     if ($records.Count -eq 0) {
-        $lines.Add('لا شيء مسجّل في هذه الفترة.')
+        $lines.Add('<i>لا شيء مسجّل في هذه الفترة.</i>')
         return ($lines -join "`n")
     }
 
@@ -660,22 +669,23 @@ function Get-MissedEventsText {
     if ($shows.Count -gt 0) {
         $operatorCount = @($shows | Group-Object -Property UserId).Count
         $lines.Add('')
-        $header = "📺 ما عُرض — $($shows.Count) عرضًا"
-        if ($operatorCount -gt 1) { $header += " · $operatorCount مشغّلين" }
+        $header = "<b>📺 ما عُرض</b> — <code>$($shows.Count)</code> عرضًا"
+        if ($operatorCount -gt 1) { $header += " · <code>$operatorCount</code> مشغّلين" }
         $lines.Add($header)
         foreach ($group in ($shows | Group-Object -Property Target | Sort-Object Count -Descending | Select-Object -First 6)) {
             $newest = @($group.Group)[-1]
             $stampText = $newest.When.ToString('HH:mm')
-            $times = if ($group.Count -gt 1) { "$($group.Count)× · آخرها $stampText" } else { $stampText }
+            $times = if ($group.Count -gt 1) { "<code>$($group.Count)×</code> · آخرها <code>$stampText</code>" } else { "<code>$stampText</code>" }
             $tally = Get-OperatorTally -Records @($group.Group)
+            $target = ConvertTo-TelegramHtmlText ([string]$group.Name)
             if ($tally.Breakdown) {
                 # Several people touched the same graphic: "20×" alone hides
                 # whether one operator was busy or four collided on it.
-                $lines.Add("• $($group.Name) — $times")
-                $lines.Add("   ↳ $($tally.Breakdown)")
+                $lines.Add("• <b>$target</b> — $times")
+                $lines.Add("   ↳ <i>$(ConvertTo-TelegramHtmlText ([string]$tally.Breakdown))</i>")
             }
             else {
-                $lines.Add("• $($group.Name) — $times — $($tally.Single)")
+                $lines.Add("• <b>$target</b> — $times — <i>$(ConvertTo-TelegramHtmlText ([string]$tally.Single))</i>")
             }
         }
     }
@@ -684,11 +694,11 @@ function Get-MissedEventsText {
     if ($removals.Count -gt 0) {
         $newest = @($removals)[-1]
         $lastWho = Get-AuditOperatorName -UserId $newest.UserId
-        $line = "🙈 إخفاء وخروج: $($removals.Count) — آخرها $($newest.When.ToString('HH:mm'))"
-        if ($lastWho) { $line += " — $lastWho" }
+        $line = "<b>🙈 إخفاء وخروج</b>: <code>$($removals.Count)</code> — آخرها <code>$($newest.When.ToString('HH:mm'))</code>"
+        if ($lastWho) { $line += " — <i>$(ConvertTo-TelegramHtmlText ([string]$lastWho))</i>" }
         $lines.Add($line)
         $removalTally = Get-OperatorTally -Records $removals
-        if ($removalTally.Breakdown) { $lines.Add("   ↳ $($removalTally.Breakdown)") }
+        if ($removalTally.Breakdown) { $lines.Add("   ↳ <i>$(ConvertTo-TelegramHtmlText ([string]$removalTally.Breakdown))</i>") }
     }
 
     # Activity lines are already written for a human, so they are shown rather
@@ -697,28 +707,40 @@ function Get-MissedEventsText {
     $notable = @($activity | Where-Object { $_.Message -match '📰|⚙️|👤|🔓|🚨|♻️' })
     if ($notable.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('📌 أحداث تستحق الانتباه')
-        foreach ($item in @($notable | Select-Object -Last 5)) {
-            $lines.Add("• $($item.When.ToString('HH:mm')) — $($item.Message)")
-        }
+        $lines.Add('<b>📌 أحداث تستحق الانتباه</b>')
+        # A blockquote, because this is quoted material - lines the bridge
+        # wrote elsewhere, shown here rather than summarised. Telegram draws
+        # the bar, which is what marks them as not this screen's own words.
+        $noted = @(@($notable | Select-Object -Last 5) | ForEach-Object {
+                "• <code>$($_.When.ToString('HH:mm'))</code> — $(ConvertTo-TelegramHtmlText ([string]$_.Message))"
+            })
+        $lines.Add("<blockquote>$($noted -join "`n")</blockquote>")
     }
 
     $failures = @($records | Where-Object { $_.Result -eq 'failed' })
     $blocked = @($records | Where-Object { $_.Result -eq 'blocked' })
     if ($failures.Count -gt 0 -or $blocked.Count -gt 0) {
         $lines.Add('')
-        $lines.Add("⚠️ فشل: $($failures.Count) · مرفوض: $($blocked.Count)")
+        # Kept apart on purpose: a rejection is a permission answer and a
+        # failure is a fault, and they were one number until 7.68.0.
+        $lines.Add("<b>⚠️ فشل: <code>$($failures.Count)</code> · مرفوض: <code>$($blocked.Count)</code></b>")
         foreach ($failure in @($failures | Select-Object -Last 3)) {
-            $detail = if ($failure.Message) { $failure.Message } else { 'بلا تفصيل' }
-            $lines.Add("• $($failure.When.ToString('HH:mm')) — $($failure.Action) $($failure.Target): $detail")
+            $detail = if ($failure.Message) { [string]$failure.Message } else { 'بلا تفصيل' }
+            $lines.Add("• <code>$($failure.When.ToString('HH:mm'))</code> — $(ConvertTo-TelegramHtmlText ([string]$failure.Action)) <b>$(ConvertTo-TelegramHtmlText ([string]$failure.Target))</b>: $(ConvertTo-TelegramHtmlText $detail)")
         }
     }
 
+    # What is true right now, under everything that already happened - the
+    # digest is read at a handover, and the last thing the person taking over
+    # needs is the current state, not the history.
     $lines.Add('')
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add($(if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
-            else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join '، ')" }))
-    $lines.Add("Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState) · Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)")
+    $nowLine = if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
+    else {
+        $live = @($script:OnAir.Keys | Sort-Object | ForEach-Object { ConvertTo-TelegramHtmlText ([string]$script:OnAir[$_].Key) })
+        "🔴 <b>على الهواء</b>: $($live -join '، ')"
+    }
+    $lines.Add("<blockquote>$nowLine
+Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))</code> · Telegram: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))</code></blockquote>")
     return ($lines -join "`n")
 }
 
@@ -734,14 +756,18 @@ function Get-TemplateHistoryText {
             [string]$_.target -and ([string]$_.target).IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
         } | Select-Object -Last $MaxResults)
 
-    if ($hits.Count -eq 0) { return "لا يوجد سجل لاستخدام '$needle' ضمن ما هو محفوظ." }
+    # parse_mode=HTML, and the needle is escaped before anything else: it is
+    # typed straight into the chat by whoever ran /who, so it is the most
+    # directly person-shaped string on any screen here.
+    $needleHtml = ConvertTo-TelegramHtmlText $needle
+    if ($hits.Count -eq 0) { return "<i>لا يوجد سجل لاستخدام «$needleHtml» ضمن ما هو محفوظ.</i>" }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("👤 من استخدم '$needle'")
+    $lines.Add("<b>👤 من استخدم «$needleHtml»</b>")
     $lines.Add('')
     foreach ($hit in $hits) {
         $stamp = [datetime]::MinValue
         $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
-        $lines.Add("• $when — $(Get-UserDisplayName -UserId ([long]$hit.userId)) — $($hit.action) ($($hit.result))")
+        $lines.Add("• <code>$when</code> — <b>$(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId ([long]$hit.userId)))</b> — $(ConvertTo-TelegramHtmlText ([string]$hit.action)) (<i>$(ConvertTo-TelegramHtmlText ([string]$hit.result))</i>)")
     }
     return ($lines -join "`n")
 }

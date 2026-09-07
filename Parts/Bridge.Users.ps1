@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -450,22 +450,28 @@ function Get-UserActivitySummaryText {
     param([datetime]$Now = (Get-Date))
     $windowMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("👥 نشاط المستخدمين التقريبي · النافذة $windowMinutes د")
-    $lines.Add('Telegram لا يوفّر حالة اتصال لحظية؛ الحالة مبنية على آخر تفاعل مع البوت.')
-    foreach ($user in @(Get-AuthorizedUsers)) {
-        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
-        $lines.Add("• $($user.Alias): $($activity.Label)")
-    }
+    # parse_mode=HTML. The caveat under the title is the whole reason this
+    # screen can mislead - "متصل" here means "spoke to the bot recently", not
+    # "online" - so it is italic and set apart from the list rather than
+    # reading as one more line of it. Aliases are typed by an administrator
+    # and escaped like any other human text.
+    $lines.Add("<b>👥 نشاط المستخدمين التقريبي</b> · النافذة <code>$windowMinutes</code> د")
+    $lines.Add('<i>Telegram لا يوفّر حالة اتصال لحظية؛ الحالة مبنية على آخر تفاعل مع البوت.</i>')
+    $rows = @(@(Get-AuthorizedUsers) | ForEach-Object {
+            $activity = Get-UserActivityStatus -LastActivityAt ([string]$_.LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
+            "• <b>$(ConvertTo-TelegramHtmlText ([string]$_.Alias))</b>: $(ConvertTo-TelegramHtmlText ([string]$activity.Label))"
+        })
+    if ($rows.Count -gt 0) { $lines.Add("<blockquote>$($rows -join "`n")</blockquote>") }
     return ($lines -join "`n")
 }
 
 function Get-UserActivityDetailText {
     param([Parameter(Mandatory)][long]$TargetUserId, [datetime]$Now = (Get-Date))
     $user = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
-    if ($user.Count -eq 0) { return 'المستخدم لم يعد ضمن قائمة المصرح لهم.' }
+    if ($user.Count -eq 0) { return '<i>المستخدم لم يعد ضمن قائمة المصرح لهم.</i>' }
     $windowMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
     $activity = Get-UserActivityStatus -LastActivityAt ([string]$user[0].LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
-    return "👤 $($user[0].Alias)`n$($activity.Label)`nالحالة تقريبية حسب آخر تفاعل مع البوت؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت."
+    return "<b>👤 $(ConvertTo-TelegramHtmlText ([string]$user[0].Alias))</b>`n$(ConvertTo-TelegramHtmlText ([string]$activity.Label))`n<i>الحالة تقريبية حسب آخر تفاعل مع البوت؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>"
 }
 
 function Test-StatusViewer {

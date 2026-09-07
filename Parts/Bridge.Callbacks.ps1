@@ -716,7 +716,7 @@ function Invoke-CallbackQuery {
             $digestHours = Get-SettingInt 'MissedEventsHours' 1
             $digestMenu = Get-MainMenuKeyboard -ChatId $chatId -UserId $userId
             if (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-MissedEventsBlocks -Hours $digestHours) -ReplyMarkup $digestMenu) { break }
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MissedEventsText -Hours $digestHours) -ReplyMarkup $digestMenu
+            Send-TelegramMessage -ChatId $chatId -Text (Get-MissedEventsText -Hours $digestHours) -ParseMode HTML -ReplyMarkup $digestMenu
             break
         }
         'menu:sharestatus' {
@@ -861,7 +861,7 @@ function Invoke-CallbackQuery {
         'usr:activity:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $targetUserId = [long](Get-CallbackArg $data 'usr:activity:')
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivityDetailText -TargetUserId $targetUserId) `
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivityDetailText -TargetUserId $targetUserId) -ParseMode HTML `
                     -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $userId)
             }
             break
@@ -1277,7 +1277,7 @@ function Invoke-CallbackQuery {
         }
         'menu:userpresence' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivitySummaryText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivitySummaryText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }

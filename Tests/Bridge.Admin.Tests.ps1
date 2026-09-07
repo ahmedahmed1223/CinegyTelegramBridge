@@ -1071,7 +1071,8 @@ Describe 'Missed events and template history' {
     AfterAll { $script:OnAir = @{} }
 
     It 'summarises what happened while nobody was looking' {
-        $text = Get-MissedEventsText -Hours 12
+        # The digest is HTML now; read it the way the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)
         # Grouped by graphic, not by verb: which template moved is the
         # question at a handover, and who moved it.
         $text | Should -Match 'الانتخابات'
@@ -1080,14 +1081,15 @@ Describe 'Missed events and template history' {
     }
 
     It 'calls out failures, which is the part worth reading' {
-        $text = Get-MissedEventsText -Hours 12
+        # The digest is HTML now; read it the way the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)
         $text | Should -Match 'فشل: 1'
         $text | Should -Match 'engine refused'
     }
 
     It 'ignores anything outside the window' {
         # The three-day-old entry names a template the recent ones do not.
-        (Get-MissedEventsText -Hours 12) | Should -Not -Match 'قديم-جدًا'
+        (ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)) | Should -Not -Match 'قديم-جدًا'
     }
 
     It 'splits a shared graphic between the operators who ran it' {
@@ -1104,7 +1106,8 @@ Describe 'Missed events and template history' {
         Add-Content -LiteralPath $script:auditFile -Encoding utf8 -Value $rows
         Mock Get-UserDisplayName { if ($UserId -eq 77) { 'محمد' } else { 'أحمد' } }
 
-        $text = Get-MissedEventsText -Hours 12
+        # The digest is HTML now; read it the way the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)
 
         $text | Should -Match 'محمد 3'
         $text | Should -Match 'أحمد 2'
@@ -1112,14 +1115,15 @@ Describe 'Missed events and template history' {
     }
 
     It 'names one operator inline rather than tallying a single person' {
-        $text = Get-MissedEventsText -Hours 12
+        # The digest is HTML now; read it the way the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)
 
         $text | Should -Match 'الانتخابات .* أحمد'
         $text | Should -Not -Match 'أحمد 1'
     }
 
     It 'reports the total number of shows, not just the top graphics' {
-        (Get-MissedEventsText -Hours 12) | Should -Match 'ما عُرض — 2 عرضًا'
+        (ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12)) | Should -Match 'ما عُرض — 2 عرضًا'
     }
 
     It 'passes activity notes through verbatim rather than counting them' {
@@ -1130,11 +1134,25 @@ Describe 'Missed events and template history' {
                 event        = 'activity'; message = '📰 نشر شريط الأخبار بواسطة أحمد: 39 خبرًا'
             } | ConvertTo-Json -Compress)
 
-        Get-MissedEventsText -Hours 12 | Should -Match '39 خبرًا'
+        ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12) | Should -Match '39 خبرًا'
     }
     It 'says so plainly when nothing happened' {
         Set-Content -LiteralPath $script:auditFile -Value '' -Encoding utf8
-        Get-MissedEventsText -Hours 12 | Should -Match 'لا شيء مسجّل'
+        ConvertFrom-TelegramHtmlText (Get-MissedEventsText -Hours 12) | Should -Match 'لا شيء مسجّل'
+    }
+
+    It 'escapes a template name and sends the digest as HTML' {
+        # The digest carries template names, operator names and free-text audit
+        # messages - a single '<' in any of them would cost the whole screen a
+        # 400, which reads on the phone as the button doing nothing.
+        Mock Get-MissedEventsRecords {
+            @([pscustomobject]@{ Action = 'SHOW'; Target = '<b>عاجل'; UserId = 7; When = (Get-Date); Result = 'ok'; Message = '' })
+        }
+
+        $raw = Get-MissedEventsText -Hours 12
+        $raw | Should -Match '&lt;b&gt;عاجل'
+        $raw | Should -Match '<blockquote>'
+        ConvertFrom-TelegramHtmlText $raw | Should -Match '<b>عاجل'
     }
 
     It 'answers who used a template, across the whole retained history' {
@@ -1228,7 +1246,8 @@ Describe 'Version 6 administrator health center' {
     It 'summarizes every operational component without running a new probe' {
         $snapshot = [pscustomobject]@{ DiskFreeGB = 10; RuntimeStorageBytes = 0L; BackupStorageBytes = 0L }
 
-        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @()
+        # The health centre is HTML now; read it as the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
 
         $text | Should -Match '🟢 Telegram'
         $text | Should -Match '🟢 Cinegy'
@@ -1243,7 +1262,8 @@ Describe 'Version 6 administrator health center' {
         $script:RuntimeState.Monitoring.CinegyHealthState = 'unhealthy'
         $snapshot = [pscustomobject]@{ DiskFreeGB = 10; RuntimeStorageBytes = 0L; BackupStorageBytes = 0L }
 
-        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @()
+        # The health centre is HTML now; read it as the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
 
         $text | Should -Match '🔴 Telegram'
         $text | Should -Match '🔴 Cinegy'
@@ -1537,7 +1557,8 @@ Describe 'The health screen can be read down its state column' {
 
     It 'builds the lines from the same rows, so the two screens cannot disagree' {
         $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
-        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @()
+        # The health centre is HTML now; read it as the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
 
         foreach ($row in $rows) {
             $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Name): $($row.Detail)"))

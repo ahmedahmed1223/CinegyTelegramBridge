@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.RuntimeHealth.Tests.ps1 - the runtime-file health screen, the health
     centre's usage line, and the operator-visible operation reference.
@@ -111,7 +111,8 @@ Describe 'Health centre usage line' {
     It 'shows the usage line on the health centre screen' {
         Add-UserOperationHistory -OperationId 'air-1' -Action SHOW -Result success -DurationMs 10 -UserId 101 -Layer 4 -Target 'urgent'
         $snapshot = [pscustomobject]@{ DiskFreeGB = 10; RuntimeStorageBytes = 0L; BackupStorageBytes = 0L }
-        $text = Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @()
+        # The health centre is HTML now; read it as the operator sees it.
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
         $text | Should -Match '📈 الاستخدام'
     }
 }

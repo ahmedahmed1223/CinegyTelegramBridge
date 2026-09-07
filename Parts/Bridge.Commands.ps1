@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -548,12 +548,12 @@ function Invoke-BridgeCommand {
         { $_ -in @('الغاء', 'إلغاء', 'cancel') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "❌ تم إلغاء أي عملية معلّقة. اختر من القائمة:" }
         { $_ -in @('مساعدة', 'help') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-HelpHomeText -ChatId $ChatId -UserId $UserId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
         { $_ -in @('الجديد', 'whatsnew') } { Send-TelegramPagedText -ChatId $ChatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-WhatsNewKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
-        { $_ -in @('digest', 'ملخص') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+        { $_ -in @('digest', 'ملخص') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         { $_ -like 'who*' -or $_ -like 'من *' } {
             if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
             else {
                 $query = ($_ -replace '^(who|من)\s*', '').Trim()
-                Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateHistoryText -Query $query) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+                Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateHistoryText -Query $query) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
             }
         }
         { $_ -in @('stats', 'uptime', 'ارقام') } {

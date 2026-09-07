@@ -13,6 +13,37 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.75.0
+
+The rest of the screens move to `parse_mode=HTML`, and the menu gets structure
+rather than a drawing of structure.
+
+The menu's on-air block is a `<blockquote>` now. The screen had been sent as
+HTML since 7.73.0 but spent the markup on emphasis alone, so it still read as
+one flat column with two rows of `━━━` scratched across it. A blockquote is the
+structure itself — Telegram draws the bar and the indent, which is what
+separating a block means — so the verdict above it and the engine line below it
+are outside something rather than merely between two rows of dashes. It folds
+itself away (`expandable`) past four layers: a gallery with eight up pushed the
+engine and operator lines off the bottom, and those are the two lines an
+operator quotes when reporting the very fault they are looking at.
+
+Five more screens converted: the handover digest, the health centre, the
+runtime-file health screen, the user-activity list and the template-history
+answer. Section headings are bold so a long screen can be scanned rather than
+read; clock times and counters are `<code>`, which keeps digits left-to-right
+beside the Arabic and makes each one tap-to-copy; and material quoted from
+elsewhere sits in a blockquote. On the activity list the caveat is italic and
+set apart from the list — "active" there means "spoke to the bot recently", not
+"online", and reading it as one more list row is the misunderstanding the
+caveat exists to prevent.
+
+Everything a person typed on those screens is escaped: template names, operator
+display names, aliases, free-text audit messages, and the search term typed by
+whoever ran `/who` — the string closest to a user's hand on any screen here. A
+single `<` would cost the whole screen a 400, which reads on the phone as a
+button doing nothing.
+
 ## Version 7.74.0
 
 A shorter menu, a log pane that is never left blank, and a heartbeat that

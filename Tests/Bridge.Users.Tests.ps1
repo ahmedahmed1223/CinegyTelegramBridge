@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Users.Tests.ps1 - Authorization, roles, aliases, and per-role menus.
 
@@ -427,10 +427,26 @@ Describe 'Administrative user activity status' {
                 [pscustomobject]@{ UserId=3L; Alias='جديد'; LastActivityAt='' }
             )
         }
-        $text = Get-UserActivitySummaryText -Now $now
+        $text = ConvertFrom-TelegramHtmlText (Get-UserActivitySummaryText -Now $now)
         $text | Should -Match 'أحمد.*نشط حديثًا'
         $text | Should -Match 'سارة.*خامل'
         $text | Should -Match 'جديد.*غير معروف'
+    }
+
+    It 'escapes an alias and keeps the caveat apart from the list' {
+        # Aliases are typed by an administrator, so a '<' in one would cost the
+        # whole screen a 400 from Telegram - which reads on the phone as the
+        # button doing nothing. And the caveat matters here more than on most
+        # screens: "نشط" means "spoke to the bot recently", not "online".
+        Mock Get-AuthorizedUsers {
+            @([pscustomobject]@{ UserId = 1L; Alias = '<b>مخرج'; LastActivityAt = (Get-Date).ToString('o') })
+        }
+
+        $raw = Get-UserActivitySummaryText
+        $raw | Should -Match '&lt;b&gt;مخرج'
+        $raw | Should -Match '<blockquote>'
+        $raw | Should -Match '<i>Telegram لا يوفّر'
+        ConvertFrom-TelegramHtmlText $raw | Should -Match '<b>مخرج'
     }
 }
 

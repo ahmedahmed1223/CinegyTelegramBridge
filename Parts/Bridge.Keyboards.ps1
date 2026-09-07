@@ -263,10 +263,19 @@ function Get-MainMenuIntro {
         'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
         default { 'لم يتم التحقّق بعد' }
     }
-    # Laid out in three separated blocks - verdict, air, machine - because run
-    # together they read as one paragraph an operator has to parse under
-    # pressure, and the first two lines are the ones that matter at a glance.
-    $sep = '━━━━━━━━━━━━━━━━━'
+    # The air block is a <blockquote>, not two drawn lines around it.
+    #
+    # The screen was already sent as HTML but spent the markup on emphasis
+    # alone, so it still read as one flat column with "━━━" scratched across
+    # it twice. A blockquote is the structure itself: Telegram draws the bar
+    # and the indent, which is what separating a block actually means, and the
+    # verdict above it and the machine line below it are then outside
+    # something rather than merely between two rows of dashes.
+    #
+    # Expandable once the list is long. A gallery with several layers up
+    # pushed the engine and the operator line off the bottom of the screen,
+    # and those are the two lines an operator quotes when reporting the very
+    # fault they are looking at.
 
     # The same verdict wording as ℹ️ الحالة, but read off the stored freshness
     # rather than a live Cinegy sweep: this screen opens on every menu press
@@ -280,24 +289,25 @@ function Get-MainMenuIntro {
     elseif ($script:OnAir.Count -gt 0) { '🟠 طبقات على الهواء' }
     else { '🟢 كل شيء سليم' }
 
+    $air = [System.Collections.Generic.List[string]]::new()
+    if ($script:OnAir.Count -eq 0) { $air.Add('⚫️ لا شيء على الهواء') }
+    else {
+        $air.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>")
+        # One layer per line. Joined with a separator they became a single run
+        # of text that had to be read word by word to find one layer in it.
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $air.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$script:OnAir[$layer].Key))</b>")
+        }
+    }
+    $air.Add("🔄 <i>$age</i>")
+    $quote = if ($script:OnAir.Count -gt 4) { '<blockquote expandable>' } else { '<blockquote>' }
+
     $lines = [System.Collections.Generic.List[string]]::new()
     # Bold, not an emoji alone: the emoji carries the colour, the weight
     # carries the priority, and the two together survive a phone glanced at
     # from arm's length in a gallery.
     $lines.Add("<b>$verdict</b>")
-    $lines.Add($sep)
-
-    if ($script:OnAir.Count -eq 0) { $lines.Add('⚫️ لا شيء على الهواء') }
-    else {
-        $lines.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>:")
-        # One layer per line. Joined with a separator they became a single run
-        # of text that had to be read word by word to find one layer in it.
-        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $lines.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$script:OnAir[$layer].Key))</b>")
-        }
-    }
-    $lines.Add("🔄 <i>$age</i>")
-    $lines.Add($sep)
+    $lines.Add("$quote$($air -join "`n")</blockquote>")
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code>")
     # Format-UserAuditActor, the same helper ℹ️ الحالة uses, so one operator is
     # written one way on both screens - and so the bracketed id stays pinned

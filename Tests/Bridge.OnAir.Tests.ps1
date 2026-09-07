@@ -1227,6 +1227,21 @@ Describe 'Main menu on-air priority' {
         ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match '8 · ticker'
     }
 
+    It 'folds a long on-air list away so the engine line survives on screen' {
+        # A gallery with several layers up pushed the engine and the operator
+        # line off the bottom - the two lines an operator quotes when reporting
+        # the very fault they are looking at.
+        $script:OnAir.Clear()
+        foreach ($layer in 1..4) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
+        Get-MainMenuIntro | Should -Match '<blockquote>'
+
+        $script:OnAir[5] = @{ Key = 't5'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        $long = Get-MainMenuIntro
+        $long | Should -Match '<blockquote expandable>'
+        # Folded, not dropped: the machine line is still in the message.
+        $long | Should -Match ([regex]::Escape($config.AirServerAddress))
+    }
+
     It 'sends the menu screen as HTML, with the verdict carrying the weight' {
         # The verdict is the one line that has to land in a glance; the
         # engine address and the channel are <code> so they stay LTR and
@@ -1261,11 +1276,14 @@ Describe 'Main menu on-air priority' {
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = (Get-Date)
         $text = Get-MainMenuIntro
         @($text -split "`n")[0] | Should -Match 'كل شيء سليم'
-        $text | Should -Match '━━━'
+        # The air block is a real blockquote now: Telegram draws the bar and
+        # the indent, which is what separating a block means - the two rows of
+        # "━━━" were a drawing of structure rather than structure.
+        $text | Should -Match '<blockquote>'
+        $text | Should -Not -Match '━━━'
 
         $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         @((Get-MainMenuIntro) -split "`n")[0] | Should -Match 'طبقات على الهواء'
-        # Still three blocks after the HTML rebuild, not three tag soups.
     }
 
     It 'gives each on-air layer its own line' {

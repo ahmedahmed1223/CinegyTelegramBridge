@@ -13,6 +13,22 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.80.1
+
+The manager logs its own exit, so the absence of that line becomes evidence.
+
+Closing the program from the tray icon was not recorded at all, so a manager
+that had vanished from the tray left the same trace whether it closed itself or
+something outside ended it: nothing. Every deliberate way out writes a line now,
+and the value is mostly in its absence — a manager that is simply gone with
+nothing in `manager.log` was ended from outside, by a task manager, an
+installer, or a build that needed the exe unlocked.
+
+Which is what had happened: a report that the manager was "closing by itself"
+turned out to be the build commands in a development session ending the process
+to free `BridgeManager.exe` before publishing. The log could not say so. Now it
+can.
+
 ## Version 7.80.0
 
 A hardening pass: two faults an operator could see, and the three biggest files

@@ -1759,6 +1759,14 @@ public sealed class MainForm : Form
                 "تأكيد الخروج", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
         }
+        // Written before anything else shuts down, because the value of this
+        // line is mostly in its absence: every deliberate way out of this
+        // program now leaves a record, so a manager that is simply gone from
+        // the tray with nothing in manager.log was ended from outside - killed
+        // by a task manager, an installer, or a build that needed the exe
+        // unlocked. Without the line, "it closed by itself" and "something
+        // closed it" are the same evidence.
+        LogEvent("إغلاق برنامج المدير بطلب من المستخدم - يتم إيقاف الجسر.");
         _exiting = true;
         _trayIcon.Visible = false;
         StopBridge(manual: true);

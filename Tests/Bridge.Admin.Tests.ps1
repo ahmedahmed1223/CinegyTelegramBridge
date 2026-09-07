@@ -1249,8 +1249,10 @@ Describe 'Version 6 administrator health center' {
         # The health centre is HTML now; read it as the operator sees it.
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
 
-        $text | Should -Match '🟢 Telegram'
-        $text | Should -Match '🟢 Cinegy'
+        # Each row now carries an identity glyph beside its state colour: a
+        # column of seven 🟢 says nothing about which row is which.
+        $text | Should -Match '🟢 📡 Telegram'
+        $text | Should -Match '🟢 🎛 Cinegy'
         $text | Should -Match 'مراقبة المخرج'
         $text | Should -Match 'البث المرحّل'
         $text | Should -Match 'التخزين'
@@ -1265,8 +1267,8 @@ Describe 'Version 6 administrator health center' {
         # The health centre is HTML now; read it as the operator sees it.
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
 
-        $text | Should -Match '🔴 Telegram'
-        $text | Should -Match '🔴 Cinegy'
+        $text | Should -Match '🔴 📡 Telegram'
+        $text | Should -Match '🔴 🎛 Cinegy'
     }
 
     It 'offers refresh full status diagnostics and return controls' {
@@ -1561,7 +1563,9 @@ Describe 'The health screen can be read down its state column' {
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot @{ DiskFreeGB = 40 } -Warnings @())
 
         foreach ($row in $rows) {
-            $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Name): $($row.Detail)"))
+            # Icon, identity glyph, name, detail - the shape the screen renders
+            # every row in, so the two still cannot drift apart.
+            $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Glyph) $($row.Name) — $($row.Detail)"))
         }
     }
 }

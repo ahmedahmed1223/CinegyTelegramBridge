@@ -13,6 +13,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.84.0
+
+A design pass on two screens: the one that is typed into, and the one searched
+for a fault.
+
+The field prompt says what to do now. Every other screen in the bridge answers a
+button press with more buttons, so an operator who has just pressed one waits
+for the next — and this is the single screen that wants typing instead. It said
+"send the field text" inside a sentence about the template and left the rest
+implied. The last line is now an instruction: write in the message box below and
+send. Progress is drawn as well as counted — `▰▰▱  2/3` is read without
+arithmetic, and the number stays for anyone who wants it — capped so a template
+with twenty fields cannot draw a bar wider than the screen. Four lines, in the
+order the question is actually asked: which template, how far through, what this
+field is, what to do about it.
+
+The health centre gives every component its own glyph — 📡 Telegram, 🎛 Cinegy,
+👁 output monitor, 📶 relay, 💾 storage, 📅 schedule, ⚠️ recent errors. A column
+of seven 🟢 says everything is fine and nothing about which row is which; these
+are told apart at a glance and at arm's length, which is how the screen is
+actually read. What needs attention is lifted above the fold and left unquoted —
+it is the screen's answer — and what is healthy folds behind a count, the same
+shape the runtime-file screen uses, so one habit covers both.
+
+Order inside each group is untouched. Sorting the whole list by severity would
+move Cinegy off the second row to wherever its colour put it today, and an
+operator who has learned where to look would lose that.
+
 ## Version 7.83.0
 
 The reporting screens take the grammar الحالة الكاملة already used: a verdict

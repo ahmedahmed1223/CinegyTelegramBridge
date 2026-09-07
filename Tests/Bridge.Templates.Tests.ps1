@@ -1019,7 +1019,12 @@ Describe 'Operator field progress' {
             Index = 1
         }
 
-        Get-FieldPromptText -State $state | Should -Match '\(2/4\)'
+        # Progress is drawn as well as counted now: ▰▰▱▱ beside "2/4".
+        $prompt = ConvertFrom-TelegramHtmlText (Get-FieldPromptText -State $state)
+        $prompt | Should -Match '2/4'
+        $prompt | Should -Match '▰▰▱▱'
+        # And it says plainly what to do, which nothing on the screen did.
+        $prompt | Should -Match 'صندوق الرسالة'
     }
 }
 

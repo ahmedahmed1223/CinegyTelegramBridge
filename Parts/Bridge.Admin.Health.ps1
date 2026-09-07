@@ -322,7 +322,13 @@ function Get-BridgeUsageMetrics {
 
 function Get-BridgeHealthRows {
     <#
-        One row per subsystem: the name, a state glyph, and the detail.
+        One row per subsystem: the name, a state glyph, a glyph for the
+        subsystem itself, and the detail.
+
+        The state glyph and the identity glyph are different jobs. A column of
+        seven 🟢 says everything is fine and nothing about which row is which;
+        📡 🎛 👁 📶 💾 📅 ⚠️ are told apart at a glance and at arm's length,
+        which is how this screen is actually read.
 
         Extracted so the text screen and the block screen cannot drift into
         disagreeing about whether something is healthy - the same reason the
@@ -337,36 +343,36 @@ function Get-BridgeHealthRows {
 
     $telegramState = [string]$script:RuntimeState.Monitoring.TelegramConnectionState
     $rows += switch ($telegramState) {
-        'connected' { @{ Name = 'Telegram'; Icon = '🟢'; Detail = 'متصل' } }
-        'disconnected' { @{ Name = 'Telegram'; Icon = '🔴'; Detail = 'غير متصل' } }
-        default { @{ Name = 'Telegram'; Icon = '🟠'; Detail = 'لم تُحسم الحالة' } }
+        'connected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟢'; Detail = 'متصل' } }
+        'disconnected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🔴'; Detail = 'غير متصل' } }
+        default { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟠'; Detail = 'لم تُحسم الحالة' } }
     }
 
     $cinegyState = [string]$script:RuntimeState.Monitoring.CinegyHealthState
     $rows += switch ($cinegyState) {
-        'healthy' { @{ Name = 'Cinegy'; Icon = '🟢'; Detail = 'سليم' } }
-        'unhealthy' { @{ Name = 'Cinegy'; Icon = '🔴'; Detail = 'غير سليم' } }
-        default { @{ Name = 'Cinegy'; Icon = '🟠'; Detail = 'الحالة غير معروفة' } }
+        'healthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟢'; Detail = 'سليم' } }
+        'unhealthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🔴'; Detail = 'غير سليم' } }
+        default { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟠'; Detail = 'الحالة غير معروفة' } }
     }
 
     $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
     $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
-    $rows += if ($monitorDisabled) { @{ Name = 'مراقبة المخرج'; Icon = '🟢'; Detail = 'معطلة باختيار المشرف' } }
-    elseif ($monitorFault) { @{ Name = 'مراقبة المخرج'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
-    else { @{ Name = 'مراقبة المخرج'; Icon = '🟢'; Detail = 'سليمة' } }
+    $rows += if ($monitorDisabled) { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🟢'; Detail = 'معطلة باختيار المشرف' } }
+    elseif ($monitorFault) { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
+    else { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🟢'; Detail = 'سليمة' } }
 
     $relay = $script:RuntimeState.Relay
-    $rows += if (-not [bool]$relay.ShouldRun) { @{ Name = 'البث المرحّل'; Icon = '🟢'; Detail = 'غير مطلوب' } }
-    elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = 'البث المرحّل'; Icon = '🟢'; Detail = 'يعمل' } }
-    else { @{ Name = 'البث المرحّل'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
+    $rows += if (-not [bool]$relay.ShouldRun) { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🟢'; Detail = 'غير مطلوب' } }
+    elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🟢'; Detail = 'يعمل' } }
+    else { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
 
     $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
-    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Icon = '🟠'; Detail = "$diskText — $(@($Warnings).Count) تحذير" } }
-    else { @{ Name = 'التخزين'; Icon = '🟢'; Detail = $diskText } }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(@($Warnings).Count) تحذير" } }
+    else { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
 
     $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
-    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingCount حدث قادم" } }
-    else { @{ Name = 'الجدولة'; Icon = '🟢'; Detail = "$upcomingCount حدث قادم" } }
+    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingCount حدث قادم" } }
+    else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingCount حدث قادم" } }
 
     $recentErrors = @()
     foreach ($service in @('Telegram', 'Cinegy')) {
@@ -375,8 +381,8 @@ function Get-BridgeHealthRows {
             $recentErrors += "${service}: $(Protect-SensitiveText ([string]$history.LastError))"
         }
     }
-    $rows += if ($recentErrors.Count -gt 0) { @{ Name = 'آخر الأخطاء'; Icon = '🟠'; Detail = ($recentErrors -join ' | ') } }
-    else { @{ Name = 'آخر الأخطاء'; Icon = '🟢'; Detail = 'لا شيء' } }
+    $rows += if ($recentErrors.Count -gt 0) { @{ Name = 'آخر الأخطاء'; Glyph = '⚠️'; Icon = '🟠'; Detail = ($recentErrors -join ' | ') } }
+    else { @{ Name = 'آخر الأخطاء'; Glyph = '⚠️'; Icon = '🟢'; Detail = 'لا شيء' } }
 
     return $rows
 }
@@ -446,9 +452,26 @@ function Get-BridgeHealthCenterText {
     # is what lets the column be read down. Row names and details come from
     # Get-BridgeHealthRows, built out of settings and paths the station
     # controls, so both are escaped.
-    $rowLines = @($rows | ForEach-Object {
-            "$($_.Icon) <b>$(ConvertTo-TelegramHtmlText ([string]$_.Name))</b>: $(ConvertTo-TelegramHtmlText ([string]$_.Detail))"
-        })
+    # Same shape as 🗂 صحة ملفات التشغيل: what needs attention is the
+    # screen's answer and stays outside the quote, and what is fine is folded
+    # behind a count. Order inside each group is untouched - sorting the whole
+    # list by severity would move Cinegy off the second row and cost an
+    # operator the place they have learned to look.
+    $render = {
+        param($row)
+        # Guarded: these rows are hashtables built at seven call sites, and
+        # under StrictMode an absent key throws - which would take down the
+        # screen an administrator opens when something has already gone wrong.
+        # A row without an identity glyph simply gets none.
+        # Get-JsonProp, not .Contains: these rows arrive as hashtables from
+        # Get-BridgeHealthRows and as PSCustomObjects from anything that built
+        # them from JSON, and only this helper reads both without throwing.
+        $glyphValue = [string](Get-JsonProp $row 'Glyph')
+        $glyph = if ($glyphValue) { "$glyphValue " } else { '' }
+        "$($row.Icon) $glyph<b>$(ConvertTo-TelegramHtmlText ([string]$row.Name))</b> — $(ConvertTo-TelegramHtmlText ([string]$row.Detail))"
+    }
+    $problemLines = @($rows | Where-Object { [string]$_.Icon -ne '🟢' } | ForEach-Object { & $render $_ })
+    $healthyLines = @($rows | Where-Object { [string]$_.Icon -eq '🟢' } | ForEach-Object { & $render $_ })
     # The verdict the seven rows already imply, said once at the top. This
     # screen is opened to answer one question - is anything wrong? - and it
     # answered only by making the operator read every row and notice a colour.
@@ -466,7 +489,12 @@ function Get-BridgeHealthCenterText {
         "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
         "<b>$verdict</b>"
         ''
-        "$(if ($rowLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' })$($rowLines -join "`n")</blockquote>"
+        $(if ($problemLines.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemLines.Count)):</b>`n$($problemLines -join "`n")`n" })
+        $(if ($healthyLines.Count -gt 0) {
+                $tag = if ($healthyLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
+                "<b>سليم ($($healthyLines.Count)):</b>`n$tag$($healthyLines -join "`n")</blockquote>"
+            })
+        ''
         "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
     ) -join "`n"
 }

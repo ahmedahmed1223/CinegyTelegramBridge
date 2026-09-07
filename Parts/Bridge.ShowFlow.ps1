@@ -308,21 +308,49 @@ function Get-FieldPromptText {
     $limit = 0
     if ($State.Limits -and $index -lt @($State.Limits).Count) { $limit = [int]$State.Limits[$index] }
     $limit = Get-EffectiveFieldLimit -FieldLimit $limit
-    $limitText = if ($limit -gt 0) { " (الحد: $limit حرفًا)" } else { "" }
-    # parse_mode=HTML. This is the screen an operator types into, so the field
-    # being asked for is bold, and the raw variable name under it is <code> -
-    # it is a Titler identifier like "Ajel.center", and monospace is what says
-    # "this is the machine's name for the field, not a label to read".
+    # parse_mode=HTML. Four lines, in the order the question is actually
+    # asked: which template, how far through, what this field is, and what to
+    # do about it.
     #
+    # The last line is the one that was missing. Every other screen in the
+    # bridge answers a button press with more buttons, so an operator who has
+    # just pressed one waits for the next - and this is the single screen that
+    # wants typing instead. It said "أرسل نص الحقل" inside a sentence about the
+    # template and left the rest implied.
+    #
+    # Progress is drawn rather than counted: ▰▰▱ is read without arithmetic,
+    # and "2/3" beside it stays for anyone who wants the number. Capped so a
+    # template with twenty fields cannot draw a bar wider than the screen.
+    $total = @($State.Fields).Count
+    $step = $index + 1
+    $bar = if ($total -gt 0 -and $total -le 12) {
+        ('▰' * $step) + ('▱' * [math]::Max(0, $total - $step))
+    }
+    else { '' }
+    $progress = if ($bar) { "$bar  $step/$total" } else { "$step/$total" }
+
     # Template key, label and variable name all come from templates.json, which
     # an administrator writes by hand, so all three are escaped.
+    #
+    # The label is what the operator reads; the raw variable name under it is
+    # <code>, because it is a Titler identifier like "Ajel.center" and
+    # monospace is what says "the machine's name for this, not a label".
     $shownLabel = if ($label -eq $name) {
-        "<code>$(ConvertTo-TelegramHtmlText $name)</code>"
+        "✏️ <b>$(ConvertTo-TelegramHtmlText $name)</b>"
     }
     else {
-        "<b>$(ConvertTo-TelegramHtmlText ([string]$State.Labels[$index]))</b>`n<code>$(ConvertTo-TelegramHtmlText $name)</code>"
+        "✏️ <b>$(ConvertTo-TelegramHtmlText ([string]$State.Labels[$index]))</b>`n     <code>$(ConvertTo-TelegramHtmlText $name)</code>"
     }
-    return "القالب <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b> - أرسل نص الحقل ($($index + 1)/$($State.Fields.Count))$limitText`:`n$shownLabel"
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("📋 <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b>")
+    $lines.Add("<i>$progress</i>")
+    $lines.Add('')
+    $lines.Add($shownLabel)
+    if ($limit -gt 0) { $lines.Add("     <i>الحد: $limit حرفًا</i>") }
+    $lines.Add('')
+    $lines.Add('⌨️ <b>اكتب النص في صندوق الرسالة بالأسفل وأرسله.</b>')
+    return ($lines -join "`n")
 }
 
 function Sync-LayerAfterOperatorAction {

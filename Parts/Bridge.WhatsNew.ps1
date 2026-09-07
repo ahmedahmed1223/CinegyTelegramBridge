@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.90.0'; Items = @(
+                '⏳ المدد صارت تُقرأ بالأشهر والأسابيع والأيام — لا «4320 د».'
+            ) }
         @{ Version = '7.89.0'; Items = @(
                 '📅 الجدولة القادمة وطلبات الوصول ومكتبة الموجزات و«من استخدم» صارت جداول.'
             ) }

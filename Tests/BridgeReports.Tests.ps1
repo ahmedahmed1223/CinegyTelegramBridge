@@ -6,6 +6,11 @@ BeforeAll {
     Set-StrictMode -Version Latest
 
     $script:Root = Split-Path -Parent $PSScriptRoot
+    # Bridge.Core.ps1 first: it is declarations only, and the report screens
+    # read elapsed time through Format-DurationMinutes. Loading the real one
+    # rather than stubbing it keeps these tests measuring what production
+    # prints - a stub would have its own idea of how long "300 minutes" reads.
+    . (Join-Path $script:Root 'Parts\Bridge.Core.ps1')
     . (Join-Path $script:Root 'Parts\Bridge.Reports.ps1')
 
     # The report functions read through Read-AuditRecords and the two audit
@@ -230,7 +235,9 @@ Describe 'Banner report as rich blocks' {
         @($table.cells).Count | Should -Be 2
         @($table.cells[0] | Where-Object { $_.is_header }).Count | Should -Be 4
         @($table.cells[1])[0].text | Should -Be 'urgent · ط7'
-        @($table.cells[1])[3].text | Should -Be '5 د'
+        # Through Format-DurationMinutes now: a banner that stayed up all
+        # evening used to read "300 د", a number the reader divides twice.
+        @($table.cells[1])[3].text | Should -Be '5 دقائق'
     }
 
     It 'says a banner is still up rather than reporting a duration it does not have' {

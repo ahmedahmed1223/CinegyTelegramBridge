@@ -356,14 +356,34 @@ function Format-DurationMinutes {
     if ($Minutes -le 0) { return '0 دقيقة' }
     if ($Minutes -lt 60) { return (& $name $Minutes 'دقيقة' 'دقيقتان' 'دقائق' 'دقيقة') }
 
+    # Months and weeks as well as days. Idle time and how long a banner stayed
+    # up are open-ended: an account last seen a fortnight ago read as "20160
+    # دقيقة", and once days were named it still read as "14 يومًا" where
+    # "أسبوعان" is what a person would say.
+    #
+    # A month here is thirty days and a week is seven. Neither is exact and
+    # neither pretends to be: this answers "how long ago", not a calendar, and
+    # an exact month would make the same elapsed time read differently
+    # depending on which month it happened to fall in.
+    $units = @(
+        @{ Size = 43200; One = 'شهر'; Two = 'شهران'; Few = 'أشهر'; Many = 'شهرًا' }
+        @{ Size = 10080; One = 'أسبوع'; Two = 'أسبوعان'; Few = 'أسابيع'; Many = 'أسبوعًا' }
+        @{ Size = 1440; One = 'يوم'; Two = 'يومان'; Few = 'أيام'; Many = 'يومًا' }
+        @{ Size = 60; One = 'ساعة'; Two = 'ساعتان'; Few = 'ساعات'; Many = 'ساعة' }
+        @{ Size = 1; One = 'دقيقة'; Two = 'دقيقتان'; Few = 'دقائق'; Many = 'دقيقة' }
+    )
+    # The two largest units only. "شهر و12 يومًا و7 ساعات و20 دقيقة" is precise
+    # and unreadable, and nobody deciding whether an account is dormant cares
+    # about the minutes.
     $parts = @()
-    $days = [math]::Floor($Minutes / 1440)
-    $hours = [math]::Floor(($Minutes % 1440) / 60)
-    $rest = $Minutes % 60
-
-    if ($days -gt 0) { $parts += (& $name $days 'يوم' 'يومان' 'أيام' 'يومًا') }
-    if ($hours -gt 0) { $parts += (& $name $hours 'ساعة' 'ساعتان' 'ساعات' 'ساعة') }
-    if ($rest -gt 0) { $parts += (& $name $rest 'دقيقة' 'دقيقتان' 'دقائق' 'دقيقة') }
+    $remaining = $Minutes
+    foreach ($unit in $units) {
+        if ($parts.Count -ge 2) { break }
+        $count = [math]::Floor($remaining / $unit.Size)
+        if ($count -le 0) { continue }
+        $parts += (& $name $count $unit.One $unit.Two $unit.Few $unit.Many)
+        $remaining = $remaining % $unit.Size
+    }
     return ($parts -join ' و')
 }
 

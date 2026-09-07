@@ -440,10 +440,15 @@ function Get-UserActivityStatus {
         return [pscustomobject]@{ State = 'unknown'; Label = '⚪ النشاط غير معروف'; AgeMinutes = $null }
     }
     $ageMinutes = [math]::Max(0, [int][math]::Floor(($Now - $last).TotalMinutes))
+    # Through the formatter, not "$ageMinutes د". An account last seen on
+    # Thursday read as "منذ 4320 د" - a number the reader has to divide twice
+    # before it means anything, on the very screen where they are deciding
+    # whether someone still needs access.
+    $ago = Format-DurationMinutes -Minutes $ageMinutes
     if ($ageMinutes -lt $ActiveWithinMinutes) {
-        return [pscustomobject]@{ State = 'recent'; Label = "🟢 نشط حديثًا · منذ $ageMinutes د"; AgeMinutes = $ageMinutes }
+        return [pscustomobject]@{ State = 'recent'; Label = "🟢 نشط حديثًا · منذ $ago"; AgeMinutes = $ageMinutes }
     }
-    return [pscustomobject]@{ State = 'idle'; Label = "🟠 خامل · منذ $ageMinutes د"; AgeMinutes = $ageMinutes }
+    return [pscustomobject]@{ State = 'idle'; Label = "🟠 خامل · منذ $ago"; AgeMinutes = $ageMinutes }
 }
 
 function Get-UserActivitySummaryText {

@@ -816,7 +816,8 @@ function Get-BannerReportBlocks {
         $start = ([datetime]$session.StartedAt).ToString('HH:mm')
         if ($session.EndedAt) {
             $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
-            $span = "$minutes د"
+            # A banner that stayed up all evening read as "300 د".
+        $span = Format-DurationMinutes -Minutes $minutes
         }
         else { $span = '🔴 على الهواء' }
         $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
@@ -874,7 +875,7 @@ function Get-BannerReportText {
             $start = ([datetime]$session.StartedAt).ToString('HH:mm')
             if ($session.EndedAt) {
                 $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
-                $span = "$start ← $(([datetime]$session.EndedAt).ToString('HH:mm')) · $minutes دقيقة"
+                $span = "$start ← $(([datetime]$session.EndedAt).ToString('HH:mm')) · $(Format-DurationMinutes -Minutes $minutes)"
                 $icon = '✅'
             }
             else {
@@ -977,7 +978,7 @@ function Get-BannerReportHtml {
         $start = ([datetime]$session.StartedAt).ToString('yyyy/MM/dd HH:mm')
         if ($session.EndedAt) {
             $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
-            $span = "$start &#8592; $(([datetime]$session.EndedAt).ToString('HH:mm')) &middot; $minutes دقيقة"
+            $span = "$start &#8592; $(([datetime]$session.EndedAt).ToString('HH:mm')) &middot; $(Format-DurationMinutes -Minutes $minutes)"
         }
         else { $span = '<span class="live">' + $start + ' &#8592; ما زال على الهواء</span>' }
         $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$session.Target)) + "&raquo; &middot; الطبقة $($session.Layer)"

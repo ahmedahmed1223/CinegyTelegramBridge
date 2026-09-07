@@ -390,7 +390,11 @@ Describe 'Durations read like durations' {
         # formatter was written to stop, surviving in every value that is not
         # a round minute. Uptime almost never is.
         Format-DurationSeconds -Seconds 3661 | Should -Be 'ساعة ودقيقة'
-        Format-DurationSeconds -Seconds 90061 | Should -Be 'يوم وساعة ودقيقة'
+        # Two units, not three: the formatter names the two largest and stops.
+        # "يوم وساعة ودقيقة" is precise and nobody says it, and the minutes are
+        # noise beside a day. Promotion itself - the point of this test - is
+        # unchanged: 3661 still reads "ساعة ودقيقة" rather than "3661 ثانية".
+        Format-DurationSeconds -Seconds 90061 | Should -Be 'يوم وساعة'
         Format-DurationSeconds -Seconds 3599 | Should -Be '59 دقيقة و59 ثانية'
         Format-DurationSeconds -Seconds 61 | Should -Be 'دقيقة وثانية'
     }

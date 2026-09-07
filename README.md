@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.90.0
+
+Elapsed time reads in months and weeks, not minutes for ever.
+
+The user-activity screen said "منذ 4320 د" — a number the reader divides twice
+before it means anything, on the very screen where an administrator decides
+whether someone still needs access. It goes through `Format-DurationMinutes`
+now, and that formatter names months and weeks as well as days: a fortnight read
+as "14 يومًا", which is not what a person says.
+
+A month here is thirty days and a week is seven, and neither pretends to be
+exact: this answers "how long ago", not a calendar, and an exact month would
+make the same elapsed time read differently depending on which month it fell in.
+It names the two largest units and stops — "شهر و12 يومًا و7 ساعات و20 دقيقة" is
+precise and nobody says it, and someone deciding whether an account is dormant
+does not care about the minutes.
+
+The rest of the bridge was checked. Most mentions of minutes are settings an
+administrator chose — "every 60 minutes", "remind after 30 minutes" — and are
+right as they are. The unbounded elapsed cases were four: the user activity and
+three in the banner report, where a banner up all evening read as "300 د".
+
+The banner report's tests now load `Bridge.Core.ps1` so they measure what the
+code actually prints; a stubbed formatter would have had its own idea of how
+"300 minutes" reads.
+
 ## Version 7.89.0
 
 The four remaining lists become tables.

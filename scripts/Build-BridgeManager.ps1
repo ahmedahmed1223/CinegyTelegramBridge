@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Build-BridgeManager.ps1
 
@@ -7,9 +7,18 @@
     .NET 9 SDK (https://dotnet.microsoft.com/download) - not PowerShell 7,
     which is only needed to run the bridge itself.
 
-    The exe's own version is stamped from TelegramBridge.ps1's
-    $script:BridgeVersion at publish time, including minor and patch versions,
-    shown in its title bar and in Explorer's file properties.
+    The exe is stamped with the MAJOR version only - 7, not 7.76.0 - and
+    shows it in the title bar and in Explorer's file properties.
+
+    The two are versioned apart on purpose. The bridge ships several times a
+    day; this exe is republished only when the manager itself changes, so a
+    manager stamped 7.76.0 sitting beside a bridge at 7.79.0 reads as out of
+    date when it is current. The major number is the compatibility claim it
+    can actually keep: this is the v7 manager, for a v7 bridge.
+
+    The running bridge's own full version is read off its startup line and
+    shown beside the manager's in the status bar, so the pair is visible
+    without either being mistaken for the other.
 
     Usage:
         .\scripts\Build-BridgeManager.ps1
@@ -27,13 +36,16 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw "dotnet SDK not found. Install the .NET 9 SDK from https://dotnet.microsoft.com/download, then re-run this script."
 }
 
-$version = "0"
+$bridgeVersion = "0.0.0"
 if (Test-Path $bridgeScript) {
     foreach ($line in Get-Content -LiteralPath $bridgeScript) {
-        if ($line -match "BridgeVersion\s*=\s*'(\d+\.\d+\.\d+)'") { $version = $Matches[1]; break }
+        if ($line -match "BridgeVersion\s*=\s*'(\d+\.\d+\.\d+)'") { $bridgeVersion = $Matches[1]; break }
     }
 }
-Write-Host "Bridge version: $version" -ForegroundColor Cyan
+# Major only - see the header. AssemblyVersion wants four parts, and "7"
+# widens to 7.0.0.0 on its own.
+$version = ($bridgeVersion -split '\.')[0]
+Write-Host "Bridge version: $bridgeVersion  ->  manager v$version" -ForegroundColor Cyan
 
 dotnet publish $project -c Release -r win-x64 --self-contained true -o $outDir "-p:Version=$version"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
@@ -52,4 +64,4 @@ if ($selftest.ExitCode -ne 0) {
     throw "BridgeManager selftest failed (exit $($selftest.ExitCode)). See $report."
 }
 
-Write-Host "Built: $exe (v$version)" -ForegroundColor Green
+Write-Host "Built: $exe (manager v$version, for bridge v$bridgeVersion)" -ForegroundColor Green

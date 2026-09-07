@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.77.0
+
+The manager carries its own version now, not the bridge's.
+
+`BridgeManager.exe` is stamped with the major version only: `v7`. The two drift
+apart on purpose — the bridge ships several times a day, the exe is republished
+only when the manager itself changes — so a manager stamped 7.76.0 beside a
+bridge at 7.79.0 reads as out of date when it is current. The major number is
+the compatibility claim it can actually keep: this is the v7 manager, for a v7
+bridge.
+
+That made the status line actively misleading: it read "running for … · pid
+28728 · version v7" where every other figure on it belongs to the bridge, so the
+manager's version was read as the bridge's. It now names both — "الجسر v7.76.0 ·
+المدير v7" — with the bridge's read off the startup line it prints into the log
+the manager is already tailing, and forgotten on stop, because a stopped
+bridge's version is last run's.
+
+The line grew by two versions, and a fixed-height docked label cuts a too-long
+string off mid-character with nothing to say it did — losing the end, which is
+where the versions are. It ellipsises now, with the whole line on hover.
+
+`F5` and `Ctrl+L` existed for a release with nothing on screen saying so, which
+is the same as not having them. Both are named in their button tooltips now —
+recognition over recall, the same reason `(Ctrl+F)` is written in the filter box.
+
 ## Version 7.76.0
 
 The last four screens move to `parse_mode=HTML`, and nothing is sent as plain

@@ -263,6 +263,17 @@ internal static class SelfTest
         Check("errors-only hides INFO", !MainForm.ShouldShow("2026 [INFO] fine", "", true));
         Check("errors-only keeps WARN", MainForm.ShouldShow("2026 [WARN] careful", "", true));
 
+        // The manager carries the major version only and the bridge ships
+        // several times a day, so the status bar names both rather than
+        // printing one number that gets read as the other.
+        Check("reads the bridge version off its startup line",
+            MainForm.ParseBridgeVersion("2026-09-07 09:00:01 [INFO] Bridge v7.76.0 starting. Air 127.0.0.1:5521, templates: 4")
+                == "7.76.0");
+        Check("ignores an ordinary log line", MainForm.ParseBridgeVersion("2026-09-07 09:00:02 [INFO] Telegram connected") is null);
+        Check("ignores a line that only mentions a version",
+            MainForm.ParseBridgeVersion("2026-09-07 09:00:02 [INFO] manager v7 attached to Bridge v7.76.0") is null);
+        Check("survives an empty line", MainForm.ParseBridgeVersion("") is null);
+
         // An empty log pane reads as "the bridge stopped logging" - this
         // window's whole job is to say otherwise, so no path may leave it
         // blank without a sentence naming why and the way out.

@@ -155,6 +155,9 @@ public sealed class MainForm : Form
     // would have restarted a working bridge every night. The bridge therefore
     // stamps logs/bridge.liveness once per poll loop, and this watches that.
     private DateTime? _lastLivenessSeen;
+    // The running bridge's own version, from its startup line; null until one
+    // is seen. See ParseBridgeVersion.
+    private string? _bridgeVersion;
     // Whether the log pane currently holds an empty-state note rather than log
     // lines; see EmptyStateMessage.
     private bool _showingEmptyState;
@@ -209,7 +212,11 @@ public sealed class MainForm : Form
         // one. On the left the bar trailed the text it belongs to.
         _accentBar = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Theme.Stopped };
         var headerText = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 12) };
-        _stateDetail = new Label { Dock = DockStyle.Top, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleLeft };
+        // AutoEllipsis, because this line grew: uptime, pid, and now both
+        // versions. A fixed-height docked Label cuts a too-long string off
+        // mid-character with nothing to say it did, and the piece that goes
+        // first is the end of the line - where the versions are.
+        _stateDetail = new Label { Dock = DockStyle.Top, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
         _stateLabel = new Label { Dock = DockStyle.Top, Height = 30, Text = "متوقف", Font = Theme.Title, ForeColor = Theme.Stopped, TextAlign = ContentAlignment.MiddleLeft };
         headerText.Controls.Add(_stateDetail);
         headerText.Controls.Add(_stateLabel);
@@ -259,10 +266,13 @@ public sealed class MainForm : Form
 
         _tips.SetToolTip(_startButton, "يشغّل TelegramBridge.ps1 ويتابعه.");
         _tips.SetToolTip(_stopButton, "يوقف الجسر - يتوقف التحكم بالرسومات على الهواء.");
-        _tips.SetToolTip(_restartButton, "إيقاف ثم تشغيل، لتطبيق تغييرات الإعدادات.");
+        // The shortcut is named where the hand already is. Recognition over
+        // recall: F5 and Ctrl+L existed for a release and nothing on screen
+        // said so, which is the same as not having them.
+        _tips.SetToolTip(_restartButton, "إيقاف ثم تشغيل، لتطبيق تغييرات الإعدادات.  (F5)");
         _tips.SetToolTip(settingsButton, "الحقول التي لا تُحرَّر من داخل البوت: الرمز، عنوان المحرّك، قوائم الصلاحيات.");
         _tips.SetToolTip(logsButton, "يفتح مجلد logs في المستكشف.");
-        _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.");
+        _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.  (Ctrl+L)");
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
@@ -709,8 +719,42 @@ public sealed class MainForm : Form
 
     internal static bool IsFaultedState(string state) => state is "disconnected" or "unhealthy" or "degraded";
 
+    /// <summary>
+    /// The bridge's version, from the line it prints on every start, or null
+    /// when the line is something else.
+    /// </summary>
+    /// <remarks>
+    /// The manager and the bridge are versioned apart on purpose - the exe is
+    /// republished only when the manager itself changes, while the bridge
+    /// ships several times a day - so the manager may sit at 7 beside a bridge
+    /// at 7.76.0 and both be current.
+    ///
+    /// That makes printing one of the two numbers worse than printing
+    /// neither: the status line read "يعمل منذ … المعرّف 28728 · الإصدار v7"
+    /// where every other figure on it belongs to the bridge, so the manager's
+    /// version was being read as the bridge's. The answer is to show both and
+    /// name each, and the bridge announces its own on the line the manager is
+    /// already tailing.
+    /// </remarks>
+    internal static string? ParseBridgeVersion(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(
+            line, @"\bBridge v(\d+\.\d+\.\d+) starting\b");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
     private void ApplyHealthLine(string line)
     {
+        // Same sweep as the health pills: every line passes through here
+        // once, and the version is only ever announced on a start line.
+        var version = ParseBridgeVersion(line);
+        if (version is not null)
+        {
+            _bridgeVersion = version;
+            UpdateStateDetail();
+        }
+
         var parsed = ParseHealthLine(line);
         if (parsed is null) return;
 
@@ -933,6 +977,9 @@ public sealed class MainForm : Form
         _bridgeProcess = process;
         _lastStartAt = DateTime.UtcNow;
         _lastLivenessSeen = null;
+        // A stopped bridge's version is last run's; the next start announces
+        // its own, and until it does the manager must not claim the old one.
+        _bridgeVersion = null;
         _watchdogInactiveLogged = false;
         SetStatus(running: true);
         LogEvent("تم بدء تشغيل الجسر بنجاح.");
@@ -1270,7 +1317,15 @@ public sealed class MainForm : Form
     {
         if (!_running || _bridgeProcess is not { HasExited: false }) return;
         var up = DateTime.UtcNow - _lastStartAt;
-        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  الإصدار v{Application.ProductVersion}";
+        // The bridge's version when its startup line has gone past, and the
+        // manager's own beside it - named, because the two are deliberately
+        // different numbers and an unlabelled one is read as the bridge's.
+        var versions = _bridgeVersion is null
+            ? $"المدير v{Application.ProductVersion}"
+            : $"الجسر v{_bridgeVersion}  ·  المدير v{Application.ProductVersion}";
+        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  {versions}";
+        // The whole line on hover, so a narrow window hides nothing outright.
+        _tips.SetToolTip(_stateDetail, _stateDetail.Text);
     }
 
     private static string FormatSpan(TimeSpan span)

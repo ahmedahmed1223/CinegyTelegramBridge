@@ -1,0 +1,577 @@
+﻿#requires -Version 7
+<#
+    Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
+    share the bridge script's scope and $script: state.
+
+    One audited air operation: the context it carries, the maintenance and
+    permission gates it passes, the verification against what Cinegy actually
+    reports, and the record written when it lands.
+
+    Split out of Bridge.ShowFlow.ps1, which had grown to 2733 lines by
+    accumulating three things that are not the show flow: the release notes,
+    the operator manual, and the audited air operation underneath every push.
+    Nothing moved between scopes - dot-sourced parts share one.
+#>
+
+function New-AirOperationContext {
+    param([Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
+    $id = "air-$([guid]::NewGuid().ToString('N'))"
+    Add-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
+    return [pscustomobject]@{
+        Id        = $id
+        Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+}
+
+function Start-AirOperation {
+    param([Parameter(Mandatory)]$Operation, [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action, [int]$Layer = 0, [long]$UserId = 0)
+    Start-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $Operation.Id -Action $Action -Layer $Layer -ActorId $UserId | Out-Null
+}
+
+function Get-TemplateTestReviewKeyboard {
+    return @{ inline_keyboard = @(
+        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+    ) }
+}
+
+function Format-OnAirScreenCopy {
+    <#
+        What the graphic actually says, short enough for a confirmation.
+
+        A field the template marks sensitive is named but never quoted: the
+        point is to let an operator recognise what is on screen before taking
+        it off, and a name is enough for that where the value would be a leak.
+    #>
+    param([string]$Key = '', [hashtable]$Variables = @{}, [int]$MaxChars = 200)
+    if ($null -eq $Variables -or $Variables.Count -eq 0) { return '' }
+    $sensitive = @()
+    $store = Get-TemplateStore
+    if ($Key -and $store.Map.ContainsKey($Key)) {
+        $sensitive = @(Get-JsonProp $store.Map[$Key] 'FieldSensitive' | Where-Object { $null -ne $_ })
+    }
+    $parts = foreach ($name in @($Variables.Keys | Sort-Object)) {
+        if (@($sensitive | Where-Object { [string]$_ -eq [string]$name }).Count -gt 0) {
+            "${name}: •••"
+            continue
+        }
+        $value = ([string]$Variables[$name] -replace '[\r\n]+', ' ').Trim()
+        if ($value) { "${name}: $value" }
+    }
+    $text = (@($parts) -join ' · ')
+    if ($MaxChars -gt 0 -and $text.Length -gt $MaxChars) { $text = $text.Substring(0, $MaxChars) + '…' }
+    return $text
+}
+
+function Format-AuditTemplateValues {
+    <# The text that actually reached the screen, folded into one short line
+       for the audit record. Without it a report can only say which template
+       ran, never what it said - and audit.jsonl is the only permanent record.
+
+       Capped and switchable: this file is archived and never deleted, so the
+       operator decides whether on-air copy belongs in it forever. #>
+    param([hashtable]$Variables = @{})
+    if (-not (Get-Setting 'AuditTemplateValues')) { return '' }
+    if ($null -eq $Variables -or $Variables.Count -eq 0) { return '' }
+    $parts = foreach ($name in @($Variables.Keys | Sort-Object)) {
+        $value = ([string]$Variables[$name] -replace '[\r\n]+', ' ').Trim()
+        if ($value) { "${name}: $value" }
+    }
+    $text = (@($parts) -join ' | ')
+    $max = Get-SettingInt 'AuditTemplateValuesMaxChars' 1
+    if ($text.Length -gt $max) { $text = $text.Substring(0, $max) + '…' }
+    return $text
+}
+
+function Write-AirOperationResult {
+    param(
+        [Parameter(Mandatory)][string]$OperationId,
+        [Parameter(Mandatory)][ValidateSet('SHOW', 'HIDE', 'EXIT', 'UPDATE')][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('success', 'failed', 'blocked')][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [Parameter(Mandatory)][long]$UserId,
+        [Parameter(Mandatory)][long]$ChatId,
+        [int]$Layer = 0,
+        [string]$Target = '',
+        [string]$ErrorText = '',
+        [string]$Values = ''
+    )
+    $cleanTarget = ($Target -replace '[\r\n]+', ' ').Replace('"', "'")
+    $cleanError = ($ErrorText -replace '[\r\n]+', ' ').Replace('"', "'")
+    $displayName = [string](Get-UserDisplayName -UserId $UserId)
+    $cleanUserName = if ($displayName -eq [string]$UserId) { '' } else {
+        Protect-SensitiveText ((($displayName -replace '[\r\n]+', ' ').Trim()).Replace('"', "'"))
+    }
+    $message = "AIR_OP id=$OperationId action=$Action result=$Result durationMs=$DurationMs user=$UserId chat=$ChatId layer=$Layer target=`"$cleanTarget`""
+    if ($cleanUserName) { $message += " userName=`"$cleanUserName`"" }
+    if (-not [string]::IsNullOrWhiteSpace($cleanError)) { $message += " error=`"$cleanError`"" }
+    $level = if ($Result -eq 'success') { 'INFO' } else { 'WARN' }
+    $counterName = switch ($Result) { 'success' { 'Success' }; 'failed' { 'Failed' }; default { 'Blocked' } }
+    $script:AirOperationCounters[$counterName] = [int]$script:AirOperationCounters[$counterName] + 1
+    Complete-BridgeOperation -Ledger $script:BridgeOperationLedger -OperationId $OperationId -Result $Result -ErrorText $ErrorText | Out-Null
+    Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target -Values $Values
+    Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText -Values $Values
+    Write-BridgeLog $message $level
+}
+
+function Test-MaintenanceWindowActive {
+    <# The nightly slot when the playout machine is patched or re-cabled. An
+       unset or malformed window is no window: this must never fail closed and
+       silently block control of a live channel. #>
+    return (Test-BridgeMaintenanceWindow -Now (Get-Date) `
+            -StartTime ([string](Get-Setting 'MaintenanceWindowStart')) `
+            -EndTime ([string](Get-Setting 'MaintenanceWindowEnd')))
+}
+
+function Test-MaintenanceControl {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
+    $manual = [bool](Get-Setting 'MaintenanceMode')
+    $scheduled = Test-MaintenanceWindowActive
+    if (-not $manual -and -not $scheduled) { return $true }
+    # The emergency override still works during a scheduled window: a machine
+    # being patched is no reason an administrator cannot pull a graphic that
+    # is wrongly on air.
+    if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
+    $reason = if ($scheduled -and -not $manual) {
+        "🛠 نافذة الصيانة المجدولة مفتوحة ($([string](Get-Setting 'MaintenanceWindowStart'))–$([string](Get-Setting 'MaintenanceWindowEnd')))؛ أوامر الهواء متوقفة حتى نهايتها."
+    }
+    else { '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' }
+    Send-TelegramMessage -ChatId $ChatId -Text $reason -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return $false
+}
+
+function Get-BridgeKeyList {
+    <# One reading of the comma-or-newline lists these settings are written
+       in, so every list behaves the same way. #>
+    param([string]$Value = '')
+    return @([string]$Value -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Test-BridgeListContains {
+    param([string]$Value = '', [string]$Item = '')
+    if (-not $Item) { return $false }
+    return (@(Get-BridgeKeyList -Value $Value | Where-Object { $_.Equals($Item, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0)
+}
+
+function Get-TemplateAccessLevel {
+    <#
+        Who may put this graphic on air, and take it off: 'all', 'admin' or
+        'owner'.
+
+        A template can be named directly, and so can the layer it sits on - a
+        station logo is protected by where it lives as much as by what it is.
+        Where both apply the stricter wins, because a permission that loosens
+        when you add a second rule is not a permission.
+
+        Everything unnamed is 'all', which is what every template was before
+        any of these lists existed.
+    #>
+    param([string]$Key = '', [int]$Layer = 0)
+    $layerText = if ($Layer -gt 0) { [string]$Layer } else { '' }
+    if ((Test-BridgeListContains -Value (Get-Setting 'OwnerOnlyTemplateKeys') -Item $Key) -or
+        (Test-BridgeListContains -Value (Get-Setting 'OwnerOnlyLayers') -Item $layerText)) { return 'owner' }
+    if ((Test-BridgeListContains -Value (Get-Setting 'AdminOnlyTemplateKeys') -Item $Key) -or
+        (Test-BridgeListContains -Value (Get-Setting 'AdminOnlyLayers') -Item $layerText)) { return 'admin' }
+    return 'all'
+}
+
+function Test-LayersScreenAccess {
+    <# Who may open the layers screen, in the same words the other permissions
+       use: everyone, administrators, or the owner. It is a screen of raw
+       controls - hide, exit, push to a bare layer number - so a newsroom that
+       wants its operators working through templates alone can close it. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    switch ([string](Get-Setting 'LayersScreenAccess')) {
+        'owner' { return (Test-Owner -ChatId $ChatId -UserId $UserId) }
+        'admin' { return (Test-Admin -ChatId $ChatId -UserId $UserId) }
+    }
+    return $true
+}
+
+function Test-TemplateAccess {
+    <# The same question for showing and for hiding: taking a protected
+       graphic off air changes the screen as much as putting it on. #>
+    param([string]$Key = '', [int]$Layer = 0, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $level = Get-TemplateAccessLevel -Key $Key -Layer $Layer
+    $what = if ($Key) { "القالب '$Key'" } else { "الطبقة $Layer" }
+    if ($level -eq 'owner') {
+        if (Test-Owner -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
+        return [pscustomobject]@{ Allowed = $false; Reason = "$what لمالك الجسر وحده."; Level = $level }
+    }
+    if ($level -eq 'admin') {
+        if (Test-Admin -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
+        return [pscustomobject]@{ Allowed = $false; Reason = "$what للمشرفين وحدهم."; Level = $level }
+    }
+    return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level }
+}
+
+function Test-TemplateShowPolicy {
+    <# A reserved layer normally carries something that must not be disturbed -
+       a station logo, a clock, a permanent ticker. Administrators may still
+       push to one deliberately, since they are who reserved it; operators
+       cannot. Pass -IsAdmin only where the caller has actually checked. #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][int]$Layer, [switch]$IsAdmin)
+    $reserved = @()
+    foreach ($part in ([string](Get-Setting 'ReservedLayers') -split '[,;\s]+')) {
+        $parsedLayer = 0
+        if ([int]::TryParse($part.Trim(), [ref]$parsedLayer) -and $parsedLayer -gt 0) { $reserved += $parsedLayer }
+    }
+    if ($reserved -contains $Layer -and -not $IsAdmin) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا."; Warning = '' }
+    }
+    if ($reserved -contains $Layer) {
+        return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = "⚠️ الطبقة $Layer محجوزة — تتجاوزها بصلاحية المشرف." }
+    }
+    $disabled = @([string](Get-Setting 'DisabledTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (@($disabled | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا."; Warning = '' }
+    }
+    return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = '' }
+}
+
+function Get-EffectiveAutoHideSeconds {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [int]$RequestedSeconds = 0
+    )
+    $sensitiveKeys = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $isSensitive = @($sensitiveKeys | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    if (-not $isSensitive) { return [math]::Max(0, $RequestedSeconds) }
+    $requiredSeconds = Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1
+    if ($RequestedSeconds -gt 0) { return [math]::Min($RequestedSeconds, $requiredSeconds) }
+    return $requiredSeconds
+}
+
+function Copy-ShowVariables {
+    param([hashtable]$Variables = @{})
+    $copy = @{}
+    foreach ($name in $Variables.Keys) { $copy[[string]$name] = [string]$Variables[$name] }
+    return $copy
+}
+
+function Set-RollbackCandidate {
+    param(
+        [Parameter(Mandatory)][int]$Layer,
+        [Parameter(Mandatory)][hashtable]$RestoreSnapshot,
+        [Parameter(Mandatory)][ValidateSet('replace','hidden')][string]$ExpectedState,
+        [string]$ExpectedActiveId = '',
+        [Parameter(Mandatory)][long]$ActorUserId
+    )
+    if (-not (Get-Setting 'EnableSafeRollback')) { return }
+    $window = [math]::Max(10, [math]::Min(900, (Get-SettingInt 'RollbackWindowSeconds' 10)))
+    $script:RollbackCandidates[$Layer] = @{
+        Id=[guid]::NewGuid().ToString('N'); Layer=$Layer; Restore=$RestoreSnapshot
+        ExpectedState=$ExpectedState; ExpectedActiveId=$ExpectedActiveId
+        ActorUserId=$ActorUserId; CreatedAt=(Get-Date); ExpiresAt=(Get-Date).AddSeconds($window)
+    }
+}
+
+function Get-RollbackCandidate {
+    param([Parameter(Mandatory)][int]$Layer, [long]$UserId = 0)
+    if (-not (Get-Setting 'EnableSafeRollback')) { return $null }
+    if (-not $script:RollbackCandidates.ContainsKey($Layer)) { return $null }
+    $candidate = $script:RollbackCandidates[$Layer]
+    if ((Get-Date) -ge [datetime]$candidate.ExpiresAt) { $script:RollbackCandidates.Remove($Layer) | Out-Null; return $null }
+    if ($UserId -gt 0 -and [long]$candidate.ActorUserId -ne $UserId -and -not (Test-Admin -ChatId $UserId -UserId $UserId)) { return $null }
+    return $candidate
+}
+
+function Get-CorrelatedLayerSnapshot {
+    param([Parameter(Mandatory)][int]$Layer, $LiveStatus)
+    if (-not $script:LastSuccessfulLayerShows.ContainsKey($Layer) -or -not $LiveStatus -or
+        -not $LiveStatus.Success -or $LiveStatus.IsOnAir -ne $true) { return $null }
+    $snapshot = $script:LastSuccessfulLayerShows[$Layer]
+    $activeId = [string](Get-JsonProp $LiveStatus 'ActiveId')
+    if ([string]::IsNullOrWhiteSpace($activeId) -or $activeId -ne [string]$snapshot.ActiveId) { return $null }
+    return $snapshot
+}
+
+function Get-VerifiedCinegyShowIdentity {
+    <#
+        Resolve the engine's active item while the successful SHOW operation is
+        still in hand. This is the only safe moment to translate Cinegy's
+        client EventId into its engine ActiveId: a later watchdog observation
+        may already describe a replacement and must never inherit old work.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [AllowEmptyString()][string]$TemplatePath = '',
+        [Parameter(Mandatory)][int]$Layer,
+        [AllowEmptyString()][string]$ExpectedPreviousActiveId = '',
+        [AllowEmptyString()][string]$ExpectedActiveId = '',
+        [switch]$AllowAnonymousActiveId
+    )
+    $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not [bool](Get-JsonProp $status 'Success') -or -not [bool](Get-JsonProp $status 'IsOnAir')) {
+        return (& $failed 'لم يؤكد Cinegy أن المشهد على الهواء بعد SHOW.')
+    }
+    $activeId = [string](Get-JsonProp $status 'ActiveId')
+    $normalizedId = $activeId.Trim().Trim('{', '}')
+    if ([string]::IsNullOrWhiteSpace($normalizedId) -or $normalizedId -eq '00000000-0000-0000-0000-000000000000') {
+        return (& $failed 'لم يعرض Cinegy معرّفًا نشطًا صالحًا.')
+    }
+
+    $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
+    $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
+
+    # Prefer the filename parsed from Cinegy's active-item description. Falling
+    # back to ActiveName is allowed only as an exact name, never a substring.
+    $reported = [string](Get-JsonProp $status 'ActiveTemplateName')
+    if ([string]::IsNullOrWhiteSpace($reported)) { $reported = [string](Get-JsonProp $status 'ActiveName') }
+    if ([string]::IsNullOrWhiteSpace($reported)) {
+        # Some Cinegy items expose a valid engine identity but no Name or
+        # Description. Accept that shape only when the id itself proves the
+        # relation: it is either the already-confirmed id for a manual timer,
+        # or a new id observed immediately after this bridge's SHOW.
+        if ($AllowAnonymousActiveId -and
+            ((-not [string]::IsNullOrWhiteSpace($expectedCurrentId) -and
+              $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) -or
+             (-not [string]::IsNullOrWhiteSpace($expectedPreviousId) -and
+              -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation' }
+        }
+        return (& $failed 'لم يعرض Cinegy اسم قالب يمكن مطابقته.')
+    }
+    $reported = $reported.Trim()
+    $reportedWithoutExtension = [IO.Path]::GetFileNameWithoutExtension($reported)
+    $expected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $expected.Add($Key.Trim()) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $expected.Add([IO.Path]::GetFileName($TemplatePath).Trim()) | Out-Null
+        $expected.Add([IO.Path]::GetFileNameWithoutExtension($TemplatePath).Trim()) | Out-Null
+    }
+    if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
+        return (& $failed "اسم المشهد الذي أعاده Cinegy لا يطابق '$Key'.")
+    }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
+}
+
+function Invoke-ShowTemplateResult {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [hashtable]$Variables = @{},
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [int]$AutoHideSeconds = 0
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
+    $operation = New-AirOperationContext -Action SHOW -UserId $UserId
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'maintenance mode'
+        return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
+    }
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($Key)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'unknown template'
+        return
+    }
+    $template = $store.Map[$Key]
+    # The urgent outranks the bulletin, whatever put it on air - a button, a
+    # schedule, a rollback. Every SHOW passes here, so the rule is stated once.
+    if ($Key -eq $script:MojazUrgentKey) { Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null }
+    $attemptVariables = @{}
+    foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
+    $script:LastShowAttempts[[string]$UserId] = @{
+        Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
+    }
+    $access = Test-TemplateAccess -Key $Key -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
+    if (-not $access.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$access.Reason)
+        return [pscustomobject]@{ Success = $false; Error = [string]$access.Reason }
+    }
+    $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
+    if (-not $policy.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$policy.Reason)
+        return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
+    }
+
+    # SHOW is the only operation that can replace visible content. Verify the
+    # target layer immediately before mutating it; an unreachable Cinegy must
+    # never be interpreted as an empty or safe layer.
+    $layerStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -Layer ([int]$template.Layer) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $layerStatus.Success) {
+        $errorText = [string](Get-JsonProp $layerStatus 'Error')
+        Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText $errorText
+        return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
+    }
+    $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
+    Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
+    $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
+
+    # A scene that is already loaded on the layer keeps running with the values
+    # it was started with, so a second SHOW can leave the PREVIOUS text on air.
+    # Taking the layer down first forces the scene to initialise with the new
+    # variables. (To change text without re-firing the animation, use the
+    # ✏️ تحديث نص button, which writes to the live postbox instead.)
+    $operationStarted = $false
+    if ((Get-Setting 'ReshowClearsLayer') -and $script:OnAir.ContainsKey([int]$template.Layer)) {
+        Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId
+        $operationStarted = $true
+        $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $template.Layer -TimeoutSec (Get-AirTimeout)
+        if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show HIDE on layer $($template.Layer): success=$($clear.Success)" }
+    }
+
+    # Only pass through explicit per-field type overrides; everything else
+    # takes the AirVariableType default.
+    $types = @{}
+    foreach ($name in @($template.FieldTypes.Keys)) {
+        if ($template.FieldTypes[$name]) { $types[$name] = [string]$template.FieldTypes[$name] }
+    }
+    $defaultType = [string](Get-Setting 'AirVariableType')
+    if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
+
+    if (-not $operationStarted) { Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId }
+    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
+        -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
+
+    # Air Pro answers 200 OK even when it does not recognise a variable name,
+    # so "Success" only means the request was accepted - not that the text
+    # landed. Turn on LogAirXml to see exactly what was transmitted.
+    if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
+
+    if ($result.Success) {
+        $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
+        $activeId = [string]$result.EventId
+        $activeIdConfirmed = $false
+        # Capture Cinegy's engine id for every successful SHOW. The old bridge
+        # kept the client EventId, which happened to work until Cinegy returned
+        # a different identity. An anonymous active item is accepted only when
+        # its engine id changed from the pre-SHOW item.
+        $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
+            -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
+            -AllowAnonymousActiveId
+        if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
+        if ($previousSnapshot) {
+            Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
+                -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
+        }
+        elseif ($layerStatus.Success -and $false -eq [bool]$layerStatus.IsOnAir) {
+            # Pushing onto a layer that was genuinely EMPTY used to leave
+            # nothing to undo, which is the commonest mistake there is: the
+            # wrong template, on a layer that had nothing on it. Undoing that
+            # means taking it back off, so the restore is a hide.
+            #
+            # Only when the layer was verifiably empty. If correlation failed -
+            # something the bridge cannot identify was on that layer - a hide
+            # would silently discard it rather than restore anything, so no
+            # undo is offered and the operator decides deliberately.
+            Set-RollbackCandidate -Layer ([int]$template.Layer) `
+                -RestoreSnapshot @{ Key = [string]$Key; Action = 'hide' } `
+                -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
+        }
+        else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
+        # Three of the same graphic in an hour is almost always a paste slip or
+        # a double tap. Asked after the push, never before: blocking a repeat
+        # that was deliberate would be worse than the mistake it prevents.
+        if (Test-RepeatedShow -Key ([string]$Key)) {
+            Send-TelegramMessage -ChatId $ChatId -Text "🔁 تكرار غير معتاد: عُرض '$Key' عدة مرات خلال فترة قصيرة.`nهل هذا مقصود؟ إن لم يكن، اضغط ↩️ تراجع من القائمة."
+        }
+        $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
+            Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
+            ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
+        }
+        $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
+        Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
+            Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
+            ActiveIdConfirmed = $activeIdConfirmed
+            # The copy travels with the record so that taking it off air can
+            # say what came off. Until now hide and exit recorded a layer
+            # number and nothing else, and the history could only report that
+            # something was hidden - never which strap.
+            AirCopy = (Format-AuditTemplateValues -Variables $Variables)
+            # What it says, for whoever is about to take it off. Kept apart
+            # from AirCopy on purpose: that one is gated by the audit setting
+            # because audit.jsonl is archived for ever, while this is read
+            # once on a confirmation screen and thrown away with the record.
+            ScreenCopy = (Format-OnAirScreenCopy -Key $Key -Variables $Variables)
+        }
+        Save-OnAirState
+        Add-UsageCount -Key $Key
+        $actor = Format-UserAuditActor -UserId $UserId
+        Write-BridgeLog "User $actor (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
+        Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - بواسطة $actor"
+
+        # Belt and braces: also write the values through the postbox, which is
+        # the channel this scene actually honours.
+        if ((Get-Setting 'SetValuesAfterShow') -and $Variables.Count -gt 0) {
+            $delay = Get-SettingInt 'PostShowDelayMs' 0
+            $script:PostShowQueue.Add(@{
+                    At = (Get-Date).AddMilliseconds($delay); Values = $Variables
+                    Layer = [int]$template.Layer; Key = $Key
+                })
+        }
+
+        $suffix = ""
+        if ($AutoHideSeconds -gt 0) {
+            $timerSaved = $activeIdConfirmed -and (Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
+                    -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId $activeId -ActiveIdConfirmed $true)
+            $suffix = if (-not $activeIdConfirmed) {
+                " ⚠️ لم يُضبط الإخفاء التلقائي لأن Cinegy لم يؤكد هوية المشهد؛ أخفه يدويًا."
+            }
+            elseif ($timerSaved) {
+                " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
+            }
+            else {
+                " ⚠️ تعذّر حفظ مؤقت الإخفاء؛ أخفه يدويًا."
+            }
+        }
+        if (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0) {
+            if (-not $activeIdConfirmed) {
+                $suffix += ' ⚠️ لم يُضبط تنبيه الظهور لأن Cinegy لم يؤكد هوية المشهد.'
+            }
+            elseif (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId $activeId -ActiveIdConfirmed $true) {
+                $suffix += " سيصل إليك تنبيه شخصي بعد $reminderMinutes دقيقة إذا بقي القالب ظاهرًا."
+            }
+            else {
+                $suffix += ' ⚠️ تعذّر حفظ تنبيه ظهور القالب لإعادة التشغيل.'
+            }
+        }
+        else {
+            # A new SHOW replaces the visible scene on its layer, so any old
+            # operator reminder for that layer must never reach the wrong person.
+            Remove-TemplateRemindersForLayer -Layer ([int]$template.Layer) | Out-Null
+        }
+        # A one-tap hide right where the operator is looking: previously taking
+        # something back off air meant going 🙈 -> pick layer, which is several
+        # taps too many when a wrong graphic is live.
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إظهار '$Key' على الهواء (طبقة $($template.Layer)).$suffix" -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables)
+    }
+    else {
+        Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$result.Error)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    return $result
+}
+
+function Get-LayerShowContext {
+    param([Parameter(Mandatory)][int]$Layer, [datetime]$Now = (Get-Date))
+    $record = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $lastSuccess = if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
+        -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    return [pscustomobject]@{
+        IsKnown = ($freshness.State -eq 'connected')
+        IsOnAir = ($null -ne $record)
+        Key      = if ($record) { [string](Get-JsonProp $record 'Key') } else { '' }
+        UserId   = if ($record) { [long](Get-JsonProp $record 'UserId') } else { 0L }
+        Source   = if ($record) { [string](Get-JsonProp $record 'Source') } else { '' }
+    }
+}

@@ -31,6 +31,14 @@ internal sealed class ManagerSettings
     // reads as a different application every time it is opened.
     public bool DarkMode { get; set; }
 
+    // Whether the operator has already been told that closing the window
+    // hides it to the tray. The explanation is worth showing to someone who
+    // has never seen it - a window that refuses to close reads as a bug - and
+    // is noise to everyone who has, which is everyone after the first time.
+    // Persisted rather than per-session, or reopening the manager would make
+    // it new again every day.
+    public bool TrayHintShown { get; set; }
+
     private static string SettingsFilePath => Path.Combine(AppContext.BaseDirectory, "BridgeManager.settings.json");
 
     public static ManagerSettings Load()
@@ -1776,13 +1784,24 @@ public sealed class MainForm : Form
         }
 
         // Closing the window just hides it to the tray - the bridge keeps
-        // running and supervised. Said out loud once, because a window that
-        // refuses to close without explanation reads as a bug.
+        // running and supervised.
         e.Cancel = true;
         Hide();
-        _trayIcon.ShowBalloonTip(4000, "لا يزال يعمل",
-            "المدير يتابع الجسر من شريط النظام. للإغلاق نهائيًا: زر يمين على الأيقونة ← إغلاق البرنامج.",
-            ToolTipIcon.Info);
+
+        // Once, not once per close. The comment here has said "once" since the
+        // balloon was added and the code never did it, so every close put a
+        // notification on screen; an operator who hides this window a dozen
+        // times a shift reads that as the window asking permission to close.
+        // The first one is worth showing - a window that refuses to close
+        // without explanation reads as a bug - and the rest are noise.
+        if (!_settings.TrayHintShown)
+        {
+            _settings.TrayHintShown = true;
+            _settings.Save();
+            _trayIcon.ShowBalloonTip(4000, "لا يزال يعمل",
+                "المدير يتابع الجسر من شريط النظام. للإغلاق نهائيًا: زر يمين على الأيقونة ← إغلاق البرنامج.",
+                ToolTipIcon.Info);
+        }
     }
 
     protected override void Dispose(bool disposing)

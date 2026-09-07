@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.79.0'
+$script:BridgeVersion = '7.80.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -91,13 +91,23 @@ foreach ($part in @(
         'Bridge.Telegram'
         'Bridge.News'
         'Bridge.Mojaz'
+        'Bridge.Mojaz.Design'
+        'Bridge.Mojaz.Screens'
+        'Bridge.Mojaz.Playback'
         'Bridge.Users'
         'Bridge.Templates'
         'Bridge.OnAir'
         'Bridge.Schedule'
         'Bridge.Keyboards'
+        'Bridge.WhatsNew'
+        'Bridge.Help'
+        'Bridge.AirOperation'
         'Bridge.ShowFlow'
         'Bridge.Admin'
+        'Bridge.Admin.Templates'
+        'Bridge.Admin.Health'
+        'Bridge.Admin.Config'
+        'Bridge.Admin.Diagnostics'
         'Bridge.Media'
         'Bridge.Commands'
         'Bridge.Callbacks'

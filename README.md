@@ -13,6 +13,42 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.80.0
+
+A hardening pass: two faults an operator could see, and the three biggest files
+split up.
+
+The "still running" balloon fired on every close. The comment above it has said
+"once" since the balloon was added and the code never did it, so an operator who
+hides this window a dozen times a shift saw a dozen notifications and read them
+as the window asking permission to close. It shows once now, remembered in the
+manager's settings so reopening does not make it new again.
+
+A fault in the manager's UI opened a dialog every second. The clock timer ticks
+once a second; a fault inside it is caught, reported, and thrown again on the
+next tick — one modal dialog per second, faster than an operator can dismiss
+them, while the bridge being supervised runs on perfectly well. The first
+occurrence is reported and the rest are logged, with the dialog free to return
+after ten minutes.
+
+The audit found less than feared and one real thing. The single
+`Measure-Object -Maximum` is guarded a line above it; there are no empty
+`catch {}` blocks anywhere in `Parts/`, `Modules/` or the main script; and of
+the 84 sites that looked like swallowed errors, most are `-ErrorAction
+SilentlyContinue` on best-effort cleanup and fourteen return a failure envelope
+the caller inspects. The one real finding: a failed enumeration of other bridge
+processes returned an empty list, and the caller turned that into a confident
+wrong sentence — "the lock is held but no other bridge process can be found, so
+a console is holding it". The failure is said out loud now, so "none" cannot be
+mistaken for "could not look".
+
+Three files were three times over the size this repository asks for. They are
+twelve now: `Bridge.Mojaz` (2733) became four, `Bridge.ShowFlow` (2733) became
+four — the release notes and the operator manual were never the show flow — and
+`Bridge.Admin` (2149) became five. Dot-sourced parts share one scope and load
+order between them does not matter, so this moved text and nothing else. Not one
+of the 1398 tests changed, which is what says so.
+
 ## Version 7.79.0
 
 The quote bar gets one meaning.

@@ -76,8 +76,53 @@ internal static class Program
         }
     }
 
+    /// <summary>What identifies one recurring fault, for the purpose of not
+    /// reporting it twice a second.</summary>
+    /// <remarks>
+    /// Type and message, not the stack: the same fault thrown from the same
+    /// timer carries the same pair every time, while a stack string would make
+    /// two identical faults look different whenever the frames differ.
+    /// </remarks>
+    internal static string CrashSignature(Exception? ex) =>
+        ex is null ? "(null)" : $"{ex.GetType().FullName}: {ex.Message}";
+
+    /// <summary>
+    /// Whether this fault has earned a dialog, or has already had one.
+    /// </summary>
+    /// <remarks>
+    /// The manager's clock timer ticks once a second. A fault inside it is
+    /// caught, reported, and thrown again on the next tick - so an unguarded
+    /// reporter puts one modal dialog on screen per second, faster than an
+    /// operator can dismiss them, and the window they were using to supervise
+    /// a live bridge becomes unusable. The bridge itself is fine throughout,
+    /// which is the cruel part.
+    ///
+    /// So the first of a fault is shown, and repeats of the same fault go to
+    /// the log and nowhere else until the window has passed. The log keeps
+    /// every occurrence either way - the count is what says a fault is a storm
+    /// rather than a one-off.
+    /// </remarks>
+    internal static bool ShouldShowCrashDialog(
+        string signature,
+        DateTime now,
+        IDictionary<string, DateTime> lastShown,
+        TimeSpan window)
+    {
+        if (lastShown.TryGetValue(signature, out var previous) && now - previous < window)
+        {
+            return false;
+        }
+        lastShown[signature] = now;
+        return true;
+    }
+
+    private static readonly Dictionary<string, DateTime> CrashDialogsShown = new();
+    private static readonly TimeSpan CrashDialogWindow = TimeSpan.FromMinutes(10);
+
     private static void ReportCrash(Exception? ex)
     {
+        // Logged first and always: the file is the record, and a fault whose
+        // dialog is suppressed must still be countable afterwards.
         try
         {
             var path = Path.Combine(AppContext.BaseDirectory, "BridgeManager-crash.log");
@@ -85,8 +130,13 @@ internal static class Program
         }
         catch { /* best effort - do not let logging the crash cause another one */ }
 
+        if (!ShouldShowCrashDialog(CrashSignature(ex), DateTime.UtcNow, CrashDialogsShown, CrashDialogWindow))
+        {
+            return;
+        }
+
         MessageBox.Show(
-            $"حدث خطأ غير متوقع في واجهة المدير:\n{ex?.Message}\n\nالتفاصيل في BridgeManager-crash.log بجانب البرنامج.\nالجسر نفسه (إن كان يعمل) لم يتأثر ويستمر بالعمل.",
+            $"حدث خطأ غير متوقع في واجهة المدير:\n{ex?.Message}\n\nالتفاصيل في BridgeManager-crash.log بجانب البرنامج.\nإن تكرر الخطأ فلن يُعاد فتح هذه النافذة، ويبقى التسجيل في الملف.\nالجسر نفسه (إن كان يعمل) لم يتأثر ويستمر بالعمل.",
             "خطأ غير متوقع", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
@@ -273,6 +323,28 @@ internal static class SelfTest
         Check("ignores a line that only mentions a version",
             MainForm.ParseBridgeVersion("2026-09-07 09:00:02 [INFO] manager v7 attached to Bridge v7.76.0") is null);
         Check("survives an empty line", MainForm.ParseBridgeVersion("") is null);
+
+        // A fault inside the one-second clock timer is caught, reported, and
+        // thrown again on the next tick. Unguarded, that is one modal dialog
+        // per second - faster than an operator can dismiss them - while the
+        // bridge it was supervising runs on perfectly well.
+        var shown = new Dictionary<string, DateTime>();
+        var t0 = new DateTime(2026, 9, 7, 14, 0, 0, DateTimeKind.Utc);
+        var window = TimeSpan.FromMinutes(10);
+        Check("the first of a fault is shown",
+            Program.ShouldShowCrashDialog("A: boom", t0, shown, window));
+        Check("the same fault a second later is not",
+            !Program.ShouldShowCrashDialog("A: boom", t0.AddSeconds(1), shown, window));
+        Check("nor sixty ticks later",
+            !Program.ShouldShowCrashDialog("A: boom", t0.AddSeconds(60), shown, window));
+        Check("a different fault is still shown",
+            Program.ShouldShowCrashDialog("B: other", t0.AddSeconds(2), shown, window));
+        Check("the same fault is shown again once the window has passed",
+            Program.ShouldShowCrashDialog("A: boom", t0.AddMinutes(11), shown, window));
+        Check("two faults of one type but different messages are two faults",
+            Program.CrashSignature(new InvalidOperationException("x")) != Program.CrashSignature(new InvalidOperationException("y")));
+        Check("a null exception has a signature rather than throwing",
+            Program.CrashSignature(null) == "(null)");
 
         // An empty log pane reads as "the bridge stopped logging" - this
         // window's whole job is to say otherwise, so no path may leave it

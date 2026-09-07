@@ -724,6 +724,59 @@ function Repair-TelegramHtmlChunks {
     return @($repaired)
 }
 
+function New-CopyButton {
+    <#
+        A button that puts text on the clipboard (Bot API 8.0's copy_text).
+
+        It carries no callback_data: Telegram performs the copy on the device
+        and the bridge never hears about the press, which is why it is the one
+        button here without one.
+    #>
+    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][AllowEmptyString()][string]$Payload)
+    return @{ text = $Text; copy_text = @{ text = [string]$Payload } }
+}
+
+function Send-BridgeTextEditPrompt {
+    <#
+        Ask for replacement text, starting from the text being replaced.
+
+        An editor fixing one word in a headline was retyping the headline. No
+        bot can fill a person's input box - Telegram does not offer it - so
+        the nearest thing is one tap to the clipboard, and this gives it twice
+        over: the current text sits in a <code> span, which Telegram makes
+        tap-to-copy, and a 📋 button copies it outright for anyone who does
+        not know that.
+
+        The current text is shown whole even when it is long. A truncated
+        "current" is worse than none: an editor who copies it loses the tail
+        without being told, which is the mistake this screen exists to
+        prevent.
+    #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][string]$Prompt,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Current,
+        [Parameter(Mandatory)][string]$CancelData,
+        [string]$CopyLabel = '📋 نسخ النص الحالي'
+    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>$(ConvertTo-TelegramHtmlText $Prompt)</b>")
+    $rows = @()
+    if ([string]::IsNullOrWhiteSpace($Current)) {
+        $lines.Add('<i>لا يوجد نص حالي.</i>')
+    }
+    else {
+        $lines.Add('')
+        $lines.Add('النص الحالي — اضغط عليه لنسخه:')
+        $lines.Add("<code>$(ConvertTo-TelegramHtmlText $Current)</code>")
+        $rows += , @((New-CopyButton -Text $CopyLabel -Payload $Current))
+    }
+    $lines.Add('')
+    $lines.Add('⌨️ <b>اكتب النص الجديد في صندوق الرسالة وأرسله</b>، أو انسخ الحالي وعدّله.')
+    $rows += , @((New-Button '❌ إلغاء' $CancelData))
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup @{ inline_keyboard = $rows }
+}
+
 function Send-TelegramPagedText {
     <#
         Sends a long screen as its first part plus a 📄 المزيد button.

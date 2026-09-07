@@ -577,9 +577,10 @@ function Start-MojazRowEdit {
     }
     if ($Which -eq 'image') { Send-MojazImagePrompt -ChatId $ChatId -Cancel "mojaz:row:$RowId"; return }
     $current = if ($Which -eq 'title') { [string]$row.Title } else { [string]$row.Text }
-    $prompt = if ($Which -eq 'title') { '📝 أرسل العنوان الجديد.' } else { '📰 أرسل نص الخبر الجديد.' }
-    Send-TelegramMessage -ChatId $ChatId -Text "$prompt`nالحالي: $current" `
-        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '❌ إلغاء' "mojaz:row:$RowId"))) }
+    $prompt = if ($Which -eq 'title') { '📝 أرسل العنوان الجديد' } else { '📰 أرسل نص الخبر الجديد' }
+    # The current text used to be prose on the end of a line - readable, but a
+    # phone cannot copy it without a careful long press. It is tap-to-copy now.
+    Send-BridgeTextEditPrompt -ChatId $ChatId -Prompt $prompt -Current $current -CancelData "mojaz:row:$RowId"
 }
 
 function Complete-MojazRowEdit {

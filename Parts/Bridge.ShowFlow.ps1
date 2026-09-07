@@ -169,7 +169,7 @@ function Start-ShowFlow {
             LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
         }
         Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
         return
     }
     $state = @{
@@ -219,7 +219,7 @@ function Resume-ShowFlow {
     if ($state.Index -ge $state.Fields.Count) {
         $state.Mode = 'show_review'
         Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ReplyMarkup (Get-ShowReviewKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard)
         return
     }
     Set-PendingState -ChatId $ChatId -State $state
@@ -229,19 +229,25 @@ function Resume-ShowFlow {
 function Format-ShowReviewText {
     param([Parameter(Mandatory)][hashtable]$State)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("🔎 مراجعة قبل الإرسال")
-    $lines.Add("القالب: $($State.Key)")
-    $lines.Add("الطبقة: $($State.LockLayer)")
+    # parse_mode=HTML, and one rule runs through it: anything that will
+    # appear on the television is a <code> span. Nothing else on this screen
+    # is, so the copy about to go out is unmistakable from the labels
+    # describing it - on the one screen where an operator is deciding whether
+    # to put it on air. Telegram has no text colour for a bot to use; a
+    # monospace span is the strongest distinction it does have, and it is
+    # tap-to-copy as well.
+    $lines.Add("<b>🔎 مراجعة قبل الإرسال</b>")
+    $lines.Add("القالب: <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b> · الطبقة <code>$($State.LockLayer)</code>")
     $context = Get-JsonProp $State 'ReplacementContext'
     if ($context -and -not [bool](Get-JsonProp $context 'IsKnown')) {
-        $lines.Add("⚠️ تعذّر التحقق من حداثة حالة الطبقة؛ راجع شاشة الحالة قبل التأكيد عند الشك.")
+        $lines.Add("<b>⚠️ تعذّر التحقق من حداثة حالة الطبقة</b>؛ راجع شاشة الحالة قبل التأكيد عند الشك.")
     }
     if ($context -and [bool](Get-JsonProp $context 'IsOnAir')) {
         $currentKey = [string](Get-JsonProp $context 'Key')
         if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = 'مشهد غير مسمّى' }
         $currentUserId = [long](Get-JsonProp $context 'UserId')
         $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
-        $lines.Add("⚠️ سيتم استبدال القالب الحالي: $currentKey ($sourceText).")
+        $lines.Add("<b>⚠️ سيتم استبدال القالب الحالي</b>: $(ConvertTo-TelegramHtmlText $currentKey) ($(ConvertTo-TelegramHtmlText $sourceText))")
     }
     # A structural clash, distinct from the runtime one above: these templates
     # can never be on air together, whether or not the layer is busy right now.
@@ -250,20 +256,28 @@ function Format-ShowReviewText {
     if ($sharedLayers -and $sharedLayers.Contains($layerKey)) {
         $siblings = @(@($sharedLayers[$layerKey]) | Where-Object { $_ -ne [string]$State.Key })
         if ($siblings.Count -gt 0) {
-            $lines.Add("⚠️ هذه الطبقة يتشاركها أيضًا: $($siblings -join '، ') — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
+            $lines.Add("<b>⚠️ هذه الطبقة يتشاركها أيضًا</b>: $(ConvertTo-TelegramHtmlText ($siblings -join '، ')) — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
         }
     }
-    if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: $($State.AutoHideSeconds) ثانية") }
+    if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: <code>$($State.AutoHideSeconds)</code> ثانية") }
     $lines.Add("")
+    $lines.Add("📺 <b>ما سيظهر على الشاشة:</b>")
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
         $name = [string]$State.Fields[$i]
         $label = $name
         if ($State.Labels -and $i -lt @($State.Labels).Count -and $State.Labels[$i]) { $label = [string]$State.Labels[$i] }
-        $value = if ($State.Values.ContainsKey($name)) { [string]$State.Values[$name] } else { "(متروك)" }
-        $lines.Add("• $label`: $value")
+        # A left field is not on-air copy, so it is not dressed as any: it
+        # says so in italics rather than sitting in a code span pretending to
+        # be text that will appear.
+        if ($State.Values.ContainsKey($name)) {
+            $lines.Add("$(ConvertTo-TelegramHtmlText $label):`n<code>$(ConvertTo-TelegramHtmlText ([string]$State.Values[$name]))</code>")
+        }
+        else {
+            $lines.Add("$(ConvertTo-TelegramHtmlText $label): <i>(متروك)</i>")
+        }
     }
     $lines.Add("")
-    $lines.Add("لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.")
+    $lines.Add("<i>لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.</i>")
     return ($lines -join "`n")
 }
 

@@ -212,7 +212,17 @@ function Invoke-CallbackQuery {
         'news:item:*' {
             $i=[int](Get-CallbackArg $data 'news:item:');Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index $i;break
         }
-        'news:edit:*' { $i=[int](Get-CallbackArg $data 'news:edit:');Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)};Send-TelegramMessage -ChatId $chatId -Text 'أرسل النص البديل للخبر:';break }
+        'news:edit:*' {
+            $i = [int](Get-CallbackArg $data 'news:edit:')
+            Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)}
+            # The item being replaced, so a one-word correction is not a
+            # retyped headline. This screen said only "أرسل النص البديل للخبر:"
+            # and showed nothing at all.
+            $draft = Get-NewsTickerDraft -UserId $userId
+            $current = if ($draft -and $i -ge 0 -and $i -lt @($draft.Items).Count) { [string]@($draft.Items)[$i] } else { '' }
+            Send-BridgeTextEditPrompt -ChatId $chatId -Prompt 'أرسل النص البديل للخبر' -Current $current -CancelData 'news:reorder'
+            break
+        }
         'news:delask:*' {
             Show-NewsTickerDeleteConfirm -ChatId $chatId -UserId $userId -Index ([int](Get-CallbackArg $data 'news:delask:')) -MessageId ([int]$msgObj.message_id) | Out-Null
             break
@@ -406,8 +416,8 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text "لا توجد قيم مدخلة لمعاينتها بعد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                 break
             }
-            $preview = "🔎 معاينة المسودة الحالية`n`n$(Format-ShowReviewText -State $state)"
-            Send-TelegramMessage -ChatId $chatId -Text $preview -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            $preview = "<b>🔎 معاينة المسودة الحالية</b>`n`n$(Format-ShowReviewText -State $state)"
+            Send-TelegramMessage -ChatId $chatId -Text $preview -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
             break
         }
         'hideall:confirm' {

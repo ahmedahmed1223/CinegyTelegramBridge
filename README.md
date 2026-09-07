@@ -13,6 +13,35 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.91.0
+
+Editing text starts from the text, and what will appear on screen is marked as
+such.
+
+The ticker's edit screen said "أرسل النص البديل للخبر:" and showed nothing at
+all, so an editor correcting one word was retyping the whole headline from
+memory or from a screen further back. No bot can fill a person's input box —
+Telegram does not offer it — so the nearest thing is one tap to the clipboard,
+and it is given twice: the current text sits in a `<code>` span, which Telegram
+makes tap-to-copy, and a `📋` button using Bot API 8.0's `copy_text` copies it
+outright for anyone who does not know that. It is the one button in the bridge
+with no `callback_data`, because the copy happens on the device and the bridge
+never hears the press.
+
+The text is shown whole however long it is: a truncated "current" is worse than
+none, because an editor who copies it loses the tail without being told — the
+mistake the screen exists to prevent. The bulletin row edit gets the same
+treatment; it had been showing its current text as prose on the end of a line,
+readable but not copyable on a phone without a careful long press.
+
+The pre-send review — the screen where an operator decides whether to put a
+graphic on air — showed the copy with nothing distinguishing it from the field
+labels describing it. Telegram gives a bot no text colour, and a monospace span
+is the strongest distinction it does have, so one rule now runs through that
+screen: everything that will appear on television is a `<code>` span and nothing
+else is. A field left empty says "(متروك)" in italics rather than sitting in a
+span that implies it will be shown.
+
 ## Version 7.90.0
 
 Elapsed time reads in months and weeks, not minutes for ever.

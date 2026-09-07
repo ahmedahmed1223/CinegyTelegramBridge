@@ -1811,3 +1811,59 @@ Describe 'The list screens get their tables' {
         @(Get-TemplateHistoryBlocks -Query '   ') | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Editing text starts from the text' {
+    It 'shows the current text, tap-to-copy, with a button that copies it' {
+        # An editor fixing one word was retyping the headline. No bot can fill
+        # a person's input box, so the nearest thing is one tap to the
+        # clipboard - given twice: a <code> span, which Telegram makes
+        # tap-to-copy, and a copy_text button for anyone who does not know it.
+        Mock Send-TelegramMessage { $script:SentText = $Text; $script:SentMarkup = $ReplyMarkup; $script:SentMode = $ParseMode }
+
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'أرسل النص البديل' `
+            -Current 'الرئيس يفتتح المعرض' -CancelData 'news:reorder'
+
+        $script:SentMode | Should -Be 'HTML'
+        $script:SentText | Should -Match '<code>الرئيس يفتتح المعرض</code>'
+        $script:SentText | Should -Match 'صندوق الرسالة'
+        $rows = @($script:SentMarkup.inline_keyboard)
+        # The copy button carries no callback_data: Telegram does the copy on
+        # the device and the bridge never hears the press.
+        $rows[0][0].copy_text.text | Should -Be 'الرئيس يفتتح المعرض'
+        $rows[0][0].ContainsKey('callback_data') | Should -BeFalse
+        $rows[1][0].callback_data | Should -Be 'news:reorder'
+    }
+
+    It 'escapes the current text and offers no copy button when there is none' {
+        Mock Send-TelegramMessage { $script:SentText = $Text; $script:SentMarkup = $ReplyMarkup }
+
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'p' -Current '<b>عاجل' -CancelData 'x'
+        $script:SentText | Should -Match '&lt;b&gt;عاجل'
+        @(Test-BridgeTelegramHtml -Text $script:SentText) | Should -BeNullOrEmpty
+
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'p' -Current '' -CancelData 'x'
+        $script:SentText | Should -Match 'لا يوجد نص حالي'
+        @($script:SentMarkup.inline_keyboard) | Should -HaveCount 1
+    }
+}
+
+Describe 'What will appear on screen is marked as such' {
+    It 'puts the on-air copy in code spans and nothing else in them' {
+        # The review screen is where an operator decides whether to put this
+        # on air, and the copy was indistinguishable from the labels
+        # describing it. Telegram gives a bot no text colour; a monospace span
+        # is the strongest distinction it has, and it is tap-to-copy too.
+        $state = @{
+            Key = 'عاجل'; LockLayer = 4; AutoHideSeconds = 0
+            Fields = @('Ajel.top', 'Ajel.center'); Labels = @('العنوان', 'النص')
+            Values = @{ 'Ajel.top' = 'الرئيس يفتتح المعرض' }
+        }
+
+        $text = Format-ShowReviewText -State $state
+        @(Test-BridgeTelegramHtml -Text $text) | Should -BeNullOrEmpty
+        $text | Should -Match '<code>الرئيس يفتتح المعرض</code>'
+        # A field left empty is not dressed as on-air copy.
+        $text | Should -Match '<i>\(متروك\)</i>'
+        $text | Should -Match 'ما سيظهر على الشاشة'
+    }
+}

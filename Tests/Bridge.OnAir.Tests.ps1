@@ -1227,19 +1227,47 @@ Describe 'Main menu on-air priority' {
         ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match '8 · ticker'
     }
 
-    It 'folds a long on-air list away so the engine line survives on screen' {
-        # A gallery with several layers up pushed the engine and the operator
-        # line off the bottom - the two lines an operator quotes when reporting
-        # the very fault they are looking at.
+    It 'caps a long on-air list so the engine line survives on screen' {
+        # Each layer costs two lines now, so a gallery with several up would
+        # push the engine and the operator line off the bottom - the two lines
+        # an operator quotes when reporting the very fault they are looking at.
         $script:OnAir.Clear()
-        foreach ($layer in 1..4) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
-        Get-MainMenuIntro | Should -Match '<blockquote>'
-
-        $script:OnAir[5] = @{ Key = 't5'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        foreach ($layer in 1..7) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
         $long = Get-MainMenuIntro
-        $long | Should -Match '<blockquote expandable>'
-        # Folded, not dropped: the machine line is still in the message.
+
+        @($long -split "`n" | Where-Object { $_ -match '^ • طبقة' }) | Should -HaveCount 4
+        # Nothing is lost by capping: every live layer has its own hide button
+        # under this message, and the screen says how many it did not list.
+        $long | Should -Match 'و3 أخرى'
         $long | Should -Match ([regex]::Escape($config.AirServerAddress))
+        # The count in the heading is the real one, not the shown one.
+        $long | Should -Match 'على الهواء \(7\)'
+    }
+
+    It 'says how long each layer has been up and who put it there' {
+        # The two facts an operator asks about a graphic they did not push
+        # themselves. Both were already recorded and the confirmation screen
+        # printed them; the screen an operator lands on did not.
+        $script:OnAir.Clear()
+        $script:UserAliases['777'] = 'مخرج الأخبار'
+        $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date).AddMinutes(-12); UserId = 777; Source = 'bridge' }
+        $script:OnAir[8] = @{ Key = 'ticker'; At = (Get-Date).AddMinutes(-3); UserId = 0; Source = 'cinegy' }
+
+        $text = ConvertFrom-TelegramHtmlText (Get-MainMenuIntro)
+        $text | Should -Match 'منذ .* · مخرج الأخبار'
+        # A scene the bridge did not push has no operator to name, and saying
+        # so is the point - it is how an operator learns it came from Cinegy.
+        $text | Should -Match 'Cinegy \(خارج الجسر\)'
+    }
+
+    It 'survives a record that never carried a time or an operator' {
+        # These records are written by a dozen call sites and carry only what
+        # each one cares about; under StrictMode an absent key would take down
+        # the screen opened when something has already gone wrong.
+        $script:OnAir.Clear()
+        $script:OnAir[2] = @{ Key = 'bare' }
+        { Get-MainMenuIntro } | Should -Not -Throw
+        ConvertFrom-TelegramHtmlText (Get-MainMenuIntro) | Should -Match 'bare'
     }
 
     It 'sends the menu screen as HTML, with the verdict carrying the weight' {
@@ -1276,11 +1304,12 @@ Describe 'Main menu on-air priority' {
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = (Get-Date)
         $text = Get-MainMenuIntro
         @($text -split "`n")[0] | Should -Match 'كل شيء سليم'
-        # The air block is a real blockquote now: Telegram draws the bar and
-        # the indent, which is what separating a block means - the two rows of
-        # "━━━" were a drawing of structure rather than structure.
-        $text | Should -Match '<blockquote>'
+        # Blank lines separate the three blocks. Not "━━━", which was a
+        # drawing of structure, and not a blockquote either: the bar down its
+        # side reads as material taken from somewhere else, and this is the
+        # screen's own answer.
         $text | Should -Not -Match '━━━'
+        $text | Should -Not -Match 'blockquote'
 
         $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         @((Get-MainMenuIntro) -split "`n")[0] | Should -Match 'طبقات على الهواء'

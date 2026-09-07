@@ -293,21 +293,60 @@ function Get-MainMenuIntro {
     if ($script:OnAir.Count -eq 0) { $air.Add('⚫️ لا شيء على الهواء') }
     else {
         $air.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>")
-        # One layer per line. Joined with a separator they became a single run
-        # of text that had to be read word by word to find one layer in it.
-        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $air.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$script:OnAir[$layer].Key))</b>")
+        # One layer per line, and under each the two facts an operator asks
+        # about a graphic they did not put up themselves: how long it has been
+        # there, and whose it is. Both were already recorded - the confirmation
+        # screen has printed them for releases - and the screen an operator
+        # actually lands on did not.
+        #
+        # Capped, because each layer costs two lines now. Nothing is lost by
+        # it: the keyboard under this message carries a hide button for every
+        # live layer, named, so the full list is always one glance below.
+        $layers = @($script:OnAir.Keys | Sort-Object)
+        $shown = @($layers | Select-Object -First 4)
+        foreach ($layer in $shown) {
+            $record = $script:OnAir[$layer]
+            $air.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$record.Key))</b>")
+
+            $detail = [System.Collections.Generic.List[string]]::new()
+            # Guarded: these records are written by a dozen call sites and
+            # carry only the fields each one cares about, so under StrictMode
+            # an absent key would take the menu down - the screen an operator
+            # opens when something has already gone wrong.
+            if ($record.ContainsKey('At') -and $record.At -is [datetime]) {
+                $detail.Add("منذ $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))")
+            }
+            $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
+            $detail.Add($(switch ($source) {
+                        'cinegy' { 'Cinegy (خارج الجسر)' }
+                        'BotTest' { 'اختبار قالب' }
+                        default {
+                            $who = if ($record.ContainsKey('UserId')) { Get-UserDisplayName -UserId ([long]$record.UserId) } else { '' }
+                            if ($who) { $who } else { 'غير معروف' }
+                        }
+                    }))
+            $air.Add("   ↳ <i>$(ConvertTo-TelegramHtmlText ($detail -join ' · '))</i>")
+        }
+        if ($layers.Count -gt $shown.Count) {
+            $air.Add("   <i>و$($layers.Count - $shown.Count) أخرى - أزرار الإخفاء أدناه</i>")
         }
     }
     $air.Add("🔄 <i>$age</i>")
-    $quote = if ($script:OnAir.Count -gt 4) { '<blockquote expandable>' } else { '<blockquote>' }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     # Bold, not an emoji alone: the emoji carries the colour, the weight
     # carries the priority, and the two together survive a phone glanced at
     # from arm's length in a gallery.
+    #
+    # Separated by blank lines rather than wrapped in a <blockquote>. The
+    # quote gave the block a heavy bar down its side, which reads as material
+    # taken from somewhere else - and this is the screen's own answer, on the
+    # screen an operator opens dozens of times a shift. A blank line above and
+    # below groups it just as well and carries no such claim.
     $lines.Add("<b>$verdict</b>")
-    $lines.Add("$quote$($air -join "`n")</blockquote>")
+    $lines.Add('')
+    $lines.Add($air -join "`n")
+    $lines.Add('')
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code>")
     # Format-UserAuditActor, the same helper ℹ️ الحالة uses, so one operator is
     # written one way on both screens - and so the bracketed id stays pinned

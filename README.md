@@ -13,6 +13,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.78.0
+
+The menu screen loses the quote bar and gains who put each layer up, and when.
+
+The `<blockquote>` is gone. Its heavy bar down the side reads as material taken
+from somewhere else, and this is the screen's own answer — on a screen an
+operator opens dozens of times a shift. A blank line above the block and another
+below groups it just as well and claims nothing.
+
+Under each layer is a line saying how long it has been on air and who pushed it:
+the two questions an operator asks about a graphic they did not put up
+themselves. Both facts were already recorded — the hide confirmation has printed
+them for releases — and the screen an operator actually lands on did not say
+them. A scene the bridge did not push has no operator to name, so it says
+"Cinegy (خارج الجسر)", which is how an operator learns it came from the engine
+rather than the bot.
+
+The list caps at four. Each layer costs two lines now, and eight of them would
+push the engine and operator lines off the bottom. Nothing is lost: the keyboard
+under the message carries a named hide button for every live layer, and the
+screen says how many it did not list. The count in the heading is the real one,
+not the shown one.
+
+A record carrying neither a time nor an operator no longer takes the screen
+down. These are written by a dozen call sites and each carries only what it
+cares about; under StrictMode an absent key would have brought down the screen
+opened when something has already gone wrong.
+
 ## Version 7.77.0
 
 The manager carries its own version now, not the bridge's.

@@ -1431,9 +1431,9 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
         $script:OnAir[7] = @{ Key = '<b>Logo'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         @(Test-BridgeTelegramHtml -Text (Get-MainMenuIntro -UserId 7275359265)) | Should -BeNullOrEmpty
 
-        # Past four layers the quote becomes expandable - a different tag, so
-        # it is validated too.
-        foreach ($layer in 1..5) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
+        # Past four layers the list is capped and a summary line appears -
+        # different output, so it is validated too.
+        foreach ($layer in 1..7) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
         @(Test-BridgeTelegramHtml -Text (Get-MainMenuIntro -UserId 7275359265)) | Should -BeNullOrEmpty
         $script:OnAir.Clear()
 

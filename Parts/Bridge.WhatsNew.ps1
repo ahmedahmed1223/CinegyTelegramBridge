@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.87.1'; Items = @(
+                '🔧 تقارير الموجز والأخبار والبنرات عادت للعمل — صفّ أزرار واحد كان يُسقط الرسالة كلها.'
+            ) }
         @{ Version = '7.87.0'; Items = @(
                 '📊 عادت الجداول إلى كل الشاشات: تقرير واحد ضخم كان يُعطّلها للجلسة كلها.'
             ) }

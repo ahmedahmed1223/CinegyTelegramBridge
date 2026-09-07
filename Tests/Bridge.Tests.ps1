@@ -1626,3 +1626,42 @@ Describe 'One oversized screen must not cost the session its tables' {
         $json | Should -Match 'أحدث 40 من 300'
     }
 }
+
+Describe 'Every keyboard row is a row, not a lone button' {
+    It 'builds each report keyboard as arrays of arrays' {
+        # A one-button row written as $(if (...) { , @($button) }) loses the
+        # comma's wrapper to the $( ), and the row arrives as a bare button.
+        # Telegram answers "expected an Array of InlineKeyboardButton" - and
+        # answers it to the whole message, so the rich table and its text
+        # fallback both fail. Every report but تقرير العمل, the one kind with
+        # no download row, stopped working.
+        foreach ($kind in @('work', 'banners', 'news', 'mojaz')) {
+            $rows = @((Get-ReportPeriodKeyboard -Kind $kind -Period 'today').inline_keyboard)
+            $rows.Count | Should -BeGreaterThan 0
+            foreach ($row in $rows) {
+                $row -is [hashtable] | Should -BeFalse -Because "a row of the $kind keyboard is a bare button"
+                @($row).Count | Should -BeGreaterThan 0
+                foreach ($button in @($row)) { $button.callback_data | Should -Not -BeNullOrEmpty }
+            }
+        }
+    }
+
+    It 'holds for every keyboard the bridge can build without arguments' {
+        # Swept rather than listed: the fault is one character of PowerShell
+        # and can be written into any of them.
+        $builders = @(Get-Command -CommandType Function -Name 'Get-*Keyboard' -ErrorAction SilentlyContinue |
+                Where-Object { @($_.Parameters.Keys | Where-Object { $_ -notin [System.Management.Automation.PSCmdlet]::CommonParameters }).Count -eq 0 })
+        $builders.Count | Should -BeGreaterThan 0
+
+        foreach ($builder in $builders) {
+            $keyboard = & $builder.Name
+            # ContainsKey, not a property read: a reply keyboard carries
+            # "keyboard" instead, and under StrictMode asking for a key that
+            # is not there throws rather than answering false.
+            if ($keyboard -isnot [hashtable] -or -not $keyboard.ContainsKey('inline_keyboard')) { continue }
+            foreach ($row in @($keyboard.inline_keyboard)) {
+                $row -is [hashtable] | Should -BeFalse -Because "$($builder.Name) has a row that is a bare button"
+            }
+        }
+    }
+}

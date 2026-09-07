@@ -34,13 +34,22 @@ function Get-ReportPeriodKeyboard {
     # that does not repeat its own window left the operator guessing which one
     # they had pressed.
     $mark = { param($Value, $Label) if ($Value -eq $Period) { "• $Label" } else { $Label } }
-    return @{ inline_keyboard = @(
-            , @((New-Button (& $mark 'today' 'اليوم') "rep:${Kind}:today"), (New-Button (& $mark 'yesterday' 'أمس') "rep:${Kind}:yesterday"))
-            , @((New-Button (& $mark 'week' '7 أيام') "rep:${Kind}:week"), (New-Button (& $mark 'month' '30 يومًا') "rep:${Kind}:month"))
-            $(if ($Kind -ne 'work') { , @((New-Button '⬇️ تحميل الملف' "repdl:${Kind}:${Period}")) })
-            , @((New-Button '📊 التقارير' 'menu:reports'), (New-Button '🏠 القائمة' 'menu:main'))
-        )
-    }
+    # Rows appended one at a time rather than listed inside one @( ).
+    #
+    # The download row used to be written as a conditional sub-expression -
+    # $(if (...) { , @($button) }) - and the $( ) unrolled the wrapper the
+    # comma had just built, so a one-button row arrived as a bare button
+    # object instead of an array of one. Telegram answers that with
+    # "Bad Request: expected an Array of InlineKeyboardButton", and it answers
+    # it to the whole message: both the rich table and its text fallback
+    # carry the same markup, so every report except تقرير العمل - the one
+    # kind that has no download row - failed outright.
+    $rows = @()
+    $rows += , @((New-Button (& $mark 'today' 'اليوم') "rep:${Kind}:today"), (New-Button (& $mark 'yesterday' 'أمس') "rep:${Kind}:yesterday"))
+    $rows += , @((New-Button (& $mark 'week' '7 أيام') "rep:${Kind}:week"), (New-Button (& $mark 'month' '30 يومًا') "rep:${Kind}:month"))
+    if ($Kind -ne 'work') { $rows += , @((New-Button '⬇️ تحميل الملف' "repdl:${Kind}:${Period}")) }
+    $rows += , @((New-Button '📊 التقارير' 'menu:reports'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $rows }
 }
 
 function Show-ReportsMenu {

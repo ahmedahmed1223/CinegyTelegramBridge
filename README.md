@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.87.1
+
+One keyboard row was taking down the bulletin, news and banner reports.
+
+Telegram said why itself, thanks to 7.86.2: `Bad Request: expected an Array of
+InlineKeyboardButton`. Not an HTML problem at all — the reply markup. And
+because the rich message and its text fallback carry the same markup, both paths
+failed together, which is what made it look like a formatting fault.
+
+The cause was one character of PowerShell. The "⬇️ download" row was written as
+`$(if (...) { , @($button) })`, and the `$( )` unrolls the wrapper the comma had
+just built, so the row arrived as a bare button object rather than an array of
+one. `تقرير العمل` is the only kind with no download row, which is exactly why it
+was the only report still working.
+
+Rows are appended one at a time now rather than listed inside a single `@( )`,
+so there is no place for the comma to be undone. A test sweeps every keyboard
+the bridge can build without arguments and checks that each row is an array —
+the fault is one character and can be written into any of them. That sweep
+immediately caught a shape I had not accounted for: the persistent reply
+keyboard carries `keyboard` rather than `inline_keyboard`, and asking for a
+missing key under StrictMode throws rather than answering false.
+
 ## Version 7.87.0
 
 One oversized report was costing every screen its tables until the next

@@ -1520,3 +1520,39 @@ Describe 'Credentials are stripped before anything is shown or logged' {
         $withKey | Should -Match 'rtmp://\*\*\*'
     }
 }
+
+Describe 'The aligned table the HTML screens fall back to' {
+    It 'pads every column but the last, so the columns can be read down' {
+        $table = Format-BridgeTextTable -Rows @(
+            , @('a', 'long-name', '1')
+            , @('bb', 'x', '22')
+        )
+        $rows = @((ConvertFrom-TelegramHtmlText $table) -split "`n")
+        # Column two starts at the same offset on both rows - the whole point.
+        $rows[0].IndexOf('long-name') | Should -Be $rows[1].IndexOf('x')
+        # The last column is not padded: trailing spaces cost the wrap point.
+        $rows[0] | Should -Not -Match ' $'
+    }
+
+    It 'escapes its content, because pre cannot survive a stray tag' {
+        $table = Format-BridgeTextTable -Rows @(, @('<b>', 'a & b'))
+        $table | Should -Match '&lt;b&gt;'
+        $table | Should -Match '&amp;'
+        # And it is valid HTML with nothing nested inside the pre.
+        @(Test-BridgeTelegramHtml -Text $table) | Should -BeNullOrEmpty
+    }
+
+    It 'returns nothing at all rather than an empty block' {
+        # An empty <pre> renders as a grey rectangle saying nothing.
+        Format-BridgeTextTable -Rows @() | Should -BeNullOrEmpty
+        Format-BridgeTextTable -Rows @($null) | Should -BeNullOrEmpty
+    }
+
+    It 'survives rows of different lengths' {
+        # Built at call sites by hand, so a short row is a question of when,
+        # not whether.
+        $table = Format-BridgeTextTable -Rows @(, @('a', 'b', 'c'), , @('d'))
+        $table | Should -Match 'a'
+        $table | Should -Match 'd'
+    }
+}

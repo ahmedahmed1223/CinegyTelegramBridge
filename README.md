@@ -13,6 +13,39 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.85.0
+
+Real tables, and "why" written where it is asked.
+
+`Format-BridgeTextTable` renders rows as an aligned `<pre>` block. Telegram HTML
+has no table element and `<pre>` is the only fixed-width surface it offers:
+inside one a padded column actually lines up, so a state column can be read
+straight down instead of every line being parsed on its own. It is the same
+shape the rich-message table gives where `sendRichMessage` is available, which
+is exactly what these screens are the fallback for. Applied to the health
+centre, the operating numbers and the usage summary. Each glyph column holds
+exactly one emoji per row, so the widths match whatever an emoji turns out to
+be, and the last column is never padded — trailing spaces buy nothing and cost
+the wrap point on a narrow phone.
+
+The log said "Cinegy health changed from healthy to unhealthy" and nothing else.
+`unhealthy` never meant unreachable: Air answers, and its own telemetry crosses
+a tolerance. Which tolerance, and by how much, was computed for the admin
+broadcast alone and only once the alert threshold was reached — so the only way
+to learn why was to read the metrics by hand after the moment had passed. The
+reason is on the line now, and in the recent-errors row, which used to repeat
+what its own colour already said.
+
+Recovery is announced whenever the state was not healthy before, not only when a
+warning had already gone out. The warning waits for consecutive failures, so a
+dip that cleared just under the threshold left the screens saying "unhealthy"
+for minutes and then went quiet, and an operator who looked in the middle of it
+was never told it was over. The notice now carries what the warning carries: how
+long, why, and the numbers it is at now — and says plainly when no warning
+preceded it. A first reading of `unknown` to `healthy` is a startup rather than
+a recovery and announces nothing, because a bridge that reports a recovery on
+every restart is one whose alerts get muted.
+
 ## Version 7.84.0
 
 A design pass on two screens: the one that is typed into, and the one searched

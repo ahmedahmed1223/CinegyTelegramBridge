@@ -981,17 +981,19 @@ Describe 'Operational numbers and status sharing' {
 
     It 'reports uptime, which is what tells an administrator it has been restarting' {
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
-        $text | Should -Match 'مدة التشغيل: 1 ي'
+        # Columns are aligned in a <pre> table now, so label and value are
+        # separated by padding rather than a colon.
+        $text | Should -Match 'مدة التشغيل\s+1 ي'
         $text | Should -Match ([regex]::Escape($script:BridgeVersion))
     }
 
     It 'separates flood limits from ordinary failures' {
-        ConvertFrom-TelegramHtmlText (Get-BridgeStatsText) | Should -Match '\(429\): 7'
+        ConvertFrom-TelegramHtmlText (Get-BridgeStatsText) | Should -Match '\(429\)\s+7'
     }
 
     It 'counts every air operation outcome' {
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
-        $text | Should -Match 'عمليات الهواء: 15'
+        $text | Should -Match 'عمليات الهواء\s+15'
     }
 
     It 'shares a plain summary that survives being pasted elsewhere' {
@@ -1251,8 +1253,9 @@ Describe 'Version 6 administrator health center' {
 
         # Each row now carries an identity glyph beside its state colour: a
         # column of seven 🟢 says nothing about which row is which.
-        $text | Should -Match '🟢 📡 Telegram'
-        $text | Should -Match '🟢 🎛 Cinegy'
+        # A three-column table row: state, identity, name.
+        $text | Should -Match '🟢\s+📡\s+Telegram'
+        $text | Should -Match '🟢\s+🎛\s+Cinegy'
         $text | Should -Match 'مراقبة المخرج'
         $text | Should -Match 'البث المرحّل'
         $text | Should -Match 'التخزين'
@@ -1267,8 +1270,8 @@ Describe 'Version 6 administrator health center' {
         # The health centre is HTML now; read it as the operator sees it.
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeHealthCenterText -DiagnosticsSnapshot $snapshot -Warnings @())
 
-        $text | Should -Match '🔴 📡 Telegram'
-        $text | Should -Match '🔴 🎛 Cinegy'
+        $text | Should -Match '🔴\s+📡\s+Telegram'
+        $text | Should -Match '🔴\s+🎛\s+Cinegy'
     }
 
     It 'offers refresh full status diagnostics and return controls' {
@@ -1565,7 +1568,9 @@ Describe 'The health screen can be read down its state column' {
         foreach ($row in $rows) {
             # Icon, identity glyph, name, detail - the shape the screen renders
             # every row in, so the two still cannot drift apart.
-            $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Glyph) $($row.Name) — $($row.Detail)"))
+            # Same four cells the table renders, whatever padding it chose.
+            $cells = @($row.Icon, $row.Glyph, $row.Name, $row.Detail) | ForEach-Object { [regex]::Escape([string]$_) }
+            $text | Should -Match ($cells -join '\s+')
         }
     }
 }

@@ -185,3 +185,137 @@ Describe 'The reporting screens lead with a verdict' {
         $raw | Should -Match '<blockquote expandable>'
     }
 }
+
+Describe 'A Cinegy health change says why, in numbers' {
+    BeforeEach {
+        Mock Write-BridgeLog {}
+        Mock Send-AdminBroadcast {}
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
+        $script:RuntimeState.Monitoring.LastCinegyHealthCheck = (Get-Date).AddHours(-1)
+        $script:HealthHistory.Cinegy.PendingState = ''
+        $script:HealthHistory.Cinegy.PendingCount = 0
+        $script:HealthHistory.Cinegy.FailureCount = 0
+        $script:HealthHistory.Cinegy.AlertSent = $false
+        # The real settings rather than a mock: Get-Setting is read by half the
+        # bridge, and a filtered mock without a default breaks every call this
+        # function makes for an unrelated key.
+        $config.Settings | Add-Member -NotePropertyName CinegyHealthConfirmChecks -NotePropertyValue 1 -Force
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnCinegyHealth -NotePropertyValue $false -Force
+        $config.Settings | Add-Member -NotePropertyName CinegyHealthCheckSeconds -NotePropertyValue 1 -Force
+    }
+
+    It 'names the tolerance that was crossed, not just the word "unhealthy"' {
+        # The log said "Cinegy health changed from healthy to unhealthy" and
+        # nothing else, so the only way to learn why was to read the engine's
+        # metrics by hand after the moment had passed.
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{
+                Success = $true; Healthy = $false; SampleCount = 60; OutputCount = 1440
+                DroppedCount = 60; DroppedPercent = 4.0; NoInputSignal = 0
+                AverageReadTime = 9.1; MaxReadErrorRate = 0; MaxHeartbeat = 700
+                Issues = @('الإطارات الساقطة 60 تتجاوز الحد 5')
+            }
+        }
+
+        Update-CinegyHealthWatchdog
+
+        Should -Invoke Write-BridgeLog -ParameterFilter {
+            $Message -match 'healthy to unhealthy' -and $Message -match 'تتجاوز الحد'
+        }
+        $script:HealthHistory.Cinegy.LastError | Should -Match 'تتجاوز الحد'
+    }
+
+    It 'falls back to the raw figures when the engine names no issue' {
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{
+                Success = $true; Healthy = $false; SampleCount = 60; OutputCount = 1440
+                DroppedCount = 12; DroppedPercent = 0.8; NoInputSignal = 0
+                AverageReadTime = 3.2; MaxReadErrorRate = 0.9; MaxHeartbeat = 700
+                Issues = @()
+            }
+        }
+
+        Update-CinegyHealthWatchdog
+
+        $script:HealthHistory.Cinegy.LastError | Should -Match '12'
+        $script:HealthHistory.Cinegy.LastError | Should -Match 'أخطاء القراءة'
+    }
+
+    It 'says unreachable is unreachable, and keeps the credential out of it' {
+        # A transport error carries the URL it failed on, and that URL is how
+        # the bridge reaches Air - not secret here, but the same redactor
+        # guards every other path and this one must not be the exception.
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{ Success = $false; Healthy = $null; Error = 'connection refused' }
+        }
+
+        Update-CinegyHealthWatchdog
+
+        $script:HealthHistory.Cinegy.LastError | Should -Match 'تعذّر الوصول'
+        $script:HealthHistory.Cinegy.LastError | Should -Match 'connection refused'
+    }
+}
+
+Describe 'Recovery is announced, not only the failure' {
+    BeforeEach {
+        Mock Write-BridgeLog {}
+        Mock Send-AdminBroadcast {}
+        $script:RuntimeState.Monitoring.LastCinegyHealthCheck = (Get-Date).AddHours(-1)
+        $script:HealthHistory.Cinegy.PendingState = ''
+        $script:HealthHistory.Cinegy.PendingCount = 0
+        $config.Settings | Add-Member -NotePropertyName CinegyHealthConfirmChecks -NotePropertyValue 1 -Force
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnCinegyHealth -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName CinegyHealthCheckSeconds -NotePropertyValue 1 -Force
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{
+                Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500
+                DroppedCount = 0; DroppedPercent = 0; NoInputSignal = 0
+                AverageReadTime = 1.0; MaxReadErrorRate = 0; MaxHeartbeat = 700; Issues = @()
+            }
+        }
+    }
+
+    It 'says it recovered even when the dip never reached the warning threshold' {
+        # The warning waits for HealthFailureAlertThreshold consecutive
+        # failures. A dip that cleared just under it left the screens saying
+        # "غير سليم" for minutes and then went quiet, and an operator who had
+        # looked in the middle of it was never told it was over.
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'unhealthy'
+        $script:HealthHistory.Cinegy.AlertSent = $false
+        $script:HealthHistory.Cinegy.OutageStartedAt = (Get-Date).AddMinutes(-4)
+        $script:HealthHistory.Cinegy.LastError = 'قياسات غير سليمة: الإطارات الساقطة 60'
+
+        Update-CinegyHealthWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'تعافت صحة Cinegy' -and
+            $Text -match 'استمر الخلل' -and
+            # It carries why it had been unhealthy, and the numbers it is at now.
+            $Text -match 'الإطارات الساقطة 60' -and $Text -match 'العينات 60' -and
+            # And says why no warning preceded it.
+            $Text -match 'لم يبلغ الخلل حدّ التنبيه'
+        }
+    }
+
+    It 'does not claim a recovery when it was never down' {
+        # A first reading of a run is 'unknown' to 'healthy', which is a
+        # startup, not a recovery - and announcing one on every restart is how
+        # an alert channel gets muted.
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'unknown'
+        $script:HealthHistory.Cinegy.AlertSent = $false
+        $script:HealthHistory.Cinegy.OutageStartedAt = $null
+
+        Update-CinegyHealthWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'stays silent when the state has not moved' {
+        $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
+        $script:HealthHistory.Cinegy.AlertSent = $false
+
+        Update-CinegyHealthWatchdog
+
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}

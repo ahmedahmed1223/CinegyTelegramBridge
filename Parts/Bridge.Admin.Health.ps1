@@ -457,21 +457,21 @@ function Get-BridgeHealthCenterText {
     # behind a count. Order inside each group is untouched - sorting the whole
     # list by severity would move Cinegy off the second row and cost an
     # operator the place they have learned to look.
-    $render = {
+    # Three cells per row - state, identity, name, detail - so
+    # Format-BridgeTextTable can align them into columns the eye reads down.
+    # Each glyph column holds exactly one emoji per row, which is what makes
+    # the widths line up when emoji are wider than letters.
+    #
+    # Get-JsonProp, not .Contains: these rows arrive as hashtables from
+    # Get-BridgeHealthRows and as PSCustomObjects from anything built out of
+    # JSON, and only this helper reads both without throwing under StrictMode.
+    $toCells = {
         param($row)
-        # Guarded: these rows are hashtables built at seven call sites, and
-        # under StrictMode an absent key throws - which would take down the
-        # screen an administrator opens when something has already gone wrong.
-        # A row without an identity glyph simply gets none.
-        # Get-JsonProp, not .Contains: these rows arrive as hashtables from
-        # Get-BridgeHealthRows and as PSCustomObjects from anything that built
-        # them from JSON, and only this helper reads both without throwing.
-        $glyphValue = [string](Get-JsonProp $row 'Glyph')
-        $glyph = if ($glyphValue) { "$glyphValue " } else { '' }
-        "$($row.Icon) $glyph<b>$(ConvertTo-TelegramHtmlText ([string]$row.Name))</b> — $(ConvertTo-TelegramHtmlText ([string]$row.Detail))"
+        $glyph = [string](Get-JsonProp $row 'Glyph')
+        , @([string]$row.Icon, $(if ($glyph) { $glyph } else { '·' }), [string]$row.Name, [string]$row.Detail)
     }
-    $problemLines = @($rows | Where-Object { [string]$_.Icon -ne '🟢' } | ForEach-Object { & $render $_ })
-    $healthyLines = @($rows | Where-Object { [string]$_.Icon -eq '🟢' } | ForEach-Object { & $render $_ })
+    $problemRows = @($rows | Where-Object { [string]$_.Icon -ne '🟢' } | ForEach-Object { & $toCells $_ })
+    $healthyRows = @($rows | Where-Object { [string]$_.Icon -eq '🟢' } | ForEach-Object { & $toCells $_ })
     # The verdict the seven rows already imply, said once at the top. This
     # screen is opened to answer one question - is anything wrong? - and it
     # answered only by making the operator read every row and notice a colour.
@@ -489,11 +489,8 @@ function Get-BridgeHealthCenterText {
         "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
         "<b>$verdict</b>"
         ''
-        $(if ($problemLines.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemLines.Count)):</b>`n$($problemLines -join "`n")`n" })
-        $(if ($healthyLines.Count -gt 0) {
-                $tag = if ($healthyLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
-                "<b>سليم ($($healthyLines.Count)):</b>`n$tag$($healthyLines -join "`n")</blockquote>"
-            })
+        $(if ($problemRows.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemRows.Count)):</b>`n$(Format-BridgeTextTable -Rows $problemRows)`n" })
+        $(if ($healthyRows.Count -gt 0) { "<b>سليم ($($healthyRows.Count)):</b>`n$(Format-BridgeTextTable -Rows $healthyRows)" })
         ''
         "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
     ) -join "`n"

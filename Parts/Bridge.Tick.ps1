@@ -446,19 +446,23 @@ function Get-BridgeStatsText {
     $lines.Add("<b>📈 أرقام التشغيل</b> — <code>v$($script:BridgeVersion)</code>")
     $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
     $lines.Add("<b>$verdict</b>")
-    $lines.Add('')
-    $lines.Add("<b>مدة التشغيل:</b> <code>$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د</code>")
-    $lines.Add("منذ: <code>$($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))</code>")
-    $lines.Add('')
-    $lines.Add("<b>عمليات الهواء:</b> <code>$total</code> (✅ <code>$($counters.Success)</code> · ❌ <code>$($counters.Failed)</code> · ⛔ <code>$($counters.Blocked)</code>)")
-    $lines.Add("<blockquote>رسائل رفضها Telegram لتجاوز الحد (429): <code>$($script:TelegramRateLimitHits)</code>
-رسائل مؤجلة أسقطها حد طابور Telegram: <code>$($script:TelegramOutboxDropped)</code>
-اتصال Telegram: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))</code>
-صحة Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))</code></blockquote>")
-
     $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
-    $lines.Add("آخر نبضة يومية: <code>$lastBeat</code>")
-    $lines.Add("مشاهد مسجّلة على الهواء: <code>$($script:OnAir.Count)</code>")
+
+    # One table, label against value, so the numbers form a column instead of
+    # ending each sentence at a different place. The rich-message screens have
+    # had a real table since 10.1; this is the same shape where they cannot.
+    $lines.Add('')
+    $lines.Add((Format-BridgeTextTable -Rows @(
+                , @('⏱', 'مدة التشغيل', "$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
+                , @('📅', 'منذ', $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
+                , @('🎬', 'عمليات الهواء', "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
+                , @('🚦', 'حدّ تيليجرام (429)', [string]$script:TelegramRateLimitHits)
+                , @('📭', 'رسائل أُسقطت من الطابور', [string]$script:TelegramOutboxDropped)
+                , @('📡', 'اتصال Telegram', [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
+                , @('🎛', 'صحة Cinegy', [string]$script:RuntimeState.Monitoring.CinegyHealthState)
+                , @('💚', 'آخر نبضة يومية', $lastBeat)
+                , @('🔴', 'مشاهد على الهواء', [string]$script:OnAir.Count)
+            )))
     return ($lines -join "`n")
 }
 
@@ -934,18 +938,18 @@ function Get-UsageDigestText {
     else {
         $lines.Add('')
         $lines.Add('<b>الأكثر استخدامًا:</b>')
+        # A ranking is a table by nature: the counts belong under each other,
+        # not at the end of sentences of different lengths.
         $rank = 0
-        $rankLines = [System.Collections.Generic.List[string]]::new()
-        foreach ($item in $ranked) {
-            $rank++
-            $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
-                " · آخر مرة <code>$(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))</code>"
-            }
-            else { '' }
-            $rankLines.Add("$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — <code>$($item.Value)</code>$lastUsed")
-        }
-        $tag = if ($rankLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
-        $lines.Add("$tag$($rankLines -join "`n")</blockquote>")
+        $rankRows = @(foreach ($item in $ranked) {
+                $rank++
+                $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
+                    ([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm')
+                }
+                else { '—' }
+                , @("$rank.", [string]$item.Key, [string]$item.Value, $lastUsed)
+            })
+        $lines.Add((Format-BridgeTextTable -Rows $rankRows))
     }
 
     $counters = $script:AirOperationCounters
@@ -1233,18 +1237,78 @@ function Update-CinegyHealthWatchdog {
     }
     $history.PendingState = ''; $history.PendingCount = 0
 
+    # What the reading actually was, in numbers, kept once and used for both
+    # the log line and the screens.
+    #
+    # "unhealthy" here never meant unreachable: Air answered and its own
+    # telemetry crossed a tolerance. Which tolerance, and by how much, was
+    # computed only for the admin broadcast and only once the alert threshold
+    # was reached - so the log said "Cinegy health changed from healthy to
+    # unhealthy" and nothing else, and the only way to learn why was to go and
+    # read the metrics by hand while the moment had passed.
+    $issues = @(@(Get-JsonProp $telemetry 'Issues') | Where-Object { $_ })
+    $why = if ($reading -eq 'unreachable') {
+        $err = [string](Get-JsonProp $telemetry 'Error')
+        if ($err) { "تعذّر الوصول: $(Protect-SensitiveText $err)" } else { 'تعذّر الوصول' }
+    }
+    elseif ($issues.Count -gt 0) { "قياسات غير سليمة: $($issues -join '، ')" }
+    else {
+        "قياسات غير سليمة (الساقط $(Get-JsonProp $telemetry 'DroppedCount') من $(Get-JsonProp $telemetry 'OutputCount')" +
+        " · $(Get-JsonProp $telemetry 'DroppedPercent')% · أخطاء القراءة $(Get-JsonProp $telemetry 'MaxReadErrorRate')%)"
+    }
+
     $newState = $reading
-    if ($newState -ne $oldState) { Write-BridgeLog "Cinegy health changed from $oldState to $newState" }
+    if ($newState -ne $oldState) {
+        # The reason on the same line as the change: an operator reading the
+        # log after the fact has the numbers that caused it, not just the word.
+        $suffix = if ($newState -eq 'healthy') { '' } else { " - $why" }
+        Write-BridgeLog "Cinegy health changed from $oldState to $newState$suffix"
+    }
     $script:RuntimeState.Monitoring.CinegyHealthState = $newState
     if ($newState -eq 'healthy') {
-        $shouldRecover = [bool]$history.AlertSent
+        # Recovery is announced whenever the state was not healthy before, not
+        # only when a warning had already gone out. The warning waits for
+        # HealthFailureAlertThreshold consecutive failures, so a dip that
+        # cleared just under it left the screens saying "غير سليم" for minutes
+        # and then went quiet - and an operator who had looked in the middle of
+        # it was never told it was over.
+        $wasDown = $oldState -ne 'healthy' -and $oldState -ne 'unknown'
+        $wasAlerted = [bool]$history.AlertSent
+        $downSince = $history.OutageStartedAt
+
         $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
-        if ($shouldRecover -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) { Send-AdminBroadcast -Text "💚 تعافت صحة Cinegy وعادت القياسات إلى الحالة السليمة." }
+
+        if ($wasDown -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) {
+            # The same shape as the warning: what it is now, in numbers, and
+            # how long it was not. A bare "it recovered" leaves an operator
+            # deciding whether to go and look anyway.
+            # Plain text, like the warning it answers. Send-AdminBroadcast
+            # holds a non-urgent notice for the quiet-hours digest and that
+            # queue keeps only the text, so a message that needed a parse mode
+            # would lose it on the way out hours later.
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $lines.Add('💚 تعافت صحة Cinegy')
+            if ($downSince) {
+                $seconds = [int]($now - [datetime]$downSince).TotalSeconds
+                $lines.Add("استمر الخلل $(Format-DurationSeconds -Seconds $seconds) — من $(([datetime]$downSince).ToString('HH:mm:ss')) إلى $($now.ToString('HH:mm:ss'))")
+            }
+            # Why it had been unhealthy, kept from the reading that decided it.
+            if ($history.LastError) { $lines.Add("السبب كان: $([string]$history.LastError)") }
+            $lines.Add((Format-CinegyTelemetryStatus -Telemetry $telemetry))
+            if (-not $wasAlerted) {
+                # Said plainly, or an operator wonders why they are being told
+                # something ended that they were never told had begun.
+                $lines.Add('لم يبلغ الخلل حدّ التنبيه، فلم يُرسل تحذير عند بدايته.')
+            }
+            Send-AdminBroadcast -Text ($lines -join "`n")
+        }
         return
     }
     if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
     $history.FailureCount = [int]$history.FailureCount + 1; $history.LastErrorAt = $now
-    $history.LastError = if ($newState -eq 'unreachable') { 'تعذّر الوصول' } else { 'قياسات غير سليمة' }
+    # The measured reason, not the category. "قياسات غير سليمة" told the
+    # ⚠️ آخر الأخطاء row exactly what its own colour already said.
+    $history.LastError = $why
     $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
     if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) {
         $history.AlertSent = $true

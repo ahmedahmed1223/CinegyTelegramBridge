@@ -1463,6 +1463,30 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
         @(Test-BridgeTelegramHtml -Text $long) | Should -BeNullOrEmpty
     }
 
+    It 'accepts the field prompt an operator types into' {
+        # templates.json is written by hand, so a '<' can arrive in the key,
+        # the label or the Titler variable name - and this screen shows all
+        # three at once.
+        $state = @{
+            Key = '<b>عاجل'; Index = 0
+            Fields = @('Ajel.center & co'); Labels = @('<i>العنوان'); Limits = @(0)
+        }
+
+        $text = Get-FieldPromptText -State $state
+        @(Test-BridgeTelegramHtml -Text $text) | Should -BeNullOrEmpty
+        $text | Should -Match '&lt;b&gt;عاجل'
+        $text | Should -Match '&lt;i&gt;العنوان'
+        $text | Should -Match '&amp;'
+        # The variable name is monospace: it is the machine's name for the
+        # field, not a label the operator should read as one.
+        $text | Should -Match '<code>Ajel.center'
+
+        # A field with no friendly label falls back to the raw name, and that
+        # path has to be valid HTML too.
+        $bare = Get-FieldPromptText -State @{ Key = 'k'; Index = 0; Fields = @('Ajel.center'); Labels = @(); Limits = @(0) }
+        @(Test-BridgeTelegramHtml -Text $bare) | Should -BeNullOrEmpty
+    }
+
     It 'accepts a template preview built from a hostile template' {
         # Key, category, description and field names are all typed by an
         # administrator; a '<' in any of them must come out escaped rather

@@ -181,7 +181,7 @@ function Start-ShowFlow {
         LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
     }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
 }
 
 function Resume-ShowFlow {
@@ -223,7 +223,7 @@ function Resume-ShowFlow {
         return
     }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
 }
 
 function Format-ShowReviewText {
@@ -309,7 +309,20 @@ function Get-FieldPromptText {
     if ($State.Limits -and $index -lt @($State.Limits).Count) { $limit = [int]$State.Limits[$index] }
     $limit = Get-EffectiveFieldLimit -FieldLimit $limit
     $limitText = if ($limit -gt 0) { " (الحد: $limit حرفًا)" } else { "" }
-    return "القالب '$($State.Key)' - أرسل نص الحقل ($($index + 1)/$($State.Fields.Count))$limitText`:`n$label"
+    # parse_mode=HTML. This is the screen an operator types into, so the field
+    # being asked for is bold, and the raw variable name under it is <code> -
+    # it is a Titler identifier like "Ajel.center", and monospace is what says
+    # "this is the machine's name for the field, not a label to read".
+    #
+    # Template key, label and variable name all come from templates.json, which
+    # an administrator writes by hand, so all three are escaped.
+    $shownLabel = if ($label -eq $name) {
+        "<code>$(ConvertTo-TelegramHtmlText $name)</code>"
+    }
+    else {
+        "<b>$(ConvertTo-TelegramHtmlText ([string]$State.Labels[$index]))</b>`n<code>$(ConvertTo-TelegramHtmlText $name)</code>"
+    }
+    return "القالب <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b> - أرسل نص الحقل ($($index + 1)/$($State.Fields.Count))$limitText`:`n$shownLabel"
 }
 
 function Sync-LayerAfterOperatorAction {

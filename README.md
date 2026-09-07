@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.81.0
+
+The last of the plain-text screens, leaving only what should stay plain.
+
+The field prompt — the screen an operator actually types into — puts the field
+being asked for in bold with the raw variable name under it in monospace. The
+variable is a Titler identifier like `Ajel.center`, and monospace is what says
+"this is the machine's name for the field, not a label to read". Where a
+template offers no friendly label, the raw name stands alone.
+
+The setting prompt puts the current and default values in monospace so they line
+up under one another and can be compared at a glance, with their digits staying
+left-to-right beside the Arabic. The bulletin's sync note gets a bold verdict,
+monospace figures, and `LoopEndFrame` marked as the Titler field name it is
+rather than a word to read.
+
+All of it is escaped: template key, field label, variable name, setting
+description and both values. `templates.json` is written by hand, so a `<` can
+arrive in any of the three the field prompt shows at once — pinned with a test
+on a template carrying all three.
+
+`Get-OnAirShareText` remains plain, as its own comment has always asked: it is
+meant to be pasted into another app, where markup is the one thing that breaks
+it.
+
 ## Version 7.80.1
 
 The manager logs its own exit, so the absence of that line becomes evidence.

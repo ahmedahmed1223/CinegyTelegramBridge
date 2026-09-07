@@ -386,7 +386,7 @@ function Invoke-CallbackQuery {
             $state.Mode = 'show_fields'
             $state.Index = 0
             Set-PendingState -ChatId $chatId -State $state
-            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
             break
         }
         'show:back' {
@@ -397,7 +397,7 @@ function Invoke-CallbackQuery {
             }
             $state.Index = [int]$state.Index - 1
             Set-PendingState -ChatId $chatId -State $state
-            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
             break
         }
         'show:preview' {

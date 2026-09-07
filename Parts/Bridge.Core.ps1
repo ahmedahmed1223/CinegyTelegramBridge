@@ -415,7 +415,11 @@ function Get-SettingPromptText {
     $description = if ($metadata) { [string](Get-JsonProp $metadata 'Description') } else { 'قيمة الإعداد' }
     $current = Format-SettingDisplay -Name $Name -Value (Get-Setting $Name)
     $default = Format-SettingDisplay -Name $Name -Value $script:DefaultSettings[$Name]
-    return "$description.`nالقيمة الحالية: $current`nالقيمة الافتراضية: $default`nأرسل رقمًا صحيحًا غير سالب:"
+    # parse_mode=HTML. The two values are what the operator is comparing, so
+    # both are <code>: monospace lines them up under one another and keeps the
+    # digits left-to-right beside the Arabic. Description and formatted values
+    # come from the settings metadata, so all three are escaped.
+    return "$(ConvertTo-TelegramHtmlText $description).`nالقيمة الحالية: <code>$(ConvertTo-TelegramHtmlText ([string]$current))</code>`nالقيمة الافتراضية: <code>$(ConvertTo-TelegramHtmlText ([string]$default))</code>`nأرسل رقمًا صحيحًا غير سالب:"
 }
 
 function Set-Setting {

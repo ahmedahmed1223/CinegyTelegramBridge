@@ -769,7 +769,7 @@ function Switch-MojazSync {
     $wanted = -not (Test-MojazSyncToLoop -Bulletin $bulletin)
     $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -SyncToLoop $wanted -UserId $UserId
     if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
-        Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId $ChatId))
+        Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId $ChatId)) -ParseMode HTML
     }
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
 }

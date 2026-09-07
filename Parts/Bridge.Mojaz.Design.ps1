@@ -506,15 +506,15 @@ function Get-MojazSyncText {
     param($Bulletin)
     $timing = Get-MojazSceneTiming
     if (-not (Test-MojazSyncToLoop -Bulletin $Bulletin)) {
-        return '🎬 المزامنة متوقّفة: يتغيّر الصف في منتصف الثبات، بلا حركة تُخفيه.'
+        return '<b>🎬 المزامنة متوقّفة</b>: يتغيّر الصف في منتصف الثبات، بلا حركة تُخفيه.'
     }
     if (-not $timing -or [double]$timing.LoopSeconds -le 0) {
-        return '⚠️ المزامنة مطلوبة لكن القالب لا يعطي لوبًا صالحًا، فيعمل الموجز بالمدّة المكتوبة.'
+        return '<b>⚠️ المزامنة مطلوبة</b> لكن القالب لا يعطي لوبًا صالحًا، فيعمل الموجز بالمدّة المكتوبة.'
     }
     $loop = [double]$timing.LoopSeconds
-    $line = "🎬 مزامنة مع حركة الظهور: كل صف يبقى لوبًا كاملًا ($loop ث) ويتبدّل داخل ظهورٍ مدّته $($timing.IntroSeconds) ث."
+    $line = "<b>🎬 مزامنة مع حركة الظهور</b>: كل صف يبقى لوبًا كاملًا (<code>$loop</code> ث) ويتبدّل داخل ظهورٍ مدّته <code>$($timing.IntroSeconds)</code> ث."
     if ($loop -ge 30) {
-        $line += "`n⚠️ اللوب طويل، فالصف يبقى $loop ث. لتسريعه قصِّر LoopEndFrame في Titler."
+        $line += "`n⚠️ اللوب طويل، فالصف يبقى <code>$loop</code> ث. لتسريعه قصِّر <code>LoopEndFrame</code> في Titler."
     }
     return $line
 }

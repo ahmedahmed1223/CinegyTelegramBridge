@@ -247,7 +247,7 @@ function Start-SettingValuePrompt {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_value'; Name = $Name; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPromptText -Name $Name) -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPromptText -Name $Name) -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-SettingValue {

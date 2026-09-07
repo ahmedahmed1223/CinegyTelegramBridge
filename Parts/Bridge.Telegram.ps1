@@ -726,14 +726,27 @@ function Repair-TelegramHtmlChunks {
 
 function New-CopyButton {
     <#
-        A button that puts text on the clipboard (Bot API 8.0's copy_text).
+        A button that puts text on the clipboard (copy_text, Bot API 7.11).
 
         It carries no callback_data: Telegram performs the copy on the device
         and the bridge never hears about the press, which is why it is the one
-        button here without one.
+        button here without one - and why this button cannot change after
+        being pressed. Nothing arrives to change it: its label and its colour
+        can only be chosen when the message is sent. Checked against the Bot
+        API changelog through 10.3, the newest at the time of writing.
+
+        So the colour is spent on saying what the button *is* rather than
+        what it did. Blue is the bridge's colour for the action a screen
+        offers; the copy button was the last one on these screens wearing
+        none, which left the one button that behaves unlike every other
+        looking exactly like them.
     #>
     param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][AllowEmptyString()][string]$Payload)
-    return @{ text = $Text; copy_text = @{ text = [string]$Payload } }
+    # Not through New-BridgeButton: that one builds a button around a
+    # callback, the single thing this button must not have. Clients older
+    # than 9.4 ignore the style, and ConvertTo-TelegramReplyMarkupJson strips
+    # it when button styles are turned off.
+    return @{ text = $Text; copy_text = @{ text = [string]$Payload }; style = 'primary' }
 }
 
 function Get-CopyButtonNotice {
@@ -741,7 +754,7 @@ function Get-CopyButtonNotice {
         The line that tells the reader what the copy button will do.
 
         It is written before the press because nothing can be written after
-        one: copy_text (Bot API 8.0) is handled by Telegram on the device and
+        one: copy_text (Bot API 7.11) is handled by Telegram on the device and
         sends the bridge no callback, so the bot cannot know the button was
         pressed and cannot answer it. Telegram's own client shows a brief
         confirmation; this line is what makes that confirmation expected

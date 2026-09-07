@@ -13,12 +13,33 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.92.1
+
+The button itself cannot change after the press, so it changes before it.
+
+Asked whether the copy button's label or colour could flip to show the copy had
+happened: checked against the Bot API changelog through 10.3 (24 August 2026,
+the newest), it cannot. Pressing a `copy_text` button sends the bot no update at
+all, so nothing arrives that an edit could be built on, and no field makes a
+button restyle itself once pressed. A button's label and colour are chosen when
+the message is sent or not at all.
+
+So the colour is spent on what the button *is* rather than what it did. Blue is
+this bridge's colour for the action a screen offers, and the copy button was the
+last one on these screens wearing none - which left the one button that behaves
+unlike every other looking exactly like them. Older clients ignore `style` (Bot
+API 9.4) and `EnableButtonStyles` strips it from the wire when it is off, so the
+label still carries the meaning on its own.
+
+Corrected: `copy_text` is Bot API 7.11 (31 October 2024), not 8.0 as the 7.91.0
+and 7.92.0 notes said.
+
 ## Version 7.92.0
 
 A copy button now says what it will do, because nothing can say it afterwards.
 
 The request was to confirm that the text had been copied. The bridge cannot: a
-`copy_text` button (Bot API 8.0) is carried out by Telegram on the device and
+`copy_text` button (Bot API 7.11) is carried out by Telegram on the device and
 sends no callback, so the bot never learns the button was pressed and has
 nothing to answer with. Telegram's own client shows a brief confirmation of its
 own.
@@ -45,7 +66,7 @@ all, so an editor correcting one word was retyping the whole headline from
 memory or from a screen further back. No bot can fill a person's input box —
 Telegram does not offer it — so the nearest thing is one tap to the clipboard,
 and it is given twice: the current text sits in a `<code>` span, which Telegram
-makes tap-to-copy, and a `📋` button using Bot API 8.0's `copy_text` copies it
+makes tap-to-copy, and a `📋` button using Bot API 7.11's `copy_text` copies it
 outright for anyone who does not know that. It is the one button in the bridge
 with no `callback_data`, because the copy happens on the device and the bridge
 never hears the press.

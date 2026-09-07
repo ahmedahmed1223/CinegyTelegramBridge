@@ -1858,6 +1858,20 @@ Describe 'Editing text starts from the text' {
         $rows[1][0].callback_data | Should -Be 'news:reorder'
     }
 
+    It 'colours the copy button, the only mark it can carry' {
+        # No press reaches the bridge, so the button cannot change once sent -
+        # its colour is chosen with the message or not at all. Blue is what
+        # the bridge paints the action a screen offers.
+        $button = New-CopyButton -Text 'نسخ' -Payload 'x'
+
+        $button.style | Should -Be 'primary'
+        $button.ContainsKey('callback_data') | Should -BeFalse
+        # And it comes off the wire entirely when styles are turned off.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        ConvertTo-TelegramReplyMarkupJson -ReplyMarkup @{ inline_keyboard = @(, @($button)) } |
+            Should -Not -Match 'primary'
+    }
+
     It 'says what the copy button will do, because nothing can be said after it' {
         # copy_text is handled by Telegram on the device: no callback reaches
         # the bridge, so the bot cannot confirm the press afterwards. The

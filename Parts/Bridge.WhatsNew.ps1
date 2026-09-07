@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.92.1'; Items = @(
+                '🔵 زرّ النسخ صار أزرق كبقية أزرار الفعل — الأثر الوحيد الذي يقبله زرٌّ لا يُبلَّغ بضغطه.'
+            ) }
         @{ Version = '7.92.0'; Items = @(
                 '📋 الشاشات التي فيها زر نسخ صارت تقول ما سيفعله الزرّ وأين تضع ما نسخته.'
             ) }

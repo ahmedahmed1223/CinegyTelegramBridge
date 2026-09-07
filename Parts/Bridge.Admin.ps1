@@ -855,7 +855,14 @@ function Get-RuntimeFileHealthText {
         $fileLines.Add("$icon <code>$(ConvertTo-TelegramHtmlText ([string]$record.Name))</code>")
         $fileLines.Add("      <i>$(ConvertTo-TelegramHtmlText $detail)</i>")
     }
-    if ($fileLines.Count -gt 0) { $lines.Add("<blockquote>$($fileLines -join "`n")</blockquote>") }
+    # Expandable past a handful, because folding is the one thing the quote
+    # gives that spacing cannot: the verdict above it and the advice below it
+    # both stay on the first screen of a phone instead of being scrolled past.
+    # Two lines per file, so the threshold is counted in files.
+    if ($fileLines.Count -gt 0) {
+        $tag = if ($fileLines.Count -gt 10) { '<blockquote expandable>' } else { '<blockquote>' }
+        $lines.Add("$tag$($fileLines -join "`n")</blockquote>")
+    }
 
     if ($faults.Count -gt 0) {
         $lines.Add('')
@@ -1025,7 +1032,7 @@ function Get-BridgeHealthCenterText {
         '<b>🩺 مركز صحة النظام</b>'
         "Bridge <code>v$script:BridgeVersion</code>"
         ''
-        "<blockquote>$($rowLines -join "`n")</blockquote>"
+        "$(if ($rowLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' })$($rowLines -join "`n")</blockquote>"
         "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
     ) -join "`n"
 }

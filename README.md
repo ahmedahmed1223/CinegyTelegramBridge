@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.79.0
+
+The quote bar gets one meaning.
+
+The problem was never the shape — it was that the bar meant two things. On one
+screen "material taken from somewhere else", on another "a list of details", and
+an operator working under pressure learns nothing from a mark that means two
+things. It has one meaning now: **detail you may skip**, with the verdict above
+it rather than inside it.
+
+So it comes off the user-activity list, which is that whole screen rather than
+evidence under a verdict it has already given; a bar around the only thing on
+the screen teaches nothing, which is the single job a consistent mark has.
+
+It stays where the block really is evidence: the health-centre rows, the
+runtime-file list, the secondary counters in the operating numbers, the usage
+ranking, and the notable events in the handover digest — those last genuinely
+quoted, being lines the bridge wrote elsewhere.
+
+Long lists now fold themselves away. Folding is the one thing the quote gives
+that spacing cannot: the verdict above the list and the advice below it both
+stay on the first screen of a phone instead of being scrolled past. The
+threshold is five rows, or ten lines in the file-health screen, where each file
+costs two.
+
 ## Version 7.78.0
 
 The menu screen loses the quote bar and gains who put each layer up, and when.

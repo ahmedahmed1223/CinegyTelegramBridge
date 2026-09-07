@@ -444,8 +444,10 @@ Describe 'Administrative user activity status' {
 
         $raw = Get-UserActivitySummaryText
         $raw | Should -Match '&lt;b&gt;مخرج'
-        $raw | Should -Match '<blockquote>'
         $raw | Should -Match '<i>Telegram لا يوفّر'
+        # Not quoted: this list is the whole screen, not evidence under a
+        # verdict, and the bar is kept for detail an operator may skip.
+        $raw | Should -Not -Match 'blockquote'
         ConvertFrom-TelegramHtmlText $raw | Should -Match '<b>مخرج'
     }
 }

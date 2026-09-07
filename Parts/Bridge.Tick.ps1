@@ -930,7 +930,8 @@ function Get-UsageDigestText {
             else { '' }
             $rankLines.Add("$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — <code>$($item.Value)</code>$lastUsed")
         }
-        $lines.Add("<blockquote>$($rankLines -join "`n")</blockquote>")
+        $tag = if ($rankLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
+        $lines.Add("$tag$($rankLines -join "`n")</blockquote>")
     }
 
     $counters = $script:AirOperationCounters

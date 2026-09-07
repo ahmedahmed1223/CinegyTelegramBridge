@@ -461,7 +461,14 @@ function Get-UserActivitySummaryText {
             $activity = Get-UserActivityStatus -LastActivityAt ([string]$_.LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
             "• <b>$(ConvertTo-TelegramHtmlText ([string]$_.Alias))</b>: $(ConvertTo-TelegramHtmlText ([string]$activity.Label))"
         })
-    if ($rows.Count -gt 0) { $lines.Add("<blockquote>$($rows -join "`n")</blockquote>") }
+    # Not quoted: this list is the whole screen, not evidence under a verdict
+    # the screen has already given. The bar is reserved for detail an operator
+    # may skip, and a bar around the only thing here would teach them nothing
+    # - the one job a consistent mark has.
+    if ($rows.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add($rows -join "`n")
+    }
     return ($lines -join "`n")
 }
 

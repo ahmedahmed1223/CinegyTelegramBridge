@@ -1444,6 +1444,25 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
         @(Test-BridgeTelegramHtml -Text (Get-FavoritesManagementText -UserId 7275359265)) | Should -BeNullOrEmpty
     }
 
+    It 'gives the quote bar one meaning: detail that may be skipped' {
+        # A mark that means two things teaches an operator nothing. The block
+        # that IS a screen's answer is not quoted; the blocks that are evidence
+        # under a verdict are, and fold once they are long enough that
+        # scrolling past them costs the verdict its place on the phone.
+        Get-UserActivitySummaryText | Should -Not -Match 'blockquote'
+
+        $short = Get-RuntimeFileHealthText -Records @(
+            [pscustomobject]@{ Name = 'onair.json'; State = 'healthy'; SizeText = '2 KB'; ModifiedAt = (Get-Date) })
+        $short | Should -Match '<blockquote>'
+        $short | Should -Not -Match 'expandable'
+
+        $many = @(1..8 | ForEach-Object {
+                [pscustomobject]@{ Name = "file$_.json"; State = 'healthy'; SizeText = '2 KB'; ModifiedAt = (Get-Date) } })
+        $long = Get-RuntimeFileHealthText -Records $many
+        $long | Should -Match '<blockquote expandable>'
+        @(Test-BridgeTelegramHtml -Text $long) | Should -BeNullOrEmpty
+    }
+
     It 'accepts a template preview built from a hostile template' {
         # Key, category, description and field names are all typed by an
         # administrator; a '<' in any of them must come out escaped rather

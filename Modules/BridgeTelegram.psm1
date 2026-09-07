@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function Get-BridgeTelegramRetryDelayMs {
     <#
@@ -35,6 +35,44 @@ function Get-BridgeTelegramRetryDelayMs {
     return [Math]::Min($seconds * 1000, $MaximumDelayMs)
 }
 
+function Get-BridgeTelegramErrorText {
+    <#
+        The reason Telegram actually gave, not just the status line.
+
+        Invoke-RestMethod's exception message is "Response status code does
+        not indicate success: 400 (Bad Request)" and nothing else - which is
+        what the log carried when the reports screen broke, and why finding
+        the cause took a reproduction against the live audit trail instead of
+        one line. The body holds the answer:
+
+            {"ok":false,"error_code":400,
+             "description":"Bad Request: can't parse entities: ..."}
+
+        PowerShell puts that body in ErrorDetails.Message. The description is
+        Telegram's own wording, so it names the offending byte offset and the
+        tag it choked on.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$ErrorRecord)
+    if ($null -eq $ErrorRecord) { return '' }
+    $message = [string]$ErrorRecord.Exception.Message
+    $body = ''
+    try { $body = [string]$ErrorRecord.ErrorDetails.Message } catch { $body = '' }
+    if ([string]::IsNullOrWhiteSpace($body)) { return $message }
+
+    $description = ''
+    try { $description = [string]((ConvertFrom-Json $body -ErrorAction Stop).description) }
+    catch {
+        # Not JSON, or JSON without a description: the raw body is still more
+        # than the status line, trimmed so a stray HTML error page cannot fill
+        # the log.
+        $description = $body.Trim()
+        if ($description.Length -gt 300) { $description = $description.Substring(0, 300) + '…' }
+    }
+    if ([string]::IsNullOrWhiteSpace($description)) { return $message }
+    return "$message - $description"
+}
+
 function Invoke-BridgeTelegramRequest {
     [CmdletBinding(DefaultParameterSetName='Body')]
     param(
@@ -61,10 +99,10 @@ function Invoke-BridgeTelegramRequest {
             try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = 0 }
             if ($status -eq 429) {
                 $delay = Get-BridgeTelegramRetryDelayMs -ErrorRecord $_ -DefaultDelayMs $RetryDelayMs -MaximumDelayMs 300000
-                return [pscustomobject]@{ Success=$false; Response=$null; Error=$_.Exception.Message; Attempts=$attempt; StatusCode=429; RetryAfterMs=$delay }
+                return [pscustomobject]@{ Success=$false; Response=$null; Error=(Get-BridgeTelegramErrorText -ErrorRecord $_); Attempts=$attempt; StatusCode=429; RetryAfterMs=$delay }
             }
             if ($attempt -ge $MaxAttempts) {
-                return [pscustomobject]@{ Success=$false; Response=$null; Error=$_.Exception.Message; Attempts=$attempt; StatusCode=$status; RetryAfterMs=0 }
+                return [pscustomobject]@{ Success=$false; Response=$null; Error=(Get-BridgeTelegramErrorText -ErrorRecord $_); Attempts=$attempt; StatusCode=$status; RetryAfterMs=0 }
             }
             $delay = Get-BridgeTelegramRetryDelayMs -ErrorRecord $_ -DefaultDelayMs $RetryDelayMs
             if ($delay -gt 0) { Start-Sleep -Milliseconds $delay }
@@ -112,4 +150,4 @@ function Stop-BridgeTelegramRequestWorker {
     finally { $Worker.Pipeline.Dispose(); $Worker.Disposed = $true }
 }
 
-Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker
+Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker, Get-BridgeTelegramErrorText

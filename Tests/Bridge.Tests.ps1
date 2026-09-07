@@ -1568,3 +1568,61 @@ Describe 'A split page of HTML is still valid HTML' {
         @(Repair-TelegramHtmlChunks -Chunks $null) | Should -BeNullOrEmpty
     }
 }
+
+Describe 'One oversized screen must not cost the session its tables' {
+    BeforeEach { Reset-RichBlockCapabilities; Mock Write-BridgeLog {} }
+
+    It 'refuses to send a payload far larger than anything that renders here' {
+        Test-RichPayloadSize -Length 4000 | Should -BeTrue
+        Test-RichPayloadSize -Length 45000 | Should -BeFalse
+    }
+
+    It 'does not blame a block type when the payload was simply too big' {
+        # This is the whole fault: the banner report is the default one and
+        # serialised to 45 KB over a month. As the first rich message of a
+        # session its refusal found no type "proven yet", blamed all four, and
+        # disabled heading, table, paragraph and details until restart - so
+        # the status screens, the health centre and the digest all silently
+        # lost their tables.
+        Resolve-RichSendFailure -ErrorText '400 (Bad Request)' -Context 'sendRichMessage' `
+            -PayloadLength 45000 -Blocks @(
+                @{ type = 'heading'; text = 'x' }, @{ type = 'table'; cells = @() },
+                @{ type = 'paragraph'; text = 'y' }, @{ type = 'details'; summary = 'z'; blocks = @() })
+
+        foreach ($type in @('heading', 'table', 'paragraph', 'details')) {
+            $script:RichBlockTypesUnavailable.ContainsKey($type) | Should -BeFalse
+        }
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Message -match 'size, not a missing capability' }
+    }
+
+    It 'still blames an unproven type when the payload was a normal size' {
+        # The narrowing exists for a real reason - a server without one block
+        # type should lose that block type - and a small refusal still means
+        # what it always meant.
+        Resolve-RichSendFailure -ErrorText '400 (Bad Request)' -Context 'sendRichMessage' `
+            -PayloadLength 900 -Blocks @(@{ type = 'timeline'; text = 'x' })
+        $script:RichBlockTypesUnavailable.ContainsKey('timeline') | Should -BeTrue
+    }
+
+    It 'keeps the banner report inside what the bridge will send' {
+        # The report the whole fault came from. Capped at forty rows for the
+        # table; the text version still carries every row.
+        Mock Get-BannerReportData {
+            @{
+                Label = 'شهر'; Operators = 3; Truncated = $false
+                Sessions = @(1..300 | ForEach-Object {
+                        [pscustomobject]@{
+                            UserId = 7; Layer = 4; Target = "بنر رقم $_"
+                            Values = 'نص طويل يمثل ما يظهر على الهواء في هذا البنر'
+                            StartedAt = (Get-Date).AddMinutes(-$_); EndedAt = (Get-Date).AddMinutes(-$_ + 2)
+                        }
+                    })
+            }
+        }
+
+        $json = (@{ blocks = @(Get-BannerReportBlocks -Period 'month'); is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        # And it says what it left out rather than pretending 40 is all of it.
+        $json | Should -Match 'أحدث 40 من 300'
+    }
+}

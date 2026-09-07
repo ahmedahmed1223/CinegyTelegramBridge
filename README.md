@@ -13,6 +13,64 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.87.0
+
+One oversized report was costing every screen its tables until the next
+restart. This is the reason the design "got worse", and it has nothing to do
+with the recent text work.
+
+The banner report is the default one, and as rich blocks it serialises to 44,937
+characters for a month and 30,105 for a week. The largest payload ever seen
+rendering on this installation is the news report at 4,095. Telegram refuses it
+with a 400 — and because it can be the *first* rich message of a session, the
+narrowing logic finds no block type "proven yet", blames all four, and disables
+`heading`, `table`, `paragraph` and `details` for the rest of the session. Those
+four are what build ℹ️ الحالة, 📊 الحالة الكاملة, 🩺 مركز الصحة, 🕘 ماذا فاتني and
+every report, so all of them silently drop to their text fallback.
+
+The log says both halves plainly: at 18:59:54 "every block type in it has
+rendered before, so nothing was disabled" — a session where something small
+rendered first — and at 19:11:39 "those block types are disabled for this
+session" — a session that opened with the report. The fault is order-dependent.
+
+A payload far larger than anything that renders here is no longer sent at all
+(`Test-RichPayloadSize`, 12,000 characters): that screen alone falls back to
+text and no block type is blamed. A 400 on an oversized payload never disables a
+type — that is a size, not a missing capability — while the narrowing still does
+what it was built for, disabling an unproven type refused at a normal size.
+
+The banner report's table is capped at forty rows, taking it from 45 KB to
+9,789, and says "the newest 40 of 300" rather than implying it is all of them.
+The text version still carries every row.
+
+## Version 7.86.2
+
+A refusal says why now.
+
+`Invoke-RestMethod` gives only the status line — "Response status code does not
+indicate success: 400 (Bad Request)" and nothing else — which is what the log
+held when the reports screen broke, and why finding the cause took rebuilding
+the whole path against the live audit trail instead of reading one line.
+
+The answer is in the response body, which PowerShell puts in
+`ErrorDetails.Message`:
+
+```
+{"ok":false,"error_code":400,
+ "description":"Bad Request: can't parse entities: Unclosed start tag at byte offset 91"}
+```
+
+That description is Telegram's own wording: it names the tag it choked on and
+the byte offset. It is read and appended to the error on every failure now, 400
+and 429 alike. A body that is not the JSON expected — a gateway's error page,
+say — is taken raw and trimmed at 300 characters, so it cannot fill the log.
+
+The 7.86.1 fix was verified by rebuilding the reports path and all four status
+screens against the real 604 KB audit trail and inspecting every payload sent:
+the banner report for a month (43,210 characters) degrades to valid plain text,
+the other three reports and all four status screens send valid HTML, and not one
+message is unbalanced or over the limit.
+
 ## Version 7.86.1
 
 The reports section stopped working in 7.86.0. This is why, and the fix.

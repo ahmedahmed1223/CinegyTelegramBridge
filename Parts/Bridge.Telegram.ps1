@@ -326,6 +326,27 @@ function Get-RichBlockTypes {
     return @($found | Sort-Object -Unique)
 }
 
+# The largest rich payload seen rendering on this installation is the news
+# report at about 4 KB. Anything several times that is not worth a round trip
+# which, on the first message of a session, can cost every screen its table
+# until the next restart.
+$script:RichPayloadLimit = 12000
+
+function Test-RichPayloadSize {
+    <#
+        Whether a serialized rich_message is worth sending at all.
+
+        Telegram does not document a size for this parameter, so the rule is
+        empirical rather than exact: do not send what is far bigger than
+        anything that has ever rendered here. Being wrong this way costs one
+        screen its table and it falls back to text; being wrong the other way
+        cost every screen its table for the rest of the session.
+    #>
+    param([Parameter(Mandatory)][int]$Length, [int]$Limit = 0)
+    if ($Limit -le 0) { $Limit = $script:RichPayloadLimit }
+    return $Length -le $Limit
+}
+
 function Test-RichBlocksSendable {
     <# Whether this payload is worth a round trip at all. #>
     param([AllowNull()][array]$Blocks)
@@ -377,13 +398,22 @@ function Resolve-RichSendFailure {
     <# The two refusals mean different things. A 404 is the method missing, so
        nothing built from blocks will ever work here and the session-wide stop
        is both correct and the cheap answer. A 400 is this payload. #>
-    param([Parameter(Mandatory)][string]$ErrorText, [AllowNull()][array]$Blocks, [Parameter(Mandatory)][string]$Context)
+    param([Parameter(Mandatory)][string]$ErrorText, [AllowNull()][array]$Blocks, [Parameter(Mandatory)][string]$Context,
+        [int]$PayloadLength = 0)
     if ($ErrorText -match '404') {
         $script:RichMessagesUnavailable = $true
         Write-BridgeLog "$Context is not available here; using text for the rest of this session: $ErrorText" 'WARN'
         return
     }
     if ($ErrorText -match '400') {
+        # A large payload is refused for being large. Blaming the block types
+        # in it would disable them for every later screen, which is how a
+        # single oversized report took the tables off the status screens, the
+        # health centre and the digest until the bridge was restarted.
+        if ($PayloadLength -gt 0 -and -not (Test-RichPayloadSize -Length $PayloadLength)) {
+            Write-BridgeLog "$Context refused a $PayloadLength-character payload; that is a size, not a missing capability, so nothing was disabled: $ErrorText" 'WARN'
+            return
+        }
         $blamed = @(Register-RichBlocksRejected -Blocks $Blocks)
         if ($blamed.Count -gt 0) {
             Write-BridgeLog "$Context refused a payload using $($blamed -join ', '); those block types are disabled for this session: $ErrorText" 'WARN'
@@ -419,10 +449,16 @@ function Send-TelegramRichMessage {
         [hashtable]$ReplyMarkup
     )
     if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
-    $body = @{
-        chat_id = $ChatId
-        rich_message = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    $rich = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    # Not sent at all when it is far larger than anything that renders here.
+    # The text fallback covers this screen, and no block type is blamed for
+    # what is a size problem - which is how one big report cost every other
+    # screen its table for a whole session.
+    if (-not (Test-RichPayloadSize -Length $rich.Length)) {
+        Write-BridgeLog "A rich message of $($rich.Length) characters is past what this bridge sends; using text for this screen only" 'DEBUG'
+        return $false
     }
+    $body = @{ chat_id = $ChatId; rich_message = $rich }
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendRichMessage" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
@@ -436,7 +472,7 @@ function Send-TelegramRichMessage {
         Add-TelegramOutboxItem -Uri "$apiBase/sendRichMessage" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
         return $true
     }
-    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'sendRichMessage'
+    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'sendRichMessage' -PayloadLength $rich.Length
     return $false
 }
 

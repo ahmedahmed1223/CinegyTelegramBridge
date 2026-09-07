@@ -772,12 +772,26 @@ function Get-BannerReportBlocks {
     #>
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-BannerReportData -Period $Period -OnlyUserId $OnlyUserId
-    $sessions = @($data.Sessions)
+    $all = @($data.Sessions)
+
+    # Capped, because this one report is the reason every screen could lose
+    # its table. A month of banners serialised to 45 KB of blocks; Telegram
+    # refused it, and being the first rich message of a session that refusal
+    # used to disable heading, table, paragraph and details for every screen
+    # until the next restart.
+    #
+    # The newest are the ones asked about, and the text version below still
+    # carries every row for anyone who needs the whole window.
+    $maximumRows = 40
+    $sessions = @($all | Select-Object -Last $maximumRows)
 
     $blocks = @(@{ type = 'heading'; text = "🖼 تقرير البنرات — $($data.Label)"; size = 3 })
     if ($sessions.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = 'لم يُعرض أي بنر في هذه الفترة.' }
         return $blocks
+    }
+    if ($all.Count -gt $sessions.Count) {
+        $blocks += @{ type = 'paragraph'; text = "أحدث $($sessions.Count) من $($all.Count) بنرًا — اختر مدة أقصر لرؤية البقية في جدول." }
     }
 
     # Four columns, not five. Telegram splits a table's width evenly, so the

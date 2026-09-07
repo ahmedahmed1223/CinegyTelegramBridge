@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 
 BeforeAll {
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\BridgeTelegram.psm1') -Force
@@ -129,5 +129,38 @@ Describe 'Telegram 429 retry delay' {
         $result.StatusCode | Should -Be 429
         $result.RetryAfterMs | Should -Be 7000
         Should -Invoke Start-Sleep -ModuleName BridgeTelegram -Times 0 -Exactly
+    }
+}
+
+Describe 'A refused Telegram request says why' {
+    It 'carries the description Telegram sent, not only the status line' {
+        # The exception message is "Response status code does not indicate
+        # success: 400 (Bad Request)" and nothing else - which is what the log
+        # held when the reports screen broke, and why finding the cause took a
+        # reproduction against the live audit trail instead of one line.
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.Exception]::new('Response status code does not indicate success: 400 (Bad Request).'),
+            'x', [System.Management.Automation.ErrorCategory]::InvalidResult, $null)
+        $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new(
+            '{"ok":false,"error_code":400,"description":"Bad Request: can''t parse entities: Unclosed start tag at byte offset 91"}')
+
+        $text = Get-BridgeTelegramErrorText -ErrorRecord $record
+        $text | Should -Match '400'
+        $text | Should -Match "can't parse entities"
+        $text | Should -Match 'byte offset 91'
+    }
+
+    It 'falls back to the raw body when it is not the JSON we expect' {
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.Exception]::new('boom'), 'x', [System.Management.Automation.ErrorCategory]::InvalidResult, $null)
+        $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('<html>gateway error</html>')
+        Get-BridgeTelegramErrorText -ErrorRecord $record | Should -Match 'gateway error'
+    }
+
+    It 'is just the message when there is no body, and empty for nothing' {
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.Exception]::new('timed out'), 'x', [System.Management.Automation.ErrorCategory]::OperationTimeout, $null)
+        Get-BridgeTelegramErrorText -ErrorRecord $record | Should -Be 'timed out'
+        Get-BridgeTelegramErrorText -ErrorRecord $null | Should -BeNullOrEmpty
     }
 }

@@ -13,6 +13,36 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.86.1
+
+The reports section stopped working in 7.86.0. This is why, and the fix.
+
+A page was being cut inside a blockquote. `Split-TelegramText` cuts at the
+character limit and knows nothing about tags, so a cut inside a `<blockquote>`
+left page one with it unclosed and page two with a `</blockquote>` opening
+nothing — and Telegram answered 400 to both.
+
+The banner report is the default one, and it runs to 43 KB over a month:
+thirteen pages, every one refused. Measured against the real audit trail —
+today 4,683 characters over 2 pages, a week 24,428 over 8, a month 43,210 over
+13, all three unbalanced before and balanced after. The other three reports were
+working because they come in under 4096 characters and are never split.
+
+`Repair-TelegramHtmlChunks` closes what each page leaves open and reopens it at
+the start of the next, outermost first so the nesting survives the cut. The
+opening tag is remembered whole, so `<blockquote expandable>` comes back
+expandable rather than as a plain quote. `code` and `pre` are never reopened:
+they cannot contain other entities, so reopening one would swallow the rest of
+the page as literal text.
+
+If closing a page off pushes it past the limit, the markup comes out and the
+text goes plain — the same degrade `Send-TelegramMessage` makes for the same
+reason, rather than sending something that will be refused.
+
+The fix is in the pager rather than in the report, because the help screens, the
+release notes and the bulletin preview all take the same path and were exposed
+to the same fault.
+
 ## Version 7.86.0
 
 The remaining screens take the health centre's design.

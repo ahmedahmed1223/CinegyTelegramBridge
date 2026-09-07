@@ -1520,3 +1520,51 @@ Describe 'Credentials are stripped before anything is shown or logged' {
         $withKey | Should -Match 'rtmp://\*\*\*'
     }
 }
+
+Describe 'A split page of HTML is still valid HTML' {
+    It 'closes what a cut left open and reopens it on the next page' {
+        # The banner report runs to 43 KB over a month. The splitter cuts at
+        # the character limit knowing nothing about tags, so a cut inside a
+        # blockquote left page one unclosed and page two opening nothing -
+        # and Telegram answered 400 to both, which is how the reports screen
+        # stopped working outright.
+        $pages = @(Repair-TelegramHtmlChunks -Chunks @(
+                '<blockquote expandable>first half',
+                'second half</blockquote>'))
+
+        $pages[0] | Should -Match '</blockquote>$'
+        # Reopened with its attribute, not as a plain quote.
+        $pages[1] | Should -Match '^<blockquote expandable>'
+        foreach ($page in $pages) {
+            @(Test-BridgeTelegramHtml -Text $page) | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'keeps nesting in the order it was cut in' {
+        $pages = @(Repair-TelegramHtmlChunks -Chunks @(
+                '<blockquote><b>bold start',
+                'still bold</b></blockquote>'))
+        # Innermost closes first on page one, outermost reopens first on two.
+        $pages[0] | Should -Match '</b></blockquote>$'
+        $pages[1] | Should -Match '^<blockquote><b>'
+        foreach ($page in $pages) { @(Test-BridgeTelegramHtml -Text $page) | Should -BeNullOrEmpty }
+    }
+
+    It 'leaves a single page and a balanced pair alone' {
+        @(Repair-TelegramHtmlChunks -Chunks @('<b>one page</b>'))[0] | Should -Be '<b>one page</b>'
+        $pair = @(Repair-TelegramHtmlChunks -Chunks @('<b>a</b>', '<i>b</i>'))
+        $pair[0] | Should -Be '<b>a</b>'
+        $pair[1] | Should -Be '<i>b</i>'
+    }
+
+    It 'never reopens code or pre, which cannot contain anything' {
+        # Reopening one would swallow the rest of the page as literal text.
+        $pages = @(Repair-TelegramHtmlChunks -Chunks @('<code>cut here', 'and here</code>'))
+        $pages[1] | Should -Not -Match '^<code>'
+    }
+
+    It 'survives an empty or absent set' {
+        @(Repair-TelegramHtmlChunks -Chunks @()) | Should -BeNullOrEmpty
+        @(Repair-TelegramHtmlChunks -Chunks $null) | Should -BeNullOrEmpty
+    }
+}

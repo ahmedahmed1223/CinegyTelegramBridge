@@ -631,6 +631,63 @@ function Update-QuietHoursQueue {
     }
 }
 
+function Repair-TelegramHtmlChunks {
+    <#
+        Makes every page of a split HTML message valid on its own.
+
+        Split-TelegramText cuts at Telegram's character limit and knows
+        nothing about tags, so a cut inside a <blockquote> leaves page one
+        with it unclosed and page two with a </blockquote> that opens
+        nothing. Telegram answers 400 to both - which is how the reports
+        screen stopped working outright: the banner report runs to 43 KB over
+        a month, thirteen pages, every one of them refused.
+
+        Each page is closed off at its end and the same tags reopened at the
+        start of the next, outermost first, so the nesting survives the cut.
+        The opening tag is remembered whole, so "<blockquote expandable>"
+        comes back expandable rather than as a plain quote.
+
+        Only tags that can legally wrap several lines are tracked. pre and
+        code are deliberately not among them: they cannot contain other
+        entities, so reopening one would swallow the rest of the page.
+    #>
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][string[]]$Chunks)
+    $pages = @(@($Chunks) | Where-Object { $null -ne $_ })
+    if ($pages.Count -le 1) { return $pages }
+
+    $spanning = @('blockquote', 'b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'tg-spoiler')
+
+    $repaired = [System.Collections.Generic.List[string]]::new()
+    $open = [System.Collections.Generic.List[string]]::new()   # full opening tags, outermost first
+
+    foreach ($page in $pages) {
+        # Whatever the previous page left open is reopened here, in the order
+        # that keeps the nesting identical to what it was before the cut.
+        $prefix = if ($open.Count -gt 0) { ($open -join '') } else { '' }
+        $body = $prefix + $page
+
+        $open.Clear()
+        foreach ($match in [regex]::Matches($body, '<(/?)([a-zA-Z-]+)(\s[^>]*)?>')) {
+            $name = $match.Groups[2].Value.ToLowerInvariant()
+            if ($name -notin $spanning) { continue }
+            if ($match.Groups[1].Value -eq '/') {
+                for ($i = $open.Count - 1; $i -ge 0; $i--) {
+                    if ($open[$i] -match "^<$([regex]::Escape($name))(\s|>)") { $open.RemoveAt($i); break }
+                }
+            }
+            else { $open.Add($match.Value) }
+        }
+
+        # Close what this page leaves open, innermost first.
+        $suffix = ''
+        for ($i = $open.Count - 1; $i -ge 0; $i--) {
+            if ($open[$i] -match '^<([a-zA-Z-]+)') { $suffix += "</$($Matches[1].ToLowerInvariant())>" }
+        }
+        $repaired.Add($body + $suffix)
+    }
+    return @($repaired)
+}
+
 function Send-TelegramPagedText {
     <#
         Sends a long screen as its first part plus a 📄 المزيد button.
@@ -663,6 +720,22 @@ function Send-TelegramPagedText {
     }
     # The mode travels with the pages: 📄 المزيد arrives on a later turn, and a
     # part sent without it would show the operator its own tags.
+    # A page ending mid-blockquote is a page Telegram refuses, and so is the
+    # one after it. Repaired before they are stored, so 📄 المزيد hands out
+    # valid pages on every later turn too.
+    if ($ParseMode -eq 'HTML') {
+        $chunks = @(Repair-TelegramHtmlChunks -Chunks $chunks)
+        # Repair adds the reopened and closing tags, which can push a page
+        # that was already at the limit past it. Rather than send something
+        # Telegram will refuse, the markup comes out and the text goes plain -
+        # the same degrade Send-TelegramMessage makes for the same reason.
+        if (@($chunks | Where-Object { $_.Length -gt $script:TelegramTextLimit }).Count -gt 0) {
+            Write-BridgeLog "A paged HTML screen did not fit once its pages were closed off; markup removed and sent as text" 'WARN'
+            $chunks = @(@($source | Where-Object { $_ } |
+                        ForEach-Object { Split-TelegramText -Text (ConvertFrom-TelegramHtmlText -Text $_) }))
+            $ParseMode = ''
+        }
+    }
     $script:PagedText[$ChatId] = @{ Chunks = $chunks; Index = 0; Markup = $ReplyMarkup; ParseMode = $ParseMode }
     Send-TelegramPagedChunk -ChatId $ChatId | Out-Null
 }

@@ -13,6 +13,36 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.82.0
+
+A secret that could have left in an error message.
+
+`Protect-SensitiveText` has stripped bot tokens and stream keys for releases,
+but ten sites went around it. The Telegram file-download URL carries the bot
+token **in its path**, and the relay output URL is `rtmp://host/s/<stream key>`;
+both end up inside library exception messages, and each has a chat and a log to
+leak into.
+
+Every exception message that reaches a chat now goes through the redactor —
+seven sites. A chat is the widest audience the bridge has: an import failure is
+read by every operator in the group. Redaction costs nothing on a message
+carrying no credential, so all of them pass through it rather than each site
+being reasoned about separately.
+
+Three log sites too, only from the paths that hold a credential: the relay
+source switch, its auto-restart, and the bulletin photo download. Deliberately
+narrower than the chat rule — `bridge.log` is private, and redacting a failed
+local file write would only make the log harder to read for nothing.
+
+Three tests hold the line: one proving the redactor erases a realistically
+shaped token and stream key, and two sweeping the source so a new site cannot
+slip past.
+
+The audit behind this also found 907 functions with only five never referenced
+anywhere (0.5%) and nine covered by tests with no production caller — listed
+rather than deleted, the list being more useful than the removal right now — and
+no site anywhere logging a raw URL or `$apiBase`.
+
 ## Version 7.81.0
 
 The last of the plain-text screens, leaving only what should stay plain.

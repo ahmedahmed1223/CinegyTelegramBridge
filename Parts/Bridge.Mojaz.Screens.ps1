@@ -642,7 +642,7 @@ function Receive-MojazPhoto {
         Receive-TelegramDocument -FileId $FileId -DestinationPath $staging -MaximumBytes (10 * 1024 * 1024) | Out-Null
     }
     catch {
-        Write-BridgeLog "Mojaz photo download failed: $($_.Exception.Message)" 'WARN'
+        Write-BridgeLog "Mojaz photo download failed: $(Protect-SensitiveText $_.Exception.Message)" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ الصورة: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-CancelKeyboard)
         return $false
     }

@@ -41,7 +41,7 @@ function Invoke-SettingsExport {
         Set-Content -LiteralPath $path -Value ($document | ConvertTo-Json -Depth 8) -Encoding utf8 -ErrorAction Stop
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $($_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
     $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "📤 نسخة الإعدادات ($($payload.Count) خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين."
@@ -146,7 +146,7 @@ function Receive-SettingsImport {
     }
     catch {
         Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $($_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
     }
 }
 

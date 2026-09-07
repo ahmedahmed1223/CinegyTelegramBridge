@@ -1504,3 +1504,19 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
         ConvertFrom-TelegramHtmlText $text | Should -Match '<script>'
     }
 }
+
+Describe 'Credentials are stripped before anything is shown or logged' {
+    It 'redacts a bot token and a stream key out of any text' {
+        # The two secrets that live inside a URL the bridge builds: the file
+        # download URL carries the bot token in its path, and the relay output
+        # URL is rtmp://host/s/<stream key>. Both end up inside library
+        # exception messages, and both have a chat and a log to leak into.
+        $withToken = Protect-SensitiveText 'GET https://api.telegram.org/file/bot8201739556:AAH0mQ7xKp2LrVnT4sYbZcDeFgHiJkLmNoP/photo.jpg failed'
+        $withToken | Should -Not -Match '8201739556:'
+        $withToken | Should -Match '\*\*\*BOT_TOKEN\*\*\*'
+
+        $withKey = Protect-SensitiveText 'rtmp://dc.rtmp.t.me/s/2074119156:secretkey: Broken pipe'
+        $withKey | Should -Not -Match 'secretkey'
+        $withKey | Should -Match 'rtmp://\*\*\*'
+    }
+}

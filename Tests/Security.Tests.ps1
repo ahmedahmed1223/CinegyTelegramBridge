@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
 Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeSecurity.psm1') -Force
 }
 
@@ -71,5 +71,39 @@ Describe 'Optional DPAPI secret storage' -Skip:([Environment]::OSVersion.Platfor
         $migrated.BotToken | Should -Be 'dpapi:BotToken'
         (Get-Content -LiteralPath $storePath -Raw) | Should -Not -Match 'REPLACE_WITH_TOKEN_FROM_BOTFATHER'
         Test-Path -LiteralPath "$configPath.pre-dpapi.bak" | Should -BeTrue
+    }
+}
+
+Describe 'Credentials never reach a chat or the log through an exception' {
+    It 'sends no raw exception text to a chat' {
+        # A chat is the widest audience the bridge has - an import failure is
+        # read by every operator in the group. Redaction costs nothing on a
+        # message that carries no credential, so every one of these goes
+        # through it rather than each site being reasoned about separately.
+        $offenders = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\Parts') -Filter '*.ps1' |
+                ForEach-Object {
+                    $file = $_.Name
+                    @(Get-Content -LiteralPath $_.FullName) |
+                        Where-Object { $_ -match 'Send-TelegramMessage' -and $_ -match '\$\(\$_\.Exception\.Message\)' } |
+                        ForEach-Object { "$file : $($_.Trim())" }
+                })
+        $offenders | Should -BeNullOrEmpty
+    }
+
+    It 'writes no raw exception text to the log from a path that holds a credential' {
+        # Narrower than the chat rule on purpose: bridge.log is private, and
+        # redacting a failed local file write would only make the log harder to
+        # read. These are the paths whose URLs carry a secret.
+        $offenders = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\Parts') -Filter '*.ps1' |
+                ForEach-Object {
+                    $file = $_.Name
+                    @(Get-Content -LiteralPath $_.FullName) |
+                        Where-Object {
+                            $_ -match 'Write-BridgeLog' -and $_ -match '\$\(\$_\.Exception\.Message\)' -and
+                            $_ -match '(?i)relay|stream|download|photo|upload' -and $_ -notmatch 'Protect-SensitiveText'
+                        } |
+                        ForEach-Object { "$file : $($_.Trim())" }
+                })
+        $offenders | Should -BeNullOrEmpty
     }
 }

@@ -1236,7 +1236,7 @@ function Receive-NewsTickerImport { param($Document,[long]$ChatId,[long]$UserId)
         if(-not $result.Success){throw $result.Error}
         Clear-PendingState -ChatId $ChatId
         Send-TelegramMessage -ChatId $ChatId -Text "✅ استورد $($result.Count) خبرًا إلى المسودة فقط. راجعها قبل النشر." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
-    } catch { Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الاستيراد: $($_.Exception.Message)" }
+    } catch { Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الاستيراد: $(Protect-SensitiveText $_.Exception.Message)" }
     finally {Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue}
 }
 

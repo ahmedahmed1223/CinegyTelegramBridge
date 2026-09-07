@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -74,7 +74,7 @@ function Set-OutputMonitorFallbackActive {
             # A manual start failure is final. A failed automatic attempt keeps
             # ShouldRun set so the watchdog can spend the remaining retry budget.
             if ($notify) { $script:RelayState.ShouldRun = $false }
-            Write-BridgeLog "Live relay source switch failed: $($_.Exception.Message)" 'ERROR'
+            Write-BridgeLog "Live relay source switch failed: $(Protect-SensitiveText $_.Exception.Message)" 'ERROR'
             Send-AdminBroadcast -Text '❌ تعذرت إعادة تشغيل البث بعد تبديل المصدر.' -Urgent
         }
     }
@@ -227,7 +227,7 @@ function Start-SnapshotJob {
         $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string]$ls.SourceType) -SourceUrl $sourceUrl)
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -244,7 +244,7 @@ function Start-SnapshotJob {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل تشغيل ffmpeg: $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل تشغيل ffmpeg: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -719,7 +719,7 @@ function Start-LiveRelay {
     }
     try { Start-RelayProcess | Out-Null }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $script:RelayState.ShouldRun = $true
@@ -748,7 +748,7 @@ function Stop-LiveRelay {
         Send-TelegramMessage -ChatId $ChatId -Text "⏹ تم إيقاف البث." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "فشل إيقاف البث: $($_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "فشل إيقاف البث: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     $script:RelayState.Process = $null
     Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
@@ -822,7 +822,7 @@ function Update-RelayWatchdog {
         if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "🔄 انقطع البث وتمت إعادة تشغيله تلقائيًا (محاولة $($script:RelayState.Restarts))." }
     }
     catch {
-        Write-BridgeLog "Live relay auto-restart failed: $($_.Exception.Message)" "ERROR"
+        Write-BridgeLog "Live relay auto-restart failed: $(Protect-SensitiveText $_.Exception.Message)" "ERROR"
     }
 }
 

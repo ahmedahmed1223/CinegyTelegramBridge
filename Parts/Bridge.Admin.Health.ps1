@@ -457,21 +457,26 @@ function Get-BridgeHealthCenterText {
     # behind a count. Order inside each group is untouched - sorting the whole
     # list by severity would move Cinegy off the second row and cost an
     # operator the place they have learned to look.
-    # Three cells per row - state, identity, name, detail - so
-    # Format-BridgeTextTable can align them into columns the eye reads down.
-    # Each glyph column holds exactly one emoji per row, which is what makes
-    # the widths line up when emoji are wider than letters.
+    # Ordinary text at full size, not a <pre> table. A monospace block does
+    # align its columns, and Telegram draws it two sizes down - which on a
+    # phone costs more legibility than the alignment buys. The reports
+    # screens never used one, and they are the ones that read well.
+    #
+    # The rhythm comes from every line opening with the same two glyph slots
+    # instead: state, then identity. That is a column the eye follows without
+    # any character having been counted.
     #
     # Get-JsonProp, not .Contains: these rows arrive as hashtables from
     # Get-BridgeHealthRows and as PSCustomObjects from anything built out of
     # JSON, and only this helper reads both without throwing under StrictMode.
-    $toCells = {
+    $render = {
         param($row)
         $glyph = [string](Get-JsonProp $row 'Glyph')
-        , @([string]$row.Icon, $(if ($glyph) { $glyph } else { '·' }), [string]$row.Name, [string]$row.Detail)
+        $lead = if ($glyph) { "$([string]$row.Icon) $glyph" } else { [string]$row.Icon }
+        "$lead <b>$(ConvertTo-TelegramHtmlText ([string]$row.Name))</b> — $(ConvertTo-TelegramHtmlText ([string]$row.Detail))"
     }
-    $problemRows = @($rows | Where-Object { [string]$_.Icon -ne '🟢' } | ForEach-Object { & $toCells $_ })
-    $healthyRows = @($rows | Where-Object { [string]$_.Icon -eq '🟢' } | ForEach-Object { & $toCells $_ })
+    $problemRows = @($rows | Where-Object { [string]$_.Icon -ne '🟢' } | ForEach-Object { & $render $_ })
+    $healthyRows = @($rows | Where-Object { [string]$_.Icon -eq '🟢' } | ForEach-Object { & $render $_ })
     # The verdict the seven rows already imply, said once at the top. This
     # screen is opened to answer one question - is anything wrong? - and it
     # answered only by making the operator read every row and notice a colour.
@@ -489,8 +494,11 @@ function Get-BridgeHealthCenterText {
         "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
         "<b>$verdict</b>"
         ''
-        $(if ($problemRows.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemRows.Count)):</b>`n$(Format-BridgeTextTable -Rows $problemRows)`n" })
-        $(if ($healthyRows.Count -gt 0) { "<b>سليم ($($healthyRows.Count)):</b>`n$(Format-BridgeTextTable -Rows $healthyRows)" })
+        $(if ($problemRows.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemRows.Count))</b>`n$($problemRows -join "`n")`n" })
+        $(if ($healthyRows.Count -gt 0) {
+                $tag = if ($healthyRows.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
+                "<b>✅ سليم ($($healthyRows.Count))</b>`n$tag$($healthyRows -join "`n")</blockquote>"
+            })
         ''
         "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
     ) -join "`n"

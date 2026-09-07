@@ -13,6 +13,24 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.85.1
+
+The fixed-width table made the text small, and that trade went the wrong way.
+
+`<pre>` does align its columns, and Telegram draws it two sizes down. On a phone
+that costs more legibility than the alignment buys, and the reports screens —
+the ones that read well — never used one.
+
+The rhythm comes from every line opening with the same two glyph slots instead,
+state then identity: a column the eye follows without any character having been
+counted, at full text size. The vocabulary is the reports screens' own — `·` as
+a separator, `—` between a label and its value, the name in bold — so there is
+nothing new for an operator to learn.
+
+`Format-BridgeTextTable` is deleted. It has no caller left, and leaving a dead
+function behind a day after an audit that counted the dead ones would contradict
+the audit.
+
 ## Version 7.85.0
 
 Real tables, and "why" written where it is asked.

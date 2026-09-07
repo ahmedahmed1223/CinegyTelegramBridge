@@ -448,21 +448,24 @@ function Get-BridgeStatsText {
     $lines.Add("<b>$verdict</b>")
     $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
 
-    # One table, label against value, so the numbers form a column instead of
-    # ending each sentence at a different place. The rich-message screens have
-    # had a real table since 10.1; this is the same shape where they cannot.
+    # Full-size text, each line opening with its own glyph. A <pre> table
+    # aligns the values into a column and Telegram draws it two sizes down;
+    # on a phone that trade goes the wrong way, and the reports screens - the
+    # ones that read well - never used one.
+    #
+    # The three an administrator opens this screen for come first and alone;
+    # the rest is quoted underneath as the detail behind them.
     $lines.Add('')
-    $lines.Add((Format-BridgeTextTable -Rows @(
-                , @('⏱', 'مدة التشغيل', "$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
-                , @('📅', 'منذ', $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
-                , @('🎬', 'عمليات الهواء', "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
-                , @('🚦', 'حدّ تيليجرام (429)', [string]$script:TelegramRateLimitHits)
-                , @('📭', 'رسائل أُسقطت من الطابور', [string]$script:TelegramOutboxDropped)
-                , @('📡', 'اتصال Telegram', [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
-                , @('🎛', 'صحة Cinegy', [string]$script:RuntimeState.Monitoring.CinegyHealthState)
-                , @('💚', 'آخر نبضة يومية', $lastBeat)
-                , @('🔴', 'مشاهد على الهواء', [string]$script:OnAir.Count)
-            )))
+    $lines.Add("⏱ <b>مدة التشغيل</b> — $([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
+    $lines.Add("📅 <b>منذ</b> — $($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))")
+    $lines.Add("🎬 <b>عمليات الهواء</b> — $total · ✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked)")
+    $lines.Add('')
+    $lines.Add("<blockquote>🚦 حدّ تيليجرام (429) — $($script:TelegramRateLimitHits)
+📭 رسائل أُسقطت من الطابور — $($script:TelegramOutboxDropped)
+📡 اتصال Telegram — $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))
+🎛 صحة Cinegy — $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))
+💚 آخر نبضة يومية — $lastBeat
+🔴 مشاهد على الهواء — $($script:OnAir.Count)</blockquote>")
     return ($lines -join "`n")
 }
 
@@ -938,18 +941,20 @@ function Get-UsageDigestText {
     else {
         $lines.Add('')
         $lines.Add('<b>الأكثر استخدامًا:</b>')
-        # A ranking is a table by nature: the counts belong under each other,
-        # not at the end of sentences of different lengths.
+        # The reports screens' own vocabulary: the name in bold and the
+        # figures after a "·", at full size - where a <pre> ranking would be
+        # aligned and small.
         $rank = 0
-        $rankRows = @(foreach ($item in $ranked) {
+        $rankLines = @(foreach ($item in $ranked) {
                 $rank++
-                $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
-                    ([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm')
+                $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $($item.Value) مرة"
+                if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
+                    $line += " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
                 }
-                else { '—' }
-                , @("$rank.", [string]$item.Key, [string]$item.Value, $lastUsed)
+                $line
             })
-        $lines.Add((Format-BridgeTextTable -Rows $rankRows))
+        $tag = if ($rankLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
+        $lines.Add("$tag$($rankLines -join "`n")</blockquote>")
     }
 
     $counters = $script:AirOperationCounters

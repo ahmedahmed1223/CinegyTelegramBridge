@@ -983,17 +983,17 @@ Describe 'Operational numbers and status sharing' {
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
         # Columns are aligned in a <pre> table now, so label and value are
         # separated by padding rather than a colon.
-        $text | Should -Match 'مدة التشغيل\s+1 ي'
+        $text | Should -Match 'مدة التشغيل — 1 ي'
         $text | Should -Match ([regex]::Escape($script:BridgeVersion))
     }
 
     It 'separates flood limits from ordinary failures' {
-        ConvertFrom-TelegramHtmlText (Get-BridgeStatsText) | Should -Match '\(429\)\s+7'
+        ConvertFrom-TelegramHtmlText (Get-BridgeStatsText) | Should -Match '\(429\) — 7'
     }
 
     It 'counts every air operation outcome' {
         $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
-        $text | Should -Match 'عمليات الهواء\s+15'
+        $text | Should -Match 'عمليات الهواء — 15'
     }
 
     It 'shares a plain summary that survives being pasted elsewhere' {
@@ -1568,9 +1568,9 @@ Describe 'The health screen can be read down its state column' {
         foreach ($row in $rows) {
             # Icon, identity glyph, name, detail - the shape the screen renders
             # every row in, so the two still cannot drift apart.
-            # Same four cells the table renders, whatever padding it chose.
-            $cells = @($row.Icon, $row.Glyph, $row.Name, $row.Detail) | ForEach-Object { [regex]::Escape([string]$_) }
-            $text | Should -Match ($cells -join '\s+')
+            # The exact shape the screen renders every row in, so the two
+            # still cannot drift apart: state, identity, name — detail.
+            $text | Should -Match ([regex]::Escape("$($row.Icon) $($row.Glyph) $($row.Name) — $($row.Detail)"))
         }
     }
 }

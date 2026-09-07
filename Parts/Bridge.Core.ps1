@@ -458,56 +458,6 @@ function Invoke-LogRotation {
     Move-Item $logPath (Join-Path $logDir "$base.1$ext") -Force -ErrorAction SilentlyContinue
 }
 
-function Format-BridgeTextTable {
-    <#
-        Rows of cells as an aligned <pre> block.
-
-        Telegram HTML has no table element, and <pre> is the only fixed-width
-        surface it offers: inside one a padded column actually lines up, so a
-        state column can be read straight down instead of every line being
-        parsed on its own. It is the same shape the rich-message table gives
-        where sendRichMessage is available - which is exactly what these
-        screens are the fallback for.
-
-        Emoji are wider than a letter in most monospace faces, so a column
-        holding them carries exactly one emoji per row: every row then has the
-        same width whatever that width turns out to be, rather than being
-        padded against letters it can never match.
-
-        The last column is never padded. Trailing spaces buy nothing and cost
-        the wrap point on a narrow phone.
-
-        pre and code cannot contain other entities, so nothing in here is bold
-        and everything is escaped - an unescaped '<' would close the block and
-        take the whole message with it.
-    #>
-    # AllowNull as well as AllowEmptyCollection: a caller that builds its rows
-    # from a pipeline yielding nothing passes $null, not an empty array, and
-    # PowerShell unwraps @($null) to $null on the way in.
-    param([Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Rows)
-    $body = @(@($Rows) | Where-Object { $_ })
-    if ($body.Count -eq 0) { return '' }
-
-    $columns = [int]((@($body) | ForEach-Object { @($_).Count } | Measure-Object -Maximum).Maximum)
-    if ($columns -le 0) { return '' }
-    $widths = New-Object 'int[]' $columns
-    foreach ($row in $body) {
-        for ($i = 0; $i -lt $columns; $i++) {
-            $cell = if ($i -lt @($row).Count) { [string]@($row)[$i] } else { '' }
-            if ($cell.Length -gt $widths[$i]) { $widths[$i] = $cell.Length }
-        }
-    }
-
-    $lines = @(foreach ($row in $body) {
-            $cells = @(for ($i = 0; $i -lt $columns; $i++) {
-                    $cell = if ($i -lt @($row).Count) { [string]@($row)[$i] } else { '' }
-                    if ($i -eq $columns - 1) { $cell } else { $cell.PadRight($widths[$i]) }
-                })
-            ($cells -join '  ').TrimEnd()
-        })
-    return "<pre>$(ConvertTo-TelegramHtmlText ($lines -join "`n"))</pre>"
-}
-
 function Protect-SensitiveText {
     <# Strips credentials out of anything headed for the log or for chat.
 

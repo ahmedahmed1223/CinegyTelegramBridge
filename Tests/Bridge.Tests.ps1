@@ -1335,3 +1335,109 @@ Describe 'The heartbeat the hang watchdog reads' {
         { Write-BridgeLivenessStamp } | Should -Not -Throw
     }
 }
+
+function global:Test-BridgeTelegramHtml {
+    <#
+        Whether a string is HTML the Bot API will actually accept.
+
+        Written after a screen went out with "<b>…<code>n</code>…</b>" in it.
+        That reads as ordinary nesting and is not: bold, italic, underline,
+        strikethrough and spoiler entities cannot be combined with code or
+        pre, and the API answers the whole message with a 400 rather than
+        dropping one entity - which on the phone is a button that does
+        nothing.
+
+        Returns the reasons it is not acceptable, empty when it is.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    $allowed = @('b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del',
+        'a', 'code', 'pre', 'span', 'tg-spoiler', 'tg-emoji', 'tg-time', 'blockquote')
+    # code and pre may not share characters with any of these.
+    $incompatible = @('b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'span', 'tg-spoiler')
+
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $open = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($match in [regex]::Matches($Text, '<(/?)([a-zA-Z-]+)(\s[^>]*)?>')) {
+        $closing = $match.Groups[1].Value -eq '/'
+        $name = $match.Groups[2].Value.ToLowerInvariant()
+        if ($name -notin $allowed) { $problems.Add("unsupported tag <$name>"); continue }
+
+        if ($closing) {
+            if ($open.Count -eq 0) { $problems.Add("</$name> with nothing open"); continue }
+            if ($open[$open.Count - 1] -ne $name) {
+                $problems.Add("</$name> closes <$($open[$open.Count - 1])>")
+                continue
+            }
+            $open.RemoveAt($open.Count - 1)
+            continue
+        }
+
+        if ($name -eq 'blockquote' -and $open -contains 'blockquote') {
+            $problems.Add('blockquote inside blockquote')
+        }
+        if ($name -in @('code', 'pre')) {
+            foreach ($outer in $open) {
+                if ($outer -in $incompatible) { $problems.Add("<$name> inside <$outer>") }
+            }
+        }
+        if ($name -in $incompatible) {
+            foreach ($outer in $open) {
+                if ($outer -in @('code', 'pre')) { $problems.Add("<$name> inside <$outer>") }
+            }
+        }
+        $open.Add($name)
+    }
+
+    foreach ($leftover in $open) { $problems.Add("<$leftover> never closed") }
+    return @($problems)
+}
+
+Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
+    It 'rejects the combination that caused this test to exist' {
+        # The validator has to fail on the real fault before it is worth
+        # trusting on the screens.
+        @(Test-BridgeTelegramHtml -Text '<b>failed: <code>3</code></b>') | Should -Not -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text '<blockquote>a<blockquote>b</blockquote></blockquote>') | Should -Not -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text '<b>unclosed') | Should -Not -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text '<marquee>no</marquee>') | Should -Not -BeNullOrEmpty
+        # Side by side is the correct shape, and a blockquote may hold both.
+        @(Test-BridgeTelegramHtml -Text '<b>failed:</b> <code>3</code>') | Should -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text '<blockquote expandable><b>a</b> <code>4</code></blockquote>') | Should -BeNullOrEmpty
+    }
+
+    It 'no source line nests code inside bold, italic, underline or strikethrough' {
+        # Caught at the source rather than only on the screens a test happens
+        # to render: the combination is easy to write and impossible to see.
+        $offenders = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\Parts') -Filter '*.ps1' |
+                ForEach-Object {
+                    $file = $_.Name
+                    @(Get-Content -LiteralPath $_.FullName) |
+                        Where-Object { $_ -notmatch '^\s*#' } |
+                        Where-Object { $_ -match '<(b|i|u|s|strong|em|ins|del|strike|tg-spoiler)>[^<]*<(code|pre)>' } |
+                        ForEach-Object { "$file : $($_.Trim())" }
+                })
+        $offenders | Should -BeNullOrEmpty
+    }
+
+    It 'accepts the menu screen, the status screens and the digest as built' {
+        # The screens themselves, not only the source pattern: an unbalanced
+        # tag or a stray blockquote shows up here and nowhere else.
+        $script:OnAir.Clear()
+        @(Test-BridgeTelegramHtml -Text (Get-MainMenuIntro -UserId 7275359265)) | Should -BeNullOrEmpty
+
+        $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        $script:OnAir[7] = @{ Key = '<b>Logo'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        @(Test-BridgeTelegramHtml -Text (Get-MainMenuIntro -UserId 7275359265)) | Should -BeNullOrEmpty
+
+        # Past four layers the quote becomes expandable - a different tag, so
+        # it is validated too.
+        foreach ($layer in 1..5) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
+        @(Test-BridgeTelegramHtml -Text (Get-MainMenuIntro -UserId 7275359265)) | Should -BeNullOrEmpty
+        $script:OnAir.Clear()
+
+        @(Test-BridgeTelegramHtml -Text (Get-RuntimeFileHealthText)) | Should -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text (Get-UserActivitySummaryText)) | Should -BeNullOrEmpty
+    }
+}

@@ -13,6 +13,25 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.75.1
+
+Two lines from 7.75.0 would have stopped their screens arriving at all.
+
+`<b>…<code>n</code>…</b>` looks like ordinary nesting and is not. Telegram's
+entity rules are explicit: bold, italic, underline, strikethrough and spoiler
+entities cannot be combined with `code` or `pre`, and the API refuses the whole
+message with a 400 rather than dropping one of the two entities — which on the
+phone is a button that does nothing. The two places were the failed/blocked
+line in the handover digest and the "files needing attention" line in the
+runtime-file health screen; both are side by side now rather than one inside
+the other.
+
+A test keeps it out. It checks the allowed tag set, that tags balance, that no
+blockquote sits inside a blockquote, and that `code` never shares characters
+with an emphasis entity — on the screens as they are actually built, and across
+every source file, because the combination is easy to write and impossible to
+see.
+
 ## Version 7.75.0
 
 The rest of the screens move to `parse_mode=HTML`, and the menu gets structure

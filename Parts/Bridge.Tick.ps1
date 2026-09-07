@@ -723,7 +723,10 @@ function Get-MissedEventsText {
         $lines.Add('')
         # Kept apart on purpose: a rejection is a permission answer and a
         # failure is a fault, and they were one number until 7.68.0.
-        $lines.Add("<b>⚠️ فشل: <code>$($failures.Count)</code> · مرفوض: <code>$($blocked.Count)</code></b>")
+        # Bold and code side by side rather than nested: the two cannot be
+        # combined on the same characters, and Telegram refuses the whole
+        # message rather than dropping one of them.
+        $lines.Add("<b>⚠️ فشل:</b> <code>$($failures.Count)</code> · <b>مرفوض:</b> <code>$($blocked.Count)</code>")
         foreach ($failure in @($failures | Select-Object -Last 3)) {
             $detail = if ($failure.Message) { [string]$failure.Message } else { 'بلا تفصيل' }
             $lines.Add("• <code>$($failure.When.ToString('HH:mm'))</code> — $(ConvertTo-TelegramHtmlText ([string]$failure.Action)) <b>$(ConvertTo-TelegramHtmlText ([string]$failure.Target))</b>: $(ConvertTo-TelegramHtmlText $detail)")

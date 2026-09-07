@@ -827,7 +827,12 @@ function Get-RuntimeFileHealthText {
         $lines.Add('<b>🟢 كل ملفات التشغيل سليمة.</b>')
     }
     else {
-        $lines.Add("<b>🔴 ملفات تحتاج انتباهك: <code>$($faults.Count)</code></b>")
+        # Side by side, not one inside the other: bold, italic, underline,
+        # strikethrough and spoiler entities cannot be combined with code or
+        # pre, so <b>…<code>n</code>…</b> is not a nesting Telegram will
+        # accept - it is a message the API refuses outright, which reads on the
+        # phone as the screen never arriving.
+        $lines.Add("<b>🔴 ملفات تحتاج انتباهك:</b> <code>$($faults.Count)</code>")
     }
     $lines.Add('')
 

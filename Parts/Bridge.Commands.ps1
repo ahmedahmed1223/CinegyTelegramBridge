@@ -553,7 +553,10 @@ function Invoke-BridgeCommand {
             if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
             else {
                 $query = ($_ -replace '^(who|من)\s*', '').Trim()
-                Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateHistoryText -Query $query) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+                $historyKeyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+                if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-TemplateHistoryBlocks -Query $query) -ReplyMarkup $historyKeyboard)) {
+                    Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateHistoryText -Query $query) -ParseMode HTML -ReplyMarkup $historyKeyboard
+                }
             }
         }
         { $_ -in @('stats', 'uptime', 'ارقام') } {

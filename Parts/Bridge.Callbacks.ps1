@@ -976,15 +976,19 @@ function Invoke-CallbackQuery {
             break
         }
         'schedule:list' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText) -ParseMode 'HTML' `
-                -ReplyMarkup (Get-UpcomingScheduleKeyboard)
+            if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UpcomingScheduleBlocks) -ReplyMarkup (Get-UpcomingScheduleKeyboard))) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText) -ParseMode 'HTML' `
+                    -ReplyMarkup (Get-UpcomingScheduleKeyboard)
+            }
             break
         }
         'schedupage:*' {
             $page = 0
             if ([int]::TryParse((Get-CallbackArg $data 'schedupage:'), [ref]$page) -and $page -ge 0) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText -Page $page) -ParseMode 'HTML' `
-                    -ReplyMarkup (Get-UpcomingScheduleKeyboard -Page $page)
+                if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UpcomingScheduleBlocks -Page $page) -ReplyMarkup (Get-UpcomingScheduleKeyboard -Page $page))) {
+                    Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText -Page $page) -ParseMode 'HTML' `
+                        -ReplyMarkup (Get-UpcomingScheduleKeyboard -Page $page)
+                }
             }
             break
         }
@@ -1225,7 +1229,10 @@ function Invoke-CallbackQuery {
         }
         'menu:pending' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-PendingApprovalsText) -ParseMode HTML -ReplyMarkup (Get-PendingKeyboard)
+                $pendingKeyboard = Get-PendingKeyboard
+                if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-PendingApprovalsBlocks) -ReplyMarkup $pendingKeyboard)) {
+                    Send-TelegramMessage -ChatId $chatId -Text (Get-PendingApprovalsText) -ParseMode HTML -ReplyMarkup $pendingKeyboard
+                }
             }
             break
         }

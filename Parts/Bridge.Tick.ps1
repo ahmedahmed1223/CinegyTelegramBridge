@@ -821,6 +821,39 @@ Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitor
     return ($lines -join "`n")
 }
 
+function Get-TemplateHistoryBlocks {
+    <# Who used a template, as a table: when, who, what they did and how it
+       ended - four columns the text version separates with dashes. #>
+    param([Parameter(Mandatory)][string]$Query, [int]$MaxResults = 10)
+    $needle = $Query.Trim()
+    if ([string]::IsNullOrWhiteSpace($needle)) { return @() }
+    $hits = @(Read-AuditRecords -MaxLines 2000 | Where-Object {
+            [string]$_.target -and ([string]$_.target).IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        } | Select-Object -Last $MaxResults)
+
+    $blocks = @(@{ type = 'heading'; text = "👤 من استخدم «$needle»"; size = 3 })
+    if ($hits.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لا يوجد سجل ضمن ما هو محفوظ.' })
+    }
+    $cells = @(, @(
+            @{ text = 'متى'; is_header = $true }
+            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = 'العملية'; is_header = $true }
+            @{ text = 'النتيجة'; is_header = $true }
+        ))
+    foreach ($hit in $hits) {
+        $stamp = [datetime]::MinValue
+        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
+        $cells += , @(
+            @{ text = $when }
+            @{ text = [string](Get-UserDisplayName -UserId ([long]$hit.userId)) }
+            @{ text = [string]$hit.action }
+            @{ text = [string]$hit.result }
+        )
+    }
+    return $blocks + @(@{ type = 'table'; cells = $cells })
+}
+
 function Get-TemplateHistoryText {
     <# Who used a template, and when. The answer already exists in the audit
        trail; it just was not reachable without opening a file on the playout

@@ -1762,3 +1762,48 @@ Describe 'The usage summary as tables' {
         $script:UsageCounts = @{}
     }
 }
+
+Describe 'The list screens get their tables' {
+    It 'tables the upcoming schedule, and pages it the way the text does' {
+        Mock Get-UpcomingScheduleEvents {
+            @(1..12 | ForEach-Object {
+                    @{ TemplateKey = "قالب $_"; ScheduledAt = ([datetimeoffset]::Now.AddHours($_)).ToString('o'); Recurrence = 'once'; Id = "s$_" }
+                })
+        }
+        $blocks = @(Get-UpcomingScheduleBlocks -Page 0 -PageSize 8)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+        # Header plus one page of eight.
+        @($table.cells).Count | Should -Be 9
+        # The count in the heading is every event, not the page.
+        $blocks[0].text | Should -Match '\(12\)'
+    }
+
+    It 'tables the pending requests without throwing on a bare record' {
+        # These records are written at more than one call site; an absent key
+        # would throw under StrictMode on the screen an administrator opens to
+        # answer a waiting person.
+        $script:PendingApprovals = @{ '55' = @{} ; '66' = @{ Name = 'سامي'; At = (Get-Date).AddMinutes(-9) } }
+        $blocks = @(Get-PendingApprovalsBlocks)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+        @($table.cells).Count | Should -Be 3
+        $table.cells[1][1].text | Should -Be '—'
+        $table.cells[2][1].text | Should -Be 'سامي'
+        $script:PendingApprovals = @{}
+    }
+
+    It 'says plainly when a list is empty instead of drawing an empty table' {
+        Mock Get-UpcomingScheduleEvents { @() }
+        $blocks = @(Get-UpcomingScheduleBlocks)
+        @($blocks | Where-Object { $_.type -eq 'table' }) | Should -BeNullOrEmpty
+        $blocks[1].text | Should -Match 'لا توجد أحداث'
+
+        $script:PendingApprovals = @{}
+        @(@(Get-PendingApprovalsBlocks) | Where-Object { $_.type -eq 'table' }) | Should -BeNullOrEmpty
+    }
+
+    It 'returns nothing for a template history with no search term' {
+        # The text version answers with an instruction; blocks would be a
+        # heading over nothing, so the caller falls through to the text.
+        @(Get-TemplateHistoryBlocks -Query '   ') | Should -BeNullOrEmpty
+    }
+}

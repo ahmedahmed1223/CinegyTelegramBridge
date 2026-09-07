@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.89.0'; Items = @(
+                '📅 الجدولة القادمة وطلبات الوصول ومكتبة الموجزات و«من استخدم» صارت جداول.'
+            ) }
         @{ Version = '7.88.1'; Items = @(
                 '📊 ملخص الاستخدام صار جدولين: ترتيب القوالب، وكيف انتهت العمليات.'
             ) }

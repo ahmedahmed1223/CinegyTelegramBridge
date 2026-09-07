@@ -1013,6 +1013,44 @@ function Get-ScheduleReviewKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-UpcomingScheduleBlocks {
+    <#
+        The upcoming events as a table.
+
+        The text version carries a tg-time entity per event, so each reader
+        sees the moment in their own zone. A table cell cannot hold an entity,
+        so the station's own time is written out instead - which is the time a
+        playout schedule is actually written in - and the text version stays
+        the one that adapts.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 8)
+    $events = @(Get-UpcomingScheduleEvents)
+    $blocks = @(@{ type = 'heading'; text = "📅 الأحداث القادمة ($($events.Count))"; size = 3 })
+    if ($events.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد أحداث قادمة.' })
+    }
+    $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
+    if ($window.PageCount -gt 1) {
+        $blocks += @{ type = 'paragraph'; text = "صفحة $($window.Page + 1) من $($window.PageCount)" }
+    }
+    $cells = @(, @(
+            @{ text = 'القالب'; is_header = $true }
+            @{ text = 'الموعد'; is_header = $true }
+            @{ text = 'التكرار'; is_header = $true }
+        ))
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $entry = $events[$index]
+        $at = [datetimeoffset]$entry.ScheduledAt
+        $recurrence = switch ([string]$entry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+        $cells += , @(
+            @{ text = [string]$entry.TemplateKey }
+            @{ text = $at.ToString('MM-dd HH:mm') }
+            @{ text = $recurrence }
+        )
+    }
+    return $blocks + @(@{ type = 'table'; cells = $cells })
+}
+
 function Get-UpcomingScheduleText {
     <#
         The upcoming events, as one page of them.
@@ -1185,6 +1223,45 @@ function Get-ApprovalKeyboard {
             , @( (New-Button "✅ موافقة" "approve:$TargetChatId" -Style success), (New-Button "❌ رفض" "reject:$TargetChatId") )
             , @( (New-Button "⬅️ الرئيسية" "menu") )
         ) }
+}
+
+function Get-PendingApprovalsBlocks {
+    <#
+        Who is asking for control of the on-air graphics, as a table.
+
+        An administrator granting the ability to put graphics on air is
+        comparing three things across the requests - the id, the name the
+        stranger chose, and how long ago they asked - which is a table rather
+        than a paragraph each.
+    #>
+    param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
+    $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
+    $blocks = @(@{ type = 'heading'; text = "👤 طلبات الوصول المعلّقة ($($ids.Count))"; size = 3 })
+    if ($ids.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لا طلبات الآن.' })
+    }
+    $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
+    $cells = @(, @(
+            @{ text = 'المعرّف'; is_header = $true }
+            @{ text = 'الاسم'; is_header = $true }
+            @{ text = 'منذ'; is_header = $true }
+        ))
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $id = $ids[$index]
+        $record = $script:PendingApprovals[$id]
+        # Guarded: the record is written at more than one call site, and an
+        # absent key would throw under StrictMode on the screen an
+        # administrator opens to answer a waiting person.
+        $name = [string](Get-JsonProp $record 'Name')
+        if (-not $name) { $name = '—' }
+        $askedAt = Get-JsonProp $record 'At'
+        $since = if ($askedAt -is [datetime]) {
+            Format-Duration -Seconds ([int]((Get-Date) - $askedAt).TotalSeconds)
+        }
+        else { '—' }
+        $cells += , @(@{ text = [string]$id }, @{ text = $name }, @{ text = $since })
+    }
+    return $blocks + @(@{ type = 'table'; cells = $cells })
 }
 
 function Get-PendingApprovalsText {

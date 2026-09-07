@@ -207,6 +207,36 @@ function Show-MojazScreen {
 
 # ---------------------------------------------------------------- the library
 
+function Get-MojazLibraryBlocks {
+    <# The saved bulletins as a table: rows, revision, what is scheduled, and
+       whether one is on air right now - four facts the text has to run
+       together on a second line under each name. #>
+    $bulletins = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
+    $blocks = @(@{ type = 'heading'; text = "📑 الموجزات المحفوظة ($($bulletins.Count))"; size = 3 })
+    if ($bulletins.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد موجزات محفوظة. أنشئ موجزًا ثم أضف صفوفه.' })
+    }
+    $cells = @(, @(
+            @{ text = 'الموجز'; is_header = $true }
+            @{ text = 'صفوف'; is_header = $true }
+            @{ text = 'مراجعة'; is_header = $true }
+            @{ text = 'الحالة'; is_header = $true }
+        ))
+    foreach ($bulletin in $bulletins) {
+        $upcoming = @(Get-MojazBulletinSchedules -BulletinId ([string]$bulletin.Id)).Count
+        $state = if (Test-MojazOnAir -Bulletin $bulletin) { '▶️ على الهواء' }
+        elseif ($upcoming -gt 0) { "🕒 $upcoming موعدًا" }
+        else { '—' }
+        $cells += , @(
+            @{ text = [string]$bulletin.Name }
+            @{ text = [string]@(Get-JsonProp $bulletin 'Rows').Count }
+            @{ text = [string][int]$bulletin.Revision }
+            @{ text = $state }
+        )
+    }
+    return $blocks + @(@{ type = 'table'; cells = $cells })
+}
+
 function Get-MojazLibraryText {
     $bulletins = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -264,6 +294,7 @@ function Show-MojazLibraryScreen {
         return
     }
     $script:MojazSelections.Remove([string]$ChatId)
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazLibraryBlocks) -ReplyMarkup (Get-MojazLibraryKeyboard)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazLibraryText) -ParseMode HTML `
         -ReplyMarkup (Get-MojazLibraryKeyboard -Page $Page)
 }

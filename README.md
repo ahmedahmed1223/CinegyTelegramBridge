@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.89.0
+
+The four remaining lists become tables.
+
+The upcoming schedule shows template, time and recurrence. Its text version
+keeps the `tg-time` entity that renders the moment in each reader's own zone; a
+table cell cannot hold an entity, so the station's own time is written out —
+which is the time a playout schedule is written in anyway.
+
+Pending access requests show the id, the name and how long ago. Someone granting
+the ability to put graphics on air is comparing those three across the requests,
+which is a table rather than a paragraph each. The bulletin library shows rows,
+revision and state — four facts the text has to run together on a second line
+under every name. The template history shows when, who, what and how it ended.
+
+An empty list says so instead of drawing a header over nothing, and a template
+history with no search term returns no blocks at all, so the caller falls through
+to the text that carries the instruction. A bare pending-approval record no
+longer takes the screen down: these are written at more than one call site, and
+a missing key under StrictMode would have broken the screen an administrator
+opens to answer someone who is waiting.
+
 ## Version 7.88.1
 
 `📊 ملخص الاستخدام` becomes two tables — and a correction to 7.88.0.

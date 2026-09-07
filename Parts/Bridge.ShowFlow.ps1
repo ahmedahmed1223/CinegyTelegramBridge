@@ -712,31 +712,52 @@ function Invoke-RepeatLastShow {
     Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $last.Variables
 }
 
-function Get-MyOperationsKeyboard {
+function Get-MyOperationsCopyReference {
+    <#
+        The reference this screen offers to copy, or '' when it offers none.
+
+        The reference is eight hex characters an operator quotes to an
+        administrator so one grep finds the line. It was printed in the
+        message and had to be retyped off a phone, one character wrong being
+        one grep that finds nothing; copy_text puts it on the clipboard.
+        Only the newest one gets a button - ten of them would bury the two
+        controls under a wall of hex.
+
+        The newest *failed* one when there is one: a reference is printed on
+        screen only beside a failure, and that failure is what gets reported.
+        Copying the reference of a successful operation instead handed the
+        operator eight characters that appear nowhere on the screen they are
+        reading from.
+
+        Its own function because the message body has to say what the button
+        does and the body is built in another file. Two copies of this choice
+        would drift into a screen promising a button it does not have.
+    #>
     param([Parameter(Mandatory)][long]$UserId)
-    $rows = @()
-    # The reference is eight hex characters an operator quotes to an
-    # administrator so one grep finds the line. It was printed in the message
-    # and had to be retyped off a phone, one character wrong being one grep
-    # that finds nothing; copy_text (Bot API 7.11) puts it on the clipboard.
-    # Only the newest one gets a button - ten of them would bury the two
-    # controls under a wall of hex.
-    # The newest *failed* one when there is one: a reference is printed on
-    # screen only beside a failure, and that failure is what gets reported.
-    # Copying the reference of a successful operation instead handed the
-    # operator eight characters that appear nowhere on the screen they are
-    # reading from.
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
     # Get-JsonProp, not $_.Result: a history entry carries only the fields
     # its writer knew, and StrictMode turns a missing one into a crash on the
     # screen an operator opens to report a crash.
     $troubled = @($history | Where-Object { [string](Get-JsonProp $_ 'Result') -notin @('', 'success') })
     $latest = @(@(if ($troubled.Count -gt 0) { $troubled } else { $history }) | Select-Object -Last 1)
-    if ($latest.Count -gt 0) {
-        $reference = Get-OperationReference -OperationId ([string]$latest[0].OperationId)
-        if ($reference) {
-            $rows += , @(@{ text = "📋 نسخ مرجع $reference"; copy_text = @{ text = $reference } })
-        }
+    if ($latest.Count -eq 0) { return '' }
+    return [string](Get-OperationReference -OperationId ([string]$latest[0].OperationId))
+}
+
+function Get-MyOperationsCopyLabel {
+    <# What the button says, so the notice can name it exactly. #>
+    param([Parameter(Mandatory)][string]$Reference)
+    return "نسخ مرجع $Reference"
+}
+
+function Get-MyOperationsKeyboard {
+    param([Parameter(Mandatory)][long]$UserId)
+    $rows = @()
+    $reference = Get-MyOperationsCopyReference -UserId $UserId
+    if ($reference) {
+        # Through the shared helper rather than a hand-built hashtable, so
+        # there is one place that knows what a copy button looks like.
+        $rows += , @((New-CopyButton -Text "📋 $(Get-MyOperationsCopyLabel -Reference $reference)" -Payload $reference))
     }
     if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
         $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
@@ -843,6 +864,12 @@ function Invoke-MyOperationsCommand {
             default { '' }
         }
         if ($advice) { $lines.Add("      ↳ $advice") }
+    }
+    $copyReference = Get-MyOperationsCopyReference -UserId $UserId
+    if ($copyReference) {
+        $lines.Add('')
+        $lines.Add((Get-CopyButtonNotice -Label (Get-MyOperationsCopyLabel -Reference $copyReference) `
+                    -Hint 'أرسله للمشرف مع وصف ما حدث.'))
     }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
 }

@@ -1227,6 +1227,30 @@ Describe 'The operation history says what happened before it says what was done'
         @($blocks | Where-Object { $_.type -eq 'divider' }).Count | Should -Be 3
     }
 
+    It 'promises the copy only on the screen that carries the button' {
+        # Both the body and the keyboard ask the same function, so a screen
+        # cannot describe a button it does not show.
+        Mock Get-UserOperationHistory {
+            @([pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'failed'; Target = 'a'; Values = ''; OperationId = 'air-5023333b032c476eb48204ca08032a98' })
+        }
+
+        $notice = @(@(Get-MyOperationsBlocks -UserId 101) | Where-Object { $_.ContainsKey('text') -and [string]$_.text -match 'حافظة جهازك' })
+        $keyboard = Get-MyOperationsKeyboard -UserId 101
+        $button = @($keyboard.inline_keyboard)[0][0]
+
+        $notice | Should -HaveCount 1
+        $notice[0].text | Should -Match 'زر «نسخ مرجع 5023333b»'
+        $button.copy_text.text | Should -Be '5023333b'
+
+        # No reference, no button, and so no promise.
+        Mock Get-UserOperationHistory {
+            @([pscustomobject]@{ At = '2026-08-31T21:00:00'; Action = 'SHOW'; Result = 'success'; Target = 'a'; Values = ''; OperationId = '' })
+        }
+        @(@(Get-MyOperationsBlocks -UserId 101) | Where-Object { $_.ContainsKey('text') -and [string]$_.text -match 'حافظة جهازك' }) | Should -BeNullOrEmpty
+        $plain = Get-MyOperationsKeyboard -UserId 101
+        @(@($plain.inline_keyboard) | ForEach-Object { $_ } | Where-Object { $_.ContainsKey('copy_text') }) | Should -BeNullOrEmpty
+    }
+
     It 'falls back to the text screen when rich sending is refused' {
         Mock Send-TelegramRichMessage { $false }
         Mock Get-UserOperationHistory { @() }
@@ -1832,6 +1856,21 @@ Describe 'Editing text starts from the text' {
         $rows[0][0].copy_text.text | Should -Be 'الرئيس يفتتح المعرض'
         $rows[0][0].ContainsKey('callback_data') | Should -BeFalse
         $rows[1][0].callback_data | Should -Be 'news:reorder'
+    }
+
+    It 'says what the copy button will do, because nothing can be said after it' {
+        # copy_text is handled by Telegram on the device: no callback reaches
+        # the bridge, so the bot cannot confirm the press afterwards. The
+        # notice is written before it, and names the button as labelled.
+        Mock Send-TelegramMessage { $script:SentText = $Text; $script:SentMarkup = $ReplyMarkup }
+
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'p' -Current 'الرئيس يفتتح المعرض' -CancelData 'x' `
+            -CopyLabel '📋 نسخ العنوان'
+
+        $script:SentText | Should -Match 'زر «نسخ العنوان» ينسخ النص إلى حافظة جهازك'
+        # Nothing promised when there is no button to press.
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'p' -Current '' -CancelData 'x'
+        $script:SentText | Should -Not -Match 'حافظة جهازك'
     }
 
     It 'escapes the current text and offers no copy button when there is none' {

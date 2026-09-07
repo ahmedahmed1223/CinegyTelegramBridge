@@ -455,6 +455,12 @@ function Get-MyOperationsBlocks {
         }
         $blocks += @{ type = 'details'; summary = "🔍 عمليات أقدم ($($older.Count))"; blocks = $inner }
     }
+    # Only when the keyboard actually carries the button - both screens ask
+    # the same function, so the promise cannot outlive the button.
+    $copyReference = Get-MyOperationsCopyReference -UserId $UserId
+    if ($copyReference) {
+        $blocks += @{ type = 'paragraph'; text = (Get-CopyButtonNotice -Label (Get-MyOperationsCopyLabel -Reference $copyReference) -Hint 'أرسله للمشرف مع وصف ما حدث.') }
+    }
     return $blocks
 }
 

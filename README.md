@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.92.0
+
+A copy button now says what it will do, because nothing can say it afterwards.
+
+The request was to confirm that the text had been copied. The bridge cannot: a
+`copy_text` button (Bot API 8.0) is carried out by Telegram on the device and
+sends no callback, so the bot never learns the button was pressed and has
+nothing to answer with. Telegram's own client shows a brief confirmation of its
+own.
+
+So the notice is written before the press instead of waited for after it. One
+line names the button exactly as it is labelled and says where the copied text
+is meant to go - which makes Telegram's confirmation expected rather than a
+surprise, and turns a button that looked inert into an understood action. Both
+screens that carry a copy button have it: the text editor ("paste it in the
+message box and edit it") and the operation history ("send it to an
+administrator with what happened"), and the wording lives in one function so no
+two screens promise it differently. Whether the operations screen carries the
+button at all is now decided by a single function that both its body and its
+keyboard ask, since the two are built in different files and would otherwise
+drift into a screen promising a button it does not show.
+
 ## Version 7.91.0
 
 Editing text starts from the text, and what will appear on screen is marked as

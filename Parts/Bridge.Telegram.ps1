@@ -736,6 +736,28 @@ function New-CopyButton {
     return @{ text = $Text; copy_text = @{ text = [string]$Payload } }
 }
 
+function Get-CopyButtonNotice {
+    <#
+        The line that tells the reader what the copy button will do.
+
+        It is written before the press because nothing can be written after
+        one: copy_text (Bot API 8.0) is handled by Telegram on the device and
+        sends the bridge no callback, so the bot cannot know the button was
+        pressed and cannot answer it. Telegram's own client shows a brief
+        confirmation; this line is what makes that confirmation expected
+        rather than a surprise, and says where the copied text is meant to go.
+
+        Shared so the promise is worded the same on every screen that makes
+        it - a screen wording it differently is a screen an operator stops
+        trusting.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [string]$Hint = 'الصقه حيث تحتاجه.'
+    )
+    return "📋 زر «$Label» ينسخ النص إلى حافظة جهازك فورًا — $Hint"
+}
+
 function Send-BridgeTextEditPrompt {
     <#
         Ask for replacement text, starting from the text being replaced.
@@ -773,6 +795,13 @@ function Send-BridgeTextEditPrompt {
     }
     $lines.Add('')
     $lines.Add('⌨️ <b>اكتب النص الجديد في صندوق الرسالة وأرسله</b>، أو انسخ الحالي وعدّله.')
+    if (-not [string]::IsNullOrWhiteSpace($Current)) {
+        # Named after the button as it is actually labelled, minus its emoji:
+        # a notice pointing at a button that reads something else is worse
+        # than no notice.
+        $notice = Get-CopyButtonNotice -Label ($CopyLabel -replace '^[^\p{L}]+', '') -Hint 'الصقه في صندوق الرسالة ثم عدّله.'
+        $lines.Add("<i>$(ConvertTo-TelegramHtmlText $notice)</i>")
+    }
     $rows += , @((New-Button '❌ إلغاء' $CancelData))
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup @{ inline_keyboard = $rows }
 }

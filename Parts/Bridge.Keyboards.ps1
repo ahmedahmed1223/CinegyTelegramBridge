@@ -229,6 +229,84 @@ function Get-BridgeReadinessSummary {
     return [pscustomobject]@{ Ready = $ready; Text = "$label · Telegram: $telegram · Cinegy: $cinegy · القرص: $diskFree GB" }
 }
 
+function Get-MainMenuIntroBlocks {
+    <#
+        The menu screen as a table, one row per live layer.
+
+        It is the screen an operator opens most and the last one with no rich
+        version, so it stayed unlike the rest however its text was arranged.
+        What is on air is rows of columns - layer, template, how long, whose -
+        which is a table by nature; in text those four facts have to be run
+        together across two lines each.
+
+        The verdict is the heading, because it is the one thing that has to
+        land before anything is read.
+
+        Every layer gets a row. The text version caps at four because each
+        costs it two lines; a table is read down its columns, so a cap would
+        only hide a live graphic for no gain.
+    #>
+    param([long]$UserId = 0)
+    $freshness = Get-CinegyStateFreshness `
+        -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
+        -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
+    $age = switch ($freshness.State) {
+        'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
+        default { 'لم يتم التحقّق بعد' }
+    }
+    $verdict = if ($freshness.State -ne 'connected') { '🟠 تعذّر تأكيد الحالة من Cinegy' }
+    elseif ($script:OnAir.Count -gt 0) { '🟠 طبقات على الهواء' }
+    else { '🟢 كل شيء سليم' }
+
+    $blocks = @(@{ type = 'heading'; text = $verdict; size = 3 })
+
+    if ($script:OnAir.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = '⚫️ لا شيء على الهواء' }
+    }
+    else {
+        $cells = @(, @(
+                @{ text = 'الطبقة'; is_header = $true }
+                @{ text = 'القالب'; is_header = $true }
+                @{ text = 'منذ'; is_header = $true }
+                @{ text = 'المشغّل'; is_header = $true }
+            ))
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $record = $script:OnAir[$layer]
+            # Guarded: these records are written at a dozen call sites and
+            # carry only what each one cares about, so under StrictMode an
+            # absent key would take down the screen an operator opens when
+            # something has already gone wrong.
+            $since = if ($record.ContainsKey('At') -and $record.At -is [datetime]) {
+                Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds)
+            }
+            else { '—' }
+            $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
+            $who = switch ($source) {
+                'cinegy' { 'Cinegy' }
+                'BotTest' { 'اختبار' }
+                default {
+                    $name = if ($record.ContainsKey('UserId')) { Get-UserDisplayName -UserId ([long]$record.UserId) } else { '' }
+                    if ($name) { $name } else { '—' }
+                }
+            }
+            $cells += , @(
+                @{ text = [string]$layer }
+                @{ text = [string]$record.Key }
+                @{ text = $since }
+                @{ text = $who }
+            )
+        }
+        $blocks += @{ type = 'table'; cells = $cells }
+    }
+
+    $blocks += @{ type = 'paragraph'; text = "🔄 $age" }
+    $blocks += @{ type = 'paragraph'; text = "🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)" }
+    if ($UserId -gt 0) { $blocks += @{ type = 'paragraph'; text = "👤 $(Format-UserAuditActor -UserId $UserId)" } }
+    return $blocks
+}
+
 function Get-MainMenuIntro {
     param([long]$UserId = 0)
     <#

@@ -859,6 +859,17 @@ function Get-PersistentReplyKeyboard {
     }
 }
 
+function Show-MainMenuScreen {
+    <# The menu screen without the pinned-keyboard bookkeeping Show-MainMenu
+       does - what the two "back to the menu" callbacks want. One function, so
+       the rich-then-text decision is made in a single place. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks @(Get-MainMenuIntroBlocks -UserId $UserId) -ReplyMarkup $keyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MainMenuIntro -UserId $UserId) -ParseMode HTML -ReplyMarkup $keyboard
+}
+
 function Show-MainMenu {
     <# The canonical "get me back to a known state" response: clears any
        half-finished flow, re-pins the persistent keyboard, then shows the
@@ -881,7 +892,15 @@ function Show-MainMenu {
     # stop showing, and /بدء and /إلغاء were the two doors still leading to it.
     $status = Get-MainMenuIntro -UserId $UserId
     $text = if ([string]::IsNullOrWhiteSpace($Intro)) { $status } else { "$Intro`n`n$status" }
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    # Table first, text as the fallback - the shape every other screen uses.
+    # An -Intro leads the blocks the way it leads the text, so /بدء and /إلغاء
+    # keep their greeting above the state rather than instead of it.
+    $blocks = @()
+    if (-not [string]::IsNullOrWhiteSpace($Intro)) { $blocks += @{ type = 'paragraph'; text = $Intro } }
+    $blocks += @(Get-MainMenuIntroBlocks -UserId $UserId)
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $keyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
 }
 
 function Import-UserProfiles {

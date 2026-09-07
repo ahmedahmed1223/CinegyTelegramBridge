@@ -346,7 +346,7 @@ function Invoke-CallbackQuery {
         'mojaz:dropconfirm' { Remove-MojazBulletinAndSchedules -ChatId $chatId -UserId $userId | Out-Null; break }
         { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Show-MainMenuScreen -ChatId $chatId -UserId $userId
             break
         }
         'cancel' {
@@ -709,7 +709,7 @@ function Invoke-CallbackQuery {
                 $script:PendingCancelReason = $null
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'سُجّل، شكرًا.'
             }
-            Send-TelegramMessage -ChatId $chatId -Text (Get-MainMenuIntro -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            Show-MainMenuScreen -ChatId $chatId -UserId $userId
             break
         }
         'menu:digest' {
@@ -728,7 +728,10 @@ function Invoke-CallbackQuery {
         }
         'menu:stats' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                $statsKeyboard = Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId
+                if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-BridgeStatsBlocks) -ReplyMarkup $statsKeyboard)) {
+                    Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup $statsKeyboard
+                }
             }
             break
         }

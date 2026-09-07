@@ -216,6 +216,64 @@ function Get-RuntimeFileHealth {
     return @($records)
 }
 
+function Get-RuntimeFileHealthBlocks {
+    <#
+        The runtime files as a table, one row per file.
+
+        The other health screen has had a table since 10.1 and this one never
+        did, so two halves of the same question looked like different
+        products. A file, a state and a sentence about it is three columns.
+
+        Every file gets a row here rather than the healthy ones being folded
+        away as they are in the text: a table is read down its state column,
+        so eight quiet rows cost nothing to skip, and hiding them would mean
+        the screen could not answer "is anything missing" without being
+        opened twice.
+    #>
+    param([AllowNull()][object[]]$Records = $null)
+    if ($null -eq $Records) { $Records = @(Get-RuntimeFileHealth -Files (Get-BridgeRuntimeFiles)) }
+    $Records = @($Records)
+
+    $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
+    $verdict = if ($faults.Count -eq 0) { '🟢 كل ملفات التشغيل سليمة.' } else { "🔴 ملفات تحتاج انتباهك: $($faults.Count)" }
+
+    $blocks = @(
+        @{ type = 'heading'; text = '🗂 صحة ملفات التشغيل'; size = 3 }
+        @{ type = 'paragraph'; text = $verdict }
+    )
+    if ($Records.Count -eq 0) { return $blocks }
+
+    $cells = @(, @(
+            @{ text = 'الملف'; is_header = $true }
+            @{ text = 'الحالة'; is_header = $true }
+            @{ text = 'التفصيل'; is_header = $true }
+        ))
+    # Faults first, for the reason the health centre puts them first: on a
+    # screen opened because something is wrong, the wrong thing should not be
+    # in row six.
+    $ordered = @($faults) + @($Records | Where-Object { $_.State -notin @('broken', 'recoverable') })
+    foreach ($record in $ordered) {
+        $icon = switch ([string]$record.State) {
+            'healthy' { '🟢' }
+            'absent' { '⚪️' }
+            'recoverable' { '🟠' }
+            default { '🔴' }
+        }
+        $detail = switch ([string]$record.State) {
+            'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
+            'absent' { 'لم يُكتب بعد — لا شيء لاستعادته' }
+            'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
+            default { 'تالف ولا توجد نسخة احتياطية' }
+        }
+        $cells += , @(@{ text = [string]$record.Name }, @{ text = $icon }, @{ text = $detail })
+    }
+    $blocks += @{ type = 'table'; cells = $cells }
+    if ($faults.Count -gt 0) {
+        $blocks += @{ type = 'paragraph'; text = 'الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل؛ والتالف بلا نسخة يبدأ فارغًا.' }
+    }
+    return $blocks
+}
+
 function Get-RuntimeFileHealthText {
     param([AllowNull()][object[]]$Records = $null)
     if ($null -eq $Records) { $Records = @(Get-RuntimeFileHealth -Files (Get-BridgeRuntimeFiles)) }
@@ -296,7 +354,11 @@ function Get-RuntimeFileHealthText {
 function Invoke-RuntimeFileHealthCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-RuntimeFileHealthText) -ParseMode HTML -ReplyMarkup (Get-HealthCenterKeyboard)
+    $keyboard = Get-HealthCenterKeyboard
+    # Table first, text as the fallback - the shape every other screen here
+    # uses, and the reason this one used to look unlike them.
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-RuntimeFileHealthBlocks) -ReplyMarkup $keyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-RuntimeFileHealthText) -ParseMode HTML -ReplyMarkup $keyboard
 }
 
 function Get-BridgeUsageMetrics {

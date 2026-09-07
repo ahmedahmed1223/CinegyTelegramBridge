@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.88.0
+
+No screen is left without a table.
+
+Three screens had no rich path at all — they were text however the text was
+formatted, which is why they stayed unlike the rest no matter how the lines were
+arranged.
+
+The menu screen is the one an operator lands on most. What is on air is rows of
+columns by nature — layer, template, how long, whose — four facts the text has
+to run together across two lines each. The verdict becomes the message's
+heading, because it is what must land before anything is read. There is no cap
+here: the text version stops at four layers because each costs it two lines,
+but a table is read down its columns and a cap would only hide a live graphic.
+
+The operating numbers are a label-and-value list, which is a two-column table by
+nature. The runtime-file health screen is the other half of a question whose
+first half has had a table since 10.1, so the two looked like different
+products; broken files come first, as they do in the health centre.
+
+The rich-then-text decision for the menu now lives in one place
+(`Show-MainMenuScreen`) rather than being made separately at three call sites.
+
 ## Version 7.87.1
 
 One keyboard row was taking down the bulletin, news and banner reports.

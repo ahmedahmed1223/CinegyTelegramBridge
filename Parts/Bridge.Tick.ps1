@@ -412,6 +412,51 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Get-BridgeStatsBlocks {
+    <#
+        The operating numbers as a real table, label against value.
+
+        This screen never had a rich version at all - it was text however the
+        text was formatted, which is why it stayed unlike every other screen
+        no matter how the lines were arranged. A label-and-value list is a
+        two-column table by nature: the figures belong under each other rather
+        than at the end of sentences of different lengths.
+
+        The verdict is a paragraph above the table for the same reason it
+        leads the text version: this screen is opened because something feels
+        off, and the answer should not have to be assembled from nine rows.
+    #>
+    $now = Get-Date
+    $uptime = $now - $script:BridgeStartedAt
+    $counters = $script:AirOperationCounters
+    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
+    $verdict = if ($uptime.TotalMinutes -lt 15) { '🟠 التشغيل حديث — قد يكون الجسر يُعاد تشغيله' }
+    elseif ([int]$script:TelegramRateLimitHits -gt 0) { '🟠 تيليجرام يحدّ من الإرسال' }
+    else { '🟢 تشغيل مستقر' }
+    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
+
+    $rows = @(
+        , @('⏱ مدة التشغيل', "$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
+        , @('📅 منذ', $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
+        , @('🎬 عمليات الهواء', "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
+        , @('🚦 حدّ تيليجرام (429)', [string]$script:TelegramRateLimitHits)
+        , @('📭 أُسقطت من الطابور', [string]$script:TelegramOutboxDropped)
+        , @('📡 اتصال Telegram', [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
+        , @('🎛 صحة Cinegy', [string]$script:RuntimeState.Monitoring.CinegyHealthState)
+        , @('💚 آخر نبضة يومية', $lastBeat)
+        , @('🔴 مشاهد على الهواء', [string]$script:OnAir.Count)
+    )
+    $cells = @(, @(@{ text = 'البند'; is_header = $true }, @{ text = 'القيمة'; is_header = $true }))
+    foreach ($row in $rows) { $cells += , @(@{ text = [string]$row[0] }, @{ text = [string]$row[1] }) }
+
+    return @(
+        @{ type = 'heading'; text = "📈 أرقام التشغيل — v$script:BridgeVersion"; size = 3 }
+        @{ type = 'paragraph'; text = "🕒 $($now.ToString('yyyy-MM-dd HH:mm:ss')) (محلي)" }
+        @{ type = 'paragraph'; text = $verdict }
+        @{ type = 'table'; cells = $cells }
+    )
+}
+
 function Get-BridgeStatsText {
     <# Operational numbers an administrator asks for when something feels off:
        how long this instance has been up, what it has done, and whether

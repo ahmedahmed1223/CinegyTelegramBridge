@@ -1665,3 +1665,58 @@ Describe 'Every keyboard row is a row, not a lone button' {
         }
     }
 }
+
+Describe 'Every screen now has a table to try before its text' {
+    It 'gives the menu screen one row per live layer' {
+        # The screen an operator opens most, and the last one that had no rich
+        # version - so it stayed unlike the rest however its text was arranged.
+        $script:OnAir.Clear()
+        $script:OnAir[4] = @{ Key = 'Urgent'; At = (Get-Date).AddMinutes(-12); UserId = 777; Source = 'bridge' }
+        $script:OnAir[7] = @{ Key = 'Logo'; At = (Get-Date).AddHours(-3); UserId = 0; Source = 'cinegy' }
+
+        $blocks = @(Get-MainMenuIntroBlocks -UserId 777)
+        $table = @($blocks | Where-Object { $_.type -eq 'table' })[0]
+        # A header row plus one per layer, four columns.
+        @($table.cells).Count | Should -Be 3
+        @($table.cells[0]).Count | Should -Be 4
+        $blocks[0].type | Should -Be 'heading'
+
+        # No cap here: the text version stops at four because each layer costs
+        # it two lines, but a table is read down its columns and capping would
+        # only hide a live graphic.
+        foreach ($layer in 1..9) { $script:OnAir[$layer] = @{ Key = "t$layer"; At = (Get-Date); UserId = 1; Source = 'bridge' } }
+        $wide = @(Get-MainMenuIntroBlocks -UserId 777)
+        @(@($wide | Where-Object { $_.type -eq 'table' })[0].cells).Count | Should -Be 10
+        $script:OnAir.Clear()
+    }
+
+    It 'survives a menu record carrying neither a time nor an operator' {
+        $script:OnAir.Clear()
+        $script:OnAir[2] = @{ Key = 'bare' }
+        { Get-MainMenuIntroBlocks -UserId 1 } | Should -Not -Throw
+        $script:OnAir.Clear()
+    }
+
+    It 'gives the operating numbers and the runtime files a table too' {
+        # Neither had a rich builder at all, which is why they looked unlike
+        # every other screen no matter how their text was formatted.
+        $stats = @(Get-BridgeStatsBlocks)
+        @($stats | Where-Object { $_.type -eq 'table' }) | Should -Not -BeNullOrEmpty
+        $stats[0].type | Should -Be 'heading'
+
+        $files = @(Get-RuntimeFileHealthBlocks -Records @(
+                [pscustomobject]@{ Name = 'broken.json'; State = 'broken'; SizeText = '0 KB'; ModifiedAt = (Get-Date) }
+                [pscustomobject]@{ Name = 'ok.json'; State = 'healthy'; SizeText = '2 KB'; ModifiedAt = (Get-Date) }))
+        $table = @($files | Where-Object { $_.type -eq 'table' })[0]
+        # Faults first: on a screen opened because something is wrong, the
+        # wrong thing must not be in row six.
+        $table.cells[1][0].text | Should -Be 'broken.json'
+    }
+
+    It 'keeps all three inside what the bridge will send' {
+        foreach ($blocks in @((Get-MainMenuIntroBlocks -UserId 1), (Get-BridgeStatsBlocks), (Get-RuntimeFileHealthBlocks))) {
+            $json = (@{ blocks = @($blocks); is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+            Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        }
+    }
+}

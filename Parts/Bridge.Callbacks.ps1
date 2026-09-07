@@ -467,11 +467,11 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد متاحًا.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls -ChatId $chatId -UserId $userId)
                 break
             }
-            Send-TelegramMessage -ChatId $chatId -Text (Get-TemplatePreviewText -Template $template) -ReplyMarkup (Get-TemplatePreviewKeyboard -TemplateIndex $templateIndex)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-TemplatePreviewText -Template $template) -ParseMode HTML -ReplyMarkup (Get-TemplatePreviewKeyboard -TemplateIndex $templateIndex)
             break
         }
         'menu:favorites' {
-            Send-TelegramMessage -ChatId $chatId -Text (Get-FavoritesManagementText -UserId $userId) -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (Get-FavoritesManagementText -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
             break
         }
         'favtoggle:*' {
@@ -728,7 +728,7 @@ function Invoke-CallbackQuery {
         }
         'menu:stats' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -777,7 +777,7 @@ function Invoke-CallbackQuery {
         }
         'menu:usagedigest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }

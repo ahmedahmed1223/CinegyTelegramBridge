@@ -423,20 +423,29 @@ function Get-BridgeStatsText {
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("📈 أرقام التشغيل — v$($script:BridgeVersion)")
+    # parse_mode=HTML. Uptime is the number this screen exists for - a bridge
+    # up for eleven minutes has been restarting - so it leads in bold, and
+    # every figure is a <code> span: monospace keeps the digits left-to-right
+    # against the Arabic, and Telegram makes each tap-to-copy for an
+    # administrator quoting them in a fault report.
+    #
+    # Bold and code sit side by side, never one inside the other: the two
+    # cannot be combined on the same characters and the API refuses the whole
+    # message if they are.
+    $lines.Add("<b>📈 أرقام التشغيل</b> — <code>v$($script:BridgeVersion)</code>")
     $lines.Add('')
-    $lines.Add("مدة التشغيل: $([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
-    $lines.Add("منذ: $($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))")
+    $lines.Add("<b>مدة التشغيل:</b> <code>$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د</code>")
+    $lines.Add("منذ: <code>$($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))</code>")
     $lines.Add('')
-    $lines.Add("عمليات الهواء: $total (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
-    $lines.Add("رسائل رفضها Telegram لتجاوز الحد (429): $($script:TelegramRateLimitHits)")
-    $lines.Add("رسائل مؤجلة أسقطها حد طابور Telegram: $($script:TelegramOutboxDropped)")
-    $lines.Add("اتصال Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)")
-    $lines.Add("صحة Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState)")
+    $lines.Add("<b>عمليات الهواء:</b> <code>$total</code> (✅ <code>$($counters.Success)</code> · ❌ <code>$($counters.Failed)</code> · ⛔ <code>$($counters.Blocked)</code>)")
+    $lines.Add("<blockquote>رسائل رفضها Telegram لتجاوز الحد (429): <code>$($script:TelegramRateLimitHits)</code>
+رسائل مؤجلة أسقطها حد طابور Telegram: <code>$($script:TelegramOutboxDropped)</code>
+اتصال Telegram: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))</code>
+صحة Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))</code></blockquote>")
 
     $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
-    $lines.Add("آخر نبضة يومية: $lastBeat")
-    $lines.Add("مشاهد مسجّلة على الهواء: $($script:OnAir.Count)")
+    $lines.Add("آخر نبضة يومية: <code>$lastBeat</code>")
+    $lines.Add("مشاهد مسجّلة على الهواء: <code>$($script:OnAir.Count)</code>")
     return ($lines -join "`n")
 }
 
@@ -901,45 +910,51 @@ function Get-UsageDigestText {
        templates, the operation totals, and anything that got refused. #>
     param([int]$TopCount = 5)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📊 ملخص الاستخدام')
+    # parse_mode=HTML. Template names are typed by an administrator, so each
+    # one is escaped; the ranking sits in a blockquote because it is a list
+    # inside a summary rather than the summary itself.
+    $lines.Add('<b>📊 ملخص الاستخدام</b>')
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
-    if ($ranked.Count -eq 0) { $lines.Add('• لم تُستخدم أي قوالب بعد.') }
+    if ($ranked.Count -eq 0) { $lines.Add('<i>• لم تُستخدم أي قوالب بعد.</i>') }
     else {
         $lines.Add('')
-        $lines.Add('الأكثر استخدامًا:')
+        $lines.Add('<b>الأكثر استخدامًا:</b>')
         $rank = 0
+        $rankLines = [System.Collections.Generic.List[string]]::new()
         foreach ($item in $ranked) {
             $rank++
             $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
-                " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
+                " · آخر مرة <code>$(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))</code>"
             }
             else { '' }
-            $lines.Add("$rank. $($item.Key) — $($item.Value)$lastUsed")
+            $rankLines.Add("$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — <code>$($item.Value)</code>$lastUsed")
         }
+        $lines.Add("<blockquote>$($rankLines -join "`n")</blockquote>")
     }
 
     $counters = $script:AirOperationCounters
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
     $lines.Add('')
-    $lines.Add("عمليات الهواء منذ آخر تشغيل: $total")
+    $lines.Add("<b>عمليات الهواء منذ آخر تشغيل:</b> <code>$total</code>")
     # The scheduled weekly digest cannot use the process counters: a restart
     # at handover made a quiet week look empty. Audit is the durable source.
     $week = Get-ReportRecords -From ((Get-Date).Date.AddDays(-6)) -To (Get-Date) -EventName 'air_control'
     $weeklyOperations = @($week.Records).Count
     $completedDays = 7
     $dailyAverage = [math]::Round($weeklyOperations / $completedDays, 1)
-    $lines.Add("تقدير أسبوعي: $weeklyOperations عملية في آخر 7 أيام · متوسط $dailyAverage يوميًا")
-    $lines.Add("✅ ناجحة $($counters.Success) · ❌ فاشلة $($counters.Failed) · ⛔ مرفوضة $($counters.Blocked)")
+    $lines.Add("تقدير أسبوعي: <code>$weeklyOperations</code> عملية في آخر 7 أيام · متوسط <code>$dailyAverage</code> يوميًا")
+    $lines.Add("✅ ناجحة <code>$($counters.Success)</code> · ❌ فاشلة <code>$($counters.Failed)</code> · ⛔ مرفوضة <code>$($counters.Blocked)</code>")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
-        $lines.Add('راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.')
+        $lines.Add('<i>راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.</i>')
     }
     if ($script:CancelReasons.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('أسباب التراجع المسجّلة:')
-        foreach ($reason in ($script:CancelReasons.Keys | Sort-Object)) {
-            $lines.Add("• $(Get-CancelReasonLabel -Reason $reason): $($script:CancelReasons[$reason])")
-        }
+        $lines.Add('<b>أسباب التراجع المسجّلة:</b>')
+        $reasonLines = @(@($script:CancelReasons.Keys | Sort-Object) | ForEach-Object {
+                "• $(ConvertTo-TelegramHtmlText (Get-CancelReasonLabel -Reason $_)): <code>$($script:CancelReasons[$_])</code>"
+            })
+        $lines.Add("<blockquote>$($reasonLines -join "`n")</blockquote>")
     }
     return ($lines -join "`n")
 }

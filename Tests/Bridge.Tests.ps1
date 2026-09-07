@@ -1439,5 +1439,25 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
 
         @(Test-BridgeTelegramHtml -Text (Get-RuntimeFileHealthText)) | Should -BeNullOrEmpty
         @(Test-BridgeTelegramHtml -Text (Get-UserActivitySummaryText)) | Should -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text (Get-BridgeStatsText)) | Should -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text (Get-UsageDigestText)) | Should -BeNullOrEmpty
+        @(Test-BridgeTelegramHtml -Text (Get-FavoritesManagementText -UserId 7275359265)) | Should -BeNullOrEmpty
+    }
+
+    It 'accepts a template preview built from a hostile template' {
+        # Key, category, description and field names are all typed by an
+        # administrator; a '<' in any of them must come out escaped rather
+        # than as a tag that unbalances the message.
+        $template = [pscustomobject]@{
+            Key = '<b>عاجل'; Layer = 4; Category = 'أخبار & تقارير'
+            Description = 'وصف فيه <script> ورمز &'
+            Fields = @('العنوان', '<i>النص')
+        }
+
+        $text = Get-TemplatePreviewText -Template $template
+        @(Test-BridgeTelegramHtml -Text $text) | Should -BeNullOrEmpty
+        $text | Should -Match '&lt;b&gt;عاجل'
+        $text | Should -Match '&amp;'
+        ConvertFrom-TelegramHtmlText $text | Should -Match '<script>'
     }
 }

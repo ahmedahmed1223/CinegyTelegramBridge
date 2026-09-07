@@ -13,6 +13,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.76.0
+
+The last four screens move to `parse_mode=HTML`, and nothing is sent as plain
+text now except the one thing that must be.
+
+The operating numbers, the usage summary, the template preview and the
+favourites screen. Uptime leads in bold because it is the number that screen
+exists for — a bridge up for eleven minutes has been restarting — and every
+figure beside it is a `<code>` span that stays left-to-right and is tap-to-copy.
+
+The template preview now leads with what is read just before something goes to
+air: which template, and whether it is already up. The detail sits under them in
+a blockquote instead of a row of `━━━` over one flat column. On the favourites
+screen the explanatory line is italic — it is the whole point of the screen,
+explaining the two states the tick marks cannot, and it read as a second
+instruction.
+
+`Get-OnAirShareText` stays plain on purpose. Its own comment says why: it is a
+summary meant to be pasted into another app, and markup is the one thing that
+breaks it there.
+
+The validity test covers these screens too, including a hostile template with
+`<` and `&` in its key, description, category and field names — all of it comes
+out escaped and reads back correctly. That test caught a fault written during
+this very change: a `<code>` inside an `<i>` on the favourites screen. The
+counts there are plain digits inside the italic sentence now; splitting the
+sentence into three spans to buy monospace would have cost the sentence.
+
 ## Version 7.75.1
 
 Two lines from 7.75.0 would have stopped their screens arriving at all.

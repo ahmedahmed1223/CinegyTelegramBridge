@@ -557,7 +557,7 @@ function Invoke-BridgeCommand {
             }
         }
         { $_ -in @('stats', 'uptime', 'ارقام') } {
-            if (Test-Admin -ChatId $ChatId -UserId $UserId) { Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeStatsText) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+            if (Test-Admin -ChatId $ChatId -UserId $UserId) { Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
             else { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         }
         { $_ -in @('قوالب', 'templates') } { Invoke-TemplatesCommand -ChatId $ChatId -UserId $UserId }

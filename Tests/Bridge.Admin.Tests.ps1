@@ -811,20 +811,20 @@ Describe 'Usage digest' {
     It 'ranks the busiest templates first' {
         $script:UsageCounts = @{ 'ticker' = 3; 'lower-third' = 11; 'bug' = 7 }
         $script:TemplateLastUsed = @{}
-        $text = Get-UsageDigestText
+        $text = ConvertFrom-TelegramHtmlText (Get-UsageDigestText)
         $text.IndexOf('lower-third') | Should -BeLessThan $text.IndexOf('bug')
         $text.IndexOf('bug') | Should -BeLessThan $text.IndexOf('ticker')
     }
 
     It 'says plainly when nothing has been used yet' {
         $script:UsageCounts = @{}
-        Get-UsageDigestText | Should -Match 'لم تُستخدم'
+        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match 'لم تُستخدم'
     }
 
     It 'reports failures and refusals, and points at the audit log' {
         $script:UsageCounts = @{ 'ticker' = 1 }
         $script:AirOperationCounters = @{ Success = 10; Failed = 2; Blocked = 1 }
-        $text = Get-UsageDigestText
+        $text = ConvertFrom-TelegramHtmlText (Get-UsageDigestText)
         $text | Should -Match 'فاشلة 2'
         $text | Should -Match 'مرفوضة 1'
         $text | Should -Match 'السجل'
@@ -833,7 +833,7 @@ Describe 'Usage digest' {
     It 'stays quiet about the audit log when nothing went wrong' {
         $script:UsageCounts = @{ 'ticker' = 1 }
         $script:AirOperationCounters = @{ Success = 4; Failed = 0; Blocked = 0 }
-        Get-UsageDigestText | Should -Not -Match 'راجع 📜'
+        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Not -Match 'راجع 📜'
     }
 }
 
@@ -980,17 +980,17 @@ Describe 'Operational numbers and status sharing' {
     AfterAll { $script:OnAir = @{} }
 
     It 'reports uptime, which is what tells an administrator it has been restarting' {
-        $text = Get-BridgeStatsText
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
         $text | Should -Match 'مدة التشغيل: 1 ي'
         $text | Should -Match ([regex]::Escape($script:BridgeVersion))
     }
 
     It 'separates flood limits from ordinary failures' {
-        Get-BridgeStatsText | Should -Match '\(429\): 7'
+        ConvertFrom-TelegramHtmlText (Get-BridgeStatsText) | Should -Match '\(429\): 7'
     }
 
     It 'counts every air operation outcome' {
-        $text = Get-BridgeStatsText
+        $text = ConvertFrom-TelegramHtmlText (Get-BridgeStatsText)
         $text | Should -Match 'عمليات الهواء: 15'
     }
 
@@ -1050,7 +1050,7 @@ Describe 'Cancel reasons' {
         $script:AirOperationCounters = @{ Success = 1; Failed = 0; Blocked = 0 }
         $script:CancelReasons = @{ 'template' = 3 }
 
-        Get-UsageDigestText | Should -Match 'قالب خاطئ: 3'
+        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match 'قالب خاطئ: 3'
     }
 }
 

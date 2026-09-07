@@ -488,16 +488,19 @@ function Get-TemplatePreviewText {
     $live = if ($script:OnAir.ContainsKey([int]$Template.Layer)) { '🔴 على الهواء الآن' } else { '⚫️ غير معروض' }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("ℹ️ $($Template.Key)")
-    $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add($live)
-    $lines.Add($where)
-    $lines.Add("التصنيف: $category")
-    $lines.Add("الحقول: $fields")
+    # parse_mode=HTML. This screen is read just before something goes to air,
+    # so the two facts that decide that - which template, and whether it is
+    # already up - carry the weight and the rest is the detail behind them.
+    # Key, category, description and field names are all typed by an
+    # administrator, so all of them are escaped.
+    $lines.Add("ℹ️ <b>$(ConvertTo-TelegramHtmlText ([string]$Template.Key))</b>")
+    $lines.Add("<b>$live</b>")
+    $lines.Add("<blockquote>$(ConvertTo-TelegramHtmlText $where)
+التصنيف: $(ConvertTo-TelegramHtmlText $category)
+الحقول: $(ConvertTo-TelegramHtmlText $fields)</blockquote>")
+    $lines.Add((ConvertTo-TelegramHtmlText $description))
     $lines.Add('')
-    $lines.Add($description)
-    $lines.Add('')
-    $lines.Add("الاستخدام: $uses · آخر مرة: $lastUsed")
+    $lines.Add("الاستخدام: <code>$(ConvertTo-TelegramHtmlText $uses)</code> · آخر مرة: <code>$(ConvertTo-TelegramHtmlText $lastUsed)</code>")
     return ($lines -join "`n")
 }
 
@@ -782,15 +785,22 @@ function Get-FavoritesManagementText {
     $selected = @(Get-UserFavoriteSelection -UserId $UserId)
     $count = Get-SettingInt 'FavoritesCount' 0
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('⭐ اختر القوالب التي تريد إظهارها في مفضلتك:')
+    # parse_mode=HTML. The line under the title is the whole point of this
+    # screen - it explains the two states the tick marks cannot - so it is
+    # italic and reads as an explanation rather than a second instruction.
+    #
+    # The counts stay inside the italic as plain digits rather than <code>:
+    # italic and code cannot be combined on the same characters, and breaking
+    # the sentence into three spans to buy monospace would cost the sentence.
+    $lines.Add('<b>⭐ اختر القوالب التي تريد إظهارها في مفضلتك:</b>')
     if ($count -le 0) {
-        $lines.Add('⚠️ عدد المفضلة المعروضة مضبوط على صفر، فلن يظهر أي قالب في القائمة.')
+        $lines.Add('<i>⚠️ عدد المفضلة المعروضة مضبوط على صفر، فلن يظهر أي قالب في القائمة.</i>')
     }
     elseif ($selected.Count -eq 0) {
-        $lines.Add("ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $count قوالب استخدامًا تلقائيًا.")
+        $lines.Add("<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $count قوالب استخدامًا تلقائيًا.</i>")
     }
     elseif ($selected.Count -gt $count) {
-        $lines.Add("⚠️ اخترت $($selected.Count) قوالب، وتعرض القائمة أول $count منها فقط.")
+        $lines.Add("<i>⚠️ اخترت $($selected.Count) قوالب، وتعرض القائمة أول $count منها فقط.</i>")
     }
     return ($lines -join "`n")
 }

@@ -13,6 +13,37 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.93.0
+
+Every screen now measures its own payload, so the limit is not discovered by an
+operator whose table has vanished.
+
+The 7.87 outage was found only after a report had already stopped rendering for
+a whole session. Nothing watched the size until it was too large, and a screen
+crosses the limit gradually as a station's day fills up. Now every rich payload
+is measured as it is serialised, a warning is logged once per screen at 70% of
+the limit - while it still works, and while there is still time to cap a table -
+and the operating-numbers screen carries a line naming the biggest screen sent
+this run and its percentage of the limit.
+
+Found while reviewing: `editMessageText` built a rich payload with no size check
+at all, though `sendRichMessage` has had one since 7.87. An oversized edit is a
+400 like any other, and a 400 narrows or disables a block type for the rest of
+the session - and the reorder screen re-renders on every arrow press, so it
+would have paid that price repeatedly. It has the same gate now, and its
+failures carry the payload length so no block type is blamed for a size problem.
+
+Also fixed: fifteen tests were making real requests to api.telegram.org and
+waiting out a 401 each, roughly a second apiece on every run of the gate. Since
+screens began trying `sendRichMessage` before their text, any test that drove a
+real screen while mocking only `Send-TelegramMessage` had its rich attempt
+escape the mocks - and the answer was never useful anyway, the token in
+config.example.json being a placeholder. The mock now sits at the real boundary,
+`Invoke-RestMethod` inside the `BridgeTelegram` module, rather than at the
+wrapper: everything above it still runs and is still measured, including the
+retry and the timeout, whose own tests mock that same command and whose mock
+wins over this one.
+
 ## Version 7.92.1
 
 The button itself cannot change after the press, so it changes before it.

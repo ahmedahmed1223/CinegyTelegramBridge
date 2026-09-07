@@ -1281,6 +1281,10 @@ Describe 'Main menu on-air priority' {
 
         Mock Send-TelegramMessage { }
         Mock Clear-PendingState { }
+        # Refused, so the text path is what runs - this test is about the text.
+        # Without it the screen's rich attempt reaches api.telegram.org from
+        # inside the gate and waits out a 401.
+        Mock Send-TelegramRichMessage { $false }
         Show-MainMenu -ChatId 909 -UserId 909
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ParseMode -eq 'HTML'
@@ -1357,6 +1361,10 @@ Describe 'Main menu on-air priority' {
         $script:PersistentKeyboardPinned = @{}
         Mock Send-TelegramMessage { }
         Mock Clear-PendingState { }
+        # Refused, so the text path is what runs - this test is about the text.
+        # Without it the screen's rich attempt reaches api.telegram.org from
+        # inside the gate and waits out a 401.
+        Mock Send-TelegramRichMessage { $false }
 
         Show-MainMenu -ChatId 909 -UserId 909
         Show-MainMenu -ChatId 909 -UserId 909
@@ -1379,6 +1387,10 @@ Describe 'Main menu on-air priority' {
         $script:PersistentKeyboardPinned = @{ 909 = $true }
         Mock Send-TelegramMessage { }
         Mock Clear-PendingState { }
+        # Refused, so the text path is what runs - this test is about the text.
+        # Without it the screen's rich attempt reaches api.telegram.org from
+        # inside the gate and waits out a 401.
+        Mock Send-TelegramRichMessage { $false }
         Show-MainMenu -ChatId 909 -UserId 909 -Intro 'أهلاً!'
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $Text -match 'أهلاً!' -and $Text -match 'الهواء'

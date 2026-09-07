@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.TestContext.ps1 - shared Pester setup for the Bridge.*.Tests.ps1
     files. Dot-sourced at the top of each one so the bridge loads the same
@@ -38,5 +38,20 @@ BeforeAll {
     if (-not (Get-Command Split-TelegramText -ErrorAction SilentlyContinue)) {
         throw "TelegramBridge.ps1 did not load its functions; check the -LoadOnly guard."
     }
+
+    # The network, shut for every test file.
+    #
+    # -LoadOnly stops the polling loop, not a screen. Since screens began
+    # trying sendRichMessage before their text, any test that drove a real
+    # screen while mocking only Send-TelegramMessage was making a live request
+    # to api.telegram.org and waiting out its 401 - fifteen of them, a second
+    # each, on every run of the gate. The answer was never useful either: the
+    # token in config.example.json is a placeholder.
+    #
+    # Mocked at the real boundary rather than at Invoke-BridgeTelegramRequest,
+    # so everything above it still runs and is still measured - including the
+    # retry and the timeout, whose own tests mock this same command and whose
+    # mock wins over this one.
+    Mock Invoke-RestMethod -ModuleName BridgeTelegram { throw 'the tests do not talk to Telegram' }
 }
 

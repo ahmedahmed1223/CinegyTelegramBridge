@@ -1266,6 +1266,11 @@ Describe 'Every button on screen goes somewhere' {
     It 'opens the main menu from the home button, in both spellings' {
         Mock Send-TelegramMessage {}
         Mock Confirm-TelegramCallback {}
+        # Refused, so the text path is what runs. Without this the menu's rich
+        # attempt escaped the mocks and made a real request to api.telegram.org
+        # from inside the gate - two seconds and a 401 per run, for a screen
+        # this test is not about.
+        Mock Send-TelegramRichMessage { $false }
 
         # The whitelisted chat from config.example.json: an unauthorized one never reaches the router.
         $chatId = @(Get-JsonProp $config 'AllowedChatIds')[0]
@@ -1603,6 +1608,46 @@ Describe 'One oversized screen must not cost the session its tables' {
     It 'refuses to send a payload far larger than anything that renders here' {
         Test-RichPayloadSize -Length 4000 | Should -BeTrue
         Test-RichPayloadSize -Length 45000 | Should -BeFalse
+    }
+
+    It 'names the screen and warns while it still fits' {
+        # The 7.87 outage was found only after a report had already stopped
+        # rendering. Nothing watched the size until it was too late; a screen
+        # crosses the limit gradually as a station's day fills up.
+        $script:RichPayloadPeak = @{ Length = 0; Screen = '' }
+        $script:RichPayloadWarned = @{}
+        $warnings = [System.Collections.Generic.List[string]]::new()
+        Mock Write-BridgeLog { if ($Level -eq 'WARN') { $warnings.Add($Message) } }
+
+        $blocks = @(@{ type = 'heading'; text = '📊 تقرير الشريط'; size = 3 })
+        Register-RichPayloadMeasurement -Blocks $blocks -Length 9000
+        # A smaller screen must not displace the peak.
+        Register-RichPayloadMeasurement -Blocks @(@{ type = 'heading'; text = 'ℹ️ الحالة' }) -Length 900
+        # And the same screen again must not repeat the warning.
+        Register-RichPayloadMeasurement -Blocks $blocks -Length 9100
+
+        $peak = Get-RichPayloadPeak
+        $peak.Screen | Should -Be '📊 تقرير الشريط'
+        $peak.Length | Should -Be 9100
+        # 9100 of 12000, rounded: the figure is for a reader, not a budget.
+        $peak.Percent | Should -Be 76
+        @($warnings) | Should -HaveCount 1
+        $warnings[0] | Should -Match 'تقرير الشريط'
+    }
+
+    It 'gives editing the size gate sending has, instead of a 400 that costs a block type' {
+        # editMessageText built a rich payload with no size check at all, and
+        # the reorder screen re-renders on every press - so it would have paid
+        # that price again on every arrow.
+        Mock Write-BridgeLog {}
+        Mock Invoke-BridgeTelegramRequest { throw 'the payload must never reach the API' }
+        $huge = @(@{ type = 'heading'; text = 'ضخم' }, @{ type = 'paragraph'; text = ('x' * 40000) })
+
+        Edit-TelegramRichMessage -ChatId 1 -MessageId 2 -Blocks $huge | Should -BeFalse
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+        # No type is blamed for what is a size problem.
+        Test-RichBlocksSendable -Blocks @(@{ type = 'table'; cells = @() }) | Should -BeTrue
     }
 
     It 'does not blame a block type when the payload was simply too big' {

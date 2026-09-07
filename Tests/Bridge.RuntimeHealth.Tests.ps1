@@ -131,6 +131,10 @@ Describe 'Operator-visible operation reference' {
 
     It 'prints the reference beside the operation on the operator screen' {
         Mock Send-TelegramMessage {}
+        # Refused, so the text path is what runs - this test is about the text.
+        # Without it the screen's rich attempt reaches api.telegram.org from
+        # inside the gate and waits out a 401.
+        Mock Send-TelegramRichMessage { $false }
         Add-UserOperationHistory -OperationId 'air-1fbf8e20975640f38a0d7e0b078e0359' -Action SHOW -Result success -DurationMs 10 -UserId 101 -Layer 4 -Target 'urgent'
         Invoke-MyOperationsCommand -ChatId 101 -UserId 101
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '1fbf8e20' }

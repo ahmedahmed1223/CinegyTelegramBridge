@@ -347,6 +347,79 @@ function Test-RichPayloadSize {
     return $Length -le $Limit
 }
 
+# The largest rich payload this run has sent, and the screen it belonged to.
+# In memory like the other counters on the operating-numbers screen: it
+# answers "is any screen close to losing its table", which is a question about
+# this run against this station's data.
+$script:RichPayloadPeak = @{ Length = 0; Screen = '' }
+$script:RichPayloadWarned = @{}
+
+function Get-RichBlocksTitle {
+    <# What to call a payload in a log line: the screen's own heading, which
+       every builder puts first. Falls back to the first text of any kind, and
+       then to a dash - a name is for the reader, so guessing badly is worse
+       than saying nothing. #>
+    param([AllowNull()][array]$Blocks)
+    foreach ($block in @($Blocks)) {
+        if ($block -is [hashtable] -and [string]$block['type'] -eq 'heading' -and $block['text']) { return [string]$block['text'] }
+    }
+    foreach ($block in @($Blocks)) {
+        if ($block -is [hashtable] -and $block['text']) { return [string]$block['text'] }
+    }
+    return '—'
+}
+
+function Register-RichPayloadMeasurement {
+    <#
+        Records how big a screen's payload was, and warns while it still fits.
+
+        The 7.87 outage was found only after a report had already stopped
+        rendering for a whole session. Nothing was watching the size until it
+        was too large; a screen crosses the limit gradually, as a station's
+        day fills up, and the first person to know was the operator whose
+        table vanished.
+
+        Measured for every payload including the ones refused for size - those
+        are the interesting ones - and warned once per screen so a busy day
+        does not fill the log with the same line.
+    #>
+    param([AllowNull()][array]$Blocks, [Parameter(Mandatory)][int]$Length)
+    $screen = Get-RichBlocksTitle -Blocks $Blocks
+    if ($Length -gt [int]$script:RichPayloadPeak.Length) {
+        $script:RichPayloadPeak = @{ Length = $Length; Screen = $screen }
+    }
+    # 70%: far enough below the limit that there is time to cap a table, and
+    # high enough that an ordinary screen never trips it.
+    $threshold = [int]($script:RichPayloadLimit * 0.7)
+    if ($Length -ge $threshold -and -not $script:RichPayloadWarned.ContainsKey($screen)) {
+        $script:RichPayloadWarned[$screen] = $true
+        $percent = [int](($Length * 100) / $script:RichPayloadLimit)
+        Write-BridgeLog "Rich payload for '$screen' is $Length characters, $percent% of the limit - cap its rows before it loses its table" 'WARN'
+    }
+}
+
+function Get-RichPayloadPeak {
+    <# The biggest payload of this run, as a screen name, a size and a
+       percentage of the limit - what the operating-numbers screen shows. #>
+    $length = [int]$script:RichPayloadPeak.Length
+    return [pscustomobject]@{
+        Length = $length
+        Screen = [string]$script:RichPayloadPeak.Screen
+        Percent = if ($script:RichPayloadLimit -gt 0) { [int](($length * 100) / $script:RichPayloadLimit) } else { 0 }
+    }
+}
+
+function ConvertTo-RichMessagePayload {
+    <# The rich_message parameter, serialised once and measured on the way
+       past. Both senders go through here so a payload cannot be built without
+       being counted - which is how editMessageText came to carry no size
+       check at all while sendRichMessage had one. #>
+    param([Parameter(Mandatory)][array]$Blocks)
+    $rich = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    Register-RichPayloadMeasurement -Blocks $Blocks -Length $rich.Length
+    return $rich
+}
+
 function Test-RichBlocksSendable {
     <# Whether this payload is worth a round trip at all. #>
     param([AllowNull()][array]$Blocks)
@@ -449,7 +522,7 @@ function Send-TelegramRichMessage {
         [hashtable]$ReplyMarkup
     )
     if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
-    $rich = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+    $rich = ConvertTo-RichMessagePayload -Blocks $Blocks
     # Not sent at all when it is far larger than anything that renders here.
     # The text fallback covers this screen, and no block type is blamed for
     # what is a size problem - which is how one big report cost every other
@@ -496,10 +569,19 @@ function Edit-TelegramRichMessage {
         [hashtable]$ReplyMarkup
     )
     if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
+    $rich = ConvertTo-RichMessagePayload -Blocks $Blocks
+    # The same gate sending has had since 7.87, which this never got: an
+    # oversized edit is a 400 like any other, and a 400 here narrows or
+    # disables a block type for the rest of the session. The reorder screen
+    # re-renders on every press, so it would have paid that price repeatedly.
+    if (-not (Test-RichPayloadSize -Length $rich.Length)) {
+        Write-BridgeLog "A rich edit of $($rich.Length) characters is past what this bridge sends; using text for this screen only" 'DEBUG'
+        return $false
+    }
     $body = @{
         chat_id = $ChatId
         message_id = $MessageId
-        rich_message = (@{ blocks = $Blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+        rich_message = $rich
     }
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
@@ -514,7 +596,7 @@ function Edit-TelegramRichMessage {
         Add-TelegramOutboxItem -Uri "$apiBase/editMessageText" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
         return $true
     }
-    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'editMessageText'
+    Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'editMessageText' -PayloadLength $rich.Length
     return $false
 }
 

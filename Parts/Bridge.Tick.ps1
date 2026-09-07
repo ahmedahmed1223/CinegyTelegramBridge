@@ -446,6 +446,13 @@ function Get-BridgeStatsBlocks {
         , @('💚 آخر نبضة يومية', $lastBeat)
         , @('🔴 مشاهد على الهواء', [string]$script:OnAir.Count)
     )
+    # What is closest to losing its table. A screen crosses the payload limit
+    # gradually as the station's day fills up, and until this line the first
+    # to know was the operator whose table had already vanished.
+    $peak = Get-RichPayloadPeak
+    if ($peak.Length -gt 0) {
+        $rows += , @('📐 أكبر شاشة أُرسلت', "$($peak.Percent)% من الحدّ · $($peak.Screen)")
+    }
     $cells = @(, @(@{ text = 'البند'; is_header = $true }, @{ text = 'القيمة'; is_header = $true }))
     foreach ($row in $rows) { $cells += , @(@{ text = [string]$row[0] }, @{ text = [string]$row[1] }) }
 
@@ -488,6 +495,11 @@ function Get-BridgeStatsText {
     elseif ([int]$script:TelegramRateLimitHits -gt 0) { '🟠 تيليجرام يحدّ من الإرسال' }
     else { '🟢 تشغيل مستقر' }
 
+    $peakMeasurement = Get-RichPayloadPeak
+    $peakLine = if ($peakMeasurement.Length -gt 0) {
+        "`n📐 أكبر شاشة أُرسلت — $($peakMeasurement.Percent)% من الحدّ · $(ConvertTo-TelegramHtmlText $peakMeasurement.Screen)"
+    }
+    else { '' }
     $lines.Add("<b>📈 أرقام التشغيل</b> — <code>v$($script:BridgeVersion)</code>")
     $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
     $lines.Add("<b>$verdict</b>")
@@ -510,7 +522,7 @@ function Get-BridgeStatsText {
 📡 اتصال Telegram — $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))
 🎛 صحة Cinegy — $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))
 💚 آخر نبضة يومية — $lastBeat
-🔴 مشاهد على الهواء — $($script:OnAir.Count)</blockquote>")
+🔴 مشاهد على الهواء — $($script:OnAir.Count)$peakLine</blockquote>")
     return ($lines -join "`n")
 }
 

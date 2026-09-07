@@ -780,7 +780,10 @@ function Invoke-CallbackQuery {
         }
         'menu:usagedigest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                $usageKeyboard = Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId
+                if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UsageDigestBlocks) -ReplyMarkup $usageKeyboard)) {
+                    Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ParseMode HTML -ReplyMarkup $usageKeyboard
+                }
             }
             break
         }

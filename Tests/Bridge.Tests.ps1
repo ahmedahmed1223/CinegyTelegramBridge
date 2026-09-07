@@ -1720,3 +1720,45 @@ Describe 'Every screen now has a table to try before its text' {
         }
     }
 }
+
+Describe 'The usage summary as tables' {
+    It 'ranks the templates in one table and the outcomes in another' {
+        # Two questions, two tables: which templates carry the work, and how
+        # the shift's operations ended. One table would need a column meaning
+        # one thing in half its rows and something else in the others.
+        $script:UsageCounts = @{ 'عاجل' = 42; 'ticker' = 3 }
+        $script:TemplateLastUsed = @{ 'عاجل' = (Get-Date).AddHours(-2).ToString('o') }
+        $script:CancelReasons = @{}
+
+        $tables = @(@(Get-UsageDigestBlocks) | Where-Object { $_.type -eq 'table' })
+        $tables.Count | Should -Be 2
+
+        # Ranking: header plus one row per template, four columns.
+        @($tables[0].cells).Count | Should -Be 3
+        @($tables[0].cells[0]).Count | Should -Be 4
+        $tables[0].cells[1][1].text | Should -Be 'عاجل'
+        # Never used stays a dash rather than an empty cell.
+        $tables[0].cells[2][3].text | Should -Be '—'
+
+        # Outcomes: header plus the three the bridge counts.
+        @($tables[1].cells).Count | Should -Be 4
+    }
+
+    It 'adds a third table only when a cancel reason was recorded' {
+        $script:UsageCounts = @{}
+        $script:CancelReasons = @{}
+        @(@(Get-UsageDigestBlocks) | Where-Object { $_.type -eq 'table' }) | Should -HaveCount 1
+
+        $script:CancelReasons = @{ 'wrong_template' = 3 }
+        @(@(Get-UsageDigestBlocks) | Where-Object { $_.type -eq 'table' }) | Should -HaveCount 2
+        $script:CancelReasons = @{}
+    }
+
+    It 'stays inside what the bridge will send' {
+        $script:UsageCounts = @{}
+        1..40 | ForEach-Object { $script:UsageCounts["قالب رقم $_"] = $_ }
+        $json = (@{ blocks = @(Get-UsageDigestBlocks); is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        $script:UsageCounts = @{}
+    }
+}

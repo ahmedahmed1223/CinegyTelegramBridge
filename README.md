@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.88.1
+
+`📊 ملخص الاستخدام` becomes two tables — and a correction to 7.88.0.
+
+7.88.0 said "no screen is left without a table". That was not accurate. Screens
+without a rich builder remain, and this was one of them. Most of the rest are
+prompts, confirmations and single values, where a table is the wrong shape — but
+several are lists that deserve one: the upcoming schedule, pending access
+requests, the bulletin library, the settings backups, and a template's usage
+history.
+
+Two tables rather than one, because the screen answers two questions — which
+templates carry the work, and how the shift's operations ended. A single table
+would need a column meaning one thing in half its rows and something else in the
+others. The ranking is `# · template · times · last used`, with a dash rather
+than an empty cell for a template never used; the outcomes are successful,
+failed and blocked; and a third table appears only when a cancel reason has been
+recorded.
+
+The scheduled weekly digest deliberately keeps its text. It goes out through
+`Send-AdminBroadcast`, which holds a non-urgent notice for the quiet-hours
+digest and stores only the text, so a table would arrive hours later as nothing
+at all.
+
 ## Version 7.88.0
 
 No screen is left without a table.

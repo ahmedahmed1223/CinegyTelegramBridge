@@ -969,6 +969,91 @@ function Add-CancelReason {
     Save-CancelReasons | Out-Null
 }
 
+function Get-UsageDigestBlocks {
+    <#
+        The usage summary as tables: a ranking, and how the operations ended.
+
+        A ranking is a table in every sense - a position, a name, a count and
+        a date belong under each other rather than at the end of sentences of
+        different lengths - and the outcome tally is three labels against
+        three numbers.
+
+        Two tables rather than one. They answer different questions - which
+        templates carry the work, and how the shift's operations ended - and a
+        single table would need a column that means one thing in half its rows
+        and something else in the others.
+
+        The scheduled weekly digest keeps the text version. It goes out
+        through Send-AdminBroadcast, which holds a non-urgent notice for the
+        quiet-hours digest and stores only text, so a table would arrive hours
+        later as nothing at all.
+    #>
+    param([int]$TopCount = 5)
+    $now = Get-Date
+    $counters = $script:AirOperationCounters
+    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
+    $week = Get-ReportRecords -From ($now.Date.AddDays(-6)) -To $now -EventName 'air_control'
+    $weeklyOperations = @($week.Records).Count
+    $dailyAverage = [math]::Round($weeklyOperations / 7, 1)
+
+    $blocks = @(
+        @{ type = 'heading'; text = '📊 ملخص الاستخدام'; size = 3 }
+        @{ type = 'paragraph'; text = "🕒 $($now.ToString('yyyy-MM-dd HH:mm')) (محلي)" }
+        @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $total عملية · 📆 آخر 7 أيام: $weeklyOperations · متوسط $dailyAverage يوميًا" }
+    )
+
+    $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
+    if ($ranked.Count -eq 0) {
+        $blocks += @{ type = 'paragraph'; text = 'لم تُستخدم أي قوالب بعد.' }
+    }
+    else {
+        $cells = @(, @(
+                @{ text = '#'; is_header = $true }
+                @{ text = 'القالب'; is_header = $true }
+                @{ text = 'مرات'; is_header = $true }
+                @{ text = 'آخر مرة'; is_header = $true }
+            ))
+        $rank = 0
+        foreach ($item in $ranked) {
+            $rank++
+            $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
+                ([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm')
+            }
+            else { '—' }
+            $cells += , @(
+                @{ text = [string]$rank }
+                @{ text = [string]$item.Key }
+                @{ text = [string]$item.Value }
+                @{ text = $lastUsed }
+            )
+        }
+        $blocks += @{ type = 'table'; cells = $cells }
+    }
+
+    $blocks += @{ type = 'table'; cells = @(
+            , @(@{ text = 'النتيجة'; is_header = $true }, @{ text = 'العدد'; is_header = $true })
+            , @(@{ text = '✅ ناجحة' }, @{ text = [string]$counters.Success })
+            , @(@{ text = '❌ فاشلة' }, @{ text = [string]$counters.Failed })
+            , @(@{ text = '⛔ مرفوضة' }, @{ text = [string]$counters.Blocked })
+        )
+    }
+    if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
+        $blocks += @{ type = 'paragraph'; text = 'راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.' }
+    }
+
+    if ($script:CancelReasons.Count -gt 0) {
+        $reasonCells = @(, @(@{ text = 'سبب التراجع'; is_header = $true }, @{ text = 'مرات'; is_header = $true }))
+        foreach ($reason in ($script:CancelReasons.Keys | Sort-Object)) {
+            $reasonCells += , @(
+                @{ text = [string](Get-CancelReasonLabel -Reason $reason) }
+                @{ text = [string]$script:CancelReasons[$reason] }
+            )
+        }
+        $blocks += @{ type = 'table'; cells = $reasonCells }
+    }
+    return $blocks
+}
+
 function Get-UsageDigestText {
     <# What the shift actually did, from counters the bridge already keeps.
        Meant to be read on a phone, so it is a handful of lines: the busiest

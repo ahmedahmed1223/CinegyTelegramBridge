@@ -313,7 +313,21 @@ public sealed class MainForm : Form
         _darkModeCheck = Theme.ToggleChip("الوضع الليلي",
             "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
         _darkModeCheck.Checked = _settings.DarkMode;
-        _optionsBar.Controls.AddRange(new Control[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck, _autoClearCheck, _wordWrapCheck, _darkModeCheck });
+        // Two groups, named, because these six switches are not one list.
+        //
+        // Three of them decide what happens to the channel when nobody is
+        // watching - a bridge that restarts itself, a hang that is caught, a
+        // manager that comes back after a reboot. Three decide what this
+        // window looks like. Side by side and identically styled they read as
+        // equals, and the row an operator scans during an incident is half
+        // filled with preferences about line wrapping.
+        var runtimeSwitches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 18, 0) };
+        runtimeSwitches.Controls.Add(MakeSwitchGroupLabel("التشغيل"));
+        runtimeSwitches.Controls.AddRange(new Control[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck });
+        var viewSwitches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 0) };
+        viewSwitches.Controls.Add(MakeSwitchGroupLabel("العرض"));
+        viewSwitches.Controls.AddRange(new Control[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck });
+        _optionsBar.Controls.AddRange(new Control[] { runtimeSwitches, viewSwitches });
 
         // ---- filter row, sitting directly on top of what it filters --------
         _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
@@ -744,6 +758,19 @@ public sealed class MainForm : Form
     /// name each, and the bridge announces its own on the line the manager is
     /// already tailing.
     /// </remarks>
+    // A quiet caption in front of a group of switches. Small and muted on
+    // purpose: it explains the grouping without competing with the switches
+    // themselves, which are what the eye is looking for.
+    private static Label MakeSwitchGroupLabel(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        Font = Theme.UiSmall,
+        ForeColor = Theme.TextMuted,
+        Margin = new Padding(0, 8, 8, 0),
+        TextAlign = ContentAlignment.MiddleRight
+    };
+
     internal static string? ParseBridgeVersion(string line)
     {
         if (string.IsNullOrEmpty(line)) return null;

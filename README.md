@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.5.0
+
+The manual catches up with what the bridge learned to do, and the manager's
+switches say which of them govern the air.
+
+A new chapter, `🔔 التنبيهات`, covers what a notice carries (the copy, the
+layer, the duration, who ran it), that it never reaches the person who ran it,
+the per-person mute and the `تنبيهاتي` command that undoes it, the holding while
+somebody is typing, and the one warning that arrives immediately regardless: the
+template you are preparing has just gone on or off air. `🔍 المتابعة` gains the
+operations log with its four windows and its day-by-day walk; `✏️ التعديل`
+explains that editing starts from the current text and that a flow warns a
+minute before it expires with a button to extend it; `⚙️ الإعدادات` describes
+values set by tapping rather than typing; and `🚪 من يدخل البوت` covers the
+two-tap approval, the announcement to every administrator, and the history of
+past requests.
+
+In the manager, the six switches became two named groups - "التشغيل" and
+"العرض". Three of them decide what happens to the channel when nobody is
+watching; three decide what a window looks like. Side by side in identical
+style they read as equals, and the row an operator scans during an incident was
+half filled with preferences about line wrapping. Build clean, 118 self-test
+checks passing.
+
 ## Version 8.4.0
 
 The notice waits its turn, and a collision over a template is told to the person

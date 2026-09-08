@@ -45,7 +45,7 @@ function Save-UsageCounts {
                 LastUsedUtc = if ($script:TemplateLastUsed.ContainsKey($key)) { ([datetime]$script:TemplateLastUsed[$key]).ToUniversalTime().ToString('o') } else { '' }
             }
         }
-        $persisted | ConvertTo-Json -Depth 4 | Set-Content -Path $usageFile -Encoding utf8 -ErrorAction Stop
+        Write-BridgeValidatedJson -Path $usageFile -Json ($persisted | ConvertTo-Json -Depth 4) | Out-Null
         $script:UsageDirty = $false
     }
     catch { Write-BridgeLog "Could not write usage.json: $($_.Exception.Message)" "WARN" }
@@ -409,10 +409,7 @@ function Import-UserFavorites {
 
 function Save-UserFavorites {
     try {
-        $temporary = "$($script:userFavoritesFile).tmp"
-        $script:UserFavorites | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:userFavoritesFile -Force -ErrorAction Stop
-        return $true
+        return (Write-BridgeValidatedJson -Path $script:userFavoritesFile -Json ($script:UserFavorites | ConvertTo-Json -Depth 5))
     }
     catch { Write-BridgeLog "Could not write favorites.json: $($_.Exception.Message)" 'WARN'; return $false }
 }
@@ -450,10 +447,7 @@ function Import-UserAliases {
 
 function Save-UserAliases {
     try {
-        $temporary = "$($script:userAliasesFile).tmp"
-        $script:UserAliases | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:userAliasesFile -Force -ErrorAction Stop
-        return $true
+        return (Write-BridgeValidatedJson -Path $script:userAliasesFile -Json ($script:UserAliases | ConvertTo-Json -Depth 3))
     }
     catch { Write-BridgeLog "Could not write user-aliases.json: $($_.Exception.Message)" 'WARN'; return $false }
 }

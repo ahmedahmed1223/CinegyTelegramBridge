@@ -559,11 +559,7 @@ function Save-MojazPlaybackState {
             Rows = @($playback.Rows)
             Plan = @($playback.Plan)
         }
-        $path = Get-MojazPlaybackFile
-        $temporary = "$path.tmp"
-        $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
-        return $true
+        return (Write-BridgeValidatedJson -Path (Get-MojazPlaybackFile) -Json ($state | ConvertTo-Json -Depth 8))
     }
     catch { Write-BridgeLog "Could not write mojaz-playback.json: $($_.Exception.Message)" 'WARN'; return $false }
 }

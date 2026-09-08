@@ -32,11 +32,8 @@ function Import-BridgeAnnouncements {
 function Save-BridgeAnnouncements {
     try {
         $path = Get-AnnouncementsFile
-        $temporary = "$path.tmp"
-        [ordered]@{ Announcements = @($script:Announcements) } | ConvertTo-Json -Depth 6 |
-            Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
-        return $true
+        $json = [ordered]@{ Announcements = @($script:Announcements) } | ConvertTo-Json -Depth 6
+        return (Write-BridgeValidatedJson -Path $path -Json $json)
     }
     catch { Write-BridgeLog "Could not write announcements.json: $($_.Exception.Message)" 'WARN'; return $false }
 }

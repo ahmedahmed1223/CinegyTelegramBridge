@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -748,10 +748,8 @@ function Get-RecentFieldKey {
 
 function Save-RecentFieldValues {
     try {
-        $temporary = "$script:recentValuesFile.tmp"
         $json = ConvertTo-Json -InputObject $script:RecentFieldValues -Depth 4
-        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:recentValuesFile -Force -ErrorAction Stop
+        Write-BridgeValidatedJson -Path $script:recentValuesFile -Json $json | Out-Null
     }
     catch { Write-BridgeLog "Could not write recent-values.json: $($_.Exception.Message)" "WARN" }
 }
@@ -805,9 +803,7 @@ function Save-DraftStates {
             $entries.Add(@{ ChatId = [long]$chatId; State = $copy })
         }
         $json = ConvertTo-Json -InputObject @($entries.ToArray()) -Depth 8
-        $temporary = "$script:draftsFile.tmp"
-        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:draftsFile -Force -ErrorAction Stop
+        Write-BridgeValidatedJson -Path $script:draftsFile -Json $json | Out-Null
     }
     catch { Write-BridgeLog "Could not write drafts.json: $($_.Exception.Message)" "WARN" }
 }

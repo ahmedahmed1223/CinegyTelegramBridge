@@ -642,13 +642,18 @@ public sealed class MainForm : Form
         if (stamp is null || DateTime.UtcNow - stamp.Value > TimeSpan.FromMinutes(2)) return false;
 
         Process process;
+        try { process = Process.GetProcessById(pid.Value); }
+        catch { return false; }
+
+        // Every path out of here past this point owns a handle and has to give
+        // it back. A bridge that died between the heartbeat and this call is
+        // the common case, and it used to leak on the way out.
         try
         {
-            process = Process.GetProcessById(pid.Value);
-            if (process.HasExited) return false;
+            if (process.HasExited) { process.Dispose(); return false; }
             process.EnableRaisingEvents = true;
         }
-        catch { return false; }
+        catch { process.Dispose(); return false; }
 
         process.Exited += (_, _) =>
         {
@@ -1883,6 +1888,12 @@ public sealed class MainForm : Form
         _restartAfterExit = false;
         _stoppingIntentionally = true;
         if (_bridgeProcess is not { } process) return true;
+        // WaitForExit blocks this thread, which is the UI thread, for up to ten
+        // seconds. It cannot become async without restructuring the save, but a
+        // window that stops repainting with no cursor and no message reads as a
+        // hang - and the operator's next move is to kill it mid-save.
+        SetHeader("جارٍ إيقاف الجسر…", Theme.Pending, "ينتظر المدير انتهاء العملية قبل حفظ الإعدادات.");
+        Cursor = Cursors.WaitCursor;
         try
         {
             if (!process.HasExited) process.Kill(entireProcessTree: true);
@@ -1897,7 +1908,9 @@ public sealed class MainForm : Form
             SetHeader("تعذّر الإيقاف", Theme.Pending, "لم تُحفظ الإعدادات؛ تحقّق من حالة الجسر.");
             return false;
         }
+        finally { Cursor = Cursors.Default; }
     }
+
     private void OpenSettings()
     {
         if (!EnsureBridgeScriptResolved()) return;
@@ -1914,7 +1927,9 @@ public sealed class MainForm : Form
         if (!EnsureBridgeScriptResolved()) return;
         var logsDir = Path.Combine(BridgeRoot, "logs");
         Directory.CreateDirectory(logsDir);
-        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{logsDir}\"") { UseShellExecute = true });
+        // Disposed: Process.Start hands back an object owning a native handle
+        // even when nothing is done with it, and this runs on every press.
+        using var explorer = Process.Start(new ProcessStartInfo("explorer.exe", $"\"{logsDir}\"") { UseShellExecute = true });
     }
 
     private void ShowFromTray()
@@ -1989,8 +2004,14 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            _filterTimer.Stop();
-            _filterTimer.Dispose();
+            // All seven, not the one. The other six were created with new
+            // rather than added to the form's components container, so nothing
+            // disposed them: their native timer handles outlived the window.
+            foreach (var timer in new[] { _filterTimer, _restartTimer, _autoClearTimer, _drainTimer, _watchdogTimer, _clockTimer, _startupTimer })
+            {
+                timer.Stop();
+                timer.Dispose();
+            }
             // A NotifyIcon that is never disposed leaves a dead icon sitting in
             // the tray until the mouse happens to pass over it.
             _trayIcon.Visible = false;

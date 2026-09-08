@@ -13,6 +13,38 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.14.0
+
+The fourth tier of the audit plan: maintenance rather than a visible fault, each
+item checked against the code before being acted on.
+
+AGENTS.md requires a state file to be written through a unique temp file, a
+validated backup and an atomic replace, which is what Write-BridgeValidatedJson
+does. Seven sites wrote with a raw Set-Content and a Move-Item instead:
+announcements, the usage counter, favourites, user aliases, recent field values,
+show drafts and mojaz playback state. None of them kept a backup, so a corrupt
+file meant losing favourites, names or drafts outright - and the temp file name
+was fixed rather than unique, so two concurrent saves of the same file raced for
+it. All seven now go through the shared writer. (The report counted five and did
+not mention the fixed temp name.)
+
+In the manager, six of seven timers were never disposed - they are created with
+new rather than in the form's components container, so nothing released them.
+Process.Start for the logs folder returns a handle-owning object even when
+unused, on every press, and is now scoped with using. Adopting a bridge that had
+already exited returned without disposing the handle just opened, which is the
+common case when a bridge dies between its heartbeat and the read.
+StopForSettingsSave blocks the UI thread for up to ten seconds in WaitForExit; it
+cannot become async without restructuring the save, but a window that stops
+repainting with no cursor and no message reads as a hang - and the operator's
+next move is to kill it mid-save - so it now sets a header and a wait cursor,
+restored in a finally.
+
+Deliberately deferred: the per-second synchronous reads of bridge.liveness and
+bridge.log on the UI thread. The observation is correct, but the fix is a
+restructure into async IO with the re-entrancy that follows, which is more risk
+than it is worth while the logs are local rather than on a network share.
+
 ## Version 8.13.0
 
 A refused request must not change the air.

@@ -258,25 +258,25 @@ public sealed class MainForm : Form
 
         // ---- action bar: three things that change the air, then the rest ---
         _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
-        _startButton = Theme.PrimaryButton("تشغيل", () => Theme.Running);
+        _startButton = Theme.PrimaryButton("▶  تشغيل", () => Theme.Running);
         _startButton.AccessibleName = "تشغيل الجسر";
         _startButton.Width = 118;
-        _stopButton = Theme.PrimaryButton("إيقاف", () => Theme.Stopped);
+        _stopButton = Theme.PrimaryButton("■  إيقاف", () => Theme.Stopped);
         _stopButton.AccessibleName = "إيقاف الجسر";
         _stopButton.Width = 118;
         _stopButton.Enabled = false;
-        _restartButton = Theme.PrimaryButton("إعادة تشغيل", () => Theme.Pending);
+        _restartButton = Theme.PrimaryButton("↻  إعادة تشغيل", () => Theme.Pending);
         _restartButton.AccessibleName = "إعادة تشغيل الجسر (F5)";
         _restartButton.Width = 140;
         _restartButton.Enabled = false;
 
-        var settingsButton = Theme.QuietButton("الإعدادات");
+        var settingsButton = Theme.QuietButton("⚙  الإعدادات");
         settingsButton.Width = 120;
-        var logsButton = Theme.QuietButton("مجلد السجلات");
+        var logsButton = Theme.QuietButton("📂  مجلد السجلات");
         logsButton.Width = 140;
-        var clearButton = Theme.QuietButton("مسح الشاشة");
+        var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
         clearButton.Width = 130;
-        var optionsButton = Theme.QuietButton("⚙️ خيارات");
+        var optionsButton = Theme.QuietButton("☰  خيارات");
         optionsButton.Width = 118;
         optionsButton.AccessibleName = "خيارات التشغيل والعرض";
         optionsButton.Click += (_, _) => _optionsMenu?.Show(optionsButton, new Point(0, optionsButton.Height));
@@ -310,17 +310,17 @@ public sealed class MainForm : Form
 
         // ---- options: switches, which are not actions ----------------------
         _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
-        _autoRestartCheck = Theme.ToggleChip("إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
+        _autoRestartCheck = Theme.ToggleChip("↻  إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
         _autoRestartCheck.Checked = _settings.AutoRestart;
-        _watchdogCheck = Theme.ToggleChip("كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
+        _watchdogCheck = Theme.ToggleChip("🩺  كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
         _watchdogCheck.Checked = _settings.HangWatchdog;
-        _startWithWindowsCheck = Theme.ToggleChip("مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
+        _startWithWindowsCheck = Theme.ToggleChip("🪟  مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
         _startWithWindowsCheck.Checked = IsStartWithWindowsEnabled();
-        _autoClearCheck = Theme.ToggleChip("مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم - لا يمسّ logs\bridge.log.", _tips);
+        _autoClearCheck = Theme.ToggleChip("🧹  مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم - لا يمسّ logs\bridge.log.", _tips);
         _autoClearCheck.Checked = _settings.AutoClearDaily;
-        _wordWrapCheck = Theme.ToggleChip("التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
+        _wordWrapCheck = Theme.ToggleChip("↩  التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
         _wordWrapCheck.Checked = _settings.WordWrap;
-        _darkModeCheck = Theme.ToggleChip("الوضع الليلي",
+        _darkModeCheck = Theme.ToggleChip("🌙  الوضع الليلي",
             "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
         _darkModeCheck.Checked = _settings.DarkMode;
         // The switches move behind one button, and the row they occupied goes
@@ -357,7 +357,10 @@ public sealed class MainForm : Form
         _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
         var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false };
         _filterBox = Theme.Input(300);
-        _filterBox.PlaceholderText = "تصفية الأسطر…  (Ctrl+F)";
+        // Saying that a time works here, because it always did and nothing
+        // said so: every line opens with its stamp, so "07:2" is a filter on
+        // a twenty-minute window as much as a word is a filter on a word.
+        _filterBox.PlaceholderText = "تصفية بالنص أو بالوقت (مثل 07:2)…  (Ctrl+F)";
         _filterBox.AccessibleName = "تصفية السجل";
         _filterBox.AccessibleDescription = "يبحث في النص المعروض من سجل الجسر.";
         _errorsOnlyCheck = Theme.ToggleChip("الأخطاء والتحذيرات فقط", "يخفي كل ما عدا أسطر [ERROR] و[WARN].", _tips);
@@ -509,11 +512,15 @@ public sealed class MainForm : Form
             Visible = true
         };
         var trayMenu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes };
-        trayMenu.Items.Add("عرض النافذة", null, (_, _) => ShowFromTray());
+        // The same glyphs the window uses. This menu is what an operator sees
+        // when the window is hidden, which is most of the time, and a menu
+        // whose items look nothing like the buttons they mirror is a second
+        // thing to learn.
+        trayMenu.Items.Add("🪟  عرض النافذة", null, (_, _) => ShowFromTray());
         trayMenu.Items.Add(new ToolStripSeparator());
-        trayMenu.Items.Add("تشغيل", null, (_, _) => StartBridge(manual: true));
-        trayMenu.Items.Add("إيقاف", null, (_, _) => { if (ConfirmStop()) StopBridge(manual: true); });
-        trayMenu.Items.Add("إعادة تشغيل", null, (_, _) => { if (ConfirmRestart()) RestartBridge(); });
+        trayMenu.Items.Add("▶  تشغيل", null, (_, _) => StartBridge(manual: true));
+        trayMenu.Items.Add("■  إيقاف", null, (_, _) => { if (ConfirmStop()) StopBridge(manual: true); });
+        trayMenu.Items.Add("↻  إعادة تشغيل", null, (_, _) => { if (ConfirmRestart()) RestartBridge(); });
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("❌ إغلاق البرنامج", null, (_, _) => ExitFromTray());
         _trayIcon.ContextMenuStrip = trayMenu;
@@ -798,18 +805,38 @@ public sealed class MainForm : Form
     // bridge comes back.
     private ContextMenuStrip MakeOptionsMenu()
     {
-        var menu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes, ShowImageMargin = false };
-        menu.Items.Add(MakeSwitchGroupLabel("التشغيل"));
+        // RenderMode.System, and the colours set again on every open: the
+        // default renderer paints a light chrome that survives the dark
+        // palette and leaves white gutters around dark items, and the theme
+        // can be switched from inside this very menu.
+        var menu = new ContextMenuStrip
+        {
+            RightToLeft = RightToLeft.Yes,
+            ShowImageMargin = false,
+            RenderMode = ToolStripRenderMode.System,
+            Padding = new Padding(4, 6, 4, 6)
+        };
+        menu.Items.Add(MakeSwitchGroupLabel("🔴  ما يحدث للقناة"));
         foreach (var box in new[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck })
         {
-            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(12, 2, 12, 2) });
+            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
         }
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(MakeSwitchGroupLabel("العرض"));
+        menu.Items.Add(MakeSwitchGroupLabel("🖥  هذه النافذة"));
         foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck })
         {
-            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(12, 2, 12, 2) });
+            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
         }
+        menu.Opening += (_, _) =>
+        {
+            menu.BackColor = Theme.Surface;
+            menu.ForeColor = Theme.Text;
+            foreach (ToolStripItem item in menu.Items)
+            {
+                item.BackColor = Theme.Surface;
+                if (item is ToolStripLabel) item.ForeColor = Theme.TextMuted;
+            }
+        };
         return menu;
     }
 

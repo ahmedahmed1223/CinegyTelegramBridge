@@ -13,6 +13,26 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.7.0
+
+The manager's controls say what they are before they are read.
+
+Every button and switch carries a glyph - ▶ start, ■ stop, ↻ restart, ⚙
+settings, 📂 logs, 🧹 clear, ☰ options - and keeps its word beside it, because
+an icon alone is a guess and these are pressed under pressure. The options menu
+follows the theme now (`RenderMode.System` with colours reapplied on each open):
+the default renderer paints a light chrome that survives the dark palette, and
+the theme can be switched from inside that very menu. Its two groups are named
+for what they govern - "🔴 ما يحدث للقناة" and "🖥 هذه النافذة" - rather than
+"operation" and "view", which needed explaining.
+
+The tray menu carries the same glyphs, since it is what an operator sees while
+the window is hidden, which is most of the time, and a menu that looks nothing
+like the buttons it mirrors is a second thing to learn. And the filter box
+admits it can search a time: every line opens with its stamp, so "07:2" filters
+a twenty-minute window exactly as a word filters a word - it always worked and
+nothing said so.
+
 ## Version 8.6.0
 
 The manager's window goes back to what it is for: the log.

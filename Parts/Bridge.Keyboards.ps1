@@ -1176,6 +1176,21 @@ function Get-CancelKeyboard {
     return @{ inline_keyboard = @( , @( (New-Button "❌ إلغاء" "cancel") ) ) }
 }
 
+function Get-NoticeKeyboard {
+    <#
+        One way back, for a message that answers a press the reader cannot act
+        on: a refusal, or a flow that ended under them.
+
+        The whole main menu used to be attached to these. Seventeen rows under
+        "this is for administrators only" push the sentence itself off a phone
+        screen, and not one of the seventeen is what the reader wanted next -
+        they wanted the thing they were just refused. A single button closes
+        the screen without burying the reason it appeared.
+    #>
+    param([string]$BackData = 'menu')
+    return @{ inline_keyboard = @( , @( (New-Button '⬅️ القائمة' $BackData) ) ) }
+}
+
 function Get-FieldPromptKeyboard {
     param([hashtable]$State)
     $rows = @()

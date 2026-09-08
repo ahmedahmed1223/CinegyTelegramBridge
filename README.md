@@ -13,6 +13,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.10.0
+
+Three moments where the interface said something other than what had happened.
+
+Hiding a layer used to report success unconditionally. Cinegy accepts the HIDE,
+but the read-back that follows can fail, and the record is deliberately kept
+when it does - losing track of a graphic that may still be on screen is the
+worse mistake, and an existing test guards it. That left the operator holding
+two answers at once: a green "hidden" over a keyboard still offering "hide layer
+7", which reads as a bug rather than as an unconfirmed state. The message now
+follows the state: the command was accepted, the removal is not confirmed yet,
+and the layer stays listed until it is.
+
+A refusal used to arrive with the whole main menu under it. Seventeen rows below
+"this is for administrators only" push the sentence itself off a phone screen,
+and none of the seventeen is what the reader wanted - they wanted the thing they
+were refused. The four refusal guards and the input-timeout notice now carry a
+single way back.
+
+In the manager, every button opens with a glyph, and a screen reader announces
+the glyph's own name before the words, so the operator hears "gear" and then
+waits to learn what the button is. The spoken name is now derived in the
+BaseButton factory rather than at each call site, so it covers both windows and
+any button added later; an explicit AccessibleName still wins.
+
+Found by driving the journeys rather than reading them, and each of the three is
+covered by a test.
+
 ## Version 8.9.0
 
 A review that went looking for switches nothing reads and limits nothing applies.

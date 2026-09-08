@@ -14,7 +14,7 @@ function Update-PendingExpiry {
         if ($elapsed -ge $stateTimeout) {
             Clear-PendingState -ChatId ([long]$chatId)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
-            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId ([long]$chatId))
+            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-NoticeKeyboard)
             continue
         }
         # A minute's notice, with a way to take more time.

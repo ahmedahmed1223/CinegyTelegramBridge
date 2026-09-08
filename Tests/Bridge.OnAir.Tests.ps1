@@ -82,6 +82,48 @@ Describe 'Safe in-memory layer rollback' {
         (Get-RollbackCandidate -Layer 5 -UserId 10).ExpectedState | Should -Be 'hidden'
     }
 
+    It 'says the hide is unconfirmed while the layer is still recorded live' {
+        # Cinegy accepted the command but the read-back failed, so the record
+        # is kept on purpose. The operator used to be told "✅ hidden" over a
+        # keyboard still offering "🔴 hide layer 5" - two answers at once.
+        Mock Send-TelegramMessage {}
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Sync-LayerAfterOperatorAction { }
+        $script:OnAir[5] = @{ Key = 'alpha'; Values = @{}; ShownAt = (Get-Date) }
+        try {
+            Invoke-HideLayer -Layer 5 -ChatId 10 -UserId 10 | Out-Null
+            Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+                $Text -match 'لم يُؤكَّد'
+            }
+        }
+        finally { $script:OnAir.Remove(5) }
+    }
+
+    It 'says plainly that it is hidden once the record is gone' {
+        Mock Send-TelegramMessage {}
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Sync-LayerAfterOperatorAction { $script:OnAir.Remove(5) }
+        $script:OnAir[5] = @{ Key = 'alpha'; Values = @{}; ShownAt = (Get-Date) }
+        try {
+            Invoke-HideLayer -Layer 5 -ChatId 10 -UserId 10 | Out-Null
+            Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+                $Text -match 'تم إخفاء الطبقة 5'
+            }
+        }
+        finally { $script:OnAir.Remove(5) }
+    }
+
+    It 'answers a refusal with one way back, not the whole menu' {
+        # Seventeen rows under "administrators only" push the sentence off a
+        # phone screen, and none of the seventeen is what the reader wanted.
+        Mock Send-TelegramMessage {}
+        Mock Test-Admin { $false }
+        Test-CallbackAdmin -ChatId 10 -UserId 10 | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard).Count -eq 1
+        }
+    }
+
     It 'records the configured operator name with its ID in the visible template-operation audit' {
         $previousAlias = if ($script:UserAliases.ContainsKey('10')) { [string]$script:UserAliases['10'] } else { $null }
         try {

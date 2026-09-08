@@ -426,7 +426,21 @@ function Invoke-HideLayer {
         # in the gallery watched happen.
         Send-TemplateAirNotice -Key $outgoingKey -Layer $Layer -ActorChatId $ChatId -ActorName $actor `
             -Copy $outgoingCopy -Action hide -OnAirSince (Get-JsonProp $outgoing 'At') | Out-Null
-        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
+        # Said as it is, not as it was asked for. Cinegy accepted the HIDE, but
+        # the read-back that follows can fail, and the record is deliberately
+        # kept when it does - losing track of a graphic that may still be on
+        # screen is the worse mistake. That left the operator holding two
+        # answers at once: "✅ hidden" over a keyboard still offering
+        # "🔴 hide layer 7", which reads as a bug in the bridge rather than as
+        # what it is, an unconfirmed state.
+        if (-not $Quiet) {
+            $unconfirmed = $script:OnAir.ContainsKey($Layer)
+            $hideText = if ($unconfirmed) {
+                "🕓 أُرسل أمر إخفاء الطبقة $Layer وقبِله Cinegy، لكن لم يُؤكَّد رفعها بعد.`nتبقى معروضة هنا كأنها على الهواء حتى يصل التأكيد."
+            }
+            else { "✅ تم إخفاء الطبقة $Layer." }
+            Send-TelegramMessage -ChatId $ChatId -Text $hideText -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
+        }
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     elseif (-not $Quiet) {

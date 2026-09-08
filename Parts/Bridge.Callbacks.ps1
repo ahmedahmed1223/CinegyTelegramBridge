@@ -10,7 +10,7 @@ function Test-CallbackAdmin {
     <# Guard used by every admin-only callback branch. #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (Test-Admin -ChatId $ChatId -UserId $UserId) { return $true }
-    Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-NoticeKeyboard)
     return $false
 }
 
@@ -19,14 +19,14 @@ function Test-CallbackStatusViewer {
        are not listed among the day-to-day administrators. #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) { return $true }
-    Send-TelegramMessage -ChatId $ChatId -Text "هذا الفحص متاح للمشرف والمالك فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "هذا الفحص متاح للمشرف والمالك فقط." -ReplyMarkup (Get-NoticeKeyboard)
     return $false
 }
 
 function Test-CallbackTemplateReminderManager {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId) { return $true }
-    Send-TelegramMessage -ChatId $ChatId -Text 'إعداد تنبيه القالب متاح للمشرف والمالك فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text 'إعداد تنبيه القالب متاح للمشرف والمالك فقط.' -ReplyMarkup (Get-NoticeKeyboard)
     return $false
 }
 
@@ -36,7 +36,7 @@ function Test-CallbackOwner {
        administrator is precisely what it does not entitle you to grant. #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (Test-Owner -ChatId $ChatId -UserId $UserId) { return $true }
-    Send-TelegramMessage -ChatId $ChatId -Text "👑 تعيين المشرفين للمالك وحده." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "👑 تعيين المشرفين للمالك وحده." -ReplyMarkup (Get-NoticeKeyboard)
     return $false
 }
 

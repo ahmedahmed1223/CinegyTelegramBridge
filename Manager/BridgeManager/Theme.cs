@@ -172,9 +172,32 @@ internal static class Theme
         return button;
     }
 
+    /// <summary>
+    /// The label without its leading glyph, for whoever is listening rather
+    /// than looking.
+    ///
+    /// Every control here opens with one - "⚙  الإعدادات", "🧹  مسح الشاشة" -
+    /// and a screen reader announces the glyph's own name before the word, so
+    /// the operator hears "gear" and then waits to find out what the button
+    /// is. The glyph is decoration for the eye; the words after it are the
+    /// control. Falls back to the whole label rather than to nothing, for a
+    /// control whose text is only a glyph.
+    /// </summary>
+    private static string SpokenName(string text)
+    {
+        var index = 0;
+        while (index < text.Length && !char.IsLetterOrDigit(text[index])) index++;
+        var spoken = (index < text.Length ? text[index..] : text).Trim();
+        return spoken.Length > 0 ? spoken : text.Trim();
+    }
+
+    // Named here rather than at each call site, so a button added later is
+    // announced properly without anyone remembering to. An explicit
+    // AccessibleName still wins: it is assigned after construction.
     private static Button BaseButton(string text) => new()
     {
         Text = text,
+        AccessibleName = SpokenName(text),
         AutoSize = false,
         Height = 36,
         FlatStyle = FlatStyle.Flat,
@@ -219,7 +242,7 @@ internal static class Theme
             Margin = new Padding(0, 0, 8, 4),
             UseVisualStyleBackColor = false
         };
-        box.AccessibleName = text;
+        box.AccessibleName = SpokenName(text);
         box.AccessibleRole = AccessibleRole.CheckButton;
         box.FlatAppearance.BorderSize = 1;
 

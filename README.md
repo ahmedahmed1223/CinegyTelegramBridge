@@ -13,6 +13,27 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.98.0
+
+The cause of the silent administrator was the promotion itself.
+
+`Set-AdminRole` added to `AdminUserIds` and left `AdminChatIds` exactly as it
+found it, so everyone promoted from inside the bot became an administrator with
+no notifications: able to approve a stranger into the on-air controls, never
+sent a request. It was not a misconfiguration but the promotion path. It fills
+both lists now - one is who may decide, the other is who is told there is
+something to decide, and freezing the second makes the first blind.
+
+The original caution stands: a group chat's id is negative, so no promotion can
+turn one into an audience for administrator notices; what gets added is always a
+private chat id, which is the user's own id.
+
+A one-time repair runs at startup (`Repair-AdminChatIds`), because anyone
+promoted by an older build stays where they are however the path is fixed - and
+cannot discover it, since what they are missing is messages that were never
+sent. It only ever adds, and it names in the log whoever it added rather than
+changing a configuration file in silence.
+
 ## Version 7.97.0
 
 Two incidents from the air: an access request that never reached one of its

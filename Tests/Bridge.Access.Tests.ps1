@@ -839,6 +839,54 @@ Describe 'An administrator who can approve is an administrator who is told' {
     }
 }
 
+Describe 'A promotion puts an administrator in both lists' {
+    BeforeEach {
+        $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11) -Force
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11) -Force
+        $config | Add-Member -NotePropertyName 'AllowedChatIds' -NotePropertyValue @(11, 44) -Force
+        $config | Add-Member -NotePropertyName 'AllowedUserIds' -NotePropertyValue @(11, 44) -Force
+        Mock Save-Config { }
+    }
+
+    It 'adds the promoted user to the notices as well as to the roster' {
+        # The roster alone made an administrator who could approve a stranger
+        # into the on-air controls and was never sent a single request.
+        (Set-AdminRole -TargetUserId 44 -IsAdmin $true).Success | Should -BeTrue
+
+        @($config.AdminUserIds) | Should -Contain 44
+        @($config.AdminChatIds) | Should -Contain 44
+    }
+
+    It 'still refuses to make a group chat an audience' {
+        # A group id is negative, and the original caution stands.
+        $config | Add-Member -NotePropertyName 'AllowedUserIds' -NotePropertyValue @(11, -100123) -Force
+        [void](Set-AdminRole -TargetUserId -100123 -IsAdmin $true)
+        @($config.AdminChatIds) | Should -Not -Contain -100123
+    }
+
+    It 'takes a demoted administrator out of both' {
+        [void](Set-AdminRole -TargetUserId 44 -IsAdmin $true)
+        (Set-AdminRole -TargetUserId 44 -IsAdmin $false).Success | Should -BeTrue
+
+        @($config.AdminUserIds) | Should -Not -Contain 44
+        @($config.AdminChatIds) | Should -Not -Contain 44
+    }
+
+    It 'repairs an installation that was already promoted without notices' {
+        # What this installation looked like: authority for three, notices for
+        # two, and the third with no way to discover it.
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11, 22, 33) -Force
+        $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11, 22) -Force
+
+        $added = @(Repair-AdminChatIds)
+
+        @($added) | Should -Be @(33)
+        @($config.AdminChatIds) | Should -Contain 33
+        # Idempotent: a second start changes nothing and says nothing.
+        @(Repair-AdminChatIds) | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Granting on-air control takes two taps' {
     It 'asks before it grants' {
         # A stray tap on a message sitting in a chat granted access with

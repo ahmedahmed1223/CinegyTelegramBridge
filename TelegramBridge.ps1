@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.97.0'
+$script:BridgeVersion = '7.98.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -1624,6 +1624,13 @@ if (-not $AllowMultipleInstances) {
 }
 
 Initialize-Settings
+# Before anything can send an administrator notice: an administrator promoted
+# by an older build is in the roster and in no notification list, and has no
+# way to notice messages that were never sent.
+$repairedAdmins = @(Repair-AdminChatIds)
+if ($repairedAdmins.Count -gt 0) {
+    Write-BridgeLog "Added $($repairedAdmins -join ', ') to AdminChatIds: they hold admin authority and were receiving no notices." 'WARN'
+}
 Import-UsageCounts
 Import-CancelReasons
 Import-NewsTickerDraft

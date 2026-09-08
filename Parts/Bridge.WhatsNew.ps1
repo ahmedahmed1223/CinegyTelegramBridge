@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.98.0'; Items = @(
+                '🔼 ترقية مستخدم إلى مشرف صارت تضيفه إلى الإشعارات أيضًا، لا إلى الصلاحية وحدها.'
+            ) }
         @{ Version = '7.97.0'; Items = @(
                 '🔑 منح الوصول صار يسأل مرة ثانية، ويُبلَّغ به كل المشرفين.'
                 '📢 وكل مشرف يصله الإشعار الآن، لا من كان في AdminChatIds وحده.'

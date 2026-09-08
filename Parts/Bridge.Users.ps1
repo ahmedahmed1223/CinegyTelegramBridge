@@ -577,14 +577,50 @@ function Set-AdminRole {
         $updated = @($admins | Where-Object { $_ -ne $TargetUserId })
     }
 
-    # AdminUserIds carries the roster. AdminChatIds keeps only ids it already
-    # held, so a promotion can never quietly authorize a whole group chat.
-    $chatIds = @(@(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } |
-            ForEach-Object { [long]$_ } | Where-Object { $updated -contains $_ })
+    # Both lists, because they answer two halves of one question:
+    # AdminUserIds is who may decide, AdminChatIds is who is told there is
+    # something to decide. Keeping the second frozen made every promotion
+    # produce an administrator who could approve a stranger into the on-air
+    # controls and was never sent a single request - which is what happened
+    # here, and was found only when the person it happened to mentioned that
+    # he had never seen one.
+    #
+    # The original caution still holds and is what the > 0 test is for: a
+    # group chat's id is negative, so no promotion can turn one into an
+    # audience for administrator notices. A private chat's id is the user's
+    # own id, which is the only kind being added.
+    $chatIds = @(@(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ }) + @($updated) |
+            Where-Object { $_ -gt 0 } | Where-Object { $updated -contains $_ } | Sort-Object -Unique)
     $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($updated) -Force
     $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @($chatIds) -Force
     Save-Config
     return [pscustomobject]@{ Success = $true; Error = '' }
+}
+
+function Repair-AdminChatIds {
+    <#
+        Brings AdminChatIds up to date with AdminUserIds, once, at startup.
+
+        Every administrator promoted before this was written is in the roster
+        and in no notification list, and cannot discover that by any means
+        available to them: what they are missing is messages that were never
+        sent. Fixing the promotion path leaves them where they are, so the
+        repair has to run over the state that already exists.
+
+        Only ever adds, and only ids that already hold administrator
+        authority; a negative id - a group - is never added, for the same
+        reason promotion will not add one.
+
+        Returns the ids it added, so the caller can say so in the log rather
+        than changing a configuration file silently.
+    #>
+    $admins = @(@(Get-JsonProp $config 'AdminUserIds') | ForEach-Object { [long]$_ } | Where-Object { $_ -gt 0 })
+    $chats = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ } | Where-Object { $_ -gt 0 })
+    $missing = @($admins | Where-Object { $chats -notcontains $_ } | Sort-Object -Unique)
+    if ($missing.Count -eq 0) { return @() }
+    $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(@($chats + $missing) | Sort-Object -Unique) -Force
+    Save-Config
+    return @($missing)
 }
 
 function Request-AdminRoleChange {

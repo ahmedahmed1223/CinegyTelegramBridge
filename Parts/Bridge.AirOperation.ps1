@@ -113,6 +113,93 @@ function Write-AirOperationResult {
     Write-BridgeLog $message $level
 }
 
+function Get-TemplateNotifyScope {
+    <#
+        Who should hear that this template went on air: none, admins, or every
+        authorised chat.
+
+        Read from one setting an administrator can edit from a phone -
+        "Urgent=all, Banner=admins" - rather than from a rule the bridge
+        invents. "عاجل" on one station is "Breaking" on another, and which
+        graphics are worth interrupting a room for is a newsroom's decision,
+        not a program's.
+
+        A name written without a scope means all: someone who bothered to list
+        a template wants somebody told, and the safe reading of an incomplete
+        rule is the one that informs rather than the one that silences.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return 'none' }
+    foreach ($rule in (([string](Get-Setting 'TemplateNotifyRules')) -split ',')) {
+        $parts = @($rule -split '=', 2 | ForEach-Object { $_.Trim() })
+        $name = [string]$parts[0]
+        if (-not $name) { continue }
+        if (-not [string]::Equals($name, $Key, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $scope = if ($parts.Count -gt 1) { ([string]$parts[1]).ToLowerInvariant() } else { 'all' }
+        if ($scope -in @('none', 'admins', 'all')) { return $scope }
+        return 'all'
+    }
+    return 'none'
+}
+
+function Get-TemplateNoticeAudience {
+    <# Who hears it, minus the person who did it: they are looking at their own
+       confirmation, and a second message telling them what they just did is
+       the kind of noise that gets a bot muted. #>
+    param([Parameter(Mandatory)][string]$Scope, [long]$ActorChatId = 0)
+    if ($Scope -eq 'none') { return @() }
+    $ids = if ($Scope -eq 'all') {
+        @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })
+    }
+    else { @(Get-AdminNotifyIds) }
+    return @($ids | Where-Object { $_ -gt 0 -and $_ -ne $ActorChatId } | Sort-Object -Unique)
+}
+
+function Send-TemplateAirNotice {
+    <#
+        Tells the room that a graphic is on air: which, what it says, who put
+        it there, and how long it stays.
+
+        The copy is the point. "عاجل على الطبقة 7" tells a newsroom that
+        something happened; the sentence that is on the screen tells them
+        whether it is the one they are already handling, which is the only
+        version anybody can act on. The duration is the second question they
+        ask, and answering it in the same message saves the reply.
+
+        Silent unless a template was named: a station shows dozens of graphics
+        a day, and a bot that reports each one is a bot people mute - and a
+        muted bot loses the message that mattered.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Key,
+        [int]$Layer = 0,
+        [long]$ActorChatId = 0,
+        [AllowEmptyString()][string]$ActorName = '',
+        [AllowEmptyString()][string]$Copy = '',
+        [int]$AutoHideSeconds = 0
+    )
+    $scope = Get-TemplateNotifyScope -Key $Key
+    $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $ActorChatId)
+    if ($audience.Count -eq 0) { return 0 }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $layerPart = if ($Layer -gt 0) { " · طبقة $Layer" } else { '' }
+    $lines.Add("🔴 <b>على الهواء الآن</b> — $(ConvertTo-TelegramHtmlText $Key)$layerPart")
+    if (-not [string]::IsNullOrWhiteSpace($Copy)) {
+        # In a code span, like every other place the on-air copy appears: it is
+        # what will be read on television, and it is not a label.
+        $lines.Add("<code>$(ConvertTo-TelegramHtmlText $Copy)</code>")
+    }
+    $duration = if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" }
+    else { '⏱ يبقى حتى يُخفى يدويًا' }
+    $lines.Add($duration)
+    if ($ActorName) { $lines.Add("👤 $(ConvertTo-TelegramHtmlText $ActorName)") }
+    $text = $lines -join "`n"
+    foreach ($chatId in $audience) { Send-TelegramMessage -ChatId $chatId -Text $text -ParseMode HTML }
+    Write-BridgeLog "On-air notice for '$Key' sent to $($audience.Count) chat(s) (scope: $scope)"
+    return $audience.Count
+}
+
 function Test-MaintenanceWindowActive {
     <# The nightly slot when the playout machine is patched or re-cabled. An
        unset or malformed window is no window: this must never fail closed and
@@ -506,6 +593,11 @@ function Invoke-ShowTemplateResult {
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
         Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - بواسطة $actor"
+        # The room hears about the templates it asked to hear about, with what
+        # they say and how long they stay.
+        Send-TemplateAirNotice -Key $Key -Layer ([int]$template.Layer) -ActorChatId $ChatId `
+            -ActorName $actor -Copy (Format-OnAirScreenCopy -Key $Key -Variables $Variables) `
+            -AutoHideSeconds $AutoHideSeconds | Out-Null
 
         # Belt and braces: also write the values through the postbox, which is
         # the channel this scene actually honours.

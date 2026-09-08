@@ -1518,6 +1518,21 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'news:draft:extend' {
+            # Touching the draft is the extension: the expiry measures idleness
+            # from UpdatedAt, so saying "keep it" is the same act as editing it.
+            $draft = Get-NewsTickerDraft -UserId $userId
+            if ($draft) {
+                $draft | Add-Member -NotePropertyName 'UpdatedAt' -NotePropertyValue ((Get-Date).ToString('o')) -Force
+                $draft.PSObject.Properties.Remove('WarnedAt')
+                Save-NewsTickerDraft | Out-Null
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⏳ مُدِّدت مهلة المسودة.'
+            }
+            else {
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'لا توجد مسودة قائمة.' -Alert
+            }
+            break
+        }
         'flow:extend' {
             # The minute's warning, answered. The clock restarts from now
             # rather than being switched off: the flow still has to end if the

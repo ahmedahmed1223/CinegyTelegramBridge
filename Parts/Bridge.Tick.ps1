@@ -953,9 +953,27 @@ function Update-NewsDraftExpiry {
     $updatedAt = [datetime]::MinValue
     $stamp = [string](Get-JsonProp $draft 'UpdatedAt')
     if (-not [datetime]::TryParse($stamp, [ref]$updatedAt)) { return }
-    if (((Get-Date) - $updatedAt).TotalMinutes -lt $timeout) { return }
-
     $owner = [long](Get-JsonProp $draft 'OwnerChatId')
+    $elapsed = ((Get-Date) - $updatedAt).TotalMinutes
+    if ($elapsed -lt $timeout) {
+        # A warning first, with a way to keep it. This expiry does not drop
+        # one half-typed field like the flow watchdog does - it throws away a
+        # whole strap, every headline in it, and the editor learns of it only
+        # from the message saying how many they just lost. Five minutes'
+        # notice is what turns that into a decision.
+        $warnAt = [math]::Max(1, [math]::Min(5, [int]($timeout / 4)))
+        $warned = [string](Get-JsonProp $draft 'WarnedAt')
+        if ($owner -gt 0 -and -not $warned -and ($timeout - $elapsed) -le $warnAt) {
+            $draft | Add-Member -NotePropertyName 'WarnedAt' -NotePropertyValue ((Get-Date).ToString('o')) -Force
+            Save-NewsTickerDraft | Out-Null
+            $items = @(Get-JsonProp $draft 'Items')
+            Send-TelegramMessage -ChatId $owner -ParseMode HTML `
+                -Text "⏳ <b>مسودة الشريط ($($items.Count) خبرًا) على وشك الانتهاء</b>`nستُحذف بعد $(Format-DurationMinutes -Minutes ([int][math]::Ceiling($timeout - $elapsed))) بلا تعديل. مدّدها أو انشرها." `
+                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏳ تمديد' 'news:draft:extend'), (New-Button '📰 فتح المسودة' 'news:refresh'))) }
+        }
+        return
+    }
+
     $items = @(Get-JsonProp $draft 'Items')
     $count = $items.Count
     Remove-NewsTickerDraft

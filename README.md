@@ -13,6 +13,35 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.0.0
+
+A template can announce itself on air, and nothing expires unannounced.
+
+`TemplateNotifyRules` is one setting an administrator writes from a phone -
+"Urgent=all, Banner=admins" - and urgent is the example rather than the rule:
+"عاجل" on one station is "Breaking" on another, and which graphics are worth
+interrupting a room for is a newsroom's decision, not something a program can
+infer. Each template names its own audience (`none`, `admins`, `all`), and a
+name written without one means all, because someone who bothered to list a
+template wants somebody told.
+
+The message carries what people actually ask: the copy that will be read on
+television in a `<code>` span, the layer, how long it stays ("hidden
+automatically after 30 seconds" or "stays until someone takes it off"), and who
+put it there. It never goes to the person who ran it - they are looking at their
+own confirmation, and a second message describing what they just did is the
+noise that gets a bot muted. Nothing is sent for a template nobody named: a
+station shows dozens of graphics a day.
+
+The extend button covers every input flow - bulletin, ticker, banner, schedule,
+templates - because the flow watchdog is indifferent to which mode it is
+watching. The ticker draft was outside it: a separate expiry that discards the
+whole strap rather than one half-typed field, with the editor learning of it
+only from the message counting what they had lost. It now warns five minutes
+before, with the number of headlines at stake and a `⏳ تمديد` button that
+restarts the clock. The expiry itself stays, because an abandoned draft holds
+the ticker - but it is a decision now rather than a surprise.
+
 ## Version 7.99.0
 
 The log states the period it covers, can be read a day at a time, and access

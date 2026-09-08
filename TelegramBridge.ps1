@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.99.0'
+$script:BridgeVersion = '8.0.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -227,6 +227,9 @@ $script:DefaultSettings = [ordered]@{
     NewsSheetSyncMinutes       = 5
     NewsSheetTimeoutSeconds    = 30
     NewsSheetNotifyScope       = 'all'    # none | admins | all authorised chats
+    # Which templates announce themselves when they go on air, and to whom:
+    # "Urgent=all, Banner=admins". Urgent is the example, not the rule.
+    TemplateNotifyRules        = 'Urgent=all'
     AllowOperatorsSheetPull    = $true    # operators may pull the sheet, not only administrators
     AllowOperatorsDeleteNews   = $false
     AllowOperatorsRestoreNews  = $false
@@ -514,6 +517,7 @@ $script:SettingDisplayMetadata = @{
     NewsSheetSyncMinutes = @{ Unit = 'دقيقة'; Description = 'كل كم تُسحب نسخة من الشيت في الوضع التلقائي' }
     NewsSheetTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة تنزيل الشيت قبل اعتباره فاشلًا' }
     NewsSheetNotifyScope = @{ Unit = ''; Description = 'من يصله إشعار تغيّر الشيت: none بلا أحد · admins المشرفون · all كل المصرّح لهم' }
+    TemplateNotifyRules = @{ Unit = ''; Description = 'قوالب تُعلن عن نفسها عند العرض: «القالب=الجهة» مفصولة بفاصلة (الجهة: none · admins · all)' }
     AllowOperatorsSheetPull = @{ Unit = ''; Description = 'يسمح للمشغّل بسحب الشيت، لا للمشرف وحده' }
     AllowOperatorsDeleteNews = @{ Unit = ''; Description = 'يسمح للمشغّل بحذف خبر من الشريط' }
     AllowOperatorsRestoreNews = @{ Unit = ''; Description = 'يسمح للمشغّل باستعادة نسخة سابقة من الشريط' }
@@ -1137,6 +1141,7 @@ foreach ($entry in @(
                 'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks',
                 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
                 'NotifyAdminsOnCinegyHealth', 'NotifyOperatorsOnBlackOutput',
+                'TemplateNotifyRules',
                 'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes',
                 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds',
                 'NewsSheetNotifyScope', 'TemplateReminderFollowUpMinutes',
@@ -1300,6 +1305,7 @@ $script:SettingNavigationLabels = @{
     NewsListStackedLabelLength = 'طول الخبر في سطره'
     NotifyOnScheduleOverwrite = 'تنبيه استبدال مشهد'
     NotifyOperatorsOnBlackOutput = 'إشعار المشغّلين بالسواد'
+    TemplateNotifyRules = 'إشعار العرض حسب القالب'
     OneHandMode = 'وضع اليد الواحدة'
     OutputBlackConfirmSeconds = 'انتظار اللقطة المؤكِّدة'
     OutputBlackLuminance = 'حد سطوع السواد'

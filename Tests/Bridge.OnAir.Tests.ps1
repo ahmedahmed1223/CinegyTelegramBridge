@@ -1994,3 +1994,134 @@ Describe 'Noticing that the logo or the strip is gone' {
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
 }
+
+Describe 'A named template announces itself on air' {
+    BeforeEach {
+        $config | Add-Member -NotePropertyName 'AllowedChatIds' -NotePropertyValue @(11, 22, 33) -Force
+        $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11) -Force
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11) -Force
+        Mock Get-Setting { 'Urgent=all, Banner=admins, Quiet=none' } -ParameterFilter { $Name -eq 'TemplateNotifyRules' }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'reads the rule an administrator wrote, template by template' {
+        # Which graphics are worth interrupting a room for is a newsroom's
+        # decision, not a rule the bridge can infer from a name.
+        Get-TemplateNotifyScope -Key 'Urgent' | Should -Be 'all'
+        Get-TemplateNotifyScope -Key 'banner' | Should -Be 'admins'   # matched without case
+        Get-TemplateNotifyScope -Key 'Quiet' | Should -Be 'none'
+        # Anything unnamed says nothing: a station shows dozens a day.
+        Get-TemplateNotifyScope -Key 'Lower3' | Should -Be 'none'
+        Get-TemplateNotifyScope -Key '' | Should -Be 'none'
+    }
+
+    It 'sends the copy, the duration and the operator to everyone but the operator' {
+        $sent = [System.Collections.Generic.List[object]]::new()
+        Mock Send-TelegramMessage { $sent.Add(@{ ChatId = [long]$ChatId; Text = [string]$Text }) }
+
+        $count = Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 `
+            -ActorName 'ابو حسام' -Copy 'الرئيس يفتتح المعرض' -AutoHideSeconds 30
+
+        $count | Should -Be 2
+        @($sent | ForEach-Object { $_.ChatId }) | Should -Not -Contain 22
+        $sent[0].Text | Should -Match '<code>الرئيس يفتتح المعرض</code>'
+        $sent[0].Text | Should -Match 'طبقة 7'
+        $sent[0].Text | Should -Match 'يُخفى تلقائيًا بعد'
+        $sent[0].Text | Should -Match 'ابو حسام'
+    }
+
+    It 'says it stays until somebody takes it off when there is no timer' {
+        Mock Send-TelegramMessage { $script:Notice = [string]$Text }
+        [void](Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'نص')
+        $script:Notice | Should -Match 'حتى يُخفى يدويًا'
+    }
+
+    It 'keeps an admins-only rule to the administrators' {
+        $sent = [System.Collections.Generic.List[long]]::new()
+        Mock Send-TelegramMessage { $sent.Add([long]$ChatId) }
+
+        [void](Send-TemplateAirNotice -Key 'Banner' -Layer 4 -ActorChatId 22 -ActorName 'x' -Copy 'نص')
+
+        @($sent) | Should -Be @(11)
+    }
+
+    It 'stays silent for a template nobody asked about' {
+        Mock Send-TelegramMessage { }
+        Send-TemplateAirNotice -Key 'Lower3' -Layer 3 -ActorChatId 22 -ActorName 'x' -Copy 'نص' | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'The ticker draft warns before it is thrown away' {
+    BeforeEach {
+        Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+        Mock Get-SettingInt { 10 }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'gives five minutes notice and a way to keep the draft' {
+        # This expiry does not drop one half-typed field - it throws away a
+        # whole strap, and the editor used to learn of it only from the
+        # message counting what they had lost.
+        $script:NewsTickerDraft = [pscustomobject]@{
+            OwnerChatId = 555; Items = @('خبر أول', 'خبر ثانٍ', 'خبر ثالث')
+            UpdatedAt = (Get-Date).AddMinutes(-117).ToString('o')
+        }
+        $script:Warned = ''
+        $script:WarnMarkup = $null
+        Mock Send-TelegramMessage { $script:Warned = [string]$Text; $script:WarnMarkup = $ReplyMarkup }
+
+        Update-NewsDraftExpiry
+
+        $script:Warned | Should -Match 'على وشك الانتهاء'
+        $script:Warned | Should -Match '3 خبرًا'
+        @($script:WarnMarkup.inline_keyboard)[0][0].callback_data | Should -Be 'news:draft:extend'
+        # Warned, not deleted.
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'warns once, however many ticks pass' {
+        $script:NewsTickerDraft = [pscustomobject]@{
+            OwnerChatId = 555; Items = @('خبر'); UpdatedAt = (Get-Date).AddMinutes(-117).ToString('o')
+        }
+        Mock Send-TelegramMessage { }
+
+        Update-NewsDraftExpiry
+        Update-NewsDraftExpiry
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'still discards a draft nobody came back to' {
+        $script:NewsTickerDraft = [pscustomobject]@{
+            OwnerChatId = 555; Items = @('خبر'); UpdatedAt = (Get-Date).AddMinutes(-200).ToString('o')
+        }
+        Mock Send-TelegramMessage { }
+        Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
+
+        Update-NewsDraftExpiry
+
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+    }
+
+    It 'restarts the clock when the draft is extended' {
+        $script:NewsTickerDraft = [pscustomobject]@{
+            OwnerChatId = 555; Items = @('خبر')
+            UpdatedAt = (Get-Date).AddMinutes(-117).ToString('o'); WarnedAt = (Get-Date).ToString('o')
+        }
+        Mock Get-NewsTickerDraft { $script:NewsTickerDraft }
+        Mock Confirm-TelegramCallback { $script:Answer = [string]$Text }
+        Mock Test-Authorized { $true }
+
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = '3'; data = 'news:draft:extend'
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 555; type = 'private' } }
+                from = [pscustomobject]@{ id = 555; first_name = 'x' }
+            })
+
+        ((Get-Date) - [datetime]$script:NewsTickerDraft.UpdatedAt).TotalMinutes | Should -BeLessThan 1
+        @($script:NewsTickerDraft.PSObject.Properties.Name) | Should -Not -Contain 'WarnedAt'
+        $script:Answer | Should -Match 'مُدِّدت'
+    }
+}

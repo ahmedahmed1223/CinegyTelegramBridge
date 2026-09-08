@@ -75,8 +75,14 @@ function Save-UserProfiles {
 }
 
 function Write-UserApprovalMetadata {
-    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ApprovedByUserId)
-    $script:UserProfiles[[string]$TargetUserId] = @{ AddedAt = (Get-Date).ToString('o'); AddedByUserId = $ApprovedByUserId; LastActivityAt = $null }
+    param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ApprovedByUserId,
+        [AllowNull()]$RequestedAt = $null)
+    # RequestedAt as well as AddedAt: the pair is the wait, and the wait is
+    # what an administrator is judging when they look back at how requests
+    # were handled. It lives here rather than only in the audit file because
+    # this is the record that outlives log rotation.
+    $asked = if ($RequestedAt -is [datetime]) { $RequestedAt.ToString('o') } else { [string]$RequestedAt }
+    $script:UserProfiles[[string]$TargetUserId] = @{ AddedAt = (Get-Date).ToString('o'); AddedByUserId = $ApprovedByUserId; LastActivityAt = $null; RequestedAt = $asked }
     $script:UserProfilesDirty = $true
     return Save-UserProfiles -Force
 }

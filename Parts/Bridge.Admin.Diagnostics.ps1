@@ -264,6 +264,29 @@ function Invoke-DiagnosticsCommand {
     Send-TelegramMessage -ChatId $ChatId -Text (Protect-SensitiveText $text) -ReplyMarkup (Get-DiagnosticsKeyboard)
 }
 
+function Get-AuditTrailStamp {
+    <# The stamp a trail line begins with, or a dash when the line is missing
+       or shaped unexpectedly - a period line must never be the thing that
+       takes down the screen it describes. #>
+    param([AllowNull()][string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) { return '—' }
+    if ($Line -match '^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2})') { return $Matches[1] }
+    return '—'
+}
+
+function Get-AuditScreenKeyboard {
+    <# The way from the raw trail to the operations log. A supervisor looking
+       for what went out yesterday opens 📜 first - it is the screen named
+       "the log" - and until now it was a dead end of fixed length. #>
+    # No parameters: every button here is the same for whoever opens it, and
+    # a parameter kept "for symmetry" is a parameter that will be trusted.
+    param()
+    return @{ inline_keyboard = @(
+            , @((New-Button '📅 سجل العمليات بالساعات' 'oplog:48'))
+            , @((New-Button '🏠 القائمة' 'menu:main'))
+        ) }
+}
+
 function Invoke-AuditCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -273,8 +296,19 @@ function Invoke-AuditCommand {
         Send-TelegramMessage -ChatId $ChatId -Text "📜 آخر العمليات`n━━━━━━━━━━━━━━`nلا توجد عمليات مسجّلة بعد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $text = "📜 آخر العمليات`n━━━━━━━━━━━━━━`n" + (($script:AuditTrail | Select-Object -Last 20) -join "`n")
-    Send-TelegramPagedText -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    # The period first. This screen shows a fixed number of lines, not a
+    # window of time, so how far back it reaches depends entirely on how busy
+    # the station has been - which the reader cannot know and had no way to
+    # ask.
+    $shown = @($script:AuditTrail | Select-Object -Last 20)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('📜 آخر العمليات')
+    $lines.Add('━━━━━━━━━━━━━━')
+    $lines.Add("الفترة: $(Get-AuditTrailStamp -Line @($shown)[0]) ← $(Get-AuditTrailStamp -Line @($shown)[-1])")
+    $lines.Add("المعروض: $($shown.Count) من $($script:AuditTrail.Count) سطرًا محفوظة")
+    $lines.Add('')
+    $lines.AddRange([string[]]$shown)
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-AuditScreenKeyboard)
 }
 
 function Request-Approval {
@@ -322,6 +356,12 @@ function Request-Approval {
         Send-AdminBroadcast -Text "🔔 طلب وصول جديد للبوت`n$($nameLine)رقم المحادثة: $ChatId`nرقم المستخدم: $UserId" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
     }
     Write-BridgeLog "Access request from chat $ChatId / user $UserId ($name) sent to admins"
+    # When it was asked, as data: the decision rows are only half an answer
+    # without it - "approved at 11:09" says nothing about whether anyone was
+    # kept waiting.
+    Write-AuditRecord -OperationId "access-$([guid]::NewGuid().ToString('N'))" -EventName 'access' `
+        -Result 'requested' -UserId $UserId -ChatId $ChatId -Action 'request' `
+        -Target ([string]$UserId) -Message ([string]$name)
     # Asked after the admins are told, never before: a requester who never
     # answers still has a request waiting, which is the point of the queue.
     # What they send replaces the Telegram handle as the name the roster shows.
@@ -412,9 +452,11 @@ function Grant-UserAccess {
     if ($ApproverUserId -eq 0) { $ApproverUserId = $ApprovedBy }
     $targetUserId = $TargetChatId
     $requestedName = ''
+    $pendingRecord = $null
     if ($script:PendingApprovals.ContainsKey($TargetChatId)) {
-        $targetUserId = [long]$script:PendingApprovals[$TargetChatId].UserId
-        $requestedName = [string]$script:PendingApprovals[$TargetChatId].Name
+        $pendingRecord = $script:PendingApprovals[$TargetChatId]
+        $targetUserId = [long]$pendingRecord.UserId
+        $requestedName = [string]$pendingRecord.Name
     }
 
     # Idempotent: the approval buttons sit in a message that stays tappable,
@@ -435,7 +477,8 @@ function Grant-UserAccess {
         $changed = $true
     }
     if ($changed) { Save-Config }
-    Write-UserApprovalMetadata -TargetUserId $targetUserId -ApprovedByUserId $ApproverUserId | Out-Null
+    $requestedAt = if ($pendingRecord) { Get-JsonProp $pendingRecord 'RequestedAt' } else { $null }
+    Write-UserApprovalMetadata -TargetUserId $targetUserId -ApprovedByUserId $ApproverUserId -RequestedAt $requestedAt | Out-Null
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"
@@ -457,6 +500,13 @@ function Grant-UserAccess {
         }
     }
     Add-AuditEntry "👤 موافقة على $(Format-UserAuditActor -UserId ([long]$targetUserId)) - بواسطة $(Format-UserAuditActor -UserId $ApproverUserId)"
+    # And as data, not only as an Arabic sentence. The screen that answers
+    # "who let this person in, and when" cannot be built by parsing prose:
+    # every audit line here carried the whole decision inside one message
+    # string, with its structured fields left empty.
+    Write-AuditRecord -OperationId "access-$([guid]::NewGuid().ToString('N'))" -EventName 'access' `
+        -Result 'approved' -UserId $ApproverUserId -ChatId $TargetChatId -Action 'approve' `
+        -Target ([string]$targetUserId) -Message ([string]$requestedName)
     Send-TelegramMessage -ChatId $ApprovedBy -Text "✅ تمت الموافقة على $TargetChatId وأُضيف إلى المستخدمين المصرح لهم.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "✅ تمت الموافقة على طلبك، يمكنك الآن استخدام البوت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)
 }
@@ -471,6 +521,12 @@ function Deny-UserAccess {
     $blocked = [bool](Get-Setting 'BlockRejectedRequesters') -and (Block-AccessChat -ChatId $TargetChatId -Reason 'rejected' -ByUserId $RejecterUserId)
     Write-BridgeLog "User $RejecterUserId rejected access request from $TargetChatId (blocked=$blocked)"
     Add-AuditEntry "👤 رفض طلب $TargetChatId - بواسطة $(Format-UserAuditActor -UserId $RejecterUserId)"
+    # A rejection leaves nothing behind anywhere else - no profile, no roster
+    # entry - so without this row the screen would show only the people who
+    # were let in, which is the half of the history nobody needs to ask about.
+    Write-AuditRecord -OperationId "access-$([guid]::NewGuid().ToString('N'))" -EventName 'access' `
+        -Result 'rejected' -UserId $RejecterUserId -ChatId $TargetChatId -Action 'reject' `
+        -Target ([string]$TargetChatId) -Message $(if ($blocked) { 'blocked' } else { '' })
     $note = if ($blocked) { " وحُظرت المحادثة من الطلب مجددًا." } else { "" }
     Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId.$note" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text "تم رفض طلب الوصول الخاص بك."

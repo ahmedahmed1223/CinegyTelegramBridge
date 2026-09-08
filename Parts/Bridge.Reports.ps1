@@ -29,6 +29,53 @@ $script:ReportMaxRecords = 5000
 # so out loud when it hits that limit.
 $script:OperationLogWindows = @(24, 48, 72, 168)
 
+# How far back the day arrows will walk. Not a retention promise - the audit
+# file and its archives decide that - but a stop: past this, an empty screen
+# says more about the log's own limits than about the day, and the reader
+# cannot tell those apart.
+$script:OperationLogMaxDaysBack = 90
+
+function Get-BridgeLogDay {
+    <#
+        Reads a yyyy-MM-dd from a callback, refusing anything the log cannot
+        honestly answer for.
+
+        A future day has nothing in it by definition. A day older than the
+        walk's limit has nothing in it either, but for a reason the reader
+        would have to guess at - so the walk stops rather than showing an
+        empty screen that looks like a quiet Tuesday.
+    #>
+    param([AllowEmptyString()][string]$Value, [Parameter(Mandatory)][ref]$Result)
+    $parsed = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact($Value, 'yyyy-MM-dd', [cultureinfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+        return $false
+    }
+    $today = (Get-Date).Date
+    if ($parsed.Date -gt $today) { return $false }
+    if (($today - $parsed.Date).Days -gt $script:OperationLogMaxDaysBack) { return $false }
+    $Result.Value = $parsed.Date
+    return $true
+}
+
+function Get-OperationLogDayLabel {
+    <# A day named the way a person refers to it. "2026-09-07" is exact and
+       nobody says it; "أمس" is what the question was asked in, with the date
+       beside it so a screen left open overnight cannot lie. #>
+    param([Parameter(Mandatory)][datetime]$Day)
+    $date = $Day.Date
+    $today = (Get-Date).Date
+    $name = switch (($today - $date).Days) {
+        0 { 'اليوم' }
+        1 { 'أمس' }
+        2 { 'أول أمس' }
+        default { '' }
+    }
+    $stamp = $date.ToString('yyyy-MM-dd')
+    if ($name) { return "$name · $stamp" }
+    return "يوم $stamp"
+}
+
 function Get-OperationLogWindowLabel {
     <# What to call a window on a button. 168 is a true number of hours and a
        useless label: nobody asks for a hundred and sixty-eight hours. #>
@@ -50,10 +97,22 @@ function Get-OperationLogData {
     #>
     param(
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
-        [long]$OnlyUserId = 0
+        [long]$OnlyUserId = 0,
+        [datetime]$Day = [datetime]::MinValue
     )
-    $to = Get-Date
-    $from = $to.AddHours(-$Hours)
+    # A named day, or a window ending now. "What went out on Tuesday" is a
+    # different question from "what went out in the last 48 hours", and a
+    # window that always ends at this moment cannot answer it: by Thursday,
+    # Tuesday has fallen out of every window that would still be readable.
+    $isDay = $Day -gt [datetime]::MinValue
+    if ($isDay) {
+        $from = $Day.Date
+        $to = $Day.Date.AddDays(1).AddTicks(-1)
+    }
+    else {
+        $to = Get-Date
+        $from = $to.AddHours(-$Hours)
+    }
     $window = Get-ReportRecords -From $from -To $to -EventName 'air_control'
     $records = @($window.Records)
     if ($OnlyUserId -gt 0) {
@@ -67,7 +126,9 @@ function Get-OperationLogData {
     return [pscustomobject]@{
         Records   = $ordered
         Hours     = $Hours
-        Label     = "آخر $(Get-OperationLogWindowLabel -Hours $Hours)"
+        Day       = $Day
+        IsDay     = $isDay
+        Label     = $(if ($isDay) { Get-OperationLogDayLabel -Day $Day } else { "آخر $(Get-OperationLogWindowLabel -Hours $Hours)" })
         From      = $from
         To        = $to
         Failed    = $failed
@@ -86,8 +147,8 @@ function Get-OperationLogBlocks {
         because something is suspected, and counting failures by reading
         forty rows is the work it exists to save.
     #>
-    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0)
-    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day
     $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
     $blocks = @(@{ type = 'heading'; text = "🧾 سجل العمليات — $($data.Label) · $who"; size = 3 })
 
@@ -154,8 +215,8 @@ function Get-OperationLogBlocks {
 function Get-OperationLogText {
     <# The fallback, in the reports' shape: totals first, the rows quoted
        under them. #>
-    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0)
-    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day
     $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>🧾 سجل العمليات</b> — $(ConvertTo-HtmlText $data.Label) · $who")
@@ -190,10 +251,12 @@ function Get-OperationLogKeyboard {
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [long]$OnlyUserId = 0,
         [long]$ChatId = 0,
-        [long]$UserId = 0
+        [long]$UserId = 0,
+        [datetime]$Day = [datetime]::MinValue
     )
     $scope = if ($OnlyUserId -gt 0) { 'mine' } else { 'all' }
     $prefix = if ($scope -eq 'mine') { 'oplog' } else { 'oplog:all' }
+    $isDay = $Day -gt [datetime]::MinValue
     # $window, not $hours: PowerShell variable names are case-insensitive, so
     # a loop over $hours would be a loop over the -Hours parameter itself -
     # every window came out marked as the current one, and the scope button
@@ -204,11 +267,31 @@ function Get-OperationLogKeyboard {
             New-Button $label "${prefix}:$window"
         })
     $rows = @()
-    # Two to a row, like the report periods. Four windows across one row of a
-    # phone leaves each label too narrow to read, which is the whole point of
-    # naming them.
-    for ($index = 0; $index -lt $buttons.Count; $index += 2) {
-        $rows += , @($buttons[$index..([math]::Min($index + 1, $buttons.Count - 1))])
+    if ($isDay) {
+        # One day at a time, walked with arrows. A calendar would be a screen
+        # of its own for a question usually answered by "yesterday" or the day
+        # before, and each label carries its date so the walk stays legible.
+        $previous = $Day.Date.AddDays(-1)
+        $next = $Day.Date.AddDays(1)
+        $dayRow = @(New-Button "◀ $($previous.ToString('MM-dd'))" "${prefix}:day:$($previous.ToString('yyyy-MM-dd'))")
+        # No arrow past today: there is nothing after now to look at, and a
+        # button that answers "لا توجد عمليات" by design is a button that
+        # teaches people to distrust the screen.
+        if ($next.Date -le (Get-Date).Date) {
+            $dayRow += New-Button "$($next.ToString('MM-dd')) ▶" "${prefix}:day:$($next.ToString('yyyy-MM-dd'))"
+        }
+        $rows += , @($dayRow)
+        $rows += , @((New-Button "⏱ آخر $(Get-OperationLogWindowLabel -Hours $Hours)" "${prefix}:$Hours"))
+    }
+    else {
+        # Two to a row, like the report periods. Four windows across one row of
+        # a phone leaves each label too narrow to read, which is the whole
+        # point of naming them.
+        for ($index = 0; $index -lt $buttons.Count; $index += 2) {
+            $rows += , @($buttons[$index..([math]::Min($index + 1, $buttons.Count - 1))])
+        }
+        $yesterday = (Get-Date).Date.AddDays(-1)
+        $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
     }
     # Everyone's operations is an administrator's view: an operator seeing who
     # else put what on air is not this screen's job.
@@ -230,7 +313,8 @@ function Invoke-OperationLogCommand {
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
-        [switch]$AllUsers
+        [switch]$AllUsers,
+        [datetime]$Day = [datetime]::MinValue
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     # An operator who asks for everyone gets their own operations. The guard
@@ -238,9 +322,9 @@ function Invoke-OperationLogCommand {
     # without one being pressed.
     $everyone = $AllUsers -and (Test-Admin -ChatId $ChatId -UserId $UserId)
     $onlyUserId = if ($everyone) { 0 } else { $UserId }
-    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $onlyUserId -ChatId $ChatId -UserId $UserId
-    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-OperationLogBlocks -Hours $Hours -OnlyUserId $onlyUserId) -ReplyMarkup $keyboard) { return }
-    Send-TelegramPagedText -ChatId $ChatId -Text (Get-OperationLogText -Hours $Hours -OnlyUserId $onlyUserId) -ParseMode HTML -ReplyMarkup $keyboard
+    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $onlyUserId -ChatId $ChatId -UserId $UserId -Day $Day
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-OperationLogBlocks -Hours $Hours -OnlyUserId $onlyUserId -Day $Day) -ReplyMarkup $keyboard) { return }
+    Send-TelegramPagedText -ChatId $ChatId -Text (Get-OperationLogText -Hours $Hours -OnlyUserId $onlyUserId -Day $Day) -ParseMode HTML -ReplyMarkup $keyboard
 }
 
 function Get-ReportsMenuKeyboard {
@@ -248,6 +332,7 @@ function Get-ReportsMenuKeyboard {
             , @((New-Button '🖼 البنرات' 'rep:banners:today'), (New-Button '📰 الأخبار' 'rep:news:today'))
             , @((New-Button '📑 الموجزات' 'rep:mojaz:today'))
             , @((New-Button '👥 تقرير العمل' 'rep:work:today'))
+            , @((New-Button '🧾 سجل العمليات' 'oplog:48'))
             , @((New-Button '🏠 القائمة' 'menu:main'))
         )
     }

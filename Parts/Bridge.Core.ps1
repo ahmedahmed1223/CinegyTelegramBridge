@@ -372,6 +372,23 @@ function Get-RichTableTrimNote {
     return "⚠️ عُرض أحدث $Shown صفًّا فقط؛ $Hidden صفًّا أقدم غير معروضة."
 }
 
+function Format-AuditTrailStamp {
+    <#
+        The stamp on one line of the 📜 screen.
+
+        A clock time alone, which is what this was, is only unambiguous within
+        a day - and the screen restores fifty entries from audit.jsonl, which
+        on a quiet week reaches back several days. "07:22" then means one of
+        four mornings, and the reader has no way to tell which.
+
+        Today keeps the bare time, because that is the common case and a date
+        on every line would be noise; anything older carries its date.
+    #>
+    param([Parameter(Mandatory)][datetime]$At)
+    if ($At.Date -eq (Get-Date).Date) { return $At.ToString('HH:mm:ss') }
+    return $At.ToString('MM-dd HH:mm:ss')
+}
+
 function Format-DurationMinutes {
     <#
         Minutes as something a person reads at a glance.
@@ -772,7 +789,7 @@ function Add-AuditEntry {
     <# Short in-memory history surfaced by the admin's 📜 button, so "who put
        that on air?" can be answered from Telegram without opening the log. #>
     param([Parameter(Mandatory)][string]$Message)
-    $script:AuditTrail.Add("$(Get-Date -Format 'HH:mm:ss') $Message")
+    $script:AuditTrail.Add("$(Format-AuditTrailStamp -At (Get-Date)) $Message")
     $max = Get-SettingInt 'AuditTrailSize' 1
     while ($script:AuditTrail.Count -gt $max) { $script:AuditTrail.RemoveAt(0) }
     Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -EventName activity -Result success -Message $Message
@@ -814,7 +831,7 @@ function Import-AuditTrail {
         foreach ($record in @(Read-AuditRecords -MaxLines ($max * 10))) {
             if ((Get-AuditRecordField $record 'event') -ne 'activity') { continue }
             $at = Read-AuditRecordStamp -Record $record
-            $stamp = if ($at) { $at.ToString('HH:mm:ss') } else { '--:--:--' }
+            $stamp = if ($at) { Format-AuditTrailStamp -At $at } else { '--:--:--' }
             $restored.Add("$stamp $(Get-AuditRecordField $record 'message')")
         }
         while ($restored.Count -gt $max) { $restored.RemoveAt(0) }

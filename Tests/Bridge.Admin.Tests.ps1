@@ -1903,3 +1903,177 @@ Describe 'The operations log reaches past the last ten' {
         $script:LoggedText | Should -Match '<b>الإجمالي</b>'
     }
 }
+
+Describe 'The log can be read one past day at a time' {
+    BeforeEach {
+        Mock Get-ReportRecords {
+            # One operation an hour for four days, so a day window can be told
+            # apart from an hours window by its count.
+            $now = Get-Date
+            $records = @(0..95 | ForEach-Object {
+                    [pscustomobject]@{
+                        When = $now.AddHours(-$_); Action = 'SHOW'; Result = 'success'
+                        Target = "قالب $_"; UserId = '101'; Values = ''; Count = 0; Layer = 4
+                        OperationId = ''; DurationMs = 100
+                    }
+                })
+            @{ Records = @($records | Where-Object { $_.When -ge $From -and $_.When -le $To }); Truncated = $false }
+        }
+        Mock Get-AuditOperatorName { 'مشغّل' }
+        Mock Test-Admin { $true }
+    }
+
+    It 'names yesterday the way a person says it, with the date beside it' {
+        $yesterday = (Get-Date).Date.AddDays(-1)
+        $data = Get-OperationLogData -Day $yesterday
+
+        $data.IsDay | Should -BeTrue
+        $data.Label | Should -Be "أمس · $($yesterday.ToString('yyyy-MM-dd'))"
+        # The whole day, not a window ending now.
+        $data.From | Should -Be $yesterday
+        $data.To.Date | Should -Be $yesterday
+        @($data.Records).Count | Should -Be 24
+    }
+
+    It 'walks days with arrows and never offers one past today' {
+        $today = (Get-Date).Date
+        $onToday = @(Get-OperationLogKeyboard -Day $today -OnlyUserId 101 -ChatId 1 -UserId 1).inline_keyboard |
+            ForEach-Object { $_ } | ForEach-Object { $_.callback_data }
+        $onYesterday = @(Get-OperationLogKeyboard -Day $today.AddDays(-1) -OnlyUserId 101 -ChatId 1 -UserId 1).inline_keyboard |
+            ForEach-Object { $_ } | ForEach-Object { $_.callback_data }
+
+        $onToday | Should -Contain "oplog:day:$($today.AddDays(-1).ToString('yyyy-MM-dd'))"
+        @($onToday | Where-Object { $_ -eq "oplog:day:$($today.AddDays(1).ToString('yyyy-MM-dd'))" }) | Should -BeNullOrEmpty
+        # From yesterday, today is a day you can walk forward to.
+        $onYesterday | Should -Contain "oplog:day:$($today.ToString('yyyy-MM-dd'))"
+        # And a way back to the hours windows.
+        $onYesterday | Should -Contain 'oplog:48'
+    }
+
+    It 'offers yesterday from the hours view' {
+        $labels = @(Get-OperationLogKeyboard -Hours 48 -OnlyUserId 101 -ChatId 1 -UserId 1).inline_keyboard |
+            ForEach-Object { $_ } | ForEach-Object { $_.callback_data }
+        $labels | Should -Contain "oplog:day:$((Get-Date).Date.AddDays(-1).ToString('yyyy-MM-dd'))"
+    }
+
+    It 'refuses a day it cannot honestly answer for' {
+        $day = [datetime]::MinValue
+        Get-BridgeLogDay -Value '2026-09-07' -Result ([ref]$day) | Should -BeTrue
+        $day | Should -Be ([datetime]'2026-09-07')
+
+        # Tomorrow has nothing in it by definition; so has a day past the
+        # walk's limit, but for a reason the reader would have to guess at.
+        Get-BridgeLogDay -Value ((Get-Date).AddDays(1).ToString('yyyy-MM-dd')) -Result ([ref]$day) | Should -BeFalse
+        Get-BridgeLogDay -Value ((Get-Date).AddDays(-400).ToString('yyyy-MM-dd')) -Result ([ref]$day) | Should -BeFalse
+        Get-BridgeLogDay -Value 'ليس تاريخًا' -Result ([ref]$day) | Should -BeFalse
+        Get-BridgeLogDay -Value '' -Result ([ref]$day) | Should -BeFalse
+    }
+}
+
+Describe 'The log screen says which period it covers' {
+    It 'stamps an older line with its date and leaves today bare' {
+        # Fifty restored entries reach back days, and "07:22" alone means one
+        # of four mornings.
+        Format-AuditTrailStamp -At (Get-Date) | Should -Match '^\d{2}:\d{2}:\d{2}$'
+        Format-AuditTrailStamp -At (Get-Date).AddDays(-1) | Should -Match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+    }
+
+    It 'states the period and the count above the lines' {
+        $script:AuditTrail.Clear()
+        $script:AuditTrail.Add('09-07 21:40:03 سطر قديم')
+        $script:AuditTrail.Add('08:15:00 سطر اليوم')
+        Mock Send-TelegramPagedText { $script:Shown = $Text }
+
+        Invoke-AuditCommand -ChatId 101 -UserId 101
+
+        $script:Shown | Should -Match 'الفترة: 09-07 21:40:03 ← 08:15:00'
+        $script:Shown | Should -Match 'المعروض: 2 من 2'
+        # And a way on to the windowed log, which is what the reader wants
+        # next when twenty lines are not enough.
+        @(Get-AuditScreenKeyboard).inline_keyboard | ForEach-Object { $_ } |
+            ForEach-Object { $_.callback_data } | Should -Contain 'oplog:48'
+    }
+
+    It 'says a dash rather than throwing on a line it cannot read' {
+        Get-AuditTrailStamp -Line 'بلا طابع زمني' | Should -Be '—'
+        Get-AuditTrailStamp -Line '' | Should -Be '—'
+        Get-AuditTrailStamp -Line $null | Should -Be '—'
+    }
+}
+
+Describe 'The access requests screen shows what was decided' {
+    BeforeEach {
+        $script:PendingApprovals.Clear()
+        $script:UserProfiles.Clear()
+        Mock Get-AuditOperatorName { if ($UserId -eq '11') { 'أحمد' } else { 'مهنّد' } }
+        Mock Get-UserDisplayName { 'مستخدم قديم' }
+        Mock Get-ReportRecords {
+            @{ Truncated = $false; Records = @(
+                    [pscustomobject]@{ When = (Get-Date).AddHours(-2); Result = 'approved'; Target = '4321'
+                        UserId = '11'; Values = 'معاذ - الأخبار'; Action = 'approve'; Layer = 0; Count = 0
+                        OperationId = ''; DurationMs = 0 }
+                    [pscustomobject]@{ When = (Get-Date).AddHours(-3); Result = 'rejected'; Target = '9999'
+                        UserId = '22'; Values = ''; Action = 'reject'; Layer = 0; Count = 0
+                        OperationId = ''; DurationMs = 0 }
+                ) }
+        }
+    }
+
+    It 'shows who was let in, who was turned away, and who is still waiting' {
+        # A rejection leaves no profile and no roster entry, so without the
+        # audit row the screen would show only half the history.
+        $script:PendingApprovals[[long]777] = @{ Name = 'طالب جديد'; ChatId = 777; UserId = 777; RequestedAt = (Get-Date).AddMinutes(-40) }
+
+        $rows = @(Get-AccessHistoryRows)
+
+        @($rows | Where-Object { $_.State -eq 'approved' })[0].UserId | Should -Be '4321'
+        @($rows | Where-Object { $_.State -eq 'approved' })[0].DecidedBy | Should -Be 'أحمد'
+        @($rows | Where-Object { $_.State -eq 'rejected' })[0].UserId | Should -Be '9999'
+        @($rows | Where-Object { $_.State -eq 'pending' })[0].Name | Should -Be 'طالب جديد'
+    }
+
+    It 'keeps an approval made before decisions were recorded as data' {
+        # From the roster, which is the only place it exists.
+        $script:UserProfiles['5555'] = @{ AddedAt = (Get-Date).AddDays(-9).ToString('o'); AddedByUserId = 22; LastActivityAt = '' }
+
+        $rows = @(Get-AccessHistoryRows)
+
+        @($rows | Where-Object { $_.UserId -eq '5555' }).Count | Should -Be 1
+        @($rows | Where-Object { $_.UserId -eq '5555' })[0].DecidedBy | Should -Be 'مهنّد'
+    }
+
+    It 'does not show one approval twice when both sources have it' {
+        $script:UserProfiles['4321'] = @{ AddedAt = (Get-Date).AddHours(-2).ToString('o'); AddedByUserId = 11; LastActivityAt = '' }
+        @(Get-AccessHistoryRows | Where-Object { $_.UserId -eq '4321' }) | Should -HaveCount 1
+    }
+
+    It 'tables the three states with a verdict above them' {
+        $blocks = @(Get-AccessHistoryBlocks)
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        $blocks[0].type | Should -Be 'heading'
+        $blocks[1].text | Should -Match '✅ 1 · ❌ 1'
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        # And it admits what it cannot know about the past.
+        $json | Should -Match 'الطلبات المرفوضة قبل هذا الإصدار غير مسجّلة'
+    }
+
+    It 'is reachable from the pending screen and refused to an operator' {
+        @(Get-PendingKeyboard).inline_keyboard | ForEach-Object { $_ } |
+            ForEach-Object { $_.callback_data } | Should -Contain 'access:history'
+
+        Mock Test-CallbackAdmin { $false }
+        Mock Invoke-AccessHistoryCommand { $script:Opened = $true }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        $script:Opened = $false
+
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = '9'; data = 'access:history'
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 5; type = 'private' } }
+                from = [pscustomobject]@{ id = 5; first_name = 'x' }
+            })
+
+        $script:Opened | Should -BeFalse
+    }
+}

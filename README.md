@@ -13,6 +13,37 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.99.0
+
+The log states the period it covers, can be read a day at a time, and access
+requests now have a history.
+
+`📜 السجل` wrote `HH:mm:ss` and nothing else, while restoring fifty entries from
+audit.jsonl that on a quiet week reach back several days - so "07:22" meant one
+of four mornings with no way to tell which. Today keeps the bare time, anything
+older carries its date, and two lines above the entries give the period actually
+shown and how many of the stored lines that is: the screen shows a fixed number
+of lines rather than a window of time, so how far back it reaches depends
+entirely on how busy the station has been.
+
+"What went out on Tuesday" is not a question a window ending now can answer - by
+Thursday, Tuesday has fallen out of every readable window. The operations log
+now offers `📆 يوم أمس` and walks from there with `◀` and `▶`, with no arrow
+past today, because a button whose answer is "no operations" by design teaches
+people to distrust the screen. Days are named the way people say them ("أمس ·
+2026-09-07"), and the screen is now reachable from `📜 السجل` and `📊 التقارير`
+as well as from the operations screen, since that is where supervisors look.
+
+Access decisions were recorded only as an Arabic sentence inside one audit
+message, with the structured fields left empty - no screen could be built on
+that without parsing prose. Requests, approvals and rejections are now written
+as data, and `📜 الطلبات السابقة` on the pending screen shows who asked, the
+state, when it was decided, by whom, and how long the person waited. It is built
+from the audit file and the user roster together, because neither is complete
+alone: rejections leave no other trace, and approvals older than this release
+exist only in the roster - which the screen says out loud rather than being read
+as the whole story.
+
 ## Version 7.98.0
 
 The cause of the silent administrator was the promotion itself.

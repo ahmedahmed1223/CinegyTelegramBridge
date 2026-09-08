@@ -531,6 +531,26 @@ function Invoke-CallbackQuery {
         'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
+        'access:history' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Invoke-AccessHistoryCommand -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'oplog:all:day:*' {
+            $day = [datetime]::MinValue
+            if (Get-BridgeLogDay -Value (Get-CallbackArg $data 'oplog:all:day:') -Result ([ref]$day)) {
+                Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Day $day -AllUsers
+            }
+            break
+        }
+        'oplog:day:*' {
+            $day = [datetime]::MinValue
+            if (Get-BridgeLogDay -Value (Get-CallbackArg $data 'oplog:day:') -Result ([ref]$day)) {
+                Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Day $day
+            }
+            break
+        }
         'oplog:all:*' {
             $hours = 48
             if ([int]::TryParse((Get-CallbackArg $data 'oplog:all:'), [ref]$hours) -and $hours -in $script:OperationLogWindows) {

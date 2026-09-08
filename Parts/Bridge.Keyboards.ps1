@@ -1246,6 +1246,177 @@ function Get-AccessGrantConfirmKeyboard {
         ) }
 }
 
+function Get-AccessHistoryRows {
+    <#
+        Who asked for access, who decided, and when - newest first.
+
+        Built from two sources because neither is complete on its own. The
+        audit file carries every decision including the rejections, which
+        leave no other trace at all; the user profiles carry the approvals
+        made before decisions were recorded as data, and outlive log rotation.
+        A request approved today appears once, from the audit.
+
+        Waiting requests are included as their own state: an administrator
+        reviewing how requests were handled needs the ones that were not.
+    #>
+    param([int]$Days = 30)
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $seen = @{}
+
+    foreach ($record in @((Get-ReportRecords -From ((Get-Date).Date.AddDays(-$Days)) -EventName 'access').Records |
+            Sort-Object -Property When -Descending)) {
+        $result = [string]$record.Result
+        if ($result -eq 'requested') { continue }   # the ask, paired below
+        $subject = [string]$record.Target
+        $key = "$subject/$result"
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        $rows.Add([pscustomobject]@{
+                UserId      = $subject
+                Name        = [string]$record.Values
+                State       = $(if ($result -eq 'approved') { 'approved' } else { 'rejected' })
+                DecidedAt   = $record.When
+                DecidedBy   = [string](Get-AuditOperatorName -UserId ([string]$record.UserId))
+                RequestedAt = $null
+            })
+    }
+
+    # The approvals that predate the structured records, from the roster.
+    foreach ($id in @($script:UserProfiles.Keys)) {
+        if ($seen.ContainsKey("$id/approved")) { continue }
+        # $entry, not $profile: $profile is a PowerShell automatic variable,
+        # and assigning to it has effects nobody reading this would expect.
+        $entry = $script:UserProfiles[$id]
+        $addedAt = [string](Get-JsonProp $entry 'AddedAt')
+        if ([string]::IsNullOrWhiteSpace($addedAt)) { continue }
+        $added = [datetime]::MinValue
+        if (-not [datetime]::TryParse($addedAt, [ref]$added)) { continue }
+        $askedAt = [string](Get-JsonProp $entry 'RequestedAt')
+        $asked = [datetime]::MinValue
+        $rows.Add([pscustomobject]@{
+                UserId      = [string]$id
+                Name        = [string](Get-UserDisplayName -UserId ([long]$id))
+                State       = 'approved'
+                DecidedAt   = $added
+                DecidedBy   = [string](Get-AuditOperatorName -UserId ([string](Get-JsonProp $entry 'AddedByUserId')))
+                RequestedAt = $(if ([datetime]::TryParse($askedAt, [ref]$asked)) { $asked } else { $null })
+            })
+    }
+
+    # Still waiting, which is a state and not an absence.
+    foreach ($id in @($script:PendingApprovals.Keys)) {
+        $record = $script:PendingApprovals[$id]
+        $rows.Add([pscustomobject]@{
+                UserId      = [string]$id
+                Name        = [string](Get-JsonProp $record 'Name')
+                State       = 'pending'
+                DecidedAt   = $null
+                DecidedBy   = ''
+                RequestedAt = (Get-JsonProp $record 'RequestedAt')
+            })
+    }
+
+    return @($rows | Sort-Object -Property @{ Expression = { if ($_.DecidedAt) { $_.DecidedAt } else { Get-Date } } } -Descending)
+}
+
+function Get-AccessHistoryStateLabel {
+    <# The three states, named. #>
+    param([Parameter(Mandatory)][string]$State)
+    switch ($State) {
+        'approved' { return '✅ مقبول' }
+        'rejected' { return '❌ مرفوض' }
+        default { return '⏳ بانتظار القرار' }
+    }
+}
+
+function Get-AccessHistoryBlocks {
+    <# The history as a table: who, what was decided, by whom, and when. #>
+    param([int]$Days = 30)
+    $rows = @(Get-AccessHistoryRows -Days $Days)
+    $blocks = @(@{ type = 'heading'; text = "📜 طلبات الوصول السابقة — آخر $Days يومًا"; size = 3 })
+    if ($rows.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد طلبات مسجّلة في هذه المدة.' })
+    }
+    $pending = @($rows | Where-Object { $_.State -eq 'pending' }).Count
+    $approved = @($rows | Where-Object { $_.State -eq 'approved' }).Count
+    $rejected = @($rows | Where-Object { $_.State -eq 'rejected' }).Count
+    $blocks += @{ type = 'paragraph'; text = "✅ $approved · ❌ $rejected · ⏳ $pending" }
+
+    $trimmed = Select-RichTableRows -Items $rows
+    $cells = @(, @(
+            @{ text = 'الطالب'; is_header = $true }
+            @{ text = 'الحالة'; is_header = $true }
+            @{ text = 'القرار'; is_header = $true }
+            @{ text = 'بواسطة'; is_header = $true }
+        ))
+    foreach ($row in @($trimmed.Rows)) {
+        $name = if ($row.Name) { "$($row.Name) · $($row.UserId)" } else { [string]$row.UserId }
+        $when = if ($row.DecidedAt) { ([datetime]$row.DecidedAt).ToString('MM-dd HH:mm') } else { '—' }
+        # The wait beside the decision where there is one: two dates in a
+        # four-column table are unreadable, and the gap is the fact.
+        if ($row.RequestedAt -and $row.DecidedAt) {
+            $waited = [int]((([datetime]$row.DecidedAt) - ([datetime]$row.RequestedAt)).TotalMinutes)
+            if ($waited -ge 1) { $when += " (بعد $(Format-DurationMinutes -Minutes $waited))" }
+        }
+        elseif ($row.State -eq 'pending' -and $row.RequestedAt) {
+            $when = "طُلب منذ $(Format-DurationMinutes -Minutes ([int](((Get-Date) - ([datetime]$row.RequestedAt)).TotalMinutes)))"
+        }
+        $cells += , @(
+            @{ text = $name }
+            @{ text = (Get-AccessHistoryStateLabel -State $row.State) }
+            @{ text = $when }
+            @{ text = $(if ($row.DecidedBy) { $row.DecidedBy } else { '—' }) }
+        )
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+    # Said plainly rather than left to be discovered: what predates this
+    # screen comes from the roster, which records who was let in and never
+    # who was turned away.
+    $blocks += @{ type = 'paragraph'; text = 'ℹ️ الطلبات المرفوضة قبل هذا الإصدار غير مسجّلة؛ الموافقات القديمة مأخوذة من سجل المستخدمين.' }
+    return $blocks
+}
+
+function Get-AccessHistoryText {
+    <# The fallback, in the reports' shape. #>
+    param([int]$Days = 30)
+    $rows = @(Get-AccessHistoryRows -Days $Days)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>📜 طلبات الوصول السابقة</b> — آخر $Days يومًا")
+    if ($rows.Count -eq 0) {
+        $lines.Add('<i>لا توجد طلبات مسجّلة في هذه المدة.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add('')
+    $entries = @(foreach ($row in $rows) {
+            $name = if ($row.Name) { ConvertTo-TelegramHtmlText ([string]$row.Name) } else { [string]$row.UserId }
+            $when = if ($row.DecidedAt) { ([datetime]$row.DecidedAt).ToString('MM-dd HH:mm') } else { '—' }
+            $by = if ($row.DecidedBy) { " · بواسطة $(ConvertTo-TelegramHtmlText ([string]$row.DecidedBy))" } else { '' }
+            "$(Get-AccessHistoryStateLabel -State $row.State) $name <code>$($row.UserId)</code> · $when$by"
+        })
+    $tag = if ($entries.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($entries -join "`n")</blockquote>")
+    return ($lines -join "`n")
+}
+
+function Get-AccessHistoryKeyboard {
+    param()
+    return @{ inline_keyboard = @(
+            , @((New-Button '👤 الطلبات المعلّقة' 'menu:pending'))
+            , @((New-Button '🏠 القائمة' 'menu:main'))
+        ) }
+}
+
+function Invoke-AccessHistoryCommand {
+    <# Table first, text when the table cannot be sent. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Days = 30)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $keyboard = Get-AccessHistoryKeyboard
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-AccessHistoryBlocks -Days $Days) -ReplyMarkup $keyboard) { return }
+    Send-TelegramPagedText -ChatId $ChatId -Text (Get-AccessHistoryText -Days $Days) -ParseMode HTML -ReplyMarkup $keyboard
+}
+
 function Get-PendingApprovalsBlocks {
     <#
         Who is asking for control of the on-air graphics, as a table.
@@ -1334,7 +1505,10 @@ function Get-PendingApprovalsText {
 
 function Get-PendingKeyboard {
     param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
-    $rows = @()
+    # The history sits on this screen because this is where the question is
+    # asked: the administrator looking at who is waiting is the same person
+    # who wants to know who was let in last week, and by whom.
+    $rows = @(, @((New-Button '📜 الطلبات السابقة' 'access:history')))
     $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
     if ($window.EndIndex -ge $window.StartIndex) {

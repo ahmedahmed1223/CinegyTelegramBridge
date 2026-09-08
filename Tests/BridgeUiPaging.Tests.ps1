@@ -58,6 +58,8 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-SettingsKeyboard'              = 'one button per settings category, a fixed list'
             'Get-SettingsCategoryKeyboard'      = 'the settings in one category, a fixed list in the source'
             'Get-DurationKeyboard'              = 'a fixed set of durations'
+            'Get-SettingSmallRangeKeyboard'     = 'one button per value in a declared range of at most 24'
+            'Show-SettingTimePicker'            = 'twenty-four hours and four quarters, both fixed'
             'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'

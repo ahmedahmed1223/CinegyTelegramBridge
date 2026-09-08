@@ -501,6 +501,20 @@ function Get-SettingPromptText {
 
 function Set-Setting {
     param([Parameter(Mandatory)][string]$Name, $Value)
+    # The range, checked here because this is the one door: two screens, an
+    # import and a restore all arrive through it, and a rule enforced at one
+    # of them is a rule with three ways round it. Refused rather than
+    # clamped - a caller that means "as high as it goes" says so by asking
+    # for the maximum, and silently changing a number somebody typed is worse
+    # than telling them it is out of range.
+    if ($script:SettingConstraints -and $script:SettingConstraints.ContainsKey($Name)) {
+        $bounds = $script:SettingConstraints[$Name]
+        $number = 0
+        if ([int]::TryParse([string]$Value, [ref]$number)) {
+            if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) { throw "$Name لا يقلّ عن $($bounds.Minimum)." }
+            if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) { throw "$Name لا يزيد عن $($bounds.Maximum)." }
+        }
+    }
     $settings = Get-JsonProp $config 'Settings'
     if (-not $settings) {
         $settings = [pscustomobject]@{}

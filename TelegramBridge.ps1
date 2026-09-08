@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.1.0'
+$script:BridgeVersion = '8.2.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -1052,6 +1052,10 @@ $script:SettingChoices = @{
     NewsListLayout = @('text', 'stacked', 'inline', 'compact')
     NewsSheetSyncMode = @('manual', 'auto')
     NewsSheetNotifyScope = @('none', 'admins', 'all')
+    # One character, typed - and a space typed after it silently became part
+    # of the separator, so every headline on the strip gained a gap nobody
+    # could see in the setting.
+    NewsItemSeparator = @('|', '•', '—', '؛', '/')
     LayersScreenAccess = @('all', 'admin', 'owner')
     BroadcastFps = @('25', '50', '60')
 }
@@ -1342,12 +1346,51 @@ $script:SettingNavigationLabels = @{
     UsageDigestEnabled = 'الملخص الأسبوعي'
 }
 
+# What a number may be.
+#
+# The schema has carried Minimum and Maximum since it was written and not one
+# setting declared them, so every integer was whatever anyone typed: a poll
+# interval of 0 (a bridge asking Cinegy for its state without pause), a
+# negative timeout, a retry count of ten thousand. Nothing rejected any of it.
+#
+# Declared for the settings where a wrong number is felt on air or on the
+# engine, not for all ninety: a bound invented for a harmless number is a
+# bound somebody will one day need to exceed, and the argument about it costs
+# more than the mistake it prevents.
+$script:SettingConstraints = @{
+    # Anything that talks to Cinegy or Telegram on a clock.
+    CinegyStateCheckSeconds       = @{ Minimum = 1; Maximum = 300 }
+    CinegyHealthCheckSeconds      = @{ Minimum = 5; Maximum = 3600 }
+    TelegramPollTimeoutSeconds    = @{ Minimum = 1; Maximum = 50 }
+    TelegramRequestTimeoutSeconds = @{ Minimum = 1; Maximum = 120 }
+    PostShowDelayMs               = @{ Minimum = 0; Maximum = 10000 }
+    # Anything that decides how long a person or a graphic waits.
+    PendingStateTimeoutMinutes    = @{ Minimum = 1; Maximum = 1440 }
+    NewsDraftTimeoutMinutes       = @{ Minimum = 0; Maximum = 10080 }
+    PendingApprovalExpiryHours    = @{ Minimum = 1; Maximum = 720 }
+    AutoHideMaxSeconds            = @{ Minimum = 1; Maximum = 86400 }
+    StaleOnAirAlertHours          = @{ Minimum = 1; Maximum = 168 }
+    # Hours of the day, which have twenty-four of them.
+    HeartbeatHour                 = @{ Minimum = 0; Maximum = 23 }
+    QuietHoursStart               = @{ Minimum = 0; Maximum = 23 }
+    QuietHoursEnd                 = @{ Minimum = 0; Maximum = 23 }
+    UsageDigestDayOfWeek          = @{ Minimum = 0; Maximum = 6 }
+    # Sizes and counts with a real cost at the extremes.
+    MaxFieldLength                = @{ Minimum = 1; Maximum = 4000 }
+    MaxPendingApprovals           = @{ Minimum = 1; Maximum = 500 }
+    MaxNewsItems                  = @{ Minimum = 1; Maximum = 200 }
+    AuditMaxLines                 = @{ Minimum = 100; Maximum = 500000 }
+    DiskFreeWarningGB             = @{ Minimum = 1; Maximum = 10000 }
+    MissedEventsHours             = @{ Minimum = 1; Maximum = 168 }
+}
+
 $script:SettingSchema = @(New-BridgeSettingSchema `
         -Defaults $script:DefaultSettings `
         -DisplayMetadata $script:SettingDisplayMetadata `
         -CategoryByName $script:SettingCategoryByName `
         -Labels $script:SettingNavigationLabels `
         -ProtectedNames $script:ProtectedSettings `
+        -Constraints $script:SettingConstraints `
         -Choices $script:SettingChoices)
 
 

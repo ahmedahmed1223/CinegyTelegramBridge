@@ -71,6 +71,21 @@ function ConvertTo-ImportedSettingValue {
     }
     if ($Value -isnot [string]) { throw "الخيار $Name يجب أن يكون نصًا." }
     if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw "قيمة الخيار $Name غير مسموحة." }
+    # Refused here rather than at the screen: a setting can be changed by an
+    # import, by a restore, and by two screens, and a rule enforced at one
+    # door is a rule with three ways round it.
+    if ($script:SettingConstraints.ContainsKey($Name)) {
+        $bounds = $script:SettingConstraints[$Name]
+        $number = 0
+        if ([int]::TryParse([string]$Value, [ref]$number)) {
+            if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) {
+                throw "$Name لا يقلّ عن $($bounds.Minimum)."
+            }
+            if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) {
+                throw "$Name لا يزيد عن $($bounds.Maximum)."
+            }
+        }
+    }
     return [string]$Value
 }
 

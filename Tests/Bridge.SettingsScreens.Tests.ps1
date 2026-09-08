@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.1.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.1.0'
+        $script:BridgeVersion | Should -Be '8.2.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.2.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -997,5 +997,81 @@ Describe 'The on-air notice is set by tapping, not by typing' {
 
         $script:Opened | Should -BeTrue
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'A number is set by tapping, and cannot leave its range' {
+    It 'moves by a step that suits the size of the number' {
+        # A poll interval of 1 second wants to move by one; a retention of
+        # 5000 lines does not want fifty taps to reach 5500.
+        Get-SettingStep -Value 3 | Should -Be 1
+        Get-SettingStep -Value 60 | Should -Be 5
+        Get-SettingStep -Value 500 | Should -Be 10
+        Get-SettingStep -Value 5000 | Should -Be 100
+        Get-SettingStep -Value 200000 | Should -Be 1000
+    }
+
+    It 'clamps at the ceiling instead of refusing the tap' {
+        # Pressing plus at the top means "as high as it goes", and an error in
+        # reply to a button that should not have been offered is the screen's
+        # fault rather than the operator's.
+        Mock Set-Setting { $script:Applied = $Value }
+        Mock Get-Setting { 300 } -ParameterFilter { $Name -eq 'CinegyStateCheckSeconds' }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+
+        Set-SettingNumber -Name 'CinegyStateCheckSeconds' -Operation '+10' -UserId 1 | Should -Be 300
+    }
+
+    It 'refuses an out-of-range write wherever it comes from' {
+        # The guard is in Set-Setting, not on the screen: an import and a
+        # restore write settings too.
+        { Set-Setting -Name 'CinegyStateCheckSeconds' -Value 0 } | Should -Throw
+        { Set-Setting -Name 'QuietHoursStart' -Value 25 } | Should -Throw
+        { Set-Setting -Name 'CinegyStateCheckSeconds' -Value 5 } | Should -Not -Throw
+    }
+
+    It 'shows a whole day of hours rather than stepping to them' {
+        $labels = @(@(Get-SettingStepperKeyboard -Name 'HeartbeatHour').inline_keyboard |
+            ForEach-Object { $_ } | ForEach-Object { $_.text })
+
+        @($labels | Where-Object { $_ -match '^•? ?0[0-9]:00$' }).Count | Should -BeGreaterThan 5
+        $labels | Should -Contain '23:00'
+        # And a weekday by its name.
+        @(@(Get-SettingStepperKeyboard -Name 'UsageDigestDayOfWeek').inline_keyboard |
+            ForEach-Object { $_ } | ForEach-Object { $_.text }) | Should -Contain 'الخميس'
+    }
+
+    It 'picks a maintenance window from a clock, and can empty it' {
+        Mock Send-TelegramMessage { $script:Markup = $ReplyMarkup }
+        Show-SettingTimePicker -Name 'MaintenanceWindowStart' -ChatId 101 -UserId 101
+        $data = @($script:Markup.inline_keyboard) | ForEach-Object { $_ } | ForEach-Object { $_.callback_data }
+
+        $data | Should -Contain 'tm:MaintenanceWindowStart:23'
+        # No window at all is how maintenance is left off, and it needs a button.
+        $data | Should -Contain 'tm:MaintenanceWindowStart:clear'
+
+        Mock Set-Setting { $script:Written = $Value }
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Set-SettingTime -Name 'MaintenanceWindowStart' -Hour 23 -Minute 30 -UserId 1 | Should -Be '23:30'
+        Set-SettingTime -Name 'MaintenanceWindowStart' -UserId 1 | Should -Be ''
+    }
+
+    It 'gives the three typed lists the pickers that already existed' {
+        # A misspelled key in a permission list reads as "not in the list", so
+        # the permission quietly protects nothing.
+        foreach ($name in 'DisabledTemplateKeys', 'SensitiveTemplateKeys') {
+            $script:SettingPickers[$name] | Should -Be 'template'
+        }
+        $script:SettingPickers['ReservedLayers'] | Should -Be 'layer'
+        $script:SettingPickers['AutoHidePresetSeconds'] | Should -Be 'seconds'
+        # And the durations read as durations rather than as bare numbers.
+        @(Get-SettingPickItems -Name 'AutoHidePresetSeconds')[0].Label | Should -Not -Be '5'
+    }
+
+    It 'offers the separator instead of asking for a character' {
+        $script:SettingChoices['NewsItemSeparator'] | Should -Contain '|'
+        $script:SettingChoices['NewsItemSeparator'] | Should -Contain '•'
     }
 }

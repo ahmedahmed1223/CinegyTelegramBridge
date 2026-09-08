@@ -2067,6 +2067,220 @@ function Show-TemplateNotifyEditor {
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
 }
 
+function Get-SettingBounds {
+    <# What this number may be, as a pair. An undeclared setting is bounded
+       only below zero: no setting here means anything negative, and a minus
+       sign typed into a timeout has never once been intended. #>
+    param([Parameter(Mandatory)][string]$Name)
+    $minimum = 0
+    $maximum = [int]::MaxValue
+    if ($script:SettingConstraints.ContainsKey($Name)) {
+        $bounds = $script:SettingConstraints[$Name]
+        if ($null -ne $bounds.Minimum) { $minimum = [int]$bounds.Minimum }
+        if ($null -ne $bounds.Maximum) { $maximum = [int]$bounds.Maximum }
+    }
+    return [pscustomobject]@{ Minimum = $minimum; Maximum = $maximum }
+}
+
+function Get-SettingStep {
+    <#
+        How much one tap moves this number.
+
+        From its own size rather than a table: a poll interval of 1 second
+        wants to move by one, a retention of 5000 lines does not want fifty
+        taps to reach 5500. Rounded to something a person would say - 1, 5,
+        10, 100, 1000 - which keeps every setting about the same number of
+        taps from anywhere it is likely to go.
+    #>
+    param([Parameter(Mandatory)][int]$Value)
+    $magnitude = [math]::Abs($Value)
+    if ($magnitude -le 20) { return 1 }
+    if ($magnitude -le 120) { return 5 }
+    if ($magnitude -le 1000) { return 10 }
+    if ($magnitude -le 10000) { return 100 }
+    return 1000
+}
+
+function Get-SettingStepperKeyboard {
+    <# Minus and plus around the value, then the three answers people actually
+       want - the default, the floor, the ceiling - and a way back to typing
+       for the one person in ten who knows the exact number they need. #>
+    param([Parameter(Mandatory)][string]$Name)
+    $current = [int](Get-Setting $Name)
+    $bounds = Get-SettingBounds -Name $Name
+    # A range small enough to show whole is shown whole. An hour of the day
+    # has twenty-four possible answers and a weekday has seven; stepping to
+    # them one tap at a time is arithmetic in place of a choice.
+    if (($bounds.Maximum - $bounds.Minimum) -le 23 -and $script:SettingConstraints.ContainsKey($Name)) {
+        return Get-SettingSmallRangeKeyboard -Name $Name
+    }
+    $step = Get-SettingStep -Value $current
+    $rows = @()
+    $rows += , @(
+        (New-Button "➖ $step" "num:${Name}:-$step")
+        (New-Button "$current" "num:${Name}:noop")
+        (New-Button "➕ $step" "num:${Name}:+$step")
+    )
+    $presets = @()
+    $default = [int]$script:DefaultSettings[$Name]
+    if ($current -ne $default) { $presets += New-Button "↩️ الافتراضي ($default)" "num:${Name}:def" }
+    if ($script:SettingConstraints.ContainsKey($Name)) {
+        if ($current -ne $bounds.Minimum) { $presets += New-Button "الأدنى ($($bounds.Minimum))" "num:${Name}:min" }
+        if ($current -ne $bounds.Maximum -and $bounds.Maximum -lt [int]::MaxValue) { $presets += New-Button "الأعلى ($($bounds.Maximum))" "num:${Name}:max" }
+    }
+    for ($index = 0; $index -lt $presets.Count; $index += 2) {
+        $pair = @($presets[$index])
+        if ($index + 1 -lt $presets.Count) { $pair += $presets[$index + 1] }
+        $rows += , @($pair)
+    }
+    $rows += , @((New-Button '⌨️ اكتب رقمًا' "num:${Name}:type"), (New-Button '⬅️ رجوع' 'menu:settings'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-SettingRangeLabel {
+    <# A value as it is read rather than as it is stored: a weekday by its
+       name, an hour as a clock time, anything else as itself. #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][int]$Value)
+    if ($Name -match 'DayOfWeek') {
+        $days = @('الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت')
+        if ($Value -ge 0 -and $Value -lt $days.Count) { return $days[$Value] }
+    }
+    if ($Name -match 'Hour') { return ('{0:00}:00' -f $Value) }
+    return [string]$Value
+}
+
+function Get-SettingSmallRangeKeyboard {
+    <# Every value the setting may hold, the current one marked. Six to a row,
+       so a full day of hours is four rows and still legible on a phone. #>
+    param([Parameter(Mandatory)][string]$Name)
+    $bounds = Get-SettingBounds -Name $Name
+    $current = [int](Get-Setting $Name)
+    $buttons = @(foreach ($value in $bounds.Minimum..$bounds.Maximum) {
+            $label = Get-SettingRangeLabel -Name $Name -Value $value
+            if ($value -eq $current) { $label = "• $label" }
+            New-Button $label "num:${Name}:=$value"
+        })
+    $perRow = if ($Name -match 'DayOfWeek') { 4 } else { 6 }
+    $rows = @()
+    for ($index = 0; $index -lt $buttons.Count; $index += $perRow) {
+        $rows += , @($buttons[$index..([math]::Min($index + $perRow - 1, $buttons.Count - 1))])
+    }
+    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-SettingTimePicker {
+    <#
+        A time of day, picked from a clock face rather than typed.
+
+        MaintenanceWindowStart and MaintenanceWindowEnd are stored as "HH:mm"
+        and were free text: "8:00", "٨:٠٠", "20.00" and an empty string all
+        looked like an answer while the window silently did nothing.
+
+        Two taps: the hour, then the quarter. Quarters rather than every
+        minute because a maintenance window is agreed in quarters, and sixty
+        buttons is not a screen.
+    #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
+        [int]$Hour = -1, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $label = if ($script:SettingNavigationLabels.Contains($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
+    $current = [string](Get-Setting $Name)
+    $shown = if ($current) { $current } else { 'غير محدّد' }
+    $rows = @()
+    if ($Hour -lt 0) {
+        $buttons = @(foreach ($hour in 0..23) { New-Button ('{0:00}' -f $hour) "tm:${Name}:$hour" })
+        for ($index = 0; $index -lt $buttons.Count; $index += 6) {
+            $rows += , @($buttons[$index..([math]::Min($index + 5, $buttons.Count - 1))])
+        }
+        # Emptying it is a real answer: no window at all is how maintenance
+        # mode is left off, and it had no button.
+        $rows += , @((New-Button '🚫 بلا توقيت' "tm:${Name}:clear"))
+        $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالحالي: <code>$shown</code>`nاختر الساعة:"
+    }
+    else {
+        $buttons = @(foreach ($minute in @(0, 15, 30, 45)) { New-Button ('{0:00}:{1:00}' -f $Hour, $minute) "tm:${Name}:${Hour}:$minute" })
+        $rows += , @($buttons)
+        $rows += , @((New-Button '⬅️ ساعة أخرى' "tm:${Name}:pick"))
+        $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالساعة $('{0:00}' -f $Hour) — اختر الدقيقة:"
+    }
+    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    $keyboard = @{ inline_keyboard = $rows }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ParseMode HTML -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
+}
+
+function Set-SettingTime {
+    <# Writes "HH:mm", or empties the setting. #>
+    param([Parameter(Mandatory)][string]$Name, [int]$Hour = -1, [int]$Minute = 0, [long]$UserId = 0)
+    $value = if ($Hour -lt 0) { '' } else { '{0:00}:{1:00}' -f $Hour, $Minute }
+    Set-Setting -Name $Name -Value $value
+    Write-BridgeLog "User $UserId set $Name = $value"
+    $shown = if ($value) { $value } else { 'بلا توقيت' }
+    Add-AuditEntry "⚙️ $Name = $shown - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    return $value
+}
+
+function Show-SettingStepper {
+    <#
+        A number set by tapping.
+
+        Ninety of this bridge's settings are integers and every one of them
+        asked an operator to type a number into a phone keyboard, read back a
+        prompt to check the units, and get the digits right first time - while
+        standing in a gallery. The value moves by a tap now, and the screen
+        shows the range it may move in.
+    #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bounds = Get-SettingBounds -Name $Name
+    # Read directly: Get-BridgeMapValue lives inside the schema module and is
+    # not exported, so calling it here would have thrown on the first tap.
+    $display = if ($script:SettingDisplayMetadata.Contains($Name)) { $script:SettingDisplayMetadata[$Name] } else { @{} }
+    $unit = if ($display -and $display.Contains('Unit')) { [string]$display['Unit'] } else { '' }
+    $label = if ($script:SettingNavigationLabels.Contains($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
+    $unitPart = if ($unit) { " $unit" } else { '' }
+    $rangePart = if ($script:SettingConstraints.ContainsKey($Name)) { " · المدى: $($bounds.Minimum)–$($bounds.Maximum)" } else { '' }
+    $lines = @(
+        "⚙️ <b>$(ConvertTo-TelegramHtmlText $label)</b>"
+        "<code>$Name</code>"
+        "القيمة: <b>$(Get-Setting $Name)</b>$unitPart"
+        "الافتراضي: $($script:DefaultSettings[$Name])$rangePart"
+    )
+    $text = $lines -join "`n"
+    $keyboard = Get-SettingStepperKeyboard -Name $Name
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ParseMode HTML -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
+}
+
+function Set-SettingNumber {
+    <#
+        Applies one tap, clamped.
+
+        Clamped rather than refused: the person pressing ➕ at the ceiling
+        means "as high as it goes", and an error in reply to a button that
+        should not have been offered is the screen's fault, not theirs.
+        Returns the value it settled on.
+    #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Operation, [long]$UserId = 0)
+    $bounds = Get-SettingBounds -Name $Name
+    $current = [int](Get-Setting $Name)
+    $target = switch -Regex ($Operation) {
+        '^def$' { [int]$script:DefaultSettings[$Name]; break }
+        '^min$' { [int]$bounds.Minimum; break }
+        '^max$' { [int]$bounds.Maximum; break }
+        '^=\d+$' { [int]($Operation.Substring(1)); break }
+        '^[+-]\d+$' { $current + [int]$Operation; break }
+        default { $current }
+    }
+    $target = [math]::Max([int]$bounds.Minimum, [math]::Min([int]$bounds.Maximum, [int]$target))
+    if ($target -eq $current) { return $current }
+    Set-Setting -Name $Name -Value $target
+    Write-BridgeLog "User $UserId set $Name = $target"
+    Add-AuditEntry "⚙️ $Name = $target - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    return $target
+}
+
 # Settings whose value is a set of things the bridge already knows: template
 # keys, or layer numbers. Typed, a misspelling reads as "not in the list", so
 # a permission quietly protects nothing; picked from what exists it cannot be
@@ -2076,6 +2290,17 @@ $script:SettingPickers = @{
     OwnerOnlyTemplateKeys = 'template'
     AdminOnlyLayers       = 'layer'
     OwnerOnlyLayers       = 'layer'
+    # These three were typed, and they are the same kind of list as the four
+    # above. A misspelled key in a permission list reads as "not in the list",
+    # so the permission quietly protects nothing and nobody finds out until
+    # somebody uses what they should not have been able to use.
+    DisabledTemplateKeys  = 'template'
+    SensitiveTemplateKeys = 'template'
+    ReservedLayers        = 'layer'
+    # A list of durations, which is a list like the others: typed, it was a
+    # comma-separated string where one stray character silently dropped a
+    # preset from every hide-timer screen.
+    AutoHidePresetSeconds = 'seconds'
 }
 
 function Get-SettingPickItems {
@@ -2083,6 +2308,12 @@ function Get-SettingPickItems {
        stored as its number but shown by its name, so the administrator picks
        the logo rather than remembering that the logo is layer 9. #>
     param([Parameter(Mandatory)][string]$Name)
+    if ([string]$script:SettingPickers[$Name] -eq 'seconds') {
+        # The durations a station actually uses, from a strap that blinks to
+        # one that holds a quarter of an hour.
+        return @(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600, 900 | ForEach-Object {
+                @{ Value = [string]$_; Label = [string](Format-DurationSeconds -Seconds $_) } })
+    }
     if ([string]$script:SettingPickers[$Name] -eq 'layer') {
         return @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique | ForEach-Object {
                 @{ Value = [string]$_; Label = [string](Get-LayerDisplayName -Layer $_) } })
@@ -2194,6 +2425,12 @@ function Show-SettingChoices {
        them to tick through, and anything else a free-text prompt. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    # A time of day is two taps on a clock, not a string typed in a format
+    # nobody is told.
+    if ($Name -in @('MaintenanceWindowStart', 'MaintenanceWindowEnd')) {
+        Show-SettingTimePicker -Name $Name -ChatId $ChatId -UserId $UserId
+        return
+    }
     # Not through $script:SettingPickers: that picker ticks a value in or out
     # of a list, and this one has three states per template rather than two.
     if ($Name -eq 'TemplateNotifyRules') {

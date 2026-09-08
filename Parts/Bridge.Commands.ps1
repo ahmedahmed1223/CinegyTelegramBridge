@@ -246,8 +246,9 @@ function Start-SettingValuePrompt {
         Send-TelegramMessage -ChatId $ChatId -Text "إعداد غير معروف: $Name" -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
-    Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_value'; Name = $Name; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingPromptText -Name $Name) -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
+    # Buttons first, typing on request: a number reached by tapping cannot be
+    # a typo, and the screen shows the range while it is being chosen.
+    Show-SettingStepper -Name $Name -ChatId $ChatId -UserId $UserId
 }
 
 function Complete-SettingValue {

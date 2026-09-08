@@ -13,6 +13,45 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.2.0
+
+The settings stopped asking to be typed. An audit of all 174 of them, then five
+fixes.
+
+What the audit found: 58 booleans with toggle buttons (fine), 7 choice lists, 4
+pickers - and **90 integers, every one of them typed**, plus 14 free-text
+settings of which half needed no text at all.
+
+Numbers are now set on one screen: `➖ step`, the value, `➕ step`, then the
+default, the floor and the ceiling, with a `⌨️` button for anyone who knows the
+exact number. The step comes from the size of the number rather than a table - a
+timeout in seconds moves by one, a retention of 5000 lines does not need fifty
+taps to reach 5500 - and pressing plus at the ceiling clamps rather than
+refusing, because that press means "as high as it goes".
+
+The schema has carried `Minimum` and `Maximum` since it was written and not one
+setting declared them: `CinegyStateCheckSeconds = 0` was accepted, a bridge
+asking the engine for its state without pause, and so was a negative timeout.
+Twenty settings declare their range now - the ones whose wrong value is felt on
+air or on the engine - and the guard sits in `Set-Setting`, because an import, a
+restore and two screens all arrive through it.
+
+A range small enough to show whole is shown whole: an hour of the day is 24
+answers and a weekday is 7, so both are a grid with the current value marked and
+the day named rather than numbered. The maintenance window is picked from a
+clock in two taps - it was free text, where "8:00", "٨:٠٠", "20.00" and an empty
+string all looked like an answer while the window silently did nothing - with a
+button for no window at all, which is a real answer that had none.
+
+`DisabledTemplateKeys`, `SensitiveTemplateKeys` and `ReservedLayers` were typed
+while the picker they needed already served four settings just like them; a
+misspelled key in a permission list reads as "not in the list", so the
+permission quietly protects nothing and nobody finds out until someone uses what
+they should not have. `AutoHidePresetSeconds` is a duration picker now, and
+`NewsItemSeparator` a choice of five - a space typed after the separator used to
+become part of it, giving every headline on the strip a gap invisible in the
+setting.
+
 ## Version 8.1.0
 
 The notification rule is chosen by tapping rather than typed.

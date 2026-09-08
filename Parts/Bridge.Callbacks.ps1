@@ -1683,6 +1683,58 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'tm:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $parts = @((Get-CallbackArg $data 'tm:') -split ':')
+                $timeName = [string]$parts[0]
+                if ($timeName -in @('MaintenanceWindowStart', 'MaintenanceWindowEnd')) {
+                    $timeMessageId = [int]$msgObj.message_id
+                    $tail = if ($parts.Count -gt 1) { [string]$parts[1] } else { '' }
+                    $hour = -1
+                    if ($tail -eq 'clear') {
+                        [void](Set-SettingTime -Name $timeName -UserId $userId)
+                        Show-SettingTimePicker -Name $timeName -ChatId $chatId -UserId $userId -MessageId $timeMessageId
+                    }
+                    elseif ($tail -eq 'pick') {
+                        Show-SettingTimePicker -Name $timeName -ChatId $chatId -UserId $userId -MessageId $timeMessageId
+                    }
+                    elseif ([int]::TryParse($tail, [ref]$hour) -and $hour -ge 0 -and $hour -le 23) {
+                        $minute = -1
+                        if ($parts.Count -gt 2 -and [int]::TryParse([string]$parts[2], [ref]$minute)) {
+                            [void](Set-SettingTime -Name $timeName -Hour $hour -Minute $minute -UserId $userId)
+                            Show-SettingTimePicker -Name $timeName -ChatId $chatId -UserId $userId -MessageId $timeMessageId
+                        }
+                        else {
+                            # The hour is chosen; the minute is the next tap.
+                            Show-SettingTimePicker -Name $timeName -ChatId $chatId -UserId $userId -Hour $hour -MessageId $timeMessageId
+                        }
+                    }
+                }
+            }
+            break
+        }
+        'num:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                # name:operation, and a setting name cannot contain a colon.
+                $rest = Get-CallbackArg $data 'num:'
+                $split = $rest.LastIndexOf(':')
+                if ($split -gt 0) {
+                    $name = $rest.Substring(0, $split)
+                    $operation = $rest.Substring($split + 1)
+                    if ($script:DefaultSettings.Contains($name)) {
+                        if ($operation -eq 'type') {
+                            Set-PendingState -ChatId $chatId -State @{ Mode = 'setting_value'; Name = $name; UserId = $userId }
+                            Send-TelegramMessage -ChatId $chatId -Text (Get-SettingPromptText -Name $name) -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
+                        }
+                        elseif ($operation -ne 'noop') {
+                            [void](Set-SettingNumber -Name $name -Operation $operation -UserId $userId)
+                            Show-SettingStepper -Name $name -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)
+                        }
+                    }
+                }
+            }
+            break
+        }
         'cfg:v:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-SettingValuePrompt -Name (Get-CallbackArg $data 'cfg:v:') -ChatId $chatId -UserId $userId }
             break

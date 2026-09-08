@@ -259,9 +259,10 @@ function Get-HelpChapters {
                 '   كل الشاشات لا القائمة وحدها — لمن يمسك الهاتف بيدٍ واحدة'
                 '   وإبهامٍ واحد والوقت ضيّق.'
                 ''
-                '🗂 الأبواب الثمانية:'
+                '🗂 الأبواب التسعة:'
                 '↳ 🔐 الأمان · 🔴 التشغيل على الهواء · 📚 القوالب · 📰 شريط الأخبار.'
-                '↳ 📅 الجدولة · 📊 المراقبة · 🗄️ الملفات والاحتفاظ · 🛠️ خيارات متقدمة.'
+                '↳ 📅 الجدولة · 📊 المراقبة · 🗄️ الملفات والاحتفاظ · 🔔 الإشعارات.'
+                '↳ 🛠️ خيارات متقدمة.'
                 '↳ كل إعداد في باب واحد فقط، وكل زر يعرض قيمته الحالية.'
                 ''
                 '🔎 الوصول السريع:'
@@ -290,7 +291,8 @@ function Get-HelpChapters {
                 '↳ تظهر بقفل وتطلب تأكيدًا عند إضعافها لا عند تقويتها.'
                 '↳ وهي: RequireUserLevelAuth، EnableSelfServiceRequests،'
                 '   EnableRawCommand، EnableFullTemplateManagement،'
-                '   EnableDpapiSecrets.'
+                '   EnableDpapiSecrets، BlockRejectedRequesters،'
+                '   LeaveUnknownGroups.'
                 ''
                 '♻️ التراجع:'
                 '↳ لكل إعداد زر يعيده إلى الافتراضي بتأكيد، و«استعادة الافتراضي»'
@@ -320,7 +322,8 @@ function Get-HelpChapters {
                 '♻️ إعادة تشغيل الجسر: بتأكيد، وبعد التحقق من وجود خدمة تعيده.'
                 ''
                 '🖤 مراقبة المخرج — كيف تعرف أن البث شغّال:'
-                "↳ الجسر يلتقط لقطة من خرج القناة كل $(Format-DurationMinutes -Minutes (Get-SettingInt 'OutputMonitorMinutes' 1))."
+                $(if ((Get-SettingInt 'OutputMonitorMinutes' 0) -le 0) { '↳ المراقبة متوقفة الآن (OutputMonitorMinutes = 0).' }
+                  else { "↳ الجسر يلتقط لقطة من خرج القناة كل $(Format-DurationMinutes -Minutes (Get-SettingInt 'OutputMonitorMinutes' 1))." })
                 '↳ ينظر إلى الصورة نفسها، لا إلى ما يقوله Cinegy عن نفسه.'
                 "↳ إن جاءت اللقطة سوداء لا يُنبّه فورًا: ينتظر $(Format-DurationSeconds -Seconds (Get-SettingInt 'OutputBlackConfirmSeconds' 1)) ويلتقط أخرى."
                 '↳ التنبيه يصل فقط إذا كانت اللقطتان سوداوين — فاصل أو تعتيم'

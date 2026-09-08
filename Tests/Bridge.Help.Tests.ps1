@@ -186,6 +186,32 @@ Describe 'The settings chapter' {
         Get-HelpChapterText -Key 'settings' -ChatId 202 -UserId 202 | Should -BeNullOrEmpty
     }
 
+    It 'names every settings door the screen actually has' {
+        # The chapter said "the eight doors" and listed eight while the code
+        # had nine. The one left out was 🔔 الإشعارات - whose own chapter this
+        # same manual explains at length. A door nobody names is a door an
+        # administrator never opens, and counting them by hand is how the
+        # count went stale in the first place.
+        Mock Test-Admin { $true }
+        $text = Get-HelpChapterText -Key 'settings' -ChatId 101 -UserId 101
+        foreach ($category in @(Get-SettingCategoryDefinitions)) {
+            # The manual shortens a label - "الأمان والصلاحيات" appears as
+            # "الأمان" - so the first word is what has to be there.
+            $head = ([string]$category.Label -split ' ')[0]
+            $text | Should -Match ([regex]::Escape($head)) -Because "the settings chapter must name the '$($category.Key)' door"
+        }
+    }
+
+    It 'names every protected setting the guard actually protects' {
+        # The list is introduced with "وهي:", which is a claim to be complete.
+        # It named five of seven.
+        Mock Test-Admin { $true }
+        $text = Get-HelpChapterText -Key 'settings' -ChatId 101 -UserId 101
+        foreach ($name in @($script:ProtectedSettings)) {
+            $text | Should -Match ([regex]::Escape($name)) -Because "$name asks for confirmation, so the manual must say so"
+        }
+    }
+
     It 'sets a section head in bold and a real setting name in code' {
         Mock Test-Admin { $true }
         $text = Get-HelpChapterText -Key 'settings' -ChatId 101 -UserId 101

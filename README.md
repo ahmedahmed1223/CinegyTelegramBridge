@@ -13,6 +13,41 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.12.0
+
+Checking the manual against the code rather than against itself.
+
+8.11.0 read the manual for contradiction and omission. This one took every
+countable claim in it and compared that claim with the implementation, which
+turned up two faults only counting finds.
+
+The settings chapter said "the eight doors" and listed eight.
+`$script:SettingCategoryDefinitions` holds nine. The one missing - right after
+"files and retention" - was the notifications door, whose contents this same
+manual had been extended to explain one release earlier. An administrator
+looking for quiet hours in the settings screen was reading a list of eight that
+did not include the door they were in.
+
+The protected-settings list is introduced with "they are:", a claim to be
+complete, and named five. `$script:ProtectedSettings` holds seven: those five
+plus BlockRejectedRequesters and LeaveUnknownGroups.
+
+And in the output-monitor section, one line reported the capture interval from
+the setting while a line four below told the reader to set it to zero to turn
+monitoring off - so anyone following that advice then read "a capture every 0
+minutes". It now says monitoring is off when it is.
+
+Two tests were added that compare the chapter's text against the category table
+and against ProtectedSettings, so the count cannot go stale by hand again. Both
+were checked by reintroducing the faults before being kept.
+
+Verified correct and left alone: the operation-log windows (24/48/72/168 hours),
+the notice rate limit (thirty seconds, "half a minute"), that
+OutputMonitorMinutes = 0 really does stop the loop, that export emits the
+Settings block only - no token, no user lists - that deleting a bulletin cancels
+its appointments and is refused while it is on air, that an empty sheet is
+rejected rather than clearing the ticker, and that the promised commands exist.
+
 ## Version 8.11.0
 
 A review of the manual: what it says, and what it had never said.

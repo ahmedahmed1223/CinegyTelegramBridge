@@ -13,6 +13,27 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.1.0
+
+The notification rule is chosen by tapping rather than typed.
+
+"Urgent=all, Banner=admins" is a syntax to remember, a template name to spell
+exactly, and a scope word in a language the screen does not otherwise use -
+three ways to be silently wrong about a setting whose whole purpose is that
+somebody hears. It is a screen now: one row per template showing what it will do
+when it goes on air, and tapping cycles it through 🔕 nobody, 👮 administrators,
+📢 everyone. Nothing to spell, no syntax, and every answer visible at once.
+
+Paged like the other pickers and addressed by position, since a callback carries
+64 bytes and a template name does not always fit in what is left; redrawn in
+place on each tap so the list does not grow a copy of itself down the chat. A
+rule meaning silence is not stored, because silence is the default, and a rule
+for a template the registry no longer has is kept - one renamed in the morning
+and restored in the afternoon should not lose the newsroom's decision in
+between. The setting itself is unchanged: the screen writes the same string that
+lives in config.json and in every backup, rather than introducing a second store
+to keep in step with it.
+
 ## Version 8.0.0
 
 A template can announce itself on air, and nothing expires unannounced.

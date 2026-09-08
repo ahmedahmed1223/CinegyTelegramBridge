@@ -1962,6 +1962,111 @@ function Get-SettingChoiceKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-TemplateNotifyLabel {
+    <# A scope as a person reads it. #>
+    param([Parameter(Mandatory)][string]$Scope)
+    switch ($Scope) {
+        'all' { return '📢 الجميع' }
+        'admins' { return '👮 المشرفون' }
+        default { return '🔕 لا أحد' }
+    }
+}
+
+function Get-TemplateNotifyMap {
+    <#
+        The notification rules as a map, template to scope.
+
+        Read from the one setting rather than kept beside it: the setting is
+        what an administrator can still edit by hand, export, and read in a
+        backup, and a second copy of the same fact is a second thing to keep
+        in step.
+    #>
+    $map = [ordered]@{}
+    foreach ($rule in (([string](Get-Setting 'TemplateNotifyRules')) -split ',')) {
+        $parts = @($rule -split '=', 2 | ForEach-Object { $_.Trim() })
+        $name = [string]$parts[0]
+        if (-not $name) { continue }
+        $scope = if ($parts.Count -gt 1) { ([string]$parts[1]).ToLowerInvariant() } else { 'all' }
+        if ($scope -notin @('none', 'admins', 'all')) { $scope = 'all' }
+        $map[$name] = $scope
+    }
+    return $map
+}
+
+function Set-TemplateNotifyRule {
+    <#
+        Sets one template's scope and writes the setting back.
+
+        Rules for templates the registry no longer has are kept: a template
+        renamed this morning and restored this afternoon should not have lost
+        the newsroom's decision about it in between, and dropping a line
+        nobody asked to drop is how a settings screen loses trust.
+    #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][ValidateSet('none', 'admins', 'all')][string]$Scope)
+    $map = Get-TemplateNotifyMap
+    $map[$Key] = $Scope
+    $rules = @(foreach ($name in $map.Keys) {
+            if ([string]$map[$name] -eq 'none') { continue }   # silence is the default; no need to store it
+            "$name=$($map[$name])"
+        })
+    Set-Setting -Name 'TemplateNotifyRules' -Value ($rules -join ', ')
+    return $Scope
+}
+
+function Get-TemplateNotifyKeyboard {
+    <#
+        Every template, each showing what it will do when it goes on air, and
+        each a button that cycles: nobody, administrators, everyone.
+
+        Typing "Urgent=all, Banner=admins" is a syntax to remember, a template
+        name to spell exactly, and a scope word in a language the screen does
+        not otherwise use - three ways to be silently wrong for a setting
+        whose whole purpose is that somebody hears. Tapping cannot misspell a
+        template that exists, and shows the current answer for every one of
+        them at once.
+
+        Paged like the other pickers, and addressed by absolute position: a
+        callback carries 64 bytes and a template name does not always fit in
+        what is left.
+    #>
+    param([int]$Page = 0, [ValidateRange(2, 40)][int]$PageSize = 12)
+    $keys = @(@((Get-TemplateStore).Order) | ForEach-Object { [string]$_ })
+    $map = Get-TemplateNotifyMap
+    $rows = @()
+    $window = Get-BridgePageWindow -ItemCount $keys.Count -Page $Page -PageSize $PageSize
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($index in $window.StartIndex..$window.EndIndex) {
+            $key = $keys[$index]
+            $scope = if ($map.Contains($key)) { [string]$map[$key] } else { 'none' }
+            $rows += , @((New-Button "$key — $(Get-TemplateNotifyLabel -Scope $scope)" "tnfy:c:$index"))
+        }
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.Page -gt 0) { $pager += New-Button '⬅️ السابق' "tnfy:p:$($window.Page - 1)" }
+        if ($window.Page -lt $window.PageCount - 1) { $pager += New-Button 'التالي ➡️' "tnfy:p:$($window.Page + 1)" }
+        if ($pager.Count -gt 0) { $rows += , @($pager) }
+    }
+    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-TemplateNotifyEditor {
+    <# The screen. Re-drawn in place on every tap so the list does not grow a
+       copy of itself down the chat with each change. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $lines = @(
+        '🔔 <b>إشعار العرض حسب القالب</b>'
+        'اضغط على القالب ليتنقّل بين: 🔕 لا أحد ← 👮 المشرفون ← 📢 الجميع.'
+        'الإشعار يحمل نصّ الخبر ومدّته ومن نشره، ولا يصل صاحبه.'
+    )
+    $text = $lines -join "`n"
+    $keyboard = Get-TemplateNotifyKeyboard -Page $Page
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ParseMode HTML -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
+}
+
 # Settings whose value is a set of things the bridge already knows: template
 # keys, or layer numbers. Typed, a misspelling reads as "not in the list", so
 # a permission quietly protects nothing; picked from what exists it cannot be
@@ -2089,6 +2194,12 @@ function Show-SettingChoices {
        them to tick through, and anything else a free-text prompt. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
+    # Not through $script:SettingPickers: that picker ticks a value in or out
+    # of a list, and this one has three states per template rather than two.
+    if ($Name -eq 'TemplateNotifyRules') {
+        Show-TemplateNotifyEditor -ChatId $ChatId -UserId $UserId
+        return
+    }
     if ($script:SettingPickers.ContainsKey($Name)) {
         Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
         return

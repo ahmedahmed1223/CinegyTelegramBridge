@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.0.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.0.0'
+        $script:BridgeVersion | Should -Be '8.1.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.1.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -942,5 +942,60 @@ Describe 'The configuration backups list' {
         @((Get-ConfigBackupsKeyboard -Path $configPath).inline_keyboard |
                 ForEach-Object { @($_) } | ForEach-Object { [string]$_['text'] } |
                 Where-Object { $_ -like '1.*' }).Count | Should -Be 1
+    }
+}
+
+Describe 'The on-air notice is set by tapping, not by typing' {
+    BeforeEach {
+        Mock Get-TemplateStore { @{ Order = @('Urgent', 'Banner', 'Lower3') } }
+        Mock Set-Setting { $script:Rules = [string]$Value }
+        Mock Get-Setting { $script:Rules } -ParameterFilter { $Name -eq 'TemplateNotifyRules' }
+        $script:Rules = 'Urgent=all, Banner=admins'
+    }
+
+    It 'shows every template with what it will do' {
+        # Typing "Urgent=all, Banner=admins" is a syntax to remember, a name
+        # to spell exactly, and a scope word - three ways to be silently wrong
+        # about a setting whose whole point is that somebody hears.
+        $labels = @(@(Get-TemplateNotifyKeyboard).inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.text })
+
+        @($labels | Where-Object { $_ -match '^Urgent' })[0] | Should -Match 'الجميع'
+        @($labels | Where-Object { $_ -match '^Banner' })[0] | Should -Match 'المشرفون'
+        # Never named, so nobody hears about it.
+        @($labels | Where-Object { $_ -match '^Lower3' })[0] | Should -Match 'لا أحد'
+    }
+
+    It 'cycles one template without touching the others' {
+        [void](Set-TemplateNotifyRule -Key 'Lower3' -Scope 'admins')
+
+        $map = Get-TemplateNotifyMap
+        $map['Lower3'] | Should -Be 'admins'
+        $map['Urgent'] | Should -Be 'all'
+        $map['Banner'] | Should -Be 'admins'
+    }
+
+    It 'drops a rule that means silence rather than storing it' {
+        [void](Set-TemplateNotifyRule -Key 'Banner' -Scope 'none')
+        $script:Rules | Should -Not -Match 'Banner'
+        $script:Rules | Should -Match 'Urgent=all'
+    }
+
+    It 'keeps a rule for a template the registry no longer has' {
+        # Renamed this morning, restored this afternoon: the newsroom's
+        # decision should survive the gap.
+        $script:Rules = 'Urgent=all, Retired=admins'
+        [void](Set-TemplateNotifyRule -Key 'Urgent' -Scope 'admins')
+        $script:Rules | Should -Match 'Retired=admins'
+    }
+
+    It 'opens the editor instead of asking for a string' {
+        Mock Show-TemplateNotifyEditor { $script:Opened = $true }
+        Mock Send-TelegramMessage { }
+        $script:Opened = $false
+
+        Show-SettingChoices -Name 'TemplateNotifyRules' -ChatId 101 -UserId 101
+
+        $script:Opened | Should -BeTrue
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
     }
 }

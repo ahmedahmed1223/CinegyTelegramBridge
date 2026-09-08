@@ -531,6 +531,36 @@ function Invoke-CallbackQuery {
         'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
+        'tnfy:c:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $index = -1
+                if ([int]::TryParse((Get-CallbackArg $data 'tnfy:c:'), [ref]$index)) {
+                    $keys = @(@((Get-TemplateStore).Order) | ForEach-Object { [string]$_ })
+                    if ($index -ge 0 -and $index -lt $keys.Count) {
+                        $key = $keys[$index]
+                        $map = Get-TemplateNotifyMap
+                        $current = if ($map.Contains($key)) { [string]$map[$key] } else { 'none' }
+                        # none -> admins -> all -> none: widening by one tap,
+                        # and back to silence without hunting for an off button.
+                        $next = switch ($current) { 'none' { 'admins' } 'admins' { 'all' } default { 'none' } }
+                        [void](Set-TemplateNotifyRule -Key $key -Scope $next)
+                        Write-BridgeLog "User $userId set the on-air notice for '$key' to $next"
+                        $page = [int][math]::Floor($index / 12)
+                        Show-TemplateNotifyEditor -ChatId $chatId -UserId $userId -Page $page -MessageId ([int]$msgObj.message_id)
+                    }
+                }
+            }
+            break
+        }
+        'tnfy:p:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $page = 0
+                if ([int]::TryParse((Get-CallbackArg $data 'tnfy:p:'), [ref]$page)) {
+                    Show-TemplateNotifyEditor -ChatId $chatId -UserId $userId -Page $page -MessageId ([int]$msgObj.message_id)
+                }
+            }
+            break
+        }
         'access:history' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Invoke-AccessHistoryCommand -ChatId $chatId -UserId $userId

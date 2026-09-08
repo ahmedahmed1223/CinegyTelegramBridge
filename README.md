@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.11.0
+
+A review of the manual: what it says, and what it had never said.
+
+The settings chapter contradicted itself within one screen. It opens with "most
+values are set by pressing, not typing - numbers have minus and plus", and a few
+lines later said a numeric setting "asks for the value in writing". The second
+was left over from before the pickers landed, and the repository's own rule is
+that numbers are never typed. That line now describes what actually happens.
+
+Three features were missing from the manual entirely - searching it for "quiet
+hours", "one-hand" and "your draft" returned nothing at all. Quiet hours were
+absent from the notifications chapter, which is their chapter: what is held
+overnight, what is urgent enough to arrive anyway, and that held notices now
+survive a restart. One-hand mode was undocumented despite being a visible
+setting, and is now described as covering every screen rather than the menu
+alone. And the draft that comes back after a restart is now noted beside the
+input-timeout warning, so nobody's next message becomes a headline unknowingly.
+The unconfirmed hide from 8.10.0 was added to the shutdown chapter.
+
+One orthographic outlier was corrected. Chapters were measured after the
+additions: the largest is 2472 characters against Telegram's 4096, and the
+full one-screen guide still goes out through Send-TelegramPagedText.
+
 ## Version 8.10.0
 
 Three moments where the interface said something other than what had happened.

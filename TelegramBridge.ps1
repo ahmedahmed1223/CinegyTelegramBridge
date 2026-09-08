@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.8.0'
+$script:BridgeVersion = '8.9.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -190,7 +190,6 @@ $script:DefaultSettings = [ordered]@{
     RollbackWindowSeconds       = 120   # in-memory safe rollback lifetime; editorial values are never persisted
     LayerNames                 = ''     # e.g. 7=عاجل;8=شريط الأخبار
     EnableFavorites            = $true
-    SharedFavoritesEnabled     = $false  # reserved; per-user favourites remain the active mode
     MaintenanceMode           = $false  # blocks playout mutations while monitoring remains available
     EnablePersistentMenuButton = $true   # always-visible 🏠 القائمة / 🆘 مساعدة bar
     ButtonTextMaxLength        = 32      # visual text elements; 0 disables shortening
@@ -236,7 +235,6 @@ $script:DefaultSettings = [ordered]@{
     AllowOperatorsClearAllNews = $false
     # --- safety ---
     MojazAnchorToAirClock      = $true   # time the bulletin from Cinegy's own ScheduledAt rather than the bridge's stopwatch
-    MojazHoldFollowsClip       = $true   # an uploaded clip's own length becomes the hold, unless the operator set one
     MojazMultiDesign           = $false  # bulletins may be bound to different designs; off keeps the single built-in one
     MojazRowFrames             = 200     # how long each Mojaz row stays before the next replaces it (8 s at 25 fps)
     MojazImageKeepHours        = 48      # how long an unreferenced Mojaz picture is kept before the sweep removes it (0 = for ever)
@@ -449,7 +447,6 @@ $script:SettingDisplayMetadata = @{
     BackupStorageWarningMB = @{ Unit = 'ميغابايت'; Description = 'حد تنبيه حجم النسخ الاحتياطية' }
     HeartbeatHour = @{ Unit = 'ساعة (0-23)'; Description = 'ساعة إرسال نبض التشغيل اليومي' }
     MojazAnchorToAirClock = @{ Unit = ''; Description = 'ضبط زمن الموجز على لحظة البدء التي يقولها Cinegy بدل ساعة الجسر، فتصيب المزامنة الفيضة بدقة أعلى' }
-    MojazHoldFollowsClip = @{ Unit = ''; Description = 'مدة بقاء الموجز تتبع طول المقطع المرفوع تلقائيًا. ما يكتبه المستخدم يعلو عليها دائمًا' }
     MojazMultiDesign = @{ Unit = ''; Description = 'يسمح بربط كل موجز بتصميم مختلف وقراءة حقوله من المشهد. مطفأ = التصميم الواحد الحالي بحقوله الثلاثة' }
     MojazImageKeepHours = @{ Unit = 'ساعة'; Description = 'مدة الاحتفاظ بصورة موجز لم يعد يشير إليها أي صف قبل حذفها تلقائيًا (0 = لا حذف)' }
     MojazRowFrames = @{ Unit = 'إطار'; Description = 'المدة الافتراضية لبقاء صف الموجز قبل الصف التالي، بالإطارات. تُستخدم لكل موجز جديد ولكل موجز لم يُحدَّد له رقم' }
@@ -502,7 +499,6 @@ $script:SettingDisplayMetadata = @{
     SensitiveTemplateKeys = @{ Unit = ''; Description = 'قوالب تُعطى مؤقّت إخفاء تلقائيًا دائمًا فلا تبقى على الهواء منسية' }
     LayerNames = @{ Unit = ''; Description = 'أسماء الطبقات كما تُعرض للمشغّل، بصيغة 7=عاجل;8=شريط الأخبار' }
     EnableFavorites = @{ Unit = ''; Description = 'يفعّل ⭐ المفضّلة: القوالب المختارة تظهر أعلى القائمة' }
-    SharedFavoritesEnabled = @{ Unit = ''; Description = 'محجوز لمفضّلة مشتركة بين الجميع؛ الوضع العامل حاليًا مفضّلة لكل مستخدم' }
     EnablePersistentMenuButton = @{ Unit = ''; Description = 'يبقي شريط 🏠 القائمة و🆘 مساعدة ظاهرًا أسفل المحادثة' }
     EnableNewsTickerManagement = @{ Unit = ''; Description = 'يفعّل 📰 إدارة شريط الأخبار في القائمة' }
     NewsFilePath = @{ Unit = ''; Description = 'مسار ملف الشريط الذي يقرأه المشغّل على الهواء (.txt بمسار كامل)' }
@@ -1090,7 +1086,7 @@ foreach ($entry in @(
             ) },
         @{ Category = 'onair'; Names = @(
                 'EnableSnapshot', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazMultiDesign', 'MojazHoldFollowsClip', 'MojazAnchorToAirClock', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
+                'BroadcastFps', 'MojazMultiDesign', 'MojazAnchorToAirClock', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
                 'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
@@ -1104,7 +1100,7 @@ foreach ($entry in @(
                 'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
                 'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
-                'LayerNames', 'EnableFavorites', 'SharedFavoritesEnabled', 'FavoritesCount',
+                'LayerNames', 'EnableFavorites', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
                 'ShowLayerLockBadge', 'ButtonTextMaxLength', 'EnableButtonStyles'
             ) },
@@ -1185,7 +1181,6 @@ $script:SettingNavigationLabels = @{
     SensitiveTemplateKeys = 'القوالب الحساسة'
     LayerNames = 'أسماء الطبقات'
     EnableFavorites = 'المفضلة'
-    SharedFavoritesEnabled = 'المفضلة المشتركة'
     MaintenanceMode = 'وضع الصيانة'
     EnablePersistentMenuButton = 'زر القائمة الثابت'
     EnableNewsTickerManagement = 'إدارة شريط الأخبار'
@@ -1247,7 +1242,6 @@ $script:SettingNavigationLabels = @{
     TemplateReminderFollowUpMinutes = 'مهلة متابعة تنبيه القالب'
     EnableDpapiSecrets = 'حماية الأسرار عبر Windows'
     MojazMultiDesign = 'موجز متعدد التصاميم'
-    MojazHoldFollowsClip = 'المدة تتبع المقطع'
     MojazAnchorToAirClock = 'ضبط الزمن من Cinegy'
     MojazRowFrames = 'إطارات صف الموجز'
     MojazImageKeepHours = 'الاحتفاظ بصور الموجز'
@@ -1361,14 +1355,13 @@ $script:SettingConstraints = @{
     # Anything that talks to Cinegy or Telegram on a clock.
     CinegyStateCheckSeconds       = @{ Minimum = 1; Maximum = 300 }
     CinegyHealthCheckSeconds      = @{ Minimum = 5; Maximum = 3600 }
-    TelegramPollTimeoutSeconds    = @{ Minimum = 1; Maximum = 50 }
     TelegramRequestTimeoutSeconds = @{ Minimum = 1; Maximum = 120 }
     PostShowDelayMs               = @{ Minimum = 0; Maximum = 10000 }
     # Anything that decides how long a person or a graphic waits.
     PendingStateTimeoutMinutes    = @{ Minimum = 1; Maximum = 1440 }
     NewsDraftTimeoutMinutes       = @{ Minimum = 0; Maximum = 10080 }
     PendingApprovalExpiryHours    = @{ Minimum = 1; Maximum = 720 }
-    AutoHideMaxSeconds            = @{ Minimum = 1; Maximum = 86400 }
+    AutoHideDefaultSeconds        = @{ Minimum = 1; Maximum = 86400 }
     StaleOnAirAlertHours          = @{ Minimum = 1; Maximum = 168 }
     # Hours of the day, which have twenty-four of them.
     HeartbeatHour                 = @{ Minimum = 0; Maximum = 23 }
@@ -1378,8 +1371,11 @@ $script:SettingConstraints = @{
     # Sizes and counts with a real cost at the extremes.
     MaxFieldLength                = @{ Minimum = 1; Maximum = 4000 }
     MaxPendingApprovals           = @{ Minimum = 1; Maximum = 500 }
-    MaxNewsItems                  = @{ Minimum = 1; Maximum = 200 }
-    AuditMaxLines                 = @{ Minimum = 100; Maximum = 500000 }
+    NewsMaxItems                  = @{ Minimum = 1; Maximum = 200 }
+    # Zero is a real answer here - it means "never archive" - so the floor is
+    # zero rather than a size. The ceiling is megabytes, not the line count an
+    # earlier version of this setting was written in.
+    AuditMaxSizeMB                = @{ Minimum = 0; Maximum = 10000 }
     DiskFreeWarningGB             = @{ Minimum = 1; Maximum = 10000 }
     MissedEventsHours             = @{ Minimum = 1; Maximum = 168 }
 }
@@ -1682,6 +1678,7 @@ if ($repairedAdmins.Count -gt 0) {
 }
 Import-UsageCounts
 Import-CancelReasons
+Import-QuietHoursQueue
 Import-NewsTickerDraft
 Import-UserFavorites
 Import-UserAliases

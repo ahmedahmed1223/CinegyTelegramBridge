@@ -1599,8 +1599,14 @@ function Invoke-BridgeTick {
 }
 
 function Get-BasePollTimeout {
+    <# Clamped here rather than in $script:SettingConstraints because this is a
+       top-level config key, not a Settings entry, so it never passes through
+       Set-Setting's guard. Telegram refuses a getUpdates timeout above 50 and
+       answers a hand-edited 3600 with an error on every poll, which reads in
+       the log as the bot being down rather than as a bad number. #>
     $value = 0
     if (-not [int]::TryParse([string](Get-JsonProp $config 'PollTimeoutSeconds'), [ref]$value) -or $value -le 0) { $value = 30 }
+    if ($value -gt 50) { $value = 50 }
     return $value
 }
 

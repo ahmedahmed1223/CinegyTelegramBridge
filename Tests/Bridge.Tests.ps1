@@ -557,6 +557,10 @@ Describe 'Reply markup serialisation' {
         $script:StyledMarkup = @{ inline_keyboard = @(
                 , @((New-BridgeButton -Text 'انشر' -CallbackData 'news:publish' -Style 'success'),
                     (New-BridgeButton -Text 'رجوع' -CallbackData 'menu'))) }
+        # Serialisation honours two settings now, not one: the one-hand pass
+        # moved here from the single screen that used to call it. These cases
+        # are about colour, so the layout is pinned off and left alone.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'OneHandMode' }
     }
 
     It 'keeps the colour while the setting is on' {
@@ -1995,6 +1999,9 @@ Describe 'Editing text starts from the text' {
         $button.ContainsKey('callback_data') | Should -BeFalse
         # And it comes off the wire entirely when styles are turned off.
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        # Serialisation reads the layout setting too; a lone button is the
+        # same row either way, but the call still needs an answer.
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'OneHandMode' }
         ConvertTo-TelegramReplyMarkupJson -ReplyMarkup @{ inline_keyboard = @(, @($button)) } |
             Should -Not -Match 'primary'
     }

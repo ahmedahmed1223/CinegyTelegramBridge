@@ -113,7 +113,12 @@ function Test-PendingStateAdmission {
     if ($mode -in @('access_request_name', 'join_secret', 'announcement_text')) { return $true }
     if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return $false }
     $adminModes = @('setting_value','setting_text','settings_search','stream_url','layer_name','user_alias_edit','template_definition_json','preset_admin_name','preset_admin_values')
-    if ($mode -in $adminModes -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    # The wizard is matched by prefix rather than listed: template_create_ has
+    # four steps, and a fifth would have been added to the switch that consumes
+    # them without anyone remembering this list. Its sibling that edits the same
+    # definitions as raw JSON was here from the start; the wizard that writes
+    # them a field at a time was not.
+    if (($mode -in $adminModes -or $mode -like 'template_create_*') -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     return $true
 }
 

@@ -13,6 +13,47 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.9.0
+
+A review that went looking for switches nothing reads and limits nothing applies.
+
+One-hand mode turned out to reshape a single screen. `ConvertTo-OneHandLayout`
+documents itself as "applied as a final pass over a finished keyboard so no
+individual screen has to know about it", and had exactly one call site: the main
+menu. An operator who switched it on got a single column there and three-across
+rows on the fifty-odd screens behind it. The pass now runs inside
+`ConvertTo-TelegramReplyMarkupJson` - the one place a keyboard becomes wire JSON,
+and where `EnableButtonStyles` was already read - so it covers every keyboard the
+bridge sends. The persistent home/help bar carries `keyboard` rather than
+`inline_keyboard` and is left alone.
+
+Four numeric ranges were written against names no setting had: `MaxNewsItems` for
+`NewsMaxItems`, `AuditMaxLines` for `AuditMaxSizeMB`, `AutoHideMaxSeconds` for
+`AutoHideDefaultSeconds`, and `TelegramPollTimeoutSeconds` for
+`PollTimeoutSeconds`. The guard in `Set-Setting` is correct but keyed by name, so
+it never fired - the screen printed a range under a field that would have taken
+two billion. Three are renamed; `AuditMaxSizeMB` takes a floor of zero rather
+than a hundred because zero means "never archive" there, and a ceiling in
+megabytes rather than the line count an earlier version of the setting counted in.
+`PollTimeoutSeconds` is a top-level key that never passes through `Set-Setting`,
+so it is clamped where it is read: Telegram refuses a long-poll timeout above 50
+and errors on every poll, which reads in the log as the bot being down. A test
+now rejects any constraint whose name is not a real setting.
+
+A restored draft now says so. `Import-DraftStates` brings an open show flow back
+after a restart and wrote one line to `bridge.log` about it; the operator never
+saw the restart, so the next message they sent about something else became the
+text of a breaking-news banner. Quiet-hours notices survive a restart too - they
+lived in memory alone, so a 03:00 restart dropped everything being held, with no
+trace beyond a log line written hours before.
+
+The Mojaz "hold follows the clip" option is gone, along with the chain behind it.
+The setting was on the settings screen with a description and was read by no line
+of code; the `MediaSeconds` field driving it was read by the planner and written
+nowhere in production - only by the tests, by hand - so the branch was green in
+Pester and dead on the machine; and `Get-FfprobePath` had no caller at all.
+Durations are typed, as they always were in practice.
+
 ## Version 8.8.0
 
 One timed-out grab is not a dead source.

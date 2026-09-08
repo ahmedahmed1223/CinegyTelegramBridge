@@ -82,9 +82,19 @@ function ConvertTo-TelegramReplyMarkupJson {
 
        Styled buttons are rebuilt without the field rather than edited: the
        caller's keyboard is theirs, and stripping it in place would change
-       what a re-render sends next time. #>
+       what a re-render sends next time.
+
+       OneHandMode is honoured here for the same reason and in the same way.
+       It used to be applied by the one screen that remembered to call
+       ConvertTo-OneHandLayout, so an operator who turned it on got a single
+       column on the main menu and three-across rows on the fifty-odd screens
+       behind it - the fields, the templates, the settings, the bulletin. A
+       layout rule every screen has to opt into is a rule most screens miss.
+       Only inline keyboards are reshaped; the persistent 🏠/🆘 bar carries
+       'keyboard' instead and is left alone. #>
     param([Parameter(Mandatory)][hashtable]$ReplyMarkup)
     $markup = $ReplyMarkup
+    if ($markup.ContainsKey('inline_keyboard')) { $markup = ConvertTo-OneHandLayout -Keyboard $markup }
     if ($markup.ContainsKey('inline_keyboard') -and -not (Get-Setting 'EnableButtonStyles')) {
         $rows = @(foreach ($row in @($markup.inline_keyboard)) {
                 , @(foreach ($button in @($row)) {
@@ -725,6 +735,7 @@ function Send-AdminBroadcast {
     param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent)
     if (-not $Urgent -and (Test-QuietHoursActive)) {
         $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
+        Save-QuietHoursQueue | Out-Null
         Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
         return
     }
@@ -768,6 +779,41 @@ function Get-AdminListMismatch {
     }
 }
 
+function Save-QuietHoursQueue {
+    <# Held notices outlive a restart, because being held is not the same as
+       being unimportant - it is the opposite of being sent. A bridge restarted
+       at 03:00 used to drop everything it was holding, and nobody ever learned
+       those notices existed: they were never delivered, and the only trace was
+       a log line written hours earlier saying the queue had grown. #>
+    $path = Join-Path $script:logDir 'quiet-hours-queue.json'
+    try {
+        $entries = foreach ($item in @($script:QuietHoursQueue)) {
+            @{ At = ([datetimeoffset]$item.At).ToString('o'); Text = [string]$item.Text }
+        }
+        return (Write-BridgeValidatedJson -Path $path -Json (ConvertTo-Json -InputObject @($entries) -Depth 4))
+    }
+    catch { Write-BridgeLog "Could not save the quiet-hours queue: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Import-QuietHoursQueue {
+    $path = Join-Path $script:logDir 'quiet-hours-queue.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $read = Read-BridgeValidatedJson -Path $path -AsHashtable
+        if (-not ($read -and $read.Data)) { return }
+        foreach ($entry in @($read.Data)) {
+            if (-not ($entry -is [System.Collections.IDictionary]) -or -not $entry.Contains('At')) { continue }
+            $at = [datetime]::MinValue
+            if (-not [datetime]::TryParse([string]$entry['At'], [ref]$at)) { continue }
+            $script:QuietHoursQueue.Add(@{ At = $at; Text = [string]$entry['Text'] }) | Out-Null
+        }
+        if ($script:QuietHoursQueue.Count -gt 0) {
+            Write-BridgeLog "Restored $($script:QuietHoursQueue.Count) notice(s) held from the previous run's quiet hours"
+        }
+    }
+    catch { Write-BridgeLog "Could not read quiet-hours-queue.json: $($_.Exception.Message)" 'WARN' }
+}
+
 function Test-QuietHoursActive {
     if (-not (Get-Setting 'QuietHoursEnabled')) { return $false }
     return (Test-BridgeQuietHour -Hour ((Get-Date).Hour) `
@@ -782,6 +828,7 @@ function Update-QuietHoursQueue {
     if (Test-QuietHoursActive) { return }
     $held = @($script:QuietHoursQueue)
     $script:QuietHoursQueue.Clear()
+    Save-QuietHoursQueue | Out-Null
     $lines = @("🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count))") + @($held | ForEach-Object {
             "• $($_.At.ToString('HH:mm')) — $(($_.Text -split "`n")[0])"
         })

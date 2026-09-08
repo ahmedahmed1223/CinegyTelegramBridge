@@ -831,6 +831,15 @@ function Import-DraftStates {
             if (-not $lock.Success) { continue }
             $state.StartedAt = $startedAt
             $script:PendingState[$chatId] = $state
+            # Told, not just logged. A restored draft is a flow waiting to eat
+            # the next thing this operator types: they did not see the restart,
+            # so a message they send about something else becomes the text of a
+            # breaking-news banner. The log line went to whoever reads the log,
+            # which during a shift is nobody.
+            $restoredKey = ConvertTo-TelegramHtmlText ([string]$state.Key)
+            Send-TelegramMessage -ChatId $chatId `
+                -Text "↩️ أُعيد تشغيل الجسر، ومسودتك لم تضِع: <b>$restoredKey</b> ما تزال مفتوحة وتنتظر نصّك.`nأكمل من حيث توقفت، أو ألغِها إن لم تعد تريدها." `
+                -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
         }
         if ($script:PendingState.Count -gt 0) {
             Write-BridgeLog "Restored $($script:PendingState.Count) operator draft(s) from the previous run"

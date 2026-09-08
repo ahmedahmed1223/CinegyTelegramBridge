@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.8.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.8.0'
+        $script:BridgeVersion | Should -Be '8.9.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.9.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -773,6 +773,17 @@ Describe 'Version 6 settings navigation schema' {
 }
 
 Describe 'Settings are explained, not just listed' {
+    It 'declares a range only for settings that actually exist' {
+        # Four constraints were written against names no setting ever had -
+        # MaxNewsItems for NewsMaxItems, AuditMaxLines for AuditMaxSizeMB, and
+        # two more. Set-Setting looks the bounds up by name, finds nothing, and
+        # lets the number through, so the screen printed a range under a field
+        # that would have accepted two billion. A misspelt guard is not a
+        # weaker guard; it is no guard, and it looks exactly like one.
+        $orphans = @(@($script:SettingConstraints.Keys) | Where-Object { -not $script:DefaultSettings.Contains($_) })
+        $orphans | Should -BeNullOrEmpty
+    }
+
     It 'gives every setting a description an administrator can act on' {
         $undocumented = @(@($script:DefaultSettings.Keys) | Where-Object {
                 $metadata = Get-JsonProp $script:SettingDisplayMetadata $_

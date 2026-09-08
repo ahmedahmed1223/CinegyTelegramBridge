@@ -1201,11 +1201,32 @@ Describe 'Main menu on-air priority' {
 
     It 'splits every pair back apart for a thumb in one-hand mode' {
         # The pairing is a layout choice; OneHandMode is the operator saying
-        # they are holding the phone in one hand, and it still wins.
+        # they are holding the phone in one hand, and it still wins. Asserted
+        # through serialisation because that is where the pass now runs: it
+        # used to be called by this one screen, which is exactly why every
+        # other screen ignored the setting.
         $original = Get-Setting 'OneHandMode'
         try {
             $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $true -Force
-            $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+            $markup = Get-MainMenuKeyboard -ChatId 101 -UserId 101
+            $rows = @((ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $markup | ConvertFrom-Json).inline_keyboard)
+            @($rows | Where-Object { @($_).Count -gt 1 }) | Should -BeNullOrEmpty
+        }
+        finally {
+            $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $original -Force
+        }
+    }
+
+    It 'reaches a screen that never applied the one-hand pass itself' {
+        # Deliberately not the main menu. Before the pass moved to
+        # serialisation this keyboard - and fifty-odd others - ignored the
+        # setting entirely, so an operator got one column on the menu and
+        # two-across everywhere they went from it.
+        $original = Get-Setting 'OneHandMode'
+        try {
+            $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $true -Force
+            $rows = @((ConvertTo-TelegramReplyMarkupJson -ReplyMarkup (Get-ScheduleMenuKeyboard) | ConvertFrom-Json).inline_keyboard)
+            @($rows).Count | Should -Be 3
             @($rows | Where-Object { @($_).Count -gt 1 }) | Should -BeNullOrEmpty
         }
         finally {

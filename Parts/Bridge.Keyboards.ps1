@@ -201,7 +201,7 @@ function Get-MainMenuKeyboard {
         $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
         $rows += , @( (New-Button "🗂 أدوات الإدارة" "menu:admintools") )
     }
-    return (ConvertTo-OneHandLayout -Keyboard @{ inline_keyboard = $rows })
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-RoleMainKeyboard {

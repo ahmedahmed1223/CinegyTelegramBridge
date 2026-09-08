@@ -595,41 +595,29 @@ Describe 'A bulletin that carries one story' {
     }
 }
 
-Describe 'How long a clip stays up' {
+Describe 'How long a bulletin stays up' {
+    # These once covered a hold taken from an uploaded clip's own length. The
+    # planner branch was real and tested, but nothing in the bridge ever wrote
+    # the MediaSeconds it read - only these tests did, by hand - so the feature
+    # was green here and dead on the machine. The branch is gone; what remains
+    # is the operator's own duration, which is what the screen always asked for.
     function global:New-TestClipBulletin {
-        param([double]$Hold = 0, [double]$MediaSeconds = 0, [double]$Delay = 8)
+        param([double]$Hold = 0, [double]$Delay = 8)
         [pscustomobject]@{
             Id = 'b_clip'; Name = 'تقرير'; Revision = 1; DelaySeconds = $Delay; HoldSeconds = $Hold
-            Rows = @([pscustomobject]@{ Id = 'r_1'; Title = 'خبر'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = $MediaSeconds })
+            Rows = @([pscustomobject]@{ Id = 'r_1'; Title = 'خبر'; Text = 'ن'; ImageMode = 'inherit'; Image = '' })
         }
     }
 
-    It 'follows the clip when the operator set nothing' {
-        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin -MediaSeconds 42.5)).Value
-        $snapshot.ExitAtSeconds | Should -Be 42.5
-        $snapshot.HoldFromClip | Should -BeTrue
-    }
-
-    It 'never second-guesses a duration the operator typed' {
-        # Even a clip twice as long: they said twenty, so twenty it is.
-        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin -Hold 20 -MediaSeconds 42.5)).Value
+    It 'keeps the scene up for exactly the duration the operator typed' {
+        $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin -Hold 20)).Value
+        $snapshot.HoldSeconds | Should -Be 20
         $snapshot.ExitAtSeconds | Should -Be 20
-        $snapshot.HoldFromClip | Should -BeFalse
     }
 
-    It 'takes the longest clip so a second one is not cut short' {
-        $bulletin = New-TestClipBulletin -MediaSeconds 10
-        $bulletin.Rows = @(
-            [pscustomobject]@{ Id = 'r_1'; Title = 'أ'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = 10 }
-            [pscustomobject]@{ Id = 'r_2'; Title = 'ب'; Text = 'ن'; ImageMode = 'inherit'; Image = ''; MediaSeconds = 31 }
-        )
-        (New-MojazRunSnapshot -Bulletin $bulletin).Value.ExitAtSeconds | Should -Be 31
-    }
-
-    It 'falls back to the row timing when nothing knows a duration' {
+    It 'falls back to the row timing when the operator typed nothing' {
         $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin)).Value
         $snapshot.HoldSeconds | Should -Be 0
-        $snapshot.HoldFromClip | Should -BeFalse
         $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
     }
 }

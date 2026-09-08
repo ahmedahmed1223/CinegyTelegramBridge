@@ -94,19 +94,6 @@ function Get-FfmpegPath {
     return $null
 }
 
-function Get-FfprobePath {
-    <# ffprobe ships beside ffmpeg in every distribution of it, so the one
-       already resolved for the output monitor finds this one too. #>
-    $cmd = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    $ffmpeg = Get-FfmpegPath
-    if ($ffmpeg) {
-        $beside = Join-Path (Split-Path -Parent $ffmpeg) 'ffprobe.exe'
-        if (Test-Path -LiteralPath $beside) { return $beside }
-    }
-    return $null
-}
-
 function ConvertTo-ProcessArgumentLine {
     <# Start-Process -ArgumentList joins an array with spaces and does NOT quote
        elements that contain spaces. With a script path like

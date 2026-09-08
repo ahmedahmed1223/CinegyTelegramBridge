@@ -13,6 +13,32 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.3.0
+
+Coming off air is news too, and three things the notification path was missing.
+
+A take-down is announced by the same rule that announces a push - one rule per
+template covering both, rather than two settings that drift apart - and it
+carries how long the graphic was up. That is the question a take-down raises: a
+strap that ran four minutes was read, one that ran four seconds was a mistake
+somebody has already corrected. It is sent even for a quiet hide, because an
+auto-hide timer taking a strap down is exactly the change nobody in the gallery
+watched happen.
+
+Three improvements found while adding it. A burst of pushes was a burst of
+messages: an operator correcting a headline pushes the same template three times
+in twenty seconds, the room sees one change, and three identical interruptions
+is how a notification becomes something people switch off - so a notice repeats
+at most once every thirty seconds per template, layer and action, the window
+kept short because the same graphic returning minutes later is news again.
+There was no way out for someone who did not want it: the audience was a
+collective decision with no individual answer, so every notice now carries a
+`🔕` button whose choice is kept in that person's profile and survives a
+restart - a bot with no way out is a bot muted at the operating-system level,
+and then the alert that mattered is lost too. And for anyone who muted and then
+closed the message, `تنبيهاتي` says where they stand and offers the opposite
+button.
+
 ## Version 8.2.0
 
 The settings stopped asking to be typed. An audit of all 174 of them, then five

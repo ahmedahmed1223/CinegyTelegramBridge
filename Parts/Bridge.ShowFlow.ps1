@@ -411,6 +411,12 @@ function Invoke-HideLayer {
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor hid layer $Layer"
         Add-AuditEntry "🙈 إخفاء طبقة $Layer - بواسطة $actor"
+        # The room is told a graphic came off for the same reason it is told
+        # one went on: what is on screen changed. Sent even for a quiet hide -
+        # an auto-hide timer taking a strap down is exactly the change nobody
+        # in the gallery watched happen.
+        Send-TemplateAirNotice -Key $outgoingKey -Layer $Layer -ActorChatId $ChatId -ActorName $actor `
+            -Copy $outgoingCopy -Action hide -OnAirSince (Get-JsonProp $outgoing 'At') | Out-Null
         if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إخفاء الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
@@ -457,6 +463,8 @@ function Invoke-ExitLayer {
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor exited scene on layer $Layer"
         Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - بواسطة $actor"
+        Send-TemplateAirNotice -Key $outgoingKey -Layer $Layer -ActorChatId $ChatId -ActorName $actor `
+            -Copy $outgoingCopy -Action hide -OnAirSince (Get-JsonProp $outgoing 'At') | Out-Null
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }

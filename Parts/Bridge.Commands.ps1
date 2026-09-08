@@ -572,6 +572,15 @@ function Invoke-BridgeCommand {
         { $_ -in @('قوالب', 'templates') } { Invoke-TemplatesCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('عرض', 'show') } { Invoke-ShowCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('اخفاء', 'إخفاء', 'hide') } { Invoke-HideCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
+        { $_ -in @('تنبيهاتي', 'notices') } {
+            # The way back for somebody who muted and then closed the message:
+            # a mute with no route out is how a person loses the alerts they
+            # did want.
+            $muted = Test-AirNoticeMuted -UserId $UserId
+            $noticeText = if ($muted) { '🔕 تنبيهات العرض متوقّفة لك حاليًا.' } else { '🔔 تنبيهات العرض تصلك حاليًا.' }
+            $noticeButton = if ($muted) { New-Button '🔔 أعد التنبيهات' 'notice:unmute' } else { New-Button '🔕 أوقف تنبيهاتي' 'notice:mute' }
+            Send-TelegramMessage -ChatId $ChatId -Text $noticeText -ReplyMarkup @{ inline_keyboard = @(, @($noticeButton)) }
+        }
         { $_ -in @('اخفاءالكل', 'hideall') } { Request-HideAllConfirmation -ChatId $ChatId -UserId $UserId }
         { $_ -in @('خروج', 'exit') } { Invoke-ExitCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         { $_ -in @('تحديث', 'set') } { Invoke-SetCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }

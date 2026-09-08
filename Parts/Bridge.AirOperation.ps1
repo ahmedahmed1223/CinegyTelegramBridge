@@ -176,28 +176,86 @@ function Send-TemplateAirNotice {
         [long]$ActorChatId = 0,
         [AllowEmptyString()][string]$ActorName = '',
         [AllowEmptyString()][string]$Copy = '',
-        [int]$AutoHideSeconds = 0
+        [int]$AutoHideSeconds = 0,
+        [ValidateSet('show', 'hide')][string]$Action = 'show',
+        [AllowNull()]$OnAirSince = $null
     )
     $scope = Get-TemplateNotifyScope -Key $Key
     $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $ActorChatId)
     if ($audience.Count -eq 0) { return 0 }
+    if (-not (Test-AirNoticeDue -Key $Key -Layer $Layer -Action $Action)) { return 0 }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $layerPart = if ($Layer -gt 0) { " · طبقة $Layer" } else { '' }
-    $lines.Add("🔴 <b>على الهواء الآن</b> — $(ConvertTo-TelegramHtmlText $Key)$layerPart")
+    $heading = if ($Action -eq 'hide') { '⚫️ <b>رُفع عن الهواء</b>' } else { '🔴 <b>على الهواء الآن</b>' }
+    $lines.Add("$heading — $(ConvertTo-TelegramHtmlText $Key)$layerPart")
     if (-not [string]::IsNullOrWhiteSpace($Copy)) {
         # In a code span, like every other place the on-air copy appears: it is
         # what will be read on television, and it is not a label.
         $lines.Add("<code>$(ConvertTo-TelegramHtmlText $Copy)</code>")
     }
-    $duration = if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" }
-    else { '⏱ يبقى حتى يُخفى يدويًا' }
-    $lines.Add($duration)
+    if ($Action -eq 'hide') {
+        # How long it was up, which is the question a take-down raises: a
+        # strap that ran four minutes was read; one that ran four seconds was
+        # a mistake somebody has already corrected.
+        if ($OnAirSince -is [datetime]) {
+            $lines.Add("⏱ بقي $(Format-DurationSeconds -Seconds ([int]((Get-Date) - $OnAirSince).TotalSeconds))")
+        }
+    }
+    else {
+        $lines.Add($(if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" } else { '⏱ يبقى حتى يُخفى يدويًا' }))
+    }
     if ($ActorName) { $lines.Add("👤 $(ConvertTo-TelegramHtmlText $ActorName)") }
     $text = $lines -join "`n"
-    foreach ($chatId in $audience) { Send-TelegramMessage -ChatId $chatId -Text $text -ParseMode HTML }
-    Write-BridgeLog "On-air notice for '$Key' sent to $($audience.Count) chat(s) (scope: $scope)"
-    return $audience.Count
+    $markup = Get-AirNoticeMuteKeyboard
+    # $delivered, not $sent: a mock in a test can resolve a bare name up the
+    # call stack, and a common one here collides with the caller's.
+    $delivered = 0
+    foreach ($chatId in $audience) {
+        # Muted per person, checked here rather than when the audience is
+        # built: the audience is who the newsroom decided should hear, and
+        # this is one person's own answer to it.
+        if (Test-AirNoticeMuted -UserId $chatId) { continue }
+        Send-TelegramMessage -ChatId $chatId -Text $text -ParseMode HTML -ReplyMarkup $markup
+        $delivered++
+    }
+    Write-BridgeLog "Air notice ($Action) for '$Key' sent to $delivered chat(s) (scope: $scope)"
+    return $delivered
+}
+
+# The last time each template said something, so a burst of pushes is not a
+# burst of messages.
+$script:AirNoticeLastSent = @{}
+
+function Test-AirNoticeDue {
+    <#
+        Whether this notice should go out, or whether the room has just been
+        told the same thing.
+
+        An operator correcting a headline pushes the same template three
+        times in twenty seconds; as far as the room is concerned the strap
+        changed once, and three identical interruptions is how a notification
+        becomes something people turn off. The window is short - half a
+        minute - because the same graphic going up again minutes later is
+        news again.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Key, [int]$Layer = 0, [string]$Action = 'show')
+    $signature = "$Action|$Key|$Layer"
+    $now = Get-Date
+    if ($script:AirNoticeLastSent.ContainsKey($signature)) {
+        $elapsed = ($now - $script:AirNoticeLastSent[$signature]).TotalSeconds
+        if ($elapsed -lt 30) { return $false }
+    }
+    $script:AirNoticeLastSent[$signature] = $now
+    return $true
+}
+
+function Get-AirNoticeMuteKeyboard {
+    <# One button, on every notice: the person being interrupted can stop
+       being interrupted without hunting for a settings screen. A bot with no
+       way out is a bot muted at the operating system level, and then the
+       alert that mattered is gone too. #>
+    return @{ inline_keyboard = @(, @((New-Button '🔕 أوقف تنبيهاتي' 'notice:mute'))) }
 }
 
 function Test-MaintenanceWindowActive {

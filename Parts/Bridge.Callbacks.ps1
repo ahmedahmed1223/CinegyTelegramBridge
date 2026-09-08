@@ -531,6 +531,19 @@ function Invoke-CallbackQuery {
         'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
+        'notice:mute' {
+            [void](Set-AirNoticeMuted -UserId $userId -Muted $true)
+            Write-BridgeLog "User $userId muted their on-air notices"
+            Send-TelegramMessage -ChatId $chatId -Text '🔕 أُوقفت تنبيهات العرض لك.' `
+                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '🔔 أعد التنبيهات' 'notice:unmute'))) }
+            break
+        }
+        'notice:unmute' {
+            [void](Set-AirNoticeMuted -UserId $userId -Muted $false)
+            Write-BridgeLog "User $userId resumed their on-air notices"
+            Send-TelegramMessage -ChatId $chatId -Text '🔔 عادت تنبيهات العرض لك.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'tnfy:c:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $index = -1

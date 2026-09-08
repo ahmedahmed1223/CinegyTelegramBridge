@@ -87,6 +87,33 @@ function Write-UserApprovalMetadata {
     return Save-UserProfiles -Force
 }
 
+function Test-AirNoticeMuted {
+    <# Whether this person asked not to hear about graphics going on air.
+       Their own answer, kept in their profile beside when they were added: it
+       survives a restart, and it is not a setting an administrator has to
+       maintain on their behalf. #>
+    param([Parameter(Mandatory)][long]$UserId)
+    $id = [string]$UserId
+    if (-not $script:UserProfiles.ContainsKey($id)) { return $false }
+    return [bool](Get-JsonProp $script:UserProfiles[$id] 'MutedAirNotices')
+}
+
+function Set-AirNoticeMuted {
+    <# Sets or clears it, creating the profile if this is the first thing
+       anyone has recorded about them. #>
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][bool]$Muted)
+    $id = [string]$UserId
+    if (-not $script:UserProfiles.ContainsKey($id)) {
+        $script:UserProfiles[$id] = @{ AddedAt = ''; AddedByUserId = 0L; LastActivityAt = '' }
+    }
+    $entry = $script:UserProfiles[$id]
+    if ($entry -is [hashtable]) { $entry['MutedAirNotices'] = $Muted }
+    else { $entry | Add-Member -NotePropertyName 'MutedAirNotices' -NotePropertyValue $Muted -Force }
+    $script:UserProfilesDirty = $true
+    Save-UserProfiles -Force | Out-Null
+    return $Muted
+}
+
 function Update-UserLastActivity {
     param([Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Authorized -ChatId $UserId -UserId $UserId)) { return $false }

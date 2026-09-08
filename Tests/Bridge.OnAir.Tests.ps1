@@ -2002,6 +2002,10 @@ Describe 'A named template announces itself on air' {
         $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11) -Force
         Mock Get-Setting { 'Urgent=all, Banner=admins, Quiet=none' } -ParameterFilter { $Name -eq 'TemplateNotifyRules' }
         Mock Write-BridgeLog { }
+        # Each test is its own moment: the burst suppression is deliberate and
+        # has its own test below.
+        $script:AirNoticeLastSent = @{}
+        $script:UserProfiles.Clear()
     }
 
     It 'reads the rule an administrator wrote, template by template' {
@@ -2043,6 +2047,47 @@ Describe 'A named template announces itself on air' {
         [void](Send-TemplateAirNotice -Key 'Banner' -Layer 4 -ActorChatId 22 -ActorName 'x' -Copy 'نص')
 
         @($sent) | Should -Be @(11)
+    }
+
+    It 'tells the room when the graphic comes off, and how long it was up' {
+        # A take-down changes what is on screen exactly as much as a push
+        # does, and the duration is the question it raises: four minutes was
+        # read, four seconds was a mistake already corrected.
+        Mock Send-TelegramMessage { $script:OffAir = [string]$Text }
+
+        [void](Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'ابو حسام' `
+                -Copy 'الرئيس يفتتح المعرض' -Action hide -OnAirSince (Get-Date).AddMinutes(-4))
+
+        $script:OffAir | Should -Match 'رُفع عن الهواء'
+        $script:OffAir | Should -Match 'بقي'
+        $script:OffAir | Should -Match '<code>الرئيس يفتتح المعرض</code>'
+    }
+
+    It 'does not repeat itself when the same graphic is pushed twice in a minute' {
+        # An operator correcting a headline pushes three times in twenty
+        # seconds; the room sees one change, and three interruptions is how a
+        # notification becomes something people turn off.
+        Mock Send-TelegramMessage { }
+
+        (Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'أول') | Should -BeGreaterThan 0
+        (Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'ثانٍ') | Should -Be 0
+        # A different action on the same graphic is a different event.
+        (Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'أول' -Action hide) | Should -BeGreaterThan 0
+    }
+
+    It 'leaves out anyone who asked not to hear it' {
+        # And every notice carries the button that does it, because a bot with
+        # no way out is a bot muted at the operating system level.
+        Mock Save-UserProfiles { $true }
+        [void](Set-AirNoticeMuted -UserId 33 -Muted $true)
+        $sentTo = [System.Collections.Generic.List[long]]::new()
+        Mock Send-TelegramMessage { $sentTo.Add([long]$ChatId); $script:Markup = $ReplyMarkup }
+
+        [void](Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'نص')
+
+        @($sentTo) | Should -Not -Contain 33
+        @($sentTo) | Should -Contain 11
+        @($script:Markup.inline_keyboard)[0][0].callback_data | Should -Be 'notice:mute'
     }
 
     It 'stays silent for a template nobody asked about' {

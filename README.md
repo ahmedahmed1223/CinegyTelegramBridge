@@ -13,6 +13,35 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.94.0
+
+A stability audit: three screens that would have repeated the 7.87 outage, one
+latent crash, and five dead functions.
+
+Three rich tables had no row cap. Measured on the real serialiser against the
+12000-character limit: 40 rows is 4088 characters (34%), 250 rows is 24399
+(203%), and 700 rows is 68049 - **567% of the limit**, worse than the banner
+report that cost every screen its tables in 7.87. That report was capped then;
+these three were not. The bulletin report grows a row per run, so a station
+running one every hour makes about seven hundred rows in a month; the bulletin
+library grows a row per saved bulletin and nothing prunes it; and the publish
+review shows every removed headline and every added one, two rows per item, so
+replacing a forty-item ticker is eighty rows. The cap now lives in one place
+(`Select-RichTableRows`), because a cap written four times is a cap that gets
+raised in three of them, and every trimmed table says what it left out rather
+than being read as the whole story.
+
+`Get-MojazRunDuration` read `$Run.DurationMs` directly. A run record carries
+only the fields the version that wrote it knew, and the store outlives the
+version - under StrictMode a missing field is not a zero but a crash, on the
+reports screen, for every run in the window. It goes through `Get-JsonProp` now.
+Found by a test built from realistic records rather than complete ones.
+
+Also removed: five functions with no caller anywhere in the repository and no
+test - 124 lines. What the audit found healthy: not one empty `catch {}` in the
+codebase, a polling loop guarded per update and per handler, and the per-user
+operation history capped at twenty.
+
 ## Version 7.93.1
 
 "Once per screen" meant once per number.

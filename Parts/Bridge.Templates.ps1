@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -346,27 +346,6 @@ function Get-TemplateTestLayerConflict {
     if ($Layer -le 0) { return @() }
     $store = Get-TemplateStore
     return @($store.Map.Keys | Where-Object { [int]$store.Map[$_].Layer -eq $Layer } | Sort-Object)
-}
-
-function Get-LayerDevice {
-    <#
-        The Cinegy device name for a layer, or '' when it is addressed by
-        number like every ordinary GFX layer.
-
-        A lookup rather than a parameter threaded through every call, because
-        the layer number stays the bridge's key for on-air records, locks and
-        buttons - only the Cinegy boundary needs the device name. A template
-        declares it once with "device": "logo" and nothing else changes.
-    #>
-    param([Parameter(Mandatory)][int]$Layer)
-    $store = Get-TemplateStore
-    foreach ($key in $store.Order) {
-        $template = $store.Map[$key]
-        if ([int]$template.Layer -ne $Layer) { continue }
-        $device = [string](Get-JsonProp $template 'Device')
-        if (-not [string]::IsNullOrWhiteSpace($device)) { return $device }
-    }
-    return ''
 }
 
 function Get-KnownLayers {

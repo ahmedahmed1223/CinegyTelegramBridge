@@ -451,9 +451,16 @@ function Get-MojazRunDuration {
        preferred over the gap between the two stamps: it is the playback's own
        monotonic clock, and it is the number the newsroom asks about. #>
     param([Parameter(Mandatory)]$Run)
-    if (-not $Run.EndedAt) { return '🔴 على الهواء' }
-    $seconds = if ([long]$Run.DurationMs -gt 0) { [int][math]::Round([long]$Run.DurationMs / 1000) }
-    elseif ($Run.StartedAt) { [int][math]::Round((([datetime]$Run.EndedAt) - ([datetime]$Run.StartedAt)).TotalSeconds) }
+    # Get-JsonProp throughout: a run record carries only the fields the
+    # version that wrote it knew about, and the store outlives the version.
+    # Under StrictMode a missing DurationMs is not a zero, it is a crash - on
+    # the reports screen, for every run in the window.
+    $endedAt = Get-JsonProp $Run 'EndedAt'
+    if (-not $endedAt) { return '🔴 على الهواء' }
+    $startedAt = Get-JsonProp $Run 'StartedAt'
+    $durationMs = [long](Get-JsonProp $Run 'DurationMs')
+    $seconds = if ($durationMs -gt 0) { [int][math]::Round($durationMs / 1000) }
+    elseif ($startedAt) { [int][math]::Round((([datetime]$endedAt) - ([datetime]$startedAt)).TotalSeconds) }
     else { 0 }
     return (Format-DurationSeconds -Seconds ([math]::Max(0, $seconds)))
 }
@@ -464,7 +471,12 @@ function Get-MojazReportBlocks {
        the room it needs to be recognised. #>
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
-    $runs = @($data.Runs)
+    # Capped like the banner report, and for the same reason: a station
+    # running a bulletin every hour makes some seven hundred rows in a
+    # month's report, which is the shape that took every screen's table down
+    # in 7.87. The text version still carries the whole window.
+    $trimmed = Select-RichTableRows -Items @($data.Runs)
+    $runs = @($trimmed.Rows)
 
     $blocks = @(@{ type = 'heading'; text = "📑 تقرير الموجزات — $($data.Label)"; size = 3 })
     if ($runs.Count -eq 0) {
@@ -493,7 +505,12 @@ function Get-MojazReportBlocks {
     }
 
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
-    $summary = "الإجمالي: $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا · $($data.Operators) مشغّلين"
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $runs.Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+    # The total counts every run in the window, not just the rows shown: it is
+    # the answer to "how much ran", and trimming it to the table would make
+    # the report quietly understate the day.
+    $summary = "الإجمالي: $(@($data.Runs).Count) تشغيلًا · $([int]$data.Rows) صفًّا · $($data.Operators) مشغّلين"
     if ([int]$data.Scheduled -gt 0) { $summary += " · $([int]$data.Scheduled) بالجدولة 🕒" }
     $blocks += @{ type = 'paragraph'; text = $summary }
     if ($data.Truncated) {
@@ -783,16 +800,10 @@ function Get-BannerReportBlocks {
     $data = Get-BannerReportData -Period $Period -OnlyUserId $OnlyUserId
     $all = @($data.Sessions)
 
-    # Capped, because this one report is the reason every screen could lose
-    # its table. A month of banners serialised to 45 KB of blocks; Telegram
-    # refused it, and being the first rich message of a session that refusal
-    # used to disable heading, table, paragraph and details for every screen
-    # until the next restart.
-    #
-    # The newest are the ones asked about, and the text version below still
-    # carries every row for anyone who needs the whole window.
-    $maximumRows = 40
-    $sessions = @($all | Select-Object -Last $maximumRows)
+    # Capped through the shared helper: this report is the reason the cap
+    # exists at all, and it is no longer the only screen that needs one.
+    $trimmed = Select-RichTableRows -Items $all
+    $sessions = @($trimmed.Rows)
 
     $blocks = @(@{ type = 'heading'; text = "🖼 تقرير البنرات — $($data.Label)"; size = 3 })
     if ($sessions.Count -eq 0) {
@@ -817,7 +828,7 @@ function Get-BannerReportBlocks {
         if ($session.EndedAt) {
             $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
             # A banner that stayed up all evening read as "300 د".
-        $span = Format-DurationMinutes -Minutes $minutes
+            $span = Format-DurationMinutes -Minutes $minutes
         }
         else { $span = '🔴 على الهواء' }
         $who = Get-AuditOperatorName -UserId ([string]$session.UserId)

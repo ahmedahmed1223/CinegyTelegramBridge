@@ -332,6 +332,46 @@ function Get-LayerDisplayName {
     return "$name · طبقة $Layer"
 }
 
+# How many rows a rich table may carry, whatever is being tabled.
+#
+# A month of banners once serialised to 45 KB of blocks. Telegram refused it,
+# and being the first rich message of a session that refusal disabled heading,
+# table, paragraph and details for every screen until the next restart. Forty
+# rows keeps any table an order of magnitude below the limit.
+$script:RichTableMaxRows = 40
+
+function Select-RichTableRows {
+    <#
+        The newest rows a table may show, and how many were left out.
+
+        Its own function because three screens had no cap at all and each
+        would have grown into the same outage on a different station: a
+        bulletin report over a month, a library nothing prunes, a ticker
+        rewritten whole. A cap written four times is a cap that will be
+        raised in three places and forgotten in the fourth.
+
+        The newest, because every one of these screens is read for what
+        happened most recently; the text version of each still carries the
+        whole window for anyone who needs it.
+    #>
+    param([AllowNull()][object[]]$Items, [int]$Maximum = 0)
+    if ($Maximum -le 0) { $Maximum = $script:RichTableMaxRows }
+    $all = @($Items)
+    if ($all.Count -le $Maximum) {
+        return [pscustomobject]@{ Rows = $all; Hidden = 0 }
+    }
+    return [pscustomobject]@{ Rows = @($all | Select-Object -Last $Maximum); Hidden = ($all.Count - $Maximum) }
+}
+
+function Get-RichTableTrimNote {
+    <# The line that admits what the table left out. Said on the screen, not
+       only in a log: a table silently missing its oldest rows is a table that
+       will be read as the whole story. #>
+    param([Parameter(Mandatory)][int]$Hidden, [Parameter(Mandatory)][int]$Shown)
+    if ($Hidden -le 0) { return '' }
+    return "⚠️ عُرض أحدث $Shown صفًّا فقط؛ $Hidden صفًّا أقدم غير معروضة."
+}
+
 function Format-DurationMinutes {
     <#
         Minutes as something a person reads at a glance.

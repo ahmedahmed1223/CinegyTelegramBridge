@@ -1112,10 +1112,24 @@ function Get-NewsPublishReviewBlocks {
         $blocks += @{ type = 'paragraph'; text = 'لا فرق: النشر لن يغيّر ما على الهواء.' }
         return $blocks
     }
+    # Replacing a full ticker is every old item removed and every new one
+    # added: two rows per headline, and a station's strip runs to forty of
+    # them. Capped like the reports, additions first - they are what is about
+    # to go on air.
+    $changes = @(
+        @($diff.Added | ForEach-Object { @{ Mark = '➕'; Line = [string]$_ } })
+        @($diff.Removed | ForEach-Object { @{ Mark = '➖'; Line = [string]$_ } })
+    )
+    # -Items keeps the newest; here the front of the list is what matters, so
+    # the list is reversed into it and back out again.
+    $trimmed = Select-RichTableRows -Items @($changes)[($changes.Count - 1)..0]
+    $shown = @($trimmed.Rows)
+    if ($shown.Count -gt 1) { $shown = @($shown[($shown.Count - 1)..0]) }
     $cells = @(, @(@{ text = ''; is_header = $true }, @{ text = 'الخبر'; is_header = $true }))
-    foreach ($line in $diff.Added) { $cells += , @(@{ text = '➕' }, @{ text = [string]$line }) }
-    foreach ($line in $diff.Removed) { $cells += , @(@{ text = '➖' }, @{ text = [string]$line }) }
+    foreach ($change in $shown) { $cells += , @(@{ text = $change.Mark }, @{ text = $change.Line }) }
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $shown.Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
     if ($diff.Kept.Count -gt 0) {
         $blocks += @{ type = 'details'; summary = "بلا تغيير ($($diff.Kept.Count))"
             blocks = @($diff.Kept | ForEach-Object { @{ type = 'paragraph'; text = "· $_" } }) }
@@ -1194,11 +1208,6 @@ function Get-NewsTickerBackupsText {
 function Get-NewsTickerBackupsKeyboard {
     $rows=@();$files=@(Get-NewsTickerBackupFiles)
     for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text="$($i+1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))";callback_data="news:restore:$i"})};$rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
-}
-
-function Get-NewsTickerItemsKeyboard { param([long]$UserId)
-    $draft=Get-NewsTickerDraft -UserId $UserId;$rows=@();if($draft){for($i=0;$i-lt @($draft.Items).Count;$i++){$label="$(($i+1)). $($draft.Items[$i])";if($label.Length-gt 35){$label=$label.Substring(0,34)+'…'};$rows+=,@(@{text=$label;callback_data="news:item:$i"})}}
-    $rows+=,@(@{text='⬅️ إدارة الأخبار';callback_data='news:refresh'});return @{inline_keyboard=$rows}
 }
 
 function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)

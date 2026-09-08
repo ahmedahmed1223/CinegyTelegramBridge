@@ -215,45 +215,6 @@ function Save-OnAirState {
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }
 
-function Test-OnAirTemplateMatch {
-    param(
-        [string]$TemplateKey,
-        [string]$ActiveName,
-        [bool]$HasTrackedId = $false
-    )
-    if ([string]::IsNullOrWhiteSpace($ActiveName)) {
-        return $HasTrackedId
-    }
-    if ([string]::IsNullOrWhiteSpace($TemplateKey)) { return $false }
-
-    $cleanActive = $ActiveName.Trim()
-    $cleanKey = $TemplateKey.Trim()
-
-    if ($cleanActive -ieq $cleanKey -or
-        $cleanActive -like "*$cleanKey*" -or
-        $cleanKey -like "*$cleanActive*") {
-        return $true
-    }
-
-    $store = Get-TemplateStore
-    $tpl = Get-JsonProp $store.Map $TemplateKey
-
-    if ($tpl) {
-        $tplPath = [string](Get-JsonProp $tpl 'path')
-        if (-not [string]::IsNullOrWhiteSpace($tplPath)) {
-            $fileName = [System.IO.Path]::GetFileName($tplPath)
-            $fileNameNoExt = [System.IO.Path]::GetFileNameWithoutExtension($tplPath)
-            if ($cleanActive -ieq $fileName -or
-                $cleanActive -ieq $fileNameNoExt -or
-                $cleanActive -like "*$fileNameNoExt*" -or
-                $fileNameNoExt -like "*$cleanActive*") {
-                return $true
-            }
-        }
-    }
-    return $false
-}
-
 function Update-OnAirStateFromCinegy {
     <# Reconciles onair.json with Cinegy's current GFX-layer state. Regular
        watchdog calls verify bridge-tracked layers only. Operator checks pass a

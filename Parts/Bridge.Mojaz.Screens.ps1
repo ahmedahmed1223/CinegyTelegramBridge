@@ -211,9 +211,14 @@ function Get-MojazLibraryBlocks {
     <# The saved bulletins as a table: rows, revision, what is scheduled, and
        whether one is on air right now - four facts the text has to run
        together on a second line under each name. #>
-    $bulletins = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
-    $blocks = @(@{ type = 'heading'; text = "📑 الموجزات المحفوظة ($($bulletins.Count))"; size = 3 })
-    if ($bulletins.Count -eq 0) {
+    $saved = @(Get-JsonProp $script:MojazLibrary 'Bulletins')
+    # Nothing prunes the library, so this table grows for as long as the
+    # station keeps making bulletins - the one screen here whose row count
+    # only ever rises.
+    $trimmed = Select-RichTableRows -Items $saved
+    $bulletins = @($trimmed.Rows)
+    $blocks = @(@{ type = 'heading'; text = "📑 الموجزات المحفوظة ($($saved.Count))"; size = 3 })
+    if ($saved.Count -eq 0) {
         return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد موجزات محفوظة. أنشئ موجزًا ثم أضف صفوفه.' })
     }
     $cells = @(, @(
@@ -234,7 +239,10 @@ function Get-MojazLibraryBlocks {
             @{ text = $state }
         )
     }
-    return $blocks + @(@{ type = 'table'; cells = $cells })
+    $blocks += @{ type = 'table'; cells = $cells }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $bulletins.Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+    return $blocks
 }
 
 function Get-MojazLibraryText {

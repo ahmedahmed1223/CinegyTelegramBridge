@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -245,22 +245,6 @@ function Update-AnnouncementQueue {
     }
     if ($dirty) { Save-BridgeAnnouncements | Out-Null }
     return $repeated
-}
-
-function Get-PinnedAnnouncementLine {
-    <# The one line a pinned notice adds above the main menu, so somebody who
-       dismissed the message still sees that something is going on. Capped
-       hard: this sits on the screen an operator uses under pressure. #>
-    param([Parameter(Mandatory)][long]$UserId, [datetime]$Now = (Get-Date))
-    foreach ($announcement in @(Get-ActiveAnnouncements -Now $Now)) {
-        if (-not [bool](Get-JsonProp $announcement 'Pinned')) { continue }
-        if (@(Get-AnnouncementAudience -Announcement $announcement) -notcontains $UserId) { continue }
-        if (Test-AnnouncementRead -Announcement $announcement -UserId $UserId) { continue }
-        $text = ([string](Get-JsonProp $announcement 'Text') -replace '[\r\n]+', ' ').Trim()
-        if ($text.Length -gt 80) { $text = $text.Substring(0, 79) + '…' }
-        return "📢 $text"
-    }
-    return ''
 }
 
 function Get-AnnouncementsText {

@@ -1701,6 +1701,85 @@ Describe 'One oversized screen must not cost the session its tables' {
         # And it says what it left out rather than pretending 40 is all of it.
         $json | Should -Match 'أحدث 40 من 300'
     }
+
+    It 'keeps a month of bulletins inside it too' {
+        # A station running a bulletin every hour makes some seven hundred
+        # rows in a month - the same shape as the banner report, and it was
+        # the one screen still uncapped after 7.87.
+        Mock Get-MojazReportData {
+            @{
+                Label = 'شهر'; Operators = 4; Rows = 2100; Scheduled = 120; Truncated = $false
+                Runs = @(1..700 | ForEach-Object {
+                        [pscustomobject]@{
+                            Name = "موجز الساعة $_"; UserId = 7; Rows = 3; Kind = 'manual'
+                            StartedAt = (Get-Date).AddMinutes(-$_); EndedAt = (Get-Date).AddMinutes(-$_ + 2)
+                        }
+                    })
+            }
+        }
+
+        $blocks = @(Get-MojazReportBlocks -Period 'month')
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells.Count | Should -Be 41
+        $json | Should -Match 'صفًّا أقدم غير معروضة'
+        # The total still counts the whole window, not the shown rows: it is
+        # the answer to "how much ran", and trimming it would understate the
+        # month.
+        $json | Should -Match 'الإجمالي: 700'
+    }
+
+    It 'keeps a library that nothing prunes inside it' {
+        $script:MojazLibrary = [pscustomobject]@{
+            Bulletins = @(1..250 | ForEach-Object {
+                    [pscustomobject]@{ Id = "b$_"; Name = "موجز محفوظ رقم $_"; Revision = 2; Rows = @('a', 'b', 'c') }
+                })
+        }
+        Mock Get-MojazBulletinSchedules { @() }
+        Mock Test-MojazOnAir { $false }
+
+        $blocks = @(Get-MojazLibraryBlocks)
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells.Count | Should -Be 41
+        # The heading still counts everything saved, because that is the
+        # number the screen is asked for.
+        $blocks[0].text | Should -Match '\(250\)'
+    }
+
+    It 'keeps a wholly rewritten ticker inside it' {
+        # Replacing the strip is every old headline removed and every new one
+        # added: two rows per item.
+        Mock Get-NewsTickerDraft { @{ Items = @(1..40 | ForEach-Object { "خبر جديد رقم $_ بنص طويل بما يكفي ليشبه خبرًا حقيقيًا" }) } }
+        Mock Get-NewsTickerConfiguredSnapshot {
+            @{ Success = $true; Items = @(1..40 | ForEach-Object { "خبر قديم رقم $_ بنص طويل بما يكفي ليشبه خبرًا حقيقيًا" }) }
+        }
+
+        $blocks = @(Get-NewsPublishReviewBlocks -UserId 101)
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells.Count | Should -Be 41
+        # Additions first: they are what is about to go on air.
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells[1][0].text | Should -Be '➕'
+        $json | Should -Match 'صفًّا أقدم غير معروضة'
+    }
+
+    It 'leaves a table that fits exactly as it is' {
+        # The cap must not touch the ordinary case, which is every screen on
+        # an ordinary day.
+        $small = Select-RichTableRows -Items @(1..12)
+
+        @($small.Rows).Count | Should -Be 12
+        $small.Hidden | Should -Be 0
+        Get-RichTableTrimNote -Hidden 0 -Shown 12 | Should -BeNullOrEmpty
+        # And it keeps the newest when it does trim.
+        $big = Select-RichTableRows -Items @(1..100)
+        @($big.Rows)[-1] | Should -Be 100
+        $big.Hidden | Should -Be 60
+    }
 }
 
 Describe 'Every keyboard row is a row, not a lone button' {

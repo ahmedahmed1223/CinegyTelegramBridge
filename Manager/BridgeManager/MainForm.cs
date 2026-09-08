@@ -101,6 +101,15 @@ public sealed class MainForm : Form
     private readonly Label _lineCountLabel;
     private readonly Label _livenessLabel;
     private readonly Label _pathLabel;
+    // One width for every button on the action row. Seven hand-set widths
+    // between 118 and 140 read as seven different kinds of thing; the eye
+    // groups by shape before it reads a word.
+    private const int ActionButtonWidth = 136;
+
+    // And one width inside the menu, so the six switches make a column with
+    // their ticks aligned rather than a ragged edge that has to be scanned.
+    private const int MenuSwitchWidth = 210;
+
     private readonly Label _activityLabel;
     private ContextMenuStrip? _optionsMenu;
     // The last thing that reached air, and when the last hour's errors landed.
@@ -260,24 +269,24 @@ public sealed class MainForm : Form
         _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
         _startButton = Theme.PrimaryButton("▶  تشغيل", () => Theme.Running);
         _startButton.AccessibleName = "تشغيل الجسر";
-        _startButton.Width = 118;
+        _startButton.Width = ActionButtonWidth;
         _stopButton = Theme.PrimaryButton("■  إيقاف", () => Theme.Stopped);
         _stopButton.AccessibleName = "إيقاف الجسر";
-        _stopButton.Width = 118;
+        _stopButton.Width = ActionButtonWidth;
         _stopButton.Enabled = false;
         _restartButton = Theme.PrimaryButton("↻  إعادة تشغيل", () => Theme.Pending);
         _restartButton.AccessibleName = "إعادة تشغيل الجسر (F5)";
-        _restartButton.Width = 140;
+        _restartButton.Width = ActionButtonWidth;
         _restartButton.Enabled = false;
 
         var settingsButton = Theme.QuietButton("⚙  الإعدادات");
-        settingsButton.Width = 120;
+        settingsButton.Width = ActionButtonWidth;
         var logsButton = Theme.QuietButton("📂  مجلد السجلات");
-        logsButton.Width = 140;
+        logsButton.Width = ActionButtonWidth;
         var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
-        clearButton.Width = 130;
+        clearButton.Width = ActionButtonWidth;
         var optionsButton = Theme.QuietButton("☰  خيارات");
-        optionsButton.Width = 118;
+        optionsButton.Width = ActionButtonWidth;
         optionsButton.AccessibleName = "خيارات التشغيل والعرض";
         optionsButton.Click += (_, _) => _optionsMenu?.Show(optionsButton, new Point(0, optionsButton.Height));
 
@@ -819,12 +828,14 @@ public sealed class MainForm : Form
         menu.Items.Add(MakeSwitchGroupLabel("🔴  ما يحدث للقناة"));
         foreach (var box in new[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck })
         {
+            box.MinimumSize = new Size(MenuSwitchWidth, 0);
             menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(MakeSwitchGroupLabel("🖥  هذه النافذة"));
         foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck })
         {
+            box.MinimumSize = new Size(MenuSwitchWidth, 0);
             menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
         }
         menu.Opening += (_, _) =>

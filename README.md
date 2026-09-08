@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.8.0
+
+One timed-out grab is not a dead source.
+
+At 16:09 a single output-monitor capture exceeded its eight-second timeout while
+the machine was busy building and publishing the manager - the source was up the
+whole time - and the bridge switched the channel to its Cinegy standby and said
+so. Three faults met there. A configured standby switched on the first failure
+by design ("do not leave a dead primary for another interval"), so there is now
+a second attempt a second and a half later before any failure is counted: eight
+seconds against an hour on the wrong source. The next check was an hour away
+(`OutputMonitorMinutes = 60`), which is exactly why no recovery notice arrived -
+it had not run yet - so a failover now schedules a re-check within minutes and
+the message says so. And worst, "the primary is back" was announced without
+testing it: the successful grab comes from whichever source is active, which
+while failed over is the standby. `Test-PrimaryMonitorSourceBack` asks the
+primary directly and restores the state whatever the answer.
+
+In the manager, every button on the action row now shares one width - there were
+seven between 118 and 140, and the eye groups by shape before it reads a word -
+and the options menu is a straight column with a shared minimum width, so the
+ticks line up instead of making a ragged edge to scan.
+
 ## Version 8.7.0
 
 The manager's controls say what they are before they are read.

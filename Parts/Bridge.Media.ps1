@@ -276,6 +276,28 @@ function Update-SnapshotJobs {
     foreach ($request in $retryRequests) { Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId }
 }
 
+function Test-PrimaryMonitorSourceBack {
+    <#
+        Asks the primary source directly, while the standby is the one in use.
+
+        Without this the monitor read a successful grab from the standby as
+        proof that the primary had recovered, and announced a return that
+        nobody had tested - the two sources are different addresses and only
+        one of them was ever asked.
+    #>
+    param([int]$TimeoutSeconds = 8)
+    $wasFallback = $script:OutputMonitorFallbackActive
+    try {
+        # Asked as the primary for the length of one grab, then put back
+        # exactly as it was whatever the answer is.
+        $script:OutputMonitorFallbackActive = $false
+        $path = Get-MonitorFrame -TimeoutSeconds $TimeoutSeconds
+        if ($path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return $true }
+        return $false
+    }
+    finally { $script:OutputMonitorFallbackActive = $wasFallback }
+}
+
 function Get-MonitorFrame {
     <# Grabs one frame synchronously for the black-output monitor.
 
@@ -429,6 +451,17 @@ function Update-OutputBlackWatchdog {
 
     $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
     if (-not $firstPath) {
+        # One more try before believing it. This ran once an hour and a single
+        # eight-second timeout switched a working channel to its standby: the
+        # grab that failed on 8 September timed out while the machine was busy
+        # building something else, and the source was fine the whole time.
+        # A second attempt costs eight seconds against an hour of being on the
+        # wrong source.
+        Start-Sleep -Milliseconds 1500
+        $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
+        if ($firstPath) { Write-BridgeLog 'Output monitor: the first grab failed and the retry succeeded; the source is up.' 'INFO' }
+    }
+    if (-not $firstPath) {
         $script:OutputMonitorFailureCount++
         $failureThreshold = [math]::Max(1, (Get-SettingInt 'OutputMonitorFailureAlertThreshold' 2))
         $backup = Get-BackupLiveStreamConfig
@@ -442,7 +475,12 @@ function Update-OutputBlackWatchdog {
             Write-BridgeLog "Output monitor source unavailable for $($script:OutputMonitorFailureCount) consecutive capture(s)" 'WARN'
             Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $($script:OutputMonitorFailureCount) مرات متتالية"
             if ($shouldSwitch -and (Set-OutputMonitorFallbackActive -Active $true)) {
-                Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى المصدر الأساسي بعد $($script:OutputMonitorFailureCount) محاولات متتالية.`nتم التحويل إلى مصدر Cinegy الاحتياطي." -Urgent
+                # Checked again in minutes, not at the next hourly turn. The
+                # switch is the moment the primary matters most, and leaving
+                # the answer an hour away is why nobody heard that it had come
+                # back - the check simply had not run yet.
+                $script:LastOutputMonitorAt = $now.AddMinutes(-([math]::Max(0, (Get-SettingInt 'OutputMonitorMinutes' 1) - 3)))
+                Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى المصدر الأساسي بعد $($script:OutputMonitorFailureCount) محاولات متتالية.`nتم التحويل إلى مصدر Cinegy الاحتياطي.`nسيُعاد فحص المصدر الأساسي خلال دقائق." -Urgent
             }
             else {
                 Send-OutputMonitorFailureNotification -FailureCount $script:OutputMonitorFailureCount
@@ -452,8 +490,19 @@ function Update-OutputBlackWatchdog {
     }
     if ($script:OutputMonitorFailureCount -gt 0) {
         if ($script:OutputMonitorFallbackActive) {
-            if (Set-OutputMonitorFallbackActive -Active $false) {
-                Send-AdminBroadcast -Text '💡 عاد المصدر الأساسي؛ تمت العودة إليه من مصدر Cinegy الاحتياطي.' -Urgent
+            # The grab that just succeeded came from whichever source is
+            # active - and while the fallback is active, that is the standby.
+            # Reading it as "the primary is back" announced a recovery nobody
+            # had tested. The primary is asked directly.
+            if (Test-PrimaryMonitorSourceBack -TimeoutSeconds $timeout) {
+                if (Set-OutputMonitorFallbackActive -Active $false) {
+                    Send-AdminBroadcast -Text '💡 عاد المصدر الأساسي؛ تمت العودة إليه من مصدر Cinegy الاحتياطي.' -Urgent
+                }
+            }
+            else {
+                # Still on the standby, and still working: no news, and the
+                # counter stays up so the next success asks again.
+                return
             }
         }
         elseif ($script:OutputMonitorFailureAlerted) {

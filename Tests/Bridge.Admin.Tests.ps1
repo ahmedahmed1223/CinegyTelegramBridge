@@ -109,7 +109,39 @@ Describe 'Per-user operation history and safe retry' {
 
 Describe 'Quiet runtime orchestration' {
     It 'does not leak periodic helper return values to the terminal' {
-        foreach ($step in @('Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-ScheduleQueue', 'Update-PendingExpiry', 'Update-SnapshotCleanup', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-CinegyHealthWatchdog', 'Update-Heartbeat')) {
+        # Every step, not a chosen twelve. Fifteen were left real, and one of
+        # them - Update-OutputBlackWatchdog - launches ffmpeg against the
+        # source URL in config.example.json, so this "quiet orchestration"
+        # test was reaching for the network and waiting out its timeout on
+        # every run of the gate. The list is the tick's own, in its order.
+        foreach ($step in @(
+                'Update-TelegramOutbox',
+                'Update-PostShowQueue',
+                'Update-SnapshotJobs',
+                'Update-RelayWatchdog',
+                'Update-AutoHideQueue',
+                'Update-TemplateReminderQueue',
+                'Update-ScheduleQueue',
+                'Update-MojazScheduleQueue',
+                'Update-MojazPlayback',
+                'Update-MojazTickerReturn',
+                'Update-PendingExpiry',
+                'Update-NewsDraftExpiry',
+                'Update-NewsLockRequest',
+                'Update-NewsSheetSync',
+                'Update-SnapshotCleanup',
+                'Update-UploadCleanup',
+                'Update-MojazImageCleanup',
+                'Update-OutputBlackWatchdog',
+                'Save-UsageCounts',
+                'Save-UserProfiles',
+                'Update-CinegyStateWatchdog',
+                'Update-StaleOnAirWatchdog',
+                'Update-CinegyHealthWatchdog',
+                'Update-QuietHoursQueue',
+                'Update-AnnouncementQueue',
+                'Update-Heartbeat',
+                'Update-UsageDigest')) {
             Mock $step { return $true }
         }
 
@@ -130,6 +162,22 @@ Describe 'Maintenance mode control gate' {
     }
 
     AfterEach { $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $script:OriginalMaintenanceMode -Force }
+
+    It 'stops no bulletin for a HIDE it refuses' {
+        # The gate and the side effect were the wrong way round: a blocked HIDE
+        # sends nothing to Cinegy, yet the bulletin was already stopped, marked
+        # finished and the ticker recalled - for an operation that never
+        # happened, while the scene may still have been walking rows on air.
+        Mock Stop-MojazForLayer { }
+        Invoke-HideLayer -Layer 4 -ChatId 10 -UserId 10 | Should -BeFalse
+        Should -Invoke Stop-MojazForLayer -Times 0 -Exactly
+    }
+
+    It 'stops no bulletin for an EXIT it refuses' {
+        Mock Stop-MojazForLayer { }
+        Invoke-ExitLayer -Layer 4 -ChatId 10 -UserId 10 | Should -BeFalse
+        Should -Invoke Stop-MojazForLayer -Times 0 -Exactly
+    }
 
     It 'blocks SHOW before any Cinegy command is sent' {
         $result = Invoke-ShowTemplateResult -Key urgent -ChatId 10 -UserId 10
@@ -2075,5 +2123,45 @@ Describe 'The access requests screen shows what was decided' {
             })
 
         $script:Opened | Should -BeFalse
+    }
+}
+
+
+Describe 'A refused request changes nothing on air' {
+    # The rule this file is here to hold: nothing that alters the channel may
+    # run before the answer to "may they" is known. It was broken in the one
+    # place where the effect looked like housekeeping rather than an action -
+    # pulling the bulletin down for an urgent that had not been allowed yet.
+    BeforeEach {
+        Mock Send-TelegramMessage { }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = '{A}' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Clear-MojazForUrgent { $true }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ Urgent = [pscustomobject]@{ Key = 'Urgent'; Layer = 7; Path = 'urgent.cintitle'; FieldTypes = @{} } }; Order = @('Urgent'); Errors = @() }
+        }
+    }
+
+    It 'pulls no bulletin down for an urgent the operator may not show' {
+        # An operator allowed on the bot but not on this template took the
+        # bulletin off air and was THEN refused: a denial that changed the
+        # channel.
+        Mock Test-TemplateAccess { [pscustomobject]@{ Allowed = $true; Reason = '' } }
+        Mock Test-TemplateShowPolicy { [pscustomobject]@{ Allowed = $false; Reason = 'قالب للمشرفين' } }
+
+        $result = Invoke-ShowTemplateResult -Key 'Urgent' -ChatId 10 -UserId 10
+
+        $result.Success | Should -BeFalse
+        Should -Invoke Clear-MojazForUrgent -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'pulls no bulletin down for an urgent the operator may not reach at all' {
+        Mock Test-TemplateAccess { [pscustomobject]@{ Allowed = $false; Reason = 'غير مصرّح' } }
+
+        Invoke-ShowTemplateResult -Key 'Urgent' -ChatId 10 -UserId 10 | Out-Null
+
+        Should -Invoke Clear-MojazForUrgent -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 }

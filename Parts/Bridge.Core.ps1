@@ -68,7 +68,15 @@ function Save-Config {
     $managed = @('AllowedChatIds', 'AdminChatIds', 'AllowedUserIds', 'AdminUserIds', 'Settings', 'LiveStream')
     $target = $null
     try { $target = Get-Content -Path $Path -Raw | ConvertFrom-Json }
-    catch { Write-Host "Save-Config: could not re-read $Path, writing in-memory copy." }
+    catch {
+        # Write-BridgeLog, not Write-Host: this branch overwrites the file on
+        # disk with the in-memory copy, discarding anything hand-edited there
+        # - including keys the bridge does not manage. It was the one step in
+        # this function that left no trace in bridge.log, so the loss was
+        # silent and unattributable afterwards.
+        $script:LastConfigSaveFailed = $true
+        Write-BridgeLog "Could not re-read $Path before saving ($($_.Exception.Message)); writing the in-memory copy. Any edit made to the file by hand since startup is lost." 'ERROR'
+    }
 
     if ($target) {
         foreach ($name in $managed) {

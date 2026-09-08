@@ -846,6 +846,12 @@ public sealed class MainForm : Form
             {
                 item.BackColor = Theme.Surface;
                 if (item is ToolStripLabel) item.ForeColor = Theme.TextMuted;
+                // A hosted chip sits in no Control.Controls tree, so the
+                // Theme.Apply that repaints the window on a theme switch never
+                // reaches it - and one of these six switches IS the theme. The
+                // menu reopened with light chips on a dark ground. Restyled
+                // through the delegate each chip already carries in its Tag.
+                if (item is ToolStripControlHost host && host.Control is not null) Theme.Apply(host.Control);
             }
         };
         return menu;

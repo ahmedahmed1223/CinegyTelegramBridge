@@ -697,7 +697,13 @@ function Start-RelayProcess {
         -WorkingDirectory $scriptRoot -StandardOutputPath $stdoutLog -StandardErrorPath $stderrLog
     # pid + process start time, so a recycled PID cannot be mistaken for ours.
     $stamp = "$($script:RelayState.Process.Id)|$($script:RelayState.Process.StartTime.Ticks)"
-    Set-Content -Path $relayPidFile -Value $stamp -Encoding ascii
+    # ffmpeg is already running by this line, so a failure to write the stamp
+    # is not a failure to start the relay. Reported as started either way: an
+    # unwritable pid file used to be read as "the relay did not start" while
+    # the stream was live and now untracked - nothing in the interface could
+    # stop it, because nothing knew it was there.
+    try { Set-Content -Path $relayPidFile -Value $stamp -Encoding ascii -ErrorAction Stop }
+    catch { Write-BridgeLog "Relay is running (pid $($script:RelayState.Process.Id)) but its pid file could not be written: $(Protect-SensitiveText $_.Exception.Message). Stop it from the manager or by pid." 'ERROR' }
     return $true
 }
 

@@ -13,6 +13,42 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.13.0
+
+A refused request must not change the air.
+
+This release came from external audit reports; every finding was checked against
+the code before being acted on.
+
+Three sites, one fault: an effect that touches the air ran before the gate that
+decides whether it may, because the effect sat at the top of the function as
+housekeeping rather than as an action. Clear-MojazForUrgent ran the moment the
+template was resolved - six lines before Test-TemplateAccess and
+Test-TemplateShowPolicy - so an operator allowed on the bot but not on the urgent
+template pulled the bulletin off air and was then refused. Invoke-HideLayer and
+Invoke-ExitLayer stopped the bulletin before the maintenance gate, so a blocked
+hide sent nothing to Cinegy while the bulletin was marked finished and the ticker
+recalled, the scene possibly still walking rows on air. All three now run below
+their gates, and a guard describe plus two maintenance-gate tests fail if the
+order returns - verified by restoring the old order first.
+
+relay.pid was written without protection although ffmpeg is already running by
+that line, so a failed write read as "the relay did not start" while the stream
+was live and untracked. It now reports running and logs that the id could not be
+saved. The repository's own guard rejected the first wording: a test forbids raw
+exception text on a path holding a credential, and this file handles RTMP keys,
+so the message goes through Protect-SensitiveText.
+
+Save-Config wrote its re-read failure with Write-Host - nothing in bridge.log -
+then overwrote the file with the in-memory copy, losing any hand edit silently.
+The quiet-hours queue, added in 8.9.0 without a ceiling, is capped at 200 with
+the oldest shed first and the count reported in the digest. The "quiet runtime
+orchestration" test mocked twelve of twenty-seven tick steps, leaving the output
+monitor to run ffmpeg against the example config's placeholder URL; it now mocks
+the tick's own list. And the six switches in the manager's options menu are
+hosted outside any Control.Controls tree, so Theme.Apply never reached them and
+the menu reopened light on a dark ground - one of those switches being the theme.
+
 ## Version 8.12.0
 
 Checking the manual against the code rather than against itself.

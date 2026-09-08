@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Schedule.Tests.ps1 - Scheduled shows, conflicts, retries, and quiet hours.
 
@@ -443,6 +443,27 @@ Describe 'Quiet hours delivery' {
 
         $script:QuietHoursQueue.Count | Should -Be 2
         @($script:QuietHoursQueue | ForEach-Object { $_.Text }) | Should -Contain 'مساحة القرص منخفضة'
+    }
+
+    It 'stops growing without bound, and says how many it shed' {
+        # The digest is one Telegram message and Telegram stops at 4096
+        # characters. A long night with a chatty source grew both the file and
+        # a message that could not be delivered at all. Oldest go first, and
+        # the count survives so the morning does not quietly show fewer.
+        $original = $script:QuietHoursQueueMax
+        try {
+            $script:QuietHoursQueueMax = 3
+            1..6 | ForEach-Object { Send-AdminBroadcast -Text "تنبيه $_" }
+
+            $script:QuietHoursQueue.Count | Should -Be 3
+            @($script:QuietHoursQueue | ForEach-Object { $_.Text }) | Should -Contain 'تنبيه 6'
+            @($script:QuietHoursQueue | ForEach-Object { $_.Text }) | Should -Not -Contain 'تنبيه 1'
+
+            Mock Test-QuietHoursActive { $false }
+            Update-QuietHoursQueue
+            Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'وسقط 3 أقدم منها' }
+        }
+        finally { $script:QuietHoursQueueMax = $original; $script:QuietHoursDropped = 0 }
     }
 
     It 'still sends an urgent one immediately' {

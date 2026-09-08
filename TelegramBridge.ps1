@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.12.0'
+$script:BridgeVersion = '8.13.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -918,6 +918,8 @@ $script:RelayState = $script:RuntimeState.Relay
 $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
 $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
+$script:QuietHoursQueueMax = 200   # the morning digest is one 4096-char message
+$script:QuietHoursDropped = 0      # oldest notices shed past the cap, reported once
 $script:NewsLockRequest = $null
 # Who a just-granted news lock is being held for, and until when. Without it a
 # hand-over settled after five minutes of negotiation was won by whoever tapped

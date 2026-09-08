@@ -393,9 +393,6 @@ function Invoke-HideLayer {
         [switch]$MaintenanceOverride
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
-    # A bulletin walking this layer has to stop with it, or it keeps writing
-    # rows into a scene nobody can see.
-    Stop-MojazForLayer -Layer $Layer | Out-Null
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
     # answer to "what did I just take down" is only available beforehand.
@@ -406,6 +403,13 @@ function Invoke-HideLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
+    # A bulletin walking this layer has to stop with it, or it keeps writing
+    # rows into a scene nobody can see.
+    # After the gate, not before it. A blocked HIDE sends nothing to Cinegy,
+    # so a bulletin stopped here was stopped for an operation that never
+    # happened - recorded as finished, ticker recalled, scene possibly still
+    # walking rows on air.
+    Stop-MojazForLayer -Layer $Layer | Out-Null
     $rollbackSnapshot = $null
     if (-not $Quiet -and (Get-Setting 'EnableSafeRollback')) {
         $preHideStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
@@ -455,9 +459,6 @@ function Invoke-HideLayer {
 function Invoke-ExitLayer {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    # A bulletin walking this layer has to stop with it, or it keeps writing
-    # rows into a scene nobody can see.
-    Stop-MojazForLayer -Layer $Layer | Out-Null
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
     # answer to "what did I just take down" is only available beforehand.
@@ -468,6 +469,10 @@ function Invoke-ExitLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
+    # A bulletin walking this layer has to stop with it, or it keeps writing
+    # rows into a scene nobody can see. After the gate, for the same reason as
+    # the hide above.
+    Stop-MojazForLayer -Layer $Layer | Out-Null
     $rollbackSnapshot = $null
     if (Get-Setting 'EnableSafeRollback') {
         $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `

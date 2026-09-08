@@ -612,9 +612,6 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
-    # The urgent outranks the bulletin, whatever put it on air - a button, a
-    # schedule, a rollback. Every SHOW passes here, so the rule is stated once.
-    if ($Key -eq $script:MojazUrgentKey) { Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null }
     $attemptVariables = @{}
     foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
     $script:LastShowAttempts[[string]$UserId] = @{
@@ -650,6 +647,17 @@ function Invoke-ShowTemplateResult {
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
     $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
+
+    # The urgent outranks the bulletin, whatever put it on air - a button, a
+    # schedule, a rollback. Every SHOW passes here, so the rule is stated once.
+    #
+    # Below the gates, not above them. It used to run the moment the template
+    # was resolved, so an operator allowed on the bot but not on this template
+    # took the bulletin off air and was THEN refused their urgent: a request
+    # that changed the channel by being denied. Nothing that alters the air may
+    # run before the answer to "may they" is known - and now that includes an
+    # unreachable Cinegy, which is refused above.
+    if ($Key -eq $script:MojazUrgentKey) { Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null }
 
     # A scene that is already loaded on the layer keeps running with the values
     # it was started with, so a second SHOW can leave the PREVIOUS text on air.

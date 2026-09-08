@@ -735,6 +735,16 @@ function Send-AdminBroadcast {
     param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent)
     if (-not $Urgent -and (Test-QuietHoursActive)) {
         $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
+        # Capped, because the digest is one Telegram message and Telegram stops
+        # at 4096 characters. A long night with a chatty source would otherwise
+        # grow both the file and a message that cannot be delivered at all. The
+        # oldest go first and the count is kept, so the morning still says how
+        # many there were rather than quietly showing fewer.
+        $held = $script:QuietHoursQueue.Count
+        if ($held -gt $script:QuietHoursQueueMax) {
+            $script:QuietHoursQueue.RemoveRange(0, $held - $script:QuietHoursQueueMax)
+            $script:QuietHoursDropped = [int]$script:QuietHoursDropped + ($held - $script:QuietHoursQueueMax)
+        }
         Save-QuietHoursQueue | Out-Null
         Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
         return
@@ -829,7 +839,11 @@ function Update-QuietHoursQueue {
     $held = @($script:QuietHoursQueue)
     $script:QuietHoursQueue.Clear()
     Save-QuietHoursQueue | Out-Null
-    $lines = @("🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count))") + @($held | ForEach-Object {
+    $dropped = [int]$script:QuietHoursDropped
+    $script:QuietHoursDropped = 0
+    $headline = if ($dropped -gt 0) { "🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count)، وسقط $dropped أقدم منها)" }
+    else { "🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count))" }
+    $lines = @($headline) + @($held | ForEach-Object {
             "• $($_.At.ToString('HH:mm')) — $(($_.Text -split "`n")[0])"
         })
     Write-BridgeLog "Flushed $($held.Count) quiet-hours notice(s)"

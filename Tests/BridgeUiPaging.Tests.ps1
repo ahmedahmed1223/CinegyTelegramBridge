@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 
 BeforeAll {
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\BridgeUiPaging.psm1') -Force
@@ -58,6 +58,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-SettingsKeyboard'              = 'one button per settings category, a fixed list'
             'Get-SettingsCategoryKeyboard'      = 'the settings in one category, a fixed list in the source'
             'Get-DurationKeyboard'              = 'a fixed set of durations'
+            'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'
             'ConvertTo-TelegramReplyMarkupJson' = 'serialises a keyboard, it does not build one'

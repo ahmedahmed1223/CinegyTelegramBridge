@@ -1765,3 +1765,121 @@ Describe 'The authorized users roster' {
         @($buttons | Where-Object { $_ -like '2.*ثانٍ*' }).Count | Should -Be 1
     }
 }
+
+Describe 'The operations log reaches past the last ten' {
+    BeforeEach {
+        # Three days of a busy station: one operation every twenty minutes,
+        # from two operators, with a failure every seventeenth.
+        Mock Get-ReportRecords {
+            $now = Get-Date
+            $records = @(0..215 | ForEach-Object {
+                    [pscustomobject]@{
+                        When   = $now.AddMinutes(-20 * $_)
+                        Action = 'SHOW'
+                        Result = $(if ($_ % 17 -eq 0) { 'failed' } else { 'success' })
+                        Target = "قالب رقم $_"
+                        UserId = $(if ($_ % 2 -eq 0) { '101' } else { '202' })
+                        Values = 'نص الخبر كما ظهر على الشاشة'
+                        Count  = 0
+                        Layer  = 4
+                        OperationId = "air-$('{0:x32}' -f $_)"
+                        DurationMs  = 120
+                    }
+                })
+            # The caller's window is what decides which of these count.
+            @{ Records = @($records | Where-Object { $_.When -ge $From -and $_.When -le $To }); Truncated = $false }
+        }
+        Mock Get-AuditOperatorName { if ($UserId -eq '101') { 'مشغّل الأخبار' } else { 'مخرج النشرة' } }
+        Mock Test-Admin { $true }
+        Mock Get-OperationSentence { "عرض «$Target»" }
+    }
+
+    It 'answers "what went out in the last 48 hours", which memory could not' {
+        # The screen this extends holds twenty entries a person and forgets
+        # them at a restart. This one reads audit.jsonl, so the window is the
+        # only limit.
+        $data = Get-OperationLogData -Hours 48
+        $wider = Get-OperationLogData -Hours 72
+
+        # 48 hours at one operation every twenty minutes is 144 of them.
+        @($data.Records).Count | Should -BeGreaterThan 100
+        @($wider.Records).Count | Should -BeGreaterThan @($data.Records).Count
+        $data.Label | Should -Be 'آخر 48 ساعة'
+        # Newest first: the screen is opened to ask what just happened.
+        @($data.Records)[0].When | Should -BeGreaterThan @($data.Records)[-1].When
+    }
+
+    It 'shows one operator only their own operations' {
+        $mine = Get-OperationLogData -Hours 72 -OnlyUserId 101
+        @($mine.Records | Where-Object { $_.UserId -ne '101' }) | Should -BeNullOrEmpty
+        $mine.Scope | Should -Be 'mine'
+    }
+
+    It 'leads with the verdict and stays inside what the bridge will send' {
+        $blocks = @(Get-OperationLogBlocks -Hours 72)
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        $blocks[0].type | Should -Be 'heading'
+        $blocks[1].text | Should -Match 'عملية'
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        # Capped like every other table, and it says what it left out.
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells.Count | Should -Be 41
+        $json | Should -Match 'صفًّا أقدم غير معروضة'
+    }
+
+    It 'names the operator only where the answer differs by row' {
+        $everyone = @(Get-OperationLogBlocks -Hours 24)
+        $mine = @(Get-OperationLogBlocks -Hours 24 -OnlyUserId 101)
+
+        @($everyone | Where-Object { $_.type -eq 'table' })[0].cells[0].Count | Should -Be 5
+        @($mine | Where-Object { $_.type -eq 'table' })[0].cells[0].Count | Should -Be 4
+    }
+
+    It 'says so plainly when the window is empty' {
+        Mock Get-ReportRecords { @{ Records = @(); Truncated = $false } }
+        $blocks = @(Get-OperationLogBlocks -Hours 24)
+        @($blocks | Where-Object { $_.type -eq 'table' }) | Should -BeNullOrEmpty
+        $blocks[1].text | Should -Match 'لم تُسجَّل أي عملية'
+    }
+
+    It 'marks the window being read and offers the other two' {
+        $keyboard = Get-OperationLogKeyboard -Hours 48 -OnlyUserId 101 -ChatId 1 -UserId 1
+        $labels = @(@($keyboard.inline_keyboard)[0] | ForEach-Object { $_.text })
+
+        $labels | Should -Contain '• 48 ساعة'
+        $labels | Should -Contain '24 ساعة'
+        $labels | Should -Contain '72 ساعة'
+        # Every row is a row, which is what one bare button once cost.
+        foreach ($row in @($keyboard.inline_keyboard)) { , $row | Should -BeOfType ([System.Array]) }
+    }
+
+    It 'offers everyone-s operations to an administrator and not to an operator' {
+        @(@(Get-OperationLogKeyboard -Hours 24 -OnlyUserId 5 -ChatId 5 -UserId 5).inline_keyboard |
+            ForEach-Object { $_ } | Where-Object { $_.callback_data -eq 'oplog:all:24' }) | Should -HaveCount 1
+
+        Mock Test-Admin { $false }
+        @(@(Get-OperationLogKeyboard -Hours 24 -OnlyUserId 5 -ChatId 5 -UserId 5).inline_keyboard |
+            ForEach-Object { $_ } | Where-Object { $_.callback_data -eq 'oplog:all:24' }) | Should -BeNullOrEmpty
+    }
+
+    It 'gives an operator their own rows even when the callback asks for everyone' {
+        # The guard is in the command, not only on the button: a callback can
+        # arrive without one being pressed.
+        Mock Test-Admin { $false }
+        Mock Send-TelegramRichMessage { $script:LoggedBlocks = $Blocks; $true }
+
+        Invoke-OperationLogCommand -ChatId 202 -UserId 202 -Hours 24 -AllUsers
+
+        @($script:LoggedBlocks)[0].text | Should -Match 'عملياتي'
+        @($script:LoggedBlocks)[0].text | Should -Not -Match 'كل المشغّلين'
+    }
+
+    It 'falls back to the text version, totals first' {
+        Mock Send-TelegramRichMessage { $false }
+        Mock Send-TelegramPagedText { $script:LoggedText = $Text }
+
+        Invoke-OperationLogCommand -ChatId 101 -UserId 101 -Hours 48
+
+        $script:LoggedText | Should -Match '<b>الإجمالي</b>'
+    }
+}

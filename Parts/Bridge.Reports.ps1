@@ -16,6 +16,214 @@
 # truncated report that does not say so reads as a complete one.
 $script:ReportMaxRecords = 5000
 
+# The windows the operations log offers, in hours.
+#
+# The screen it extends showed the last ten operations and nothing older: a
+# supervisor asking "what went out last night" was handed this morning's
+# list. Two days is the shift-handover question and three covers a weekend,
+# which is why 48 and 72 are here rather than one vague "recent".
+$script:OperationLogWindows = @(24, 48, 72)
+
+function Get-OperationLogData {
+    <#
+        Air operations inside a window of hours, newest first.
+
+        Read from audit.jsonl through the report machinery rather than from
+        $script:UserOperationHistory: that history is memory, holds twenty
+        entries per person, and answers only "since this bridge started". The
+        audit file is the permanent record, survives a restart, and reaches
+        back into the rotated archives - which is what seventy-two hours
+        needs.
+    #>
+    param(
+        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [long]$OnlyUserId = 0
+    )
+    $to = Get-Date
+    $from = $to.AddHours(-$Hours)
+    $window = Get-ReportRecords -From $from -To $to -EventName 'air_control'
+    $records = @($window.Records)
+    if ($OnlyUserId -gt 0) {
+        $records = @($records | Where-Object { [string]$_.UserId -eq [string]$OnlyUserId })
+    }
+    # Newest first: this screen is opened to ask what just happened, and the
+    # answer is at the end of a file written in order.
+    $ordered = @($records | Sort-Object -Property When -Descending)
+    $failed = @($ordered | Where-Object { [string]$_.Result -eq 'failed' }).Count
+    $blocked = @($ordered | Where-Object { [string]$_.Result -eq 'blocked' }).Count
+    return [pscustomobject]@{
+        Records   = $ordered
+        Hours     = $Hours
+        Label     = "آخر $Hours ساعة"
+        From      = $from
+        To        = $to
+        Failed    = $failed
+        Blocked   = $blocked
+        Succeeded = ($ordered.Count - $failed - $blocked)
+        Truncated = [bool]$window.Truncated
+        Scope     = $(if ($OnlyUserId -gt 0) { 'mine' } else { 'all' })
+    }
+}
+
+function Get-OperationLogBlocks {
+    <#
+        The window as a table: when, what, on what, and how it ended.
+
+        A verdict first, like every other screen here: this one is opened
+        because something is suspected, and counting failures by reading
+        forty rows is the work it exists to save.
+    #>
+    param([ValidateSet(24, 48, 72)][int]$Hours = 48, [long]$OnlyUserId = 0)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
+    $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
+    $blocks = @(@{ type = 'heading'; text = "🧾 سجل العمليات — $($data.Label) · $who"; size = 3 })
+
+    $all = @($data.Records)
+    if ($all.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لم تُسجَّل أي عملية في هذه المدة.' })
+    }
+
+    $verdict = if ($data.Failed -eq 0 -and $data.Blocked -eq 0) { "🟢 $($all.Count) عملية، كلّها ناجحة" }
+    else { "🟠 $($all.Count) عملية · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)" }
+    $blocks += @{ type = 'paragraph'; text = $verdict }
+
+    $trimmed = Select-RichTableRows -Items $all
+    $rows = @($trimmed.Rows)
+    $header = @(
+        @{ text = 'الوقت'; is_header = $true }
+        @{ text = 'العملية'; is_header = $true }
+        @{ text = 'القالب'; is_header = $true }
+        @{ text = 'النتيجة'; is_header = $true }
+    )
+    # The operator column only where it says something: on "my operations" it
+    # would be the same name in every row.
+    if ($data.Scope -eq 'all') { $header += @{ text = 'المشغّل'; is_header = $true } }
+    $cells = @(, $header)
+    foreach ($record in $rows) {
+        $verb = switch ([string]$record.Action) {
+            'SHOW' { 'عرض' }
+            'HIDE' { 'إخفاء' }
+            'EXIT' { 'خروج' }
+            'UPDATE' { 'تحديث' }
+            default { [string]$record.Action }
+        }
+        $mark = switch ([string]$record.Result) {
+            'success' { '✅' }
+            'blocked' { '⛔' }
+            default { '❌' }
+        }
+        $target = [string]$record.Target
+        if ([int]$record.Layer -gt 0) { $target += " · ط$([int]$record.Layer)" }
+        # Day and hour, not hour alone: over three days "21:40" is ambiguous
+        # on the screen whose whole job is placing an event in time.
+        $row = @(
+            @{ text = ([datetime]$record.When).ToString('MM-dd HH:mm') }
+            @{ text = $verb }
+            @{ text = $(if ($target) { $target } else { '—' }) }
+            @{ text = $mark }
+        )
+        if ($data.Scope -eq 'all') {
+            $name = Get-AuditOperatorName -UserId ([string]$record.UserId)
+            $row += @{ text = $(if ($name) { $name } else { '—' }) }
+        }
+        $cells += , $row
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $rows.Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+    if ($data.Truncated) {
+        $blocks += @{ type = 'paragraph'; text = "⚠️ بلغ السجل حدّ القراءة ($script:ReportMaxRecords سجلًّا)؛ قد تكون هناك عمليات أقدم داخل المدة." }
+    }
+    return $blocks
+}
+
+function Get-OperationLogText {
+    <# The fallback, in the reports' shape: totals first, the rows quoted
+       under them. #>
+    param([ValidateSet(24, 48, 72)][int]$Hours = 48, [long]$OnlyUserId = 0)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
+    $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>🧾 سجل العمليات</b> — $(ConvertTo-HtmlText $data.Label) · $who")
+    $all = @($data.Records)
+    if ($all.Count -eq 0) {
+        $lines.Add('<i>لم تُسجَّل أي عملية في هذه المدة.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add("📊 <b>الإجمالي</b> — $($all.Count) عملية · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)")
+    $lines.Add('')
+    $entries = @(foreach ($record in $all) {
+            $mark = switch ([string]$record.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
+            $stamp = ([datetime]$record.When).ToString('MM-dd HH:mm')
+            $sentence = Get-OperationSentence -Action ([string]$record.Action) -Result ([string]$record.Result) `
+                -Target ([string]$record.Target) -Layer ([int]$record.Layer)
+            $name = if ($data.Scope -eq 'all') { Get-AuditOperatorName -UserId ([string]$record.UserId) } else { '' }
+            $suffix = if ($name) { " — $(ConvertTo-HtmlText $name)" } else { '' }
+            "$mark $stamp · $(ConvertTo-HtmlText $sentence)$suffix"
+        })
+    $tag = if ($entries.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
+    $lines.Add("$tag$($entries -join "`n")</blockquote>")
+    if ($data.Truncated) { $lines.Add('<i>⚠️ بلغ السجل حدّ القراءة؛ قد تكون هناك عمليات أقدم داخل المدة.</i>') }
+    return ($lines -join "`n")
+}
+
+function Get-OperationLogKeyboard {
+    <# The three windows, the scope, and the way back. The window being read
+       is marked, like the report periods: identical buttons over a screen
+       that does not repeat its own window left people guessing which one
+       they had pressed. #>
+    param(
+        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [long]$OnlyUserId = 0,
+        [long]$ChatId = 0,
+        [long]$UserId = 0
+    )
+    $scope = if ($OnlyUserId -gt 0) { 'mine' } else { 'all' }
+    $prefix = if ($scope -eq 'mine') { 'oplog' } else { 'oplog:all' }
+    # $window, not $hours: PowerShell variable names are case-insensitive, so
+    # a loop over $hours would be a loop over the -Hours parameter itself -
+    # every window came out marked as the current one, and the scope button
+    # carried whichever window the loop happened to end on.
+    $windowRow = @(foreach ($window in $script:OperationLogWindows) {
+            $label = if ($window -eq $Hours) { "• $window ساعة" } else { "$window ساعة" }
+            New-Button $label "${prefix}:$window"
+        })
+    $rows = @()
+    $rows += , @($windowRow)
+    # Everyone's operations is an administrator's view: an operator seeing who
+    # else put what on air is not this screen's job.
+    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+        $rows += , @($(if ($scope -eq 'mine') {
+                    New-Button '👥 كل المشغّلين' "oplog:all:$Hours"
+                }
+                else {
+                    New-Button '👤 عملياتي فقط' "oplog:$Hours"
+                }))
+    }
+    $rows += , @((New-Button '🧾 آخر عملياتي' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Invoke-OperationLogCommand {
+    <# The screen: table first, text when the table cannot be sent. #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [switch]$AllUsers
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    # An operator who asks for everyone gets their own operations. The guard
+    # is here rather than only on the button, because a callback can arrive
+    # without one being pressed.
+    $everyone = $AllUsers -and (Test-Admin -ChatId $ChatId -UserId $UserId)
+    $onlyUserId = if ($everyone) { 0 } else { $UserId }
+    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $onlyUserId -ChatId $ChatId -UserId $UserId
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-OperationLogBlocks -Hours $Hours -OnlyUserId $onlyUserId) -ReplyMarkup $keyboard) { return }
+    Send-TelegramPagedText -ChatId $ChatId -Text (Get-OperationLogText -Hours $Hours -OnlyUserId $onlyUserId) -ParseMode HTML -ReplyMarkup $keyboard
+}
+
 function Get-ReportsMenuKeyboard {
     return @{ inline_keyboard = @(
             , @((New-Button '🖼 البنرات' 'rep:banners:today'), (New-Button '📰 الأخبار' 'rep:news:today'))

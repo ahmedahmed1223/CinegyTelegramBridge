@@ -762,6 +762,10 @@ function Get-MyOperationsKeyboard {
     if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
         $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
     }
+    # The window that reaches past this screen. What is above comes from
+    # memory - twenty entries a person, and only since the last restart - so
+    # a supervisor asking what went out last night was shown this morning.
+    $rows += , @((New-Button '📅 سجل 48 ساعة' 'oplog:48'))
     $rows += , @((New-Button '🔄 تحديث' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
     return @{ inline_keyboard = $rows }
 }

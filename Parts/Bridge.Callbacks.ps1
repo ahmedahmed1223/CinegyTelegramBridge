@@ -531,6 +531,24 @@ function Invoke-CallbackQuery {
         'repdl:banners:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind banners -Period (Get-CallbackArg $data 'repdl:banners:'); break }
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
+        'oplog:all:*' {
+            $hours = 48
+            if ([int]::TryParse((Get-CallbackArg $data 'oplog:all:'), [ref]$hours) -and $hours -in $script:OperationLogWindows) {
+                Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Hours $hours -AllUsers
+            }
+            break
+        }
+        'oplog:*' {
+            # A window this build does not offer is ignored rather than
+            # clamped: it can only come from an older keyboard, and answering
+            # with a window different from the one the label promised is worse
+            # than not answering.
+            $hours = 48
+            if ([int]::TryParse((Get-CallbackArg $data 'oplog:'), [ref]$hours) -and $hours -in $script:OperationLogWindows) {
+                Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Hours $hours
+            }
+            break
+        }
         'menu:update' {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب لتحديث أحد حقوله:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'updtpl' -ChatId $chatId -UserId $userId)
             break

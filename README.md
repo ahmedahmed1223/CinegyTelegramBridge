@@ -13,6 +13,35 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.95.0
+
+The operations log now reaches back 72 hours, and reads the file rather than
+memory.
+
+`🧾 آخر عملياتك` showed the last ten operations and nothing older, from memory:
+twenty entries per person, forgotten at a restart. A supervisor asking what went
+out last night was handed this morning's list. The new screen reads audit.jsonl
+through the same report machinery - the permanent record, which survives a
+restart and reaches into the rotated archives, which is what a 72-hour window
+needs.
+
+Three windows: 24, 48 and 72 hours. Two days is the shift-handover question and
+three covers a weekend, which is clearer than one vague "recent"; the window
+being read is marked on its own button. The table gives the time as day and
+hour (over three days "21:40" alone is ambiguous), the operation, the template
+and layer, and the outcome - with a verdict above it, so failures are not
+counted by reading forty rows. Administrators get a `👥 كل المشغّلين` button,
+and the guard for it sits in the command rather than only on the button, since
+a callback can arrive without one being pressed. Capped at forty rows like every
+other table, and it says both what it trimmed and whether the log hit its read
+limit.
+
+Caught by its own tests before anyone saw it: `foreach ($hours in ...)` inside a
+function whose parameter is `-Hours`. PowerShell variable names are
+case-insensitive, so the loop was overwriting the parameter - every window came
+out marked as the current one, and the scope button carried whichever window the
+loop ended on.
+
 ## Version 7.94.0
 
 A stability audit: three screens that would have repeated the 7.87 outage, one

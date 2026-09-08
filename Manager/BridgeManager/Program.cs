@@ -413,6 +413,14 @@ internal static class SelfTest
             Check("failed config replacement removes the credential staging file", Directory.GetFiles(fixture, "*.tmp").Length == 0);
         }
         finally { Directory.Delete(fixture, recursive: true); }
+        // The activity line: the manager reads the bridge's own AIR_OP record,
+        // whose shape is fixed by Write-AirOperationResult.
+        Check("reads an air operation into one readable line",
+            MainForm.ParseAirActivity("2026-09-08 14:22:31 [INFO] AIR_OP id=air-1 action=SHOW result=success durationMs=9 user=7 chat=7 layer=7 target=\"Urgent\"")
+                == "✅ عرض «Urgent» — 14:22");
+        Check("marks a refused operation as refused",
+            (MainForm.ParseAirActivity("2026-09-08 14:22:31 [WARN] AIR_OP id=air-2 action=HIDE result=blocked durationMs=9 user=7 chat=7 layer=4 target=\"\"") ?? "").StartsWith("⛔ إخفاء"));
+        Check("an ordinary line is not an air operation", MainForm.ParseAirActivity("2026-09-08 14:22:31 [INFO] Bridge v8.5.0 starting.") is null);
         Check("earlier information remains before a later warning", !MainForm.PriorityComesFirst(2, 1));
         Check("earlier warning remains before later information", MainForm.PriorityComesFirst(1, 2));
         Check("priority queue drains when information is empty", MainForm.PriorityComesFirst(1, null));

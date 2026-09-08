@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.6.0
+
+The manager's window goes back to what it is for: the log.
+
+Fourteen controls stood between the top of the window and the first line of the
+thing it exists to show. The six switches moved behind an `⚙️ خيارات` button,
+giving a whole row back to what is actually read - they are set once and left
+alone for months, two of them about line wrapping and dark mode, so a click each
+is the right price. They are the same controls hosted inside the menu rather
+than copies of them, so every read of their state elsewhere still works and what
+they persist is unchanged.
+
+One primary action at a time: "تشغيل" when it is stopped, "إيقاف" when it is
+running, rather than three buttons of equal weight with two of them dead -
+during an incident the button that can be pressed is the one that is there. And
+a line above the log says what is happening without reading it: the last
+operation that reached air with its time, and the number of errors in the last
+hour, coloured when there are any. The log is a stream that scrolls past; this
+is the summary you glance at.
+
+The manager's version follows the bridge automatically - `Build-BridgeManager.ps1`
+reads 8.5.0 and stamps **v8**. It needed no change, only a build made after the
+bridge reached eight. Build clean, 121 self-test checks passing, three of them
+new for reading an operation line.
+
 ## Version 8.5.0
 
 The manual catches up with what the bridge learned to do, and the manager's

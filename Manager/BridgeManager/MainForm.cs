@@ -101,6 +101,11 @@ public sealed class MainForm : Form
     private readonly Label _lineCountLabel;
     private readonly Label _livenessLabel;
     private readonly Label _pathLabel;
+    private readonly Label _activityLabel;
+    private ContextMenuStrip? _optionsMenu;
+    // The last thing that reached air, and when the last hour's errors landed.
+    private string _lastAirSummary = string.Empty;
+    private readonly Queue<DateTime> _recentErrors = new();
     private readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 200 };
     private readonly NotifyIcon _trayIcon;
     private readonly Icon _appIcon;
@@ -271,6 +276,10 @@ public sealed class MainForm : Form
         logsButton.Width = 140;
         var clearButton = Theme.QuietButton("مسح الشاشة");
         clearButton.Width = 130;
+        var optionsButton = Theme.QuietButton("⚙️ خيارات");
+        optionsButton.Width = 118;
+        optionsButton.AccessibleName = "خيارات التشغيل والعرض";
+        optionsButton.Click += (_, _) => _optionsMenu?.Show(optionsButton, new Point(0, optionsButton.Height));
 
         _tips.SetToolTip(_startButton, "يشغّل TelegramBridge.ps1 ويتابعه.");
         _tips.SetToolTip(_stopButton, "يوقف الجسر - يتوقف التحكم بالرسومات على الهواء.");
@@ -281,6 +290,7 @@ public sealed class MainForm : Form
         _tips.SetToolTip(settingsButton, "الحقول التي لا تُحرَّر من داخل البوت: الرمز، عنوان المحرّك، قوائم الصلاحيات.");
         _tips.SetToolTip(logsButton, "يفتح مجلد logs في المستكشف.");
         _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.  (Ctrl+L)");
+        _tips.SetToolTip(optionsButton, "إعادة التشغيل التلقائية وكشف التعليق وبدء ويندوز، ومظهر هذه النافذة.");
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
@@ -295,7 +305,7 @@ public sealed class MainForm : Form
         var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
         operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
         var utilityActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 6) };
-        utilityActions.Controls.AddRange(new Control[] { settingsButton, logsButton, clearButton });
+        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, clearButton });
         _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
 
         // ---- options: switches, which are not actions ----------------------
@@ -313,21 +323,35 @@ public sealed class MainForm : Form
         _darkModeCheck = Theme.ToggleChip("الوضع الليلي",
             "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
         _darkModeCheck.Checked = _settings.DarkMode;
-        // Two groups, named, because these six switches are not one list.
+        // The switches move behind one button, and the row they occupied goes
+        // back to the log.
         //
-        // Three of them decide what happens to the channel when nobody is
-        // watching - a bridge that restarts itself, a hang that is caught, a
-        // manager that comes back after a reboot. Three decide what this
-        // window looks like. Side by side and identically styled they read as
-        // equals, and the row an operator scans during an incident is half
-        // filled with preferences about line wrapping.
-        var runtimeSwitches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 18, 0) };
-        runtimeSwitches.Controls.Add(MakeSwitchGroupLabel("التشغيل"));
-        runtimeSwitches.Controls.AddRange(new Control[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck });
-        var viewSwitches = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 0) };
-        viewSwitches.Controls.Add(MakeSwitchGroupLabel("العرض"));
-        viewSwitches.Controls.AddRange(new Control[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck });
-        _optionsBar.Controls.AddRange(new Control[] { runtimeSwitches, viewSwitches });
+        // This window exists to be watched: fourteen controls stood between
+        // its top edge and the first line of the thing it is for, and on a
+        // gallery laptop the log had less than half the height. These six are
+        // set once and left alone for months - two of them are about line
+        // wrapping and dark mode - so they cost a click each and give a row
+        // back to what is actually read.
+        //
+        // Hosted, not rebuilt: the same CheckBox objects sit inside the menu,
+        // so every .Checked read and every handler elsewhere still works, and
+        // what they persist is untouched.
+        _optionsMenu = MakeOptionsMenu();
+        _optionsBar.Visible = false;
+
+        // ---- what is happening, above the stream that says it slowly -------
+        _activityLabel = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 26,
+            Font = Theme.UiSmall,
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Background,
+            Padding = new Padding(16, 5, 16, 0),
+            TextAlign = ContentAlignment.MiddleRight,
+            AutoEllipsis = true,
+            Text = "▶ آخر عملية: لا عملية بعد     ⚠ بلا أخطاء"
+        };
 
         // ---- filter row, sitting directly on top of what it filters --------
         _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
@@ -406,6 +430,7 @@ public sealed class MainForm : Form
         // bottom-of-the-window first.
         Controls.Add(_output);
         Controls.Add(_filterBar);
+        Controls.Add(_activityLabel);
         Controls.Add(_optionsBar);
         Controls.Add(_actionBar);
         Controls.Add(_header);
@@ -758,18 +783,78 @@ public sealed class MainForm : Form
     /// name each, and the bridge announces its own on the line the manager is
     /// already tailing.
     /// </remarks>
-    // A quiet caption in front of a group of switches. Small and muted on
-    // purpose: it explains the grouping without competing with the switches
-    // themselves, which are what the eye is looking for.
-    private static Label MakeSwitchGroupLabel(string text) => new()
+    // A quiet caption above a group of switches inside the menu. It explains
+    // the grouping without competing with the switches themselves.
+    private static ToolStripLabel MakeSwitchGroupLabel(string text) => new(text)
     {
-        Text = text,
-        AutoSize = true,
         Font = Theme.UiSmall,
         ForeColor = Theme.TextMuted,
-        Margin = new Padding(0, 8, 8, 0),
-        TextAlign = ContentAlignment.MiddleRight
+        Enabled = false
     };
+
+    // The switches, grouped by what they govern: the channel when nobody is
+    // watching, or this window. Mixing them made a row where a preference
+    // about line wrapping sat beside the switch that decides whether a dead
+    // bridge comes back.
+    private ContextMenuStrip MakeOptionsMenu()
+    {
+        var menu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes, ShowImageMargin = false };
+        menu.Items.Add(MakeSwitchGroupLabel("التشغيل"));
+        foreach (var box in new[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck })
+        {
+            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(12, 2, 12, 2) });
+        }
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(MakeSwitchGroupLabel("العرض"));
+        foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck })
+        {
+            menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(12, 2, 12, 2) });
+        }
+        return menu;
+    }
+
+    // What is happening, in one line, without reading the log: the last thing
+    // that reached air, and how many errors the last hour holds. The log is a
+    // stream that scrolls past; this is the summary an operator glances at.
+    private void UpdateActivityStrip()
+    {
+        PruneRecentErrors();
+        var last = string.IsNullOrEmpty(_lastAirSummary) ? "لا عملية بعد" : _lastAirSummary;
+        var errors = _recentErrors.Count == 0 ? "بلا أخطاء" : $"{_recentErrors.Count} خطأ في آخر ساعة";
+        _activityLabel.Text = $"▶ آخر عملية: {last}     ⚠ {errors}";
+        _activityLabel.ForeColor = _recentErrors.Count == 0 ? Theme.TextMuted : Theme.Stopped;
+    }
+
+    private void PruneRecentErrors()
+    {
+        var cutoff = DateTime.Now.AddHours(-1);
+        while (_recentErrors.Count > 0 && _recentErrors.Peek() < cutoff) _recentErrors.Dequeue();
+    }
+
+    // Read off the same sweep every line already passes through. AIR_OP is the
+    // bridge's own record of something reaching the channel, and its shape is
+    // fixed by Write-AirOperationResult.
+    internal static string? ParseAirActivity(string line)
+    {
+        if (line is null || !line.Contains("AIR_OP ")) return null;
+        var action = Regex.Match(line, @"action=(\w+)");
+        var result = Regex.Match(line, @"result=(\w+)");
+        if (!action.Success || !result.Success) return null;
+        var target = Regex.Match(line, "target=\"([^\"]*)\"");
+        var verb = action.Groups[1].Value switch
+        {
+            "SHOW" => "عرض",
+            "HIDE" => "إخفاء",
+            "EXIT" => "خروج",
+            "UPDATE" => "تحديث",
+            _ => action.Groups[1].Value
+        };
+        var mark = result.Groups[1].Value switch { "success" => "✅", "blocked" => "⛔", _ => "❌" };
+        var name = target.Success && target.Groups[1].Value.Length > 0 ? $" «{target.Groups[1].Value}»" : "";
+        var stamp = Regex.Match(line, @"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2})");
+        var at = stamp.Success ? $" — {stamp.Groups[1].Value}" : "";
+        return $"{mark} {verb}{name}{at}";
+    }
 
     internal static string? ParseBridgeVersion(string line)
     {
@@ -788,6 +873,18 @@ public sealed class MainForm : Form
         {
             _bridgeVersion = version;
             UpdateStateDetail();
+        }
+
+        var activity = ParseAirActivity(line);
+        if (activity is not null)
+        {
+            _lastAirSummary = activity;
+            UpdateActivityStrip();
+        }
+        if (ClassifyLine(line) == LogLineKind.Error)
+        {
+            _recentErrors.Enqueue(DateTime.Now);
+            UpdateActivityStrip();
         }
 
         var parsed = ParseHealthLine(line);
@@ -1341,8 +1438,13 @@ public sealed class MainForm : Form
             running ? Theme.Running : Theme.Stopped,
             running ? "" : "الجسر لا يتحكم بالرسومات على الهواء الآن.");
         UpdateStateDetail();
+        // One primary action at a time. Three buttons of equal weight, two of
+        // them dead, is a decision to make during an incident; the one that
+        // can be pressed is the one that is there.
         _startButton.Enabled = !running;
+        _startButton.Visible = !running;
         _stopButton.Enabled = running;
+        _stopButton.Visible = running;
         _restartButton.Enabled = running;
         _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
         UpdateStatusBar();

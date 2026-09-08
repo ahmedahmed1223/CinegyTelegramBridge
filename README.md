@@ -13,6 +13,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.96.0
+
+And a full week, because that is the span a newsroom reviews.
+
+`🗓 7 أيام` joins 24, 48 and 72 hours: "did that banner run on Tuesday" is a
+weekly question, not a three-day one. It costs nothing the other windows do not
+already pay - the table caps at forty rows however wide the window, and
+`Get-ReportRecords` reads the same bounded number of lines for a week as it does
+for the month reports, saying so out loud when it reaches that limit. It is
+named as days rather than 168 hours, which is a true number and a useless label,
+and the window buttons now sit two to a row like the report periods: four across
+one row of a phone leaves every label too narrow to read.
+
 ## Version 7.95.0
 
 The operations log now reaches back 72 hours, and reads the file rather than

@@ -20,9 +20,22 @@ $script:ReportMaxRecords = 5000
 #
 # The screen it extends showed the last ten operations and nothing older: a
 # supervisor asking "what went out last night" was handed this morning's
-# list. Two days is the shift-handover question and three covers a weekend,
-# which is why 48 and 72 are here rather than one vague "recent".
-$script:OperationLogWindows = @(24, 48, 72)
+# list. Two days is the shift-handover question, three covers a weekend, and
+# a week is the span a newsroom reviews - "did that banner run on Tuesday".
+#
+# A week costs nothing the other windows do not already pay: the table is
+# capped at forty rows either way, and Get-ReportRecords reads the same
+# bounded number of lines for a week as it does for the month reports, saying
+# so out loud when it hits that limit.
+$script:OperationLogWindows = @(24, 48, 72, 168)
+
+function Get-OperationLogWindowLabel {
+    <# What to call a window on a button. 168 is a true number of hours and a
+       useless label: nobody asks for a hundred and sixty-eight hours. #>
+    param([Parameter(Mandatory)][int]$Hours)
+    if ($Hours -ge 168) { return '7 أيام' }
+    return "$Hours ساعة"
+}
 
 function Get-OperationLogData {
     <#
@@ -36,7 +49,7 @@ function Get-OperationLogData {
         needs.
     #>
     param(
-        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [long]$OnlyUserId = 0
     )
     $to = Get-Date
@@ -54,7 +67,7 @@ function Get-OperationLogData {
     return [pscustomobject]@{
         Records   = $ordered
         Hours     = $Hours
-        Label     = "آخر $Hours ساعة"
+        Label     = "آخر $(Get-OperationLogWindowLabel -Hours $Hours)"
         From      = $from
         To        = $to
         Failed    = $failed
@@ -73,7 +86,7 @@ function Get-OperationLogBlocks {
         because something is suspected, and counting failures by reading
         forty rows is the work it exists to save.
     #>
-    param([ValidateSet(24, 48, 72)][int]$Hours = 48, [long]$OnlyUserId = 0)
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0)
     $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
     $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
     $blocks = @(@{ type = 'heading'; text = "🧾 سجل العمليات — $($data.Label) · $who"; size = 3 })
@@ -141,7 +154,7 @@ function Get-OperationLogBlocks {
 function Get-OperationLogText {
     <# The fallback, in the reports' shape: totals first, the rows quoted
        under them. #>
-    param([ValidateSet(24, 48, 72)][int]$Hours = 48, [long]$OnlyUserId = 0)
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0)
     $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId
     $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -174,7 +187,7 @@ function Get-OperationLogKeyboard {
        that does not repeat its own window left people guessing which one
        they had pressed. #>
     param(
-        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [long]$OnlyUserId = 0,
         [long]$ChatId = 0,
         [long]$UserId = 0
@@ -185,12 +198,18 @@ function Get-OperationLogKeyboard {
     # a loop over $hours would be a loop over the -Hours parameter itself -
     # every window came out marked as the current one, and the scope button
     # carried whichever window the loop happened to end on.
-    $windowRow = @(foreach ($window in $script:OperationLogWindows) {
-            $label = if ($window -eq $Hours) { "• $window ساعة" } else { "$window ساعة" }
+    $buttons = @(foreach ($window in $script:OperationLogWindows) {
+            $label = Get-OperationLogWindowLabel -Hours $window
+            if ($window -eq $Hours) { $label = "• $label" }
             New-Button $label "${prefix}:$window"
         })
     $rows = @()
-    $rows += , @($windowRow)
+    # Two to a row, like the report periods. Four windows across one row of a
+    # phone leaves each label too narrow to read, which is the whole point of
+    # naming them.
+    for ($index = 0; $index -lt $buttons.Count; $index += 2) {
+        $rows += , @($buttons[$index..([math]::Min($index + 1, $buttons.Count - 1))])
+    }
     # Everyone's operations is an administrator's view: an operator seeing who
     # else put what on air is not this screen's job.
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
@@ -210,7 +229,7 @@ function Invoke-OperationLogCommand {
     param(
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [ValidateSet(24, 48, 72)][int]$Hours = 48,
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [switch]$AllUsers
     )
     if ($UserId -eq 0) { $UserId = $ChatId }

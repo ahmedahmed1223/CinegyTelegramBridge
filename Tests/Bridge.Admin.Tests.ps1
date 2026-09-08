@@ -1842,15 +1842,35 @@ Describe 'The operations log reaches past the last ten' {
         $blocks[1].text | Should -Match 'لم تُسجَّل أي عملية'
     }
 
-    It 'marks the window being read and offers the other two' {
+    It 'marks the window being read and offers the other three' {
         $keyboard = Get-OperationLogKeyboard -Hours 48 -OnlyUserId 101 -ChatId 1 -UserId 1
-        $labels = @(@($keyboard.inline_keyboard)[0] | ForEach-Object { $_.text })
+        $labels = @(@($keyboard.inline_keyboard) | ForEach-Object { $_ } | ForEach-Object { $_.text })
 
         $labels | Should -Contain '• 48 ساعة'
         $labels | Should -Contain '24 ساعة'
         $labels | Should -Contain '72 ساعة'
+        # Named as days: nobody asks for a hundred and sixty-eight hours.
+        $labels | Should -Contain '7 أيام'
+        # Two to a row, so a label stays wide enough to read on a phone.
+        @($keyboard.inline_keyboard)[0].Count | Should -Be 2
         # Every row is a row, which is what one bare button once cost.
         foreach ($row in @($keyboard.inline_keyboard)) { , $row | Should -BeOfType ([System.Array]) }
+    }
+
+    It 'holds a week of a busy station inside what the bridge will send' {
+        # The window the newsroom asked for. Nothing about it is new work:
+        # the table caps at forty rows however wide the window is.
+        $data = Get-OperationLogData -Hours 168
+        $blocks = @(Get-OperationLogBlocks -Hours 168)
+        $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+
+        $data.Label | Should -Be 'آخر 7 أيام'
+        # Not an exact 216: the newest record is stamped when the mock runs,
+        # a moment after the window's own upper bound was taken.
+        @($data.Records).Count | Should -BeGreaterThan 200
+        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        @($blocks | Where-Object { $_.type -eq 'table' })[0].cells.Count | Should -Be 41
+        $blocks[0].text | Should -Match 'آخر 7 أيام'
     }
 
     It 'offers everyone-s operations to an administrator and not to an operator' {

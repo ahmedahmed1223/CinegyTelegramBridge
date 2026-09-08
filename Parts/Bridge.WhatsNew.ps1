@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.96.0'; Items = @(
+                '🗓 وسجل العمليات صار يصل إلى 7 أيام، لا 72 ساعة فقط.'
+            ) }
         @{ Version = '7.95.0'; Items = @(
                 '📅 سجل عمليات بنافذة 24 أو 48 أو 72 ساعة — من زرّ «سجل 48 ساعة» في شاشة عملياتك.'
                 '👥 وللمشرف: عمليات كل المشغّلين في المدة نفسها.'

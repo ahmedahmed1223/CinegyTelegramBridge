@@ -216,11 +216,105 @@ function Send-TemplateAirNotice {
         # built: the audience is who the newsroom decided should hear, and
         # this is one person's own answer to it.
         if (Test-AirNoticeMuted -UserId $chatId) { continue }
-        Send-TelegramMessage -ChatId $chatId -Text $text -ParseMode HTML -ReplyMarkup $markup
-        $delivered++
+        if (Send-AirNoticeOrHold -ChatId $chatId -Text $text -Markup $markup) { $delivered++ }
     }
+    # Whoever is preparing this same graphic hears about it differently, and
+    # regardless of their mute: this is not news about the channel, it is news
+    # about the thing in their hands.
+    Send-AirCollisionWarning -Key $Key -Layer $Layer -ActorChatId $ActorChatId -ActorName $ActorName -Action $Action | Out-Null
     Write-BridgeLog "Air notice ($Action) for '$Key' sent to $delivered chat(s) (scope: $scope)"
     return $delivered
+}
+
+# Notices that arrived while somebody was in the middle of typing, waiting
+# for them to finish.
+$script:AirNoticeHeld = @{}
+
+function Send-AirNoticeOrHold {
+    <#
+        Sends the notice, unless the person is mid-sentence.
+
+        An editor typing the third headline of a ticker does not lose their
+        place to an incoming message - the flow is state on the server, not
+        the last thing in the chat - but the prompt they were reading scrolls
+        away, and on a phone that is the same thing. Somebody entering a
+        bulletin row, a banner's copy or an urgent headline is doing the work
+        the notice is about; interrupting them to describe it is the worst
+        moment there is.
+
+        Held rather than dropped: what went on air is still worth knowing
+        when they look up. Delivered by Send-HeldAirNotices the moment the
+        flow ends.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Text, [hashtable]$Markup)
+    if (-not (Get-PendingState -ChatId $ChatId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text $Text -ParseMode HTML -ReplyMarkup $Markup
+        return $true
+    }
+    if (-not $script:AirNoticeHeld.ContainsKey($ChatId)) {
+        $script:AirNoticeHeld[$ChatId] = [System.Collections.Generic.List[string]]::new()
+    }
+    # Capped: a long flow during a busy hour must not end in a wall of
+    # messages, which is its own kind of interruption.
+    if ($script:AirNoticeHeld[$ChatId].Count -lt 5) { $script:AirNoticeHeld[$ChatId].Add($Text) }
+    return $false
+}
+
+function Send-HeldAirNotices {
+    <# Everything that happened while they were typing, in one message. #>
+    param([Parameter(Mandatory)][long]$ChatId)
+    if (-not $script:AirNoticeHeld.ContainsKey($ChatId)) { return 0 }
+    $pending = @($script:AirNoticeHeld[$ChatId])
+    $script:AirNoticeHeld.Remove($ChatId)
+    if ($pending.Count -eq 0) { return 0 }
+    $header = if ($pending.Count -eq 1) { '📣 <b>حدث أثناء انشغالك:</b>' } else { "📣 <b>حدث أثناء انشغالك ($($pending.Count)):</b>" }
+    $body = (@($header) + $pending) -join "`n`n"
+    Send-TelegramMessage -ChatId $ChatId -Text $body -ParseMode HTML -ReplyMarkup (Get-AirNoticeMuteKeyboard)
+    return $pending.Count
+}
+
+function Send-AirCollisionWarning {
+    <#
+        Tells whoever is preparing this graphic that it has just gone out
+        without them.
+
+        The layer lock stops two people starting a flow on the same layer,
+        but nothing stopped a preset, a schedule or a second operator on
+        another layer from publishing the very template somebody is typing
+        into - and the first they knew was their own text failing to appear,
+        or worse, replacing what was already right.
+
+        Sent whatever their mute says: a mute means "do not tell me what the
+        channel is doing", not "do not tell me my work has been overtaken".
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Key,
+        [int]$Layer = 0,
+        [long]$ActorChatId = 0,
+        [AllowEmptyString()][string]$ActorName = '',
+        [string]$Action = 'show'
+    )
+    if ([string]::IsNullOrWhiteSpace($Key)) { return 0 }
+    $warned = 0
+    foreach ($entry in @($script:PendingState.GetEnumerator())) {
+        $chatId = [long]$entry.Key
+        if ($chatId -eq $ActorChatId) { continue }
+        $state = $entry.Value
+        $stateKey = [string](Get-JsonProp $state 'Key')
+        $stateLayer = [int](Get-JsonProp $state 'LockLayer')
+        # The same template, or the same layer - either way what they are
+        # preparing is about to land on top of something new.
+        $sameTemplate = $stateKey -and [string]::Equals($stateKey, $Key, [System.StringComparison]::OrdinalIgnoreCase)
+        $sameLayer = $Layer -gt 0 -and $stateLayer -eq $Layer
+        if (-not ($sameTemplate -or $sameLayer)) { continue }
+        $verb = if ($Action -eq 'hide') { 'رُفع عن الهواء' } else { 'عُرض على الهواء' }
+        $who = if ($ActorName) { " بواسطة $(ConvertTo-TelegramHtmlText $ActorName)" } else { '' }
+        Send-TelegramMessage -ChatId $chatId -ParseMode HTML `
+            -Text "⚠️ <b>$(ConvertTo-TelegramHtmlText $Key) $verb$who أثناء تجهيزك.</b>`nراجع ما أعددته قبل الإرسال — قد يكون ما على الشاشة قد تغيّر."
+        $warned++
+    }
+    if ($warned -gt 0) { Write-BridgeLog "Warned $warned operator(s) preparing '$Key' that it just changed on air" }
+    return $warned
 }
 
 # The last time each template said something, so a burst of pushes is not a

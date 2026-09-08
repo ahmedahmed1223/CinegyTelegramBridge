@@ -91,6 +91,10 @@ function Clear-PendingState {
     param([Parameter(Mandatory)][long]$ChatId)
     $state=Remove-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId
     if ($state) { Complete-PendingStateCleanup -ChatId $ChatId -State $state }
+    # The moment they finished is the moment anything held for them is worth
+    # reading. Here rather than at each of the dozen places a flow can end,
+    # because this is the one they all pass through.
+    Send-HeldAirNotices -ChatId $ChatId | Out-Null
 }
 
 function Clear-PendingStatesForUser {

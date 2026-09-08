@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.4.0
+
+The notice waits its turn, and a collision over a template is told to the person
+it affects.
+
+An editor entering the third headline of a ticker does not lose their place to
+an incoming message - the flow is state on the server, not the last thing in the
+chat - but the prompt they were reading scrolls away, and on a phone that is the
+same thing. Someone entering a bulletin row, a banner's copy or an urgent
+headline is doing the very work the notice is about, and interrupting them to
+describe it is the worst moment there is. A notice for anyone mid-flow is now
+held and delivered as one message the moment the flow ends ("📣 حدث أثناء
+انشغالك (3)") - held rather than dropped, capped at five so a long flow in a
+busy hour does not end in a wall, and flushed from `Clear-PendingState`, the one
+point every ending passes through.
+
+The layer lock has long stopped two people starting a flow on the same layer,
+but nothing stopped a schedule, a preset or an operator on another layer from
+publishing the very template somebody was typing into - and the first they knew
+was their text failing to appear, or worse, replacing what was already right.
+Anyone preparing that template or that layer is now warned the moment it changes
+("⚠️ Urgent عُرض على الهواء بواسطة … أثناء تجهيزك — راجع ما أعددته قبل
+الإرسال"), and that warning ignores their mute: a mute means "do not tell me
+what the channel is doing", not "do not tell me my work has been overtaken".
+
 ## Version 8.3.0
 
 Coming off air is news too, and three things the notification path was missing.

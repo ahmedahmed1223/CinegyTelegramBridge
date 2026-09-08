@@ -2090,6 +2090,62 @@ Describe 'A named template announces itself on air' {
         @($script:Markup.inline_keyboard)[0][0].callback_data | Should -Be 'notice:mute'
     }
 
+    It 'waits for somebody who is in the middle of typing' {
+        # An editor entering the third headline of a ticker keeps their place -
+        # the flow is state on the server - but the prompt they were reading
+        # scrolls away, and on a phone that is the same thing.
+        $script:AirNoticeHeld = @{}
+        $script:PendingState[[long]33] = @{ Mode = 'news_add_text'; UserId = 33; StartedAt = (Get-Date) }
+        $reached = [System.Collections.Generic.List[long]]::new()
+        Mock Send-TelegramMessage { $reached.Add([long]$ChatId) }
+
+        [void](Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' -Copy 'نص')
+
+        @($reached) | Should -Not -Contain 33
+        @($reached) | Should -Contain 11
+        # Held, not dropped: it is still worth knowing when they look up.
+        # [long]33, as the code keys it: a hashtable keyed by Int32 is not
+        # found by an Int64 lookup, and the two look identical in the source.
+        $script:AirNoticeHeld[[long]33].Count | Should -Be 1
+        $script:PendingState.Remove([long]33)
+    }
+
+    It 'delivers what it held the moment the flow ends' {
+        $script:AirNoticeHeld = @{ [long]44 = [System.Collections.Generic.List[string]]@('أول', 'ثانٍ') }
+        Mock Send-TelegramMessage { $script:Caught = [string]$Text }
+
+        Send-HeldAirNotices -ChatId 44 | Should -Be 2
+
+        $script:Caught | Should -Match 'حدث أثناء انشغالك \(2\)'
+        $script:Caught | Should -Match 'أول'
+        # Taken off the queue, so a second flow does not repeat them.
+        Send-HeldAirNotices -ChatId 44 | Should -Be 0
+    }
+
+    It 'warns whoever is preparing the same graphic that it just went out' {
+        # The layer lock stops a second flow starting on the same layer, but a
+        # preset or a schedule can publish the very template somebody is
+        # typing into - and the first they knew was their text not appearing.
+        $script:PendingState[[long]55] = @{ Mode = 'show_fields'; Key = 'Urgent'; LockLayer = 7; UserId = 55; StartedAt = (Get-Date) }
+        $script:Warning = ''
+        Mock Send-TelegramMessage { if ([long]$ChatId -eq 55) { $script:Warning = [string]$Text } }
+
+        Send-AirCollisionWarning -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'ابو حسام' | Should -Be 1
+
+        $script:Warning | Should -Match 'أثناء تجهيزك'
+        $script:Warning | Should -Match 'ابو حسام'
+        $script:PendingState.Remove([long]55)
+    }
+
+    It 'leaves alone somebody preparing something unrelated' {
+        $script:PendingState[[long]66] = @{ Mode = 'show_fields'; Key = 'Lower3'; LockLayer = 3; UserId = 66; StartedAt = (Get-Date) }
+        Mock Send-TelegramMessage { }
+
+        Send-AirCollisionWarning -Key 'Urgent' -Layer 7 -ActorChatId 22 -ActorName 'x' | Should -Be 0
+
+        $script:PendingState.Remove([long]66)
+    }
+
     It 'stays silent for a template nobody asked about' {
         Mock Send-TelegramMessage { }
         Send-TemplateAirNotice -Key 'Lower3' -Layer 3 -ActorChatId 22 -ActorName 'x' -Copy 'نص' | Should -Be 0

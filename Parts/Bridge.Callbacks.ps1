@@ -1478,9 +1478,39 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'approve:confirm:*' {
+            # Before 'approve:*', which would otherwise swallow this: the
+            # switch takes the first pattern that matches.
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $target = [long](Get-CallbackArg $data 'approve:confirm:')
+                $pending = $(if ($script:PendingApprovals.ContainsKey($target)) { $script:PendingApprovals[$target] } else { $null })
+                $name = if ($pending) { [string](Get-JsonProp $pending 'Name') } else { '' }
+                $who = if ($name) { "$name ‎($target)‎" } else { [string]$target }
+                Send-TelegramMessage -ChatId $chatId -ParseMode HTML `
+                    -Text "⚠️ <b>منح الوصول إلى $(ConvertTo-TelegramHtmlText $who)؟</b>`nسيتمكّن من عرض الغرافيك على الهواء." `
+                    -ReplyMarkup (Get-AccessGrantConfirmKeyboard -TargetChatId $target)
+            }
+            break
+        }
         'approve:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Grant-UserAccess -TargetChatId ([long](Get-CallbackArg $data 'approve:')) -ApprovedBy $chatId -ApproverUserId $userId
+            }
+            break
+        }
+        'flow:extend' {
+            # The minute's warning, answered. The clock restarts from now
+            # rather than being switched off: the flow still has to end if the
+            # person really has walked away.
+            $state = Get-PendingState -ChatId $chatId
+            if ($state) {
+                $state.StartedAt = Get-Date
+                $state.Remove('WarnedAt')
+                Set-PendingState -ChatId $chatId -State $state
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⏳ مُدِّدت المهلة. أكمل كتابتك.'
+            }
+            else {
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'لا توجد عملية قائمة.' -Alert
             }
             break
         }

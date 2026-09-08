@@ -10,10 +10,25 @@ function Update-PendingExpiry {
     $stateTimeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
     foreach ($chatId in @($script:PendingState.Keys)) {
         $state = $script:PendingState[$chatId]
-        if (((Get-Date) - $state.StartedAt).TotalMinutes -ge $stateTimeout) {
+        $elapsed = ((Get-Date) - $state.StartedAt).TotalMinutes
+        if ($elapsed -ge $stateTimeout) {
             Clear-PendingState -ChatId ([long]$chatId)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
             Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId ([long]$chatId))
+            continue
+        }
+        # A minute's notice, with a way to take more time.
+        #
+        # An editor writing a headline was cut off mid-sentence and told "the
+        # time ran out, start again" - the first he knew of any clock. He was
+        # not abandoning the flow; he was being interrupted by the rest of his
+        # job. The expiry is still right, because an abandoned flow eats the
+        # next message the person sends, but it must not arrive as a surprise.
+        if ($stateTimeout -ge 2 -and $elapsed -ge ($stateTimeout - 1) -and -not $state.ContainsKey('WarnedAt')) {
+            $state.WarnedAt = Get-Date
+            Send-TelegramMessage -ChatId ([long]$chatId) `
+                -Text "⏳ لم يصل نصّك بعد، وستُلغى العملية بعد دقيقة. أرسل النص الآن أو اضغط «تمديد»." `
+                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏳ تمديد' 'flow:extend'), (New-Button '❌ إلغاء' 'menu:main'))) }
         }
     }
 

@@ -1218,10 +1218,31 @@ function Get-HideAllConfirmKeyboard {
 }
 
 function Get-ApprovalKeyboard {
+    <#
+        The first tap asks; the second grants.
+
+        Every consequential action in this bridge confirms - hiding a layer,
+        restarting, clearing a log - and the one that hands a stranger the
+        on-air controls did not. An administrator here reported an approval he
+        had no memory of making, and a single stray tap on a message sitting
+        in a chat is exactly how that happens, leaving nothing behind that
+        would remind him.
+    #>
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
-            , @( (New-Button "✅ موافقة" "approve:$TargetChatId" -Style success), (New-Button "❌ رفض" "reject:$TargetChatId") )
+            , @( (New-Button "✅ موافقة" "approve:confirm:$TargetChatId" -Style success), (New-Button "❌ رفض" "reject:$TargetChatId") )
             , @( (New-Button "⬅️ الرئيسية" "menu") )
+        ) }
+}
+
+function Get-AccessGrantConfirmKeyboard {
+    <# The second tap, named for what it does rather than "نعم": a button
+       that says «امنح الوصول» cannot be pressed absent-mindedly and read as
+       something else afterwards. #>
+    param([Parameter(Mandatory)][long]$TargetChatId)
+    return @{ inline_keyboard = @(
+            , @( (New-Button '✅ نعم، امنح الوصول' "approve:$TargetChatId" -Style danger) )
+            , @( (New-Button '❌ تراجع' 'menu:pending') )
         ) }
 }
 

@@ -220,6 +220,9 @@ Describe 'News sheet pulled into the draft for review' {
 Describe 'News sheet notice audience' {
     BeforeEach {
         $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11) -Force
+        # Both lists, because "the administrators" now means every one of
+        # them: an id with authority and no chat entry used to hear nothing.
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11) -Force
         $config | Add-Member -NotePropertyName 'AllowedChatIds' -NotePropertyValue @(11, 22, 33) -Force
     }
 

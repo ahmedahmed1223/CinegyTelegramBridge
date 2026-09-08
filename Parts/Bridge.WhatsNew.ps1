@@ -23,6 +23,11 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.97.0'; Items = @(
+                '🔑 منح الوصول صار يسأل مرة ثانية، ويُبلَّغ به كل المشرفين.'
+                '📢 وكل مشرف يصله الإشعار الآن، لا من كان في AdminChatIds وحده.'
+                '⏳ والكتابة لم تعد تُلغى فجأة: تنبيه قبل دقيقة وزرّ «تمديد».'
+            ) }
         @{ Version = '7.96.0'; Items = @(
                 '🗓 وسجل العمليات صار يصل إلى 7 أيام، لا 72 ساعة فقط.'
             ) }

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '7.96.0'
+$script:BridgeVersion = '7.97.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -261,7 +261,12 @@ $script:DefaultSettings = [ordered]@{
     SetValuesAfterShow         = $true   # re-send field values via postbox just after SHOW
     PostShowDelayMs            = 400     # wait this long after SHOW before the postbox write
     # --- timing / limits ---
-    PendingStateTimeoutMinutes = 5       # abandoned "type the field text" flows expire
+    # Ten, not five: five minutes is shorter than writing a headline while
+    # the phone rings. The warning a minute before, with its extend button,
+    # is what actually stops work being thrown away - this only keeps the
+    # common case from needing it. An installation that set its own value
+    # keeps that value.
+    PendingStateTimeoutMinutes = 10      # abandoned "type the field text" flows expire
     SnapshotCooldownSeconds    = 10      # reuse the last frame instead of re-running ffmpeg
     SnapshotTimeoutSeconds     = 8       # hard kill ffmpeg after this
     SnapshotRetentionMinutes   = 30      # sweep orphaned snapshot files older than this

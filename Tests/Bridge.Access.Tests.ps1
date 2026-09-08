@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Access.Tests.ps1 - who may put a graphic on air, and take it off.
 #>
@@ -797,5 +797,148 @@ Describe 'A permission list longer than one message' {
 
     It 'says which page it is on' {
         Get-SettingPickText -Name 'AdminOnlyTemplateKeys' -Page 1 | Should -Match 'صفحة 2 من 5'
+    }
+}
+
+Describe 'An administrator who can approve is an administrator who is told' {
+    BeforeEach {
+        # The shape this installation was actually in: three administrators
+        # by authority, two by notification.
+        $config | Add-Member -NotePropertyName 'AdminChatIds' -NotePropertyValue @(11, 22) -Force
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11, 22, 33) -Force
+    }
+
+    It 'broadcasts to every administrator, not only those in the chat list' {
+        # 33 could approve a stranger into the on-air controls and was never
+        # told one had asked.
+        $sent = [System.Collections.Generic.List[long]]::new()
+        Mock Send-TelegramMessage { $sent.Add([long]$ChatId) }
+        Mock Test-QuietHoursActive { $false }
+
+        Send-AdminBroadcast -Text 'اختبار'
+
+        @($sent) | Should -Contain 33
+        @($sent).Count | Should -Be 3
+    }
+
+    It 'names the administrator who hears nothing, in both directions' {
+        $mismatch = Get-AdminListMismatch
+        @($mismatch.Unnotified) | Should -Be @(33)
+        @($mismatch.Unauthorized) | Should -BeNullOrEmpty
+
+        # And the health screen carries it, because nobody can notice a
+        # message that never arrives.
+        $warnings = @(Get-DiagnosticWarnings -Snapshot @{ DiskFreeGB = 40; RuntimeStorageBytes = 0; BackupStorageBytes = 0 })
+        @($warnings | Where-Object { $_ -match '33' }) | Should -HaveCount 1
+    }
+
+    It 'stays silent when the two lists agree' {
+        $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @(11, 22) -Force
+        $warnings = @(Get-DiagnosticWarnings -Snapshot @{ DiskFreeGB = 40; RuntimeStorageBytes = 0; BackupStorageBytes = 0 })
+        @($warnings | Where-Object { $_ -match 'مشرفون بلا إشعارات' }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Granting on-air control takes two taps' {
+    It 'asks before it grants' {
+        # A stray tap on a message sitting in a chat granted access with
+        # nothing left behind to remind the administrator he had done it.
+        $first = @(Get-ApprovalKeyboard -TargetChatId 4321).inline_keyboard | ForEach-Object { $_ } |
+            Where-Object { [string]$_.text -match 'موافقة' }
+
+        @($first)[0].callback_data | Should -Be 'approve:confirm:4321'
+        # And the second button names the act rather than saying "yes".
+        $second = @(Get-AccessGrantConfirmKeyboard -TargetChatId 4321).inline_keyboard | ForEach-Object { $_ }
+        @($second)[0].callback_data | Should -Be 'approve:4321'
+        @($second)[0].text | Should -Match 'امنح الوصول'
+    }
+
+    It 'routes the asking tap to a question, not to a grant' {
+        Mock Test-CallbackAdmin { $true }
+        # 11 is an administrator in this fixture but not in the example
+        # config's allow list, and the router refuses before any branch runs.
+        Mock Test-Authorized { $true }
+        Mock Send-TelegramMessage { $script:AskedText = $Text }
+        Mock Grant-UserAccess { $script:Granted = $true }
+        Mock Confirm-TelegramCallback { }
+        $script:Granted = $false
+        # [long], as Request-Approval stores it: a hashtable keyed by Int32
+        # is not found by an Int64 lookup, so an int literal here would test
+        # a shape production never has.
+        $script:PendingApprovals[[long]4321] = @{ Name = 'معاذ - الأخبار'; ChatId = 4321; UserId = 4321; RequestedAt = (Get-Date) }
+
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = '1'; data = 'approve:confirm:4321'
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 11; type = 'private' } }
+                from = [pscustomobject]@{ id = 11; first_name = 'x' }
+            })
+
+        $script:Granted | Should -BeFalse
+        $script:AskedText | Should -Match 'منح الوصول'
+        $script:AskedText | Should -Match 'معاذ'
+        $script:PendingApprovals.Remove([long]4321)
+    }
+}
+
+Describe 'A flow says it is about to end' {
+    BeforeEach {
+        $script:PendingState.Clear()
+        # A default as well as the filtered one: a filtered mock alone makes
+        # Pester throw on every other setting this path reads.
+        Mock Get-SettingInt { 10 }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        Mock Update-DormantUsers { }
+    }
+
+    It 'warns a minute before, with a way to take more time' {
+        # An editor writing a headline was cut off mid-sentence and told the
+        # time had run out - the first he knew of any clock.
+        $script:PendingState[555] = @{ Mode = 'news_add_text'; UserId = 555; StartedAt = (Get-Date).AddMinutes(-9.2) }
+        $script:Warned = ''
+        $script:WarnMarkup = $null
+        Mock Send-TelegramMessage { $script:Warned = $Text; $script:WarnMarkup = $ReplyMarkup }
+
+        Update-PendingExpiry
+
+        $script:Warned | Should -Match 'ستُلغى العملية بعد دقيقة'
+        @($script:WarnMarkup.inline_keyboard)[0][0].callback_data | Should -Be 'flow:extend'
+        # Still there: warning is not expiring.
+        $script:PendingState.ContainsKey(555) | Should -BeTrue
+    }
+
+    It 'warns once, not on every tick' {
+        $script:PendingState[556] = @{ Mode = 'news_add_text'; UserId = 556; StartedAt = (Get-Date).AddMinutes(-9.2) }
+        Mock Send-TelegramMessage { }
+
+        Update-PendingExpiry
+        Update-PendingExpiry
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'still expires a flow that really was abandoned' {
+        $script:PendingState[557] = @{ Mode = 'news_add_text'; UserId = 557; StartedAt = (Get-Date).AddMinutes(-30) }
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+
+        Update-PendingExpiry
+
+        $script:PendingState.ContainsKey(557) | Should -BeFalse
+    }
+
+    It 'restarts the clock when the extend button is pressed' {
+        $script:PendingState[558] = @{ Mode = 'news_add_text'; UserId = 558; StartedAt = (Get-Date).AddMinutes(-9.5); WarnedAt = (Get-Date) }
+        Mock Confirm-TelegramCallback { $script:Answer = $Text }
+        Mock Test-Authorized { $true }
+
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = '2'; data = 'flow:extend'
+                message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 558; type = 'private' } }
+                from = [pscustomobject]@{ id = 558; first_name = 'x' }
+            })
+
+        ((Get-Date) - $script:PendingState[558].StartedAt).TotalMinutes | Should -BeLessThan 1
+        $script:PendingState[558].ContainsKey('WarnedAt') | Should -BeFalse
+        $script:Answer | Should -Match 'مُدِّدت'
     }
 }

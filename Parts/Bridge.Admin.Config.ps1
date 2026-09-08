@@ -460,5 +460,17 @@ function Get-DiagnosticWarnings {
     if ([long]$Snapshot.BackupStorageBytes -gt ([math]::Max(1, $BackupStorageWarningMB) * 1MB)) {
         $warnings.Add("⚠️ حجم النسخ الاحتياطية تجاوز $BackupStorageWarningMB MB")
     }
+    # Two lists that are meant to agree, and nothing checked that they did:
+    # an administrator with authority and no notices approved nothing because
+    # he was never asked, while the request was decided by someone else in a
+    # minute. It is silent by nature - the missing person cannot notice what
+    # never reaches them - so the screen has to say it.
+    $mismatch = Get-AdminListMismatch
+    if (@($mismatch.Unnotified).Count -gt 0) {
+        $warnings.Add("⚠️ مشرفون بلا إشعارات (في AdminUserIds لا AdminChatIds): $(@($mismatch.Unnotified) -join '، ')")
+    }
+    if (@($mismatch.Unauthorized).Count -gt 0) {
+        $warnings.Add("⚠️ يصلهم إشعار المشرفين بلا صلاحية مشرف: $(@($mismatch.Unauthorized) -join '، ')")
+    }
     return $warnings.ToArray()
 }

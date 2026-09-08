@@ -439,6 +439,14 @@ function Grant-UserAccess {
 
     $script:PendingApprovals.Remove($TargetChatId)
     Write-BridgeLog "User $ApproverUserId approved new user $targetUserId (chat $TargetChatId)"
+    # Every administrator hears who was let in and by whom. One approval on
+    # this installation was made in a minute by one of three, and the other
+    # two learned of it from a colleague - a grant of on-air control that
+    # nobody but its author saw. Not urgent: it is a record, and a record can
+    # wait for the quiet-hours digest.
+    $approverName = Format-UserAuditActor -UserId $ApproverUserId
+    $grantedName = if ($requestedName) { "$requestedName ‎($targetUserId)‎" } else { [string]$targetUserId }
+    Send-AdminBroadcast -Text "👤 مُنح الوصول: $grantedName — بواسطة $approverName" 
     # The name the person gave for themselves becomes their alias here, which
     # is the whole reason for asking: the roster and every audit line read it
     # from the first minute, with no administrator typing it in. An alias

@@ -520,7 +520,7 @@ function Get-NewsSheetNoticeAudience {
     param([string]$Scope = '')
     if ([string]::IsNullOrWhiteSpace($Scope)) { $Scope = [string](Get-Setting 'NewsSheetNotifyScope') }
     if ($Scope -eq 'none') { return @() }
-    $admins = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })
+    $admins = @(Get-AdminNotifyIds)
     if ($Scope -ne 'all') { return @($admins) }
     $everyone = @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })
     return @(@($admins + $everyone) | Sort-Object -Unique)

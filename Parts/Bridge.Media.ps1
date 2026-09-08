@@ -515,7 +515,9 @@ function Send-OutputBlackNotification {
     else { "🖤 المخرج أسود — تأكّد عبر لقطتين متتاليتين (سطوع $Luminance).`nتحقّق من المصدر وسلسلة البث." }
     Send-AdminBroadcast -Text $text -Urgent
     if (-not (Get-Setting 'NotifyOperatorsOnBlackOutput')) { return }
-    $adminIds = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ })
+    # The same audience Send-AdminBroadcast just used, or an administrator
+    # it reached would be told twice.
+    $adminIds = @(Get-AdminNotifyIds)
     foreach ($chatId in @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ })) {
         if ($adminIds -contains $chatId) { continue }   # already told above
         Send-TelegramMessage -ChatId $chatId -Text $text

@@ -64,6 +64,7 @@ Describe 'Every screen built from a growing list is paged' {
             'ConvertTo-TelegramReplyMarkupJson' = 'serialises a keyboard, it does not build one'
             'Receive-SettingsImport'            = 'not a keyboard builder; it reports on an imported file'
             'Update-TemplateReminderQueue'      = 'not a keyboard builder; it sends one reminder per due item'
+            'Update-PendingExpiry'              = 'not a keyboard builder; its one row is the extend button on the expiry warning'
             'Invoke-CallbackQuery'              = 'the callback switch, which delegates to the builders above'
         }
 

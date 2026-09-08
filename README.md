@@ -13,6 +13,39 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.97.0
+
+Two incidents from the air: an access request that never reached one of its
+administrators, and an editor cut off mid-sentence.
+
+`AdminUserIds` held three administrators and `AdminChatIds` two. Nothing checked
+that the two lists agreed, so the third could approve a stranger into the on-air
+controls and was never told one had asked - nor of a Cinegy alert, nor of the
+weekly digest. The request reached two of the three, one approved it inside a
+minute, and the third heard about it from a colleague. `Send-AdminBroadcast` now
+messages both lists (a private chat's id is the user's own id), the black-output
+alert and the sheet notice use the same audience, and the health screen names
+anyone who is in one list and not the other - the fault is silent by nature,
+since the person missing cannot notice a message that never arrives.
+
+Every consequential action here confirms - hiding a layer, restarting, clearing
+a log - except the one that hands a stranger the on-air controls. An
+administrator reported an approval he had no memory of making, which is exactly
+what a stray tap on a message sitting in a chat produces. Approval now takes two
+taps: the first asks, naming the requester, and the second is a red button
+reading "نعم، امنح الوصول" rather than a bare yes. Every approval is then
+announced to all administrators, because a grant of on-air control should not be
+visible only to whoever made it.
+
+And an editor writing a headline was cut off with "the time ran out, start
+again" - the first he knew of any clock. He was not abandoning the flow; he was
+being interrupted by the rest of his job. A flow now warns a minute before it
+ends and offers an extend button that restarts the clock; expiry itself is still
+right, because an abandoned flow swallows the next message its owner sends, but
+it no longer arrives as a surprise. The shipped default rises from five minutes
+to ten - five is shorter than writing a headline while the phone rings - and an
+installation that set its own value keeps it.
+
 ## Version 7.96.0
 
 And a full week, because that is the span a newsroom reviews.

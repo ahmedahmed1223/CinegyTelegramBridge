@@ -728,8 +728,43 @@ function Send-AdminBroadcast {
         Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
         return
     }
-    foreach ($adminId in @(Get-JsonProp $config 'AdminChatIds')) {
-        if ($adminId) { Send-TelegramMessage -ChatId ([long]$adminId) -Text $Text -ReplyMarkup $ReplyMarkup }
+    foreach ($adminId in @(Get-AdminNotifyIds)) {
+        Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup
+    }
+}
+
+function Get-AdminNotifyIds {
+    <#
+        Everyone who should hear an administrator notice.
+
+        Both lists, not AdminChatIds alone. They are meant to agree and
+        nothing made them: on this installation AdminUserIds carried a third
+        administrator who was in no chat list, so he could approve a stranger
+        into the on-air controls and was never told one had asked. An access
+        request reached two of the three, one approved inside a minute, and
+        the third learned of it from a colleague.
+
+        A private chat's id is the user's own id, which is why one list can
+        stand in for the other here. An administrator who has never opened a
+        chat with the bot cannot be messaged at all - that send fails and is
+        logged, which is itself the answer to "why does he never hear
+        anything".
+    #>
+    $ids = @(@(Get-JsonProp $config 'AdminChatIds') + @(Get-JsonProp $config 'AdminUserIds'))
+    return @($ids | ForEach-Object { [long]$_ } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+}
+
+function Get-AdminListMismatch {
+    <# The administrators one list holds and the other does not, in both
+       directions. An id with authority and no notice hears nothing; an id
+       with notice and no authority is told about decisions it cannot make. #>
+    $chats = @(@(Get-JsonProp $config 'AdminChatIds') | ForEach-Object { [long]$_ } | Where-Object { $_ -gt 0 })
+    $users = @(@(Get-JsonProp $config 'AdminUserIds') | ForEach-Object { [long]$_ } | Where-Object { $_ -gt 0 })
+    return [pscustomobject]@{
+        # Held authority, missing from the notices - the one that hurt.
+        Unnotified = @($users | Where-Object { $chats -notcontains $_ } | Sort-Object -Unique)
+        # Notified without authority - confusing rather than harmful.
+        Unauthorized = @($chats | Where-Object { $users -notcontains $_ } | Sort-Object -Unique)
     }
 }
 

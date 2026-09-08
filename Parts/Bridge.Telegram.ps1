@@ -388,11 +388,18 @@ function Register-RichPayloadMeasurement {
     if ($Length -gt [int]$script:RichPayloadPeak.Length) {
         $script:RichPayloadPeak = @{ Length = $Length; Screen = $screen }
     }
+    # Warned once per screen, and a screen is its heading with the numbers
+    # taken out. Eight headings carry a count or a period in them - "الأحداث
+    # القادمة (12)", "تقرير الموجزات - هذا الأسبوع" - so keying on the heading
+    # as written made "once" mean once per count: the log would repeat the
+    # same warning all day, and the table of warned screens would gain a key
+    # every time a number changed, for as long as the bridge ran.
+    $key = ($screen -replace '\d+', '') -replace '\s+', ' '
     # 70%: far enough below the limit that there is time to cap a table, and
     # high enough that an ordinary screen never trips it.
     $threshold = [int]($script:RichPayloadLimit * 0.7)
-    if ($Length -ge $threshold -and -not $script:RichPayloadWarned.ContainsKey($screen)) {
-        $script:RichPayloadWarned[$screen] = $true
+    if ($Length -ge $threshold -and -not $script:RichPayloadWarned.ContainsKey($key)) {
+        $script:RichPayloadWarned[$key] = $true
         $percent = [int](($Length * 100) / $script:RichPayloadLimit)
         Write-BridgeLog "Rich payload for '$screen' is $Length characters, $percent% of the limit - cap its rows before it loses its table" 'WARN'
     }

@@ -23,6 +23,9 @@ function Get-WhatsNewSections {
         mention things an operator can see or act on.
     #>
     return @(
+        @{ Version = '7.93.1'; Items = @(
+                '🔧 تحذير حجم الشاشة صار يُقال مرة واحدة فعلًا، لا مرة لكل رقم في عنوانها.'
+            ) }
         @{ Version = '7.93.0'; Items = @(
                 '📐 «أرقام التشغيل» تقول الآن أي شاشة أقرب إلى فقدان جدولها — قبل أن تفقده.'
             ) }

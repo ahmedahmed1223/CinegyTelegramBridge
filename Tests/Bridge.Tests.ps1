@@ -1619,15 +1619,18 @@ Describe 'One oversized screen must not cost the session its tables' {
         $warnings = [System.Collections.Generic.List[string]]::new()
         Mock Write-BridgeLog { if ($Level -eq 'WARN') { $warnings.Add($Message) } }
 
-        $blocks = @(@{ type = 'heading'; text = '📊 تقرير الشريط'; size = 3 })
+        $blocks = @(@{ type = 'heading'; text = '📊 تقرير الشريط (14)'; size = 3 })
         Register-RichPayloadMeasurement -Blocks $blocks -Length 9000
         # A smaller screen must not displace the peak.
         Register-RichPayloadMeasurement -Blocks @(@{ type = 'heading'; text = 'ℹ️ الحالة' }) -Length 900
-        # And the same screen again must not repeat the warning.
-        Register-RichPayloadMeasurement -Blocks $blocks -Length 9100
+        # The same screen with a different count in its heading is the same
+        # screen: eight headings carry one, and keying on the text as written
+        # made "warned once" mean once per count - a line all day, and a key
+        # for every number for as long as the bridge ran.
+        Register-RichPayloadMeasurement -Blocks @(@{ type = 'heading'; text = '📊 تقرير الشريط (15)'; size = 3 }) -Length 9100
 
         $peak = Get-RichPayloadPeak
-        $peak.Screen | Should -Be '📊 تقرير الشريط'
+        $peak.Screen | Should -Be '📊 تقرير الشريط (15)'
         $peak.Length | Should -Be 9100
         # 9100 of 12000, rounded: the figure is for a reader, not a budget.
         $peak.Percent | Should -Be 76

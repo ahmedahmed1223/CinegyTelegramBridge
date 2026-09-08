@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 7.93.1
+
+"Once per screen" meant once per number.
+
+The size warning added in 7.93.0 was keyed on the screen's heading as written,
+and eight headings carry a count or a period inside them - "الأحداث القادمة
+(12)", "تقرير الموجزات - هذا الأسبوع". So the warning repeated whenever the
+number changed, and the table of already-warned screens gained a key for every
+distinct count, for as long as the bridge ran. The key is now the heading with
+its digits removed. Found by a stability audit an hour after it shipped.
+
 ## Version 7.93.0
 
 Every screen now measures its own payload, so the limit is not discovered by an

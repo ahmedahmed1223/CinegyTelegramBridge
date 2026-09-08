@@ -430,6 +430,21 @@ Describe 'Quiet hours delivery' {
         $script:QuietHoursQueue.Count | Should -Be 1
     }
 
+    It 'keeps what it is holding across a restart' {
+        # Being held is the opposite of being unimportant: these were withheld
+        # on purpose. In memory alone, a 03:00 restart dropped every one of
+        # them and left no trace but a log line written hours earlier.
+        Send-AdminBroadcast -Text 'قالب لم يُتحقق منه'
+        Send-AdminBroadcast -Text 'مساحة القرص منخفضة'
+        $script:QuietHoursQueue.Count | Should -Be 2
+
+        $script:QuietHoursQueue.Clear()
+        Import-QuietHoursQueue
+
+        $script:QuietHoursQueue.Count | Should -Be 2
+        @($script:QuietHoursQueue | ForEach-Object { $_.Text }) | Should -Contain 'مساحة القرص منخفضة'
+    }
+
     It 'still sends an urgent one immediately' {
         # A black output means the channel is wrong right now.
         Send-AdminBroadcast -Text 'المخرج أسود' -Urgent

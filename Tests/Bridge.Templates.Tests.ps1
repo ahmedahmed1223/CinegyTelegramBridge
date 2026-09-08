@@ -1306,6 +1306,26 @@ Describe 'Persistent operator drafts' {
         $script:LayerLocks[4].UserId | Should -Be 81
     }
 
+    It 'tells the operator their draft came back, before it eats their next message' {
+        # A restored draft is a flow waiting to consume the next thing this
+        # person types. They did not see the restart, so without a word from
+        # the bridge their message about something else becomes the headline.
+        Mock Send-TelegramMessage {}
+        Set-PendingState -ChatId 73 -State @{
+            Mode = 'show_fields'; Key = 'urgent'; UserId = 83; LockLayer = 6
+            Fields = @('Headline.Text'); Labels = @('العنوان'); Limits = @(80)
+            Required = @($true); Index = 0; Values = @{}; AutoHideSeconds = 0
+        }
+        $script:PendingState.Clear()
+        $script:LayerLocks.Clear()
+
+        Import-DraftStates
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 73 -and $Text -match 'مسودتك لم تضِع' -and $Text -match 'urgent'
+        }
+    }
+
     It 'removes a saved draft when the operator cancels it' {
         Set-PendingState -ChatId 72 -State @{
             Mode = 'show_review'; Key = 'urgent'; UserId = 82; LockLayer = 5

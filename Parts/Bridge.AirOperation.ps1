@@ -670,7 +670,15 @@ function Invoke-ShowTemplateResult {
         $operationStarted = $true
         $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $template.Layer -TimeoutSec (Get-AirTimeout)
-        if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show HIDE on layer $($template.Layer): success=$($clear.Success)" }
+        # Reported whether or not the XML log is on. This clear exists because
+        # a scene already loaded keeps the values it started with, so a failed
+        # clear is the exact condition under which the NEXT line puts the new
+        # text nowhere and leaves the previous headline on air - and it was
+        # visible only to someone who had turned on a debug setting.
+        if (-not $clear.Success) {
+            Write-BridgeLog "Pre-show clear of layer $($template.Layer) failed before showing '$Key': $($clear.Error). The scene may keep its previous values." 'WARN'
+        }
+        elseif (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show HIDE on layer $($template.Layer): success=$($clear.Success)" }
     }
 
     # Only pass through explicit per-field type overrides; everything else
@@ -763,9 +771,13 @@ function Invoke-ShowTemplateResult {
         # the channel this scene actually honours.
         if ((Get-Setting 'SetValuesAfterShow') -and $Variables.Count -gt 0) {
             $delay = Get-SettingInt 'PostShowDelayMs' 0
+            # Stamped with what is on the layer now, so the write can prove at
+            # fire time that it is still addressing the same scene.
+            $liveScene = if ($script:OnAir.ContainsKey([int]$template.Layer)) { $script:OnAir[[int]$template.Layer] } else { $null }
             $script:PostShowQueue.Add(@{
                     At = (Get-Date).AddMilliseconds($delay); Values = $Variables
                     Layer = [int]$template.Layer; Key = $Key
+                    ActiveId = if ($liveScene) { [string](Get-JsonProp $liveScene 'ActiveId') } else { '' }
                 })
         }
 

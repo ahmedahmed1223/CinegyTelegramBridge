@@ -48,11 +48,33 @@ function Update-PendingExpiry {
 function Update-PostShowQueue {
     <# Fires the deferred postbox write that follows a SHOW. Failures are
        logged but never surfaced to the operator: the SHOW itself already
-       succeeded and was already confirmed in chat. #>
+       succeeded and was already confirmed in chat.
+
+       Addressed to a scene, not to a layer. The write lands up to
+       PostShowDelayMs after the SHOW, and a layer can be replaced inside that
+       window - so the values of the graphic that just left were being written
+       into the one that had taken its place, and the room read the old
+       headline under the new scene. The queue entry carries the key and the
+       ActiveId it was made for; anything else on that layer now means the
+       scene it belonged to is gone, and the write is dropped rather than
+       aimed at a stranger. A HIDE or EXIT clears the record too, so those
+       cancel a pending write by the same test. #>
     if ($script:PostShowQueue.Count -eq 0) { return }
     $due = @($script:PostShowQueue | Where-Object { (Get-Date) -ge $_.At })
     foreach ($item in $due) {
         $script:PostShowQueue.Remove($item) | Out-Null
+        $layer = [int]$item.Layer
+        $live = if ($script:OnAir.ContainsKey($layer)) { $script:OnAir[$layer] } else { $null }
+        $stillOurs = $null -ne $live -and [string](Get-JsonProp $live 'Key') -eq [string]$item.Key
+        if ($stillOurs -and [string]$item.ActiveId) {
+            $liveId = [string](Get-JsonProp $live 'ActiveId')
+            if ($liveId) { $stillOurs = $liveId -eq [string]$item.ActiveId }
+        }
+        if (-not $stillOurs) {
+            $now = if ($live) { [string](Get-JsonProp $live 'Key') } else { 'nothing' }
+            Write-BridgeLog "Dropped the post-show postbox write for '$($item.Key)' on layer $layer : the layer now holds $now." 'WARN'
+            continue
+        }
         $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress `
             -AirChannelNumber $config.AirChannelNumber -Values $item.Values -TimeoutSec (Get-AirTimeout)
         if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air post-show POSTBOX ($($item.Key)): success=$($result.Success) $($result.Xml)" }

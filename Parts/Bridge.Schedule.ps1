@@ -79,7 +79,7 @@ function Get-ScheduleCalendarKeyboard {
     $nav += , (New-BridgeButton -Text 'التالي ▶️' -CallbackData "schcal:$($first.AddMonths(1).ToString('yyyy-MM'))")
     $rows += , @($nav)
     $rows += , @((New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
-    return @{ inline_keyboard = $rows }
+    return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
 function Get-ScheduleHourKeyboard {
@@ -99,7 +99,7 @@ function Get-ScheduleHourKeyboard {
     }
     $rows += , @((New-BridgeButton -Text '◀️ التاريخ' -CallbackData "schcal:$($day.ToString('yyyy-MM'))"),
         (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
-    return @{ inline_keyboard = $rows }
+    return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
 function Get-ScheduleMinuteKeyboard {
@@ -117,7 +117,7 @@ function Get-ScheduleMinuteKeyboard {
     }
     $rows += , @((New-BridgeButton -Text '◀️ الساعة' -CallbackData "schday:$Date"),
         (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
-    return @{ inline_keyboard = $rows }
+    return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
 function Get-ScheduleTimePromptKeyboard {

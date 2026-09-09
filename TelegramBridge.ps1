@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.14.0'
+$script:BridgeVersion = '8.15.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -889,6 +889,10 @@ $script:LastUploadSweep = [datetime]::MinValue
 # snapshots on the dead source until the normal monitor interval elapses.
 $script:LastOutputMonitorAt = [datetime]::MinValue
 $script:OutputBlackAlerted = $false
+# The confirming second look is owed at a moment, not slept through: see
+# Update-OutputBlackWatchdog.
+$script:OutputMonitorConfirmAt = [datetime]::MinValue
+$script:OutputMonitorFirstLuma = 0.0
 $script:OutputMonitorFailureCount = 0
 $script:OutputMonitorFailureAlerted = $false
 $script:OutputMonitorFallbackActive = $false
@@ -918,6 +922,7 @@ $script:RelayState = $script:RuntimeState.Relay
 $script:CancelReasons = @{}
 $script:RecentShowTimes = @{}
 $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
+$script:AnnouncementHistoryMax = 50 # finished notices kept behind the live ones
 $script:QuietHoursQueueMax = 200   # the morning digest is one 4096-char message
 $script:QuietHoursDropped = 0      # oldest notices shed past the cap, reported once
 $script:NewsLockRequest = $null

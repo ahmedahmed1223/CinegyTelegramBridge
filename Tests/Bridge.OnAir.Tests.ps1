@@ -1259,6 +1259,31 @@ Describe 'Main menu on-air priority' {
         }
     }
 
+    It 'leaves a picker grid alone, because a column of dates is not a calendar' {
+        # The regression this pass caused. Moving the one-hand split to send
+        # time made it global, which was the point - and it then reshaped the
+        # screens whose rows carry position. October came out as forty-six
+        # single-button rows, the hour picker as twenty-seven. The code's own
+        # comment says the row a date sits on is how the eye finds it.
+        $original = Get-Setting 'OneHandMode'
+        try {
+            $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $true -Force
+            foreach ($grid in @(
+                    @{ Name = 'calendar'; Keyboard = (Get-ScheduleCalendarKeyboard -Month '2026-10') }
+                    @{ Name = 'hours'; Keyboard = (Get-ScheduleHourKeyboard -Date '2026-10-15') }
+                    @{ Name = 'minutes'; Keyboard = (Get-ScheduleMinuteKeyboard -Date '2026-10-15' -Hour 14) }
+                    @{ Name = 'small range'; Keyboard = (Get-SettingSmallRangeKeyboard -Name 'HeartbeatHour') }
+                )) {
+                $json = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $grid.Keyboard
+                $rows = @(($json | ConvertFrom-Json).inline_keyboard)
+                @($rows | Where-Object { @($_).Count -gt 1 }) | Should -Not -BeNullOrEmpty -Because "the $($grid.Name) grid must keep its rows"
+                # KeepRows is ours; the Bot API has never heard of it.
+                $json | Should -Not -Match 'KeepRows'
+            }
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $original -Force }
+    }
+
     It 'reaches a screen that never applied the one-hand pass itself' {
         # Deliberately not the main menu. Before the pass moved to
         # serialisation this keyboard - and fifty-odd others - ignored the
@@ -2287,5 +2312,58 @@ Describe 'The ticker draft warns before it is thrown away' {
         ((Get-Date) - [datetime]$script:NewsTickerDraft.UpdatedAt).TotalMinutes | Should -BeLessThan 1
         @($script:NewsTickerDraft.PSObject.Properties.Name) | Should -Not -Contain 'WarnedAt'
         $script:Answer | Should -Match 'مُدِّدت'
+    }
+}
+
+
+Describe 'The deferred postbox write is addressed to a scene' {
+    # A SHOW queues its values to be written again PostShowDelayMs later. A
+    # layer can be replaced inside that window, and the write used to be aimed
+    # at the layer alone - so the headline that had just left was written into
+    # the scene that replaced it, and the room read the old text under the new
+    # graphic.
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Error = ''; Xml = '' } }
+        $script:PostShowQueue.Clear()
+        $script:OnAir.Clear()
+    }
+    AfterEach { $script:PostShowQueue.Clear(); $script:OnAir.Clear() }
+
+    It 'writes when the scene it was made for is still on the layer' {
+        $script:OnAir[7] = @{ Key = 'alpha'; ActiveId = '{A}'; At = (Get-Date) }
+        $script:PostShowQueue.Add(@{ At = (Get-Date).AddSeconds(-1); Values = @{ t = 'x' }; Layer = 7; Key = 'alpha'; ActiveId = '{A}' })
+
+        Update-PostShowQueue
+
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly
+    }
+
+    It 'drops the write when another template has taken the layer' {
+        $script:OnAir[7] = @{ Key = 'beta'; ActiveId = '{B}'; At = (Get-Date) }
+        $script:PostShowQueue.Add(@{ At = (Get-Date).AddSeconds(-1); Values = @{ t = 'STALE' }; Layer = 7; Key = 'alpha'; ActiveId = '{A}' })
+
+        Update-PostShowQueue
+
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'drops the write when the same template was re-fired as a new scene' {
+        # Same key, different scene: a re-show is a new animation, and the
+        # values queued for the previous one are not its.
+        $script:OnAir[7] = @{ Key = 'alpha'; ActiveId = '{B}'; At = (Get-Date) }
+        $script:PostShowQueue.Add(@{ At = (Get-Date).AddSeconds(-1); Values = @{ t = 'STALE' }; Layer = 7; Key = 'alpha'; ActiveId = '{A}' })
+
+        Update-PostShowQueue
+
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'drops the write when the layer was hidden before it fired' {
+        $script:PostShowQueue.Add(@{ At = (Get-Date).AddSeconds(-1); Values = @{ t = 'STALE' }; Layer = 7; Key = 'alpha'; ActiveId = '{A}' })
+
+        Update-PostShowQueue
+
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
     }
 }

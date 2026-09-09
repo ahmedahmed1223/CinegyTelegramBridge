@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Cinegy.Tests.ps1 - Cinegy transport, telemetry, and watchdogs.
 
@@ -700,6 +700,9 @@ Describe 'Black output watchdog' {
         $script:OutputMonitorFailureCount = 0
         $script:OutputMonitorFailureAlerted = $false
         $script:OutputMonitorFallbackActive = $false
+        # The confirming look is booked across ticks now, so it has to be
+        # cleared between cases or one test's booking answers the next one.
+        $script:OutputMonitorConfirmAt = [datetime]::MinValue
         Mock Write-BridgeLog {}
         Mock Add-AuditEntry {}
         Mock Send-AdminBroadcast {}
@@ -722,6 +725,11 @@ Describe 'Black output watchdog' {
     It 'alerts only after a second capture confirms the black' {
         Mock Get-BridgeFrameLuminance { 0.5 }
 
+        # Two ticks, because the wait between the looks is no longer slept
+        # through on the control loop - it is booked and honoured later.
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorConfirmAt | Should -BeGreaterThan ([datetime]::MinValue)
+        $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         Should -Invoke Get-BridgeFrameLuminance -Times 2 -Exactly
@@ -735,6 +743,8 @@ Describe 'Black output watchdog' {
         Mock Get-BridgeFrameLuminance { $script:probe++; if ($script:probe -eq 1) { 0.5 } else { 120 } }
 
         Update-OutputBlackWatchdog
+        $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
+        Update-OutputBlackWatchdog
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
@@ -746,13 +756,33 @@ Describe 'Black output watchdog' {
 
         Should -Invoke Get-BridgeFrameLuminance -Times 1 -Exactly
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+        # Nothing booked: a bright output is one reading, not a pair.
+        $script:OutputMonitorConfirmAt | Should -Be ([datetime]::MinValue)
+    }
+
+    It 'books the confirming look instead of sleeping through it' {
+        # The reason for the split. Start-Sleep here held the whole control
+        # loop - auto-hide timers, the schedule, pending expiry and the
+        # heartbeat all waited out a fade.
+        Mock Get-BridgeFrameLuminance { 0.5 }
+        Mock Start-Sleep { throw 'the control loop must not sleep for the confirming look' }
+
+        { Update-OutputBlackWatchdog } | Should -Not -Throw
+
+        $script:OutputMonitorConfirmAt | Should -BeGreaterThan (Get-Date)
+        Should -Invoke Get-BridgeFrameLuminance -Times 1 -Exactly
     }
 
     It 'does not repeat the alert while the output stays black' {
         Mock Get-BridgeFrameLuminance { 0.5 }
 
         Update-OutputBlackWatchdog
+        $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
+        Update-OutputBlackWatchdog
+
         $script:LastOutputMonitorAt = [datetime]::MinValue
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
@@ -760,6 +790,8 @@ Describe 'Black output watchdog' {
 
     It 'reports recovery once the picture comes back' {
         Mock Get-BridgeFrameLuminance { 0.5 }
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         Mock Get-BridgeFrameLuminance { 140 }

@@ -163,6 +163,26 @@ Describe 'Maintenance mode control gate' {
 
     AfterEach { $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $script:OriginalMaintenanceMode -Force }
 
+    It 'still stops the bulletin on a hide it allows' {
+        # The other half of moving the effect below the gate: it must still
+        # happen when the gate opens. A guard that only proves the refusal case
+        # is satisfied by deleting the effect entirely.
+        $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $false -Force
+        Mock Stop-MojazForLayer { }
+        Mock Sync-LayerAfterOperatorAction { }
+        Invoke-HideLayer -Layer 4 -ChatId 10 -UserId 10 | Out-Null
+        Should -Invoke Stop-MojazForLayer -Times 1 -Exactly
+    }
+
+    It 'still stops the bulletin on an exit it allows' {
+        $config.Settings | Add-Member -NotePropertyName MaintenanceMode -NotePropertyValue $false -Force
+        Mock Stop-MojazForLayer { }
+        Mock Sync-LayerAfterOperatorAction { }
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true; Error = '' } }
+        Invoke-ExitLayer -Layer 4 -ChatId 10 -UserId 10 | Out-Null
+        Should -Invoke Stop-MojazForLayer -Times 1 -Exactly
+    }
+
     It 'stops no bulletin for a HIDE it refuses' {
         # The gate and the side effect were the wrong way round: a blocked HIDE
         # sends nothing to Cinegy, yet the bulletin was already stopped, marked

@@ -427,6 +427,13 @@ function Update-OutputBlackWatchdog {
         source glitch all read as black. It therefore confirms with a second
         capture a few seconds later and alerts only if both are black.
     #>
+    # A booked second look comes first, and is not subject to the interval:
+    # the pair belongs to one reading.
+    if ($script:OutputMonitorConfirmAt -gt [datetime]::MinValue) {
+        if ((Get-Date) -lt $script:OutputMonitorConfirmAt) { return }
+        Complete-OutputBlackConfirmation
+        return
+    }
     $intervalMinutes = Get-SettingInt 'OutputMonitorMinutes' 0
     if ($intervalMinutes -le 0) { return }
     $now = Get-Date
@@ -511,8 +518,23 @@ function Update-OutputBlackWatchdog {
         return
     }
 
-    # Confirm before crying wolf: cuts and fades are legitimately black.
-    Start-Sleep -Seconds ([math]::Max(1, (Get-SettingInt 'OutputBlackConfirmSeconds' 1)))
+    # Confirm before crying wolf: cuts and fades are legitimately black - but
+    # the waiting is owed to a clock, not to this thread. Start-Sleep here held
+    # the whole control loop: auto-hide timers, the schedule, pending expiry
+    # and the heartbeat all waited out a fade. The second look is booked for a
+    # moment and taken by whichever tick arrives after it.
+    $script:OutputMonitorFirstLuma = $first
+    $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds([math]::Max(1, (Get-SettingInt 'OutputBlackConfirmSeconds' 1)))
+    return
+}
+
+function Complete-OutputBlackConfirmation {
+    <# The second half of Update-OutputBlackWatchdog, on a later tick. #>
+    $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
+    $threshold = Get-SettingInt 'OutputBlackLuminance' 1
+    $first = [double]$script:OutputMonitorFirstLuma
+    $script:OutputMonitorConfirmAt = [datetime]::MinValue
+
     $secondPath = Get-MonitorFrame -TimeoutSeconds $timeout
     if (-not $secondPath) { return }
     $second = Get-BridgeFrameLuminance -Path $secondPath

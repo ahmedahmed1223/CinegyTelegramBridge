@@ -176,8 +176,27 @@ function New-BridgeAnnouncement {
         Status       = 'active'
     }
     $script:Announcements.Add($announcement)
+    # Finished notices are history, not state: expired and cancelled ones were
+    # kept for ever, and every acknowledgement rewrote the whole list. The live
+    # ones are always kept; the rest are trimmed oldest-first to the cap.
+    Remove-StaleAnnouncements
     Save-BridgeAnnouncements | Out-Null
     return $announcement
+}
+
+function Remove-StaleAnnouncements {
+    <# Keeps every announcement that can still be shown, and at most
+       $script:AnnouncementHistoryMax of the finished ones behind them. #>
+    param([datetime]$Now = (Get-Date))
+    $live = @($script:Announcements | Where-Object { Test-AnnouncementLive -Announcement $_ -Now $Now })
+    $done = @($script:Announcements | Where-Object { -not (Test-AnnouncementLive -Announcement $_ -Now $Now) })
+    if ($done.Count -le $script:AnnouncementHistoryMax) { return 0 }
+    $keep = @($done | Select-Object -Last $script:AnnouncementHistoryMax)
+    $dropped = $done.Count - $keep.Count
+    $script:Announcements.Clear()
+    foreach ($entry in @($live + $keep)) { $script:Announcements.Add($entry) }
+    Write-BridgeLog "Trimmed $dropped finished announcement(s) past the $($script:AnnouncementHistoryMax) kept."
+    return $dropped
 }
 
 function Confirm-AnnouncementRead {

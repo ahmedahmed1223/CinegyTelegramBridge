@@ -53,5 +53,13 @@ BeforeAll {
     # retry and the timeout, whose own tests mock this same command and whose
     # mock wins over this one.
     Mock Invoke-RestMethod -ModuleName BridgeTelegram { throw 'the tests do not talk to Telegram' }
+
+    # And the other way out of the process. A tick test that mocked most of its
+    # steps but not the output monitor spawned a real ffmpeg against the source
+    # URL in config.example.json and waited out its timeout on every run of the
+    # gate. The promise above was only ever enforced for HTTP; this is the same
+    # promise for media. A test that means to exercise the launcher mocks this
+    # itself, and its own mock wins over this one.
+    Mock Start-BridgeMediaProcess -ModuleName BridgeMedia { throw 'the tests do not start media processes' }
 }
 

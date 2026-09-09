@@ -95,6 +95,12 @@ function ConvertTo-TelegramReplyMarkupJson {
     param([Parameter(Mandatory)][hashtable]$ReplyMarkup)
     $markup = $ReplyMarkup
     if ($markup.ContainsKey('inline_keyboard')) { $markup = ConvertTo-OneHandLayout -Keyboard $markup }
+    # KeepRows is a layout instruction to the pass above, not a Bot API field.
+    if ($markup.ContainsKey('KeepRows')) {
+        $plain = @{}
+        foreach ($key in $markup.Keys) { if ($key -ne 'KeepRows') { $plain[$key] = $markup[$key] } }
+        $markup = $plain
+    }
     if ($markup.ContainsKey('inline_keyboard') -and -not (Get-Setting 'EnableButtonStyles')) {
         $rows = @(foreach ($row in @($markup.inline_keyboard)) {
                 , @(foreach ($button in @($row)) {

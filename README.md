@@ -13,6 +13,48 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.15.0
+
+The rest of the audit findings, and a regression this work caused.
+
+Moving the one-hand split to send time in 8.9.0 was right - it made the setting
+reach every screen instead of one. It also reached the screens whose rows carry
+position: the schedule calendar went from nine rows to forty-six, the hour picker
+from six to twenty-seven, the minute picker and the small-range setting grid
+likewise. The code's own comment says the row a date sits on is how the eye finds
+it. No test caught it because the test written at the time measured the main menu
+and action screens, not grids. Those five screens now declare KeepRows, which the
+single serialisation layer honours and strips before sending, and a test measures
+all four pickers.
+
+The deferred postbox write was addressed to a layer, and a layer can be replaced
+inside PostShowDelayMs - so the values of the graphic that had just left were
+written into the one that replaced it. The queue entry now carries the key and
+ActiveId it was made for and is dropped if the layer holds anything else; a hide
+or exit cancels it by the same test rather than by separate machinery.
+
+The black-output check slept on the control loop between its two captures,
+holding auto-hide timers, the schedule, pending expiry and the heartbeat while a
+fade passed. The second look is now booked for a moment and taken by whichever
+tick arrives after it. The capture itself stays synchronous: that was a
+documented, deliberate trade in the code, and reversing it is a restructure
+rather than a line.
+
+Smaller: a failed pre-show clear is logged always rather than only under a debug
+setting - it is the condition that leaves the previous headline on air; finished
+announcements are capped at fifty behind the live ones; and the test context now
+blocks media process launches as it has long blocked the network.
+
+A regression sweep over this session's own changes found the state writers
+round-tripping with their backups, the deleted settings read by nothing, and the
+bulletin still being stopped on an allowed hide - the half that a refusal-only
+guard would not have noticed, since deleting the effect entirely would satisfy
+it. Two tests now hold both halves.
+
+Not done, with the reason: the rich-table guard. Six of twenty-six Get-*Blocks
+functions call Select-RichTableRows, so the guard needs those twenty-six
+classified first or it ships with an exemption list that empties it.
+
 ## Version 8.14.0
 
 The fourth tier of the audit plan: maintenance rather than a visible fault, each

@@ -18,6 +18,12 @@ function ConvertTo-OneHandLayout {
     #>
     param([Parameter(Mandatory)][hashtable]$Keyboard)
     if (-not (Get-Setting 'OneHandMode')) { return $Keyboard }
+    # A grid is not a stack of rows that happen to share a line. In a calendar
+    # the row a date sits on is how the eye finds it, and an hour picker read
+    # as twenty-seven stacked buttons is not a picker at all - moving this pass
+    # to send time turned October into forty-six rows. Those screens say so for
+    # themselves; every other keyboard is still split.
+    if ($Keyboard.ContainsKey('KeepRows') -and $Keyboard.KeepRows) { return $Keyboard }
     $rows = @()
     foreach ($row in @($Keyboard.inline_keyboard)) {
         foreach ($button in @($row)) { $rows += , @($button) }
@@ -2181,7 +2187,7 @@ function Get-SettingSmallRangeKeyboard {
         $rows += , @($buttons[$index..([math]::Min($index + $perRow - 1, $buttons.Count - 1))])
     }
     $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
-    return @{ inline_keyboard = $rows }
+    return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
 function Show-SettingTimePicker {
@@ -2220,7 +2226,7 @@ function Show-SettingTimePicker {
         $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالساعة $('{0:00}' -f $Hour) — اختر الدقيقة:"
     }
     $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
-    $keyboard = @{ inline_keyboard = $rows }
+    $keyboard = @{ inline_keyboard = $rows; KeepRows = $true }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ParseMode HTML -ReplyMarkup $keyboard)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
 }

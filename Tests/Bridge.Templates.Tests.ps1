@@ -1064,6 +1064,23 @@ Describe 'SHOW review gate' {
         Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
     }
 
+    It 'offers the edit button on the review that follows hand-typed fields' {
+        # The button was wired only into the review reached with values already
+        # filled in. Typing the fields by hand - the one route where a typo is
+        # possible - reached a review offering confirm or cancel and nothing else.
+        $script:ReviewButtons = @()
+        Mock Send-TelegramMessage {
+            $script:ReviewButtons = @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        }
+
+        Start-ShowFlow -TemplateIndex 0 -ChatId 50 -UserId 60
+        Resume-ShowFlow -ChatId 50 -Value 'خبر عاجل'
+
+        (Get-PendingState -ChatId 50).Mode | Should -Be 'show_review'
+        $script:ReviewButtons | Should -Contain 'show:edit'
+        $script:ReviewButtons | Should -Contain 'show:confirm'
+    }
+
     It 'reviews a template with no fields instead of sending it immediately' {
         Mock Get-TemplateByIndex {
             [pscustomobject]@{

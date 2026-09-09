@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.18.1
+
+The review screen offers an edit button after the fields are typed by hand.
+It always had one after values arrived ready-made from a preset, and never
+after an operator typed them - the one route where a misspelling is possible
+at all. Getting a typo back cost a cancel and a restart.
+
 ## Version 8.18.0
 
 Six features from a plan that one question to the station reordered.

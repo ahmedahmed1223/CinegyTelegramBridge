@@ -228,7 +228,13 @@ function Resume-ShowFlow {
     if ($state.Index -ge $state.Fields.Count) {
         $state.Mode = 'show_review'
         Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard)
+        # -HasFields, which this path had never passed. The edit button was
+        # offered on the review that follows values arriving ready-made from a
+        # preset, and withheld from the review that follows an operator typing
+        # them by hand - the one path where a typo is possible at all. So the
+        # only way back from a misspelt headline was Cancel and start again.
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML `
+            -ReplyMarkup (Get-ShowReviewKeyboard -HasFields:(@($state.Fields).Count -gt 0))
         return
     }
     Set-PendingState -ChatId $ChatId -State $state

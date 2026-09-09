@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Help.Tests.ps1 - the quick start card, the chapter index, and
     chapter navigation.
@@ -165,12 +165,20 @@ Describe 'The whole manual in one message' {
     }
 
     It 'keeps the administrator chapter out of an operator manual' {
+        # Asserted on what the operator can read, not on how many blocks each
+        # gets. Capping the guide to the payload limit trims from the end for
+        # both roles, so the counts can now match while the content differs -
+        # and the content is the thing that must not leak.
         Mock Test-Admin { $false }
-        $operator = @(Get-HelpRichBlocks -ChatId 202 -UserId 202 | Where-Object { $_.type -eq 'details' })
-        Mock Test-Admin { $true }
-        $admin = @(Get-HelpRichBlocks -ChatId 101 -UserId 101 | Where-Object { $_.type -eq 'details' })
+        $operator = @(Get-HelpRichBlocks -ChatId 202 -UserId 202)
+        $titles = @($operator | Where-Object { $_.type -eq 'details' } | ForEach-Object { [string]$_.summary })
+        $tail = [string](@($operator)[-1].text)
 
-        $operator.Count | Should -BeLessThan $admin.Count
+        foreach ($adminChapter in @('الإعدادات', 'أدوات المشرف', 'من يدخل البوت')) {
+            $titles | Should -Not -Contain $adminChapter
+            # Nor named in the line that lists what was left out.
+            if ($tail) { $tail | Should -Not -Match ([regex]::Escape($adminChapter)) }
+        }
     }
 }
 
@@ -264,5 +272,42 @@ Describe 'The manual covers what the bridge actually grew' {
         # automatic hide is never refused.
         $body | Should -Match 'فارغٌ يعني للجميع'
         $body | Should -Match 'الإخفاء الآلي لا يُمنع'
+    }
+}
+
+
+Describe 'The rich guide fits the message it is sent in' {
+    # It never did. Every chapter at once measured 115% of the payload limit
+    # for an operator and 182% for an administrator, so Send-TelegramRichMessage
+    # refused it every time and the reader always got the paged-text fallback -
+    # the collapsible chapters this screen exists for had not once rendered.
+    # The only sign was one warning line in bridge.log, which AGENTS.md says to
+    # watch after every addition to a rich screen, and which nobody watched.
+    It 'stays under the payload limit for an operator' {
+        Mock Test-Admin { $false }
+        $payload = ConvertTo-RichMessagePayload -Blocks (Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        Test-RichPayloadSize -Length $payload.Length | Should -BeTrue -Because "the operator guide is $($payload.Length) characters"
+    }
+
+    It 'stays under the payload limit for an administrator, who has three more chapters' {
+        Mock Test-Admin { $true }
+        Mock Test-StatusViewer { $true }
+        $payload = ConvertTo-RichMessagePayload -Blocks (Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        Test-RichPayloadSize -Length $payload.Length | Should -BeTrue -Because "the administrator guide is $($payload.Length) characters"
+    }
+
+    It 'names the chapters it had to leave out rather than stopping silently' {
+        Mock Test-Admin { $true }
+        Mock Test-StatusViewer { $true }
+        $blocks = @(Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        $shown = @($blocks | Where-Object { $_.type -eq 'details' } | ForEach-Object { [string]$_.summary })
+        $all = @(Get-HelpChapters -ChatId 101 -UserId 101 | ForEach-Object { [string]$_.Title })
+        if ($shown.Count -lt $all.Count) {
+            $tail = [string](@($blocks)[-1].text)
+            $tail | Should -Match 'بقية الأبواب'
+            foreach ($missing in @($all | Where-Object { $shown -notcontains $_ })) {
+                $tail | Should -Match ([regex]::Escape($missing))
+            }
+        }
     }
 }

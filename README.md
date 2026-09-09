@@ -13,6 +13,43 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.16.0
+
+Inspecting the plans, and what the inspection found.
+
+bridge.log had been carrying this line since the day before, and nobody had
+looked - me first among them: the rich payload for the full guide measured 21861
+characters, 182% of the limit. AGENTS.md says of exactly that line, "watch it
+after every addition"; I added to the help in 8.11 and 8.12 and did not.
+
+Measured today: 115% for an operator, 182% for an administrator. So
+Send-TelegramRichMessage refused the message every single time and the reader
+always fell through to the paged text - the collapsible chapters this screen
+exists for had never once rendered for anyone. Not a loud failure: the fallback
+works and the manual arrives. The feature was simply dead, quietly. My additions
+made it worse rather than causing it; it was over the limit before them.
+
+The guide is now capped by measurement - chapters go in until the next will not
+fit, then a line names the rest, because a manual that stops silently is worse
+than one that says where it continues - and the measurement is linear rather
+than quadratic, the first version having re-serialised the whole growing list per
+chapter and slowed the gate by over a minute.
+
+An existing test failed against this: it compared the administrator's block count
+with the operator's, and the cap trims from the end for both, so the counts can
+now match. The assertion moved to the property that actually matters - no
+administrator chapter title in an operator's copy, nor in the line naming what
+was left out.
+
+The plan itself described a system nine releases old: its header said 8.6.0, and
+its third open item asked for time-based log search in the manager, which arrived
+in 8.7. Its first item had been waiting on a full day of running before measuring
+the notification numbers; three weeks of log (17 August - 9 September) answer it:
+one payload warning in the entire period, for one screen, so every other screen
+stayed under 70% against real station data and the 12000 limit is not tight. The
+held-notice figure remains unmeasured - quiet hours are disabled here and the
+period holds zero holds - and the plan now says so with the numbers.
+
 ## Version 8.15.0
 
 The rest of the audit findings, and a regression this work caused.

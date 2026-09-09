@@ -433,13 +433,38 @@ function Get-HelpRichBlocks {
     param([long]$ChatId = 0, [long]$UserId = 0)
     $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
     $blocks = @(@{ type = 'heading'; text = '📖 دليل الجسر'; size = 3 })
+    # Capped against the payload limit rather than built and hoped for. Every
+    # chapter of this manual at once came to 115% of the limit for an operator
+    # and 182% for an administrator, so the rich send failed every time and the
+    # reader always got the paged-text fallback: the collapsible chapters this
+    # function exists to produce had never once rendered, and the only sign was
+    # a warning line in bridge.log. Chapters go in until the next one would not
+    # fit; the rest are named, because a manual that silently stops is worse
+    # than one that says where it continues.
+    $skipped = @()
+    $used = (ConvertTo-RichMessagePayload -Blocks $blocks).Length
     foreach ($chapter in $chapters) {
         $body = @(@($chapter.Body) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
                 ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
         # A details block with nothing in it renders as a control that opens
         # onto blank space, which reads as a chapter that failed to load.
         if ($body.Count -eq 0) { continue }
-        $blocks += @{ type = 'details'; summary = [string]$chapter.Title; blocks = $body }
+        # Measured per chapter and accumulated, not by re-serialising the whole
+        # growing list each time round: that was quadratic, and it showed - the
+        # gate slowed by more than a minute on a screen nobody had complained
+        # about. Room is kept back for the closing line that names what was
+        # left out.
+        $entry = @{ type = 'details'; summary = [string]$chapter.Title; blocks = $body }
+        $entryLength = (ConvertTo-RichMessagePayload -Blocks @($entry)).Length
+        if ($skipped.Count -eq 0 -and (Test-RichPayloadSize -Length ($used + $entryLength + 400))) {
+            $blocks += $entry
+            $used += $entryLength
+            continue
+        }
+        $skipped += [string]$chapter.Title
+    }
+    if ($skipped.Count -gt 0) {
+        $blocks += @{ type = 'paragraph'; text = "📚 وبقية الأبواب في الفهرس: $($skipped -join ' · ')" }
     }
     return $blocks
 }

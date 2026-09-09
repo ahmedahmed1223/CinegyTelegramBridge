@@ -285,6 +285,23 @@ function Format-ShowReviewText {
             $lines.Add("$(ConvertTo-TelegramHtmlText $label): <i>(متروك)</i>")
         }
     }
+    # Advisory, and last, so it never sits between the operator and the copy
+    # they came to read. Nothing here blocks: the confirm button below is
+    # live whatever this says, because a breaking headline held back over a
+    # name no checker knows is worse than the typo.
+    if (Get-Setting 'EnableTextChecks') {
+        $notes = @(foreach ($name in @($State.Fields)) {
+                if (-not $State.Values.ContainsKey($name)) { continue }
+                foreach ($warning in @(Get-BridgeTextWarnings -Text ([string]$State.Values[$name]))) {
+                    "• $(ConvertTo-TelegramHtmlText $warning)"
+                }
+            })
+        if ($notes.Count -gt 0) {
+            $lines.Add("")
+            $lines.Add("<b>✍️ تنبيهات إملائية</b> (إرشادية — لا تمنع الإرسال):")
+            foreach ($note in @($notes | Select-Object -Unique -First 6)) { $lines.Add($note) }
+        }
+    }
     $lines.Add("")
     $lines.Add("<i>لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.</i>")
     return ($lines -join "`n")

@@ -143,6 +143,13 @@ function Get-MainMenuKeyboard {
     }
     $rows += , $statusRow
 
+    # The channel's own material and the shift change, both optional because a
+    # station that does neither should not carry the buttons.
+    $shiftRow = @()
+    if (Get-Setting 'EnableMaterialSchedule') { $shiftRow += (New-Button '🎞 جدول المواد' 'menu:material') }
+    if (Get-Setting 'EnableShiftHandover') { $shiftRow += (New-Button '🤝 تسليم' 'menu:handover') }
+    if ($shiftRow.Count -gt 0) { $rows += , $shiftRow }
+
     if (Get-Setting 'EnableFavorites') {
         # @() is mandatory, not decoration: a PowerShell function that returns
         # an empty array emits ZERO objects, so an unwrapped assignment yields

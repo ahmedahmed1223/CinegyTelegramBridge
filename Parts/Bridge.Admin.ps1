@@ -136,6 +136,122 @@ function Get-AirMaterialNowNext {
     return ($parts -join "`n")
 }
 
+function Show-MaterialScheduleScreen {
+    <#
+        What the channel is scheduled to play today.
+
+        The bridge could always say what IT put on air and nothing about the
+        material underneath, so an operator deciding whether a moment suited a
+        strap opened Cinegy to find out. This is that list, with the item now
+        playing marked.
+
+        Trimmed like every table here: twenty-four items was a measured day on
+        this station, and a day is not every day.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $keyboard = @{ inline_keyboard = @(, @((New-Button '🔄 تحديث' 'menu:material'), (New-Button '⬅️ القائمة' 'menu'))) }
+    if (-not $schedule.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ تعذّر قراءة جدول المواد من القناة.' -ReplyMarkup $keyboard
+        return
+    }
+    $items = @($schedule.Items)
+    if ($items.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد مواد مجدولة على القناة.' -ReplyMarkup $keyboard
+        return
+    }
+    $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $activeId = [string]$status.ActiveId
+
+    $trimmed = Select-RichTableRows -Items $items
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🎞 جدول المواد</b>')
+    foreach ($item in @($trimmed.Rows)) {
+        $bare = ([string]$item.Id).Trim('{', '}')
+        $mark = if ($bare -eq $activeId) { '▶️' } else { '•' }
+        $lines.Add("$mark <code>$($item.ScheduledAt.ToLocalTime().ToString('HH:mm'))</code> $(ConvertTo-TelegramHtmlText ([string]$item.Name))")
+    }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $lines.Add($note) }
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
+}
+
+function Show-ShiftHandoverScreen {
+    <#
+        Everything a shift change needs, on one screen.
+
+        Asked how handovers happen here, the station said shifts exist but the
+        handover is usually spoken - which is exactly where what nobody
+        mentions gets lost. This does not replace the conversation; it gives it
+        a checklist and leaves a record.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🤝 تسليم المناوبة</b>')
+    $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code>")
+
+    $material = Get-AirMaterialNowNext
+    if ($material) { $lines.Add(''); $lines.Add($material) }
+
+    $lines.Add('')
+    if ($script:OnAir.Count -eq 0) { $lines.Add('🟢 لا شيء من الجسر على الهواء.') }
+    else {
+        $lines.Add('<b>🔴 على الهواء الآن</b>')
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $record = $script:OnAir[$layer]
+            $since = ''
+            $at = Get-JsonProp $record 'At'
+            if ($at) {
+                $stamp = [datetime]::MinValue
+                if ([datetime]::TryParse([string]$at, [ref]$stamp)) {
+                    $since = " · منذ $(Format-Duration -Seconds ([int]((Get-Date) - $stamp).TotalSeconds))"
+                }
+            }
+            $who = [long](Get-JsonProp $record 'UserId')
+            $byText = if ($who -gt 0) { " · $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $who))" } else { '' }
+            $lines.Add("• طبقة $layer · $(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $record 'Key')))$since$byText")
+        }
+    }
+
+    $upcoming = @(Get-UpcomingScheduleEvents | Select-Object -First 5)
+    $lines.Add('')
+    if ($upcoming.Count -eq 0) { $lines.Add('📅 لا مواعيد قادمة.') }
+    else {
+        $lines.Add('<b>📅 المواعيد القادمة</b>')
+        foreach ($entry in $upcoming) {
+            $at = [datetimeoffset]$entry.ScheduledAt
+            $lines.Add("• <code>$($at.ToLocalTime().ToString('MM-dd HH:mm'))</code> $(ConvertTo-TelegramHtmlText ([string]$entry.TemplateKey))")
+        }
+    }
+
+    # Drafts belong here more than anywhere. A half-written headline in
+    # somebody else's chat is invisible to the person taking over, and it will
+    # swallow their next message if they inherit the handset.
+    $drafts = @(foreach ($chat in @($script:PendingState.Keys)) {
+            $state = $script:PendingState[$chat]
+            if ([string]$state.Mode -notin @('show_fields', 'show_review')) { continue }
+            "• $(ConvertTo-TelegramHtmlText ([string]$state.Key)) · $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId ([long](Get-JsonProp $state 'UserId'))))"
+        })
+    $lines.Add('')
+    if ($drafts.Count -gt 0) {
+        $lines.Add('<b>✍️ مسودات مفتوحة</b>')
+        foreach ($draft in $drafts) { $lines.Add($draft) }
+    }
+    else { $lines.Add('✍️ لا مسودات مفتوحة.') }
+
+    $lines.Add('')
+    $lines.Add('<i>راجع القائمة مع من يستلم، ثم اضغط «سلّمت» ليُسجَّل.</i>')
+    $keyboard = @{ inline_keyboard = @(
+            , @((New-Button '✅ سلّمت المناوبة' 'handover:done' -Style success))
+            , @((New-Button '🔄 تحديث' 'menu:handover'), (New-Button '⬅️ القائمة' 'menu'))
+        ) }
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
+}
+
 function Get-StatusRichBlocks {
     <#
         A status screen as blocks: the verdict, what is on air, and the

@@ -13,6 +13,54 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.18.0
+
+Six features from a plan that one question to the station reordered.
+
+The roadmap was ranked by what could be measured in the code. Then the station
+was asked what had actually gone wrong on air last, and answered: a graphic
+stayed up and was never taken down. None of the top three candidates addressed
+that, so it went first.
+
+The alert for exactly that failure existed and still allowed it, because it fired
+once, to administrators, with no button - whoever missed it missed it for good.
+It now escalates on a widening interval while the record survives, goes to the
+operator who published the graphic rather than only to administrators, and
+carries the hide button on the notice itself.
+
+The bridge knew what it had put on air and nothing about the programme
+underneath. Two read-only calls answer that, both measured against the live
+channel before a line was written: the status screen names what is playing with
+minutes remaining and what is cued next, a material screen shows the channel day
+with the current item marked, and a handover screen gathers what a shift change
+needs - what is on air and since when and who published it, the upcoming
+schedule, the current programme, and the open drafts with their owners named -
+then records the handover. The station said shifts exist and the handover is
+usually spoken, which is where what nobody mentions gets lost.
+
+Spell checking arrives under two constraints: the text never leaves the network,
+and it never blocks - a breaking headline held back over a proper noun is worse
+than the typo. Shape errors need no vocabulary. The second level, "the station
+has never written this word", flagged ordinary Arabic on its first build, so the
+two lists were given separate jobs: an embedded 422-word Arabic core suppresses,
+and the station own vocabulary qualifies, waking the check only once the newsroom
+has written five hundred real words. Clitic stripping reads the common prefixes
+and suffixes back to their stems.
+
+A failed output capture now names which link looks broken - channel, relay or
+source - rather than reporting the symptom. Every check is read-only; SetOutput
+changes what goes to air and is never sent.
+
+The proxy warning was measured before it was built: twenty-two of twenty-four
+scheduled items carry no local copy, so reading from source is normal here and an
+always-on alert would fire on nearly everything. It ships off, as an
+administrator option, and distinguishes no copy from a transfer stopped part way.
+
+The repository stopped this work four times: the paging guard twice, both
+answered with a written reason rather than a workaround; the analyzer on an empty
+catch block, in a tree that had none; and an existing test broken by the new
+failure message, which was fixed rather than worked around.
+
 ## Version 8.17.0
 
 The rich-table guard, after the classification that was its precondition.

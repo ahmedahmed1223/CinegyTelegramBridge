@@ -69,6 +69,8 @@ Describe 'Every screen built from a growing list is paged' {
             'Update-PendingExpiry'              = 'not a keyboard builder; its one row is the extend button on the expiry warning'
             'Invoke-CallbackQuery'              = 'the callback switch, which delegates to the builders above'
             'Update-StaleOnAirWatchdog'         = 'one hide button per stale layer, and a channel has nine graphics layers'
+            'Show-MaterialScheduleScreen'       = 'a fixed refresh-and-back keyboard; the loop builds text, trimmed by Select-RichTableRows and paged by Send-TelegramPagedText'
+            'Show-ShiftHandoverScreen'          = 'a fixed keyboard of three buttons; the loops build text, paged by Send-TelegramPagedText'
         }
 
         # Rich-table screens whose rows are a fixed list rather than the

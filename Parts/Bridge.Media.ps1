@@ -551,16 +551,71 @@ function Complete-OutputBlackConfirmation {
     Send-OutputBlackNotification -Luminance $second
 }
 
-function Send-OutputMonitorFailureNotification {
-    <# Reports a sustained inability to capture the configured output source,
-       separately from the confirmed-black picture alarm. #>
-    param([int]$FailureCount = 0, [switch]$Recovered)
-    $text = if ($Recovered) {
-        '💡 عاد الوصول إلى مخرج البث بعد تعذّر التقاطه.'
+function Get-OutputFailureDiagnosis {
+    <#
+        Which link in the chain looks broken, not merely that something is.
+
+        "تعذّر الوصول إلى مخرج البث" names a symptom and leaves the reader to
+        work out where to start, at the moment they have least patience for
+        it. There are three candidates and the bridge can already see all
+        three: the channel itself, the relay process that republishes it, and
+        the source it is reading.
+
+        Every check here is read-only. SetOutput would change what goes to
+        air and is never sent from the bridge.
+
+        Returns the lines to append, in the order a person would check them.
+    #>
+    $lines = @()
+
+    # The channel first. A deliberate Black or Bypass is a working channel
+    # with nothing to show, which reads identically to a dead one on a
+    # captured frame - and is the single most common false alarm here.
+    $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $status.Success) {
+        $lines += '• القناة: لا تُجيب — ابدأ من Cinegy Air نفسه.'
+    }
+    elseif ($status.OutputState -and $status.OutputState -ne 'Normal') {
+        $lines += "• القناة: تُجيب، ومخرجها مضبوط على <b>$(ConvertTo-TelegramHtmlText $status.OutputState)</b> — أي أنّ السواد مقصود لا عطل."
     }
     else {
-        "⚠️ تعذّر الوصول إلى مخرج البث بعد $FailureCount محاولات متتالية.`nتحقّق من رابط المصدر وخادم البث."
+        $lines += '• القناة: تُجيب ومخرجها طبيعي.'
     }
+
+    # Then the relay, when one is meant to be running: an ffmpeg that died is
+    # a break the operator can fix without touching playout.
+    if ($script:RelayState.ShouldRun) {
+        $running = Get-RunningRelayProcess
+        $lines += if ($running) { '• الترحيل: يعمل.' } else { '• الترحيل: مطلوب تشغيله لكنه غير عامل — أعد تشغيل البث المباشر.' }
+    }
+
+    # And the source last, because it is the one the bridge cannot test
+    # without another capture - but it can say which source it was using,
+    # which is the question that follows.
+    $active = Get-ActiveLiveStreamConfig
+    $label = Get-SnapshotSourceLabel -SourceIsPrimary (-not $script:OutputMonitorFallbackActive)
+    if ([string]::IsNullOrWhiteSpace([string]$active.SourceUrl)) {
+        $lines += '• المصدر: غير مضبوط في الإعدادات.'
+    }
+    else {
+        $lines += "• المصدر المستعمل: $label — تحقّق من خادمه وشبكته."
+    }
+    return $lines
+}
+
+function Send-OutputMonitorFailureNotification {
+    <# Reports a sustained inability to capture the configured output source,
+       separately from the confirmed-black picture alarm. Names the suspect
+       link rather than the symptom: see Get-OutputFailureDiagnosis. #>
+    param([int]$FailureCount = 0, [switch]$Recovered)
+    if ($Recovered) {
+        Send-AdminBroadcast -Text '💡 عاد الوصول إلى مخرج البث بعد تعذّر التقاطه.' -Urgent
+        return
+    }
+    $diagnosis = @(Get-OutputFailureDiagnosis)
+    $text = "⚠️ <b>تعذّر الوصول إلى مخرج البث</b> بعد $FailureCount محاولات متتالية.`n" +
+        ($diagnosis -join "`n")
     Send-AdminBroadcast -Text $text -Urgent
 }
 

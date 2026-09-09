@@ -715,6 +715,10 @@ Describe 'Black output watchdog' {
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'OutputBlackConfirmSeconds' }
         Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+        # The failure notice now names which link looks broken, and that check
+        # reads a timeout of its own.
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'CinegyMonitorTimeoutSeconds' }
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = ''; CuedId = ''; OutputState = 'Normal'; Error = '' } }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NotifyOperatorsOnBlackOutput' }
     }
 
@@ -1178,5 +1182,66 @@ Describe 'Material due without a local copy' {
         $script:RuntimeState.Monitoring.LastMaterialProxyCheck = [datetime]::MinValue
         Update-MaterialProxyWatchdog
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+}
+
+
+Describe 'Advisory text checks before air' {
+    # Advisory, never blocking. A breaking headline held back over a proper
+    # noun no checker knows is worse than the typo it guarded against.
+    It 'names the shapes a phone keyboard produces' {
+        $warnings = @(Get-BridgeTextWarnings -Text 'الرئيييس  يفتتح,المعرض 2026')
+        ($warnings -join ' ') | Should -Match 'حرف مكرّر'
+        ($warnings -join ' ') | Should -Match 'مسافتان'
+        ($warnings -join ' ') | Should -Match 'ترقيم'
+        ($warnings -join ' ') | Should -Match 'أرقام لاتينية'
+    }
+
+    It 'says nothing about ordinary Arabic' {
+        # The first build flagged الرئيس and اجتماع on a fresh install, which
+        # is noise wearing the costume of a warning.
+        Get-BridgeTextWarnings -Text 'الرئيس يفتتح المعرض اليوم' | Should -BeNullOrEmpty
+    }
+
+    It 'reads a word through what Arabic glues to it' {
+        # A stem list cannot match والرئيس or بالوزير without this.
+        foreach ($form in @('والرئيس', 'بالوزير', 'للحكومة')) {
+            Test-BridgeWordKnown -Word $form -Lexicon ([System.Collections.Generic.HashSet[string]]::new()) | Should -BeTrue -Because "$form strips to a core word"
+        }
+    }
+
+    It 'stays silent on unfamiliar words until the station has written enough' {
+        # The core list suppresses; the station's own words qualify. Below the
+        # threshold "you have never written this" carries no information, and
+        # a test fixture has written nothing.
+        @(Get-BridgeTextWarnings -Text 'زيارة الوفد الى مدينة فلانتينوس') |
+            Where-Object { $_ -match 'لم تكتبها' } | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Naming which link broke' {
+    # "تعذّر الوصول إلى مخرج البث" names a symptom and leaves the reader to
+    # work out where to start, at the moment they have least patience for it.
+    BeforeEach { Mock Write-BridgeLog { } }
+
+    It 'says the black was deliberate when the channel says so' {
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = 'x'; CuedId = ''; OutputState = 'Black'; Error = '' } }
+        (@(Get-OutputFailureDiagnosis) -join ' ') | Should -Match 'مقصود'
+    }
+
+    It 'starts at Cinegy when the channel does not answer at all' {
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $false; ActiveId = ''; CuedId = ''; OutputState = ''; Error = 'down' } }
+        (@(Get-OutputFailureDiagnosis) -join ' ') | Should -Match 'لا تُجيب'
+    }
+
+    It 'names the relay when one is meant to be running and is not' {
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = 'x'; CuedId = ''; OutputState = 'Normal'; Error = '' } }
+        Mock Get-RunningRelayProcess { $null }
+        $original = $script:RelayState.ShouldRun
+        try {
+            $script:RelayState.ShouldRun = $true
+            (@(Get-OutputFailureDiagnosis) -join ' ') | Should -Match 'الترحيل'
+        }
+        finally { $script:RelayState.ShouldRun = $original }
     }
 }

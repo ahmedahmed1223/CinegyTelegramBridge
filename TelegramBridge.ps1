@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.17.0'
+$script:BridgeVersion = '8.18.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -295,6 +295,9 @@ $script:DefaultSettings = [ordered]@{
     # twenty-four scheduled items carry no local copy, so an always-on alert
     # would fire on nearly everything and teach people to ignore it. On for a
     # station that expects its material to be local before air.
+    EnableTextChecks           = $true   # advisory typo hints on the review screen; never blocks
+    EnableMaterialSchedule     = $true   # the channel's own material list in the menu
+    EnableShiftHandover        = $true   # one screen a shift change needs
     NotifyAdminsOnMissingProxy = $false
     MaterialProxyLeadMinutes   = 30      # how long before air the local copy is checked
     OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
@@ -400,6 +403,9 @@ $script:SettingDisplayMetadata = @{
     OneHandMode = @{ Unit = ''; Description = 'زر واحد بعرض الشاشة في كل صف (استخدام بيد واحدة)' }
     EnableTextShortcuts = @{ Unit = ''; Description = 'كتابة اسم القالب مباشرة لبدء عرضه' }
     OutputMonitorMinutes = @{ Unit = 'دقيقة'; Description = 'الفاصل بين فحوص صورة المخرج (0 للتعطيل)' }
+    EnableTextChecks = @{ Unit = ''; Description = 'تنبيهات إملائية إرشادية في شاشة المراجعة قبل النشر — لا تمنع النشر أبدًا' }
+    EnableMaterialSchedule = @{ Unit = ''; Description = 'زر جدول المواد في القائمة: ما يبثّه الجهاز اليوم بمواعيده' }
+    EnableShiftHandover = @{ Unit = ''; Description = 'زر التسليم: شاشة واحدة تجمع ما يحتاجه تبديل المناوبة' }
     NotifyAdminsOnMissingProxy = @{ Unit = ''; Description = 'تنبيه المشرفين إن قاربت مادة موعدها ولا نسخة محلية لها على السيرفر — عندها تُقرأ من المصدر أثناء البثّ' }
     MaterialProxyLeadMinutes = @{ Unit = 'دقيقة'; Description = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية' }
     OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
@@ -1005,6 +1011,14 @@ $script:StaleOnAirEscalationMinutes = @(15, 30)
 # Material ids already reported as lacking a local copy, so one item is not
 # announced on every tick of its lead window.
 $script:MaterialProxyAlerted = [System.Collections.Generic.HashSet[string]]::new()
+# The station's own vocabulary, rebuilt at most once a minute. See
+# Get-BridgeStationLexicon.
+$script:StationLexicon = $null
+$script:StationLexiconAt = [datetime]::MinValue
+# The station's OWN words, not counting the embedded core list. Below this the
+# newsroom has not written enough for "never written before" to mean anything,
+# so that check stays silent and the shape checks carry the screen alone.
+$script:StationLexiconMinimum = 500
 $script:HealthHistory = @{
     Telegram = @{ LastSuccess = $null; LastError = ''; LastErrorAt = $null; FailureCount = 0; OutageStartedAt = $null; AlertSent = $false }
     # PendingState/PendingCount hold a verdict that has not been confirmed by
@@ -1147,7 +1161,8 @@ foreach ($entry in @(
             ) },
         @{ Category = 'monitoring'; Names = @(
                 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
-                'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes',
+                'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes', 'EnableTextChecks',
+                'EnableMaterialSchedule', 'EnableShiftHandover',
                 'OutputBlackLuminance', 'OutputBlackConfirmSeconds',
                 'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
                 'TelegramPollMarginSeconds', 'TelegramPollTimeoutTolerance',
@@ -1334,6 +1349,9 @@ $script:SettingNavigationLabels = @{
     OutputBlackLuminance = 'حد سطوع السواد'
     OutputMonitorFailureAlertThreshold = 'حد تنبيه فشل الالتقاط'
     OutputMonitorMinutes = 'فاصل مراقبة المخرج'
+    EnableTextChecks = 'التنبيهات الإملائية'
+    EnableMaterialSchedule = 'شاشة جدول المواد'
+    EnableShiftHandover = 'شاشة تسليم المناوبة'
     NotifyAdminsOnMissingProxy = 'تنبيه المادة بلا نسخة محلية'
     MaterialProxyLeadMinutes = 'مهلة فحص النسخة المحلية'
     PendingApprovalExpiryHours = 'صلاحية طلب الوصول'

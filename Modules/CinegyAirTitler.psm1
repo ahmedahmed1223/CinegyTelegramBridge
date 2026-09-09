@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     CinegyAirTitler.psm1
 
@@ -551,4 +551,109 @@ function Get-CinegySceneCapabilities {
 
 # ConvertTo-XmlSafeValue is an implementation detail. Tests exercise it inside the
 # module scope so importing the module exposes only its supported commands.
-Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus, Get-CinegySceneCapabilities
+function ConvertFrom-AirItemNode {
+    <# One <Item/> from a video list, as something the screens can use.
+
+       Durations arrive as "01:00:00.040" and moments as UTC with a Z; both are
+       parsed here rather than in every caller, and an unparsable one yields a
+       zero rather than throwing - a schedule with one malformed row is still
+       worth showing. #>
+    param([Parameter(Mandatory)]$Node)
+    $scheduled = [datetimeoffset]::MinValue
+    [void][datetimeoffset]::TryParse([string]$Node.GetAttribute('ScheduledAt'), [ref]$scheduled)
+    $duration = [timespan]::Zero
+    [void][timespan]::TryParse([string]$Node.GetAttribute('Duration'), [ref]$duration)
+    $progress = 0
+    [void][int]::TryParse([string]$Node.GetAttribute('ProxyProgress'), [ref]$progress)
+    return [pscustomobject]@{
+        Id = [string]$Node.GetAttribute('Id')
+        Name = [string]$Node.GetAttribute('Name')
+        ScheduledAt = $scheduled
+        Duration = $duration
+        LoopStart = ([string]$Node.GetAttribute('LoopStart')) -match '^(?i:y|yes|true|1)$'
+        ProxyProgress = $progress
+    }
+}
+
+function Get-AirVideoStatus {
+    <#
+        .SYNOPSIS
+        What the channel is playing now, and what it has cued next.
+
+        .DESCRIPTION
+        The bridge has always known what IT put on air and nothing about the
+        programme running underneath, so an operator opened Cinegy to find out
+        which item was playing. The video device answers both in one read.
+
+        Unlike the graphics layers, whose Cued id is a null guid in this
+        workflow, /video/status carries real ids for both - so "on now" and
+        "next up" are answerable. Ids are returned bare; matching them to names
+        is the caller's job via Get-AirMaterialSchedule.
+
+        A failed request returns Success = $false with everything else empty,
+        never a guess.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [int]$TimeoutSec = 10
+    )
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/video/status"
+    try {
+        $xml = [xml](Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing).Content
+        $empty = '00000000-0000-0000-0000-000000000000'
+        $read = {
+            param($Path)
+            $node = $xml.SelectSingleNode($Path)
+            if (-not $node) { return '' }
+            $id = ([string]$node.GetAttribute('Id')).Trim().Trim('{', '}')
+            if ($id -eq $empty) { return '' }
+            return $id
+        }
+        $outputNode = $xml.SelectSingleNode('/Status/Output')
+        return [pscustomobject]@{
+            Success = $true
+            ActiveId = [string](& $read '/Status/Active')
+            CuedId = [string](& $read '/Status/Cued')
+            OutputState = if ($outputNode) { [string]$outputNode.GetAttribute('State') } else { '' }
+            Error = ''
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; ActiveId = ''; CuedId = ''; OutputState = ''; Error = [string]$_.Exception.Message }
+    }
+}
+
+function Get-AirMaterialSchedule {
+    <#
+        .SYNOPSIS
+        The channel playout schedule - the programmes, not the graphics.
+
+        .DESCRIPTION
+        GET /video/list returns the material Cinegy holds for the channel with
+        the time each is due, its duration, and how far its proxy has been
+        built. Measured on a live channel at twenty-four items in about four
+        and a half kilobytes for a full day, which is small - but a holiday
+        schedule is not this one, so callers still page or trim before putting
+        it on a screen.
+
+        Ids match those in Get-AirVideoStatus, which is how "on now" gets a
+        name instead of a guid.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AirServerAddress,
+        [Parameter(Mandatory)][int]$AirChannelNumber,
+        [int]$TimeoutSec = 10
+    )
+    $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/video/list"
+    try {
+        $xml = [xml](Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing).Content
+        $items = @(foreach ($node in @($xml.SelectNodes('/List/Item'))) { ConvertFrom-AirItemNode -Node $node })
+        return [pscustomobject]@{ Success = $true; Items = @($items | Sort-Object ScheduledAt); Error = '' }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; Items = @(); Error = [string]$_.Exception.Message }
+    }
+}
+
+Export-ModuleMember -Function Set-AirLayerDeviceMap, Resolve-AirGfxDevice, Send-AirCommand, Show-TitlerTemplate, Hide-TitlerTemplate, Exit-TitlerScene, Send-PostboxValues, Get-TitlerLayerStatus, Get-AirTelemetryStatus, Get-CinegySceneCapabilities, Get-AirVideoStatus, Get-AirMaterialSchedule

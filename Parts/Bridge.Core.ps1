@@ -348,6 +348,223 @@ function Get-LayerDisplayName {
 # rows keeps any table an order of magnitude below the limit.
 $script:RichTableMaxRows = 40
 
+# A small core of Arabic the newsroom writes every day: function words,
+# dates, the verbs a wire story is built from, the institutions, the places
+# this station covers. Not a dictionary - a full Arabic one is hundreds of
+# thousands of surface forms because of the morphology, and shipping that into
+# a broadcast bridge buys accuracy nobody asked for at a cost everybody pays.
+#
+# It exists to answer the cold-start problem: without it the check flagged
+# الرئيس and اجتماع on a fresh install, which is noise wearing the costume of a
+# warning. Paired with Remove-ArabicClitics below it covers the ordinary
+# sentence and leaves the unusual word - which is the one worth a second look.
+$script:ArabicCoreWordsSeed = @'
+    أبريل أخبار أربعة أسبوع أسعار أسواق أشار أشارت أضاف أضافت أعلن أعلنت
+    أغسطس أفاد أفادت أكتوبر أكد أكدت ألف ألمانيا أم أمريكا أمس أمسية
+    أمطار أن أنا أنت أنتم أهداف أو أوضح أوضحت أولئك إحصائية إذ
+    إذا إسبانيا إصابات إصابة إطلاق إغاثة إلى إن إيران إيطاليا اتفاق اتفاقية
+    اثنان اجتماع ارتفع ارتفعت استثمار استمر استمرت اشتباك اشتباكات الآن الأحد الأحمر
+    الأربعاء الأردن الأرض الأزمة الأمم الأمن الأمين الأوروبي الأوضاع الإثنين الإعلام الإمارات
+    الاتحاد الاقتصاد البحرين البرلمان التطورات التعليم التقت التقى التي الثلاثاء الجامعة الجزائر
+    الجمعة الجيش الحكومة الخارجية الخليل الخميس الداخلية الدفاع الذي الذين الرئاسة الرئيس
+    الرسمي الزراعة السبت السعودية السفارة السفير السودان الشرطة الصحة الصليب الصومال الصين
+    الضفة العام العراق العربية القدس القدم القوات القيادة الكويت اللاتي اللجنة الله
+    المالية المتحدة المتحدث المجلس المدني المسؤول المسؤولون المستجدات المغرب الميدان النار الناطق
+    الهلال الوزراء الوزير الوضع الوفد اليمن اليوم انتهت انتهى انخفض انخفضت بث
+    بدأ بدأت بريطانيا بطولة بعد بعض بل بيان بين تجارة تركيا تسعة
+    تصريح تصعيد تغطية تقرير تكون تلك تونس ثانية ثلاثة ثم ثمانية جامعة
+    جرحى جريح جميع جنين جولة جيبوتي حتى حرارة حول حيث خانيونس خبر
+    خسارة خطاب خلال خمسة دراسة درجة دعا دعت دقيقة دوري دولار دون
+    ديسمبر ذكر ذكرت ذلك رام رسالة رفح رفض رفضت روسيا رياح زاد
+    زادت زيارة ساعة سبتمبر سبعة ستة سجل سجلت سنة سوريا سوق سوى
+    شهد شهداء شهدت شهر شهيد صباح ضحايا ضمن طالب طالبت طقس طولكرم
+    عاجل عاصفة عام عدوان عشرة على عمان عملة عن عند غادر غادرت
+    غارة غدا غزة غير فبراير فرنسا فريق فلسطين فوز في قال قالت
+    قبل قتلى قد قرار قرارات قصف قطر قمة كان كانت كرة كشف
+    كشفت كل كلمة لا لاجئ لاجئون لاعب لبنان لدى لقاء لقد لكن
+    لم لن ليبيا ليس ليست ليل مؤتمر مئة مئوية ما مارس مايو
+    مباحثات مباراة مباشر مجلس محادثات مخيم مدرب مدرسة مراسل مراسلنا مساء مساعدات
+    مستشفى مشاريع مشروع مصر مع مفاوضات مفقود مفقودون مليار مليون من منتخب
+    مندوب منذ منظمة موجز موريتانيا نابلس نازحون نتائج نحن نحو نزوح نشرة
+    نهار نوفمبر هؤلاء هدف هدنة هذا هذه هم هن هنا هناك هو
+    هي واحد وافق وافقت وصل وصلت وقف يكون يناير يوليو يوم يونيو
+'@.Split([char[]]" `t`r`n", [StringSplitOptions]::RemoveEmptyEntries)
+
+# Both forms of every ال- word. The list is written the way a newsroom writes
+# it, and Remove-ArabicClitics strips ال off the text it is checking - so
+# without the bare stem here, للحكومة reduces to حكومة and matches nothing.
+$script:ArabicCoreWords = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($coreWord in $script:ArabicCoreWordsSeed) {
+    [void]$script:ArabicCoreWords.Add($coreWord)
+    if ($coreWord.Length -gt 4 -and $coreWord.StartsWith('ال')) { [void]$script:ArabicCoreWords.Add($coreWord.Substring(2)) }
+}
+
+function Remove-ArabicClitics {
+    <#
+        The word without what Arabic glues to it.
+
+        A list of stems cannot match والرئيس or بالمستشفى or اجتماعهم, and
+        stripping the handful of clitics that attach to almost everything
+        turns one modest core list into a much larger effective one. Returns
+        the candidates in order, longest strip last, so a caller stops at the
+        first hit.
+    #>
+    param([Parameter(Mandatory)][string]$Word)
+    $forms = [System.Collections.Generic.List[string]]::new()
+    $forms.Add($Word)
+    $prefixes = @('وال', 'فال', 'بال', 'كال', 'لل', 'ال', 'و', 'ف', 'ب', 'ك', 'ل', 'س')
+    $suffixes = @('هما', 'هنّ', 'كما', 'هم', 'هن', 'ها', 'كم', 'كن', 'نا', 'ية', 'ه', 'ك', 'ي', 'ا', 'ت', 'ن')
+    foreach ($prefix in $prefixes) {
+        if ($Word.Length -gt ($prefix.Length + 2) -and $Word.StartsWith($prefix)) {
+            $stem = $Word.Substring($prefix.Length)
+            $forms.Add($stem)
+            foreach ($suffix in $suffixes) {
+                if ($stem.Length -gt ($suffix.Length + 2) -and $stem.EndsWith($suffix)) { $forms.Add($stem.Substring(0, $stem.Length - $suffix.Length)) }
+            }
+        }
+    }
+    foreach ($suffix in $suffixes) {
+        if ($Word.Length -gt ($suffix.Length + 2) -and $Word.EndsWith($suffix)) { $forms.Add($Word.Substring(0, $Word.Length - $suffix.Length)) }
+    }
+    return @($forms | Select-Object -Unique)
+}
+
+function Test-BridgeWordKnown {
+    <# Whether any stripped form of the word is one the station has written or
+       the core list carries. #>
+    param([Parameter(Mandatory)][string]$Word, [Parameter(Mandatory)]$Lexicon)
+    foreach ($form in @(Remove-ArabicClitics -Word $Word)) {
+        if ($Lexicon.Contains($form) -or $script:ArabicCoreWords.Contains($form)) { return $true }
+    }
+    return $false
+}
+
+function Get-BridgeStationLexicon {
+    <#
+        Every word this station has already put on air, near enough.
+
+        Built from what the bridge already keeps - the values operators
+        recently typed into template fields, and the ticker as it stands - so
+        it needs no dictionary file, no download and no dependency. It is not
+        an Arabic lexicon and does not pretend to be: it is a record of this
+        newsroom's own vocabulary, which is the thing a proper-noun typo fails
+        against.
+
+        Cached for a minute. Rebuilding it per keystroke would read the ticker
+        file on every field a person fills.
+    #>
+    param([switch]$Force)
+    if ($null -ne $script:StationLexicon -and -not $Force -and ((Get-Date) - $script:StationLexiconAt).TotalSeconds -lt 60) {
+        return , $script:StationLexicon
+    }
+    $words = [System.Collections.Generic.HashSet[string]]::new()
+    $add = {
+        param([string]$Text)
+        foreach ($word in @([regex]::Split([string]$Text, '[^\p{L}\p{N}]+'))) {
+            if ($word.Length -ge 3) { [void]$words.Add($word) }
+        }
+    }
+    foreach ($key in @($script:RecentFieldValues.Keys)) {
+        foreach ($value in @($script:RecentFieldValues[$key])) { & $add ([string]$value) }
+    }
+    try {
+        $path = [string](Get-Setting 'NewsFilePath')
+        if ($path -and (Test-Path -LiteralPath $path)) {
+            & $add ((Get-Content -LiteralPath $path -Raw -ErrorAction Stop))
+        }
+    }
+    catch {
+        # The ticker is one of two sources and the other already loaded, so a
+        # failure here narrows the lexicon rather than breaking the check. Said
+        # once at debug level: this runs on every review screen, and an
+        # unreadable ticker file would otherwise fill the log.
+        Write-BridgeLog "Could not read the ticker for the station lexicon: $($_.Exception.Message)" 'DEBUG'
+    }
+    $script:StationLexicon = $words
+    $script:StationLexiconAt = Get-Date
+    # The comma is load-bearing. PowerShell enumerates a collection on return,
+    # so a bare `return $words` hands back the strings one by one and the
+    # caller receives Object[] - and an EMPTY set returns nothing at all,
+    # which is how .Count threw on $null under Set-StrictMode.
+    return , $words
+}
+
+function Get-BridgeLexiconOrEmpty {
+    <# Never $null: a caller that reaches for .Count on nothing throws under
+       Set-StrictMode, and this one is on the path to air. #>
+    $lexicon = Get-BridgeStationLexicon
+    if ($lexicon -is [System.Collections.Generic.HashSet[string]]) { return , $lexicon }
+    return , ([System.Collections.Generic.HashSet[string]]::new())
+}
+
+function Get-BridgeTextWarnings {
+    <#
+        What looks wrong in a line about to go on air.
+
+        Advisory, never blocking, and that is the whole design: a breaking
+        headline held back over a proper noun no checker knows is worse than
+        the typo it was guarding against. Everything here returns a sentence
+        for the operator to judge, and the publish button stays live either
+        way.
+
+        Two levels, both local, because the text must not leave the network -
+        an outside checking service means sending unbroadcast headlines to a
+        third party.
+
+        Level one needs no vocabulary at all: shapes that are almost always a
+        slip on a phone keyboard. Level two asks whether this station has ever
+        written the word before, which is what catches a mistyped name - the
+        expensive kind, because a wrong name is wrong in a way a reader
+        notices and a spell checker would have passed.
+    #>
+    param([AllowEmptyString()][string]$Text)
+    $warnings = @()
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $warnings }
+
+    if ($Text -match '(\p{L})\1\1') { $warnings += "حرف مكرّر ثلاث مرات: «$($Matches[0])»" }
+    if ($Text -match '  ') { $warnings += 'مسافتان متتاليتان' }
+    # A comma or full stop with no space after it is the commonest phone slip
+    # in Arabic, and it closes up two words into one on screen.
+    if ($Text -match '[،,.؟!:](?=\p{L})') { $warnings += 'علامة ترقيم بلا مسافة بعدها' }
+    if ($Text -match '\s[،,.؟!]') { $warnings += 'مسافة قبل علامة ترقيم' }
+    # Latin digits inside Arabic reorder against the text around them.
+    if ($Text -match '\p{IsArabic}' -and $Text -match '[0-9]') { $warnings += 'أرقام لاتينية داخل نصّ عربي' }
+    if ($Text -ne $Text.Trim()) { $warnings += 'مسافة في أول النصّ أو آخره' }
+
+    # A lexicon too small to know the language has no business judging a word.
+    # Before this gate the check flagged الرئيس and اجتماع on a fresh install,
+    # which is not a typo warning - it is noise wearing one, and it would have
+    # taught operators to skip the whole section within a shift.
+    # The two lists do different jobs, and conflating them is what made the
+    # first build noisy. The core list SUPPRESSES: it stops ordinary Arabic
+    # being reported. The station's own words QUALIFY: only when the newsroom
+    # has written enough for its vocabulary to mean something does "you have
+    # never written this word" carry information.
+    #
+    # So the gate counts the station's words alone. On a fresh install this
+    # level stays silent and the shape checks above do the work - they are
+    # precise and need no vocabulary at all. It wakes up on its own once the
+    # bridge has seen a few hundred real headlines, which is the point at
+    # which an unfamiliar word is genuinely unusual rather than merely
+    # missing from a list I wrote by hand.
+    $lexicon = Get-BridgeLexiconOrEmpty
+    if ($lexicon.Count -lt $script:StationLexiconMinimum) { return $warnings }
+
+    $unseen = @()
+    foreach ($word in @([regex]::Split($Text, '[^\p{L}\p{N}]+'))) {
+        if ($word.Length -lt 4) { continue }
+        if ($word -match '^\p{N}+$') { continue }
+        if (-not (Test-BridgeWordKnown -Word $word -Lexicon $lexicon)) { $unseen += $word }
+    }
+    # Two at most. A genuinely new story is full of new words, and a warning
+    # naming twenty of them is a wall; naming one or two is a question.
+    $unseen = @($unseen | Select-Object -Unique)
+    if ($unseen.Count -gt 0 -and $unseen.Count -le 2) {
+        $warnings += "كلمة لم تكتبها المحطة من قبل: $($unseen -join '، ') — تأكّد من هجائها"
+    }
+    return $warnings
+}
+
 function Select-RichTableRows {
     <#
         The newest rows a table may show, and how many were left out.

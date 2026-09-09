@@ -1246,35 +1246,150 @@ function Update-UsageDigest {
     Write-BridgeLog 'Usage digest sent to admins'
 }
 
+function Update-MaterialProxyWatchdog {
+    <#
+        Warns that material about to air has no local copy on the server.
+
+        A proxy here is the server's own copy of the item. Without one the
+        channel reads the material from its source while it plays, which makes
+        a network or a source server part of the live path rather than a thing
+        that mattered earlier in the day.
+
+        Off by default, and deliberately so: measured on this station,
+        twenty-two of twenty-four scheduled items carry no local copy. An
+        alert that fires on nearly every item is an alert people learn to
+        ignore, which costs more than it saves. A station that expects its
+        material local before air turns it on and gets a real signal.
+
+        Reports each item once per run. The set clears when the item is no
+        longer inside its lead window, so tomorrow's schedule starts clean.
+    #>
+    if (-not (Get-Setting 'NotifyAdminsOnMissingProxy')) { return }
+    $lead = Get-SettingInt 'MaterialProxyLeadMinutes' 1
+    if ($lead -le 0) { return }
+    $now = Get-Date
+    if (($now - $script:RuntimeState.Monitoring.LastMaterialProxyCheck).TotalMinutes -lt 5) { return }
+    $script:RuntimeState.Monitoring.LastMaterialProxyCheck = $now
+
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not $schedule.Success) { return }
+
+    $from = [datetimeoffset]$now
+    $until = $from.AddMinutes($lead)
+    $due = @($schedule.Items | Where-Object { $_.ScheduledAt -gt $from -and $_.ScheduledAt -le $until })
+
+    # Forget anything no longer in the window, so the same item can be
+    # reported again if it is rescheduled later.
+    $inWindow = @($due | ForEach-Object { [string]$_.Id })
+    foreach ($id in @($script:MaterialProxyAlerted)) {
+        if ($inWindow -notcontains $id) { $script:MaterialProxyAlerted.Remove($id) | Out-Null }
+    }
+
+    $missing = @($due | Where-Object { [int]$_.ProxyProgress -lt 100 -and -not $script:MaterialProxyAlerted.Contains([string]$_.Id) })
+    if ($missing.Count -eq 0) { return }
+    foreach ($item in $missing) { $script:MaterialProxyAlerted.Add([string]$item.Id) | Out-Null }
+
+    $lines = @($missing | ForEach-Object {
+            # Nothing at all reads differently from a copy that stopped part
+            # way: the second is a transfer that may still finish, or may be
+            # stuck.
+            $state = if ([int]$_.ProxyProgress -le 0) { 'بلا نسخة محلية' } else { "النسخ متوقف عند $([int]$_.ProxyProgress)%" }
+            "• $($_.ScheduledAt.ToLocalTime().ToString('HH:mm')) · $(ConvertTo-TelegramHtmlText ([string]$_.Name)) — $state"
+        })
+    Write-BridgeLog "Material due within $lead minute(s) without a complete local copy: $(@($missing | ForEach-Object { $_.Name }) -join ' | ')" 'WARN'
+    Send-AdminBroadcast -Urgent -Text ("📼 <b>مادة تقارب موعدها بلا نسخة محلية</b>`n" + ($lines -join "`n") +
+        "`nستُقرأ من المصدر أثناء البثّ — تحقّق من المصدر والشبكة، أو أوقف هذا التنبيه من ⚙️ الإعدادات.")
+}
+
 function Update-StaleOnAirWatchdog {
     <# Tells the administrators when the bridge has been claiming a graphic is
        on air for implausibly long, so a record that outlived its scene is
        noticed in minutes rather than discovered by someone looking at the
-       output. Alerts once per layer; the flag clears when the record goes. #>
+       output.
+
+       Escalates rather than alerting once. Asked what had last gone wrong on
+       air, the station answered: a graphic stayed up and was never taken
+       down. This alert existed for exactly that and still allowed it, because
+       it fired a single message to administrators - whoever missed it missed
+       it for good, and the graphic stayed up in silence.
+
+       Three changes follow from that. It repeats on a widening interval while
+       the record survives. It tells the operator who put the graphic up, not
+       only the administrators, because they are the one who can take it down
+       and the one who will recognise it. And it carries the hide button
+       itself, so acting on it does not mean finding the layer in a menu.
+
+       The counter clears when the record goes, so a layer shown again later
+       starts from silence rather than mid-escalation. #>
     $threshold = Get-SettingInt 'StaleOnAirAlertHours' 0
     if ($threshold -le 0) { return }
     $now = Get-Date
     if (($now - $script:RuntimeState.Monitoring.LastStaleOnAirCheck).TotalMinutes -lt 5) { return }
     $script:RuntimeState.Monitoring.LastStaleOnAirCheck = $now
 
-    # Drop flags for layers that are no longer tracked, so a re-shown layer
-    # can alert again later instead of staying silent for ever.
-    foreach ($layer in @($script:StaleOnAirAlerted)) {
-        if (-not $script:OnAir.ContainsKey([int]$layer)) { $script:StaleOnAirAlerted.Remove([int]$layer) | Out-Null }
+    # Drop counters for layers that are no longer tracked, so a re-shown layer
+    # starts from silence instead of mid-escalation.
+    foreach ($layer in @($script:StaleOnAirAlerted.Keys)) {
+        if (-not $script:OnAir.ContainsKey([int]$layer)) { $script:StaleOnAirAlerted.Remove([int]$layer) }
     }
 
+    # Layers whose next notice is not due yet are treated as already alerted,
+    # which is how the same helper serves both the first notice and the
+    # repeats without learning about escalation.
+    $silent = @(foreach ($layer in @($script:StaleOnAirAlerted.Keys)) {
+            $seen = $script:StaleOnAirAlerted[[int]$layer]
+            $step = @($script:StaleOnAirEscalationMinutes)
+            $wait = [int]$step[[math]::Min([int]$seen.Count - 1, $step.Count - 1)]
+            if (($now - [datetime]$seen.LastAt).TotalMinutes -lt $wait) { [int]$layer }
+        })
+
     $stale = @(Get-BridgeStaleOnAirLayers -OnAir $script:OnAir -Now $now `
-            -ThresholdHours $threshold -AlreadyAlerted @($script:StaleOnAirAlerted))
+            -ThresholdHours $threshold -AlreadyAlerted @($silent))
     # Filtered after the time arithmetic, not before: only a candidate is worth
     # a Cinegy round trip, and there are rarely more than one or two.
     $stale = @($stale | Where-Object { -not (Test-LongRunningOnAir -Layer $_.Layer -Key $_.Key) })
     if ($stale.Count -eq 0) { return }
 
-    foreach ($item in $stale) { $script:StaleOnAirAlerted.Add([int]$item.Layer) | Out-Null }
+    foreach ($item in $stale) {
+        $layer = [int]$item.Layer
+        $seen = if ($script:StaleOnAirAlerted.ContainsKey($layer)) { $script:StaleOnAirAlerted[$layer] } else { @{ Count = 0; LastAt = $now } }
+        $script:StaleOnAirAlerted[$layer] = @{ Count = [int]$seen.Count + 1; LastAt = $now }
+    }
     $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $($_.Hours) ساعة" })
-    Write-BridgeLog "Stale on-air record(s) reported to administrators: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
-    Send-AdminBroadcast -Urgent -Text ("⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:`n" + ($lines -join "`n") +
-        "`nإن كانت الشاشة خالية فاضغط إخفاء على الطبقة لتصفية السجل.")
+    Write-BridgeLog "Stale on-air record(s) reported: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
+
+    # A button on the notice, not an instruction to go and find the layer. The
+    # single most useful place in the bridge for the rule that a warning the
+    # system can act on should carry the action.
+    $keyboard = @{ inline_keyboard = @(@(foreach ($item in $stale) {
+                    , @((New-Button "🙈 أخفِ طبقة $($item.Layer) · $($item.Key)" "hide:$($item.Layer)" -Style danger))
+                }) + @(, @((New-Button 'ℹ️ الحالة' 'menu:status')))) }
+
+    $repeat = @($stale | Where-Object { [int]$script:StaleOnAirAlerted[[int]$_.Layer].Count -gt 1 })
+    $head = if ($repeat.Count -eq $stale.Count -and $stale.Count -gt 0) {
+        "⚠️ <b>ما زال على الهواء</b> — تنبيه متكرّر:"
+    }
+    else { '⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:' }
+    $body = "$head`n" + ($lines -join "`n") + "`nإن كانت الشاشة خالية فالإخفاء يصفّي السجل."
+
+    Send-AdminBroadcast -Urgent -Text $body -ReplyMarkup $keyboard
+
+    # And the person who put it there. They are likelier to recognise it than
+    # an administrator reading a layer number, and likelier to be holding a
+    # phone. Skipped when they are an administrator already, so nobody is told
+    # the same thing twice in two messages.
+    $adminIds = @(Get-AdminNotifyIds)
+    foreach ($item in $stale) {
+        $record = if ($script:OnAir.ContainsKey([int]$item.Layer)) { $script:OnAir[[int]$item.Layer] } else { $null }
+        if (-not $record) { continue }
+        $target = [long](Get-JsonProp $record 'ChatId')
+        if ($target -le 0) { $target = [long](Get-JsonProp $record 'UserId') }
+        if ($target -le 0 -or $adminIds -contains $target) { continue }
+        Send-TelegramMessage -ChatId $target -ParseMode HTML `
+            -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $($item.Hours) ساعة.`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
+            -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "🙈 أخفِ طبقة $($item.Layer)" "hide:$($item.Layer)" -Style danger))) }
+    }
 }
 
 function Test-LongRunningOnAir {
@@ -1622,7 +1737,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

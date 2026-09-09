@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function New-BridgeRuntimeState {
     [CmdletBinding()]
@@ -14,6 +14,7 @@ function New-BridgeRuntimeState {
             LastCinegyHealthCheck=[datetime]::MinValue
             CinegyStateBackoffSeconds=0
             LastStaleOnAirCheck=[datetime]::MinValue
+            LastMaterialProxyCheck=[datetime]::MinValue
         }
     }
 }

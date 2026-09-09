@@ -618,6 +618,16 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
+        'menu:material' { Show-MaterialScheduleScreen -ChatId $chatId -UserId $userId; break }
+        'menu:handover' { Show-ShiftHandoverScreen -ChatId $chatId -UserId $userId; break }
+        'handover:done' {
+            # Recorded, not merely acknowledged: a spoken handover leaves
+            # nothing behind, and "who had it when" is the first question
+            # asked after anything goes wrong overnight.
+            Add-AuditEntry "🤝 تسليم مناوبة - بواسطة $(Format-UserAuditActor -UserId $userId)"
+            Send-TelegramMessage -ChatId $chatId -Text '✅ سُجِّل التسليم.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'menu:fullstatus' {
             if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
             break

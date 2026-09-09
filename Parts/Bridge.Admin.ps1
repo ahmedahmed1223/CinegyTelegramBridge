@@ -85,6 +85,173 @@ function Get-OnAirTableBlocks {
     return @(@{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true })
 }
 
+function Get-AirMaterialNowNext {
+    <#
+        What the channel is playing and what it has cued, as one line.
+
+        The bridge has always known what IT put on air and nothing about the
+        programme underneath, so "is this the right moment for the strap" was a
+        question answered by opening Cinegy. Two short reads answer it here.
+
+        Returns '' rather than an error line when the channel cannot be
+        reached: this sits on a status screen that already reports Cinegy
+        health above it, and a second failure notice in the same screen reads
+        as two faults.
+    #>
+    param([int]$TimeoutSec = 0)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1 }
+    $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    if (-not $status.Success) { return '' }
+    if (-not $status.ActiveId -and -not $status.CuedId) { return '' }
+
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    $byId = @{}
+    foreach ($item in @($schedule.Items)) { $byId[[string]$item.Id.Trim('{', '}')] = $item }
+
+    $describe = {
+        param([string]$Id, [switch]$WithRemaining)
+        if (-not $Id) { return '' }
+        if (-not $byId.ContainsKey($Id)) { return 'مادة غير مدرجة في الجدول' }
+        $item = $byId[$Id]
+        $text = ConvertTo-TelegramHtmlText ([string]$item.Name)
+        if ($WithRemaining -and $item.Duration -gt [timespan]::Zero) {
+            $left = ($item.ScheduledAt + $item.Duration) - [datetimeoffset]::Now
+            # Only while it is plausible: a schedule that has drifted would
+            # otherwise report a programme ending three hours ago.
+            if ($left -gt [timespan]::Zero -and $left -lt $item.Duration) {
+                $text += " · تبقّى <code>$([int]$left.TotalMinutes) د</code>"
+            }
+        }
+        return $text
+    }
+
+    $now = [string](& $describe $status.ActiveId -WithRemaining)
+    $next = [string](& $describe $status.CuedId)
+    $parts = @()
+    if ($now) { $parts += "▶️ الجاري: $now" }
+    if ($next) { $parts += "⏭ التالي: $next" }
+    if ($parts.Count -eq 0) { return '' }
+    return ($parts -join "`n")
+}
+
+function Show-MaterialScheduleScreen {
+    <#
+        What the channel is scheduled to play today.
+
+        The bridge could always say what IT put on air and nothing about the
+        material underneath, so an operator deciding whether a moment suited a
+        strap opened Cinegy to find out. This is that list, with the item now
+        playing marked.
+
+        Trimmed like every table here: twenty-four items was a measured day on
+        this station, and a day is not every day.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $keyboard = @{ inline_keyboard = @(, @((New-Button '🔄 تحديث' 'menu:material'), (New-Button '⬅️ القائمة' 'menu'))) }
+    if (-not $schedule.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ تعذّر قراءة جدول المواد من القناة.' -ReplyMarkup $keyboard
+        return
+    }
+    $items = @($schedule.Items)
+    if ($items.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد مواد مجدولة على القناة.' -ReplyMarkup $keyboard
+        return
+    }
+    $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $activeId = [string]$status.ActiveId
+
+    $trimmed = Select-RichTableRows -Items $items
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🎞 جدول المواد</b>')
+    foreach ($item in @($trimmed.Rows)) {
+        $bare = ([string]$item.Id).Trim('{', '}')
+        $mark = if ($bare -eq $activeId) { '▶️' } else { '•' }
+        $lines.Add("$mark <code>$($item.ScheduledAt.ToLocalTime().ToString('HH:mm'))</code> $(ConvertTo-TelegramHtmlText ([string]$item.Name))")
+    }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $lines.Add($note) }
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
+}
+
+function Show-ShiftHandoverScreen {
+    <#
+        Everything a shift change needs, on one screen.
+
+        Asked how handovers happen here, the station said shifts exist but the
+        handover is usually spoken - which is exactly where what nobody
+        mentions gets lost. This does not replace the conversation; it gives it
+        a checklist and leaves a record.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🤝 تسليم المناوبة</b>')
+    $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code>")
+
+    $material = Get-AirMaterialNowNext
+    if ($material) { $lines.Add(''); $lines.Add($material) }
+
+    $lines.Add('')
+    if ($script:OnAir.Count -eq 0) { $lines.Add('🟢 لا شيء من الجسر على الهواء.') }
+    else {
+        $lines.Add('<b>🔴 على الهواء الآن</b>')
+        foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
+            $record = $script:OnAir[$layer]
+            $since = ''
+            $at = Get-JsonProp $record 'At'
+            if ($at) {
+                $stamp = [datetime]::MinValue
+                if ([datetime]::TryParse([string]$at, [ref]$stamp)) {
+                    $since = " · منذ $(Format-Duration -Seconds ([int]((Get-Date) - $stamp).TotalSeconds))"
+                }
+            }
+            $who = [long](Get-JsonProp $record 'UserId')
+            $byText = if ($who -gt 0) { " · $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $who))" } else { '' }
+            $lines.Add("• طبقة $layer · $(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $record 'Key')))$since$byText")
+        }
+    }
+
+    $upcoming = @(Get-UpcomingScheduleEvents | Select-Object -First 5)
+    $lines.Add('')
+    if ($upcoming.Count -eq 0) { $lines.Add('📅 لا مواعيد قادمة.') }
+    else {
+        $lines.Add('<b>📅 المواعيد القادمة</b>')
+        foreach ($entry in $upcoming) {
+            $at = [datetimeoffset]$entry.ScheduledAt
+            $lines.Add("• <code>$($at.ToLocalTime().ToString('MM-dd HH:mm'))</code> $(ConvertTo-TelegramHtmlText ([string]$entry.TemplateKey))")
+        }
+    }
+
+    # Drafts belong here more than anywhere. A half-written headline in
+    # somebody else's chat is invisible to the person taking over, and it will
+    # swallow their next message if they inherit the handset.
+    $drafts = @(foreach ($chat in @($script:PendingState.Keys)) {
+            $state = $script:PendingState[$chat]
+            if ([string]$state.Mode -notin @('show_fields', 'show_review')) { continue }
+            "• $(ConvertTo-TelegramHtmlText ([string]$state.Key)) · $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId ([long](Get-JsonProp $state 'UserId'))))"
+        })
+    $lines.Add('')
+    if ($drafts.Count -gt 0) {
+        $lines.Add('<b>✍️ مسودات مفتوحة</b>')
+        foreach ($draft in $drafts) { $lines.Add($draft) }
+    }
+    else { $lines.Add('✍️ لا مسودات مفتوحة.') }
+
+    $lines.Add('')
+    $lines.Add('<i>راجع القائمة مع من يستلم، ثم اضغط «سلّمت» ليُسجَّل.</i>')
+    $keyboard = @{ inline_keyboard = @(
+            , @((New-Button '✅ سلّمت المناوبة' 'handover:done' -Style success))
+            , @((New-Button '🔄 تحديث' 'menu:handover'), (New-Button '⬅️ القائمة' 'menu'))
+        ) }
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
+}
+
 function Get-StatusRichBlocks {
     <#
         A status screen as blocks: the verdict, what is on air, and the
@@ -168,6 +335,11 @@ function Invoke-StatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
+    # The programme under the graphics. Placed with the channel line because
+    # it answers the same question - what is this channel doing right now -
+    # and above the layer detail, because it is the context the layers sit in.
+    $material = Get-AirMaterialNowNext
+    if ($material) { $lines.Add($material) }
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
         $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | ')

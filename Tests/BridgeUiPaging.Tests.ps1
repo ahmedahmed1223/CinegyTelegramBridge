@@ -70,6 +70,26 @@ Describe 'Every screen built from a growing list is paged' {
             'Invoke-CallbackQuery'              = 'the callback switch, which delegates to the builders above'
         }
 
+        # Rich-table screens whose rows are a fixed list rather than the
+        # station's data. Counted once, in 8.17, against every Get-*Blocks in
+        # Parts: twenty-five of them, and exactly one was growing unbounded.
+        $script:FixedRowScreens = @{
+            'Get-BridgeHealthCenterBlocks' = 'one row per health check, and the checks are a fixed list'
+            'Get-BridgeStatsBlocks'        = 'one row per counter on the operating-numbers screen'
+            'Get-RuntimeFileHealthBlocks'  = 'one row per runtime file, named in the source'
+            'Get-OnAirTableBlocks'         = 'one row per layer on air; a channel has a handful'
+            'Get-StatusRichBlocks'         = 'the same layers, in the status summary'
+            'Get-MainMenuIntroBlocks'      = 'the live layers and a fixed intro'
+            'Get-MojazBlocks'              = 'the selected bulletin, which has no loop over a collection'
+            'Get-ConfigRestoreBlocks'      = 'bounded by ConfigBackupKeepFiles, which is a capped setting'
+            'Get-HelpRichBlocks'           = 'the manual chapters, capped against the payload limit since 8.16'
+            'Get-MyOperationsBlocks'       = 'the newest few operations then a folded remainder, by construction'
+            'Get-MissedEventsBlocks'       = 'fixed sections, each already limited by its own reader'
+            'Get-NewsDayDetailBlocks'      = 'one row per day of the report window'
+            'Get-NewsReportBlocks'         = 'one row per day of the report window'
+            'Get-WorkReportBlocks'         = 'one row per operator, and the roster is the whitelist'
+        }
+
         function global:Get-BridgeKeyboardBuilders {
             param([Parameter(Mandatory)][string]$PartsPath)
             $found = @{}
@@ -98,6 +118,42 @@ Describe 'Every screen built from a growing list is paged' {
         )
 
         $offenders | Should -BeNullOrEmpty -Because "these build a keyboard from a collection without paging it - page it with Get-BridgePageWindow, or add it to BoundedScreens with the reason its collection cannot grow: $($offenders -join ', ')"
+    }
+
+    It 'bounds every rich table whose rows come from a growing collection' {
+        # The sibling of the paging rule above, for the message body rather
+        # than the keyboard. A table that grows with the station's data crosses
+        # the payload limit gradually, and the first to notice is the operator
+        # whose table vanished into a text fallback.
+        #
+        # Bounded means any of: Select-RichTableRows, Get-BridgePageWindow, a
+        # page window of its own, or Select-Object -First. Screens whose rows
+        # are a fixed list - the health checks, the runtime files, the layers
+        # on air - are named below with the reason, because a rule that cannot
+        # be satisfied is a rule that gets deleted.
+        $builders = Get-BridgeKeyboardBuilders -PartsPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Parts')
+        $offenders = @(
+            foreach ($name in @($builders.Keys | Sort-Object)) {
+                if ($name -notlike 'Get-*Blocks') { continue }
+                $body = $builders[$name].Body
+                if ($body -notmatch 'foreach\s*\(' -and $body -notmatch 'ForEach-Object') { continue }
+                # Every named way a builder can be bounded. Get-NewsTickerPageSize is
+                # the ticker's own page size, applied by hand in two places -
+                # bounded, but not through the shared helper, which is worth
+                # knowing and is why it is listed rather than pattern-matched.
+                if ($body -match 'Select-RichTableRows|Get-BridgePageWindow|Get-NewsTickerPageSize|Select-Object\s+-First|\$PageSize') { continue }
+                if ($script:FixedRowScreens.ContainsKey($name)) { continue }
+                "$name ($($builders[$name].File))"
+            }
+        )
+
+        $offenders | Should -BeNullOrEmpty -Because "these build a rich table from a collection without bounding it - trim it with Select-RichTableRows, or add it to FixedRowScreens with the reason its rows cannot grow: $($offenders -join ', ')"
+    }
+
+    It 'names a real function in every fixed-rows exemption' {
+        $builders = Get-BridgeKeyboardBuilders -PartsPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Parts')
+        $stale = @($script:FixedRowScreens.Keys | Where-Object { -not $builders.ContainsKey($_) } | Sort-Object)
+        $stale | Should -BeNullOrEmpty -Because "these exemptions name functions that no longer exist: $($stale -join ', ')"
     }
 
     It 'names a real function in every exemption' {

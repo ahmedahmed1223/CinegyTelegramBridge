@@ -890,7 +890,12 @@ function Get-TemplateHistoryBlocks {
             @{ text = 'العملية'; is_header = $true }
             @{ text = 'النتيجة'; is_header = $true }
         ))
-    foreach ($hit in $hits) {
+    # Capped like every other table here. This one searches the audit trail,
+    # so its length is the station's history rather than anything this screen
+    # controls - a template used through a busy month returns a table that
+    # crosses the payload limit and loses its rows entirely.
+    $trimmed = Select-RichTableRows -Items @($hits)
+    foreach ($hit in @($trimmed.Rows)) {
         $stamp = [datetime]::MinValue
         $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
         $cells += , @(
@@ -900,7 +905,10 @@ function Get-TemplateHistoryBlocks {
             @{ text = [string]$hit.result }
         )
     }
-    return $blocks + @(@{ type = 'table'; cells = $cells })
+    $blocks += @{ type = 'table'; cells = $cells }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+    return $blocks
 }
 
 function Get-TemplateHistoryText {

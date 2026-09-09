@@ -13,6 +13,40 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.17.0
+
+The rich-table guard, after the classification that was its precondition.
+
+This item had been open in the plan since 8.6, and 8.15 declined to ship it
+quickly because a crude measurement - grep over function names - said twenty
+tables were offenders, and a guard with twenty exemptions is not a guard.
+
+An AST pass over every Get-*Blocks in Parts found twenty-five functions: twelve
+bounded by a named mechanism (Select-RichTableRows, Get-BridgePageWindow, a page
+size, Select-Object -First), twelve whose rows are a fixed list - the health
+checks, the runtime files, the layers on air, the days of a report window, the
+operators on the whitelist - and exactly one growing without a bound. The
+distance between twenty and one is the distance between grep and a parser, and a
+guard built on the estimate would have been born with an exemption list that
+emptied it.
+
+The one offender was Get-TemplateHistoryBlocks, which searches the audit trail
+for a template, so its length is the station's history rather than anything the
+screen controls: a template used through a busy month returns a table that
+crosses the payload limit and loses its rows to the text fallback entirely. It is
+now trimmed, and says how many rows it hid, because a table quietly missing its
+oldest rows reads as the whole story.
+
+The guard lives beside the button-paging guard: any Get-*Blocks that builds from
+a collection in a loop must be bounded by a named mechanism or listed in
+FixedRowScreens with a written reason, and a second test rejects an exemption
+naming a function that no longer exists. It caught a case while being built -
+Get-NewsTickerReorderBlocks is paged, but by hand through Get-NewsTickerPageSize,
+with the same arithmetic written twice in the file. Bounded, but not through the
+shared helper; its mechanism is named explicitly rather than waved through by a
+loose pattern, so that duplication stays visible. Negative-checked by removing
+the new trim and watching the guard go red.
+
 ## Version 8.16.0
 
 Inspecting the plans, and what the inspection found.

@@ -990,3 +990,193 @@ Describe 'Capture failure logging' {
         Should -Invoke Write-BridgeLog -Times 1 -Exactly
     }
 }
+
+
+Describe 'The material on air and its schedule' {
+    # The programme under the graphics. Read-only, and the bridge knew nothing
+    # about it until now - an operator opened Cinegy to find out what was
+    # playing before deciding whether the moment suited a strap.
+    BeforeEach {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            $body = if ($Uri -match '/video/status') {
+                '<?xml version="1.0"?><Status><Active Id="{AAA}"/><Cued Id="{BBB}"/><License State="Licensed"/><Output State="Normal"/></Status>'
+            }
+            elseif ($Uri -match '/video/list') {
+                '<?xml version="1.0"?><List>' +
+                '<Item Id="{BBB}" Name="الثانية" ScheduledAt="2026-09-09T19:00:00.000Z" Duration="01:00:00.000" ProxyProgress="100" LoopStart="n"/>' +
+                '<Item Id="{AAA}" Name="الأولى" ScheduledAt="2026-09-09T18:00:00.000Z" Duration="01:00:00.000" ProxyProgress="0" LoopStart="y"/>' +
+                '</List>'
+            }
+            else { '<?xml version="1.0"?><Status/>' }
+            [pscustomobject]@{ Content = $body; StatusCode = 200 }
+        }
+    }
+
+    It 'reads what is playing and what is cued as real ids' {
+        $status = Get-AirVideoStatus -AirServerAddress '127.0.0.1' -AirChannelNumber 0
+        $status.Success | Should -BeTrue
+        $status.ActiveId | Should -Be 'AAA'
+        $status.CuedId | Should -Be 'BBB'
+        $status.OutputState | Should -Be 'Normal'
+    }
+
+    It 'treats a null guid as nothing cued rather than as an item' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            [pscustomobject]@{ Content = '<?xml version="1.0"?><Status><Active Id="{AAA}"/><Cued Id="{00000000-0000-0000-0000-000000000000}"/></Status>'; StatusCode = 200 }
+        }
+        (Get-AirVideoStatus -AirServerAddress '127.0.0.1' -AirChannelNumber 0).CuedId | Should -BeNullOrEmpty
+    }
+
+    It 'returns the schedule in time order whatever order it arrived in' {
+        # The live channel does not promise an order, and a rundown out of
+        # sequence is not a rundown.
+        $schedule = Get-AirMaterialSchedule -AirServerAddress '127.0.0.1' -AirChannelNumber 0
+        $schedule.Success | Should -BeTrue
+        @($schedule.Items).Count | Should -Be 2
+        @($schedule.Items)[0].Name | Should -Be 'الأولى'
+        @($schedule.Items)[0].Duration | Should -Be ([timespan]'01:00:00')
+        @($schedule.Items)[0].LoopStart | Should -BeTrue
+        @($schedule.Items)[1].ProxyProgress | Should -Be 100
+    }
+
+    It 'reports a failure instead of guessing when the channel cannot be reached' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'no route to host' }
+        $status = Get-AirVideoStatus -AirServerAddress '127.0.0.1' -AirChannelNumber 0
+        $status.Success | Should -BeFalse
+        $status.ActiveId | Should -BeNullOrEmpty
+        (Get-AirMaterialSchedule -AirServerAddress '127.0.0.1' -AirChannelNumber 0).Items | Should -BeNullOrEmpty
+    }
+
+    It 'names the programme on air and the one after it' {
+        $line = Get-AirMaterialNowNext -TimeoutSec 1
+        $line | Should -Match 'الجاري'
+        $line | Should -Match 'الأولى'
+        $line | Should -Match 'التالي'
+        $line | Should -Match 'الثانية'
+    }
+
+    It 'says nothing at all when the channel is unreachable' {
+        # The status screen reports Cinegy health above this line; a second
+        # failure notice in the same screen reads as two faults.
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'unreachable' }
+        Get-AirMaterialNowNext -TimeoutSec 1 | Should -BeNullOrEmpty
+    }
+}
+
+
+Describe 'A graphic that stayed on air' {
+    # The failure the station actually reported when asked what had last gone
+    # wrong: a graphic stayed up and was never taken down. The alert for it
+    # existed and still allowed it, because it fired once to administrators
+    # with no button - whoever missed that message missed it for good.
+    BeforeEach {
+        $script:StaleOnAirAlerted = @{}
+        $script:OnAir.Clear()
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date).AddHours(-3); UserId = 705980352; ChatId = 705980352; ActiveId = '{X}' }
+        $script:RuntimeState.Monitoring.LastStaleOnAirCheck = [datetime]::MinValue
+        Mock Write-BridgeLog { }
+        Mock Send-AdminBroadcast { }
+        Mock Send-TelegramMessage { }
+        Mock Test-LongRunningOnAir { $false }
+        Mock Get-AdminNotifyIds { @(122238225) }
+        # Set rather than mocked: a filtered mock on Get-SettingInt breaks
+        # every other reader in the call, and New-Button is one of them.
+        $script:OriginalStaleHours = Get-Setting 'StaleOnAirAlertHours'
+        $config.Settings | Add-Member -NotePropertyName StaleOnAirAlertHours -NotePropertyValue 1 -Force
+    }
+    AfterEach {
+        $script:OnAir.Clear(); $script:StaleOnAirAlerted = @{}
+        $config.Settings | Add-Member -NotePropertyName StaleOnAirAlertHours -NotePropertyValue $script:OriginalStaleHours -Force
+    }
+
+    It 'carries the hide button on the notice itself' {
+        Update-StaleOnAirWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'hide:7'
+        }
+    }
+
+    It 'tells the operator who put it there, not only the administrators' {
+        Update-StaleOnAirWatchdog
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 705980352 }
+    }
+
+    It 'does not tell an administrator twice in two messages' {
+        $script:OnAir[7].ChatId = 122238225
+        Update-StaleOnAirWatchdog
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'keeps saying so while the graphic is still up' {
+        # One notice that goes unread used to be the end of it.
+        Update-StaleOnAirWatchdog
+        $script:StaleOnAirAlerted[7].Count | Should -Be 1
+
+        # Too soon for the second notice.
+        $script:RuntimeState.Monitoring.LastStaleOnAirCheck = [datetime]::MinValue
+        Update-StaleOnAirWatchdog
+        $script:StaleOnAirAlerted[7].Count | Should -Be 1
+
+        # The first interval has passed.
+        $script:StaleOnAirAlerted[7].LastAt = (Get-Date).AddMinutes(-20)
+        $script:RuntimeState.Monitoring.LastStaleOnAirCheck = [datetime]::MinValue
+        Update-StaleOnAirWatchdog
+        $script:StaleOnAirAlerted[7].Count | Should -Be 2
+        Should -Invoke Send-AdminBroadcast -Times 2 -Exactly
+    }
+
+    It 'starts from silence again for a layer shown afresh' {
+        Update-StaleOnAirWatchdog
+        $script:OnAir.Remove(7)
+        $script:RuntimeState.Monitoring.LastStaleOnAirCheck = [datetime]::MinValue
+        Update-StaleOnAirWatchdog
+        $script:StaleOnAirAlerted.ContainsKey(7) | Should -BeFalse
+    }
+}
+
+Describe 'Material due without a local copy' {
+    BeforeEach {
+        $script:MaterialProxyAlerted.Clear()
+        $script:RuntimeState.Monitoring.LastMaterialProxyCheck = [datetime]::MinValue
+        Mock Write-BridgeLog { }
+        Mock Send-AdminBroadcast { }
+        $script:soon = [datetimeoffset]::Now.AddMinutes(10)
+        Mock Get-AirMaterialSchedule {
+            [pscustomobject]@{ Success = $true; Error = ''; Items = @(
+                    [pscustomobject]@{ Id = 'a'; Name = 'بلا نسخة'; ScheduledAt = $script:soon; Duration = [timespan]'01:00:00'; ProxyProgress = 0; LoopStart = $false }
+                    [pscustomobject]@{ Id = 'b'; Name = 'ناقصة'; ScheduledAt = $script:soon; Duration = [timespan]'01:00:00'; ProxyProgress = 40; LoopStart = $false }
+                    [pscustomobject]@{ Id = 'c'; Name = 'جاهزة'; ScheduledAt = $script:soon; Duration = [timespan]'01:00:00'; ProxyProgress = 100; LoopStart = $false }
+                ) }
+        }
+    }
+    AfterEach {
+        $script:MaterialProxyAlerted.Clear()
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnMissingProxy -NotePropertyValue $false -Force
+    }
+
+    It 'says nothing at all while the option is off' {
+        # Twenty-two of twenty-four items on this station carry no local copy,
+        # so an always-on alert would fire on nearly everything.
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnMissingProxy -NotePropertyValue $false -Force
+        Update-MaterialProxyWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'names what is missing and what merely stopped part way' {
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnMissingProxy -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName MaterialProxyLeadMinutes -NotePropertyValue 30 -Force
+        Update-MaterialProxyWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'بلا نسخة محلية' -and $Text -match 'متوقف عند 40' -and $Text -notmatch 'جاهزة'
+        }
+    }
+
+    It 'reports an item once rather than on every tick' {
+        $config.Settings | Add-Member -NotePropertyName NotifyAdminsOnMissingProxy -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName MaterialProxyLeadMinutes -NotePropertyValue 30 -Force
+        Update-MaterialProxyWatchdog
+        $script:RuntimeState.Monitoring.LastMaterialProxyCheck = [datetime]::MinValue
+        Update-MaterialProxyWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+}

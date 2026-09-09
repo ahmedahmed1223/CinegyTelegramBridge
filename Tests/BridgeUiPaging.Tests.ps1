@@ -68,6 +68,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Update-TemplateReminderQueue'      = 'not a keyboard builder; it sends one reminder per due item'
             'Update-PendingExpiry'              = 'not a keyboard builder; its one row is the extend button on the expiry warning'
             'Invoke-CallbackQuery'              = 'the callback switch, which delegates to the builders above'
+            'Update-StaleOnAirWatchdog'         = 'one hide button per stale layer, and a channel has nine graphics layers'
         }
 
         # Rich-table screens whose rows are a fixed list rather than the

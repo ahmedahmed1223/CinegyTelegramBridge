@@ -85,6 +85,57 @@ function Get-OnAirTableBlocks {
     return @(@{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true })
 }
 
+function Get-AirMaterialNowNext {
+    <#
+        What the channel is playing and what it has cued, as one line.
+
+        The bridge has always known what IT put on air and nothing about the
+        programme underneath, so "is this the right moment for the strap" was a
+        question answered by opening Cinegy. Two short reads answer it here.
+
+        Returns '' rather than an error line when the channel cannot be
+        reached: this sits on a status screen that already reports Cinegy
+        health above it, and a second failure notice in the same screen reads
+        as two faults.
+    #>
+    param([int]$TimeoutSec = 0)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1 }
+    $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    if (-not $status.Success) { return '' }
+    if (-not $status.ActiveId -and -not $status.CuedId) { return '' }
+
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    $byId = @{}
+    foreach ($item in @($schedule.Items)) { $byId[[string]$item.Id.Trim('{', '}')] = $item }
+
+    $describe = {
+        param([string]$Id, [switch]$WithRemaining)
+        if (-not $Id) { return '' }
+        if (-not $byId.ContainsKey($Id)) { return 'مادة غير مدرجة في الجدول' }
+        $item = $byId[$Id]
+        $text = ConvertTo-TelegramHtmlText ([string]$item.Name)
+        if ($WithRemaining -and $item.Duration -gt [timespan]::Zero) {
+            $left = ($item.ScheduledAt + $item.Duration) - [datetimeoffset]::Now
+            # Only while it is plausible: a schedule that has drifted would
+            # otherwise report a programme ending three hours ago.
+            if ($left -gt [timespan]::Zero -and $left -lt $item.Duration) {
+                $text += " · تبقّى <code>$([int]$left.TotalMinutes) د</code>"
+            }
+        }
+        return $text
+    }
+
+    $now = [string](& $describe $status.ActiveId -WithRemaining)
+    $next = [string](& $describe $status.CuedId)
+    $parts = @()
+    if ($now) { $parts += "▶️ الجاري: $now" }
+    if ($next) { $parts += "⏭ التالي: $next" }
+    if ($parts.Count -eq 0) { return '' }
+    return ($parts -join "`n")
+}
+
 function Get-StatusRichBlocks {
     <#
         A status screen as blocks: the verdict, what is on air, and the
@@ -168,6 +219,11 @@ function Invoke-StatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
+    # The programme under the graphics. Placed with the channel line because
+    # it answers the same question - what is this channel doing right now -
+    # and above the layer detail, because it is the context the layers sit in.
+    $material = Get-AirMaterialNowNext
+    if ($material) { $lines.Add($material) }
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
         $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | ')

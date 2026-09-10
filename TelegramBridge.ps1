@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.18.1'
+$script:BridgeVersion = '8.19.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -299,6 +299,7 @@ $script:DefaultSettings = [ordered]@{
     EnableMaterialSchedule     = $true   # the channel's own material list in the menu
     EnableShiftHandover        = $true   # one screen a shift change needs
     NotifyAdminsOnMissingProxy = $false
+    RepeatAlertWindowHours     = 6       # window for "this is the third time, same cause" (0 disables)
     MaterialProxyLeadMinutes   = 30      # how long before air the local copy is checked
     OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
@@ -407,6 +408,7 @@ $script:SettingDisplayMetadata = @{
     EnableMaterialSchedule = @{ Unit = ''; Description = 'زر جدول المواد في القائمة: ما يبثّه الجهاز اليوم بمواعيده' }
     EnableShiftHandover = @{ Unit = ''; Description = 'زر التسليم: شاشة واحدة تجمع ما يحتاجه تبديل المناوبة' }
     NotifyAdminsOnMissingProxy = @{ Unit = ''; Description = 'تنبيه المشرفين إن قاربت مادة موعدها ولا نسخة محلية لها على السيرفر — عندها تُقرأ من المصدر أثناء البثّ' }
+    RepeatAlertWindowHours = @{ Unit = 'ساعة'; Description = 'خلال كم ساعة يُحسب تكرار التنبيه: من الثالث فصاعدًا يقول التنبيه إنه تكرار ومتى بدأ (0 للتعطيل)' }
     MaterialProxyLeadMinutes = @{ Unit = 'دقيقة'; Description = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية' }
     OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
@@ -1011,6 +1013,8 @@ $script:StaleOnAirEscalationMinutes = @(15, 30)
 # Material ids already reported as lacking a local copy, so one item is not
 # announced on every tick of its lead window.
 $script:MaterialProxyAlerted = [System.Collections.Generic.HashSet[string]]::new()
+# cause -> the times it alerted, inside the repeat window. See Add-BridgeAlertOccurrence.
+$script:AlertHistory = @{}
 # The station's own vocabulary, rebuilt at most once a minute. See
 # Get-BridgeStationLexicon.
 $script:StationLexicon = $null
@@ -1162,6 +1166,7 @@ foreach ($entry in @(
         @{ Category = 'monitoring'; Names = @(
                 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
                 'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes', 'EnableTextChecks',
+                'RepeatAlertWindowHours',
                 'EnableMaterialSchedule', 'EnableShiftHandover',
                 'OutputBlackLuminance', 'OutputBlackConfirmSeconds',
                 'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
@@ -1353,6 +1358,7 @@ $script:SettingNavigationLabels = @{
     EnableMaterialSchedule = 'شاشة جدول المواد'
     EnableShiftHandover = 'شاشة تسليم المناوبة'
     NotifyAdminsOnMissingProxy = 'تنبيه المادة بلا نسخة محلية'
+    RepeatAlertWindowHours = 'نافذة تكرار التنبيه'
     MaterialProxyLeadMinutes = 'مهلة فحص النسخة المحلية'
     PendingApprovalExpiryHours = 'صلاحية طلب الوصول'
     PendingStateTimeoutMinutes = 'مهلة الإدخال غير المكتمل'
@@ -1408,6 +1414,9 @@ $script:SettingConstraints = @{
     PendingApprovalExpiryHours    = @{ Minimum = 1; Maximum = 720 }
     AutoHideDefaultSeconds        = @{ Minimum = 1; Maximum = 86400 }
     StaleOnAirAlertHours          = @{ Minimum = 1; Maximum = 168 }
+    # Zero is off, not a floor of one: an administrator who does not want
+    # repetition counted has to be able to say so.
+    RepeatAlertWindowHours        = @{ Minimum = 0; Maximum = 168 }
     # Hours of the day, which have twenty-four of them.
     HeartbeatHour                 = @{ Minimum = 0; Maximum = 23 }
     QuietHoursStart               = @{ Minimum = 0; Maximum = 23 }
@@ -1805,6 +1814,9 @@ try {
                 }
                 $fromObj = Get-JsonProp $message 'from'
                 $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { $chatId }
+                # Before anything is done with the message: whatever this
+                # operation writes to the audit log should carry a name.
+                Update-UserNameFromTelegram -From $fromObj -UserId $userId | Out-Null
                 # A picture for a Mojaz row can arrive either way: as a photo
                 # (Telegram recompresses it) or as a file. Both land in the same
                 # place, and neither is accepted unless a row is being written.

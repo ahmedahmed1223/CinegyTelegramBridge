@@ -729,6 +729,68 @@ function Clear-PendingTelegramUpdates {
     }
 }
 
+function Get-BridgeAlertCause {
+    <#
+        What an alert is about, as a key: its first line, without tags and
+        without any number in it.
+
+        The numbers are what differ between one occurrence and the next - a
+        layer, a count, a clock time - so they are exactly what must not be
+        part of the identity of the cause, or every occurrence looks new.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    $first = @($Text -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if (@($first).Count -eq 0) { return '' }
+    $clean = ConvertFrom-TelegramHtmlText ([string]@($first)[0])
+    return (($clean -replace '\d+', '#').Trim())
+}
+
+function Add-BridgeAlertOccurrence {
+    <#
+        Records that this alert happened, and says so when it is not the first
+        time.
+
+        Measured on this station's own log: 707 of 752 warning and error lines
+        belong to a cause that had already appeared three times or more, and
+        one of them - the output capture failing - repeated 22 times across a
+        fortnight without anyone acting on it. Every alert arrived looking
+        like the first, so each was read as a one-off and none as a fault
+        with a cause.
+
+        Only failures are counted. A heartbeat or a digest repeating is the
+        system working, and marking that as a recurrence would teach the
+        counter to be ignored.
+
+        The table lives in memory: a restart forgets, which is the right
+        trade for a screenful of state, and the window that matters is hours
+        rather than weeks.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [datetime]$Now = (Get-Date))
+    # No Minimum argument: Get-SettingInt's second positional is a floor, and a
+    # floor of six would clamp a deliberate zero back up and make the off
+    # switch unreachable. The default value lives in $script:DefaultSettings.
+    $hours = Get-SettingInt 'RepeatAlertWindowHours'
+    if ($hours -le 0) { return '' }
+    if ($Text -notmatch '^\s*(⚠|🔴|❌|📼|🟠)') { return '' }
+    $cause = Get-BridgeAlertCause -Text $Text
+    if ([string]::IsNullOrWhiteSpace($cause)) { return '' }
+    $cutoff = $Now.AddHours(-$hours)
+    $seen = [System.Collections.Generic.List[datetime]]::new()
+    if ($script:AlertHistory.ContainsKey($cause)) {
+        foreach ($at in @($script:AlertHistory[$cause])) { if ($at -gt $cutoff) { $seen.Add($at) } }
+    }
+    $seen.Add($Now)
+    $script:AlertHistory[$cause] = $seen.ToArray()
+    # Causes that stopped happening are dropped, so a long uptime does not
+    # grow this table by one entry per distinct fault forever.
+    foreach ($key in @($script:AlertHistory.Keys)) {
+        if (@(@($script:AlertHistory[$key]) | Where-Object { $_ -gt $cutoff }).Count -eq 0) { $script:AlertHistory.Remove($key) }
+    }
+    if ($seen.Count -lt 3) { return '' }
+    $span = Format-DurationSeconds -Seconds ([int]($Now - $seen[0]).TotalSeconds)
+    return "🔁 تكرار: هذه المرة رقم $($seen.Count) لنفس السبب خلال $span (الأولى $($seen[0].ToString('HH:mm'))). السبب واحد - عالجه، لا الحالة."
+}
+
 function Send-AdminBroadcast {
     <#
         -Urgent bypasses quiet hours. Everything meaning the channel is wrong
@@ -739,6 +801,11 @@ function Send-AdminBroadcast {
         that mattered then arrives to a muted chat.
     #>
     param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent)
+    # Counted here rather than at each of the twenty call sites that raise an
+    # alarm: they all pass through this one function, and a guard in one place
+    # cannot be forgotten by the twenty-first.
+    $repeat = Add-BridgeAlertOccurrence -Text $Text
+    if ($repeat) { $Text = "$Text`n$repeat" }
     if (-not $Urgent -and (Test-QuietHoursActive)) {
         $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
         # Capped, because the digest is one Telegram message and Telegram stops

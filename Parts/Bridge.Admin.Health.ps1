@@ -11,6 +11,36 @@
     dot-sourced parts share one.
 #>
 
+function Get-CinegyExposureWarning {
+    <#
+        Says so when the configured Cinegy address is not on a private network.
+
+        The Cinegy HTTP interface has no authentication of any kind - no key,
+        no password, no header - so reaching the port IS the authority to put
+        graphics on air and to black the output. The bridge being the only
+        gateway is a mitigation, not a boundary: anything that talks to the
+        port directly passes no check at all.
+
+        A hostname is judged as nothing rather than guessed at: resolving it
+        would put a DNS lookup on a status screen, and a wrong guess here
+        either cries wolf or reassures falsely. Only a literal public IPv4
+        address is called out, because that one is certain.
+    #>
+    param([AllowEmptyString()][string]$Address = '')
+    if ([string]::IsNullOrWhiteSpace($Address)) { return '' }
+    $hostPart = @((($Address -replace '^[A-Za-z][A-Za-z0-9+.-]*://', '') -split '[/:]')) | Select-Object -First 1
+    $parsed = [System.Net.IPAddress]::None
+    if (-not [System.Net.IPAddress]::TryParse([string]$hostPart, [ref]$parsed)) { return '' }
+    if ($parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { return '' }
+    $octet = $parsed.GetAddressBytes()
+    $isPrivate = ($octet[0] -eq 10) -or ($octet[0] -eq 127) -or
+        ($octet[0] -eq 192 -and $octet[1] -eq 168) -or
+        ($octet[0] -eq 169 -and $octet[1] -eq 254) -or
+        ($octet[0] -eq 172 -and $octet[1] -ge 16 -and $octet[1] -le 31)
+    if ($isPrivate) { return '' }
+    return '🔓 عنوان Cinegy خارج النطاقات الخاصة. واجهة Cinegy بلا مصادقة: من يصل إلى المنفذ يتحكم بالهواء. أبقِ المنفذ داخل شبكة البثّ.'
+}
+
 function Invoke-FullStatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -41,6 +71,10 @@ function Invoke-FullStatusCommand {
     }
 
     $now = Get-Date
+    # One rule between sections, the same one ℹ️ الحالة uses. Thirty-odd lines
+    # separated only by blank ones read as a single column: the eye finds no
+    # edge, so the section it wants is found by scrolling past everything.
+    $sep = '━━━━━━━━━━━━━━━━━'
     $lines = [System.Collections.Generic.List[string]]::new()
     # parse_mode=HTML, same reasoning as ℹ️ الحالة: this screen is thirty-odd
     # lines long and went out as one flat column, so the six section
@@ -49,19 +83,25 @@ function Invoke-FullStatusCommand {
     # an alias, a store error - is escaped, because a single "<" in a
     # template name would cost the whole screen a 400.
     $lines.Add("<b>📊 الحالة الكاملة</b> — <code>v$($script:BridgeVersion)</code>")
-    $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
+    $clockLine = "🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)"
+    $lines.Add($clockLine)
     $lines.Add("<b>$overall</b>")
     $identityLine = "👤 معرّفك: $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))"
     $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
+    $lines.Add($sep)
     $lines.Add('<b>🎛 اتصال Cinegy</b>')
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     $configuredSceneMode = [string](Get-Setting 'SceneMode')
     $sceneCapabilities = Get-CinegySceneCapabilities -SceneItems $layerStatuses -LayerTargetSupported $true
     $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
     $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
+    $exposure = Get-CinegyExposureWarning -Address ([string]$config.AirServerAddress)
+    if ($exposure) { $lines.Add($exposure) }
+    $material = Get-AirMaterialNowNext
+    if ($material) { $lines.Add($material) }
     $lines.Add("🧩 وضع المشاهد المختار: <code>$(ConvertTo-TelegramHtmlText $configuredSceneMode)</code> · $verification")
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
@@ -69,20 +109,25 @@ function Invoke-FullStatusCommand {
     $lines.Add("📶 حالة بيانات Cinegy: <b>$(ConvertTo-TelegramHtmlText ([string]$freshness.Label))</b>")
     $lines.Add((ConvertTo-TelegramHtmlText (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)))
     $lines.Add('')
+    $lines.Add($sep)
     $lines.Add('<b>🩺 صحة الخدمات</b>')
     $lines.Add((ConvertTo-TelegramHtmlText ([string]$health.Text)))
     $lines.Add('')
     $lines.Add((ConvertTo-TelegramHtmlText ([string]$outputMonitor.Text)))
     $lines.Add('')
+    $lines.Add($sep)
     $lines.Add('<b>⚙️ التشغيل والجدولة</b>')
     $lines.Add("📡 البث المباشر: $(ConvertTo-TelegramHtmlText (Get-LiveRelayStatusText))")
     $lines.Add("🖼 الصور المعلّقة: <code>$($script:SnapshotJobs.Count)</code> · مؤقتات الإخفاء: <code>$($script:AutoHideQueue.Count)</code> · تنبيهات الظهور: <code>$($script:TemplateReminderQueue.Count)</code>")
     $lines.Add("🗓 الأحداث المجدولة القادمة: <code>$(@(Get-UpcomingScheduleEvents).Count)</code>")
     $lines.Add('')
+    $lines.Add($sep)
     $lines.Add('<b>👥 الوصول</b>')
     $lines.Add("🔐 المستخدمون المصرح لهم: <code>$(@(Get-JsonProp $config 'AllowedChatIds').Count)</code> محادثة / <code>$(@(Get-JsonProp $config 'AllowedUserIds').Count)</code> مستخدم")
     $lines.Add("🔔 طلبات الوصول المعلّقة: <code>$($script:PendingApprovals.Count)</code>")
     $lines.Add('')
+    $lines.Add($sep)
+    $lines.Add('<b>🔄 التزامن</b>')
     if ($sync.Failed.Count -gt 0) {
         $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
     }
@@ -92,15 +137,15 @@ function Invoke-FullStatusCommand {
     else { $lines.Add("✅ حالة Cinegy متزامنة.") }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
-    # The same lines, reshaped: the verdict as a heading, what is on air
-    # as a table, and the machine detail folded under it. The leading
-    # lines are skipped because the blocks already carry them.
+    # The same lines, reshaped: the verdict and the identity as the header,
+    # the programme and the on-air layers next, and the rest in the sections
+    # the text screen already names - unfolded, because this screen is read
+    # when something is wrong.
     # Skip 6 rather than 5: the identity line joined the header block, so the
     # count of lines the blocks already carry moved with it.
     $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
-        -Identity (ConvertFrom-TelegramHtmlText $identityLine) `
-        -DetailLines @($lines | Select-Object -Skip 6 | ForEach-Object { ConvertFrom-TelegramHtmlText ([string]$_) }) `
-        -DetailSummary '🔍 التفاصيل الكاملة'
+        -Identity (ConvertFrom-TelegramHtmlText $identityLine) -Clock $clockLine -Highlights @($material) `
+        -DetailLines @($lines | Select-Object -Skip 6)
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $statusMenu
 }

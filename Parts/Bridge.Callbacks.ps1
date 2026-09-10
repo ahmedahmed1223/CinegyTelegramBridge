@@ -81,6 +81,9 @@ function Invoke-CallbackQuery {
     # still have it, so it cannot be dereferenced blindly under StrictMode.
     $fromObj = Get-JsonProp $CallbackQuery 'from'
     $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { 0 }
+    # Button presses too, not messages only: an operator who works entirely
+    # from the keyboards would otherwise never be named.
+    Update-UserNameFromTelegram -From $fromObj -UserId $userId | Out-Null
     $msgObj = Get-JsonProp $CallbackQuery 'message'
     $chatId = if ($msgObj) { [long]$msgObj.chat.id } else { $userId }
     $data = [string](Get-JsonProp $CallbackQuery 'data')

@@ -13,6 +13,33 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.19.0
+
+Four things, three of them measured on this station's own log rather than
+guessed at.
+
+The two status screens no longer fold. Everything they know is on the screen,
+in named sections with a rule between them, and the identity, the clock and
+the programme the channel is playing sit above the layer table - the last of
+those was reaching the screen folded away, which is the same as not reaching
+it.
+
+Names: 7 of 8 users in the audit log had none, and 366 records named a raw id
+instead of a person, because only an access request ever captured a name and
+most operators were added directly by an administrator. Telegram sends the
+name with every update; the bridge now keeps it the first time, and an
+administrator's own alias still wins.
+
+Recurrence: 707 of 752 warning and error lines belonged to a cause already
+seen three times or more - one of them repeated 22 times across a fortnight
+with every alert reading like the first. From the third occurrence an alert
+says it is a recurrence and when it started. Six-hour window, adjustable, 0
+turns it off.
+
+And the full status warns when the Cinegy address is outside a private range.
+The Cinegy HTTP interface has no authentication at all: reaching the port is
+the authority to put graphics on air.
+
 ## Version 8.18.1
 
 The review screen offers an edit button after the fields are typed by hand.

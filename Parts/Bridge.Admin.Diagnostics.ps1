@@ -337,11 +337,7 @@ function Request-Approval {
         return $false
     }
 
-    $firstName = Get-JsonProp $From 'first_name'
-    $lastName = Get-JsonProp $From 'last_name'
-    $username = Get-JsonProp $From 'username'
-    $name = (@($firstName, $lastName) | Where-Object { $_ }) -join ' '
-    if ($username) { $name = if ($name) { "$name (@$username)" } else { "@$username" } }
+    $name = Get-TelegramActorName -From $From
 
     $script:PendingApprovals[$ChatId] = @{ Name = $name; ChatId = $ChatId; UserId = $UserId; RequestedAt = (Get-Date) }
 

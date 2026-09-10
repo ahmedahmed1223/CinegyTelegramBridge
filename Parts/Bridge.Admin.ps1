@@ -254,8 +254,9 @@ function Show-ShiftHandoverScreen {
 
 function Get-StatusRichBlocks {
     <#
-        A status screen as blocks: the verdict, what is on air, and the
-        machine detail folded under it.
+        A status screen as blocks: the verdict, who is asking, what the
+        channel is playing, what the bridge has on air, and the machine detail
+        below it in named sections.
 
         The lines are passed in rather than rebuilt, so the block screen and
         the text screen cannot disagree - they are the same strings. Only the
@@ -267,8 +268,9 @@ function Get-StatusRichBlocks {
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Overall,
         [AllowNull()][object[]]$DetailLines = $null,
-        [string]$DetailSummary = '🔍 التفاصيل',
-        [AllowEmptyString()][string]$Identity = ''
+        [AllowEmptyString()][string]$Identity = '',
+        [AllowEmptyString()][string]$Clock = '',
+        [AllowNull()][object[]]$Highlights = $null
     )
     $blocks = @(@{ type = 'heading'; text = "$Title — v$($script:BridgeVersion)"; size = 3 })
     $blocks += @{ type = 'paragraph'; text = $Overall }
@@ -280,14 +282,42 @@ function Get-StatusRichBlocks {
     if (-not [string]::IsNullOrWhiteSpace($Identity)) {
         $blocks += @{ type = 'paragraph'; text = $Identity }
     }
+    if (-not [string]::IsNullOrWhiteSpace($Clock)) {
+        $blocks += @{ type = 'paragraph'; text = (ConvertFrom-TelegramHtmlText $Clock) }
+    }
+    # What the channel is playing sits with the identity rather than in the
+    # detail: it answers "is this the right moment" and it was reaching this
+    # screen folded away, which is the same as not reaching it.
+    $lead = @(@($Highlights) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    foreach ($line in $lead) { $blocks += @{ type = 'paragraph'; text = (ConvertFrom-TelegramHtmlText $line) } }
     $blocks += @{ type = 'divider' }
     $blocks += @(Get-OnAirTableBlocks)
-    # Blank separators are a text-screen device; as blocks they would be empty
-    # paragraphs, which render as gaps that look like something failed.
-    $detail = @(@($DetailLines) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-            ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
-    if ($detail.Count -gt 0) {
-        $blocks += @{ type = 'details'; summary = $DetailSummary; blocks = $detail }
+    # Nothing is folded any more. The detail used to live under one disclosure
+    # triangle, and this screen is read while something is wrong: a screen that
+    # must be opened before it can be read gets screenshotted half empty.
+    #
+    # The lines arrive as they were written for the text screen, tags and all,
+    # so the two screens cannot drift apart - the same strings are reshaped.
+    # That is also what makes the sections detectable: a line that is nothing
+    # but bold text was a section heading, and a rule of box-drawing
+    # characters was a separator. Both would otherwise strip down to
+    # paragraphs and the screen would lose every edge it had.
+    foreach ($raw in @($DetailLines)) {
+        $text = [string]$raw
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($lead -contains $text) { continue }
+        $isRule = $text -match '^[─-╿\-_=]+$'
+        $heading = [regex]::Match($text, '^<b>(?<t>.+)</b>$')
+        if ($isRule -or $heading.Success) {
+            # Two dividers in a row render as a double rule with nothing
+            # between them, which reads as a missing section.
+            if (@($blocks)[-1].type -ne 'divider') { $blocks += @{ type = 'divider' } }
+            if ($heading.Success) {
+                $blocks += @{ type = 'heading'; text = (ConvertFrom-TelegramHtmlText $heading.Groups['t'].Value); size = 4 }
+            }
+            continue
+        }
+        $blocks += @{ type = 'paragraph'; text = (ConvertFrom-TelegramHtmlText $text) }
     }
     return $blocks
 }
@@ -325,7 +355,8 @@ function Invoke-StatusCommand {
     # against the Arabic around them, and Telegram makes each one tap-to-copy
     # for an operator quoting it in a fault report.
     $lines.Add("<b>ℹ️ الحالة</b> — <code>v$($script:BridgeVersion)</code>")
-    $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
+    $clockLine = "🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)"
+    $lines.Add($clockLine)
     $lines.Add("<b>$overall</b>")
     # Format-UserAuditActor, not a bare id: it resolves the alias when there is
     # one and pins the bracketed digits to LTR, so an Arabic name followed by
@@ -334,6 +365,9 @@ function Invoke-StatusCommand {
     $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add($sep)
+    # Named sections rather than one column: the same grammar the full status
+    # uses, so an operator moving between the two screens reads one layout.
+    $lines.Add('<b>🎛 القناة والمادة</b>')
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     # The programme under the graphics. Placed with the channel line because
     # it answers the same question - what is this channel doing right now -
@@ -365,6 +399,7 @@ function Invoke-StatusCommand {
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
+    $lines.Add('<b>🔄 التزامن</b>')
     if ($sync.Failed.Count -gt 0) {
         $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
     }
@@ -386,9 +421,8 @@ function Invoke-StatusCommand {
     # HTML is stripped back on the way in rather than kept as a second
     # parallel copy that would drift from the one operators actually read.
     $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall `
-        -Identity (ConvertFrom-TelegramHtmlText $identityLine) `
-        -DetailLines @($lines | Select-Object -Skip 4 | ForEach-Object { ConvertFrom-TelegramHtmlText ([string]$_) }) `
-        -DetailSummary '🔍 تفاصيل الاتصال والتزامن'
+        -Identity (ConvertFrom-TelegramHtmlText $identityLine) -Clock $clockLine -Highlights @($material) `
+        -DetailLines @($lines | Select-Object -Skip 4)
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $statusMenu
 }

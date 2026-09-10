@@ -1672,35 +1672,70 @@ Describe 'The status screens lead with the verdict and table what is on air' {
         @($table.cells[2])[2].text | Should -Be 'الآن'
     }
 
-    It 'puts the verdict above everything and folds the machine detail' {
+    It 'puts the verdict above everything and folds nothing' {
         $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟠 طبقات على الهواء' `
                 -DetailLines @('🌐 127.0.0.1', '', '📶 حالة بيانات Cinegy: حديثة'))
 
         $blocks[0].type | Should -Be 'heading'
         $blocks[1].text | Should -Be '🟠 طبقات على الهواء'
-        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
-        # A blank separator is a text-screen device; as a block it renders as
-        # a gap that looks like something failed to load.
-        @($folded.blocks).Count | Should -Be 2
-    }
-
-    It 'folds nothing when there is no detail to fold' {
-        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' -DetailLines @())
-
+        # The detail used to sit under one disclosure triangle. This screen is
+        # read while something is wrong, and a screen that must be opened
+        # before it can be read gets screenshotted half empty.
         @($blocks | Where-Object { $_.type -eq 'details' }).Count | Should -Be 0
+        $texts = @($blocks | ForEach-Object { if ($_.ContainsKey('text')) { [string]$_.text } else { '' } })
+        @($texts | Where-Object { $_ -eq '📶 حالة بيانات Cinegy: حديثة' }).Count | Should -Be 1
+        # A blank line is a text-screen device; as a block it renders as a gap
+        # that looks like something failed to load.
+        @($blocks | Where-Object { $_.type -eq 'paragraph' -and [string]::IsNullOrWhiteSpace([string]$_.text) }).Count | Should -Be 0
     }
 
-    It 'shows the identity above the fold, not inside the collapsed detail' {
+    It 'turns a bold-only line into a section heading with a rule above it' {
+        $blocks = @(Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall '🟢 كل شيء سليم' `
+                -DetailLines @('🌐 127.0.0.1', '', '<b>🩺 صحة الخدمات</b>', 'Telegram: سليم'))
+
+        $head = @($blocks | Where-Object { $_.type -eq 'heading' -and $_.text -eq '🩺 صحة الخدمات' })
+        @($head).Count | Should -Be 1
+        $at = [array]::IndexOf($blocks, $head[0])
+        $blocks[$at - 1].type | Should -Be 'divider'
+    }
+
+    It 'does not draw two rules in a row where a text separator met a heading' {
+        # ℹ️ الحالة writes a box-drawing rule and then a bold heading. Rendered
+        # literally that is a divider, a second divider, and nothing between
+        # them - which reads as a section that failed to load.
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' `
+                -DetailLines @('━━━━━━━━━━━━━━━━━', '<b>🔄 التزامن</b>', '✅ الحالة متزامنة مع Cinegy.'))
+
+        for ($i = 1; $i -lt $blocks.Count; $i++) {
+            if ($blocks[$i].type -eq 'divider') { $blocks[$i - 1].type | Should -Not -Be 'divider' }
+        }
+    }
+
+    It 'lifts what the channel is playing above the layer table, once' {
+        # It answers "is this the right moment for the strap", and it was
+        # arriving folded - which is the same as not arriving.
+        $material = '🎞 الآن: نشرة الأخبار · بعدها: تقرير'
+        $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' `
+                -Highlights @($material) -DetailLines @('🌐 127.0.0.1', $material))
+
+        $texts = @($blocks | ForEach-Object { if ($_.ContainsKey('text')) { [string]$_.text } else { '' } })
+        @($texts | Where-Object { $_ -eq $material }).Count | Should -Be 1
+        [array]::IndexOf($texts, $material) | Should -BeLessThan ([array]::IndexOf(@($blocks.type), 'divider'))
+    }
+
+    It 'shows the identity and the clock in the header' {
         # The id is what an operator is asked for when requesting access or
-        # reporting a fault; behind a disclosure triangle it gets screenshotted
-        # wrongly or not at all.
+        # reporting a fault; the clock says whether the screen is current.
         $identity = '👤 معرّفك: 8201739556'
         $blocks = @(Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall '🟢 كل شيء سليم' `
-                -Identity $identity -DetailLines @('🌐 127.0.0.1'))
+                -Identity $identity -Clock '🕒 <code>2026-09-10 10:00:00</code> (محلي)' -DetailLines @('🌐 127.0.0.1'))
 
         $blocks[2].text | Should -Be $identity
-        $folded = @($blocks | Where-Object { $_.type -eq 'details' })[0]
-        @($folded.blocks | Where-Object { $_.text -eq $identity }).Count | Should -Be 0
+        # The tags come off on the way in: the block renderer has no tag syntax
+        # and would print them.
+        $blocks[3].text | Should -Be '🕒 2026-09-10 10:00:00 (محلي)'
+        $texts = @($blocks | ForEach-Object { if ($_.ContainsKey('text')) { [string]$_.text } else { '' } })
+        @($texts | Where-Object { $_ -eq $identity }).Count | Should -Be 1
     }
 
     It 'omits the identity paragraph entirely when none is supplied' {

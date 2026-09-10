@@ -323,3 +323,84 @@ Describe 'Recovery is announced, not only the failure' {
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
 }
+
+Describe 'The third failure with the same cause says so' {
+    BeforeEach {
+        $script:AlertHistory = @{}
+        $config.Settings | Add-Member -NotePropertyName RepeatAlertWindowHours -NotePropertyValue 6 -Force
+    }
+
+    AfterEach { $script:AlertHistory = @{} }
+
+    It 'stays silent for the first two and names the recurrence on the third' {
+        # Measured on this station's log: 707 of 752 warning and error lines
+        # belong to a cause already seen three times or more, and the output
+        # capture failure repeated 22 times across a fortnight with every
+        # alert reading like the first.
+        $now = Get-Date
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر الالتقاط' -Now $now.AddMinutes(-30) | Should -BeNullOrEmpty
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر الالتقاط' -Now $now.AddMinutes(-20) | Should -BeNullOrEmpty
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر الالتقاط' -Now $now | Should -Match 'رقم 3'
+    }
+
+    It 'counts an alert whose numbers changed as the same cause' {
+        # A layer, a retry count and a clock time differ every time. If they
+        # were part of the identity, no cause would ever repeat.
+        $now = Get-Date
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر فحص الطبقة 3 بعد 2 محاولات' -Now $now.AddMinutes(-10) | Out-Null
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر فحص الطبقة 7 بعد 4 محاولات' -Now $now.AddMinutes(-5) | Out-Null
+        Add-BridgeAlertOccurrence -Text '⚠️ تعذّر فحص الطبقة 2 بعد 9 محاولات' -Now $now | Should -Match 'رقم 3'
+    }
+
+    It 'does not treat a heartbeat or a digest as a failure' {
+        $now = Get-Date
+        1..3 | ForEach-Object { Add-BridgeAlertOccurrence -Text '💚 الجسر يعمل. القوالب: 12' -Now $now | Should -BeNullOrEmpty }
+        $script:AlertHistory.Count | Should -Be 0
+    }
+
+    It 'forgets a cause that stopped happening' {
+        $now = Get-Date
+        Add-BridgeAlertOccurrence -Text '⚠️ عطل قديم' -Now $now.AddHours(-20) | Out-Null
+        Add-BridgeAlertOccurrence -Text '⚠️ عطل آخر' -Now $now | Out-Null
+        # The old one aged out of the window; the table does not grow one
+        # entry per distinct fault for the life of the process.
+        $script:AlertHistory.Keys | Should -Not -Contain 'عطل قديم'
+    }
+
+    It 'counts nothing when an administrator sets the window to zero' {
+        $config.Settings | Add-Member -NotePropertyName RepeatAlertWindowHours -NotePropertyValue 0 -Force
+        1..5 | ForEach-Object { Add-BridgeAlertOccurrence -Text '⚠️ تعذّر الالتقاط' | Should -BeNullOrEmpty }
+        $script:AlertHistory.Count | Should -Be 0
+    }
+
+    It 'reaches every alarm through the one broadcaster' {
+        Mock Send-TelegramMessage { }
+        Mock Get-AdminNotifyIds { @(101) }
+        Mock Test-QuietHoursActive { $false }
+        1..3 | ForEach-Object { Send-AdminBroadcast -Text '⚠️ تعذّر الوصول إلى مخرج البث' }
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'تكرار' }
+    }
+}
+
+Describe 'The Cinegy port belongs on the broadcast network' {
+    It 'says nothing about an address inside a private range' {
+        foreach ($address in @('10.0.0.5', '192.168.1.40', '172.20.3.9', '127.0.0.1', 'http://10.0.0.5:5521')) {
+            Get-CinegyExposureWarning -Address $address | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'warns about a public address, because reaching the port is the authority' {
+        # The Cinegy HTTP interface has no authentication at all: whatever can
+        # reach 5521 can SHOW, HIDE and black the output.
+        Get-CinegyExposureWarning -Address '203.0.113.9' | Should -Match 'بلا مصادقة'
+        Get-CinegyExposureWarning -Address 'http://203.0.113.9:5521' | Should -Match 'بلا مصادقة'
+    }
+
+    It 'judges a hostname as nothing rather than guessing' {
+        # Resolving it would put a DNS lookup on a status screen, and a wrong
+        # guess either cries wolf or reassures falsely.
+        Get-CinegyExposureWarning -Address 'air-server.studio.local' | Should -BeNullOrEmpty
+        Get-CinegyExposureWarning -Address '' | Should -BeNullOrEmpty
+    }
+}

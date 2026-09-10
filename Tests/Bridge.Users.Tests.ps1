@@ -26,6 +26,50 @@ Describe 'User aliases' {
     }
 }
 
+Describe 'A name learned from the update itself' {
+    BeforeEach {
+        $script:UserAliases = @{}
+        $script:userAliasesFile = Join-Path $TestDrive 'user-aliases.json'
+    }
+
+    It 'names an operator the audit log would otherwise record as a number' {
+        # Measured on this station: 7 of 8 users had no name and 366 audit
+        # records named a raw id, because only an access request ever captured
+        # one - and most operators were added directly by an administrator.
+        Update-UserNameFromTelegram -UserId 101 -From ([pscustomobject]@{ first_name = 'أحمد'; last_name = 'علي' }) | Should -BeTrue
+        Get-UserDisplayName -UserId 101 | Should -Be 'أحمد علي'
+        Format-UserAuditActor -UserId 101 | Should -Match 'أحمد علي'
+        Format-UserAuditActor -UserId 101 | Should -Match '101'
+    }
+
+    It 'keeps the handle when Telegram carries no first name' {
+        Update-UserNameFromTelegram -UserId 102 -From ([pscustomobject]@{ username = 'news_desk' }) | Should -BeTrue
+        Get-UserDisplayName -UserId 102 | Should -Be '@news_desk'
+    }
+
+    It 'never overwrites a name an administrator chose' {
+        Set-UserAlias -TargetUserId 103 -Alias 'مخرج النشرة' | Out-Null
+        Update-UserNameFromTelegram -UserId 103 -From ([pscustomobject]@{ first_name = 'Ahmad' }) | Should -BeFalse
+        Get-UserDisplayName -UserId 103 | Should -Be 'مخرج النشرة'
+    }
+
+    It 'writes once, not on every message' {
+        $from = [pscustomobject]@{ first_name = 'أحمد' }
+        Update-UserNameFromTelegram -UserId 104 -From $from | Should -BeTrue
+        Update-UserNameFromTelegram -UserId 104 -From $from | Should -BeFalse
+    }
+
+    It 'ignores an update with no sender rather than storing a blank' {
+        Update-UserNameFromTelegram -UserId 105 -From $null | Should -BeFalse
+        Get-UserDisplayName -UserId 105 | Should -Be '105'
+    }
+
+    It 'caps a pasted paragraph so one name cannot stretch every audit line' {
+        Update-UserNameFromTelegram -UserId 106 -From ([pscustomobject]@{ first_name = ('ا' * 200) }) | Out-Null
+        (Get-UserDisplayName -UserId 106).Length | Should -BeLessOrEqual 80
+    }
+}
+
 Describe 'Authorized user administration' {
     BeforeEach {
         $script:OriginalAllowedChatIds = @(Get-JsonProp $config 'AllowedChatIds')

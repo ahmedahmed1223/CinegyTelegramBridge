@@ -13,6 +13,24 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.20.0
+
+Two items from the standing backlog, the cheapest and highest-priority ones.
+
+A guidance message already computes the fix it recommends - "the hold is
+twice the loop length (750 frames): make it 750 frames or turn on
+appearance sync" - and used to leave the operator to retype that number by
+hand in a separate free-text prompt. A button beside the warning now applies
+it directly, and disappears on its own once the warning does.
+
+The full status screen also names a gap that cost two backlog decisions
+before it was measured: the Cinegy HTTP API documentation used to design new
+features was Air 26.2, the station's installed engine reports
+22.12.0.4921.15212, and one review had to re-derive that fact from the
+device before trusting the docs. The status screen now reads the installed
+version from the same client identity it already displays and says so when
+it differs from the documented baseline.
+
 ## Version 8.19.0
 
 Four things, three of them measured on this station's own log rather than

@@ -41,6 +41,36 @@ function Get-CinegyExposureWarning {
     return '🔓 عنوان Cinegy خارج النطاقات الخاصة. واجهة Cinegy بلا مصادقة: من يصل إلى المنفذ يتحكم بالهواء. أبقِ المنفذ داخل شبكة البثّ.'
 }
 
+function Get-CinegyVersionAwarenessNote {
+    <#
+        Names the gap between the Cinegy engine actually installed and the
+        product-documentation version any new capability gets designed
+        against, so a feature built from the published HTTP API docs is not
+        assumed to exist on an older engine without being measured first.
+
+        docs/REVIEW-2026-09-10.md hit exactly this: the reference docs were
+        Air 26.2, the station ran 22.12, and two backlog items (T-10, T-18)
+        turned on that gap once it was measured against the live device
+        instead of assumed from the docs. $ReferenceDocVersion is that same
+        baseline; bump it in one place when the docs used for design change,
+        rather than hunting every place the number was typed.
+
+        Silent when there is no identity to read yet, or when it already
+        matches - so the line only appears when it says something new.
+    #>
+    param([object[]]$LayerStatuses = @(), [string]$ReferenceDocVersion = '26.2')
+    $identity = ''
+    foreach ($status in @($LayerStatuses)) {
+        $candidate = [string](Get-JsonProp $status 'ClientIdentity')
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) { $identity = $candidate; break }
+    }
+    if ([string]::IsNullOrWhiteSpace($identity)) { return '' }
+    if ($identity -notmatch '(?<Version>\d+\.\d+)(?:\.\d+){0,3}') { return '' }
+    $installed = [string]$Matches.Version
+    if ($installed -eq $ReferenceDocVersion) { return '' }
+    return "📄 توثيق Cinegy المرجعي مبنيّ على $ReferenceDocVersion، والمثبَّت هنا $installed ($(ConvertTo-TelegramHtmlText $identity)) — قِس أي قدرة جديدة على الجهاز قبل بنائها، فقد لا تكون موجودة بعد."
+}
+
 function Invoke-FullStatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -100,6 +130,8 @@ function Invoke-FullStatusCommand {
     $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
     $exposure = Get-CinegyExposureWarning -Address ([string]$config.AirServerAddress)
     if ($exposure) { $lines.Add($exposure) }
+    $versionNote = Get-CinegyVersionAwarenessNote -LayerStatuses $layerStatuses
+    if ($versionNote) { $lines.Add($versionNote) }
     $material = Get-AirMaterialNowNext
     if ($material) { $lines.Add($material) }
     $lines.Add("🧩 وضع المشاهد المختار: <code>$(ConvertTo-TelegramHtmlText $configuredSceneMode)</code> · $verification")

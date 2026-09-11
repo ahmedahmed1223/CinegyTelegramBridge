@@ -2097,3 +2097,57 @@ Describe 'Warning when the row hold does not fit the scene loop' {
         Get-MojazBulletinLoopFitNote -Bulletin $bulletin | Should -Match 'أضعاف'
     }
 }
+
+Describe 'Fixing the loop-fit warning from its own button (T-12)' {
+    # A guidance message told the operator the exact fix - "اجعلها 750 إطارًا
+    # أو فعّل مزامنة الظهور" - and left them to retype the number by hand.
+    # The screen already knows the loop length; the button applies it.
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ LoopFrames = 750; LoopSeconds = 30 } }
+        $script:bulletin = New-TestMojazLibrary -DelaySeconds 60
+    }
+
+    It 'offers the quick-fix button beside the warning it answers' {
+        $callbacks = @((Get-MojazKeyboard -Bulletin $script:bulletin).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Contain 'mojaz:matchloop'
+    }
+
+    It 'names the exact frame count in the button label' {
+        $button = @((Get-MojazKeyboard -Bulletin $script:bulletin).inline_keyboard | ForEach-Object { @($_) }) | Where-Object { $_.callback_data -eq 'mojaz:matchloop' }
+        $button.text | Should -Match '750'
+    }
+
+    It 'does not offer the button once the hold already fits the loop' {
+        # Set-MojazBulletinTiming hands back a candidate library; it only
+        # becomes $script:MojazLibrary once Invoke-MojazEdit saves it. Reading
+        # the candidate directly is the pattern the sync tests above already use.
+        $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$script:bulletin.Id) -DelayFrames 750 -UserId 1
+        $callbacks = @((Get-MojazKeyboard -Bulletin $result.Value.Bulletins[0]).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Not -Contain 'mojaz:matchloop'
+    }
+
+    It 'does not offer the button once the bulletin syncs to the loop instead' {
+        $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$script:bulletin.Id) -SyncToLoop $true -UserId 1
+        $callbacks = @((Get-MojazKeyboard -Bulletin $result.Value.Bulletins[0]).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $callbacks | Should -Not -Contain 'mojaz:matchloop'
+    }
+
+    It 'sets the delay to the loop length and clears the warning' {
+        Set-MojazDelayToLoop -ChatId 100 -UserId 101
+
+        $updated = Get-MojazSelected -ChatId 100
+        Get-MojazDelayFrames -Bulletin $updated | Should -Be 750
+        Get-MojazBulletinLoopFitNote -Bulletin $updated | Should -BeNullOrEmpty
+    }
+
+    It 'does nothing when there is no scene timing to read a loop length from' {
+        Mock Get-MojazSceneTiming { $null }
+
+        Set-MojazDelayToLoop -ChatId 100 -UserId 101
+
+        Get-MojazDelayFrames -Bulletin (Get-MojazSelected -ChatId 100) | Should -Be 1500
+    }
+}

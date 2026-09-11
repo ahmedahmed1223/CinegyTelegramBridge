@@ -404,3 +404,31 @@ Describe 'The Cinegy port belongs on the broadcast network' {
         Get-CinegyExposureWarning -Address '' | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Naming the gap between installed Cinegy and the reference docs' {
+    It 'says nothing when the installed engine matches the reference docs' {
+        $statuses = @([pscustomobject]@{ ClientIdentity = 'Cinegy Air PRO 26.2.0.1234.5678' })
+        Get-CinegyVersionAwarenessNote -LayerStatuses $statuses | Should -BeNullOrEmpty
+    }
+
+    It 'warns when the installed engine is older than the docs it would be designed against' {
+        # The measured case from REVIEW-2026-09-10.md: docs at 26.2, station at 22.12.
+        $statuses = @([pscustomobject]@{ ClientIdentity = 'Cinegy Air PRO 22.12.0.4921.15212' })
+        $note = Get-CinegyVersionAwarenessNote -LayerStatuses $statuses
+        $note | Should -Match '26\.2'
+        $note | Should -Match '22\.12'
+    }
+
+    It 'reads the first layer that actually answered, skipping ones that did not' {
+        $statuses = @(
+            [pscustomobject]@{ ClientIdentity = '' }
+            [pscustomobject]@{ ClientIdentity = 'Cinegy Air PRO 22.12.0.4921.15212' }
+        )
+        Get-CinegyVersionAwarenessNote -LayerStatuses $statuses | Should -Match '22\.12'
+    }
+
+    It 'says nothing when no layer has answered yet' {
+        Get-CinegyVersionAwarenessNote -LayerStatuses @([pscustomobject]@{ ClientIdentity = '' }) | Should -BeNullOrEmpty
+        Get-CinegyVersionAwarenessNote -LayerStatuses @() | Should -BeNullOrEmpty
+    }
+}

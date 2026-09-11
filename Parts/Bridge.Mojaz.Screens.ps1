@@ -113,6 +113,14 @@ function Get-MojazKeyboard {
     $keyboard += , @(
         (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم · الإيقاع من اللوب' } else { 'لا · الإيقاع من المدة' })" 'mojaz:sync')
     )
+    # T-12: a warning that already computed the fix should not make the
+    # operator retype it. Shown only beside the warning it answers - silent
+    # exactly when Get-MojazBulletinLoopFitNote is silent.
+    $fitNote = Get-MojazBulletinLoopFitNote -Bulletin $Bulletin
+    if ($fitNote) {
+        $loopFrames = [int](Get-JsonProp (Get-MojazSceneTiming) 'LoopFrames')
+        $keyboard += , @((New-Button "⚡ اجعلها $loopFrames إطارًا" 'mojaz:matchloop' -Style success))
+    }
     # A line per row: delete it, or move it up or down the rundown. Numbered
     # like the table above, so the button and the story line up by eye.
     for ($i = 0; $i -lt $rows.Count; $i++) {
@@ -810,6 +818,30 @@ function Switch-MojazSync {
     $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -SyncToLoop $wanted -UserId $UserId
     if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
         Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazSyncText -Bulletin (Get-MojazSelected -ChatId $ChatId)) -ParseMode HTML
+    }
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+}
+
+function Set-MojazDelayToLoop {
+    <#
+        T-12: the loop-fit warning already names the exact number that clears
+        it - the loop's own length - and used to leave the operator to retype
+        it into the free-text prompt by hand. This is that number, applied
+        from the button beside the warning it answers.
+
+        Quiet if there is nothing to fix: no bulletin selected, or no scene
+        timing to read a loop length from. Get-MojazBulletinLoopFitNote already
+        made that same check before the button was ever shown.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    $timing = Get-MojazSceneTiming
+    $loopFrames = if ($timing) { [int](Get-JsonProp $timing 'LoopFrames') } else { 0 }
+    if ($loopFrames -gt 0) {
+        $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -DelayFrames $loopFrames -UserId $UserId
+        Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
     }
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
 }

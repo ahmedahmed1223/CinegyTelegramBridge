@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.23.0
+
+Three log-measured items: dead-chat quarantine after three undeliverable
+failures (401/403 only, admin-rostered with restore and revoke), invalid
+templates listed in the catalogue with their load reason and a guarded
+delete, and expiry messages that resume the draft to its prompt or review —
+never straight to air.
+
 ## Version 8.22.0
 
 Four proposed features: a material-end alert (off by default, enabled in

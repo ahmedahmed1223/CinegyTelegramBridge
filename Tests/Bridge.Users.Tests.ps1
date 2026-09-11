@@ -578,3 +578,57 @@ Describe 'The command menu is scoped to the role' {
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly -ParameterFilter { $Body -like '*Admin*' }
     }
 }
+
+Describe 'Dead chats quarantine (D1)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-AdminBroadcast { }
+        $script:DeadChats = @{}
+        $script:DeadChatStrikes = @{}
+        $script:deadChatsFile = Join-Path $TestDrive 'dead-chats.json'
+    }
+
+    AfterEach {
+        $script:DeadChats = @{}
+        $script:DeadChatStrikes = @{}
+    }
+
+    It 'ignores content failures and counts only undeliverable chats' {
+        # A 400 is the bridge's own malformed message: quarantining on it
+        # would hide our bugs behind a roster.
+        Register-TelegramSendFailure -ChatId 111 -StatusCode 400 -ErrorText 'Bad Request'
+        Register-TelegramSendFailure -ChatId 111 -StatusCode 400 -ErrorText 'Bad Request'
+        Register-TelegramSendFailure -ChatId 111 -StatusCode 400 -ErrorText 'Bad Request'
+        Test-DeadChat -ChatId 111 | Should -BeFalse
+        Register-TelegramSendFailure -ChatId 222 -StatusCode 403 -ErrorText 'Forbidden: bot was blocked'
+        Register-TelegramSendFailure -ChatId 222 -StatusCode 403 -ErrorText 'Forbidden: bot was blocked'
+        Test-DeadChat -ChatId 222 | Should -BeFalse
+        Register-TelegramSendFailure -ChatId 222 -StatusCode 403 -ErrorText 'Forbidden: bot was blocked'
+        Test-DeadChat -ChatId 222 | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'skips quarantined chats instead of failing again' {
+        $script:DeadChats['333'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Mock Invoke-BridgeTelegramRequest { throw 'must not attempt a quarantined chat' }
+        Send-TelegramMessage -ChatId 333 -Text 'hello'
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+    }
+
+    It 'releases back to zero strikes rather than trusting the button' {
+        $script:DeadChats['444'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Restore-DeadChat -ChatId 444
+        Test-DeadChat -ChatId 444 | Should -BeFalse
+        Register-TelegramSendFailure -ChatId 444 -StatusCode 403 -ErrorText 'still blocked'
+        Test-DeadChat -ChatId 444 | Should -BeFalse
+    }
+
+    It 'persists the quarantine across restarts' {
+        $script:DeadChats['555'] = @{ Since = (Get-Date).ToString('o'); LastError = 'Unauthorized'; Strikes = 3 }
+        Save-DeadChats | Should -BeTrue
+        $script:DeadChats = @{}
+        Import-DeadChats
+        Test-DeadChat -ChatId 555 | Should -BeTrue
+    }
+}

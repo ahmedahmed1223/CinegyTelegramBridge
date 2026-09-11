@@ -316,6 +316,27 @@ function Get-TemplateStoreParsed {
     return $script:TemplateCache
 }
 
+function Get-InvalidTemplateEntries {
+    <#
+        D2: the registry entries skipped at every load, paired with why.
+        Reasons come from the store's own error lines, matched on the quoted
+        key they all carry - so the screen explains rather than repeats the
+        log's eternal "skipped" warning, and each row offers its deletion.
+    #>
+    $store = Get-TemplateStore
+    $entries = @()
+    # Get-JsonProp, not direct access: mocked stores in tests carry only the
+    # keys their test cares about, and StrictMode turns a missing InvalidKeys
+    # into a failed catalogue render.
+    foreach ($key in @(Get-JsonProp $store 'InvalidKeys' | Where-Object { $null -ne $_ })) {
+        $name = [string]$key
+        $reason = @(Get-JsonProp $store 'Errors' | Where-Object { [string]$_ -match "'$([regex]::Escape($name))'" } | Select-Object -First 1)
+        if (-not $reason) { $reason = 'غير صالح' }
+        $entries += [pscustomobject]@{ Key = $name; Reason = [string]$reason }
+    }
+    return $entries
+}
+
 function Get-TemplateByIndex {
     param([Parameter(Mandatory)][int]$Index)
     $store = Get-TemplateStore

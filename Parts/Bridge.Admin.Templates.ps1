@@ -36,6 +36,43 @@ function Complete-TemplateReminderMinutes {
     Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)
 }
 
+function Show-InvalidTemplatesScreen {
+    <#
+        D2: the "skipped" warning as a work list. Every invalid registry entry
+        with the reason it was skipped and a delete button beside it - the
+        deletion reuses Save-TemplateDefinitionChange, so its guards (on air,
+        scheduled) and its backup apply unchanged.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $entries = @(Get-InvalidTemplateEntries)
+    $back = @{ inline_keyboard = @(, @((New-Button '⬅️ القوالب' 'menu:templatesadmin'))) }
+    if ($entries.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🧹 لا قوالب غير صالحة — السجل نظيف.' -ReplyMarkup $back
+        return
+    }
+    # Paged like every keyboard built from a growing collection. The delete
+    # index stays global over the full list (not per page): ask/go re-resolve
+    # it live, so a page turn between taps still lands on the right entry.
+    $window = Get-BridgePageWindow -ItemCount $entries.Count -Page $Page -PageSize 5
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>🧹 قوالب غير صالحة ($($entries.Count))</b>")
+    $lines.Add('<i>تُتخطى عند كل تحميل. الحذف بنسخة احتياطية، والمشغول على الهواء أو المجدول محمي.</i>')
+    $rows = @()
+    foreach ($i in $window.StartIndex..$window.EndIndex) {
+        $lines.Add("• <b>$(ConvertTo-TelegramHtmlText $entries[$i].Key)</b> — $(ConvertTo-TelegramHtmlText $entries[$i].Reason)")
+        $rows += , @((New-Button "🗑 حذف $($entries[$i].Key)" "tplinv:ask:$i"))
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "tplinv:page:$($window.Page - 1)") }
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "tplinv:page:$($window.Page + 1)") }
+        $rows += , $pager
+    }
+    $rows += , @((New-Button '⬅️ القوالب' 'menu:templatesadmin'))
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup @{ inline_keyboard = $rows } -ParseMode HTML
+}
+
 function Start-TemplateDefinitionPrompt {
     param([Parameter(Mandatory)][ValidateSet('create', 'edit', 'delete')][string]$Action, [int]$TemplateIndex = -1, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Get-Setting 'EnableFullTemplateManagement')) {

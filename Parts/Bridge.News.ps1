@@ -83,6 +83,42 @@ function Start-NewsTickerDraft {
     return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''}
 }
 
+function Resume-ExpiredNewsDraft {
+    <#
+        D3: reopen an expired news draft with its items. Only its owner's
+        button reaches here (the stash is keyed by OwnerChatId), and only
+        when no draft is active - taking over somebody else's live draft
+        would be theft, not resume. The base hash is re-taken from the live
+        file: the world moved while this draft sat idle, and publishing
+        refuses on a changed base exactly for that reason. Lands on the
+        management screen, never straight to publish.
+    #>
+    param([long]$ChatId, [long]$UserId)
+    $saved = $script:ExpiredNewsDraft
+    if (-not $saved -or [long](Get-JsonProp $saved 'OwnerChatId') -ne $ChatId) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا مسودة منتهية قابلة للاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if ($script:NewsTickerDraft) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'توجد مسودة نشطة الآن — انشرها أو أغلقها أولًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $snapshot = Get-NewsTickerConfiguredSnapshot
+    if (-not $snapshot.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر الاستئناف: $($snapshot.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $script:ExpiredNewsDraft = $null
+    $script:NewsTickerDraft = [ordered]@{
+        Id = [guid]::NewGuid().ToString('N'); OwnerUserId = $UserId; OwnerChatId = $ChatId
+        CreatedAt = (Get-Date).ToString('o'); UpdatedAt = (Get-Date).ToString('o')
+        BaseHash = $snapshot.Hash; Items = @(@($saved.Items) | ForEach-Object { [string]$_ })
+    }
+    Save-NewsTickerDraft | Out-Null
+    Add-AuditEntry "↩️ استئناف مسودة أخبار منتهية ($(@($saved.Items).Count) خبرًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Show-NewsTickerManagementScreen -ChatId $ChatId -UserId $UserId
+}
+
 function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
     $draft = Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return $false }
     $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1

@@ -74,6 +74,132 @@ function Save-UserProfiles {
     catch { Write-BridgeLog "Could not write user-profiles.json: $($_.Exception.Message)" 'WARN'; return $false }
 }
 
+function Import-DeadChats {
+    if (-not (Test-Path -LiteralPath $script:deadChatsFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:deadChatsFile -Raw | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) {
+            $script:DeadChats[$prop.Name] = @{
+                Since = [string](Get-JsonProp $prop.Value 'Since'); LastError = [string](Get-JsonProp $prop.Value 'LastError')
+                Strikes = [int](Get-JsonProp $prop.Value 'Strikes')
+            }
+        }
+    }
+    catch { Write-BridgeLog "Could not read dead-chats.json: $($_.Exception.Message)" 'WARN' }
+}
+
+function Save-DeadChats {
+    try {
+        $json = $script:DeadChats | ConvertTo-Json -Depth 5
+        if (-not (Write-BridgeValidatedJson -Path $script:deadChatsFile -Json $json)) {
+            throw 'Validated JSON write failed.'
+        }
+        return $true
+    }
+    catch { Write-BridgeLog "Could not write dead-chats.json: $($_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Test-DeadChat {
+    param([Parameter(Mandatory)][long]$ChatId)
+    return $script:DeadChats.ContainsKey([string]$ChatId)
+}
+
+function Register-TelegramSendFailure {
+    <#
+        D1: three strikes from Telegram itself, then quarantine. Only 401 and
+        403 count: a 400 is the bridge's own malformed message, and
+        quarantining on it would hide our bugs behind a roster. A 429 is a
+        capacity problem with its own retry queue, not a dead chat.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [int]$StatusCode = 0, [string]$ErrorText = '')
+    if ($StatusCode -notin @(401, 403)) { return }
+    $id = [string]$ChatId
+    if ($script:DeadChats.ContainsKey($id)) { return }
+    $strikes = 0
+    [int]::TryParse([string]$script:DeadChatStrikes[$id], [ref]$strikes) | Out-Null
+    $strikes++
+    if ($strikes -lt 3) {
+        $script:DeadChatStrikes[$id] = $strikes
+        return
+    }
+    $script:DeadChatStrikes.Remove($id) | Out-Null
+    $short = $ErrorText.Trim()
+    if ($short.Length -gt 160) { $short = $short.Substring(0, 160) + '…' }
+    $script:DeadChats[$id] = @{ Since = (Get-Date).ToString('o'); LastError = $short; Strikes = $strikes }
+    Save-DeadChats | Out-Null
+    $name = Get-UserDisplayName -UserId $ChatId
+    $isAdmin = Test-Admin -ChatId $ChatId -UserId $ChatId
+    Write-BridgeLog "Chat $ChatId quarantined as dead after $strikes delivery failures ($StatusCode)" 'WARN'
+    Add-AuditEntry "💀 محادثة ميتة: $name ($ChatId) — أُوقف الإرسال لها بعد $strikes فشل"
+    # An admin that stops receiving is itself an outage: everyone else hears
+    # urgently, because a held quiet-hours digest about missing alerts is how
+    # a dead admin stays dead unnoticed.
+    $keyboard = @{ inline_keyboard = @(, @((New-Button '✅ إعادة تفعيل' "deadchat:un:$ChatId"))) }
+    Send-AdminBroadcast -Text "💀 المحادثة «$name» ($ChatId) لا تستقبل من البوت ($StatusCode) — أُوقف الإرسال لها. أعد التفعيل بعد إصلاحها أو اسحب صلاحيتها من شاشة المستخدمين." `
+        -ReplyMarkup $keyboard -Urgent:$isAdmin
+}
+
+function Restore-DeadChat {
+    <#
+        Releases a chat back to live sending. Strikes restart from zero: if
+        the block is still there, three fresh failures re-quarantine it and
+        say so again, rather than trusting a button press over Telegram.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId)
+    $id = [string]$ChatId
+    $script:DeadChats.Remove($id) | Out-Null
+    $script:DeadChatStrikes.Remove($id) | Out-Null
+    Save-DeadChats | Out-Null
+    Write-BridgeLog "Chat $ChatId released from dead-chat quarantine by administrator"
+    Add-AuditEntry "💀 أُعيد تفعيل المحادثة $ChatId"
+}
+
+function Show-DeadChatsScreen {
+    <#
+        D1: the quarantine roster. Each row names who stopped receiving, when,
+        and why - with a release button beside it (T-12's rule: a warning
+        carries its fix) and a revoke for the ones that should never come
+        back. Releasing restarts strikes from zero rather than trusting the
+        button: three fresh failures re-quarantine and say so again.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $ids = @($script:DeadChats.Keys | Sort-Object { [long]$_ })
+    $back = @{ inline_keyboard = @(, @((New-Button '⬅️ المستخدمون' 'menu:usersadmin'))) }
+    if ($ids.Count -eq 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '💀 لا محادثات ميتة — كل القائمة تستقبل.' -ReplyMarkup $back
+        return
+    }
+    # Buttons grow two per chat, so the rows are paged like the users roster -
+    # the text itself already pages through Send-TelegramPagedText, but the
+    # keyboard would not, and the paging gate fails exactly that.
+    $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize 5
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>💀 محادثات ميتة ($($ids.Count))</b>")
+    $rows = @()
+    foreach ($index in $window.StartIndex..$window.EndIndex) {
+        $id = [string]$ids[$index]
+        $target = 0L
+        [long]::TryParse($id, [ref]$target) | Out-Null
+        $entry = $script:DeadChats[$id]
+        $since = ''
+        $stamp = [datetime]::MinValue
+        if ([datetime]::TryParse([string](Get-JsonProp $entry 'Since'), [ref]$stamp)) { $since = $stamp.ToString('MM-dd HH:mm') }
+        $name = ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $target)
+        $why = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $entry 'LastError'))
+        $lines.Add("• $name (<code>$id</code>) · منذ $since`n  $why")
+        $rows += , @((New-Button '✅ إعادة تفعيل' "deadchat:un:$target"), (New-Button '⛔ سحب الصلاحية' "deadchat:revoke:$target"))
+    }
+    if ($window.PageCount -gt 1) {
+        $pager = @()
+        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "deadchat:page:$($window.Page - 1)") }
+        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "deadchat:page:$($window.Page + 1)") }
+        $rows += , $pager
+    }
+    $rows += , @((New-Button '⬅️ المستخدمون' 'menu:usersadmin'))
+    Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup @{ inline_keyboard = $rows } -ParseMode HTML
+}
+
 function Write-UserApprovalMetadata {
     param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ApprovedByUserId,
         [AllowNull()]$RequestedAt = $null)

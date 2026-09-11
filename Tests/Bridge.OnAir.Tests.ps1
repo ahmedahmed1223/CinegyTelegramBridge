@@ -2428,3 +2428,59 @@ Describe 'The deferred postbox write is addressed to a scene' {
         Should -Invoke Send-PostboxValues -Times 0 -Exactly
     }
 }
+
+Describe 'Expired flow resume (D3)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Get-TemplateByIndex { [pscustomobject]@{ Key = 'urgent'; Layer = 5; Path = 'C:/t.cintitle' } }
+        Mock Get-TemplateIndex { 0 }
+        Mock Save-DraftStates { }
+        $script:PendingState = @{}
+        $script:ExpiredFlowResume = @{}
+        $script:LayerLocks = @{}
+    }
+
+    It 'stashes an expired show flow and offers resume' {
+        $script:PendingState[[long]111] = @{
+            Mode = 'show_fields'; Key = 'urgent'; Fields = @('t'); Labels = @('النص')
+            Limits = @(100); Required = @($true); Sensitives = @($false)
+            Values = @{ t = 'محفوظ' }; Index = 1; UserId = 111
+            AutoHideSeconds = 0; LockLayer = 5; StartedAt = (Get-Date).AddMinutes(-20)
+            WarnedAt = (Get-Date).AddMinutes(-5)
+        }
+        Update-PendingExpiry
+        $script:ExpiredFlowResume.ContainsKey([long]111) | Should -BeTrue
+        $script:ExpiredFlowResume[[long]111].Values['t'] | Should -Be 'محفوظ'
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard[0].callback_data) -contains 'flow:resume'
+        }
+    }
+
+    It 'resumes to the field prompt with values intact, never to air' {
+        $script:ExpiredFlowResume[[long]111] = @{
+            Mode = 'show_fields'; Key = 'urgent'; Fields = @('t'); Labels = @('النص')
+            Limits = @(100); Required = @($true); Sensitives = @($false)
+            Values = @{}; Index = 0; UserId = 111
+            AutoHideSeconds = 0; LockLayer = 5; At = (Get-Date)
+        }
+        Mock Send-PostboxValues { }
+        Resume-ExpiredFlow -ChatId 111 -UserId 111
+        $state = Get-PendingState -ChatId 111
+        $state.Mode | Should -Be 'show_fields'
+        $state.Index | Should -Be 0
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'refuses resume when the template is gone' {
+        Mock Get-TemplateByIndex { $null }
+        $script:ExpiredFlowResume[[long]111] = @{
+            Mode = 'show_fields'; Key = 'gone'; Fields = @(); Labels = @(); Limits = @()
+            Required = @(); Sensitives = @(); Values = @{}; Index = 0; UserId = 111
+            AutoHideSeconds = 0; LockLayer = 5; At = (Get-Date)
+        }
+        Resume-ExpiredFlow -ChatId 111 -UserId 111
+        Get-PendingState -ChatId 111 | Should -BeNullOrEmpty
+    }
+}

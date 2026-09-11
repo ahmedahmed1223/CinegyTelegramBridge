@@ -141,6 +141,12 @@ function Send-TelegramMessage {
         [hashtable]$ReplyMarkup,
         [ValidateSet('', 'HTML')][string]$ParseMode = ''
     )
+    # D1: a quarantined chat already proved undeliverable three times. Trying
+    # again on every alert is how forty-one failures filled a week of log.
+    if (Test-DeadChat -ChatId $ChatId) {
+        Write-BridgeLog "Skipping send to quarantined dead chat $ChatId"
+        return
+    }
     # A split lands wherever the budget runs out, which for HTML can be the
     # middle of a tag - and Telegram rejects that outright. Callers asking for
     # HTML build one message deliberately; if one ever overflows, the markup
@@ -178,6 +184,7 @@ function Send-TelegramMessage {
                 continue
             }
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
+            Register-TelegramSendFailure -ChatId $ChatId -StatusCode ([int](Get-JsonProp $request 'StatusCode')) -ErrorText ([string]$request.Error)
         }
     }
 }
@@ -630,6 +637,10 @@ function Send-TelegramPhoto {
         [string]$Caption,
         [hashtable]$ReplyMarkup
     )
+    if (Test-DeadChat -ChatId $ChatId) {
+        Write-BridgeLog "Skipping photo send to quarantined dead chat $ChatId"
+        return
+    }
     $form = @{ chat_id = "$ChatId"; photo = Get-Item -Path $FilePath }
     if ($Caption) { $form.caption = $Caption }
     if ($ReplyMarkup) { $form.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
@@ -643,6 +654,7 @@ function Send-TelegramPhoto {
             return
         }
         Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($request.Error)" "ERROR"
+        Register-TelegramSendFailure -ChatId $ChatId -StatusCode ([int](Get-JsonProp $request 'StatusCode')) -ErrorText ([string]$request.Error)
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($request.Error)"
     }
 }

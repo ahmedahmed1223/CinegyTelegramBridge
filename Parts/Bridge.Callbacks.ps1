@@ -135,6 +135,11 @@ function Invoke-CallbackQuery {
     switch -Wildcard ($data) {
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+        'news:resume' {
+            Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id | Out-Null
+            Resume-ExpiredNewsDraft -ChatId $chatId -UserId $userId
+            break
+        }
         'news:sheetdraft' {
             if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text 'سحب الشيت غير مسموح لك.'; break }
             Send-TelegramMessage -ChatId $chatId -Text (Get-NewsSheetConfirmPrompt -Target draft) -ReplyMarkup (Get-NewsSheetConfirmKeyboard -Target draft)
@@ -951,6 +956,45 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-UsersAdminScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:deadchats' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-DeadChatsScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'deadchat:un:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $target = 0L
+            if ([long]::TryParse((Get-CallbackArg $data 'deadchat:un:'), [ref]$target) -and $target -gt 0) {
+                Restore-DeadChat -ChatId $target
+                Show-DeadChatsScreen -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'deadchat:revoke:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $target = 0L
+            if ([long]::TryParse((Get-CallbackArg $data 'deadchat:revoke:'), [ref]$target) -and $target -gt 0) {
+                $result = Revoke-AuthorizedUser -TargetUserId $target
+                if ($result -and $result.Success) {
+                    Restore-DeadChat -ChatId $target
+                    Add-AuditEntry "💀 سحب صلاحية المحادثة الميتة $target - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Show-DeadChatsScreen -ChatId $chatId -UserId $userId
+                }
+                else {
+                    $why = if ($result) { [string]$result.Error } else { 'تعذّر السحب.' }
+                    Send-TelegramMessage -ChatId $chatId -Text "❌ $why" -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $userId)
+                }
+            }
+            break
+        }
+        'deadchat:page:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $page = 0
+                [int]::TryParse((Get-CallbackArg $data 'deadchat:page:'), [ref]$page) | Out-Null
+                if ($page -lt 0) { $page = 0 }
+                Show-DeadChatsScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
         'userspage:*' {
             $page = 0
             if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
@@ -1292,6 +1336,57 @@ function Invoke-CallbackQuery {
                 if ($pendingImport -and [string]$pendingImport.Mode -like 'template_import_*') { Clear-PendingState -ChatId $chatId }
                 Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
             }
+            break
+        }
+        # D2: delete an invalid registry entry. Positional over a live
+        # re-read: the registry can change between taps, so every step
+        # re-resolves and a stale index lands back on the list, not on the
+        # wrong template. Guards and backup ride inside
+        # Save-TemplateDefinitionChange.
+        'tpladmin:invalid' {
+            if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) { Show-InvalidTemplatesScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'tplinv:page:*' {
+            if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) {
+                $page = 0
+                [int]::TryParse((Get-CallbackArg $data 'tplinv:page:'), [ref]$page) | Out-Null
+                if ($page -lt 0) { $page = 0 }
+                Show-InvalidTemplatesScreen -ChatId $chatId -UserId $userId -Page $page
+            }
+            break
+        }
+        'tplinv:ask:*' {
+            if (-not (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId)) { break }
+            $index = -1
+            $entries = @(Get-InvalidTemplateEntries)
+            if (-not [int]::TryParse((Get-CallbackArg $data 'tplinv:ask:'), [ref]$index) -or $index -lt 0 -or $index -ge $entries.Count) {
+                Show-InvalidTemplatesScreen -ChatId $chatId -UserId $userId
+                break
+            }
+            $key = [string]$entries[$index].Key
+            Send-TelegramMessage -ChatId $chatId -Text "🗑 حذف القالب غير الصالح '$key'؟`n$(ConvertTo-TelegramHtmlText $entries[$index].Reason)`nتُؤخذ نسخة احتياطية أولًا." -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '🗑 نعم، احذف' "tplinv:go:$index" -Style danger), (New-Button '❌ رجوع' 'tpladmin:invalid'))) }
+            break
+        }
+        'tplinv:go:*' {
+            if (-not (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId)) { break }
+            $index = -1
+            $entries = @(Get-InvalidTemplateEntries)
+            if (-not [int]::TryParse((Get-CallbackArg $data 'tplinv:go:'), [ref]$index) -or $index -lt 0 -or $index -ge $entries.Count) {
+                Show-InvalidTemplatesScreen -ChatId $chatId -UserId $userId
+                break
+            }
+            $key = [string]$entries[$index].Key
+            $result = Save-TemplateDefinitionChange -TemplateKey $key -Action delete
+            if ($result -and $result.Success) {
+                Add-AuditEntry "🧹 حذف قالب غير صالح $key - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Send-TelegramMessage -ChatId $chatId -Text "✅ حُذف '$key' مع نسخة احتياطية."
+            }
+            else {
+                $why = if ($result) { [string]$result.Error } else { 'تعذّر الحذف.' }
+                Send-TelegramMessage -ChatId $chatId -Text "❌ $why"
+            }
+            Show-InvalidTemplatesScreen -ChatId $chatId -UserId $userId
             break
         }
         'tadmpage:*' {
@@ -1665,6 +1760,13 @@ function Invoke-CallbackQuery {
             else {
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'لا توجد مسودة قائمة.' -Alert
             }
+            break
+        }
+        'flow:resume' {
+            # D3: the expiry message's way back. No admin gate: the stash is
+            # keyed by this chat and only reopens that chat's own draft.
+            Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id | Out-Null
+            Resume-ExpiredFlow -ChatId $chatId -UserId $userId
             break
         }
         'flow:extend' {

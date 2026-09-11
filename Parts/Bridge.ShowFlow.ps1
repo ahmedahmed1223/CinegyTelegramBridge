@@ -195,6 +195,59 @@ function Start-ShowFlow {
     Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
 }
 
+function Resume-ExpiredFlow {
+    <#
+        D3: reopen an expired show flow where it stopped. Restores the stashed
+        values into a fresh pending state and re-asks through the normal
+        prompts - a resumed draft lands on its field question or its review,
+        never straight on air. The layer is re-locked because expiry released
+        it; whoever took the layer meanwhile keeps it and the resume is
+        refused with the lock notice, not queued behind them.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (Get-PendingState -ChatId $ChatId) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لديك عملية جارية — أتممها أو ألغها أولًا، ثم استأنف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if (-not $script:ExpiredFlowResume.ContainsKey($ChatId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا مسودة منتهية قابلة للاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $saved = $script:ExpiredFlowResume[$ChatId]
+    $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
+    $template = Get-TemplateByIndex -Index (Get-TemplateIndex -Key ([string](Get-JsonProp $saved 'Key')))
+    if (-not $template) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا — لا يمكن الاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $layer = [int](Get-JsonProp $saved 'LockLayer')
+    if ($layer -le 0) { $layer = [int]$template.Layer }
+    $lock = Lock-GfxLayer -Layer $layer -ChatId $ChatId -UserId $UserId -Key ([string](Get-JsonProp $saved 'Key'))
+    if (-not $lock.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer $layer -UserId $UserId)`nانتهت المسودة المحفوظة مع الرفض." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $state = @{
+        Mode = [string](Get-JsonProp $saved 'Mode'); Key = [string](Get-JsonProp $saved 'Key')
+        Fields = @($saved.Fields); Labels = @($saved.Labels); Limits = @($saved.Limits)
+        Required = @($saved.Required); Sensitives = @($saved.Sensitives)
+        Values = @{}; Index = [int](Get-JsonProp $saved 'Index'); UserId = $UserId
+        AutoHideSeconds = [int](Get-JsonProp $saved 'AutoHideSeconds')
+        LockLayer = $layer; ReplacementContext = $null; StartedAt = (Get-Date)
+    }
+    foreach ($name in @(if ($saved.Values) { $saved.Values.Keys } else { @() })) { $state.Values[[string]$name] = [string]$saved.Values[$name] }
+    if ([string]$state.Mode -ne 'show_review') { $state.Mode = 'show_fields' }
+    Set-PendingState -ChatId $ChatId -State $state
+    Add-AuditEntry "↩️ استئناف مسودة منتهية ($([string]$state.Key)) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    if ([string]$state.Mode -eq 'show_review') {
+        Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
+    }
+}
+
 function Resume-ShowFlow {
     <# Called for each text reply (or the ⏭ skip button) while a show_fields
        flow is pending. Advances one field, or fires the template once full.

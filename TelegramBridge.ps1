@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.22.0'
+$script:BridgeVersion = '8.23.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -623,6 +623,12 @@ $script:userFavoritesFile = Join-Path $logDir "favorites.json"
 $script:userAliasesFile = Join-Path $logDir "user-aliases.json"
 $script:disabledUsersFile = Join-Path $logDir "disabled-users.json"
 $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
+# D1: chats Telegram refuses to deliver to (401/403). Quarantined after three
+# strikes so one blocked operator does not fill every run with failures; the
+# file outlives restarts because a reboot must not forgive a block.
+$script:deadChatsFile = Join-Path $logDir "dead-chats.json"
+$script:DeadChats = @{}
+$script:DeadChatStrikes = @{}
 $script:accessGuardFile = Join-Path $logDir "access-guard.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
@@ -811,6 +817,11 @@ $script:TemplateLastUsed = @{}
 # expire. In-memory like AlertHistory: the window that matters is this run.
 $script:ShowFlowTimings = @{}
 $script:AbandonedDrafts = @{}
+# D3: one-shot resume snapshots taken at expiry. Values are re-asked through
+# the normal prompts, never published directly: an expired draft resumes to
+# review, not to air.
+$script:ExpiredFlowResume = @{}
+$script:ExpiredNewsDraft = $null
 $script:UserFavorites = @{}
 $script:UserAliases = @{}
 $script:UsageDirty = $false
@@ -1771,6 +1782,7 @@ Import-UserFavorites
 Import-UserAliases
 Import-DisabledUsers
 Import-UserProfiles
+Import-DeadChats
 Import-AccessGuard
 Import-BridgeAnnouncements
 Import-OnAirState

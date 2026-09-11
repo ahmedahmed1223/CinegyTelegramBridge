@@ -1660,3 +1660,46 @@ Describe 'Template device field' {
         $store | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'Invalid template cleanup (D2)' {
+    BeforeEach {
+        $script:OriginalInvalidRegistryPath = $config.TemplateRegistryPath
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach {
+        $config.TemplateRegistryPath = $script:OriginalInvalidRegistryPath
+    }
+
+    It 'pairs every skipped entry with its reason' {
+        $file = New-TempTemplateFile -Json @'
+{ "good": { "path": "C:/valid.cintitle", "layer": 3 }, "nopath": { "layer": 4 }, "nolayer": { "path": "C:/x.cintitle" } }
+'@
+        try {
+            $entries = @(Get-InvalidTemplateEntries)
+            @($entries | ForEach-Object { $_.Key } | Sort-Object) | Should -Be @('nolayer', 'nopath')
+            @($entries | Where-Object { $_.Key -eq 'nopath' })[0].Reason | Should -Match 'path'
+            @($entries | Where-Object { $_.Key -eq 'nolayer' })[0].Reason | Should -Match 'layer'
+        }
+        finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'deletes an invalid entry with a backup and re-renders the list' {
+        $file = New-TempTemplateFile -Json @'
+{ "good": { "path": "C:\\valid.cintitle", "layer": 3 }, "nopath": { "layer": 4 } }
+'@
+        try {
+            Mock Get-UpcomingScheduleEvents { @() }
+            $result = Save-TemplateDefinitionChange -TemplateKey 'nopath' -Action delete
+            $result.Success | Should -BeTrue
+            Test-Path -LiteralPath $result.BackupPath | Should -BeTrue
+            @((Get-InvalidTemplateEntries) | ForEach-Object { $_.Key }) | Should -Not -Contain 'nopath'
+        }
+        finally {
+            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "$file.backups" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

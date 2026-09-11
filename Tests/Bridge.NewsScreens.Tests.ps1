@@ -1100,3 +1100,39 @@ Describe 'The draft is shown against what it would replace' {
         @($blocks | Where-Object { $_.type -eq 'details' })[0].summary | Should -Match 'بلا تغيير \(1\)'
     }
 }
+
+Describe 'Expired news draft resume (D3)' {
+    BeforeEach {
+        $script:NewsTickerDraft = $null
+        $script:ExpiredNewsDraft = $null
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Show-NewsTickerManagementScreen { }
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Hash = 'fresh'; Items = @('حي'); Error = '' } }
+    }
+
+    It 'reopens an expired draft with its items on a fresh base' {
+        $script:ExpiredNewsDraft = @{ Items = @('أ', 'ب'); OwnerUserId = 7; OwnerChatId = 8; At = (Get-Date) }
+        Resume-ExpiredNewsDraft -ChatId 8 -UserId 7
+        $script:NewsTickerDraft.Items.Count | Should -Be 2
+        $script:NewsTickerDraft.BaseHash | Should -Be 'fresh'
+        $script:ExpiredNewsDraft | Should -BeNullOrEmpty
+        Should -Invoke Show-NewsTickerManagementScreen -Times 1 -Exactly
+    }
+
+    It 'refuses when another draft is already active' {
+        $script:NewsTickerDraft = [ordered]@{ Items = @('حي') }
+        $script:ExpiredNewsDraft = @{ Items = @('أ'); OwnerUserId = 7; OwnerChatId = 8; At = (Get-Date) }
+        Resume-ExpiredNewsDraft -ChatId 8 -UserId 7
+        $script:NewsTickerDraft.Items.Count | Should -Be 1
+        $script:ExpiredNewsDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'refuses a resume tap from a different chat' {
+        $script:ExpiredNewsDraft = @{ Items = @('أ'); OwnerUserId = 7; OwnerChatId = 8; At = (Get-Date) }
+        Resume-ExpiredNewsDraft -ChatId 9 -UserId 9
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+    }
+}

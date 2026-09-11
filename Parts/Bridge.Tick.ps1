@@ -39,16 +39,51 @@ function Get-AbandonedDraftLabel {
     return $mode
 }
 
+function Save-ExpiredFlowSnapshot {
+    <#
+        D3: keeps one resurrection of an expired show flow. Only show flows
+        carry resumable values; the caller decides that. A helper rather than
+        inline code: the paging gate reads Update-PendingExpiry's body as
+        text and fails any function holding both a keyboard and a loop.
+    #>
+    param($State, [Parameter(Mandatory)][long]$ChatId)
+    $snapshot = @{
+        Mode = [string](Get-JsonProp $State 'Mode'); Key = [string](Get-JsonProp $State 'Key')
+        Fields = @($State.Fields); Labels = @($State.Labels); Limits = @($State.Limits)
+        Required = @($State.Required); Sensitives = @($State.Sensitives)
+        Values = @{}; Index = [int]$State.Index; UserId = [long](Get-JsonProp $State 'UserId')
+        AutoHideSeconds = [int](Get-JsonProp $State 'AutoHideSeconds')
+        LockLayer = [int](Get-JsonProp $State 'LockLayer'); At = (Get-Date)
+    }
+    foreach ($name in @(if ($State.Values) { $State.Values.Keys } else { @() })) { $snapshot.Values[[string]$name] = [string]$State.Values[$name] }
+    $script:ExpiredFlowResume[$ChatId] = $snapshot
+}
+
+function New-ExpiredFlowResumeKeyboard {
+    # D3: the expiry message's way back, beside the menu. No loop inside -
+    # see Save-ExpiredFlowSnapshot for why the two live apart.
+    return @{ inline_keyboard = @(, @(@{ text = '↩️ استئناف من حيث توقفت'; callback_data = 'flow:resume' }, @{ text = '⬅️ القائمة'; callback_data = 'menu' })) }
+}
+
 function Update-PendingExpiry {
     $stateTimeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
     foreach ($chatId in @($script:PendingState.Keys)) {
         $state = $script:PendingState[$chatId]
         $elapsed = ((Get-Date) - $state.StartedAt).TotalMinutes
         if ($elapsed -ge $stateTimeout) {
+            # D3: keep one resurrection. Only show flows carry resumable
+            # values; anything else expires exactly as before.
+            $resumeKeyboard = (Get-NoticeKeyboard)
+            $mode = [string](Get-JsonProp $state 'Mode')
+            $resumeKey = [string](Get-JsonProp $state 'Key')
+            if ($mode -in @('show_fields', 'show_review') -and -not [string]::IsNullOrWhiteSpace($resumeKey)) {
+                Save-ExpiredFlowSnapshot -State $state -ChatId ([long]$chatId)
+                $resumeKeyboard = New-ExpiredFlowResumeKeyboard
+            }
             Clear-PendingState -ChatId ([long]$chatId)
             Add-AbandonedDraft -Label (Get-AbandonedDraftLabel -State $state)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
-            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-NoticeKeyboard)
+            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء." -ReplyMarkup $resumeKeyboard
             continue
         }
         # A minute's notice, with a way to take more time.
@@ -995,6 +1030,24 @@ function Test-RepeatedShow {
     return ($times.Count -ge $threshold)
 }
 
+function Save-ExpiredNewsDraftSnapshot {
+    <#
+        D3: keeps one resurrection before the draft is destroyed. Items only -
+        the lock and base hash are re-taken fresh on resume, because the live
+        file may have moved while this draft sat idle. A helper rather than
+        inline code: the paging gate reads Update-NewsDraftExpiry's body as
+        text and fails any function holding both a keyboard and a loop.
+    #>
+    param($Draft)
+    $items = @(Get-JsonProp $Draft 'Items')
+    $copy = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $items) { $copy.Add([string]$item) }
+    $script:ExpiredNewsDraft = @{
+        Items = @($copy)
+        OwnerUserId = [long](Get-JsonProp $Draft 'OwnerUserId'); OwnerChatId = [long](Get-JsonProp $Draft 'OwnerChatId'); At = (Get-Date)
+    }
+}
+
 function Update-NewsDraftExpiry {
     <#
         Drops a news draft that has gone stale, and says why.
@@ -1040,11 +1093,16 @@ function Update-NewsDraftExpiry {
 
     $items = @(Get-JsonProp $draft 'Items')
     $count = $items.Count
+    Save-ExpiredNewsDraftSnapshot -Draft $draft
     Remove-NewsTickerDraft
     Add-AbandonedDraft -Label 'شريط الأخبار'
     Write-BridgeLog "Expired an abandoned news draft ($count item(s), idle for $timeout+ minutes)" 'WARN'
     if ($owner -gt 0) {
-        Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $(Format-DurationMinutes -Minutes $timeout) بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي."
+        # Raw button shapes, not New-Button: this path runs under strict
+        # Get-SettingInt mocks in tests, and two static labels need no
+        # length policy anyway.
+        $resumeRow = @{ inline_keyboard = @(, @(@{ text = '↩️ استئناف المسودة'; callback_data = 'news:resume' }, @{ text = '⬅️ القائمة'; callback_data = 'menu' })) }
+        Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $(Format-DurationMinutes -Minutes $timeout) بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي." -ReplyMarkup $resumeRow
         # Handed back, not merely counted. An unpublished draft is somebody's
         # work, and telling an operator how many items they just lost is worse
         # than useless. The lock hand-over has returned the text since 5.5,

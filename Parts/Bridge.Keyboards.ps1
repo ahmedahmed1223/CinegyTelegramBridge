@@ -782,6 +782,11 @@ function Get-UsersAdminKeyboard {
         if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "userspage:$($window.Page + 1)") }
         $rows += , $pager
     }
+    # D1: the quarantine roster surfaces here rather than hiding in the log.
+    $deadCount = @($script:DeadChats.Keys).Count
+    if ($deadCount -gt 0) {
+        $rows += , @((New-Button "💀 محادثات ميتة ($deadCount)" 'menu:deadchats'))
+    }
     $rows += , @((New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
 }
@@ -1812,6 +1817,12 @@ function Get-TemplateAdminCatalogueKeyboard {
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
         $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
         $rows += , @( (New-Button '📄 إضافة عبر JSON' 'tadm:createjson') )
+        # D2: the "skipped" warning as a work list, beside the tools that
+        # create the entries it cleans up.
+        $invalidCount = @(Get-InvalidTemplateEntries).Count
+        if ($invalidCount -gt 0) {
+            $rows += , @( (New-Button "🧹 قوالب غير صالحة ($invalidCount)" 'tpladmin:invalid') )
+        }
     }
     if ($window.PageCount -gt 1) {
         $pager = @()

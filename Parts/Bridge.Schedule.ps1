@@ -268,8 +268,11 @@ function New-ScheduledShowEvent {
         [Parameter(Mandatory)][ValidateSet('once', 'daily', 'weekly')][string]$Recurrence,
         [Parameter(Mandatory)][long]$ChatId,
         [Parameter(Mandatory)][long]$UserId,
-        [string]$RecurrenceUntil = ''
+        [string]$RecurrenceUntil = '',
+        [string]$AnchorMaterialId = '',
+        [int]$AnchorOffsetSeconds = 0
     )
+    if ($AnchorOffsetSeconds -lt 0) { $AnchorOffsetSeconds = 0 }
     return @{
         Id = [guid]::NewGuid().ToString(); TemplateKey = $TemplateKey; Layer = $Layer; Values = $Values
         ScheduledAt = $ScheduledAt.ToString('o'); TimeZoneId = [System.TimeZoneInfo]::Local.Id
@@ -278,6 +281,11 @@ function New-ScheduledShowEvent {
         CompletedExecutionKey = ''; StartedAt = ''; CompletedAt = ''; LastResult = ''
         AttemptCount = 0; NextAttemptAt = ''; RecurrenceUntil = $RecurrenceUntil
         NotificationExecutionKey = ''; LastTemplateCheckAt = ''; LastTemplateCheckStatus = ''
+        # T-52: optional anchor to channel material. Empty AnchorMaterialId
+        # means wall-clock time; otherwise the effective moment is the
+        # material's start plus AnchorOffsetSeconds, re-resolved from the
+        # rundown so a shifted programme carries the graphic with it.
+        AnchorMaterialId = $AnchorMaterialId; AnchorOffsetSeconds = $AnchorOffsetSeconds
     }
 }
 
@@ -354,6 +362,69 @@ function Add-ScheduledShowEvent {
     return $false
 }
 
+function Get-CachedMaterialSchedule {
+    <#
+        The rundown for anchor resolution, fetched at most once per five
+        minutes. Update-ScheduleQueue runs every tick; a GET per tick would
+        turn a quiet loop into a chatty one. Callers get the last good list
+        when the channel is unreachable, and an empty list when nothing was
+        ever fetched - resolution then falls back to the stored wall-clock
+        moment rather than breaking the event.
+    #>
+    $now = [datetimeoffset]::Now
+    if ($script:MaterialScheduleCache -and (($now - $script:MaterialScheduleCacheAt).TotalMinutes -lt 5)) {
+        return @($script:MaterialScheduleCache)
+    }
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    if ($schedule -and $schedule.Success) {
+        $script:MaterialScheduleCache = @($schedule.Items)
+        $script:MaterialScheduleCacheAt = $now
+        return @($schedule.Items)
+    }
+    return @($script:MaterialScheduleCache)
+}
+
+function Resolve-ScheduleAnchorTime {
+    <#
+        The effective moment of an event: wall-clock by default, or the
+        anchored material's start plus offset. Pure over the given items, so
+        the queue behaviour is testable without touching the network.
+    #>
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry, [array]$Items = @())
+    $stored = [datetimeoffset](Get-JsonProp $ScheduleEntry 'ScheduledAt')
+    $anchorId = [string](Get-JsonProp $ScheduleEntry 'AnchorMaterialId')
+    if ([string]::IsNullOrWhiteSpace($anchorId)) { return $stored }
+    $offset = 0
+    [int]::TryParse([string](Get-JsonProp $ScheduleEntry 'AnchorOffsetSeconds'), [ref]$offset) | Out-Null
+    if ($offset -lt 0) { $offset = 0 }
+    $bare = $anchorId.Trim('{', '}')
+    $match = @($Items | Where-Object { ([string](Get-JsonProp $_ 'Id')).Trim('{', '}') -eq $bare }) | Select-Object -First 1
+    if (-not $match) { return $stored }
+    return ([datetimeoffset](Get-JsonProp $match 'ScheduledAt')).AddSeconds($offset)
+}
+
+function Get-ScheduleAnchorLabel {
+    <#
+        One line for review and list screens, or '' when unanchored. Shows the
+        material name when the rundown has it, so the operator sees what the
+        graphic is tied to rather than a guid.
+    #>
+    param([Parameter(Mandatory)][hashtable]$ScheduleEntry, [array]$Items = @())
+    $anchorId = [string](Get-JsonProp $ScheduleEntry 'AnchorMaterialId')
+    if ([string]::IsNullOrWhiteSpace($anchorId)) { return '' }
+    $offset = 0
+    [int]::TryParse([string](Get-JsonProp $ScheduleEntry 'AnchorOffsetSeconds'), [ref]$offset) | Out-Null
+    if ($offset -lt 0) { $offset = 0 }
+    $bare = $anchorId.Trim('{', '}')
+    $match = @($Items | Where-Object { ([string](Get-JsonProp $_ 'Id')).Trim('{', '}') -eq $bare }) | Select-Object -First 1
+    $name = if ($match) { [string](Get-JsonProp $match 'Name') } else { '' }
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = 'مادة لم تعد في الجدول' }
+    $after = if ($offset -eq 0) { 'مع بدء' } elseif ($offset -lt 60) { "بعد بدء بـ $offset ث" } else { "بعد بدء بـ $([int]($offset / 60)) د" }
+    return "🎞 مربوط: $after «$name»"
+}
+
 function Get-ScheduledTemplateStatus {
     <# Resolve the template again when the timer fires. A schedule stores the
        stable key and captured values, not a stale copy of the template
@@ -405,8 +476,13 @@ function Update-ScheduleQueue {
     if (Get-Setting 'SchedulePaused') { return }
     foreach ($scheduleEntry in @($script:ScheduleEvents)) {
         if ([string]$scheduleEntry.Status -ne 'pending') { continue }
-        $scheduledAt = [datetimeoffset]$scheduleEntry.ScheduledAt
-        $occurrenceKey = "$($scheduleEntry.Id)|$($scheduledAt.ToString('o'))"
+        # T-52: an anchored event fires off the material's current start,
+        # not the wall-clock snapshot taken at creation. The due check runs
+        # against a copy carrying the resolved moment, so the stored event
+        # keeps its anchor metadata for the next tick.
+        $effectiveAt = Resolve-ScheduleAnchorTime -ScheduleEntry $scheduleEntry -Items (Get-CachedMaterialSchedule)
+        $scheduledAt = $effectiveAt
+        $occurrenceKey = "$($scheduleEntry.Id)|$($effectiveAt.ToString('o'))"
         $notifyMinutes = Get-SettingInt 'SchedulePreNotifyMinutes' 0
         $minutesUntil = ($scheduledAt - $Now).TotalMinutes
         if ($notifyMinutes -gt 0 -and $minutesUntil -gt 0 -and $minutesUntil -le $notifyMinutes -and
@@ -416,8 +492,8 @@ function Update-ScheduleQueue {
             $scheduleEntry.NotificationExecutionKey = $occurrenceKey
             Save-ScheduleEvents | Out-Null
         }
-        $dueState=Get-BridgeScheduleDueState -ScheduleEntry $scheduleEntry -Now $Now
-        if(-not $dueState.IsDue){continue}
+        $dueState = Get-BridgeScheduleDueState -ScheduleEntry (@{ Id = $scheduleEntry.Id; ScheduledAt = $effectiveAt.ToString('o'); NextAttemptAt = [string](Get-JsonProp $scheduleEntry 'NextAttemptAt'); CompletedExecutionKey = [string](Get-JsonProp $scheduleEntry 'CompletedExecutionKey') }) -Now $Now
+        if (-not $dueState.IsDue) { continue }
         $executionKey=$dueState.ExecutionKey
 
         $scheduleEntry.Status = 'running'; $scheduleEntry.ExecutionKey = $executionKey
@@ -559,7 +635,10 @@ function Format-ScheduleEventHtml {
     # has to read correctly on its own.
     $fallback = ConvertTo-TelegramHtmlText -Text ($at.ToString('yyyy-MM-dd HH:mm'))
     $stamp = "<tg-time unix=`"$($at.ToUnixTimeSeconds())`" format=`"wdt`">$fallback</tg-time>"
-    return "<b>$key</b> — $stamp — $(ConvertTo-TelegramHtmlText -Text $zone) — $recurrence"
+    $text = "<b>$key</b> — $stamp — $(ConvertTo-TelegramHtmlText -Text $zone) — $recurrence"
+    $anchor = Get-ScheduleAnchorLabel -ScheduleEntry $ScheduleEntry -Items (Get-CachedMaterialSchedule)
+    if ($anchor) { $text += "`n$(ConvertTo-TelegramHtmlText -Text $anchor)" }
+    return $text
 }
 
 function Format-ScheduleEvent {
@@ -568,7 +647,10 @@ function Format-ScheduleEvent {
     $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
     $zone = [string](Get-JsonProp $ScheduleEntry 'TimeZoneId')
     if ([string]::IsNullOrWhiteSpace($zone)) { $zone = [System.TimeZoneInfo]::Local.Id }
-    return "$($ScheduleEntry.TemplateKey) — $($at.ToString('yyyy-MM-dd HH:mm zzz')) — $zone — $recurrence"
+    $text = "$($ScheduleEntry.TemplateKey) — $($at.ToString('yyyy-MM-dd HH:mm zzz')) — $zone — $recurrence"
+    $anchor = Get-ScheduleAnchorLabel -ScheduleEntry $ScheduleEntry -Items (Get-CachedMaterialSchedule)
+    if ($anchor) { $text += "`n$anchor" }
+    return $text
 }
 
 function Start-ScheduleMutationFlow {
@@ -594,6 +676,8 @@ function Start-ScheduleMutationFlow {
         TemplateKey = [string]$entry.TemplateKey; Layer = [int](Get-JsonProp $entry 'Layer')
         Fields = @($values.Keys); Values = $values; Recurrence = [string]$entry.Recurrence
         TimeZoneId = [string]$entry.TimeZoneId; RecurrenceUntil = [string](Get-JsonProp $entry 'RecurrenceUntil'); UserId = $UserId
+        AnchorMaterialId = [string](Get-JsonProp $entry 'AnchorMaterialId')
+        AnchorOffsetSeconds = [string](Get-JsonProp $entry 'AnchorOffsetSeconds')
     }
     Set-PendingState -ChatId $ChatId -State $state
     $verb = if ($Action -eq 'copy') { 'نسخ الحدث إلى موعد جديد' } else { 'تعديل موعد الحدث' }
@@ -678,6 +762,8 @@ function Show-ScheduleReview {
         $reviewTitle, "القالب: $($State.TemplateKey)",
         "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
     )
+    $anchorLine = Get-ScheduleAnchorLabel -ScheduleEntry $State -Items (Get-CachedMaterialSchedule)
+    if ($anchorLine) { $lines += $anchorLine }
     if ([string]$State.Recurrence -ne 'once') {
         $until = [string](Get-JsonProp $State 'RecurrenceUntil')
         $lines += "نهاية التكرار: $(if ($until) { $until } else { 'بدون تاريخ انتهاء' })"
@@ -695,6 +781,53 @@ function Show-ScheduleReview {
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard -State $State)
 }
 
+function Get-ScheduleAnchorChoices {
+    <#
+        Materials the operator can tie a one-off event to: items whose end
+        is still ahead, soonest first, capped so the picker stays a screen
+        rather than a rundown. Slim shapes only - the pending state carries
+        them, and it is persisted to disk.
+    #>
+    param([array]$Items = @(), [int]$MaxChoices = 12)
+    $now = [datetimeoffset]::Now
+    $choices = @()
+    foreach ($item in @($Items | Sort-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') })) {
+        $start = [datetimeoffset](Get-JsonProp $item 'ScheduledAt')
+        $duration = [timespan]::Zero
+        try { $duration = [timespan](Get-JsonProp $item 'Duration') } catch { $duration = [timespan]::Zero }
+        if (($start + $duration) -le $now) { continue }
+        $choices += @(@{
+                Id = [string](Get-JsonProp $item 'Id')
+                Name = [string](Get-JsonProp $item 'Name')
+                ScheduledAt = $start.ToString('o')
+            })
+        if ($choices.Count -ge $MaxChoices) { break }
+    }
+    return $choices
+}
+
+function Get-ScheduleAnchorPickerKeyboard {
+    param([Parameter(Mandatory)][array]$Choices)
+    $rows = @()
+    for ($i = 0; $i -lt $Choices.Count; $i++) {
+        $at = ([datetimeoffset]$Choices[$i].ScheduledAt).ToLocalTime().ToString('HH:mm')
+        $name = [string]$Choices[$i].Name
+        if ($name.Length -gt 28) { $name = $name.Substring(0, 28) + '…' }
+        $rows += , @((New-Button "$at $name" "schanchor:$i"))
+    }
+    $rows += , @((New-Button '❌ رجوع' 'schedule:anchorback'))
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ScheduleAnchorOffsetKeyboard {
+    $rows = @(
+        , @((New-Button 'بعد البدء بـ 30 ثانية' 'schoff:30'), (New-Button 'بعد البدء بدقيقة' 'schoff:60'))
+        , @((New-Button 'بعد البدء بـ 5 دقائق' 'schoff:300'), (New-Button 'مع بدء المادة' 'schoff:0'))
+        , @((New-Button '❌ رجوع' 'schedule:anchorback'))
+    )
+    return @{ inline_keyboard = $rows }
+}
+
 function Confirm-ScheduledShow {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $state = Get-PendingState -ChatId $ChatId
@@ -710,10 +843,22 @@ function Confirm-ScheduledShow {
                 ExecutionKey = [string]$scheduleEntry.ExecutionKey; CompletedExecutionKey = [string]$scheduleEntry.CompletedExecutionKey
                 NextAttemptAt = [string]$scheduleEntry.NextAttemptAt; AttemptCount = [int]$scheduleEntry.AttemptCount
                 RecurrenceUntil = [string](Get-JsonProp $scheduleEntry 'RecurrenceUntil')
+                AnchorMaterialId = [string](Get-JsonProp $scheduleEntry 'AnchorMaterialId')
+                AnchorOffsetSeconds = [string](Get-JsonProp $scheduleEntry 'AnchorOffsetSeconds')
             }
             $scheduleEntry.ScheduledAt = [string]$state.ScheduledAt; $scheduleEntry.TimeZoneId = [string]$state.TimeZoneId
             $scheduleEntry.RecurrenceUntil = [string](Get-JsonProp $state 'RecurrenceUntil')
             $scheduleEntry.ExecutionKey = ''; $scheduleEntry.CompletedExecutionKey = ''; $scheduleEntry.NextAttemptAt = ''; $scheduleEntry.AttemptCount = 0
+            # An anchor survives an edit only while it still means something:
+            # a recurring event re-anchored to "today's programme" would fire
+            # off a stale material, so changing the recurrence clears it.
+            if ([string]$state.Recurrence -eq 'once' -and [string]$scheduleEntry.Recurrence -eq 'once') {
+                $scheduleEntry.AnchorMaterialId = [string](Get-JsonProp $state 'AnchorMaterialId')
+                $scheduleEntry.AnchorOffsetSeconds = [string](Get-JsonProp $state 'AnchorOffsetSeconds')
+            }
+            else {
+                $scheduleEntry.AnchorMaterialId = ''; $scheduleEntry.AnchorOffsetSeconds = 0
+            }
             $saved = Save-ScheduleEvents
             if (-not $saved) {
                 foreach ($name in $previous.Keys) { $scheduleEntry[$name] = $previous[$name] }
@@ -721,7 +866,7 @@ function Confirm-ScheduledShow {
         }
     }
     else {
-        $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId -RecurrenceUntil ([string](Get-JsonProp $state 'RecurrenceUntil'))
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId -RecurrenceUntil ([string](Get-JsonProp $state 'RecurrenceUntil')) -AnchorMaterialId ([string](Get-JsonProp $state 'AnchorMaterialId')) -AnchorOffsetSeconds ([int](Get-JsonProp $state 'AnchorOffsetSeconds'))
         $saved = Add-ScheduledShowEvent -ScheduleEntry $scheduleEntry
     }
     Clear-PendingState -ChatId $ChatId

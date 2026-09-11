@@ -12,6 +12,7 @@ Describe 'Safe in-memory layer rollback' {
     BeforeEach {
         $config.Settings.EnableSafeRollback=$true
         $script:RollbackCandidates=@{}; $script:LastSuccessfulLayerShows=@{}; $script:OnAir=@{}
+        $script:RollbackBeforeFiles=@{}
         $script:PendingState.Clear(); $script:LayerLocks=@{}; $script:AutoHideQueue=[Collections.Generic.List[object]]::new()
         Mock Get-TemplateStore {
             @{ Order=@('alpha','beta'); Map=@{
@@ -21,6 +22,7 @@ Describe 'Safe in-memory layer rollback' {
         }
         Mock Test-Admin { $false }
         Mock Send-TelegramMessage { }
+        Mock Send-TelegramPhoto { }
         Mock Save-OnAirState { }
         Mock Add-UsageCount { }
         Mock Write-BridgeLog { }
@@ -153,6 +155,65 @@ Describe 'Safe in-memory layer rollback' {
         (Get-PendingState -ChatId 10).Mode | Should -Be 'safe_rollback_review'
         Confirm-SafeRollback -Layer 5 -ChatId 10 -UserId 10
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'alpha' -and $Variables.Title -eq 'old' }
+    }
+
+    It 'shows before and after frames on the rollback review' {
+        # T-15: "show, don't describe" - the review carries both pictures
+        # with the rollback button, so a typo dies in seconds, not minutes.
+        $before = Join-Path $TestDrive 'before.jpg'
+        $after = Join-Path $TestDrive 'after.jpg'
+        Set-Content -LiteralPath $before -Value 'x'
+        Set-Content -LiteralPath $after -Value 'x'
+        $script:RollbackBeforeFiles[5] = $before
+        Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'} } `
+            -ExpectedState replace -ExpectedActiveId 'event-current' -ActorUserId 10
+        Mock Get-MonitorFrame { return $after }
+        Start-SafeRollbackReview -Layer 5 -ChatId 10 -UserId 10
+        Should -Invoke Send-TelegramPhoto -Times 1 -Exactly -ParameterFilter { $Caption -eq '📷 قبل النشر' }
+        Should -Invoke Send-TelegramPhoto -Times 1 -Exactly -ParameterFilter { $Caption -eq '📷 الآن على الهواء' }
+        (Get-PendingState -ChatId 10).Mode | Should -Be 'safe_rollback_review'
+    }
+
+    It 'falls back to a text-only review when no frames exist' {
+        Mock Get-MonitorFrame { $null }
+        Set-RollbackCandidate -Layer 5 -RestoreSnapshot @{ Key='alpha'; Variables=@{Title='old'} } `
+            -ExpectedState replace -ExpectedActiveId 'event-current' -ActorUserId 10
+        Start-SafeRollbackReview -Layer 5 -ChatId 10 -UserId 10
+        Should -Invoke Send-TelegramPhoto -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'مراجعة التراجع' }
+    }
+
+    It 'keeps the pre-show frame by reference only while it is fresh' {
+        $frame = Join-Path $TestDrive 'last.jpg'
+        Set-Content -LiteralPath $frame -Value 'x'
+        $script:LastSnapshotFile = $frame
+        $script:LastSnapshotAt = Get-Date
+        $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10; At=(Get-Date) }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success=$true; EventId='event-new'; Error=''; Xml='' } }
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+        [string]$script:RollbackBeforeFiles[5] | Should -Be $frame
+
+        $script:LastSnapshotAt = (Get-Date).AddHours(-1)
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+        $script:RollbackBeforeFiles.ContainsKey(5) | Should -BeFalse
+    }
+
+    It 'settles the flow clock on a successful show, not on scheduled fires' {
+        # T-16: only a flow the operator opened counts - a scheduled fire
+        # carries no FlowStartedAt and must not flatter the average.
+        $saved = $script:ShowFlowTimings
+        $script:ShowFlowTimings = @{}
+        try {
+            $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10; At=(Get-Date) }
+            Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
+            Mock Show-TitlerTemplate { [pscustomobject]@{ Success=$true; EventId='event-new'; Error=''; Xml='' } }
+            Set-PendingState -ChatId 10 -State @{ Mode='show_review'; UserId=10; FlowStartedAt=((Get-Date).AddSeconds(-90).ToString('o')) }
+            Invoke-ShowTemplateResult -Key beta -Variables @{Title='new'} -ChatId 10 -UserId 10 | Out-Null
+            [int]$script:ShowFlowTimings['beta'].Count | Should -Be 1
+            [int]$script:ShowFlowTimings['beta'].TotalSeconds | Should -BeGreaterOrEqual 85
+        }
+        finally { $script:ShowFlowTimings = $saved; Clear-PendingState -ChatId 10 }
     }
 
     It 'cancels and invalidates rollback on external change or uncertain Cinegy state' {

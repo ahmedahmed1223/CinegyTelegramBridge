@@ -662,3 +662,114 @@ Describe 'Picking a date and time instead of typing one' {
         $callbacks | Should -Contain 'schcal:2026-09'
     }
 }
+
+Describe 'Material-anchored scheduling (T-52)' {
+    BeforeEach {
+        $script:OriginalScheduleFileForAnchor = $script:scheduleFile
+        $script:OriginalScheduleExecutionFileForAnchor = $script:scheduleExecutionFile
+        $script:scheduleFile = Join-Path $TestDrive 'schedule.json'
+        $script:scheduleExecutionFile = Join-Path $TestDrive 'schedule-execution.jsonl'
+        Remove-Item -LiteralPath $script:scheduleExecutionFile -Force -ErrorAction SilentlyContinue
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Get-TemplateStore {
+            [pscustomobject]@{
+                Map = @{
+                    urgent = [pscustomobject]@{
+                        Key = 'urgent'; Path = 'C:\Scenes\Urgent.cintitle'; Layer = 4
+                        Fields = @('Headline.Text'); FieldTypes = @{}; LongRunning = $false
+                    }
+                }
+                Order = @('urgent'); Errors = @(); InvalidKeys = @(); SharedLayers = @{}
+            }
+        }
+    }
+
+    AfterEach {
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        $script:scheduleFile = $script:OriginalScheduleFileForAnchor
+        $script:scheduleExecutionFile = $script:OriginalScheduleExecutionFileForAnchor
+    }
+
+    It 'passes wall-clock events through unchanged' {
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} `
+            -ScheduledAt ([datetimeoffset]'2099-08-21T10:00:00+03:00') -Recurrence once -ChatId 1 -UserId 2
+        Resolve-ScheduleAnchorTime -ScheduleEntry $entry -Items @() |
+            Should -Be ([datetimeoffset]'2099-08-21T10:00:00+03:00')
+    }
+
+    It 'fires off the material start plus offset' {
+        # The director's "thirty seconds into the segment", not 15:00 sharp.
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} `
+            -ScheduledAt ([datetimeoffset]'2099-08-21T10:00:00+03:00') -Recurrence once -ChatId 1 -UserId 2 `
+            -AnchorMaterialId '{11111111-1111-1111-1111-111111111111}' -AnchorOffsetSeconds 30
+        $items = @(@{
+                Id = '{11111111-1111-1111-1111-111111111111}'; Name = 'الفقرة المسائية'
+                ScheduledAt = ([datetimeoffset]'2099-08-21T15:00:00+03:00').ToString('o')
+                Duration = [timespan]::FromHours(1)
+            })
+        Resolve-ScheduleAnchorTime -ScheduleEntry $entry -Items $items |
+            Should -Be ([datetimeoffset]'2099-08-21T15:00:30+03:00')
+    }
+
+    It 'falls back to the stored moment when the material left the rundown' {
+        # A deleted programme must not delete the graphic with it: the event
+        # keeps the snapshot taken at creation and says so on screen.
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} `
+            -ScheduledAt ([datetimeoffset]'2099-08-21T10:00:00+03:00') -Recurrence once -ChatId 1 -UserId 2 `
+            -AnchorMaterialId '{22222222-2222-2222-2222-222222222222}' -AnchorOffsetSeconds 30
+        Resolve-ScheduleAnchorTime -ScheduleEntry $entry -Items @() |
+            Should -Be ([datetimeoffset]'2099-08-21T10:00:00+03:00')
+        Get-ScheduleAnchorLabel -ScheduleEntry $entry -Items @() | Should -Match 'لم تعد في الجدول'
+    }
+
+    It 'offers only materials that have not ended yet' {
+        $now = [datetimeoffset]::Now
+        $items = @(
+            @{ Id = '{a}'; Name = 'انتهت'; ScheduledAt = $now.AddHours(-2).ToString('o'); Duration = [timespan]::FromHours(1) }
+            @{ Id = '{b}'; Name = 'جارية'; ScheduledAt = $now.AddMinutes(-10).ToString('o'); Duration = [timespan]::FromHours(1) }
+            @{ Id = '{c}'; Name = 'قادمة'; ScheduledAt = $now.AddHours(1).ToString('o'); Duration = [timespan]::FromHours(1) }
+        )
+        $choices = @(Get-ScheduleAnchorChoices -Items $items)
+        $choices.Count | Should -Be 2
+        $choices[0].Name | Should -Be 'جارية'
+        $choices[1].Name | Should -Be 'قادمة'
+    }
+
+    It 'fires an anchored event at the material time, not the stored one' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{ 'Headline.Text' = 'مربوط' } `
+            -ScheduledAt $now.AddHours(2) -Recurrence once -ChatId 1 -UserId 2 `
+            -AnchorMaterialId '{33333333-3333-3333-3333-333333333333}' -AnchorOffsetSeconds 30
+        Add-ScheduledShowEvent -ScheduleEntry $entry | Should -BeTrue
+        $items = @(@{
+                Id = '{33333333-3333-3333-3333-333333333333}'; Name = 'الفقرة'
+                ScheduledAt = $now.AddMinutes(1).ToString('o'); Duration = [timespan]::FromHours(1)
+            })
+        Mock Get-CachedMaterialSchedule { @($items) }
+        Update-ScheduleQueue -Now $now.AddMinutes(2)
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        $script:ScheduleEvents[0].Status | Should -Be 'completed'
+    }
+
+    It 'holds an anchored event while its material slides later' {
+        # The wall-clock snapshot says fire; the rundown says the programme
+        # moved. The rundown wins, and the graphic waits with it.
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $entry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{ 'Headline.Text' = 'مؤجل مع المادة' } `
+            -ScheduledAt $now.AddMinutes(5) -Recurrence once -ChatId 1 -UserId 2 `
+            -AnchorMaterialId '{44444444-4444-4444-4444-444444444444}' -AnchorOffsetSeconds 30
+        Add-ScheduledShowEvent -ScheduleEntry $entry | Should -BeTrue
+        $items = @(@{
+                Id = '{44444444-4444-4444-4444-444444444444}'; Name = 'الفقرة'
+                ScheduledAt = $now.AddHours(2).ToString('o'); Duration = [timespan]::FromHours(1)
+            })
+        Mock Get-CachedMaterialSchedule { @($items) }
+        Update-ScheduleQueue -Now $now.AddMinutes(6)
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        $script:ScheduleEvents[0].Status | Should -Be 'pending'
+    }
+}

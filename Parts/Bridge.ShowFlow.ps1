@@ -176,6 +176,7 @@ function Start-ShowFlow {
             Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
             Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
             LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
+            FlowStartedAt = (Get-Date).ToString('o')
         }
         Set-PendingState -ChatId $ChatId -State $state
         Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
@@ -188,6 +189,7 @@ function Start-ShowFlow {
         Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
         Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
         LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
+        FlowStartedAt = (Get-Date).ToString('o')
     }
     Set-PendingState -ChatId $ChatId -State $state
     Send-TelegramMessage -ChatId $ChatId -Text (Get-FieldPromptText -State $state) -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
@@ -536,6 +538,25 @@ function Start-SafeRollbackReview {
     $snapshot = $candidate.Restore
     $expected = if ([string]$candidate.ExpectedState -eq 'hidden') { 'يجب أن تبقى الطبقة فارغة' } else { 'يجب أن يبقى المشهد الحالي نفسه دون تغيير خارجي' }
     Set-PendingState -ChatId $ChatId -State @{ Mode='safe_rollback_review'; UserId=$UserId; Layer=$Layer; CandidateId=[string]$candidate.Id }
+    # T-15: show, don't describe. The before frame was kept by reference at
+    # SHOW time; the after is taken now, on demand. Either may be missing -
+    # a stale cache, a failed grab - and then the text review below stands
+    # alone exactly as before. Photos never block the review.
+    if ($script:RollbackBeforeFiles.ContainsKey($Layer)) {
+        $beforePath = [string]$script:RollbackBeforeFiles[$Layer]
+        if (-not [string]::IsNullOrWhiteSpace($beforePath) -and (Test-Path -LiteralPath $beforePath)) {
+            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $beforePath -Caption '📷 قبل النشر' }
+            catch { Write-BridgeLog "Rollback review: before-frame send failed: $($_.Exception.Message)" }
+        }
+    }
+    try {
+        $afterPath = Get-MonitorFrame -TimeoutSeconds (Get-SettingInt 'SnapshotTimeoutSeconds' 3)
+        if ($afterPath) {
+            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $afterPath -Caption '📷 الآن على الهواء' }
+            finally { Remove-Item -LiteralPath $afterPath -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    catch { Write-BridgeLog "Rollback review: after-frame capture failed: $($_.Exception.Message)" }
     Send-TelegramMessage -ChatId $ChatId -Text "↩️ مراجعة التراجع الآمن`nالطبقة: $Layer`nسيُستعاد القالب: $($snapshot.Key)`nشرط التنفيذ: $expected`nتنتهي الصلاحية: $(([datetime]$candidate.ExpiresAt).ToString('HH:mm:ss'))`n`nسيُفحص Cinegy مباشرة بعد التأكيد." -ReplyMarkup (Get-RollbackReviewKeyboard -Layer $Layer)
 }
 

@@ -61,5 +61,11 @@ BeforeAll {
     # promise for media. A test that means to exercise the launcher mocks this
     # itself, and its own mock wins over this one.
     Mock Start-BridgeMediaProcess -ModuleName BridgeMedia { throw 'the tests do not start media processes' }
+
+    # T-52 anchor cache starts fresh so Format-ScheduleEvent never triggers
+    # a rundown fetch on its own; a test that wants the fetch clears the
+    # timestamp or mocks Invoke-WebRequest in the CinegyAirTitler module.
+    $script:MaterialScheduleCache = @()
+    $script:MaterialScheduleCacheAt = [datetimeoffset]::Now
 }
 

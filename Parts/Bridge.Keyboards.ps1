@@ -1022,6 +1022,16 @@ function Get-ScheduleReviewKeyboard {
     if ($State -and [string]$State.Recurrence -ne 'once') {
         $rows += , @((New-Button '📆 تحديد نهاية التكرار' 'schedule:setend'), (New-Button '♾ بدون انتهاء' 'schedule:clearend'))
     }
+    # T-52: anchoring only makes sense for a single firing. A daily anchor
+    # to "today's 15:00 programme" is a wall-clock time wearing a costume.
+    if ($State -and [string]$State.Recurrence -eq 'once') {
+        if ([string](Get-JsonProp $State 'AnchorMaterialId')) {
+            $rows += , @((New-Button '🔗 إلغاء الربط بالمادة' 'schedule:unanchor'))
+        }
+        else {
+            $rows += , @((New-Button '🎞 اربط بمادة' 'schedule:anchor'))
+        }
+    }
     $rows += , @((New-Button "✅ تأكيد الجدولة" 'schedule:confirm' -Style success), (New-Button "❌ إلغاء" 'cancel'))
     return @{ inline_keyboard = $rows }
 }

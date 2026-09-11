@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.20.0'
+$script:BridgeVersion = '8.21.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -801,6 +801,12 @@ $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{
 
 $script:UsageCounts = @{}
 $script:TemplateLastUsed = @{}
+# T-16: slow templates, not slow operators. FlowStartedAt is stamped when a
+# show flow opens and settled on a successful SHOW; abandoned input flows
+# and news drafts are counted by label (never values) when their timers
+# expire. In-memory like AlertHistory: the window that matters is this run.
+$script:ShowFlowTimings = @{}
+$script:AbandonedDrafts = @{}
 $script:UserFavorites = @{}
 $script:UserAliases = @{}
 $script:UsageDirty = $false
@@ -850,6 +856,10 @@ $script:LayerLocks = @{}
 $script:RecentFieldValues = @{}
 
 $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+# T-52 anchor resolution cache: the rundown behind material-anchored events,
+# refreshed at most every five minutes (see Get-CachedMaterialSchedule).
+$script:MaterialScheduleCache = @()
+$script:MaterialScheduleCacheAt = [datetime]::MinValue
 
 
 
@@ -883,6 +893,10 @@ $script:PendingApprovals = @{}
 $script:LastShow = @{}
 $script:LastSuccessfulLayerShows = @{}
 $script:RollbackCandidates = @{}
+# T-15 before/after: layer -> last cached frame path, kept by reference when
+# fresh at SHOW time. Owned by the snapshot cache; never deleted here, and a
+# missing file simply means the review goes text-only.
+$script:RollbackBeforeFiles = @{}
 
 # Layer -> @{ Key; At; UserId } for everything THIS bridge has put on air and
 # not yet hidden. Air Pro exposes no "what is currently on screen" query, so
@@ -912,6 +926,11 @@ $script:OutputMonitorFirstLuma = 0.0
 $script:OutputMonitorFailureCount = 0
 $script:OutputMonitorFailureAlerted = $false
 $script:OutputMonitorFallbackActive = $false
+# Last ffmpeg stderr detail from any capture attempt (monitor or snapshot).
+# Powers the server link of Get-OutputFailureDiagnosis: without it the bridge
+# could name the channel, the relay and the configured source, but not the
+# streaming server itself - which is what the station asked to be checked.
+$script:LastCaptureErrorDetail = ''
 $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.

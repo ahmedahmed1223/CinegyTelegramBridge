@@ -1164,6 +1164,79 @@ function Invoke-CallbackQuery {
             Confirm-ScheduledShow -ChatId $chatId -UserId $userId
             break
         }
+        # T-52: tie a one-off event to channel material instead of wall-clock
+        # time. The picker carries positions, not names: callback_data is
+        # capped at 64 bytes and a material name alone can exceed it.
+        'schedule:anchor' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $userId -or [string]$state.Recurrence -ne 'once') { break }
+            $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+            $rundown = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+            if (-not $rundown -or -not $rundown.Success) {
+                Send-TelegramMessage -ChatId $chatId -Text '⛔ تعذّر قراءة جدول المواد من القناة الآن — احفظ بالموعد الحالي أو أعد المحاولة.' -ReplyMarkup (Get-ScheduleReviewKeyboard -State $state)
+                break
+            }
+            $choices = @(Get-ScheduleAnchorChoices -Items @($rundown.Items))
+            if ($choices.Count -eq 0) {
+                Send-TelegramMessage -ChatId $chatId -Text 'لا توجد مواد قادمة في جدول القناة للربط بها.' -ReplyMarkup (Get-ScheduleReviewKeyboard -State $state)
+                break
+            }
+            $state.AnchorChoices = @($choices)
+            $state.Mode = 'schedule_anchor'; Set-PendingState -ChatId $chatId -State $state
+            Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
+                -Text '🎞 اختر المادة التي يُربط بها العرض:' -ReplyMarkup (Get-ScheduleAnchorPickerKeyboard -Choices $choices) | Out-Null
+            break
+        }
+        'schanchor:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_anchor' -or [long]$state.UserId -ne $userId) { break }
+            $index = -1
+            if (-not [int]::TryParse((Get-CallbackArg $data 'schanchor:'), [ref]$index)) { break }
+            $choices = @($state.AnchorChoices)
+            if ($index -lt 0 -or $index -ge $choices.Count) { break }
+            $state.AnchorMaterialId = [string]$choices[$index].Id
+            $state.AnchorMaterialName = [string]$choices[$index].Name
+            $state.Mode = 'schedule_anchor_offset'; Set-PendingState -ChatId $chatId -State $state
+            $safeName = ConvertTo-TelegramHtmlText ([string]$choices[$index].Name)
+            Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
+                -Text "🎞 المادة: $safeName`nمتى يُعرض الغرافيك؟" -ReplyMarkup (Get-ScheduleAnchorOffsetKeyboard) | Out-Null
+            break
+        }
+        'schoff:*' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_anchor_offset' -or [long]$state.UserId -ne $userId) { break }
+            $offset = -1
+            if (-not [int]::TryParse((Get-CallbackArg $data 'schoff:'), [ref]$offset) -or $offset -lt 0) { break }
+            $choices = @($state.AnchorChoices)
+            $match = @($choices | Where-Object { [string]$_.Id -eq [string]$state.AnchorMaterialId }) | Select-Object -First 1
+            if (-not $match) {
+                $state.AnchorMaterialId = ''; $state.AnchorOffsetSeconds = 0
+                $state.Mode = 'schedule_review'; Set-PendingState -ChatId $chatId -State $state
+                Show-ScheduleReview -ChatId $chatId -State $state
+                break
+            }
+            $state.AnchorOffsetSeconds = $offset
+            $resolved = ([datetimeoffset]$match.ScheduledAt).AddSeconds($offset)
+            $state.ScheduledAt = $resolved.ToString('o')
+            $state.Mode = 'schedule_review'; Set-PendingState -ChatId $chatId -State $state
+            Show-ScheduleReview -ChatId $chatId -State $state
+            break
+        }
+        'schedule:anchorback' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or [string]$state.Mode -notin @('schedule_anchor', 'schedule_anchor_offset') -or [long]$state.UserId -ne $userId) { break }
+            $state.AnchorMaterialId = ''; $state.AnchorOffsetSeconds = 0
+            $state.Mode = 'schedule_review'; Set-PendingState -ChatId $chatId -State $state
+            Show-ScheduleReview -ChatId $chatId -State $state
+            break
+        }
+        'schedule:unanchor' {
+            $state = Get-PendingState -ChatId $chatId
+            if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $userId) { break }
+            $state.AnchorMaterialId = ''; $state.AnchorOffsetSeconds = 0
+            Show-ScheduleReview -ChatId $chatId -State $state
+            break
+        }
         'schedule:setend' {
             $state = Get-PendingState -ChatId $chatId
             if (-not $state -or $state.Mode -ne 'schedule_review' -or [long]$state.UserId -ne $userId -or [string]$state.Recurrence -eq 'once') { break }

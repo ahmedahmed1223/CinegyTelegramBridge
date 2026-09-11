@@ -2220,3 +2220,123 @@ Describe 'A refused request changes nothing on air' {
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 }
+
+Describe 'Weekly notices (T-31)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        $script:OrigPeak = $script:RichPayloadPeak
+        $script:OrigLastUsed = @{} + $script:TemplateLastUsed
+        $script:OrigAlertHistory = @{} + $script:AlertHistory
+        $script:RichPayloadPeak = @{ Length = 0; Screen = '' }
+        $script:TemplateLastUsed = @{}
+        $script:AlertHistory = @{}
+    }
+
+    AfterEach {
+        $script:RichPayloadPeak = $script:OrigPeak
+        $script:TemplateLastUsed = $script:OrigLastUsed
+        $script:AlertHistory = $script:OrigAlertHistory
+    }
+
+    It 'names a screen approaching its payload cap' {
+        $script:RichPayloadPeak = @{ Length = 9000; Screen = 'دليل الجسر' }
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = @{} } }
+        $text = Get-WeeklyNoticesText
+        $text | Should -Match 'قريبة من حدّها'
+        $text | Should -Match 'دليل الجسر'
+    }
+
+    It 'lists templates unused for a month and repeats under one cause' {
+        Mock Get-TemplateStore {
+            [pscustomobject]@{ Map = @{ old = @{}; fresh = @{} } }
+        }
+        $script:TemplateLastUsed['fresh'] = [datetime]::UtcNow
+        $script:AlertHistory['تعذّر التقاط #'] = @((Get-Date).AddHours(-5), (Get-Date).AddHours(-3), (Get-Date).AddHours(-1))
+        $text = Get-WeeklyNoticesText
+        $text | Should -Match 'بلا استعمال'
+        $text | Should -Match 'old'
+        $text | Should -Not -Match 'fresh —'
+        $text | Should -Match 'فشل متكرر'
+    }
+
+    It 'names changed settings but never their values' {
+        # The example config differs from defaults in dozens of places, so
+        # the signal fires here by construction. What must never happen is
+        # a value - which can be a secret - riding along with the name.
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = @{} } }
+        $text = Get-WeeklyNoticesText
+        $text | Should -Match 'إعدادات معدّلة'
+        $text | Should -Match '<code>EnableAnnouncements</code>'
+        $leak = [string](Get-JsonProp $config.Settings 'AnnouncementMaxLength')
+        if (-not [string]::IsNullOrWhiteSpace($leak)) {
+            $text | Should -Not -Match ([regex]::Escape($leak))
+        }
+    }
+
+    It 'stays valid HTML inside the weekly digest' {
+        # Test-BridgeTelegramHtml lives in Bridge.Tests.ps1, so this file
+        # enforces the same two rules directly: escape everything human, and
+        # never nest code inside bold (the API refuses the whole message).
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = @{ old = @{} } } }
+        $script:AlertHistory['تعذّر التقاط #'] = @((Get-Date).AddHours(-5), (Get-Date).AddHours(-3), (Get-Date).AddHours(-1))
+        $text = Get-WeeklyNoticesText
+        $text | Should -Not -Match '<(b|i|u|s)>[^<]*<(code|pre)>'
+        foreach ($tag in @('b', 'code', 'blockquote')) {
+            ([regex]::Matches($text, "<$tag[ >]").Count) | Should -Be ([regex]::Matches($text, "</$tag>").Count)
+        }
+        (Get-UsageDigestText) | Should -Match 'ما لاحظه الجسر'
+    }
+}
+
+Describe 'Flow timing (T-16)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        $script:OrigTimings = @{} + $script:ShowFlowTimings
+        $script:OrigAbandoned = @{} + $script:AbandonedDrafts
+        $script:ShowFlowTimings = @{}
+        $script:AbandonedDrafts = @{}
+    }
+
+    AfterEach {
+        $script:ShowFlowTimings = $script:OrigTimings
+        $script:AbandonedDrafts = $script:OrigAbandoned
+        Clear-PendingState -ChatId 99
+    }
+
+    It 'counts an expired show flow against its template, never its values' {
+        # Three abandoned drafts on one template mean a hard template, and
+        # the count must not carry a single word the operator typed.
+        Set-PendingState -ChatId 99 -State @{
+            Mode = 'show_fields'; TemplateKey = 'urgent'
+            Values = @{ 'Headline.Text' = 'secret headline' }; UserId = 99
+        }
+        (Get-PendingState -ChatId 99).StartedAt = (Get-Date).AddHours(-10)
+        Update-PendingExpiry
+        $script:AbandonedDrafts['قالب urgent'] | Should -Be 1
+        (@($script:AbandonedDrafts.Keys) -join ' ') | Should -Not -Match 'secret headline'
+    }
+
+    It 'ranks templates slowest-first with honest averages' {
+        $script:ShowFlowTimings['ticker'] = @{ Count = 2; TotalSeconds = 100 }
+        $script:ShowFlowTimings['urgent'] = @{ Count = 4; TotalSeconds = 120 }
+        $text = Get-FlowTimingText
+        $text | Should -Match 'زمن النشر'
+        $text.IndexOf('ticker') | Should -BeLessThan ($text.IndexOf('urgent'))
+        $text | Should -Match 'متوسط 50 ث'
+        $text | Should -Match 'متوسط 30 ث'
+    }
+
+    It 'stays silent when nothing was measured and nothing was dropped' {
+        Get-FlowTimingText | Should -Be ''
+    }
+
+    It 'rides the weekly digest beside the other observations' {
+        $script:ShowFlowTimings['ticker'] = @{ Count = 1; TotalSeconds = 45 }
+        $script:AbandonedDrafts['شريط الأخبار'] = 2
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = @{} } }
+        $digest = Get-UsageDigestText
+        $digest | Should -Match 'زمن النشر والمسودات'
+        $digest | Should -Match 'مسودات مهجورة'
+    }
+}

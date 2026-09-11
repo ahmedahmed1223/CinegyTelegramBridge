@@ -701,6 +701,36 @@ function Invoke-ShowTemplateResult {
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
 
     if ($result.Success) {
+        # T-15: the "before" of before/after. The last cached frame is
+        # inherently pre-show - nothing captures during the SHOW itself - so
+        # it is kept by reference when fresh, never re-taken: a synchronous
+        # grab here would hold a live show for its whole timeout. The "after"
+        # is taken on demand when the rollback review opens.
+        $beforeFile = [string]$script:LastSnapshotFile
+        if (-not [string]::IsNullOrWhiteSpace($beforeFile) -and (Test-Path -LiteralPath $beforeFile) -and
+            ((Get-Date) - [datetime]$script:LastSnapshotAt).TotalMinutes -le 15) {
+            $script:RollbackBeforeFiles[[int]$template.Layer] = $beforeFile
+        }
+        else {
+            $script:RollbackBeforeFiles.Remove([int]$template.Layer) | Out-Null
+        }
+        # T-16: settle the flow clock. Only a flow this operator opened counts:
+        # scheduled fires and retries carry no FlowStartedAt and must not
+        # flatter a template's average with their waiting time.
+        $flowState = Get-PendingState -ChatId $ChatId
+        $flowStartText = if ($flowState) { [string](Get-JsonProp $flowState 'FlowStartedAt') } else { '' }
+        $flowStart = [datetime]::MinValue
+        if (-not [string]::IsNullOrWhiteSpace($flowStartText) -and [datetime]::TryParse($flowStartText, [ref]$flowStart)) {
+            $seconds = [math]::Max(0, [int]((Get-Date) - $flowStart).TotalSeconds)
+            $timingKey = [string]$Key
+            $prior = $script:ShowFlowTimings[$timingKey]
+            $count = 0; $total = 0
+            if ($prior) {
+                [int]::TryParse([string](Get-JsonProp $prior 'Count'), [ref]$count) | Out-Null
+                [int]::TryParse([string](Get-JsonProp $prior 'TotalSeconds'), [ref]$total) | Out-Null
+            }
+            $script:ShowFlowTimings[$timingKey] = @{ Count = ($count + 1); TotalSeconds = ($total + $seconds) }
+        }
         $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
         $activeId = [string]$result.EventId
         $activeIdConfirmed = $false

@@ -6,6 +6,39 @@
     Declarations only - ordered initialization stays in TelegramBridge.ps1.
 #>
 
+function Add-AbandonedDraft {
+    <#
+        T-16: every draft that dies on a timer is counted, by label and never
+        by content. Three abandoned drafts on one template do not mean a lazy
+        operator; they mean a hard template. Called from both expiry paths:
+        the input-flow watchdog below and the news-draft expiry.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Label)
+    $name = $Label.Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = 'غير مصنّف' }
+    $count = 0
+    [int]::TryParse([string]$script:AbandonedDrafts[$name], [ref]$count) | Out-Null
+    $script:AbandonedDrafts[$name] = $count + 1
+}
+
+function Get-AbandonedDraftLabel {
+    <# A pending input flow, reduced to what may be counted: the template it
+       belonged to, or the kind of work when there is no template. Values,
+       aliases and chat ids never leave this function. #>
+    param($State)
+    if (-not $State) { return 'غير مصنّف' }
+    $mode = [string](Get-JsonProp $State 'Mode')
+    $key = [string](Get-JsonProp $State 'TemplateKey')
+    if ([string]::IsNullOrWhiteSpace($key)) { $key = [string](Get-JsonProp $State 'Key') }
+    if ($mode -in @('show_fields', 'show_review', 'schedule_fields', 'schedule_time', 'schedule_recurrence', 'schedule_review') -and -not [string]::IsNullOrWhiteSpace($key)) {
+        return "قالب $key"
+    }
+    if ($mode -like 'news*') { return 'شريط الأخبار' }
+    if ($mode -like 'mojaz*') { return 'الموجز' }
+    if ($mode -like 'sched*') { return 'الجدولة' }
+    return $mode
+}
+
 function Update-PendingExpiry {
     $stateTimeout = Get-SettingInt 'PendingStateTimeoutMinutes' 1
     foreach ($chatId in @($script:PendingState.Keys)) {
@@ -13,6 +46,7 @@ function Update-PendingExpiry {
         $elapsed = ((Get-Date) - $state.StartedAt).TotalMinutes
         if ($elapsed -ge $stateTimeout) {
             Clear-PendingState -ChatId ([long]$chatId)
+            Add-AbandonedDraft -Label (Get-AbandonedDraftLabel -State $state)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
             Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء. ابدأ من جديد." -ReplyMarkup (Get-NoticeKeyboard)
             continue
@@ -1007,6 +1041,7 @@ function Update-NewsDraftExpiry {
     $items = @(Get-JsonProp $draft 'Items')
     $count = $items.Count
     Remove-NewsTickerDraft
+    Add-AbandonedDraft -Label 'شريط الأخبار'
     Write-BridgeLog "Expired an abandoned news draft ($count item(s), idle for $timeout+ minutes)" 'WARN'
     if ($owner -gt 0) {
         Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $(Format-DurationMinutes -Minutes $timeout) بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي."
@@ -1159,7 +1194,110 @@ function Get-UsageDigestBlocks {
         }
         $blocks += @{ type = 'table'; cells = $reasonCells }
     }
+    # T-31 on the on-demand rich path: plain lines, because a table cell
+    # cannot hold markup and the names here arrive escaped for HTML already.
+    $plainNotices = Get-WeeklyNoticesText -AsPlain
+    if ($plainNotices) {
+        $blocks += @{ type = 'paragraph'; text = $plainNotices }
+    }
+    # T-16 on the same path.
+    $plainTiming = Get-FlowTimingText -AsPlain
+    if ($plainTiming) {
+        $blocks += @{ type = 'paragraph'; text = $plainTiming }
+    }
     return $blocks
+}
+
+function Get-WeeklyNoticesText {
+    <#
+        T-31: what the bridge noticed and nobody read. The bridge measures
+        every screen, counts every failure, knows every template's last use
+        and records every changed setting - and almost all of it lives in a
+        log nobody opens on shift. Folded into the weekly digest rather than
+        sent as a second message: one weekly notice gets read, two teach the
+        administrator to skip both.
+
+        Names only, never values: a setting's value can be a secret, its name
+        cannot. Everything human-typed is escaped; the whole section must pass
+        the HTML gate test that renders Get-UsageDigestText.
+    #>
+    param([switch]$AsPlain)
+    $found = [System.Collections.Generic.List[string]]::new()
+
+    # 1. Screens approaching their payload cap.
+    try {
+        $peak = Get-RichPayloadPeak
+        if ($peak -and [int]$peak.Percent -ge 70) {
+            $screen = [string]$peak.Screen
+            if (-not $AsPlain) { $screen = "<b>$(ConvertTo-TelegramHtmlText $screen)</b>" }
+            $found.Add("📐 شاشة قريبة من حدّها: $screen — $($peak.Percent)% من الحدّ.")
+        }
+    }
+    catch { Write-BridgeLog "Weekly notices: payload signal failed: $($_.Exception.Message)" }
+
+    # 2. Templates unused for thirty days (or never).
+    try {
+        $store = Get-TemplateStore
+        $map = Get-JsonProp $store 'Map'
+        if ($map) {
+            $cutoff = (Get-Date).AddDays(-30)
+            $idle = @(foreach ($key in @($map.Keys)) {
+                    $name = [string]$key
+                    if ($script:TemplateLastUsed.ContainsKey($name)) {
+                        if ([datetime]$script:TemplateLastUsed[$name] -ge $cutoff) { continue }
+                        $when = ([datetime]$script:TemplateLastUsed[$name]).ToLocalTime().ToString('MM-dd')
+                    }
+                    else { $when = 'أبدًا' }
+                    "$name — $when"
+                })
+            if (@($idle).Count -gt 0) {
+                $shown = if ($AsPlain) { @($idle | Select-Object -First 5) } else { @($idle | Select-Object -First 5 | ForEach-Object { ConvertTo-TelegramHtmlText ([string]$_) }) }
+                $extra = @($idle).Count - 5
+                $tail = if ($extra -gt 0) { " (+$extra أخرى)" } else { '' }
+                $found.Add("🕸 قوالب بلا استعمال منذ شهر: $($shown -join ' · ')$tail")
+            }
+        }
+    }
+    catch { Write-BridgeLog "Weekly notices: idle-template signal failed: $($_.Exception.Message)" }
+
+    # 3. Failures repeating under one cause (the T-32 table, weekly view).
+    try {
+        $foundCauses = @()
+        foreach ($cause in @($script:AlertHistory.Keys)) {
+            $times = @(@($script:AlertHistory[$cause]) | Where-Object { $_ -is [datetime] })
+            if ($times.Count -ge 3) {
+                $foundCauses += [pscustomobject]@{ Cause = [string]$cause; Count = $times.Count }
+            }
+        }
+        $repeats = @($foundCauses | Sort-Object Count -Descending | Select-Object -First 5)
+        if ($repeats.Count -gt 0) {
+            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $($_.Count) مرات" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $($_.Count) مرات" }) }
+            $found.Add("🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')")
+        }
+    }
+    catch { Write-BridgeLog "Weekly notices: repeat-failure signal failed: $($_.Exception.Message)" }
+
+    # 4. Settings differing from defaults - names only.
+    try {
+        $foundChanged = @()
+        foreach ($prop in @($script:DefaultSettings.Keys)) {
+            $name = [string]$prop
+            $def = [string]$script:DefaultSettings[$name]
+            $cur = ''
+            try { $cur = [string](Get-JsonProp $config.Settings $name) } catch { continue }
+            if ($cur -cne $def) { $foundChanged += $name }
+        }
+        $changed = @($foundChanged | Select-Object -First 10)
+        if ($changed.Count -gt 0) {
+            $safe = if ($AsPlain) { @($changed) } else { @($changed | ForEach-Object { "<code>$(ConvertTo-TelegramHtmlText ([string]$_))</code>" }) }
+            $found.Add("⚙️ إعدادات معدّلة عن الافتراضي: $($safe -join ' ')")
+        }
+    }
+    catch { Write-BridgeLog "Weekly notices: changed-settings signal failed: $($_.Exception.Message)" }
+
+    if ($found.Count -eq 0) { return '' }
+    $head = if ($AsPlain) { '👁 ما لاحظه الجسر' } else { '<b>👁 ما لاحظه الجسر</b>' }
+    return ("$head`n" + ($found -join "`n"))
 }
 
 function Get-UsageDigestText {
@@ -1229,7 +1367,53 @@ function Get-UsageDigestText {
             })
         $lines.Add("<blockquote>$($reasonLines -join "`n")</blockquote>")
     }
+    # T-31: the bridge's own observations ride the same weekly message.
+    $notices = Get-WeeklyNoticesText
+    if ($notices) { $lines.Add(''); $lines.Add($notices) }
+    # T-16: slow templates and abandoned drafts, from the clocks above.
+    $timingSection = Get-FlowTimingText
+    if ($timingSection) { $lines.Add(''); $lines.Add($timingSection) }
     return ($lines -join "`n")
+}
+
+function Get-FlowTimingText {
+    <#
+        T-16: the slowest templates to reach air, and the drafts that never
+        did - from ShowFlowTimings settled on successful SHOWs and
+        AbandonedDrafts counted at expiry. Template names are administrator
+        text, so each is escaped; the section must pass the HTML gate test
+        that renders Get-UsageDigestText.
+    #>
+    param([switch]$AsPlain)
+    $found = [System.Collections.Generic.List[string]]::new()
+    $slow = @()
+    foreach ($key in @($script:ShowFlowTimings.Keys)) {
+        $entry = $script:ShowFlowTimings[$key]
+        $count = 0; $total = 0
+        [int]::TryParse([string](Get-JsonProp $entry 'Count'), [ref]$count) | Out-Null
+        [int]::TryParse([string](Get-JsonProp $entry 'TotalSeconds'), [ref]$total) | Out-Null
+        if ($count -le 0) { continue }
+        $slow += [pscustomobject]@{ Key = [string]$key; Count = $count; Average = [int]($total / $count) }
+    }
+    $slow = @($slow | Sort-Object Average -Descending | Select-Object -First 3)
+    if ($slow.Count -gt 0) {
+        $parts = @($slow | ForEach-Object {
+                $name = if ($AsPlain) { $_.Key } else { "<b>$(ConvertTo-TelegramHtmlText $_.Key)</b>" }
+                "$name — متوسط $($_.Average) ث ($($_.Count) مرات)"
+            })
+        $found.Add("🐢 الأبطأ وصولًا للهواء: $($parts -join ' · ')")
+    }
+    $dropped = @($script:AbandonedDrafts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3)
+    if ($dropped.Count -gt 0) {
+        $parts = @($dropped | ForEach-Object {
+                $name = if ($AsPlain) { [string]$_.Key } else { ConvertTo-TelegramHtmlText ([string]$_.Key) }
+                "$name — $($_.Value) مرات"
+            })
+        $found.Add("🗑 مسودات مهجورة: $($parts -join ' · ')")
+    }
+    if ($found.Count -eq 0) { return '' }
+    $head = if ($AsPlain) { '⏱ زمن النشر والمسودات' } else { '<b>⏱ زمن النشر والمسودات</b>' }
+    return ("$head`n" + ($found -join "`n"))
 }
 
 function Update-UsageDigest {

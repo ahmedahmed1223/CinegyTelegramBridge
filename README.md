@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.21.0
+
+Five items from the integrated review (docs/REVIEW-2026-09-10.md).
+
+The output-failure alert now names the streaming server itself - read from
+the last ffmpeg stderr, kept on every failed capture and cleared on the
+first success - and always ends with a next step for the first broken link:
+channel, relay, server, or source.
+
+Scheduling can anchor a one-off event to channel material: "show the strap
+30 seconds into the segment" instead of a wall-clock time. The event keeps
+an absolute fallback, and the queue re-resolves the anchor from the rundown
+every tick, so a shifted programme carries its graphic with it.
+
+The rollback review now shows two frames - before the push and as it looks
+now, the latter captured on demand when the review opens. Either may be
+missing, and then the text review stands alone as before.
+
+The weekly digest folds in two new sections: what the bridge noticed
+(screens near their payload cap, templates idle for a month, failures
+repeating under one cause, settings differing from defaults by name only)
+and flow timing (slowest templates to air, abandoned drafts by label, never
+content).
+
 ## Version 8.20.0
 
 Two items from the standing backlog, the cheapest and highest-priority ones.

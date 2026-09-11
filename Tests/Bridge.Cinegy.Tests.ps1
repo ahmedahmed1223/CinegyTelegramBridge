@@ -1244,4 +1244,28 @@ Describe 'Naming which link broke' {
         }
         finally { $script:RelayState.ShouldRun = $original }
     }
+
+    It 'names the streaming server when the last capture says it is down' {
+        # The station asked for source AND server: the server link is read
+        # from the last ffmpeg stderr, stored by Get-MonitorFrame.
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = 'x'; CuedId = ''; OutputState = 'Normal'; Error = '' } }
+        $original = $script:LastCaptureErrorDetail
+        try {
+            $script:LastCaptureErrorDetail = 'Connection refused by 10.0.0.5'
+            $text = @(Get-OutputFailureDiagnosis) -join ' '
+            $text | Should -Match 'سيرفر البث'
+            $text | Should -Match 'الخطوة التالية'
+        }
+        finally { $script:LastCaptureErrorDetail = $original }
+    }
+
+    It 'still ends with a next step when nothing is broken' {
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = 'x'; CuedId = ''; OutputState = 'Normal'; Error = '' } }
+        $original = $script:LastCaptureErrorDetail
+        try {
+            $script:LastCaptureErrorDetail = ''
+            (@(Get-OutputFailureDiagnosis) -join ' ') | Should -Match 'الخطوة التالية'
+        }
+        finally { $script:LastCaptureErrorDetail = $original }
+    }
 }

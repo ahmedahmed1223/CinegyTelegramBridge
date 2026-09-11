@@ -215,10 +215,12 @@ function Update-SnapshotJobs {
             Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
             $failed = $true
+            $script:LastCaptureErrorDetail = 'انتهت مهلة التقاط الصورة'
             $msg = "❌ انتهت مهلة التقاط الصورة - تأكد أن المصدر قابل للوصول."
         }
         elseif ($job.Proc.ExitCode -ne 0 -or -not (Test-Path $job.OutPath)) {
             $detail = Get-LastErrorLine -Path $job.ErrLog
+            $script:LastCaptureErrorDetail = $detail
             $level = if (Test-MediaSourceUnreachable -Detail $detail) { 'WARN' } else { 'ERROR' }
             Write-BridgeLog "Snapshot ffmpeg failed (exit $($job.Proc.ExitCode)): $detail" $level
             $msg = "❌ فشل التقاط الصورة (كود $($job.Proc.ExitCode))."
@@ -248,6 +250,7 @@ function Update-SnapshotJobs {
             }
             $script:LastSnapshotFile = $job.OutPath
             $script:LastSnapshotAt = Get-Date
+            $script:LastCaptureErrorDetail = ''
             $script:LastSnapshotSourceIsPrimary = [bool]$job.SourceIsPrimary
             $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
             Write-BridgeLog "User $($job.UserId) captured a stream snapshot from $sourceLabel"
@@ -314,16 +317,19 @@ function Get-MonitorFrame {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            $script:LastCaptureErrorDetail = "انتهت مهلة الالتقاط بعد ${TimeoutSeconds} ثوانٍ"
             & $note "Output monitor capture timed out after ${TimeoutSeconds}s"
             return $null
         }
         if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outPath)) {
-            & $note "Output monitor capture failed (exit $($proc.ExitCode)): $(Get-LastErrorLine -Path $errLog)"
+            $script:LastCaptureErrorDetail = Get-LastErrorLine -Path $errLog
+            & $note "Output monitor capture failed (exit $($proc.ExitCode)): $script:LastCaptureErrorDetail"
             return $null
         }
         return $outPath
     }
     catch {
+        $script:LastCaptureErrorDetail = $_.Exception.Message
         & $note "Output monitor capture could not start: $($_.Exception.Message)"
         return $null
     }
@@ -504,6 +510,7 @@ function Update-OutputBlackWatchdog {
         }
         $script:OutputMonitorFailureCount = 0
         $script:OutputMonitorFailureAlerted = $false
+        $script:LastCaptureErrorDetail = ''
     }
     $first = Get-BridgeFrameLuminance -Path $firstPath
     Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue
@@ -567,6 +574,7 @@ function Get-OutputFailureDiagnosis {
         Returns the lines to append, in the order a person would check them.
     #>
     $lines = @()
+    $nextStep = ''
 
     # The channel first. A deliberate Black or Bypass is a working channel
     # with nothing to show, which reads identically to a dead one on a
@@ -575,6 +583,7 @@ function Get-OutputFailureDiagnosis {
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not $status.Success) {
         $lines += '• القناة: لا تُجيب — ابدأ من Cinegy Air نفسه.'
+        $nextStep = '🔎 الخطوة التالية: افتح Cinegy Air وتأكد أن المحرك يعمل.'
     }
     elseif ($status.OutputState -and $status.OutputState -ne 'Normal') {
         $lines += "• القناة: تُجيب، ومخرجها مضبوط على <b>$(ConvertTo-TelegramHtmlText $status.OutputState)</b> — أي أنّ السواد مقصود لا عطل."
@@ -587,7 +596,27 @@ function Get-OutputFailureDiagnosis {
     # a break the operator can fix without touching playout.
     if ($script:RelayState.ShouldRun) {
         $running = Get-RunningRelayProcess
-        $lines += if ($running) { '• الترحيل: يعمل.' } else { '• الترحيل: مطلوب تشغيله لكنه غير عامل — أعد تشغيل البث المباشر.' }
+        if ($running) { $lines += '• الترحيل: يعمل.' }
+        else {
+            $lines += '• الترحيل: مطلوب تشغيله لكنه غير عامل — أعد تشغيل البث المباشر.'
+            if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: أعد تشغيل البث المباشر من القائمة.' }
+        }
+    }
+
+    # Then the streaming server, read from the last capture's own stderr:
+    # a refused connection names the server, a local failure does not.
+    $serverDetail = [string]$script:LastCaptureErrorDetail
+    if (-not [string]::IsNullOrWhiteSpace($serverDetail)) {
+        $short = $serverDetail.Trim()
+        if ($short.Length -gt 180) { $short = $short.Substring(0, 180) + '…' }
+        $safe = ConvertTo-TelegramHtmlText $short
+        if (Test-MediaSourceUnreachable -Detail $serverDetail) {
+            $lines += "• سيرفر البث: آخر خطأ يشير إلى أن الخادم لا يجيب — $safe"
+            if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: تحقق من سيرفر البث وشبكته.' }
+        }
+        else {
+            $lines += "• سيرفر البث: آخر خطأ مسجّل — $safe"
+        }
     }
 
     # And the source last, because it is the one the bridge cannot test
@@ -601,6 +630,8 @@ function Get-OutputFailureDiagnosis {
     else {
         $lines += "• المصدر المستعمل: $label — تحقّق من خادمه وشبكته."
     }
+    if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: اطلب لقطة من القائمة لترى الصورة الحالية.' }
+    $lines += $nextStep
     return $lines
 }
 

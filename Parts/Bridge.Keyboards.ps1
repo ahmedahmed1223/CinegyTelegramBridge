@@ -95,7 +95,7 @@ function Get-MainMenuKeyboard {
         # A frame from the actual output, next to what the bridge believes is
         # on air - so the operator can check the claim without leaving the chat.
         $onAirTools = @()
-        if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button "🚨 إخفاء الكل" "menu:hideall") }
+        if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger) }
         if (Get-Setting 'EnableSnapshot') { $onAirTools += (New-Button "📷 لقطة الآن" "menu:snapshot") }
         $onAirTools += (New-Button "📋 نسخ الحالة" "menu:sharestatus")
         $rows += , $onAirTools
@@ -173,7 +173,7 @@ function Get-MainMenuKeyboard {
     # keyboard instead of here; see the on-air block above.
     $thirdRow = @()
     if ((Get-Setting 'EnableHideAll') -and $script:OnAir.Count -eq 0) {
-        $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall")
+        $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger)
     }
     if ($script:LastShow.ContainsKey($ChatId)) { $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat") }
     if ($thirdRow.Count -gt 0) { $rows += , $thirdRow }
@@ -519,11 +519,17 @@ function Get-AdminToolsKeyboard {
 }
 
 function Get-HealthCenterKeyboard {
-    return @{ inline_keyboard = @(
-            , @((New-Button '🔄 تحديث' 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
-            , @((New-Button '🧪 التشخيص' 'menu:diagnostics'), (New-Button '🗂 ملفات التشغيل' 'health:files'))
-            , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
-        ) }
+    $rows = @(
+        , @((New-Button '🔄 تحديث' 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
+        , @((New-Button '🧪 التشخيص' 'menu:diagnostics'), (New-Button '🗂 ملفات التشغيل' 'health:files'))
+    )
+    # F9: the button exists only when the screen does. An opt-in feature
+    # must not advertise itself to whoever never asked for it.
+    if (Get-Setting 'EnableEngineHealth') {
+        $rows += , @((New-Button '🖥 صحة المحرك' 'menu:enginehealth'))
+    }
+    $rows += , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-TemplateCategories {

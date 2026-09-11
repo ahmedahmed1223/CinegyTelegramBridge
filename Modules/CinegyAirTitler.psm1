@@ -611,16 +611,18 @@ function Get-AirVideoStatus {
             return $id
         }
         $outputNode = $xml.SelectSingleNode('/Status/Output')
+        $licenseNode = $xml.SelectSingleNode('/Status/License')
         return [pscustomobject]@{
             Success = $true
             ActiveId = [string](& $read '/Status/Active')
             CuedId = [string](& $read '/Status/Cued')
             OutputState = if ($outputNode) { [string]$outputNode.GetAttribute('State') } else { '' }
+            License = if ($licenseNode) { [string]$licenseNode.GetAttribute('State') } else { '' }
             Error = ''
         }
     }
     catch {
-        return [pscustomobject]@{ Success = $false; ActiveId = ''; CuedId = ''; OutputState = ''; Error = [string]$_.Exception.Message }
+        return [pscustomobject]@{ Success = $false; ActiveId = ''; CuedId = ''; OutputState = ''; License = ''; Error = [string]$_.Exception.Message }
     }
 }
 

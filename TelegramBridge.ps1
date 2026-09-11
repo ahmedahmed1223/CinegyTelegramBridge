@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.21.0'
+$script:BridgeVersion = '8.22.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -301,6 +301,8 @@ $script:DefaultSettings = [ordered]@{
     NotifyAdminsOnMissingProxy = $false
     RepeatAlertWindowHours     = 6       # window for "this is the third time, same cause" (0 disables)
     MaterialProxyLeadMinutes   = 30      # how long before air the local copy is checked
+    MaterialEndAlertMinutes    = 0       # warn this many minutes before the active material ends (0 disables)
+    EnableEngineHealth         = $false  # engine-health screen from /metrics; measures the box, off unless asked
     OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
@@ -410,6 +412,8 @@ $script:SettingDisplayMetadata = @{
     NotifyAdminsOnMissingProxy = @{ Unit = ''; Description = 'تنبيه المشرفين إن قاربت مادة موعدها ولا نسخة محلية لها على السيرفر — عندها تُقرأ من المصدر أثناء البثّ' }
     RepeatAlertWindowHours = @{ Unit = 'ساعة'; Description = 'خلال كم ساعة يُحسب تكرار التنبيه: من الثالث فصاعدًا يقول التنبيه إنه تكرار ومتى بدأ (0 للتعطيل)' }
     MaterialProxyLeadMinutes = @{ Unit = 'دقيقة'; Description = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية' }
+    MaterialEndAlertMinutes = @{ Unit = 'دقيقة'; Description = 'التنبيه قبل نهاية المادة الجارية بهذه الدقائق لتجهيز غرافيك الختام (0 للتعطيل)' }
+    EnableEngineHealth = @{ Unit = ''; Description = 'شاشة صحة المحرك من عدادات Cinegy (إطارات مسقطة وترخيص) — معطلة افتراضيًا ويفعّلها المشرف' }
     OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
@@ -860,6 +864,13 @@ $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
 # refreshed at most every five minutes (see Get-CachedMaterialSchedule).
 $script:MaterialScheduleCache = @()
 $script:MaterialScheduleCacheAt = [datetime]::MinValue
+# F4 material-end alerts: throttle for the rundown read, and the id already
+# warned about so a lead window does not repeat itself every tick.
+$script:LastMaterialEndCheck = [datetime]::MinValue
+$script:LastMaterialEndAlertId = ''
+# F9 engine-health delta: -1 means "no baseline yet", so the first view
+# reports the counter without a since-last-look delta.
+$script:LastEngineDropped = -1
 
 
 
@@ -1184,7 +1195,8 @@ foreach ($entry in @(
             ) },
         @{ Category = 'monitoring'; Names = @(
                 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
-                'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes', 'EnableTextChecks',
+                'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes', 'MaterialEndAlertMinutes',
+                'EnableEngineHealth', 'EnableTextChecks',
                 'RepeatAlertWindowHours',
                 'EnableMaterialSchedule', 'EnableShiftHandover',
                 'OutputBlackLuminance', 'OutputBlackConfirmSeconds',
@@ -1408,6 +1420,8 @@ $script:SettingNavigationLabels = @{
     UploadRetentionMinutes = 'الاحتفاظ بالملفات المرفوعة'
     UsageDigestDayOfWeek = 'يوم الملخص الأسبوعي'
     UsageDigestEnabled = 'الملخص الأسبوعي'
+    MaterialEndAlertMinutes = 'تنبيه نهاية المادة'
+    EnableEngineHealth = 'صحة المحرك'
 }
 
 # What a number may be.

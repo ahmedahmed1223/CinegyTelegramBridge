@@ -179,6 +179,39 @@ function Show-MaterialScheduleScreen {
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
 }
 
+function Get-HandoverAutoSummary {
+    <#
+        F7: the three lines the receiver would otherwise miss. Failures are
+        read newest-first from the in-memory audit trail (already stamped and
+        carrying their own markup, so they are used as-is, trimmed to one
+        screen line each); then the single most repeated alert cause, which
+        arrives escaped because it is derived from raw alert text.
+    #>
+    $found = @()
+    # The stamp is "HH:mm:ss" today and "MM-dd HH:mm:ss" older, so the emoji
+    # is matched within the line's head rather than after one token.
+    $failures = @(@($script:AuditTrail) | Where-Object { $_ -match '^.{0,18}[❌⛔⚠️]' } | Select-Object -Last 2)
+    [array]::Reverse($failures)
+    foreach ($entry in $failures) {
+        $line = [string]$entry
+        if ($line.Length -gt 140) { $line = $line.Substring(0, 140) + '…' }
+        $found += $line
+    }
+    $topCause = $null
+    $topCount = 0
+    foreach ($cause in @($script:AlertHistory.Keys)) {
+        $times = @(@($script:AlertHistory[$cause]) | Where-Object { $_ -is [datetime] })
+        if ($times.Count -ge 3 -and $times.Count -gt $topCount) {
+            $topCount = $times.Count
+            $topCause = [string]$cause
+        }
+    }
+    if ($topCause -and $found.Count -lt 3) {
+        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($topCount مرات)"
+    }
+    return @($found | Select-Object -First 3)
+}
+
 function Show-ShiftHandoverScreen {
     <#
         Everything a shift change needs, on one screen.
@@ -242,6 +275,17 @@ function Show-ShiftHandoverScreen {
         foreach ($draft in $drafts) { $lines.Add($draft) }
     }
     else { $lines.Add('✍️ لا مسودات مفتوحة.') }
+
+    # F7: the handover writes itself. The receiver reads what is on air, what
+    # is coming and what is half-written above; what they would otherwise
+    # miss is what went wrong and what keeps going wrong. At most three
+    # lines, newest failure first, then the most repeated cause.
+    $autoSummary = @(Get-HandoverAutoSummary)
+    if ($autoSummary.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('<b>📌 الأهم تلقائيًا</b>')
+        foreach ($line in $autoSummary) { $lines.Add($line) }
+    }
 
     $lines.Add('')
     $lines.Add('<i>راجع القائمة مع من يستلم، ثم اضغط «سلّمت» ليُسجَّل.</i>')

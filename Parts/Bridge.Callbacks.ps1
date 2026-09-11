@@ -649,6 +649,10 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-HealthCenterCommand -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:enginehealth' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-EngineHealthScreen -ChatId $chatId -UserId $userId }
+            break
+        }
         'health:files' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-RuntimeFileHealthCommand -ChatId $chatId -UserId $userId }
             break

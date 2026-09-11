@@ -133,6 +133,8 @@ Describe 'Quiet runtime orchestration' {
                 'Update-UploadCleanup',
                 'Update-MojazImageCleanup',
                 'Update-OutputBlackWatchdog',
+                'Update-MaterialProxyWatchdog',
+                'Update-MaterialEndWatchdog',
                 'Save-UsageCounts',
                 'Save-UserProfiles',
                 'Update-CinegyStateWatchdog',
@@ -2338,5 +2340,145 @@ Describe 'Flow timing (T-16)' {
         $digest = Get-UsageDigestText
         $digest | Should -Match 'زمن النشر والمسودات'
         $digest | Should -Match 'مسودات مهجورة'
+    }
+}
+
+Describe 'Material end alerts (F4)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-AdminBroadcast { }
+        $script:OrigEndLead = Get-JsonProp $config.Settings 'MaterialEndAlertMinutes'
+        $script:OrigEndCheck = $script:LastMaterialEndCheck
+        $script:OrigEndAlertId = $script:LastMaterialEndAlertId
+        $config.Settings | Add-Member -NotePropertyName MaterialEndAlertMinutes -NotePropertyValue 0 -Force
+        $script:LastMaterialEndCheck = [datetime]::MinValue
+        $script:LastMaterialEndAlertId = ''
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName MaterialEndAlertMinutes -NotePropertyValue $script:OrigEndLead -Force
+        $script:LastMaterialEndCheck = $script:OrigEndCheck
+        $script:LastMaterialEndAlertId = $script:OrigEndAlertId
+    }
+
+    It 'stays silent while the lead is zero' {
+        Mock Get-AirMaterialSchedule { throw 'must not fetch while disabled' }
+        Update-MaterialEndWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'warns once per material as its end enters the lead' {
+        $config.Settings | Add-Member -NotePropertyName MaterialEndAlertMinutes -NotePropertyValue 5 -Force
+        $now = [datetimeoffset]::Now
+        Mock Get-AirMaterialSchedule {
+            [pscustomobject]@{ Success = $true; Error = ''; Items = @(
+                    @{ Id = '{aaaaaaaa-0000-0000-0000-000000000001}'; Name = 'الفقرة المسائية'
+                        ScheduledAt = $now.AddMinutes(-50).ToString('o'); Duration = [timespan]::FromMinutes(51) }
+                ) }
+        }
+        Update-MaterialEndWatchdog
+        $script:LastMaterialEndCheck = [datetime]::MinValue
+        Update-MaterialEndWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Urgent -and $Text -match 'الفقرة المسائية' }
+    }
+
+    It 'says nothing while the end is still beyond the lead' {
+        $config.Settings | Add-Member -NotePropertyName MaterialEndAlertMinutes -NotePropertyValue 2 -Force
+        $now = [datetimeoffset]::Now
+        Mock Get-AirMaterialSchedule {
+            [pscustomobject]@{ Success = $true; Error = ''; Items = @(
+                    @{ Id = '{bbbbbbbb-0000-0000-0000-000000000002}'; Name = 'حلقة اليوم'
+                        ScheduledAt = $now.AddMinutes(-10).ToString('o'); Duration = [timespan]::FromHours(1) }
+                ) }
+        }
+        Update-MaterialEndWatchdog
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}
+
+Describe 'Engine health screen (F9)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        $script:OrigEngineHealth = Get-Setting 'EnableEngineHealth'
+        $script:OrigEngineDropped = $script:LastEngineDropped
+        $script:LastEngineDropped = -1
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName EnableEngineHealth -NotePropertyValue ([bool]$script:OrigEngineHealth) -Force
+        $script:LastEngineDropped = $script:OrigEngineDropped
+    }
+
+    It 'stays off by default and says how to turn it on' {
+        Mock Get-AirTelemetryStatus { throw 'must not measure while disabled' }
+        Show-EngineHealthScreen -ChatId 7 -UserId 7
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'معطلة افتراضيًا' }
+    }
+
+    It 'hides its own button while disabled' {
+        $flat = @((Get-HealthCenterKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $flat | Should -Not -Contain 'menu:enginehealth'
+    }
+
+    It 'leads with a verdict, then frames, license and programme' {
+        $config.Settings | Add-Member -NotePropertyName EnableEngineHealth -NotePropertyValue $true -Force
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{ Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500L; DroppedCount = 4L; NoInputSignal = 0L; AverageReadTime = 1.2; MaxReadErrorRate = 0; MaxHeartbeat = 680L; DroppedPercent = 0; Issues = @(); Error = '' }
+        }
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = 'x'; CuedId = ''; OutputState = 'Normal'; License = 'Licensed'; Error = '' } }
+        Mock Get-AirMaterialNowNext { '▶️ الجاري: حلقة اليوم' }
+        Show-EngineHealthScreen -ChatId 7 -UserId 7
+        Show-EngineHealthScreen -ChatId 7 -UserId 7
+        Should -Invoke Send-TelegramMessage -Times 2 -Exactly -ParameterFilter { $Text -match 'صحة المحرك' -and $Text -match 'سليم' -and $Text -match 'الترخيص' -and $Text -match 'الجاري' }
+        $flat = @((Get-HealthCenterKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $flat | Should -Contain 'menu:enginehealth'
+    }
+
+    It 'reports new drops as a delta, not the lifetime counter' {
+        $config.Settings | Add-Member -NotePropertyName EnableEngineHealth -NotePropertyValue $true -Force
+        Mock Get-AirVideoStatus { [pscustomobject]@{ Success = $true; ActiveId = ''; CuedId = ''; OutputState = 'Normal'; License = ''; Error = '' } }
+        Mock Get-AirMaterialNowNext { '' }
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{ Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500L; DroppedCount = 10L; NoInputSignal = 0L; AverageReadTime = 1.2; MaxReadErrorRate = 0; MaxHeartbeat = 680L; DroppedPercent = 0; Issues = @(); Error = '' }
+        }
+        Show-EngineHealthScreen -ChatId 7 -UserId 7
+        Mock Get-AirTelemetryStatus {
+            [pscustomobject]@{ Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1560L; DroppedCount = 13L; NoInputSignal = 0L; AverageReadTime = 1.2; MaxReadErrorRate = 0; MaxHeartbeat = 680L; DroppedPercent = 0; Issues = @(); Error = '' }
+        }
+        Show-EngineHealthScreen -ChatId 7 -UserId 7
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match '\+3 منذ آخر فحص' }
+    }
+}
+
+Describe 'Handover auto summary (F7)' {
+    BeforeEach {
+        $script:OrigTrail = @($script:AuditTrail)
+        $script:OrigCauses = @{} + $script:AlertHistory
+        $script:AuditTrail.Clear()
+        $script:AlertHistory = @{}
+    }
+
+    AfterEach {
+        $script:AuditTrail.Clear()
+        foreach ($line in $script:OrigTrail) { $script:AuditTrail.Add($line) }
+        $script:AlertHistory = $script:OrigCauses
+    }
+
+    It 'puts the newest failure first, then the most repeated cause' {
+        $script:AuditTrail.Add('12:00:00 ✅ عرض عاجل')
+        $script:AuditTrail.Add('12:05:00 ❌ فشل عرض الشريط: انتهت المهلة')
+        $script:AuditTrail.Add('12:10:00 ⛔ رُفض العرض: طبقة محجوزة')
+        $script:AlertHistory['تعذّر التقاط #'] = @((Get-Date).AddHours(-3), (Get-Date).AddHours(-2), (Get-Date).AddHours(-1))
+        $summary = @(Get-HandoverAutoSummary)
+        $summary.Count | Should -Be 3
+        $summary[0] | Should -Match 'رُفض العرض'
+        $summary[1] | Should -Match 'فشل عرض الشريط'
+        $summary[2] | Should -Match 'يتكرر'
+    }
+
+    It 'stays quiet when there is nothing worth handing over' {
+        $script:AuditTrail.Add('12:00:00 ✅ عرض عاجل')
+        @(Get-HandoverAutoSummary).Count | Should -Be 0
     }
 }

@@ -1022,6 +1022,7 @@ Describe 'The material on air and its schedule' {
         $status.ActiveId | Should -Be 'AAA'
         $status.CuedId | Should -Be 'BBB'
         $status.OutputState | Should -Be 'Normal'
+        $status.License | Should -Be 'Licensed'
     }
 
     It 'treats a null guid as nothing cued rather than as an item' {

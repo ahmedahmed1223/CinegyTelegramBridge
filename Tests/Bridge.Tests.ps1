@@ -621,6 +621,19 @@ Describe 'Button colour policy' {
         $no.ContainsKey('style') | Should -BeFalse
     }
 
+    It 'colours the emergency hide-all entry wherever it appears' {
+        # F8: the press takes everything off air, so both menu entries wear
+        # danger - beside live rows and on the quiet menu alike.
+        $script:OnAir[7] = @{ Key = 'urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
+        try {
+            $live = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+            @($live | Where-Object { $_['callback_data'] -eq 'menu:hideall' })[0].style | Should -Be 'danger'
+        }
+        finally { $script:OnAir.Remove(7) }
+        $quiet = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
+        @($quiet | Where-Object { $_['callback_data'] -eq 'menu:hideall' })[0].style | Should -Be 'danger'
+    }
+
     It 'uses only the three styles Telegram defines' {
         # A value outside the documented set is rejected for the whole message,
         # so a typo would take a screen off the air rather than mis-colour it.

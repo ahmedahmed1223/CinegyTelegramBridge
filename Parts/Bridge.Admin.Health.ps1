@@ -643,6 +643,59 @@ function Get-BridgeHealthCenterText {
     ) -join "`n"
 }
 
+function Show-EngineHealthScreen {
+    <#
+        F9: one screen answering "is the engine itself well" - verdict first,
+        then dropped frames as a delta since the last look (the raw counter
+        is cumulative since engine start and reads as a scare), the license
+        state, and what is playing underneath.
+
+        Opt-in behind EnableEngineHealth, off by default: it measures the box
+        on every open, and an unasked measurement is load without a reader.
+        All three reads are GETs; nothing here changes air.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Get-Setting 'EnableEngineHealth')) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'شاشة صحة المحرك معطلة افتراضيًا. يفعّلها المشرف من الإعدادات (صحة المحرك) إن أرادها.' -ReplyMarkup (Get-HealthCenterKeyboard)
+        return
+    }
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $video = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🖥 صحة المحرك</b>')
+    if (-not $telemetry.Success) {
+        $lines.Add('⚠️ تعذّر قراءة عدادات المحرك من القناة.')
+    }
+    else {
+        $dropped = [long]$telemetry.DroppedCount
+        $deltaLine = ''
+        if ($script:LastEngineDropped -ge 0 -and $dropped -ge $script:LastEngineDropped) {
+            $delta = $dropped - $script:LastEngineDropped
+            if ($delta -gt 0) { $deltaLine = " (+$delta منذ آخر فحص)" }
+        }
+        $script:LastEngineDropped = $dropped
+        $verdict = if ($telemetry.Healthy -eq $false) { '🔴 تحذير' }
+        elseif ([long]$telemetry.NoInputSignal -gt 0) { '🟠 بلا إشارة دخل' }
+        else { '🟢 سليم' }
+        $lines.Add("<b>$verdict</b>")
+        $lines.Add("🎞 الإطارات — المخرَجة: $($telemetry.OutputCount) · الساقطة: $dropped$deltaLine")
+        $lines.Add("⏱ متوسط القراءة: $($telemetry.AverageReadTime)ms · أخطاء القراءة: $($telemetry.MaxReadErrorRate)%")
+    }
+    $license = [string](Get-JsonProp $video 'License')
+    if (-not [string]::IsNullOrWhiteSpace($license)) {
+        $safeLicense = ConvertTo-TelegramHtmlText $license
+        $licenseLine = if ($license -eq 'Licensed') { "📄 الترخيص: $safeLicense" } else { "📄 الترخيص: <b>$safeLicense</b> — تحقق من ترخيص المحرك" }
+        $lines.Add($licenseLine)
+    }
+    $material = Get-AirMaterialNowNext -TimeoutSec $timeout
+    if ($material) { $lines.Add(''); $lines.Add($material) }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-HealthCenterKeyboard)
+}
+
 function Invoke-HealthCenterCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }

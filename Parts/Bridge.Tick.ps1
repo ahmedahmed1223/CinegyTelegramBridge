@@ -1430,6 +1430,57 @@ function Update-UsageDigest {
     Write-BridgeLog 'Usage digest sent to admins'
 }
 
+function Update-MaterialEndWatchdog {
+    <#
+        F4: "the segment ends in two minutes, get the outro graphic ready."
+
+        Off while MaterialEndAlertMinutes is 0. Reads the rundown directly
+        rather than through the anchor cache: a five-minute-old cached end
+        time against a two-minute lead alerts late or never. One 4KB GET a
+        minute is the price, throttled below.
+
+        Urgent on purpose: a "two minutes left" notice held for quiet hours
+        arrives after the segment did. The operator asked for this one by
+        setting its minutes above zero. One alert per material, keyed by id,
+        so a long outro window does not repeat itself every tick.
+    #>
+    $lead = Get-SettingInt 'MaterialEndAlertMinutes'
+    if ($lead -le 0) { return }
+    $now = Get-Date
+    if (($now - $script:LastMaterialEndCheck).TotalMinutes -lt 1) { return }
+    $script:LastMaterialEndCheck = $now
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    if (-not $schedule -or -not $schedule.Success) { return }
+    $at = [datetimeoffset]$now
+    # Parsed once, guarded once: the sort below re-reads these fields, and a
+    # malformed rundown entry must disqualify itself, not abort the watchdog.
+    $candidates = @()
+    foreach ($item in @($schedule.Items)) {
+        try {
+            $start = [datetimeoffset](Get-JsonProp $item 'ScheduledAt')
+            $duration = [timespan](Get-JsonProp $item 'Duration')
+        }
+        catch { continue }
+        if ($start -le $at -and ($start + $duration) -gt $at) {
+            $candidates += [pscustomobject]@{ Item = $item; End = ($start + $duration) }
+        }
+    }
+    $active = $candidates | Sort-Object End | Select-Object -First 1 | ForEach-Object { $_.Item }
+    if (-not $active) { $script:LastMaterialEndAlertId = ''; return }
+    $end = ([datetimeoffset](Get-JsonProp $active 'ScheduledAt') + [timespan](Get-JsonProp $active 'Duration'))
+    $left = $end - $at
+    if ($left.TotalMinutes -gt $lead -or $left.TotalSeconds -le 0) { return }
+    $bareId = ([string](Get-JsonProp $active 'Id')).Trim('{', '}')
+    if ($script:LastMaterialEndAlertId -eq $bareId) { return }
+    $script:LastMaterialEndAlertId = $bareId
+    $name = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $active 'Name'))
+    $minutes = [math]::Max(1, [int][math]::Ceiling($left.TotalMinutes))
+    Send-AdminBroadcast -Text "⏳ المادة «$name» تنتهي بعد نحو $minutes دقائق ($($end.ToLocalTime().ToString('HH:mm'))). جهّز غرافيك الختام." -Urgent
+    Write-BridgeLog "Material end alert: '$([string](Get-JsonProp $active 'Name'))' ends in $([int]$left.TotalMinutes)m"
+}
+
 function Update-MaterialProxyWatchdog {
     <#
         Warns that material about to air has no local copy on the server.
@@ -1921,7 +1972,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

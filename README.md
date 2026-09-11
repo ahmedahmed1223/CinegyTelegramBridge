@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.22.0
+
+Four proposed features: a material-end alert (off by default, enabled in
+minutes), an auto-attached handover summary (latest failures plus the most
+repeated cause), danger styling on both emergency hide-all entries, and an
+opt-in engine-health screen (dropped frames as a since-last-look delta,
+license state, now and next) behind a default-off setting.
+
 ## Version 8.21.0
 
 Five items from the integrated review (docs/REVIEW-2026-09-10.md).

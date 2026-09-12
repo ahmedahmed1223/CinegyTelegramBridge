@@ -324,6 +324,69 @@ internal static class SelfTest
             MainForm.ParseBridgeVersion("2026-09-07 09:00:02 [INFO] manager v7 attached to Bridge v7.76.0") is null);
         Check("survives an empty line", MainForm.ParseBridgeVersion("") is null);
 
+        // --- the on-air window ------------------------------------------------
+        var onAirJson = "{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\",\"At\":\"09/11/2026 15:50:04\",\"UserId\":122238225,\"Source\":\"bridge\"},{\"Layer\":8,\"Key\":\"News-Ticker\",\"At\":\"09/11/2026 15:50:11\",\"UserId\":0,\"Source\":\"cinegy\"}]}";
+        var onAirRows = OnAirForm.ParseOnAirRows(onAirJson);
+        Check("reads every tracked scene", onAirRows.Count == 2);
+        Check("keeps the layer with its key",
+            onAirRows.Exists(r => r.Layer == 9 && r.Key == "logo"));
+        Check("reads the stamp as month-first",
+            onAirRows[0].AtLocal is DateTime at && at.Month == 9 && at.Day == 11 && at.Hour == 15);
+        Check("an absent file is an empty window, not an error",
+            OnAirForm.ParseOnAirRows(null).Count == 0);
+        Check("a torn file is an empty window, not an error",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{").Count == 0);
+        Check("a scene without a layer is skipped",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Key\":\"logo\"}]}").Count == 0);
+        Check("reads numbers written as JSON numbers",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\",\"UserId\":122238225}]}")[0].UserId == 122238225);
+        Check("reads numbers written as JSON strings",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":\"9\",\"Key\":\"logo\",\"UserId\":\"122238225\"}]}")[0].Layer == 9);
+        Check("a blank stamp is no stamp", OnAirForm.ParseOnAirStamp("  ") is null);
+
+        var templateNames = OnAirForm.ReadTemplateNames("{\"Urgent\":{\"description\":\"عاجل متحرك\"},\"logo\":{}}");
+        Check("a description stands in for its key", templateNames["Urgent"] == "عاجل متحرك");
+        Check("a key without a description stands in for itself", templateNames["logo"] == "logo");
+
+        var layerNames = OnAirForm.ReadLayerNames("7=عاجل;8=شريط الأخبار;abc;9=");
+        Check("reads layer nicknames", layerNames.Count == 2 && layerNames[7] == "عاجل");
+        Check("an empty setting names nothing", OnAirForm.ReadLayerNames("").Count == 0);
+
+        var aliases = new Dictionary<string, string> { ["122238225"] = "أحمد" };
+        Check("an alias stands in for its id", OnAirForm.ResolveActor(122238225, aliases) == "أحمد");
+        Check("an unknown publisher stays numeric", OnAirForm.ResolveActor(999, aliases) == "999");
+        Check("reads the alias file",
+            OnAirForm.ReadAliases("{\"7275359265\":\"ابو حسام\"}")["7275359265"] == "ابو حسام");
+        Check("a torn alias file means raw ids", OnAirForm.ReadAliases("{oops").Count == 0);
+
+        // --- the reports window -----------------------------------------------
+        var usage = ReportsForm.ParseUsageFile("{\"urgent\":{\"Count\":10,\"LastUsedUtc\":\"2026-09-12T08:37:11.185Z\"},\"logo\":{\"Count\":5}}");
+        Check("ranks templates most-published first",
+            usage.Count == 2 && usage[0].Key == "urgent" && usage[0].Count == 10);
+        Check("a torn usage file is an empty report, not an error",
+            ReportsForm.ParseUsageFile("{oops").Count == 0);
+
+        var bars = ReportsForm.BuildUsageBars(usage, key => key);
+        Check("the leader fills its bar", bars.Count == 2 && bars[0].Fraction == 1.0);
+        Check("the rest scale against the leader", bars[1].Fraction == 0.5);
+        Check("no usage is no bars", ReportsForm.BuildUsageBars(new List<ReportsForm.TemplateUsage>(), key => key).Count == 0);
+
+        var today = new DateTime(2026, 9, 12);
+        var logLines = new[]
+        {
+            "2026-09-12 08:00:01 [Manager] تم بدء تشغيل الجسر بنجاح.",
+            "2026-09-12 09:00:01 [Manager] توقف الجسر - رمز الخروج 1.",
+            "2026-09-12 09:00:02 [Manager] إيقاف يدوي.",
+            "2026-09-12 10:00:01 [Manager] كشف تعليق: لا نبضة منذ 6 دقيقة - إعادة تشغيل تلقائية.",
+            "2026-09-12 10:00:02 [Manager] توقف متكرر (5 مرات) - تم إيقاف إعادة التشغيل التلقائي.",
+            "2026-09-11 08:00:01 [Manager] تم بدء تشغيل الجسر بنجاح."
+        };
+        var stability = ReportsForm.SummarizeManagerLog(logLines, today);
+        Check("counts only today's starts", stability.Starts == 1);
+        Check("counts manual stops", stability.ManualStops == 1);
+        Check("counts watchdog restarts", stability.WatchdogRestarts == 1);
+        Check("counts crash-loop give-ups", stability.GiveUps == 1);
+
         // A fault inside the one-second clock timer is caught, reported, and
         // thrown again on the next tick. Unguarded, that is one modal dialog
         // per second - faster than an operator can dismiss them - while the
@@ -345,6 +408,19 @@ internal static class SelfTest
             Program.CrashSignature(new InvalidOperationException("x")) != Program.CrashSignature(new InvalidOperationException("y")));
         Check("a null exception has a signature rather than throwing",
             Program.CrashSignature(null) == "(null)");
+
+        // A stop nobody asked for, with nobody coming to restart it and the
+        // window hidden, is the one stop that must knock.
+        Check("a silent stop with no auto-restart knocks",
+            MainForm.ShouldNotifyUnexpectedExit(false, false, false, false));
+        Check("a manual stop does not",
+            !MainForm.ShouldNotifyUnexpectedExit(true, false, false, false));
+        Check("a restart in flight does not",
+            !MainForm.ShouldNotifyUnexpectedExit(false, true, false, false));
+        Check("an auto-restarted stop does not",
+            !MainForm.ShouldNotifyUnexpectedExit(false, false, true, false));
+        Check("closing down does not",
+            !MainForm.ShouldNotifyUnexpectedExit(false, false, false, true));
 
         // An empty log pane reads as "the bridge stopped logging" - this
         // window's whole job is to say otherwise, so no path may leave it
@@ -416,6 +492,17 @@ internal static class SelfTest
         Check("zoom above triple clamps to triple", MainForm.ClampZoom(10f) == 3f);
         Check("a whole zoom passes through", MainForm.ClampZoom(1f) == 1f);
         Check("a step rounds to one decimal", MainForm.ClampZoom(1.26f) == 1.3f);
+
+        // The header reads the version on disk beside the version on air.
+        Check("reads the on-disk bridge version",
+            MainForm.ParseBridgeScriptVersion("$script:BridgeVersion = '8.25.0'") == "8.25.0");
+        Check("a script without the version line has none",
+            MainForm.ParseBridgeScriptVersion("Write-Host 'hi'") is null);
+        Check("an empty file has none", MainForm.ParseBridgeScriptVersion("") is null);
+
+        // The status bar keeps the folder name; the tooltip keeps the path.
+        Check("shortens a deep bridge path to its folder",
+            MainForm.ShortBridgeRoot(@"D:\cingy cg\CinegyTelegramBridge") == "CinegyTelegramBridge");
 
         // A failed replacement must not leave a second readable copy of credentials.
         var fixture = Path.Combine(Path.GetTempPath(), "BridgeManager-selftest-" + Guid.NewGuid().ToString("N"));

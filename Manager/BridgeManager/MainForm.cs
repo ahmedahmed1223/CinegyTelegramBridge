@@ -196,6 +196,10 @@ public sealed class MainForm : Form
     // The running bridge's own version, from its startup line; null until one
     // is seen. See ParseBridgeVersion.
     private string? _bridgeVersion;
+    // The version on disk, refreshed on the same slow cadence as the
+    // heartbeat read. Compared against the running bridge's announced
+    // version: a difference is an update waiting for a restart.
+    private string? _diskBridgeVersion;
     // Whether this run was adopted rather than started here: stdout belongs
     // to whoever launched it, so the pane follows the file - worth one
     // phrase in the header, because "live" and "from the file" read the same.
@@ -305,6 +309,10 @@ public sealed class MainForm : Form
         logsButton.Width = ActionButtonWidth;
         var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
         clearButton.Width = ActionButtonWidth;
+        var onAirButton = Theme.QuietButton("📡  على الهواء");
+        onAirButton.Width = ActionButtonWidth;
+        var reportsButton = Theme.QuietButton("📊  التقارير");
+        reportsButton.Width = ActionButtonWidth;
         var optionsButton = Theme.QuietButton("☰  خيارات");
         optionsButton.Width = ActionButtonWidth;
         optionsButton.AccessibleName = "خيارات التشغيل والعرض";
@@ -319,6 +327,8 @@ public sealed class MainForm : Form
         _tips.SetToolTip(settingsButton, "الحقول التي لا تُحرَّر من داخل البوت: الرمز، عنوان المحرّك، قوائم الصلاحيات.");
         _tips.SetToolTip(logsButton, "يفتح مجلد logs في المستكشف.");
         _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.  (Ctrl+L)");
+        _tips.SetToolTip(onAirButton, "ماذا يبثّ الآن على كل طبقة - قراءة فقط.");
+        _tips.SetToolTip(reportsButton, "استخدام القوالب واستقرار التشغيل من ملفات هذا الجهاز.");
         _tips.SetToolTip(optionsButton, "إعادة التشغيل التلقائية وكشف التعليق وبدء ويندوز، ومظهر هذه النافذة.");
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
@@ -327,6 +337,8 @@ public sealed class MainForm : Form
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
         clearButton.Click += (_, _) => ClearOutput();
+        onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new OnAirForm(BridgeRoot); form.ShowDialog(this); } };
+        reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new ReportsForm(BridgeRoot, _recentErrors.Count); form.ShowDialog(this); } };
 
         // Keep each group intact when the manager reaches its minimum width.
         // A lone "clear" control beside a live stop button is too easy to misread
@@ -334,7 +346,7 @@ public sealed class MainForm : Form
         var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
         operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
         var utilityActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 6) };
-        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, clearButton });
+        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, onAirButton, reportsButton, clearButton });
         _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
 
         // ---- options: switches, which are not actions ----------------------
@@ -779,6 +791,17 @@ public sealed class MainForm : Form
     private string ConfigPath => Path.Combine(BridgeRoot, "config.json");
 
     /// <summary>
+    /// The folder name for the status bar, where the full path would push the
+    /// other facts out at minimum width. The full path survives on the
+    /// tooltip. Pure, so `--selftest` can pin it.
+    /// </summary>
+    internal static string ShortBridgeRoot(string root)
+    {
+        var name = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return string.IsNullOrEmpty(name) ? root : name;
+    }
+
+    /// <summary>
     /// Where the bridge stamps its poll loop. Deliberately the default logs
     /// folder rather than anything read out of config.json: an installation
     /// that relocated its logs simply produces no file here, and a missing
@@ -954,6 +977,20 @@ public sealed class MainForm : Form
         if (string.IsNullOrEmpty(line)) return null;
         var match = System.Text.RegularExpressions.Regex.Match(
             line, @"\bBridge v(\d+\.\d+\.\d+) starting\b");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// The version the files on disk carry, so the header can say an update
+    /// is waiting. The running bridge announced its own on its startup line;
+    /// the repo may have moved on since (pulled but not restarted). A torn
+    /// read during a checkout parses to nothing, which correctly shows
+    /// nothing. Pure, so `--selftest` can pin it.
+    /// </summary>
+    internal static string? ParseBridgeScriptVersion(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return null;
+        var match = Regex.Match(content, @"\$script:BridgeVersion\s*=\s*'([^']+)'");
         return match.Success ? match.Groups[1].Value : null;
     }
 
@@ -1205,6 +1242,7 @@ public sealed class MainForm : Form
         // A stopped bridge's version is last run's; the next start announces
         // its own, and until it does the manager must not claim the old one.
         _bridgeVersion = null;
+        _diskBridgeVersion = null;
         _watchdogInactiveLogged = false;
         _adoptedBridge = false;
         SetStatus(running: true);
@@ -1241,8 +1279,24 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (ShouldNotifyUnexpectedExit(_stoppingIntentionally, _restartAfterExit, _autoRestartCheck.Checked, _exiting))
+        {
+            _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+                "توقف الجسر وإعادة التشغيل التلقائي معطّلة - لن يعود وحده. افتح النافذة وشغّله يدويًا.",
+                ToolTipIcon.Warning);
+        }
+
         ScheduleRetryOrGiveUp();
     }
+
+    /// <summary>
+    /// Whether an unexpected stop deserves a tray balloon of its own. With
+    /// auto-restart on, the restart line in the pane is the response; with it
+    /// off and the window hidden, silence is the whole story - nobody restarts
+    /// anything and nobody is watching. Pure, so `--selftest` can pin it.
+    /// </summary>
+    internal static bool ShouldNotifyUnexpectedExit(bool stoppingIntentionally, bool restartAfterExit, bool autoRestart, bool exiting) =>
+        !stoppingIntentionally && !restartAfterExit && !autoRestart && !exiting;
 
     private void ScheduleRetryOrGiveUp()
     {
@@ -1346,6 +1400,24 @@ public sealed class MainForm : Form
     /// </summary>
     internal static bool ShouldRefreshLivenessCache(DateTime lastReadUtc, DateTime nowUtc) =>
         nowUtc - lastReadUtc >= LivenessCacheAge;
+
+    /// <summary>Re-reads the on-disk bridge version. Best effort: a checkout
+    /// in flight is a reason to show nothing, not a reason to complain.</summary>
+    private void RefreshDiskBridgeVersion()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_settings.BridgeScriptPath) || !File.Exists(_settings.BridgeScriptPath))
+            {
+                _diskBridgeVersion = null;
+                return;
+            }
+            using var stream = new FileStream(_settings.BridgeScriptPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            _diskBridgeVersion = ParseBridgeScriptVersion(reader.ReadToEnd());
+        }
+        catch { _diskBridgeVersion = null; }
+    }
 
     private void CheckLiveness()
     {
@@ -1562,12 +1634,15 @@ public sealed class MainForm : Form
             ? $"المدير v{Application.ProductVersion}"
             : $"الجسر v{_bridgeVersion}  ·  المدير v{Application.ProductVersion}";
         var source = _adoptedBridge ? "  ·  السجل من الملف" : "";
-        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  {versions}{source}";
+        var drift = _bridgeVersion is not null && _diskBridgeVersion is not null
+            && !string.Equals(_bridgeVersion, _diskBridgeVersion, StringComparison.Ordinal)
+            ? $"  ·  القرص v{_diskBridgeVersion} — أعد التشغيل للتحديث" : "";
+        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  {versions}{source}{drift}";
         // The whole line on hover, so a narrow window hides nothing outright.
         _tips.SetToolTip(_stateDetail, _stateDetail.Text);
     }
 
-    private static string FormatSpan(TimeSpan span)
+    internal static string FormatSpan(TimeSpan span)
     {
         if (span.TotalMinutes < 1) return $"{Math.Max(0, (int)span.TotalSeconds)} ثانية";
         if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} دقيقة";
@@ -1591,6 +1666,7 @@ public sealed class MainForm : Form
                 _lastLivenessReadAt = DateTime.UtcNow;
                 var stamp = ReadLivenessStamp();
                 if (stamp is not null) _lastLivenessSeen = stamp;
+                RefreshDiskBridgeVersion();
             }
             _livenessLabel.Text = _lastLivenessSeen is null || _lastLivenessSeen < _lastStartAt
                 ? "كشف التعليق: بانتظار أول نبضة…"
@@ -1599,7 +1675,8 @@ public sealed class MainForm : Form
 
         _pathLabel.Text = string.IsNullOrWhiteSpace(_settings.BridgeScriptPath)
             ? "مسار الجسر: غير محدد"
-            : $"مسار الجسر: {BridgeRoot}";
+            : $"مسار الجسر: {ShortBridgeRoot(BridgeRoot)}";
+        _tips.SetToolTip(_pathLabel, string.IsNullOrWhiteSpace(_settings.BridgeScriptPath) ? "اختر ملف TelegramBridge.ps1 من زر الإعدادات." : BridgeRoot);
     }
 
     /// <summary>

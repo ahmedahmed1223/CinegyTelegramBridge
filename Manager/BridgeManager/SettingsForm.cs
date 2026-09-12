@@ -141,6 +141,10 @@ public sealed class SettingsForm : Form
 
     private bool _tokenIsDpapiReference;
     private bool _syncingChips;
+    // Whether the operator changed anything since load or save. Closing (or
+    // Esc) used to drop edits with no prompt and no trace; the bullet in the
+    // title is the warning and FormClosing is the net.
+    private bool _dirty;
     private readonly Dictionary<string, string> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _loadedScalars = new(StringComparer.Ordinal);
 
@@ -230,6 +234,9 @@ public sealed class SettingsForm : Form
         var tokenRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0), WrapContents = false };
         _showToken.CheckedChanged += (_, _) => _botToken.UseSystemPasswordChar = !_showToken.Checked;
         tokenRow.Controls.AddRange(new Control[] { _botToken, _showToken });
+        _botToken.TextChanged += (_, _) => MarkDirty();
+        _airServer.TextChanged += (_, _) => MarkDirty();
+        _airChannel.ValueChanged += (_, _) => MarkDirty();
         Field("رمز البوت (BotToken)", tokenRow, null);
         layout.Controls.Add(_tokenNote);
 
@@ -343,6 +350,12 @@ public sealed class SettingsForm : Form
         CancelButton = cancelButton;
 
         Load += (_, _) => LoadValues();
+        FormClosing += (_, e) =>
+        {
+            if (_dirty && MessageBox.Show(this, "تجاهل التعديلات غير المحفوظة؟", "تعديلات غير محفوظة",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                e.Cancel = true;
+        };
         Shown += (_, _) =>
         {
             var workingArea = Screen.FromControl(this).WorkingArea;
@@ -392,6 +405,13 @@ public sealed class SettingsForm : Form
     private long? SelectedId =>
         _accounts.SelectedItems.Count == 1 ? (long)_accounts.SelectedItems[0].Tag! : null;
 
+    private void MarkDirty()
+    {
+        if (_dirty) return;
+        _dirty = true;
+        Text = "إعدادات الجسر •";
+    }
+
     /// <summary>
     /// Points the chips at whatever is selected. Guarded, because setting
     /// Checked here raises CheckedChanged, which would write the chip state
@@ -426,6 +446,7 @@ public sealed class SettingsForm : Form
 
         if (!_model.TryGetValue(id.Value, out var roles)) return;
         if (granted) roles.Add(roleKey); else roles.Remove(roleKey);
+        MarkDirty();
 
         // Only the selected row's text changes, so rebuild that row rather
         // than the whole list - a full refresh would drop the selection the
@@ -453,6 +474,7 @@ public sealed class SettingsForm : Form
 
         _model[id] = new HashSet<string>(StringComparer.Ordinal) { DefaultRoleFor(id) };
         _newId.Clear();
+        MarkDirty();
         RefreshList(keepSelected: id);
         _newId.Focus();
     }
@@ -478,6 +500,7 @@ public sealed class SettingsForm : Form
         if (confirm != DialogResult.Yes) return;
 
         foreach (var id in selected) _model.Remove(id);
+        MarkDirty();
         RefreshList();
     }
 
@@ -574,6 +597,10 @@ public sealed class SettingsForm : Form
             // Remembered so Save can tell what the operator actually changed,
             // and only warn about the permissions that are genuinely at risk.
             foreach (var role in Roles) _loaded[role.Key] = Signature(role.Key);
+            // Loading fires the same change events as editing; without this
+            // every open would start "dirty".
+            _dirty = false;
+            Text = "إعدادات الجسر";
         }
         catch (Exception ex)
         {
@@ -672,6 +699,7 @@ public sealed class SettingsForm : Form
                 WriteConfigAtomically(json);
             });
             RestartRequested = restarting;
+            _dirty = false;
             return true;
         }
         catch (Exception ex)

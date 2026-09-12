@@ -396,6 +396,27 @@ internal static class SelfTest
         Check("a stamp from the previous run is never evidence",
             !MainForm.IsHung(started.AddMinutes(-30), started, started.AddHours(9), grace, threshold));
 
+        // The status bar used to open the heartbeat file on every tick - ten
+        // reads a second during a burst, against a writer that holds it once
+        // per poll loop. Now it re-reads at most every fifteen seconds; the
+        // thirty-second watchdog keeps its own direct read.
+        var readAt = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
+        Check("a heartbeat never read is read at once",
+            MainForm.ShouldRefreshLivenessCache(DateTime.MinValue, readAt));
+        Check("a five-second-old reading is reused",
+            !MainForm.ShouldRefreshLivenessCache(readAt, readAt.AddSeconds(5)));
+        Check("a fifteen-second-old reading is refreshed",
+            MainForm.ShouldRefreshLivenessCache(readAt, readAt.AddSeconds(15)));
+        Check("an hour-old reading is refreshed",
+            MainForm.ShouldRefreshLivenessCache(readAt, readAt.AddHours(1)));
+
+        // A persisted zoom from a hand-edited settings file must still land
+        // somewhere sane, and tenth-steps must not drift off the notches.
+        Check("zoom below half clamps to half", MainForm.ClampZoom(0.1f) == 0.5f);
+        Check("zoom above triple clamps to triple", MainForm.ClampZoom(10f) == 3f);
+        Check("a whole zoom passes through", MainForm.ClampZoom(1f) == 1f);
+        Check("a step rounds to one decimal", MainForm.ClampZoom(1.26f) == 1.3f);
+
         // A failed replacement must not leave a second readable copy of credentials.
         var fixture = Path.Combine(Path.GetTempPath(), "BridgeManager-selftest-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);

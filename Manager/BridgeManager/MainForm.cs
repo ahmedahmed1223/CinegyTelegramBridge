@@ -19,6 +19,12 @@ internal sealed class ManagerSettings
     public bool AutoRestart { get; set; } = true;
     public bool AutoClearDaily { get; set; }
     public bool WordWrap { get; set; } = true;
+    // Pinned scrollback follows new lines, as it always did. Turned off, the
+    // pane stops yanking the caret back down while somebody reads further up.
+    public bool FollowTail { get; set; } = true;
+    // Log pane zoom, Ctrl+Plus/Minus/0. A gallery laptop sits metres away;
+    // 100% is the default and the persisted value survives restarts.
+    public float LogZoom { get; set; } = 1f;
 
     // The hang watchdog is deliberately a file-only knob: the on/off switch
     // belongs on the toolbar, but the threshold is a number nobody should be
@@ -101,6 +107,8 @@ public sealed class MainForm : Form
     private readonly Label _lineCountLabel;
     private readonly Label _livenessLabel;
     private readonly Label _pathLabel;
+    private readonly Label _zoomLabel;
+    private readonly CheckBox _followTailCheck;
     // One width for every button on the action row. Seven hand-set widths
     // between 118 and 140 read as seven different kinds of thing; the eye
     // groups by shape before it reads a word.
@@ -177,9 +185,21 @@ public sealed class MainForm : Form
     // would have restarted a working bridge every night. The bridge therefore
     // stamps logs/bridge.liveness once per poll loop, and this watches that.
     private DateTime? _lastLivenessSeen;
+    // UpdateStatusBar runs on the one-second clock and on every log drain,
+    // and each of those used to open the heartbeat file itself - ten reads a
+    // second during a burst. The bridge writes that file once per poll loop,
+    // and its own log showed the write colliding with a reader. The
+    // thirty-second watchdog keeps its own direct read; everything else sees
+    // a value at most LivenessCacheAge old.
+    private DateTime _lastLivenessReadAt = DateTime.MinValue;
+    private static readonly TimeSpan LivenessCacheAge = TimeSpan.FromSeconds(15);
     // The running bridge's own version, from its startup line; null until one
     // is seen. See ParseBridgeVersion.
     private string? _bridgeVersion;
+    // Whether this run was adopted rather than started here: stdout belongs
+    // to whoever launched it, so the pane follows the file - worth one
+    // phrase in the header, because "live" and "from the file" read the same.
+    private bool _adoptedBridge;
     // Whether the log pane currently holds an empty-state note rather than log
     // lines; see EmptyStateMessage.
     private bool _showingEmptyState;
@@ -303,7 +323,7 @@ public sealed class MainForm : Form
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
         _stopButton.Click += (_, _) => { if (ConfirmStop()) StopBridge(manual: true); };
-        _restartButton.Click += (_, _) => { if (ConfirmRestart()) RestartBridge(); };
+        _restartButton.Click += (_, _) => { if (ConfirmRestart()) RestartBridge("طلب المستخدم إعادة تشغيل الجسر."); };
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
         clearButton.Click += (_, _) => ClearOutput();
@@ -329,6 +349,8 @@ public sealed class MainForm : Form
         _autoClearCheck.Checked = _settings.AutoClearDaily;
         _wordWrapCheck = Theme.ToggleChip("↩  التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
         _wordWrapCheck.Checked = _settings.WordWrap;
+        _followTailCheck = Theme.ToggleChip("📌  تتبع الجديد", "يبقي السجل على أحدث سطر. أطفئه لتقرأ أعلاه دون أن يسحبك الجديد للأسفل.", _tips);
+        _followTailCheck.Checked = _settings.FollowTail;
         _darkModeCheck = Theme.ToggleChip("🌙  الوضع الليلي",
             "مظهر داكن - أنسب لغرفة معتمة بجانب شاشة البث. الافتراضي فاتح.", _tips);
         _darkModeCheck.Checked = _settings.DarkMode;
@@ -401,6 +423,7 @@ public sealed class MainForm : Form
             // correctly inside it.
             RightToLeft = RightToLeft.No
         };
+        _output.ZoomFactor = ClampZoom(_settings.LogZoom);
 
         // ---- status bar: the facts nobody should have to hunt for ----------
         // A plain panel rather than a StatusStrip: the strip renderers fight a
@@ -410,7 +433,13 @@ public sealed class MainForm : Form
         _lineCountLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
         _livenessLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
         _pathLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 0, 0) };
-        statusFlow.Controls.AddRange(new Control[] { _lineCountLabel, _livenessLabel, _pathLabel });
+        // The shortcuts are named here, not only in code: Ctrl+Plus/Minus/0
+        // existed nowhere on screen, which is the same as not having them.
+        _zoomLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0), Cursor = Cursors.Hand };
+        _zoomLabel.Click += (_, _) => SetZoom(1f);
+        _tips.SetToolTip(_zoomLabel, "تكبير السجل (Ctrl+‏+ / Ctrl+‏-) — اضغط للعودة إلى 100%.");
+        UpdateZoomLabel();
+        statusFlow.Controls.AddRange(new Control[] { _lineCountLabel, _livenessLabel, _pathLabel, _zoomLabel });
         _statusBar.Controls.Add(statusFlow);
 
         _wordWrapCheck.CheckedChanged += (_, _) =>
@@ -419,6 +448,12 @@ public sealed class MainForm : Form
             _output.ScrollBars = _wordWrapCheck.Checked ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both;
             _settings.WordWrap = _wordWrapCheck.Checked;
             _settings.Save();
+        };
+        _followTailCheck.CheckedChanged += (_, _) =>
+        {
+            _settings.FollowTail = _followTailCheck.Checked;
+            _settings.Save();
+            LogEvent($"تتبع الجديد في السجل: {(_followTailCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
         _filterTimer = new System.Windows.Forms.Timer { Interval = 250 };
         _filterTimer.Tick += (_, _) => { _filterTimer.Stop(); RenderAll(); };
@@ -435,6 +470,9 @@ public sealed class MainForm : Form
             // Enabled-checked first: a shortcut that fires a disabled button is
             // how a keyboard restarts a bridge that is already stopping.
             if (e.Control && e.KeyCode == Keys.L) { ClearOutput(); e.Handled = true; }
+            if (e.Control && (e.KeyCode == Keys.Oemplus || e.KeyCode == Keys.Add)) { SetZoom(_output.ZoomFactor + 0.1f); e.Handled = true; }
+            if (e.Control && (e.KeyCode == Keys.OemMinus || e.KeyCode == Keys.Subtract)) { SetZoom(_output.ZoomFactor - 0.1f); e.Handled = true; }
+            if (e.Control && e.KeyCode == Keys.D0) { SetZoom(1f); e.Handled = true; }
             if (e.KeyCode == Keys.F5 && _restartButton.Enabled) { _restartButton.PerformClick(); e.Handled = true; }
         };
 
@@ -529,7 +567,11 @@ public sealed class MainForm : Form
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("▶  تشغيل", null, (_, _) => StartBridge(manual: true));
         trayMenu.Items.Add("■  إيقاف", null, (_, _) => { if (ConfirmStop()) StopBridge(manual: true); });
-        trayMenu.Items.Add("↻  إعادة تشغيل", null, (_, _) => { if (ConfirmRestart()) RestartBridge(); });
+        trayMenu.Items.Add("↻  إعادة تشغيل", null, (_, _) => { if (ConfirmRestart()) RestartBridge("طلب المستخدم إعادة تشغيل الجسر."); });
+        // The window stays hidden most of the time, and the settings dialog
+        // is reachable only from it - without this the operator restores the
+        // window just to open a dialog.
+        trayMenu.Items.Add("⚙  الإعدادات", null, (_, _) => { ShowFromTray(); OpenSettings(); });
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("❌ إغلاق البرنامج", null, (_, _) => ExitFromTray());
         _trayIcon.ContextMenuStrip = trayMenu;
@@ -576,6 +618,7 @@ public sealed class MainForm : Form
         _lineCountLabel.ForeColor = Theme.TextMuted;
         _livenessLabel.ForeColor = Theme.TextMuted;
         _pathLabel.ForeColor = Theme.TextMuted;
+        _zoomLabel.ForeColor = Theme.TextMuted;
         _stateDetail.ForeColor = Theme.TextMuted;
         Theme.Apply(this);
         ResumeLayout();
@@ -676,6 +719,7 @@ public sealed class MainForm : Form
         AppendLine($"--- تم استلام جسر يعمل بالفعل (المعرّف {pid}). سجله يُتابَع من logs\\bridge.log لأنه بدأ خارج هذا البرنامج. ---");
         StartTailingBridgeLog();
         LogEvent($"استلام جسر يعمل بالفعل (المعرّف {pid}).");
+        _adoptedBridge = true;
         SetStatus(running: true);
         return true;
     }
@@ -838,7 +882,7 @@ public sealed class MainForm : Form
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(MakeSwitchGroupLabel("🖥  هذه النافذة"));
-        foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck })
+        foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _followTailCheck, _darkModeCheck })
         {
             box.MinimumSize = new Size(MenuSwitchWidth, 0);
             menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
@@ -1162,6 +1206,7 @@ public sealed class MainForm : Form
         // its own, and until it does the manager must not claim the old one.
         _bridgeVersion = null;
         _watchdogInactiveLogged = false;
+        _adoptedBridge = false;
         SetStatus(running: true);
         LogEvent("تم بدء تشغيل الجسر بنجاح.");
     }
@@ -1294,6 +1339,14 @@ public sealed class MainForm : Form
         return (stamp, pid);
     }
 
+    /// <summary>
+    /// Whether the heartbeat file is worth re-reading. Pure, so `--selftest`
+    /// can pin it: the label must move, but never at the cost of blocking the
+    /// heartbeat it only observes.
+    /// </summary>
+    internal static bool ShouldRefreshLivenessCache(DateTime lastReadUtc, DateTime nowUtc) =>
+        nowUtc - lastReadUtc >= LivenessCacheAge;
+
     private void CheckLiveness()
     {
         if (!_watchdogCheck.Checked || _exiting) return;
@@ -1322,11 +1375,10 @@ public sealed class MainForm : Form
 
         var silentFor = (int)(now - _lastLivenessSeen!.Value).TotalMinutes;
         AppendLine($"--- الجسر يعمل لكنه توقف عن النبض منذ {silentFor} دقيقة - يُعاد تشغيله. ---");
-        LogEvent($"كشف تعليق: لا نبضة منذ {silentFor} دقيقة - إعادة تشغيل تلقائية.");
         _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
             $"الجسر معلّق (لا استجابة منذ {silentFor} دقيقة). تتم إعادة تشغيله الآن.", ToolTipIcon.Warning);
         _lastLivenessSeen = null;
-        RestartBridge();
+        RestartBridge($"كشف تعليق: لا نبضة منذ {silentFor} دقيقة - إعادة تشغيل تلقائية.");
     }
 
     // ---- stop / restart ----------------------------------------------------
@@ -1385,9 +1437,9 @@ public sealed class MainForm : Form
         try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
     }
 
-    private void RestartBridge()
+    private void RestartBridge(string reason)
     {
-        LogEvent("طلب المستخدم إعادة تشغيل الجسر.");
+        LogEvent(reason);
         _consecutiveQuickFailures = 0; // a deliberate restart always gets a fresh chance
         if (_bridgeProcess is { HasExited: false } process)
         {
@@ -1509,7 +1561,8 @@ public sealed class MainForm : Form
         var versions = _bridgeVersion is null
             ? $"المدير v{Application.ProductVersion}"
             : $"الجسر v{_bridgeVersion}  ·  المدير v{Application.ProductVersion}";
-        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  {versions}";
+        var source = _adoptedBridge ? "  ·  السجل من الملف" : "";
+        _stateDetail.Text = $"يعمل منذ {FormatSpan(up)}  ·  المعرّف {_bridgeProcess.Id}  ·  {versions}{source}";
         // The whole line on hover, so a narrow window hides nothing outright.
         _tips.SetToolTip(_stateDetail, _stateDetail.Text);
     }
@@ -1533,8 +1586,12 @@ public sealed class MainForm : Form
         else if (!_running) _livenessLabel.Text = "كشف التعليق: مفعّل";
         else
         {
-            var stamp = ReadLivenessStamp();
-            if (stamp is not null) _lastLivenessSeen = stamp;
+            if (ShouldRefreshLivenessCache(_lastLivenessReadAt, DateTime.UtcNow))
+            {
+                _lastLivenessReadAt = DateTime.UtcNow;
+                var stamp = ReadLivenessStamp();
+                if (stamp is not null) _lastLivenessSeen = stamp;
+            }
             _livenessLabel.Text = _lastLivenessSeen is null || _lastLivenessSeen < _lastStartAt
                 ? "كشف التعليق: بانتظار أول نبضة…"
                 : $"آخر نبضة: قبل {FormatSpan(DateTime.UtcNow - _lastLivenessSeen.Value)}";
@@ -1747,7 +1804,7 @@ public sealed class MainForm : Form
             _lines.Add(summary);
             if (ShouldShow(summary, filter, errorsOnly)) { WriteLine(summary); appended = true; }
         }
-        if (appended)
+        if (appended && _followTailCheck.Checked)
         {
             _output.SelectionStart = _output.TextLength;
             _output.ScrollToCaret();
@@ -1838,8 +1895,11 @@ public sealed class MainForm : Form
             _output.Invalidate();
         }
 
-        _output.SelectionStart = _output.TextLength;
-        _output.ScrollToCaret();
+        if (_followTailCheck.Checked)
+        {
+            _output.SelectionStart = _output.TextLength;
+            _output.ScrollToCaret();
+        }
         UpdateStatusBar();
     }
 
@@ -1857,6 +1917,27 @@ public sealed class MainForm : Form
             _droppedInformationalLines = 0;
         }
         UpdateStatusBar();
+    }
+
+    /// <summary>
+    /// Outside 50%-300% a log pane is a microscope or a billboard. Pure, so
+    /// `--selftest` can pin it: a persisted zoom from a hand-edited settings
+    /// file must still land somewhere sane.
+    /// </summary>
+    internal static float ClampZoom(float zoom) => MathF.Round(Math.Clamp(zoom, 0.5f, 3f), 1);
+
+    private void SetZoom(float zoom)
+    {
+        zoom = ClampZoom(zoom);
+        _output.ZoomFactor = zoom;
+        _settings.LogZoom = zoom;
+        _settings.Save();
+        UpdateZoomLabel();
+    }
+
+    private void UpdateZoomLabel()
+    {
+        _zoomLabel.Text = $"التكبير: {(int)Math.Round(_output.ZoomFactor * 100)}%";
     }
 
     /// <summary>

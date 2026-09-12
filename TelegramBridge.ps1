@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.23.0'
+$script:BridgeVersion = '8.24.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -953,6 +953,8 @@ $script:OutputMonitorFallbackActive = $false
 # could name the channel, the relay and the configured source, but not the
 # streaming server itself - which is what the station asked to be checked.
 $script:LastCaptureErrorDetail = ''
+# P1: plain-text twin of the last output-failure diagnosis, for the copy button.
+$script:LastFailureDiagnosisPlain = $null
 $script:LastSnapshotSweep = [datetime]::MinValue
 
 # Auto-hide timers created by the ⏱ timed-show button.
@@ -1056,6 +1058,15 @@ $script:StaleOnAirEscalationMinutes = @(15, 30)
 $script:MaterialProxyAlerted = [System.Collections.Generic.HashSet[string]]::new()
 # cause -> the times it alerted, inside the repeat window. See Add-BridgeAlertOccurrence.
 $script:AlertHistory = @{}
+# P2: cause -> chat -> pinned message id. Unpinned by the sweep when the
+# cause goes quiet past the window.
+$script:PinnedRecurrences = @{}
+# P2: message id of the most recent send, for pin/edit. A variable because
+# a return value would leak into bare callers' output streams.
+$script:LastTelegramMessageId = 0
+# P4: a manual quiet window set from the monitoring screen. In-memory like
+# AlertHistory: a restart ends it, which fails loud, not silent.
+$script:ManualQuietUntil = [datetime]::MinValue
 # The station's own vocabulary, rebuilt at most once a minute. See
 # Get-BridgeStationLexicon.
 $script:StationLexicon = $null

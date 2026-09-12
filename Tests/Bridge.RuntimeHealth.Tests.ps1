@@ -383,6 +383,84 @@ Describe 'The third failure with the same cause says so' {
     }
 }
 
+Describe 'A chronic fault gets a fixed place (P2)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        $script:AlertHistory = @{}
+        $script:PinnedRecurrences = @{}
+        $config.Settings | Add-Member -NotePropertyName RepeatAlertWindowHours -NotePropertyValue 6 -Force
+    }
+
+    AfterEach {
+        $script:AlertHistory = @{}
+        $script:PinnedRecurrences = @{}
+    }
+
+    It 'pins on the third occurrence and edits the pin afterwards' {
+        Mock Send-TelegramMessage { $script:LastTelegramMessageId = 77 }
+        Mock Get-AdminNotifyIds { @(101) }
+        Mock Test-QuietHoursActive { $false }
+        Mock Add-TelegramMessagePin { $true }
+        Mock Edit-TelegramMessageText { $true }
+        1..3 | ForEach-Object { Send-AdminBroadcast -Text '⚠️ تعذّر الالتقاط' }
+        Should -Invoke Add-TelegramMessagePin -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $MessageId -eq 77 }
+        Send-AdminBroadcast -Text '⚠️ تعذّر الالتقاط'
+        Should -Invoke Edit-TelegramMessageText -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $MessageId -eq 77 -and $Text -match 'رقم 4' }
+    }
+
+    It 'unpins what stopped recurring instead of messaging about it' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true } }
+        $script:PinnedRecurrences['عطل'] = @{ 101 = 55 }
+        Update-PinnedRecurrenceSweep
+        $script:PinnedRecurrences.Count | Should -Be 0
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter { $Uri -match 'unpinChatMessage' }
+    }
+
+    It 'keeps the pin while the cause still recurs' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true } }
+        $script:PinnedRecurrences['عطل'] = @{ 101 = 55 }
+        $script:AlertHistory['عطل'] = @((Get-Date))
+        Update-PinnedRecurrenceSweep
+        $script:PinnedRecurrences.Count | Should -Be 1
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+    }
+}
+
+Describe 'Manual quiet for a live shift (P4)' {
+    BeforeEach {
+        $script:ManualQuietUntil = [datetime]::MinValue
+        $config.Settings | Add-Member -NotePropertyName QuietHoursEnabled -NotePropertyValue $false -Force
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach { $script:ManualQuietUntil = [datetime]::MinValue; $script:AlertHistory = @{} }
+
+    It 'holds non-urgent notices while the window runs and releases after' {
+        $script:ManualQuietUntil = (Get-Date).AddHours(2)
+        Test-QuietHoursActive | Should -BeTrue
+        $script:ManualQuietUntil = (Get-Date).AddMinutes(-1)
+        Test-QuietHoursActive | Should -BeFalse
+    }
+
+    It 'still holds urgent for quiet hours only, never mutes the urgent itself' {
+        Mock Send-TelegramMessage { 5 }
+        Mock Get-AdminNotifyIds { @(101) }
+        $script:ManualQuietUntil = (Get-Date).AddHours(2)
+        Send-AdminBroadcast -Text '🔴 عاجل: المخرج أسود' -Urgent
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'queues the non-urgent into the morning digest instead of dropping it' {
+        Mock Send-TelegramMessage { 5 }
+        Mock Get-AdminNotifyIds { @(101) }
+        $script:QuietHoursQueue = [System.Collections.Generic.List[object]]::new()
+        $script:ManualQuietUntil = (Get-Date).AddHours(2)
+        Send-AdminBroadcast -Text '⚠️ ملاحظة أسبوعية'
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+        $script:QuietHoursQueue.Count | Should -BeGreaterThan 0
+    }
+}
+
 Describe 'The Cinegy port belongs on the broadcast network' {
     It 'says nothing about an address inside a private range' {
         foreach ($address in @('10.0.0.5', '192.168.1.40', '172.20.3.9', '127.0.0.1', 'http://10.0.0.5:5521')) {

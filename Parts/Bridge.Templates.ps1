@@ -337,6 +337,48 @@ function Get-InvalidTemplateEntries {
     return $entries
 }
 
+function Get-TemplateLastAirMap {
+    <#
+        P3: when each template last went on air, from the permanent audit
+        trail (not the 20-per-user in-memory history, which forgets by
+        design). Reads only the tail: the catalogue renders on tap, and a
+        full-file scan on every tap would tax the playout disk for a list
+        nobody scrolls past the recent entries of anyway.
+    #>
+    param([int]$TailLines = 2000)
+    $map = @{}
+    if (-not (Test-Path -LiteralPath $script:auditFile)) { return $map }
+    try {
+        $lines = @(Get-Content -LiteralPath $script:auditFile -Tail $TailLines -ErrorAction Stop)
+    }
+    catch { return $map }
+    foreach ($line in $lines) {
+        if ($line -notmatch '"action":"SHOW"') { continue }
+        if ($line -notmatch '"result":"success"') { continue }
+        $target = ''
+        $at = ''
+        if ($line -match '"target":"([^"]*)"') { $target = $Matches[1] }
+        if ($line -match '"timestampUtc":"([^"]*)"') { $at = $Matches[1] }
+        if ([string]::IsNullOrWhiteSpace($target) -or [string]::IsNullOrWhiteSpace($at)) { continue }
+        try { $stamp = [datetime]$at } catch { continue }
+        if (-not $map.ContainsKey($target) -or $stamp -gt $map[$target]) { $map[$target] = $stamp }
+    }
+    return $map
+}
+
+function Format-TemplateLastAir {
+    param($Stamp)
+    if (-not $Stamp) { return 'لم يُبث بعد' }
+    try { $at = [datetime]$Stamp } catch { return 'لم يُبث بعد' }
+    # UTC on both sides: tick subtraction across DateTime Kinds does not
+    # convert, and a Local-minus-Utc age would gain the whole timezone.
+    $age = (Get-Date).ToUniversalTime() - $at.ToUniversalTime()
+    if ($age.TotalMinutes -lt 60) { return "قبل $([math]::Max(1, [int]$age.TotalMinutes)) د" }
+    if ($age.TotalHours -lt 24) { return "قبل $([int]$age.TotalHours) س" }
+    if ($age.TotalDays -lt 7) { return "قبل $([int]$age.TotalDays) يوم" }
+    return $at.ToLocalTime().ToString('yyyy-MM-dd')
+}
+
 function Get-TemplateByIndex {
     param([Parameter(Mandatory)][int]$Index)
     $store = Get-TemplateStore

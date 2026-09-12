@@ -631,4 +631,13 @@ Describe 'Dead chats quarantine (D1)' {
         Import-DeadChats
         Test-DeadChat -ChatId 555 | Should -BeTrue
     }
+
+    It 'archives a quarantine nobody decided on for thirty days' {
+        $script:DeadChats['666'] = @{ Since = (Get-Date).AddDays(-31).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        $script:DeadChats['777'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Update-DeadChatsSweep
+        Test-DeadChat -ChatId 666 | Should -BeFalse
+        Test-DeadChat -ChatId 777 | Should -BeTrue
+        Should -Invoke Add-AuditEntry -Times 1 -Exactly -ParameterFilter { $Message -match '666' }
+    }
 }

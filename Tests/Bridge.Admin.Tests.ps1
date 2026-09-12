@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 
@@ -1865,9 +1865,28 @@ Describe 'The authorized users roster' {
             )
         }
 
-        Get-AuthorizedUsersText | Should -Match '2\. <b>ثانٍ</b>'
+        Get-AuthorizedUsersText | Should -Match '2. <b>ثانٍ</b>'
         $buttons = @((Get-UsersAdminKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { [string]$_['text'] })
         @($buttons | Where-Object { $_ -like '2.*ثانٍ*' }).Count | Should -Be 1
+    }
+
+    It 'names the last on-air action under the person who did it (P7)' {
+        Mock Get-AuthorizedUsers {
+            @([pscustomobject]@{ UserId = 99; Alias = 'مشغّل'; Role = 'operator'; Disabled = $false; AddedAt = ''; AddedByUserId = 0; LastActivityAt = '' })
+        }
+        $script:UserOperationHistory = @{}
+        $script:UserOperationHistory['99'] = @([pscustomobject]@{ At = (Get-Date); OperationId = 'x'; Action = 'SHOW'; Result = 'success'; DurationMs = 1; Layer = 4; Target = 'urgent'; Values = '' })
+
+        Get-AuthorizedUsersText | Should -Match 'آخر إجراء.*SHOW urgent'
+    }
+
+    It 'adds no action line for someone who never touched the air (P7)' {
+        Mock Get-AuthorizedUsers {
+            @([pscustomobject]@{ UserId = 98; Alias = 'جديد'; Role = 'operator'; Disabled = $false; AddedAt = ''; AddedByUserId = 0; LastActivityAt = '' })
+        }
+        $script:UserOperationHistory = @{}
+
+        Get-AuthorizedUsersText | Should -Not -Match 'آخر إجراء'
     }
 }
 
@@ -2480,5 +2499,37 @@ Describe 'Handover auto summary (F7)' {
     It 'stays quiet when there is nothing worth handing over' {
         $script:AuditTrail.Add('12:00:00 ✅ عرض عاجل')
         @(Get-HandoverAutoSummary).Count | Should -Be 0
+    }
+}
+
+Describe 'Shift readiness at a glance (P5)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        $script:OnAir = @{}
+        $script:PendingState = @{}
+        $script:NewsTickerDraft = $null
+        $script:DeadChats = @{}
+        $script:PinnedRecurrences = @{}
+        $script:ManualQuietUntil = [datetime]::MinValue
+        $config.Settings | Add-Member -NotePropertyName QuietHoursEnabled -NotePropertyValue $false -Force
+    }
+
+    It 'declares ready when nothing hangs over the shift' {
+        Show-ShiftReadinessScreen -ChatId 101 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'جاهز ✅' }
+    }
+
+    It 'names every open item instead of a bare not-ready' {
+        $script:OnAir[4] = @{ Key = 'urgent' }
+        $script:PendingState[[long]202] = @{ Mode = 'show_fields' }
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 303 }
+        $script:DeadChats['404'] = @{ Since = 'x'; LastError = 'y'; Strikes = 3 }
+        $script:PinnedRecurrences['عطل'] = @{ 101 = 55 }
+        Show-ShiftReadinessScreen -ChatId 101 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'على الهواء' -and $Text -match 'معلقة' -and $Text -match 'مسودة' -and
+            $Text -match 'محجورة' -and $Text -match 'مثبّتة' -and $Text -notmatch 'جاهز ✅'
+        }
     }
 }

@@ -74,6 +74,28 @@ function Save-UserProfiles {
     catch { Write-BridgeLog "Could not write user-profiles.json: $($_.Exception.Message)" 'WARN'; return $false }
 }
 
+function Update-DeadChatsSweep {
+    <#
+        P6: a quarantine that sits for thirty days is a decision nobody will
+        ever make - the operator moved on, the chat moved on. It leaves with
+        an audit line, not silently, and the file is rewritten only when
+        something actually left.
+    #>
+    $cutoff = (Get-Date).AddDays(-30)
+    $removed = @()
+    foreach ($id in @($script:DeadChats.Keys)) {
+        $stamp = [datetime]::MinValue
+        if ([datetime]::TryParse([string](Get-JsonProp $script:DeadChats[$id] 'Since'), [ref]$stamp) -and $stamp -lt $cutoff) {
+            $script:DeadChats.Remove($id)
+            $removed += $id
+        }
+    }
+    if ($removed.Count -eq 0) { return }
+    Save-DeadChats | Out-Null
+    foreach ($id in $removed) { Add-AuditEntry "💀 أُرشفت محادثة ميتة $id بعد 30 يومًا بلا قرار" }
+    Write-BridgeLog "Archived $($removed.Count) dead chat(s) stale past 30 days"
+}
+
 function Import-DeadChats {
     if (-not (Test-Path -LiteralPath $script:deadChatsFile)) { return }
     try {

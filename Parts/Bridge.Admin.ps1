@@ -212,6 +212,38 @@ function Get-HandoverAutoSummary {
     return @($found | Select-Object -First 3)
 }
 
+function Show-ShiftReadinessScreen {
+    <#
+        P5: the incoming shift starts from certainty, not from flipping
+        through screens. Read-only aggregation of what the bridge already
+        knows: layers on air, open drafts, quarantined chats, pinned faults,
+        quiet state. The live probe stays the existing selftest behind its
+        own button - this screen never touches the air itself.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>✅ جاهزية المناوبة</b>')
+    $onAir = @($script:OnAir.Keys).Count
+    $lines.Add($(if ($onAir -gt 0) { "🟠 طبقات على الهواء الآن: <code>$onAir</code> — راجعها قبل أن تلمس شيئًا." } else { '🟢 لا شيء على الهواء.' }))
+    $pending = @($script:PendingState.Keys).Count
+    $lines.Add($(if ($pending -gt 0) { "⏳ عمليات معلقة بانتظار أصحابها: <code>$pending</code>." } else { '✅ لا عمليات معلقة.' }))
+    $lines.Add($(if ($script:NewsTickerDraft) { "📰 مسودة شريط مفتوحة ($(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId'))))." } else { '✅ لا مسودة شريط.' }))
+    $dead = @($script:DeadChats.Keys).Count
+    $lines.Add($(if ($dead -gt 0) { "💀 محادثات محجورة بانتظار قرار: <code>$dead</code>." } else { '✅ لا محادثات محجورة.' }))
+    $pins = @($script:PinnedRecurrences.Keys).Count
+    $lines.Add($(if ($pins -gt 0) { "📌 أعطال مثبّتة لم تُحل: <code>$pins</code>." } else { '✅ لا أعطال مثبّتة.' }))
+    $lines.Add($(if (Test-QuietHoursActive) { '🔇 الهدوء مفعّل — غير العاجل يُجمَّع.' } else { '🔊 التنبيهات تصل مباشرة.' }))
+    $ready = ($onAir -eq 0 -and $pending -eq 0 -and -not $script:NewsTickerDraft -and $dead -eq 0 -and $pins -eq 0)
+    $lines.Add('')
+    $lines.Add($(if ($ready) { '<b>جاهز ✅ — ابدأ بالفحص الحي للتأكد من المسار.</b>' } else { '<b>ليست نظيفة — صفِّ ما فوق ثم افحص المسار الحي.</b>' }))
+    $keyboard = @{ inline_keyboard = @(
+        , @((New-Button '🧪 فحص المسار الحي' 'menu:selftest'), (New-Button '📋 التسليم' 'menu:handover')),
+        , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
+    ) }
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard
+}
+
 function Show-ShiftHandoverScreen {
     <#
         Everything a shift change needs, on one screen.

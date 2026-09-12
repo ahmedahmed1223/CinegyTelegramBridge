@@ -161,6 +161,12 @@ function Send-TelegramMessage {
         Write-BridgeLog "HTML message to $ChatId exceeded one chunk; markup removed and sent as text" "WARN"
     }
     [string[]]$chunks = @(Split-TelegramText -Text $body_text)
+    # P2: the last sent message id, so a caller can pin or edit what it just
+    # said. A script variable, not a return value: a return would leak into
+    # the output of every caller that invokes this bare (Set-LayerName
+    # returns $true, and a stray 0 in its stream broke exactly that).
+    $script:LastTelegramMessageId = 0
+    $lastMessageId = 0
     for ($i = 0; $i -lt $chunks.Count; $i++) {
         # [string] cast is deliberate belt-and-braces against anything
         # array-shaped ever reaching the body again.
@@ -186,7 +192,15 @@ function Send-TelegramMessage {
             Write-BridgeLog "Failed to send Telegram message to $ChatId : $($request.Error)" "ERROR"
             Register-TelegramSendFailure -ChatId $ChatId -StatusCode ([int](Get-JsonProp $request 'StatusCode')) -ErrorText ([string]$request.Error)
         }
+        else {
+            # Get-JsonProp, not direct access: test doubles of the transport
+            # carry only Success, and StrictMode turns a missing Response
+            # into a failed send.
+            $sentId = [int](Get-JsonProp (Get-JsonProp (Get-JsonProp $request 'Response') 'result') 'message_id')
+            if ($sentId -gt 0) { $lastMessageId = $sentId }
+        }
     }
+    $script:LastTelegramMessageId = $lastMessageId
 }
 
 function Test-TelegramOutboxPriority {
@@ -803,6 +817,66 @@ function Add-BridgeAlertOccurrence {
     return "🔁 تكرار: هذه المرة رقم $($seen.Count) لنفس السبب خلال $span (الأولى $($seen[0].ToString('HH:mm'))). السبب واحد - عالجه، لا الحالة."
 }
 
+function Sync-PinnedRecurrence {
+    <#
+        P2: a chronic fault gets a fixed place. The third occurrence of a
+        cause pins the alert in every admin chat; later ones edit the pinned
+        message with the new count instead of adding another drifting line.
+        No new setting: RepeatAlertWindowHours=0 already disables recurrence
+        counting, and with no counting there is nothing to pin.
+    #>
+    param([Parameter(Mandatory)][string]$Cause, [Parameter(Mandatory)][string]$Text,
+        [hashtable]$SentMessageIds = @{})
+    $count = @(@($script:AlertHistory[$Cause]) | Where-Object { $_ }).Count
+    if ($count -lt 3) { return }
+    if (-not $script:PinnedRecurrences.ContainsKey($Cause)) {
+        $pinned = @{}
+        foreach ($chatId in @($SentMessageIds.Keys)) {
+            $messageId = [int]$SentMessageIds[$chatId]
+            if ($messageId -le 0) { continue }
+            if (Add-TelegramMessagePin -ChatId ([long]$chatId) -MessageId $messageId) { $pinned[[long]$chatId] = $messageId }
+        }
+        if ($pinned.Count -gt 0) {
+            $script:PinnedRecurrences[$Cause] = $pinned
+            Write-BridgeLog "Pinned recurring alert '$Cause' in $($pinned.Count) admin chat(s)"
+        }
+        return
+    }
+    foreach ($chatId in @($script:PinnedRecurrences[$Cause].Keys)) {
+        # Plain, like the broadcast that created it: Send-AdminBroadcast
+        # sends without a parse mode, and an edit that renders the tags
+        # would show a different message than the one pinned.
+        Edit-TelegramMessageText -ChatId ([long]$chatId) -MessageId ([int]$script:PinnedRecurrences[$Cause][$chatId]) -Text $Text | Out-Null
+    }
+}
+
+function Add-TelegramMessagePin {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][int]$MessageId)
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/pinChatMessage" -Method Post -Body @{ chat_id = $ChatId; message_id = $MessageId } `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
+    if (-not $request.Success) { Write-BridgeLog "Failed to pin message $MessageId in $ChatId : $($request.Error)" "WARN"; return $false }
+    return $true
+}
+
+function Update-PinnedRecurrenceSweep {
+    <#
+        P2: unpins what stopped recurring. AlertHistory prunes causes that
+        went quiet past the window; a pin whose cause is gone is a solved
+        fault still nailed to the top of the chat, so it comes down with a
+        log line, not another message.
+    #>
+    foreach ($cause in @($script:PinnedRecurrences.Keys)) {
+        if ($script:AlertHistory.ContainsKey($cause)) { continue }
+        foreach ($chatId in @($script:PinnedRecurrences[$cause].Keys)) {
+            $body = @{ chat_id = ([long]$chatId); message_id = ([int]$script:PinnedRecurrences[$cause][$chatId]) }
+            Invoke-BridgeTelegramRequest -Uri "$apiBase/unpinChatMessage" -Method Post -Body $body `
+                -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2 | Out-Null
+        }
+        $script:PinnedRecurrences.Remove($cause)
+        Write-BridgeLog "Unpinned resolved recurring alert '$cause'"
+    }
+}
+
 function Send-AdminBroadcast {
     <#
         -Urgent bypasses quiet hours. Everything meaning the channel is wrong
@@ -817,7 +891,13 @@ function Send-AdminBroadcast {
     # alarm: they all pass through this one function, and a guard in one place
     # cannot be forgotten by the twenty-first.
     $repeat = Add-BridgeAlertOccurrence -Text $Text
-    if ($repeat) { $Text = "$Text`n$repeat" }
+    $repeatCause = ''
+    if ($repeat) {
+        $Text = "$Text`n$repeat"
+        # P2: the cause is read from the first line, which the appended
+        # recurrence line does not change.
+        $repeatCause = Get-BridgeAlertCause -Text $Text
+    }
     if (-not $Urgent -and (Test-QuietHoursActive)) {
         $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
         # Capped, because the digest is one Telegram message and Telegram stops
@@ -834,9 +914,12 @@ function Send-AdminBroadcast {
         Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
         return
     }
+    $sentIds = @{}
     foreach ($adminId in @(Get-AdminNotifyIds)) {
-        Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup
+        Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup | Out-Null
+        $sentIds[$adminId] = [int]$script:LastTelegramMessageId
     }
+    if ($repeatCause) { Sync-PinnedRecurrence -Cause $repeatCause -Text $Text -SentMessageIds $sentIds }
 }
 
 function Get-AdminNotifyIds {
@@ -910,6 +993,11 @@ function Import-QuietHoursQueue {
 }
 
 function Test-QuietHoursActive {
+    # P4: a manual two-hour quiet sits beside the scheduled window. One
+    # predicate, so the broadcast hold, the morning digest and every other
+    # caller behave identically for both - including delivery of everything
+    # held the moment the manual window ends.
+    if ((Get-Date) -lt $script:ManualQuietUntil) { return $true }
     if (-not (Get-Setting 'QuietHoursEnabled')) { return $false }
     return (Test-BridgeQuietHour -Hour ((Get-Date).Hour) `
             -StartHour (Get-SettingInt 'QuietHoursStart' 0) -EndHour (Get-SettingInt 'QuietHoursEnd' 0))

@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.24.0
+
+Seven post-8.23 proposals: a copy-ready diagnosis twin, pinned recurring
+alerts that update in place, per-template last-air in the catalogue, a
+two-hour manual quiet inside the quiet-hours path, a read-only shift
+readiness screen, 30-day archival of undecided dead chats, and the last
+on-air action under each user.
+
 ## Version 8.23.0
 
 Three log-measured items: dead-chat quarantine after three undeliverable

@@ -1703,3 +1703,42 @@ Describe 'Invalid template cleanup (D2)' {
         }
     }
 }
+
+Describe 'Template last-air from the audit trail (P3)' {
+    BeforeEach {
+        $script:OriginalP3AuditFile = $script:auditFile
+        $script:auditFile = Join-Path $TestDrive 'audit-p3.jsonl'
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach { $script:auditFile = $script:OriginalP3AuditFile }
+
+    It 'takes the latest successful SHOW per template and ignores the rest' {
+        $now = (Get-Date).ToUniversalTime()
+        $lines = @(
+            ('{"timestampUtc":"' + $now.AddHours(-5).ToString('o') + '","action":"SHOW","result":"success","target":"urgent"}'),
+            ('{"timestampUtc":"' + $now.AddHours(-1).ToString('o') + '","action":"SHOW","result":"success","target":"urgent"}'),
+            ('{"timestampUtc":"' + $now.AddMinutes(-10).ToString('o') + '","action":"SHOW","result":"failed","target":"urgent"}'),
+            ('{"timestampUtc":"' + $now.AddDays(-9).ToString('o') + '","action":"SHOW","result":"success","target":"old"}'),
+            ('{"timestampUtc":"' + $now.AddHours(-2).ToString('o') + '","action":"HIDE","result":"success","target":"urgent"}')
+        )
+        Set-Content -LiteralPath $script:auditFile -Value $lines -Encoding utf8
+        $map = Get-TemplateLastAirMap
+        $map['urgent'] | Should -Not -BeNullOrEmpty
+        # Both sides to UTC first: raw tick subtraction across DateTime Kinds
+        # does not convert, and the trail stores UTC.
+        ((Get-Date).ToUniversalTime() - ([datetime]$map['urgent']).ToUniversalTime()).TotalMinutes | Should -BeLessThan 90
+        $map['old'] | Should -Not -BeNullOrEmpty
+        Format-TemplateLastAir -Stamp $map['urgent'] | Should -Match 'قبل'
+        Format-TemplateLastAir -Stamp $map['old'] | Should -Match '^\d{4}-\d{2}-\d{2}$'
+        Format-TemplateLastAir -Stamp $null | Should -Be 'لم يُبث بعد'
+    }
+
+    It 'returns an empty map when the trail is missing' {
+        # Own filename: TestDrive is shared across Its, and the previous test
+        # created audit-p3.jsonl.
+        $script:auditFile = Join-Path $TestDrive 'audit-p3-empty.jsonl'
+        $map = Get-TemplateLastAirMap
+        $map.Count | Should -Be 0
+    }
+}

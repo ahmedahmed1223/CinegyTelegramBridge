@@ -647,7 +647,15 @@ function Send-OutputMonitorFailureNotification {
     $diagnosis = @(Get-OutputFailureDiagnosis)
     $text = "⚠️ <b>تعذّر الوصول إلى مخرج البث</b> بعد $FailureCount محاولات متتالية.`n" +
         ($diagnosis -join "`n")
-    Send-AdminBroadcast -Text $text -Urgent
+    # P1: the diagnosis names the server and the next step, and the operator
+    # retypes it for the maintenance group. The copy keeps a plain-text
+    # twin: Telegram gives bots no clipboard, but a plain message
+    # long-press-copies whole, while the HTML original does not.
+    $script:LastFailureDiagnosisPlain = @{
+        Text = ($text -replace '<[^>]+>', ''); At = (Get-Date); Failures = $FailureCount
+    }
+    $copyRow = @{ inline_keyboard = @(, @(@{ text = '📋 نسخة جاهزة للنسخ'; callback_data = 'diag:copy' })) }
+    Send-AdminBroadcast -Text $text -ReplyMarkup $copyRow -Urgent
 }
 
 function Send-OutputBlackNotification {

@@ -756,6 +756,24 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             break
         }
+        'quiet:on' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $script:ManualQuietUntil = (Get-Date).AddHours(2)
+                Add-AuditEntry "🔇 هدوء يدوي حتى $($script:ManualQuietUntil.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '🔇 هدوء ساعتين: غير العاجل يُجمَّع، والعاجل يصلك.'
+                Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'quiet:off' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $script:ManualQuietUntil = [datetime]::MinValue
+                Add-AuditEntry "🔊 إلغاء الهدوء اليدوي - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '🔊 انتهى الهدوء.'
+                Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
+            }
+            break
+        }
         'cfgcat:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $category = ''
@@ -903,6 +921,10 @@ function Invoke-CallbackQuery {
         }
         'menu:selftest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Invoke-BridgeSelfTest -ChatId $chatId -UserId $userId | Out-Null }
+            break
+        }
+        'menu:readiness' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-ShiftReadinessScreen -ChatId $chatId -UserId $userId }
             break
         }
         'menu:admintools' {
@@ -1334,7 +1356,7 @@ function Invoke-CallbackQuery {
             if (Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) {
                 $pendingImport = Get-PendingState -ChatId $chatId
                 if ($pendingImport -and [string]$pendingImport.Mode -like 'template_import_*') { Clear-PendingState -ChatId $chatId }
-                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-TemplateAdminCatalogueText) -ParseMode HTML -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -1393,7 +1415,7 @@ function Invoke-CallbackQuery {
             $page = 0
             if ((Test-CallbackTemplateReminderManager -ChatId $chatId -UserId $userId) -and
                 [int]::TryParse((Get-CallbackArg $data 'tadmpage:'), [ref]$page) -and $page -ge 0) {
-                Send-TelegramMessage -ChatId $chatId -Text '📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId -Page $page)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-TemplateAdminCatalogueText -Page $page) -ParseMode HTML -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId -Page $page)
             }
             break
         }
@@ -1759,6 +1781,20 @@ function Invoke-CallbackQuery {
             }
             else {
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text 'لا توجد مسودة قائمة.' -Alert
+            }
+            break
+        }
+        'diag:copy' {
+            # P1: no admin gate needed - this only re-sends a diagnosis that
+            # was already broadcast to every admin, back to the tapper alone.
+            Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id | Out-Null
+            $copy = $script:LastFailureDiagnosisPlain
+            $age = if ($copy) { ((Get-Date) - [datetime](Get-JsonProp $copy 'At')).TotalMinutes } else { 9999 }
+            if ($copy -and $age -lt 30) {
+                Send-TelegramMessage -ChatId $chatId -Text ([string](Get-JsonProp $copy 'Text'))
+            }
+            else {
+                Send-TelegramMessage -ChatId $chatId -Text 'انتهت صلاحية النسخة — اطلب تشخيصًا جديدًا من القائمة.' -ReplyMarkup (Get-NoticeKeyboard)
             }
             break
         }

@@ -508,6 +508,7 @@ function Get-AdminToolsKeyboard {
     }
 
     $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
+    $rows += , @( (New-Button "✅ جاهزية المناوبة" "menu:readiness") )
     $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
     $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
     if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart" -Style danger) ) }
@@ -742,6 +743,23 @@ function Get-AuthorizedUsersText {
         $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text $alias)</b> · $role · $state")
         $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
         $lines.Add("   <code>$([long]$user.UserId)</code> · $(ConvertTo-TelegramHtmlText -Text ([string]$activity.Label))")
+        # P7: during an incident, who touched the air last matters more than
+        # their role. The latest entry of their own operation history, one
+        # line, from memory - nothing new is stored for this.
+        $lastOp = @(Get-UserOperationHistory -UserId ([long]$user.UserId) | Select-Object -Last 1)
+        if ($lastOp.Count -gt 0) {
+            $ago = ''
+            try {
+                $mins = [int](((Get-Date).ToUniversalTime() - ([datetime]$lastOp[0].At).ToUniversalTime()).TotalMinutes)
+                if ($mins -lt 1) { $ago = 'الآن' }
+                elseif ($mins -lt 60) { $ago = "قبل $mins د" }
+                elseif ($mins -lt 1440) { $ago = "قبل $([int]($mins / 60)) س" }
+                else { $ago = ([datetime]$lastOp[0].At).ToLocalTime().ToString('MM-dd HH:mm') }
+            }
+            catch { $ago = '' }
+            $what = "$([string]$lastOp[0].Action) $([string]$lastOp[0].Target)".Trim()
+            if ($what) { $lines.Add("   ⏺ آخر إجراء: $(ConvertTo-TelegramHtmlText -Text $what)$(if ($ago) { " · $ago" })") }
+        }
     }
     return ($lines -join "`n")
 }
@@ -1787,8 +1805,42 @@ function Get-SettingsCategoryKeyboard {
         if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button 'التالي ➡️' "cfgcat:$Category`:$($safePage + 1)") }
         $rows += , $navigation
     }
+    # P4: manual quiet lives with its scheduled sibling. A setting would
+    # persist across restarts and lie about it; a two-hour window that dies
+    # with the process fails loud.
+    if ($Category -eq 'monitoring') {
+        if ((Get-Date) -lt $script:ManualQuietUntil) {
+            $rows += , @((New-Button "🔇 هدوء حتى $($script:ManualQuietUntil.ToString('HH:mm')) — إلغاء" 'quiet:off'))
+        }
+        else {
+            $rows += , @((New-Button '🔇 هدوء ساعتين (غير العاجل فقط)' 'quiet:on'))
+        }
+    }
     $rows += , @( (New-Button '⬅️ أقسام الإعدادات' 'menu:settings') )
     return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateAdminCatalogueText {
+    <#
+        P3: the catalogue names the template and its layer on the button;
+        the text beside it says when it last went on air - the never-aired
+        ones are the deletion candidates, the daily ones earn the shortcut.
+        Same window as the keyboard, so text and buttons never disagree.
+    #>
+    param([int]$Page = 0, [int]$PageSize = 20)
+    $store = Get-TemplateStore
+    $window = Get-BridgePageWindow -ItemCount $store.Order.Count -Page $Page -PageSize $PageSize
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:')
+    if ($window.EndIndex -ge $window.StartIndex) {
+        $lastAir = Get-TemplateLastAirMap
+        for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
+            $key = [string]$store.Order[$i]
+            $when = if ($lastAir.ContainsKey($key)) { Format-TemplateLastAir -Stamp $lastAir[$key] } else { 'لم يُبث بعد' }
+            $lines.Add("• <b>$(ConvertTo-TelegramHtmlText $key)</b> — آخر بث: $when")
+        }
+    }
+    return ($lines -join "`n")
 }
 
 function Get-TemplateAdminCatalogueKeyboard {

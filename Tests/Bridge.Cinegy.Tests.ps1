@@ -1270,3 +1270,22 @@ Describe 'Naming which link broke' {
         finally { $script:LastCaptureErrorDetail = $original }
     }
 }
+
+Describe 'Failure diagnosis copy (P1)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        Mock Send-AdminBroadcast { }
+        Mock Get-OutputFailureDiagnosis { @('• القناة: <b>تُجيب</b>.', '🔎 الخطوة التالية: افتح.') }
+        $script:LastFailureDiagnosisPlain = $null
+    }
+
+    It 'broadcasts with a copy button and keeps a plain twin' {
+        Send-OutputMonitorFailureNotification -FailureCount 3
+        $script:LastFailureDiagnosisPlain.Text | Should -Match 'تعذّر الوصول'
+        $script:LastFailureDiagnosisPlain.Text | Should -Not -Match '<b>'
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard[0].callback_data) -contains 'diag:copy'
+        }
+    }
+}

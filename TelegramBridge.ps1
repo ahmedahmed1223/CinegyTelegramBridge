@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.24.0'
+$script:BridgeVersion = '8.25.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -331,6 +331,7 @@ $script:DefaultSettings = [ordered]@{
     TemplateBasePath           = ''      # scenes folder; lets templates.json carry a bare file name
     CinegyStateBackoffMaxSeconds = 60    # ceiling for backing off reconciliation while Air is unreachable
     StaleOnAirAlertHours      = 6       # warn admins about a bridge record on air this long; 0 disables
+    StartupStormThreshold     = 4       # startups inside 24h before one storm notice; 0 disables
     ScheduleConflictWindowMinutes = 2    # warn when pending events target one layer this close together
     SchedulePaused              = $false # keep events pending without executing them
     SchedulePreNotifyMinutes    = 3      # notify this many minutes before a scheduled occurrence; 0 disables
@@ -439,6 +440,7 @@ $script:SettingDisplayMetadata = @{
     TemplateBasePath = @{ Unit = ''; Description = 'مجلد المشاهد: يسمح بكتابة اسم الملف وحده في القوالب' }
     CinegyStateBackoffMaxSeconds = @{ Unit = 'ثانية'; Description = 'أقصى تباعد لفحص طبقات Cinegy عند تعذّر الوصول' }
     StaleOnAirAlertHours = @{ Unit = 'ساعة'; Description = 'تنبيه المشرفين عن سجل على الهواء منذ هذه المدة (0 للتعطيل)' }
+    StartupStormThreshold = @{ Unit = 'إقلاع'; Description = 'عدد إقلاعات الجسر خلال 24 ساعة قبل تنبيه واحد (0 للتعطيل)' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
@@ -629,6 +631,9 @@ $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
 $script:deadChatsFile = Join-Path $logDir "dead-chats.json"
 $script:DeadChats = @{}
 $script:DeadChatStrikes = @{}
+# Restart-storm history: timestamps of recent startups so one notice, not a
+# rule, fires when release work restarts the bridge several times a day.
+$script:startupHistoryFile = Join-Path $logDir "startup-history.json"
 $script:accessGuardFile = Join-Path $logDir "access-guard.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
@@ -1245,6 +1250,7 @@ foreach ($entry in @(
                 'NewsSheetNotifyScope', 'TemplateReminderFollowUpMinutes',
                 'StaleOnAirAlertHours', 'HealthFailureAlertThreshold',
                 'OutputMonitorFailureAlertThreshold', 'MissedEventsHours',
+                'StartupStormThreshold',
                 'HeartbeatEnabled', 'HeartbeatHour',
                 'UsageDigestEnabled', 'UsageDigestDayOfWeek'
             ) },
@@ -1434,6 +1440,7 @@ $script:SettingNavigationLabels = @{
     SnapshotRetentionMinutes = 'الاحتفاظ بصور البث'
     SnapshotTimeoutSeconds = 'مهلة التقاط الصورة'
     StaleOnAirAlertHours = 'تنبيه القالب المنسي'
+    StartupStormThreshold = 'تنبيه عاصفة الإقلاع'
     TelegramRequestTimeoutSeconds = 'مهلة طلبات Telegram'
     TemplateBasePath = 'مجلد المشاهد'
     TemplateRegistryImportMaxTemplates = 'حد استيراد القوالب'
@@ -1469,6 +1476,7 @@ $script:SettingConstraints = @{
     PendingApprovalExpiryHours    = @{ Minimum = 1; Maximum = 720 }
     AutoHideDefaultSeconds        = @{ Minimum = 1; Maximum = 86400 }
     StaleOnAirAlertHours          = @{ Minimum = 1; Maximum = 168 }
+    StartupStormThreshold         = @{ Minimum = 0; Maximum = 24 }
     # Zero is off, not a floor of one: an administrator who does not want
     # repetition counted has to be able to say so.
     RepeatAlertWindowHours        = @{ Minimum = 0; Maximum = 168 }
@@ -1821,6 +1829,7 @@ Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirSer
 foreach ($ownerWarning in @(Test-OwnerConfiguration)) { Write-BridgeLog $ownerWarning 'WARN' }
 foreach ($e in $store.Errors) { Write-BridgeLog "Template warning: $e" "WARN" }
 Send-BridgeStartupNotification
+Register-BridgeStartup
 
 $offset = 0
 if (Get-Setting 'DropPendingUpdatesOnStart') {
@@ -1856,7 +1865,10 @@ try {
                 $callback = Get-JsonProp $update 'callback_query'
                 if ($callback) {
                     try { Invoke-CallbackQuery -CallbackQuery $callback | Out-Null }
-                    catch { Write-BridgeLog "Unhandled error processing callback query: $($_.Exception.Message)" "ERROR" }
+                    catch {
+                        Write-BridgeLog "Unhandled error processing callback query: $($_.Exception.Message)" "ERROR"
+                        Send-CallbackFailureNotice -CallbackQuery $callback | Out-Null
+                    }
                     continue
                 }
 
@@ -1885,7 +1897,10 @@ try {
                         }
                         else { Send-TelegramMessage -ChatId $chatId -Text 'لا يُنتظر منك صورة الآن. افتح 📑 الموجز ثم ➕ إضافة صف.' }
                     }
-                    catch { Write-BridgeLog "Unhandled error processing photo from $chatId : $($_.Exception.Message)" 'ERROR' }
+                    catch {
+                        Write-BridgeLog "Unhandled error processing photo from $chatId : $($_.Exception.Message)" 'ERROR'
+                        Send-TelegramMessage -ChatId $chatId -Text '⚠️ حدث خطأ أثناء استلام الصورة — حاول مجددًا، وإن تكرر أبلغ المشرف.'
+                    }
                     continue
                 }
                 $document = Get-JsonProp $message 'document'
@@ -1897,7 +1912,10 @@ try {
                         elseif($uploadState -and $uploadState.Mode -eq 'settings_import_upload'){Receive-SettingsImport -Document $document -ChatId $chatId -UserId $userId}
                         else{Receive-TemplateRegistryImport -Document $document -ChatId $chatId -UserId $userId}
                     }
-                    catch { Write-BridgeLog "Unhandled error processing document from $chatId : $($_.Exception.Message)" 'ERROR' }
+                    catch {
+                        Write-BridgeLog "Unhandled error processing document from $chatId : $($_.Exception.Message)" 'ERROR'
+                        Send-TelegramMessage -ChatId $chatId -Text '⚠️ حدث خطأ أثناء استلام الملف — حاول مجددًا، وإن تكرر أبلغ المشرف.'
+                    }
                     continue
                 }
                 $text = [string](Get-JsonProp $message 'text')

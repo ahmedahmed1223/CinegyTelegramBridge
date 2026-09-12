@@ -176,6 +176,41 @@ function Restore-DeadChat {
     Add-AuditEntry "💀 أُعيد تفعيل المحادثة $ChatId"
 }
 
+function Test-DeadChatDelivery {
+    <#
+        One-shot reachability probe for a quarantined chat. Bypasses the
+        Test-DeadChat send guard on purpose: the whole point is asking
+        Telegram once whether the block is gone. A success restores the chat
+        exactly like the manual button; a failure only refreshes LastError
+        and answers the tapping administrator - no broadcast, no strikes -
+        so a wrong guess costs one message, not another outage notice.
+    #>
+    param([Parameter(Mandatory)][long]$TargetChatId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $id = [string]$TargetChatId
+    if (-not $script:DeadChats.ContainsKey($id)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'هذه المحادثة ليست محجورة الآن.' -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId)
+        return
+    }
+    $probe = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post `
+        -Body @{ chat_id = $TargetChatId; text = '🔔 اختبار استلام من البوت — تجاهل هذه الرسالة.' } `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
+    if ($probe.Success) {
+        Restore-DeadChat -ChatId $TargetChatId
+        Add-AuditEntry "🔍 اختبار المحادثة $TargetChatId ناجح — أُعيد التفعيل بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Send-TelegramMessage -ChatId $ChatId -Text "✅ المحادثة $TargetChatId تستقبل — أُعيد تفعيلها."
+    }
+    else {
+        $short = ([string]$probe.Error).Trim()
+        if ($short.Length -gt 160) { $short = $short.Substring(0, 160) + '…' }
+        $script:DeadChats[$id].LastError = $short
+        Save-DeadChats | Out-Null
+        Write-BridgeLog "Dead-chat probe to $TargetChatId failed: $($probe.Error)" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ ما زالت لا تستقبل — بقيت محجورة.`n$short"
+    }
+    Show-DeadChatsScreen -ChatId $ChatId -UserId $UserId
+}
+
 function Show-DeadChatsScreen {
     <#
         D1: the quarantine roster. Each row names who stopped receiving, when,
@@ -192,7 +227,7 @@ function Show-DeadChatsScreen {
         Send-TelegramMessage -ChatId $ChatId -Text '💀 لا محادثات ميتة — كل القائمة تستقبل.' -ReplyMarkup $back
         return
     }
-    # Buttons grow two per chat, so the rows are paged like the users roster -
+    # Buttons grow three per chat, so the rows are paged like the users roster -
     # the text itself already pages through Send-TelegramPagedText, but the
     # keyboard would not, and the paging gate fails exactly that.
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize 5
@@ -210,7 +245,7 @@ function Show-DeadChatsScreen {
         $name = ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $target)
         $why = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $entry 'LastError'))
         $lines.Add("• $name (<code>$id</code>) · منذ $since`n  $why")
-        $rows += , @((New-Button '✅ إعادة تفعيل' "deadchat:un:$target"), (New-Button '⛔ سحب الصلاحية' "deadchat:revoke:$target"))
+        $rows += , @((New-Button '✅ إعادة تفعيل' "deadchat:un:$target"), (New-Button '🔍 اختبار' "deadchat:probe:$target"), (New-Button '⛔ سحب الصلاحية' "deadchat:revoke:$target"))
     }
     if ($window.PageCount -gt 1) {
         $pager = @()

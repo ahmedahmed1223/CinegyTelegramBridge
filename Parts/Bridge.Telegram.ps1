@@ -700,6 +700,30 @@ function Confirm-TelegramCallback {
     }
 }
 
+function Send-CallbackFailureNotice {
+    <#
+        The main loop's last resort: a button that died to an unhandled
+        error used to cost the operator silence (seven 'Sum' failures in the
+        log with nothing on any screen). Best-effort and throw-proof - this
+        runs inside a catch, so it must never throw itself. Returns $true
+        when the operator was told.
+    #>
+    param($CallbackQuery)
+    try {
+        $queryId = [string](Get-JsonProp $CallbackQuery 'id')
+        if ($queryId) { Confirm-TelegramCallback -CallbackQueryId $queryId | Out-Null }
+        $peer = Get-JsonProp (Get-JsonProp $CallbackQuery 'message') 'chat'
+        $target = 0L
+        if (-not [long]::TryParse([string](Get-JsonProp $peer 'id'), [ref]$target) -or $target -eq 0) { return $false }
+        Send-TelegramMessage -ChatId $target -Text '⚠️ حدث خطأ أثناء تنفيذ طلبك — حاول مجددًا، وإن تكرر أبلغ المشرف.' | Out-Null
+        return $true
+    }
+    catch {
+        Write-BridgeLog "Callback failure notice itself failed: $($_.Exception.Message)" 'DEBUG'
+        return $false
+    }
+}
+
 function Get-TelegramUpdates {
     <# Returns the update array, never $null. Telegram can reply with
        ok:false (409 Conflict when a second poller exists, or after a token

@@ -202,7 +202,9 @@ function Resume-ExpiredFlow {
         prompts - a resumed draft lands on its field question or its review,
         never straight on air. The layer is re-locked because expiry released
         it; whoever took the layer meanwhile keeps it and the resume is
-        refused with the lock notice, not queued behind them.
+        refused with the lock notice, not queued behind them. The snapshot
+        stays for a later retry: a transient lock must not destroy saved
+        work - only a deleted template consumes it.
     #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -215,9 +217,9 @@ function Resume-ExpiredFlow {
         return
     }
     $saved = $script:ExpiredFlowResume[$ChatId]
-    $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
     $template = Get-TemplateByIndex -Index (Get-TemplateIndex -Key ([string](Get-JsonProp $saved 'Key')))
     if (-not $template) {
+        $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
         Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا — لا يمكن الاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
@@ -225,9 +227,10 @@ function Resume-ExpiredFlow {
     if ($layer -le 0) { $layer = [int]$template.Layer }
     $lock = Lock-GfxLayer -Layer $layer -ChatId $ChatId -UserId $UserId -Key ([string](Get-JsonProp $saved 'Key'))
     if (-not $lock.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer $layer -UserId $UserId)`nانتهت المسودة المحفوظة مع الرفض." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer $layer -UserId $UserId)`nمسودتك محفوظة — حاول الاستئناف بعد أن تتحرر الطبقة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
+    $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
     $state = @{
         Mode = [string](Get-JsonProp $saved 'Mode'); Key = [string](Get-JsonProp $saved 'Key')
         Fields = @($saved.Fields); Labels = @($saved.Labels); Limits = @($saved.Limits)

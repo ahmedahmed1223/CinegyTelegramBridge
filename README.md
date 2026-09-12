@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.25.0
+
+A log-driven stability release (26 days, 472 pushes): resume snapshots now
+survive a transient layer lock, the dead-chat roster gains a one-shot
+reachability probe (success restores, failure stays silent), every
+unhandled button/photo/document error answers its operator instead of
+dying silently, and a fourth startup inside 24 hours notifies admins once.
+
 ## Version 8.24.0
 
 Seven post-8.23 proposals: a copy-ready diagnosis twin, pinned recurring

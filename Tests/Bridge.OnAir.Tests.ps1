@@ -2482,5 +2482,25 @@ Describe 'Expired flow resume (D3)' {
         }
         Resume-ExpiredFlow -ChatId 111 -UserId 111
         Get-PendingState -ChatId 111 | Should -BeNullOrEmpty
+        $script:ExpiredFlowResume.ContainsKey([long]111) | Should -BeFalse
+    }
+
+    It 'keeps the snapshot when the layer is taken, for a later retry' {
+        # A transient lock must not destroy saved work: only a deleted
+        # template consumes the snapshot (see the test above).
+        $script:LayerLocks[5] = @{ ChatId = 999L; UserId = 999L; Key = 'other'; StartedAt = (Get-Date) }
+        $script:ExpiredFlowResume[[long]111] = @{
+            Mode = 'show_fields'; Key = 'urgent'; Fields = @('t'); Labels = @('النص')
+            Limits = @(100); Required = @($true); Sensitives = @($false)
+            Values = @{ t = 'محفوظ' }; Index = 1; UserId = 111
+            AutoHideSeconds = 0; LockLayer = 5; At = (Get-Date)
+        }
+        Resume-ExpiredFlow -ChatId 111 -UserId 111
+        Get-PendingState -ChatId 111 | Should -BeNullOrEmpty
+        $script:ExpiredFlowResume.ContainsKey([long]111) | Should -BeTrue
+        $script:ExpiredFlowResume[[long]111].Values['t'] | Should -Be 'محفوظ'
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -like '*محفوظة*'
+        }
     }
 }

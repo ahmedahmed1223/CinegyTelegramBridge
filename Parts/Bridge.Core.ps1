@@ -774,6 +774,40 @@ function Invoke-LogRotation {
     Move-Item $logPath (Join-Path $logDir "$base.1$ext") -Force -ErrorAction SilentlyContinue
 }
 
+function Register-BridgeStartup {
+    <#
+        Notices a restart storm. Release days legitimately restart often (23
+        startups on 2026-09-07), so this never blocks - it says once, when
+        the StartupStormThreshold-th startup lands inside 24 hours, and
+        leaves the operator to judge planned work from a crash loop. History
+        is a small timestamp file beside the other state files, pruned to 48
+        hours on every write; a corrupt entry is skipped, never fatal.
+    #>
+    try {
+        $now = Get-Date
+        $stamps = @()
+        if (Test-Path -LiteralPath $script:startupHistoryFile) {
+            $raw = Get-Content -LiteralPath $script:startupHistoryFile -Raw | ConvertFrom-Json
+            foreach ($entry in @($raw)) {
+                $moment = [datetime]::MinValue
+                if ([datetime]::TryParse([string]$entry, [ref]$moment)) { $stamps += $moment }
+            }
+        }
+        $stamps += $now
+        $stamps = @($stamps | Where-Object { $_ -gt $now.AddHours(-48) } | Sort-Object)
+        $json = ($stamps | ForEach-Object { $_.ToString('o') } | ConvertTo-Json)
+        Write-BridgeValidatedJson -Path $script:startupHistoryFile -Json $json | Out-Null
+        $threshold = Get-SettingInt 'StartupStormThreshold' 4
+        $dayCount = @($stamps | Where-Object { $_ -gt $now.AddHours(-24) }).Count
+        if ($threshold -gt 0 -and $dayCount -eq $threshold) {
+            Write-BridgeLog "$threshold bridge startups inside 24 hours - notifying administrators once" 'WARN'
+            Add-AuditEntry "🔁 الجسر أُعيد تشغيله $threshold مرات خلال 24 ساعة — عمل إصدارات أم حلقة عطل؟"
+            Send-AdminBroadcast -Text "🔁 الجسر أُعيد تشغيله $threshold مرات خلال 24 ساعة. إن كان عمل إصدارات مخططًا فتجاهل هذا — وإلا راجع آخر أسطر bridge.log."
+        }
+    }
+    catch { Write-BridgeLog "Could not record bridge startup: $($_.Exception.Message)" 'WARN' }
+}
+
 function Protect-SensitiveText {
     <# Strips credentials out of anything headed for the log or for chat.
 

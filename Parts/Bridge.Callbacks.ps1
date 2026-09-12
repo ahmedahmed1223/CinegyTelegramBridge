@@ -991,6 +991,15 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'deadchat:probe:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $target = 0L
+            if ([long]::TryParse((Get-CallbackArg $data 'deadchat:probe:'), [ref]$target) -and $target -gt 0) {
+                Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id | Out-Null
+                Test-DeadChatDelivery -TargetChatId $target -ChatId $chatId -UserId $userId
+            }
+            break
+        }
         'deadchat:revoke:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
             $target = 0L

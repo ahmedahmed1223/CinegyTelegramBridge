@@ -641,3 +641,68 @@ Describe 'Dead chats quarantine (D1)' {
         Should -Invoke Add-AuditEntry -Times 1 -Exactly -ParameterFilter { $Message -match '666' }
     }
 }
+
+Describe 'Dead-chat probe (log-driven)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-TelegramMessage { }
+        Mock Send-TelegramPagedText { }
+        Mock Send-AdminBroadcast { }
+        # No lexical assignment on purpose: PSScriptAnalyzer cannot see into
+        # Pester blocks, so `$apiBase = ...` here reads as write-only. The
+        # probe reads bare $apiBase through dynamic scope, and Script scope
+        # puts it on that lookup chain (the entry script sets it in prod).
+        Set-Variable -Name 'apiBase' -Value 'https://localhost/' -Scope Script
+        $script:DeadChats = @{}
+        $script:DeadChatStrikes = @{}
+        $script:deadChatsFile = Join-Path $TestDrive 'dead-chats.json'
+    }
+
+    AfterEach {
+        $script:DeadChats = @{}
+        $script:DeadChatStrikes = @{}
+    }
+
+    It 'restores on a successful probe and answers the tapping admin' {
+        $script:DeadChats['777'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true } } -ParameterFilter { $Uri -like "$apiBase*" }
+        Test-DeadChatDelivery -TargetChatId 777 -ChatId 111 -UserId 111
+        Test-DeadChat -ChatId 777 | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*أُعيد تفعيلها*' }
+    }
+
+    It 'stays quarantined on a failed probe, with no broadcast' {
+        $script:DeadChats['778'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Error = 'Forbidden: bot was blocked' } } -ParameterFilter { $Uri -like "$apiBase*" }
+        Test-DeadChatDelivery -TargetChatId 778 -ChatId 111 -UserId 111
+        Test-DeadChat -ChatId 778 | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*بقيت محجورة*' }
+    }
+
+    It 'answers without probing when the target is no longer quarantined' {
+        Mock Invoke-BridgeTelegramRequest { throw 'must not probe a live chat' }
+        Test-DeadChatDelivery -TargetChatId 779 -ChatId 111 -UserId 111
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*ليست محجورة*' }
+    }
+
+    It 'routes the probe button only after the admin guard succeeds' {
+        $script:DeadChats['780'] = @{ Since = (Get-Date).ToString('o'); LastError = 'blocked'; Strikes = 3 }
+        Mock Test-CallbackAdmin { $true }
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity { }
+        Mock Confirm-TelegramCallback { }
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true } }
+        $callback = [pscustomobject]@{
+            id = 'deadchat-probe-admin'
+            from = [pscustomobject]@{ id = 111 }
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 111; type = 'private' } }
+            data = 'deadchat:probe:780'
+        }
+        Invoke-CallbackQuery -CallbackQuery $callback
+        Test-DeadChat -ChatId 780 | Should -BeFalse
+    }
+}

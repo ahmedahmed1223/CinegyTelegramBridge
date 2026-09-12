@@ -2067,3 +2067,62 @@ Describe 'What will appear on screen is marked as such' {
         $text | Should -Match 'ما سيظهر على الشاشة'
     }
 }
+
+Describe 'Callback failure notice (log-driven)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Confirm-TelegramCallback { }
+        Mock Send-TelegramMessage { }
+    }
+
+    It 'tells the operator when a button dies to an unhandled error' {
+        $callback = [pscustomobject]@{
+            id = 'q1'
+            message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 111 } }
+        }
+        Send-CallbackFailureNotice -CallbackQuery $callback | Should -BeTrue
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 111 -and $Text -like '*حدث خطأ*' }
+    }
+
+    It 'stays silent and throw-proof when the callback carries no chat' {
+        Send-CallbackFailureNotice -CallbackQuery ([pscustomobject]@{ id = 'q2' }) | Should -BeFalse
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+}
+
+Describe 'Restart-storm notice (log-driven)' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Add-AuditEntry { }
+        Mock Send-AdminBroadcast { }
+        $script:startupHistoryFile = Join-Path $TestDrive 'startup-history.json'
+    }
+
+    It 'notifies once when the fourth startup lands inside 24 hours' {
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+        Register-BridgeStartup
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -like '*4 مرات*' }
+        Register-BridgeStartup
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'ignores a corrupt history file instead of failing startup' {
+        'not json{{{' | Set-Content -LiteralPath (Join-Path $TestDrive 'startup-history.json')
+        { Register-BridgeStartup } | Should -Not -Throw
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'stays silent when the threshold is set to zero' {
+        Mock Get-SettingInt { 0 }
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Register-BridgeStartup
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+}

@@ -326,8 +326,8 @@ public sealed class MainForm : Form
         _tips.SetToolTip(_restartButton, "إيقاف ثم تشغيل، لتطبيق تغييرات الإعدادات.  (F5)");
         _tips.SetToolTip(settingsButton, "الحقول التي لا تُحرَّر من داخل البوت: الرمز، عنوان المحرّك، قوائم الصلاحيات.");
         _tips.SetToolTip(logsButton, "يفتح مجلد logs في المستكشف.");
-        _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط - لا يمسّ logs\\bridge.log.  (Ctrl+L)");
-        _tips.SetToolTip(onAirButton, "ماذا يبثّ الآن على كل طبقة - قراءة فقط.");
+        _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط — لا يمسّ logs\\bridge.log.  (Ctrl+L)");
+        _tips.SetToolTip(onAirButton, "ماذا يبثّ الآن على كل طبقة — قراءة فقط.");
         _tips.SetToolTip(reportsButton, "استخدام القوالب واستقرار التشغيل من ملفات هذا الجهاز.");
         _tips.SetToolTip(optionsButton, "إعادة التشغيل التلقائية وكشف التعليق وبدء ويندوز، ومظهر هذه النافذة.");
 
@@ -353,11 +353,11 @@ public sealed class MainForm : Form
         _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
         _autoRestartCheck = Theme.ToggleChip("↻  إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
         _autoRestartCheck.Checked = _settings.AutoRestart;
-        _watchdogCheck = Theme.ToggleChip("🩺  كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} دقيقة، حتى لو بقيت العملية حيّة.", _tips);
+        _watchdogCheck = Theme.ToggleChip("🩺  كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} {ArabicCountWord(_settings.HangWatchdogMinutes, "دقيقة", "دقيقتان", "دقائق", "دقيقة")}، حتى لو بقيت العملية حيّة.", _tips);
         _watchdogCheck.Checked = _settings.HangWatchdog;
         _startWithWindowsCheck = Theme.ToggleChip("🪟  مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
         _startWithWindowsCheck.Checked = IsStartWithWindowsEnabled();
-        _autoClearCheck = Theme.ToggleChip("🧹  مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم - لا يمسّ logs\bridge.log.", _tips);
+        _autoClearCheck = Theme.ToggleChip("🧹  مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم — لا يمسّ logs\\bridge.log.", _tips);
         _autoClearCheck.Checked = _settings.AutoClearDaily;
         _wordWrapCheck = Theme.ToggleChip("↩  التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
         _wordWrapCheck.Checked = _settings.WordWrap;
@@ -936,7 +936,9 @@ public sealed class MainForm : Form
     {
         PruneRecentErrors();
         var last = string.IsNullOrEmpty(_lastAirSummary) ? "لا عملية بعد" : _lastAirSummary;
-        var errors = _recentErrors.Count == 0 ? "بلا أخطاء" : $"{_recentErrors.Count} خطأ في آخر ساعة";
+        var errors = _recentErrors.Count == 0
+            ? "بلا أخطاء"
+            : $"{_recentErrors.Count} {ArabicCountWord(_recentErrors.Count, "خطأ", "خطآن", "أخطاء", "خطأً")} في آخر ساعة";
         _activityLabel.Text = $"▶ آخر عملية: {last}     ⚠ {errors}";
         _activityLabel.ForeColor = _recentErrors.Count == 0 ? Theme.TextMuted : Theme.Stopped;
     }
@@ -1644,11 +1646,33 @@ public sealed class MainForm : Form
 
     internal static string FormatSpan(TimeSpan span)
     {
-        if (span.TotalMinutes < 1) return $"{Math.Max(0, (int)span.TotalSeconds)} ثانية";
-        if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} دقيقة";
-        if (span.TotalDays < 1) return $"{(int)span.TotalHours} ساعة و{span.Minutes} دقيقة";
-        return $"{(int)span.TotalDays} يوم و{span.Hours} ساعة";
+        if (span.TotalMinutes < 1)
+        {
+            var seconds = Math.Max(0, (int)span.TotalSeconds);
+            return $"{seconds} {ArabicCountWord(seconds, "ثانية", "ثانيتان", "ثوانٍ", "ثانية")}";
+        }
+        if (span.TotalHours < 1)
+        {
+            var minutes = (int)span.TotalMinutes;
+            return $"{minutes} {ArabicCountWord(minutes, "دقيقة", "دقيقتان", "دقائق", "دقيقة")}";
+        }
+        if (span.TotalDays < 1)
+        {
+            var hours = (int)span.TotalHours;
+            return $"{hours} {ArabicCountWord(hours, "ساعة", "ساعتان", "ساعات", "ساعة")} و{span.Minutes} {ArabicCountWord(span.Minutes, "دقيقة", "دقيقتان", "دقائق", "دقيقة")}";
+        }
+        var days = (int)span.TotalDays;
+        return $"{days} {ArabicCountWord(days, "يوم", "يومان", "أيام", "يومًا")} و{span.Hours} {ArabicCountWord(span.Hours, "ساعة", "ساعتان", "ساعات", "ساعة")}";
     }
+
+    /// <summary>
+    /// The Arabic noun after a number: one takes the singular, two the dual,
+    /// three-to-ten the plural, eleven and up the singular again. Callers pass
+    /// the four forms; "3 خطأ" and "5 ثانية" on a supervisor's screen are the
+    /// kind of wrong nobody reports and everybody reads.
+    /// </summary>
+    internal static string ArabicCountWord(int n, string one, string two, string few, string many) =>
+        n == 1 ? one : n == 2 ? two : n is >= 3 and <= 10 ? few : many;
 
     private void UpdateStatusBar()
     {
@@ -1877,7 +1901,7 @@ public sealed class MainForm : Form
         }
         if (droppedPriority + droppedInformational > 0)
         {
-            var summary = $"--- خفّض المدير ضغط السجل: حُذفت {droppedInformational} رسالة معلومات و{droppedPriority} رسالة تحذير/خطأ قديمة من العرض. السجل الكامل محفوظ في bridge.log. ---";
+            var summary = $"--- خفّض المدير ضغط السجل: حُذفت {droppedInformational} {ArabicCountWord(droppedInformational, "رسالة", "رسالتان", "رسائل", "رسالة")} معلومات و{droppedPriority} {ArabicCountWord(droppedPriority, "رسالة", "رسالتان", "رسائل", "رسالة")} تحذير/خطأ قديمة من العرض. السجل الكامل محفوظ في bridge.log. ---";
             _lines.Add(summary);
             if (ShouldShow(summary, filter, errorsOnly)) { WriteLine(summary); appended = true; }
         }

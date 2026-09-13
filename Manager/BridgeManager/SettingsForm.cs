@@ -44,7 +44,7 @@ public sealed class SettingsForm : Form
     private readonly ListView _accounts;
     private readonly TextBox _newId = Theme.Input(190);
     private readonly Label _accountsSummary = Theme.Hint("");
-    private readonly Label _permissionsCaption = Theme.Caption("صلاحيات الحساب المحدَّد");
+    private readonly Label _permissionsCaption = Theme.Caption("صلاحيات الحساب المحدد");
     private readonly Dictionary<string, CheckBox> _permissionChips = new(StringComparer.Ordinal);
     private readonly FlowLayoutPanel _permissionsRow;
 
@@ -115,7 +115,7 @@ public sealed class SettingsForm : Form
         if (trimmed.Length == 0) return "أدخل الرقم التعريفي أولًا.";
         if (!long.TryParse(trimmed, out id)) return "الرقم التعريفي أرقام فقط (وقد يبدأ بسالب للمجموعات).";
         if (id == 0) return "صفر ليس رقمًا تعريفيًا صالحًا.";
-        if (existing.Contains(id)) return "هذا الحساب موجود في القائمة - حدّده وعدّل صلاحياته.";
+        if (existing.Contains(id)) return "هذا الحساب موجود في القائمة — حدّده وعدّل صلاحياته.";
         return null;
     }
 
@@ -285,7 +285,7 @@ public sealed class SettingsForm : Form
         _accounts.KeyDown += (_, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
         layout.Controls.Add(_accounts);
 
-        var removeButton = Theme.QuietButton("احذف المحدَّد");
+        var removeButton = Theme.QuietButton("احذف المحدد");
         removeButton.Width = 155;
         removeButton.Click += (_, _) => RemoveSelected();
         layout.Controls.Add(removeButton);
@@ -495,7 +495,7 @@ public sealed class SettingsForm : Form
         // anyone to notice they selected the wrong one.
         var names = string.Join("\n", selected.Select(id => $"  • {id}  ({PermissionSummary(_model[id])})"));
         var confirm = MessageBox.Show(this,
-            $"سيُسحب الوصول من {selected.Count} حساب:\n\n{names}\n\nمتابعة؟",
+            $"سيُسحب الوصول من {selected.Count} {MainForm.ArabicCountWord(selected.Count, "حساب", "حسابان", "حسابات", "حسابًا")}:\n\n{names}\n\nمتابعة؟",
             "تأكيد الحذف", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes) return;
 
@@ -515,13 +515,14 @@ public sealed class SettingsForm : Form
 
         if (_model.Count == 0)
         {
-            _accountsSummary.Text = "لا حسابات بعد - لن يستطيع أحد استخدام البوت.";
+            _accountsSummary.Text = "لا حسابات بعد — لن يستطيع أحد استخدام البوت.";
             _accountsSummary.ForeColor = Theme.Stopped;
             return;
         }
+        var accountWord = MainForm.ArabicCountWord(_model.Count, "حساب", "حسابان", "حسابات", "حسابًا");
         _accountsSummary.Text = withNone > 0
-            ? $"{_model.Count} حسابًا — {joined}   {withNone} بلا أي صلاحية"
-            : $"{_model.Count} حسابًا — {joined}";
+            ? $"{_model.Count} {accountWord} — {joined}   {withNone} {MainForm.ArabicCountWord(withNone, "حساب", "حسابان", "حسابات", "حسابًا")} بلا أي صلاحية"
+            : $"{_model.Count} {accountWord} — {joined}";
         _accountsSummary.ForeColor = withNone > 0 ? Theme.Pending : Theme.TextMuted;
     }
 
@@ -642,7 +643,7 @@ public sealed class SettingsForm : Form
         if (orphans.Count > 0)
         {
             var answer = MessageBox.Show(this,
-                $"{orphans.Count} حساب بلا أي صلاحية:\n\n  {string.Join("\n  ", orphans)}\n\n" +
+                $"{orphans.Count} {MainForm.ArabicCountWord(orphans.Count, "حساب", "حسابان", "حسابات", "حسابًا")} بلا أي صلاحية:\n\n  {string.Join("\n  ", orphans)}\n\n" +
                 "لن تُحفظ هذه الحسابات لأنها لا تنتمي إلى أي قائمة.\n\nمتابعة الحفظ بدونها؟",
                 "حسابات بلا صلاحيات", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (answer != DialogResult.Yes) return false;

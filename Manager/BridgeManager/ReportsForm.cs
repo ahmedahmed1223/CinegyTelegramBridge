@@ -25,6 +25,7 @@ public sealed class ReportsForm : Form
     private readonly string _bridgeRoot;
     private readonly int _errorsLastHour;
     private readonly BarChart _chart = new();
+    private readonly Label _usageFootnote;
     private readonly Panel _usagePage = new() { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(14, 6, 14, 10) };
     private readonly Panel _healthPage = new() { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(18, 6, 18, 10), AutoScroll = true, Visible = false };
     private readonly CheckBox _usageChip;
@@ -34,6 +35,9 @@ public sealed class ReportsForm : Form
     private readonly Label _watchdogValue;
     private readonly Label _giveupsValue;
     private readonly Label _errorsValue;
+    private readonly Panel _watchdogAccent;
+    private readonly Panel _giveupsAccent;
+    private readonly Panel _errorsAccent;
     private readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 200 };
 
     public ReportsForm(string bridgeRoot, int errorsLastHour)
@@ -74,19 +78,23 @@ public sealed class ReportsForm : Form
         switchRow.Controls.AddRange(new Control[] { _usageChip, _healthChip });
 
         var usageHint = new Label { Dock = DockStyle.Top, Height = 20, Text = "مرتبة بالأكثر نشرًا، من عدّاد الجسر.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
+        _usageFootnote = new Label { Dock = DockStyle.Bottom, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleRight };
         _chart.Dock = DockStyle.Fill;
         _chart.EmptyText = "لا استخدام مسجل بعد.";
         _usagePage.Controls.Add(_chart);
         _usagePage.Controls.Add(usageHint);
+        _usagePage.Controls.Add(_usageFootnote);
 
         var healthHint = new Label { Dock = DockStyle.Top, Height = 20, Text = "إقلاعات اليوم من سجل المدير، والأخطاء من الساعة الأخيرة.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
-        _healthPage.Controls.Add(healthHint);
+        var statsFlow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(0, 8, 0, 4) };
+        (_startsValue, _) = StatTile(statsFlow, "إقلاعات الجسر اليوم", Theme.Accent);
+        (_stopsValue, _) = StatTile(statsFlow, "إيقافات يدوية اليوم", Theme.Accent);
+        (_watchdogValue, _watchdogAccent) = StatTile(statsFlow, "إعادة تشغيل لكشف التعليق", Theme.Border);
+        (_giveupsValue, _giveupsAccent) = StatTile(statsFlow, "توقف متكرر أوقف التلقائي", Theme.Border);
+        (_errorsValue, _errorsAccent) = StatTile(statsFlow, "أخطاء الساعة الأخيرة", Theme.Border);
+        _healthPage.Controls.Add(statsFlow);
         // Added bottom-up: DockStyle.Top stacks in reverse addition order.
-        _errorsValue = StatLine(_healthPage, "أخطاء الساعة الأخيرة");
-        _giveupsValue = StatLine(_healthPage, "توقف متكرر أوقف التلقائي");
-        _watchdogValue = StatLine(_healthPage, "إعادة تشغيل لكشف التعليق");
-        _stopsValue = StatLine(_healthPage, "إيقافات يدوية اليوم");
-        _startsValue = StatLine(_healthPage, "إقلاعات الجسر اليوم");
+        _healthPage.Controls.Add(healthHint);
 
         var buttons = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Theme.Surface, Padding = new Padding(18, 12, 18, 12) };
         var buttonFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
@@ -116,15 +124,24 @@ public sealed class ReportsForm : Form
         _healthPage.Visible = page == _healthPage;
     }
 
-    private static Label StatLine(Control parent, string caption)
+    /// <summary>
+    /// One stability metric as a card: a big number over a caption, with a
+    /// thin top bar carrying the colour. The bar starts at <paramref
+    /// name="accentColor"/> and Reload() repaints it once real counts are
+    /// known, so a stack of five equal-weight numbers reads instead as one
+    /// calm signal and two or three that want a glance.
+    /// </summary>
+    private static (Label Value, Panel Accent) StatTile(Control parent, string caption, Color accentColor)
     {
-        var row = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Color.Transparent };
-        var value = new Label { Dock = DockStyle.Left, Width = 90, Text = "—", Font = Theme.UiBold, ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft };
-        var name = new Label { Dock = DockStyle.Fill, Text = caption, Font = Theme.Ui, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleRight };
-        row.Controls.Add(value);
-        row.Controls.Add(name);
-        parent.Controls.Add(row);
-        return value;
+        var tile = new Panel { Width = 168, Height = 92, BackColor = Theme.Surface, Margin = new Padding(0, 0, 10, 10) };
+        var name = new Label { Dock = DockStyle.Fill, Text = caption, Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.TopCenter, Padding = new Padding(8, 0, 8, 10) };
+        var value = new Label { Dock = DockStyle.Top, Height = 46, Text = "—", Font = Theme.Title, ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleCenter };
+        var accent = new Panel { Dock = DockStyle.Top, Height = 3, BackColor = accentColor };
+        tile.Controls.Add(name);
+        tile.Controls.Add(value);
+        tile.Controls.Add(accent);
+        parent.Controls.Add(tile);
+        return (value, accent);
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -139,7 +156,12 @@ public sealed class ReportsForm : Form
         {
             var names = OnAirForm.ReadTemplateNames(ReadSharedFile(Path.Combine(_bridgeRoot, "templates.json")));
             var usage = ParseUsageFile(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "usage.json")));
-            _chart.SetData(BuildUsageBars(usage, key => names.TryGetValue(key, out var friendly) ? friendly : key));
+            var bars = BuildUsageBars(usage, key => names.TryGetValue(key, out var friendly) ? friendly : key);
+            _chart.SetData(bars);
+            // The chart caps at eight bars; the ninth template down must be
+            // named, not silently missing.
+            var hidden = Math.Max(0, usage.Count - bars.Count);
+            _usageFootnote.Text = hidden == 0 ? "" : $"يعرض أول 8 من {usage.Count}.";
 
             var logLines = ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "manager.log"))?
                 .Split('\n') ?? Array.Empty<string>();
@@ -150,6 +172,10 @@ public sealed class ReportsForm : Form
             _giveupsValue.Text = summary.GiveUps.ToString(CultureInfo.CurrentCulture);
             _errorsValue.Text = _errorsLastHour.ToString(CultureInfo.CurrentCulture);
             _errorsValue.ForeColor = _errorsLastHour == 0 ? Theme.Running : Theme.Stopped;
+            // Calm when zero, coloured only when the number says look here.
+            _watchdogAccent.BackColor = summary.WatchdogRestarts == 0 ? Theme.Running : Theme.Pending;
+            _giveupsAccent.BackColor = summary.GiveUps == 0 ? Theme.Running : Theme.Stopped;
+            _errorsAccent.BackColor = _errorsLastHour == 0 ? Theme.Running : Theme.Stopped;
         }
         catch { /* a half-written file keeps the previous report, never a crash */ }
     }

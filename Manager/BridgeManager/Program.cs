@@ -359,6 +359,13 @@ internal static class SelfTest
             OnAirForm.ReadAliases("{\"7275359265\":\"ابو حسام\"}")["7275359265"] == "ابو حسام");
         Check("a torn alias file means raw ids", OnAirForm.ReadAliases("{oops").Count == 0);
 
+        // One noun, four numbers: the rule behind every corrected screen line.
+        Check("one takes the singular", MainForm.ArabicCountWord(1, "خطأ", "خطآن", "أخطاء", "خطأً") == "خطأ");
+        Check("two takes the dual", MainForm.ArabicCountWord(2, "خطأ", "خطآن", "أخطاء", "خطأً") == "خطآن");
+        Check("three-to-ten takes the plural", MainForm.ArabicCountWord(5, "دقيقة", "دقيقتان", "دقائق", "دقيقة") == "دقائق");
+        Check("eleven and up takes the singular again", MainForm.ArabicCountWord(11, "ساعة", "ساعتان", "ساعات", "ساعة") == "ساعة");
+        Check("zero takes the singular", MainForm.ArabicCountWord(0, "رسالة", "رسالتان", "رسائل", "رسالة") == "رسالة");
+
         // --- the reports window -----------------------------------------------
         var usage = ReportsForm.ParseUsageFile("{\"urgent\":{\"Count\":10,\"LastUsedUtc\":\"2026-09-12T08:37:11.185Z\"},\"logo\":{\"Count\":5}}");
         Check("ranks templates most-published first",

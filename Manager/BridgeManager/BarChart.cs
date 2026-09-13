@@ -56,17 +56,20 @@ internal sealed class BarChart : Control
         using var valueBrush = new SolidBrush(Theme.TextMuted);
         using var trackBrush = new SolidBrush(Theme.SurfaceAlt);
         using var fillBrush = new SolidBrush(Theme.Accent);
-        using var near = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near };
-        using var far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near };
+        using var near = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        using var far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
 
         // RightToLeft.Yes mirrors Near/Far for us: Near is the leading (right)
-        // edge. One code path paints correctly in both directions.
+        // edge. Label and value get their own thirds of the line, so a long
+        // template name meets "357 مرة" with an ellipsis, not a collision.
         var y = Pad;
+        var labelWidth = (Width - Pad * 2) * 0.62f;
         foreach (var bar in _bars)
         {
-            var labelRect = new RectangleF(Pad, y, Width - Pad * 2, 22);
+            var labelRect = new RectangleF(Width - Pad - labelWidth, y, labelWidth, 22);
+            var valueRect = new RectangleF(Pad, y, Width - Pad * 2 - labelWidth - 8, 22);
             g.DrawString(bar.Label, Theme.UiBold, labelBrush, labelRect, near);
-            g.DrawString(bar.Value, Theme.UiSmall, valueBrush, labelRect, far);
+            g.DrawString(bar.Value, Theme.UiSmall, valueBrush, valueRect, far);
 
             var track = new RectangleF(Pad, y + 26, Width - Pad * 2, BarHeight);
             g.FillRectangle(trackBrush, track);

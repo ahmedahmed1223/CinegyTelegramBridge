@@ -394,6 +394,13 @@ internal static class SelfTest
         Check("counts watchdog restarts", stability.WatchdogRestarts == 1);
         Check("counts crash-loop give-ups", stability.GiveUps == 1);
 
+        var health = ReportsForm.ParseHealthSnapshot(
+            "{\"GeneratedUtc\":\"2026-09-13T17:00:00Z\",\"Rows\":[{\"Name\":\"Telegram\",\"Icon\":\"🟢\",\"Detail\":\"متصل\"},{\"Name\":\"Cinegy\",\"Icon\":\"🔴\",\"Detail\":\"غير سليم\"}]}");
+        Check("reads every live health row", health.Rows.Count == 2 && health.Rows[1].Name == "Cinegy" && health.Rows[1].Icon == "🔴");
+        Check("reads the snapshot timestamp", health.GeneratedUtc == new DateTime(2026, 9, 13, 17, 0, 0, DateTimeKind.Utc));
+        Check("a missing snapshot file is an empty report, not an error", ReportsForm.ParseHealthSnapshot(null).Rows.Count == 0);
+        Check("a torn snapshot file is an empty report, not an error", ReportsForm.ParseHealthSnapshot("{oops").Rows.Count == 0);
+
         // A fault inside the one-second clock timer is caught, reported, and
         // thrown again on the next tick. Unguarded, that is one modal dialog
         // per second - faster than an operator can dismiss them - while the

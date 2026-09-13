@@ -526,6 +526,36 @@ function Get-BridgeHealthRows {
     return $rows
 }
 
+function Save-HealthSnapshot {
+    <#
+        Writes the same rows "🩺 مركز صحة النظام" shows an admin to
+        logs/health-snapshot.json, throttled like Save-UsageCounts (60s, not
+        every tick) since disk-free and file-size checks are not free.
+
+        BridgeManager is a separate .NET process that only ever sees this
+        process's uptime (from manager.log) and template usage counts - it has
+        no way to know Telegram disconnected, Cinegy went unhealthy, or the
+        output monitor has an active alarm while the process itself stays up.
+        This file is that bridge, read-only, no new port or IPC.
+    #>
+    if (((Get-Date) - $script:LastHealthSnapshotFlush).TotalSeconds -lt 60) { return }
+    $script:LastHealthSnapshotFlush = Get-Date
+    try {
+        $diagnostics = Get-BridgeDiagnosticsSnapshot
+        $warnings = @(Get-DiagnosticWarnings -Snapshot $diagnostics `
+                -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
+                -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
+                -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
+        $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot $diagnostics -Warnings $warnings)
+        $payload = [ordered]@{
+            GeneratedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Rows         = @($rows | ForEach-Object { [ordered]@{ Name = [string]$_.Name; Icon = [string]$_.Icon; Detail = [string]$_.Detail } })
+        }
+        Write-BridgeValidatedJson -Path $script:healthSnapshotFile -Json ($payload | ConvertTo-Json -Depth 4) | Out-Null
+    }
+    catch { Write-BridgeLog "Could not write health-snapshot.json: $($_.Exception.Message)" "WARN" }
+}
+
 function Get-BridgeHealthCenterBlocks {
     <#
         The health screen as a table, so the state column can be read down.

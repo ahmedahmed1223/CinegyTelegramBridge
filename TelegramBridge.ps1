@@ -634,6 +634,11 @@ $script:DeadChatStrikes = @{}
 # Restart-storm history: timestamps of recent startups so one notice, not a
 # rule, fires when release work restarts the bridge several times a day.
 $script:startupHistoryFile = Join-Path $logDir "startup-history.json"
+# Mirrors "🩺 مركز صحة النظام" for BridgeManager, a separate process that
+# otherwise only sees process uptime and template usage - never whether
+# Telegram or Cinegy are actually healthy. Refreshed on a tick, not on demand.
+$script:healthSnapshotFile = Join-Path $logDir "health-snapshot.json"
+$script:LastHealthSnapshotFlush = [datetime]::MinValue
 $script:accessGuardFile = Join-Path $logDir "access-guard.json"
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"

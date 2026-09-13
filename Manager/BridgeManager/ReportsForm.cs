@@ -21,6 +21,8 @@ public sealed class ReportsForm : Form
 {
     internal sealed record TemplateUsage(string Key, int Count, DateTime? LastUsedUtc);
     internal sealed record StabilitySummary(int Starts, int ManualStops, int WatchdogRestarts, int GiveUps);
+    internal sealed record HealthRow(string Name, string Icon, string Detail);
+    internal sealed record HealthSnapshot(DateTime? GeneratedUtc, List<HealthRow> Rows);
 
     private readonly string _bridgeRoot;
     private readonly int _errorsLastHour;
@@ -38,6 +40,7 @@ public sealed class ReportsForm : Form
     private readonly Panel _watchdogAccent;
     private readonly Panel _giveupsAccent;
     private readonly Panel _errorsAccent;
+    private readonly FlowLayoutPanel _liveHealthList = new() { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 4, 0, 8) };
     private readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 200 };
 
     public ReportsForm(string bridgeRoot, int errorsLastHour)
@@ -92,8 +95,11 @@ public sealed class ReportsForm : Form
         (_watchdogValue, _watchdogAccent) = StatTile(statsFlow, "إعادة تشغيل لكشف التعليق", Theme.Border);
         (_giveupsValue, _giveupsAccent) = StatTile(statsFlow, "توقف متكرر أوقف التلقائي", Theme.Border);
         (_errorsValue, _errorsAccent) = StatTile(statsFlow, "أخطاء الساعة الأخيرة", Theme.Border);
-        _healthPage.Controls.Add(statsFlow);
+        var liveHealthHeading = new Label { Dock = DockStyle.Top, Height = 26, Text = "🩺 حالة الأنظمة الحية (من الجسر)", Font = Theme.SectionHeading, ForeColor = Theme.Text };
         // Added bottom-up: DockStyle.Top stacks in reverse addition order.
+        _healthPage.Controls.Add(_liveHealthList);
+        _healthPage.Controls.Add(liveHealthHeading);
+        _healthPage.Controls.Add(statsFlow);
         _healthPage.Controls.Add(healthHint);
 
         var buttons = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Theme.Surface, Padding = new Padding(18, 12, 18, 12) };
@@ -176,6 +182,23 @@ public sealed class ReportsForm : Form
             _watchdogAccent.BackColor = summary.WatchdogRestarts == 0 ? Theme.Running : Theme.Pending;
             _giveupsAccent.BackColor = summary.GiveUps == 0 ? Theme.Running : Theme.Stopped;
             _errorsAccent.BackColor = _errorsLastHour == 0 ? Theme.Running : Theme.Stopped;
+
+            var live = ParseHealthSnapshot(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "health-snapshot.json")));
+            _liveHealthList.Controls.Clear();
+            if (live.Rows.Count == 0)
+            {
+                _liveHealthList.Controls.Add(new Label { AutoSize = true, Font = Theme.UiSmall, ForeColor = Theme.TextMuted, Text = "بلا بيانات حالة حيّة بعد — يحتاج جسرًا بإصدار يكتب health-snapshot.json." });
+            }
+            else
+            {
+                if (live.GeneratedUtc is DateTime generated && DateTime.UtcNow - generated > TimeSpan.FromMinutes(5))
+                {
+                    var age = DateTime.UtcNow - generated;
+                    _liveHealthList.Controls.Add(new Label { AutoSize = true, Font = Theme.UiSmall, ForeColor = Theme.Pending, Text = $"⚠️ آخر تحديث منذ {MainForm.FormatSpan(age)} — الجسر قد يكون متوقفًا عن الكتابة." });
+                }
+                foreach (var row in live.Rows)
+                    _liveHealthList.Controls.Add(new Label { AutoSize = true, Font = Theme.Ui, ForeColor = Theme.Text, Text = $"{row.Icon}  {row.Name} — {row.Detail}" });
+            }
         }
         catch { /* a half-written file keeps the previous report, never a crash */ }
     }
@@ -216,6 +239,41 @@ public sealed class ReportsForm : Form
         catch { /* torn file - an empty report beats a half one */ }
         items.Sort((a, b) => b.Count.CompareTo(a.Count));
         return items;
+    }
+
+    /// <summary>
+    /// The bridge's own "🩺 مركز صحة النظام" rows, mirrored to
+    /// logs/health-snapshot.json. This is the one place BridgeManager learns
+    /// whether Telegram or Cinegy are actually healthy - everything else on
+    /// this screen is inferred from this process's own log, which says
+    /// nothing about the bridge process once it has started.
+    /// </summary>
+    internal static HealthSnapshot ParseHealthSnapshot(string? json)
+    {
+        var rows = new List<HealthRow>();
+        DateTime? generated = null;
+        try
+        {
+            var root = JsonNode.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json) as JsonObject;
+            if (root is null) return new HealthSnapshot(null, rows);
+            var stamp = (string?)root["GeneratedUtc"];
+            if (!string.IsNullOrWhiteSpace(stamp) &&
+                DateTime.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+                generated = parsed.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
+                    : parsed.ToUniversalTime();
+            if (root["Rows"] is JsonArray array)
+            {
+                foreach (var node in array)
+                {
+                    var name = (string?)node?["Name"] ?? "";
+                    if (name.Length == 0) continue;
+                    rows.Add(new HealthRow(name, (string?)node?["Icon"] ?? "", (string?)node?["Detail"] ?? ""));
+                }
+            }
+        }
+        catch { /* torn file - no live rows beats a crash */ }
+        return new HealthSnapshot(generated, rows);
     }
 
     /// <summary>Usage rows ready for paint: fractions against the leader, at most eight bars.</summary>

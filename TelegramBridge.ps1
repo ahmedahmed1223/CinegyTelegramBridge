@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.26.2'
+$script:BridgeVersion = '8.26.3'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -631,6 +631,7 @@ $script:userProfilesFile = Join-Path $logDir "user-profiles.json"
 $script:deadChatsFile = Join-Path $logDir "dead-chats.json"
 $script:DeadChats = @{}
 $script:DeadChatStrikes = @{}
+$script:LastDeadChatsSweep = [datetime]::MinValue
 # Restart-storm history: timestamps of recent startups so one notice, not a
 # rule, fires when release work restarts the bridge several times a day.
 $script:startupHistoryFile = Join-Path $logDir "startup-history.json"

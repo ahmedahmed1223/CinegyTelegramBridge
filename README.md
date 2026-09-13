@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.3
+
+Two follow-ups from the earlier security/performance review: `Complete-StreamUrl`
+now rejects any RTMP destination that doesn't start with `rtmp://`/`rtmps://`
+(ffmpeg resolves its output protocol from the URL scheme itself), and
+`Get-BridgeHealthRows` — read by both the bot's health-center screen and
+`health-snapshot.json` — now reports the dead-chat quarantine count as its
+own row, so BridgeManager's stability tab picks it up automatically. Also
+throttled `Update-DeadChatsSweep`, the one tick step with no self-throttle
+guard.
+
 ## Version 8.26.2
 
 A documentation-and-UI pass requested after the security review. `Get-ArabicCountNoun`

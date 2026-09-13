@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.2
+
+A documentation-and-UI pass requested after the security review. `Get-ArabicCountNoun`
+existed since 8.25.1 but was only used in a few places; this sweep found and
+fixed roughly 30 hardcoded number+noun constructions across 16 files in
+`Parts/` (reminders, schedule notices, news-lock timers, list headers,
+health-center rows, reports, the bulletin loop-fit warning, restart-storm
+alerts) that used a fixed noun form regardless of count. Also added three
+paragraphs to the bot's own guide for shipped-but-undocumented features:
+the material-schedule button, the shift-handover button, and shift
+readiness / manual quiet-hours.
+
 ## Version 8.26.1
 
 A security-review fix: the snapshot cooldown was keyed off a capture's

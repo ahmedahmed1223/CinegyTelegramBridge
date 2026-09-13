@@ -970,6 +970,14 @@ function Complete-StreamUrl {
         Send-TelegramMessage -ChatId $ChatId -Text "لم يتم إدخال رابط، لم يتغيّر شيء." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
         return
     }
+    # ffmpeg resolves the output protocol from the URL scheme itself, so a
+    # non-rtmp value (file://, concat:, a pipe) would redirect the relay's
+    # output away from the network. Admin-only already, but the allowlist
+    # costs nothing and closes it outright rather than trusting intent.
+    if ($trimmed -notmatch '^rtmps?://') {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ الرابط يجب أن يبدأ بـ rtmp:// أو rtmps://." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
+        return
+    }
     $ls = Get-LiveStreamConfig
     $ls | Add-Member -NotePropertyName 'RtmpDestination' -NotePropertyValue $trimmed -Force
     Save-Config

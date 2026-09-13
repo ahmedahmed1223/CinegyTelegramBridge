@@ -80,7 +80,13 @@ function Update-DeadChatsSweep {
         ever make - the operator moved on, the chat moved on. It leaves with
         an audit line, not silently, and the file is rewritten only when
         something actually left.
+
+        Throttled like every other tick watchdog: the only step in
+        Invoke-BridgeTick that scanned its whole collection and parsed a date
+        per entry on every single tick instead of every few minutes.
     #>
+    if (((Get-Date) - $script:LastDeadChatsSweep).TotalMinutes -lt 10) { return }
+    $script:LastDeadChatsSweep = Get-Date
     $cutoff = (Get-Date).AddDays(-30)
     $removed = @()
     foreach ($id in @($script:DeadChats.Keys)) {

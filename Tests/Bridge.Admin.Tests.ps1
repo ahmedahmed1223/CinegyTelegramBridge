@@ -1650,13 +1650,13 @@ Describe 'The health screen can be read down its state column' {
     }
 
     It 'gives every subsystem a row, with the glyph in a column of its own' {
-        # Seven sentences each starting with a coloured circle is parsed one
+        # Eight sentences each starting with a coloured circle is parsed one
         # line at a time; a column of them is scanned in one movement, which
         # is the whole job of this screen.
         $table = @(@(Get-BridgeHealthCenterBlocks -Warnings @()) | Where-Object { $_.type -eq 'table' })[0]
 
         @($table.cells[0]).Count | Should -Be 3
-        @($table.cells).Count | Should -Be 8
+        @($table.cells).Count | Should -Be 9
         foreach ($row in @($table.cells | Select-Object -Skip 1)) {
             @($row)[1].text | Should -BeIn @('🟢', '🟠', '🔴')
         }

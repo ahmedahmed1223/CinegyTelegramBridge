@@ -1677,8 +1677,9 @@ public sealed class MainForm : Form
     private void UpdateStatusBar()
     {
         var filtering = _errorsOnlyCheck.Checked || !string.IsNullOrWhiteSpace(_filterBox.Text);
+        var trimmedFilter = _filterBox.Text.Trim();
         _lineCountLabel.Text = filtering
-            ? $"المعروض: {_lines.Count(l => ShouldShow(l, _filterBox.Text, _errorsOnlyCheck.Checked))} من {_lines.Count}"
+            ? $"المعروض: {_lines.Count(l => ShouldShow(l, trimmedFilter, _errorsOnlyCheck.Checked))} من {_lines.Count}"
             : $"الأسطر: {_lines.Count}";
 
         if (!_watchdogCheck.Checked) _livenessLabel.Text = "كشف التعليق: معطّل";
@@ -1853,7 +1854,7 @@ public sealed class MainForm : Form
     {
         if (IsDisposed) return;
 
-        var filter = _filterBox.Text;
+        var filter = _filterBox.Text.Trim();
         var errorsOnly = _errorsOnlyCheck.Checked;
         var appended = false;
         var trimNeeded = false;
@@ -1967,7 +1968,10 @@ public sealed class MainForm : Form
 
     private void RenderAll()
     {
-        var filter = _filterBox.Text;
+        // Trimmed once here rather than inside ShouldShow's hot loop below,
+        // which used to re-trim the same string per line across up to
+        // MaxOutputLines retained lines on every redraw.
+        var filter = _filterBox.Text.Trim();
         var errorsOnly = _errorsOnlyCheck.Checked;
 
         // Repainting per line while rebuilding a couple of thousand of them is

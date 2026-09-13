@@ -995,6 +995,34 @@ Describe 'Capture failure logging' {
     }
 }
 
+Describe 'RTMP destination is scheme-locked' {
+    <#
+        ffmpeg resolves its output protocol from the URL scheme itself, so a
+        non-rtmp value would redirect the live relay's output off the network
+        (file://, concat:, a pipe). Admin-only already, but the allowlist is
+        a one-line hardening found during a 2026-09-13 security review.
+    #>
+    BeforeEach {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Set-PendingState -ChatId 500 -State @{ Mode = 'stream_url'; UserId = 500 }
+    }
+
+    It 'refuses a value that is not rtmp or rtmps' {
+        Complete-StreamUrl -ChatId 500 -Value 'file:///etc/passwd'
+
+        Should -Invoke Save-Config -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*rtmp://*' }
+    }
+
+    It 'accepts a real rtmp destination' {
+        Set-PendingState -ChatId 501 -State @{ Mode = 'stream_url'; UserId = 501 }
+        Complete-StreamUrl -ChatId 501 -Value 'rtmps://dc.pscp.tv:443/x/key'
+
+        Should -Invoke Save-Config -Times 1 -Exactly
+    }
+}
+
 Describe 'Snapshot capture stays to one in flight' {
     <#
         SnapshotCooldownSeconds only blocks a repeat request once the PRIOR

@@ -514,6 +514,13 @@ function Get-BridgeHealthRows {
     $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
     else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
 
+    # D1: quarantined chats are invisible everywhere except 👥 المستخدمون -
+    # BridgeManager mirrors this same row list (Save-HealthSnapshot), so this
+    # is the cheapest way to put that count somewhere the desk actually looks.
+    $deadChatsCount = $script:DeadChats.Count
+    $rows += if ($deadChatsCount -eq 0) { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟢'; Detail = 'لا شيء' } }
+    else { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟠'; Detail = Get-ArabicCountNoun -Count $deadChatsCount -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' } }
+
     $recentErrors = @()
     foreach ($service in @('Telegram', 'Cinegy')) {
         $history = $script:HealthHistory[$service]

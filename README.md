@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.1
+
+A security-review fix: the snapshot cooldown was keyed off a capture's
+*completion* time, so a burst of taps inside the few-second capture window
+itself could each spawn a concurrent `ffmpeg` process against the live
+source from any allowlisted (non-admin) account. `Start-SnapshotJob` now
+refuses a new request outright while one is already in flight.
+
 ## Version 8.26.0
 
 BridgeManager (the desktop supervisor) now shows the bridge's own live

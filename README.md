@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.0
+
+BridgeManager (the desktop supervisor) now shows the bridge's own live
+health, not just its process uptime: the bridge mirrors its "🩺 مركز صحة
+النظام" rows (Telegram connection, Cinegy health, output monitor, relay,
+storage, schedule) to `logs/health-snapshot.json` every ~60s, and the
+manager's stability tab reads it, flagging the data as stale past five
+minutes. That tab also moved from five equal-weight numbers to colour-coded
+cards, a template-name/usage-count overlap in the usage chart is fixed, and
+every count across both manager windows now uses correct Arabic noun
+agreement instead of a fixed plural.
+
 ## Version 8.25.2
 
 The news lock hand-over request now survives a restart: it is persisted

@@ -995,6 +995,51 @@ Describe 'Capture failure logging' {
     }
 }
 
+Describe 'Snapshot capture stays to one in flight' {
+    <#
+        SnapshotCooldownSeconds only blocks a repeat request once the PRIOR
+        job has finished (Update-SnapshotJobs sets LastSnapshotAt there) - a
+        burst of taps inside the capture window itself used to sail straight
+        past that check and spawn a fresh ffmpeg per tap, from any allowlisted
+        account, not just an admin. Found by security review 2026-09-13.
+    #>
+    BeforeEach {
+        $script:SnapshotJobs.Clear()
+        $script:LastSnapshotAt = [datetime]::MinValue
+        $script:LastSnapshotFile = $null
+    }
+
+    It 'refuses a second capture while one is still running' {
+        Mock Send-TelegramMessage {}
+        Mock Start-BridgeMediaProcess { [pscustomobject]@{ Id = 1; HasExited = $false } }
+        $script:SnapshotJobs.Add(@{
+                Proc = [pscustomobject]@{ HasExited = $false }; ChatId = 1; UserId = 1
+                OutPath = 'x'; ErrLog = 'y'; Deadline = (Get-Date).AddSeconds(3)
+            })
+
+        Start-SnapshotJob -ChatId 2 -UserId 2
+
+        Should -Invoke Start-BridgeMediaProcess -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*قيد الالتقاط*' }
+        $script:SnapshotJobs.Count | Should -Be 1
+    }
+
+    It 'still captures normally when nothing is in flight' {
+        Mock Send-TelegramMessage {}
+        Mock Get-FfmpegPath { 'ffmpeg.exe' }
+        Mock Start-BridgeMediaProcess { [pscustomobject]@{ Id = 99; HasExited = $false } }
+        $previousLiveStream = $config.LiveStream
+        $config.LiveStream = [pscustomobject]@{ SourceType = 'm3u8'; SourceUrl = 'https://primary.example/stream.m3u8' }
+        try {
+            Start-SnapshotJob -ChatId 3 -UserId 3
+        }
+        finally { $config.LiveStream = $previousLiveStream }
+
+        Should -Invoke Start-BridgeMediaProcess -Times 1 -Exactly
+        $script:SnapshotJobs.Count | Should -Be 1
+    }
+}
+
 
 Describe 'The material on air and its schedule' {
     # The programme under the graphics. Read-only, and the bridge knew nothing

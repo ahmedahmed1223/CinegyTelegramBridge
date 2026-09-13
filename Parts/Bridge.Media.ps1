@@ -137,8 +137,13 @@ function Get-FfmpegInputArguments {
 function Start-SnapshotJob {
     <# Kicks off a one-frame ffmpeg grab and returns immediately. The result is
        delivered later by Update-SnapshotJobs. Within SnapshotCooldownSeconds
-       the previous frame is re-sent instead of spawning ffmpeg again, which
-       keeps repeated taps from loading the playout machine's CPU. #>
+       the previous frame is re-sent instead of spawning ffmpeg again - but
+       that check is keyed off LastSnapshotAt, which Update-SnapshotJobs only
+       sets once a job *finishes*. A burst of taps inside the capture window
+       (SnapshotTimeoutSeconds, a few seconds) would all pass the cooldown
+       check and each spawn their own ffmpeg against the live source, from
+       any allowlisted account - not just an admin. The in-flight guard below
+       catches exactly that gap: at most one capture runs at a time. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
 
@@ -153,6 +158,11 @@ function Start-SnapshotJob {
         Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
             -Caption "📸 آخر لقطة ($([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) ثانية مضت)`n📡 المصدر: $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)" `
             -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+
+    if ($script:SnapshotJobs.Count -gt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⏳ لقطة أخرى قيد الالتقاط الآن - انتظر لحظات ثم أعد المحاولة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 

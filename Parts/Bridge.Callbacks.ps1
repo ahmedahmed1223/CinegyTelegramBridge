@@ -278,7 +278,7 @@ function Invoke-CallbackQuery {
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
         }
-        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Clear-NewsLockReservation;$script:NewsLockRequest=$null;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
+        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Clear-NewsLockReservation;$script:NewsLockRequest=$null;Save-NewsLockRequest|Out-Null;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
         'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm';style='danger'},@{text='إلغاء';callback_data='news:refresh'}))};break }
         'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
         'news:backups' { Send-TelegramMessage -ChatId $chatId -Text (Get-NewsTickerBackupsText) -ParseMode HTML -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }

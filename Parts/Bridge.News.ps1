@@ -305,6 +305,50 @@ function Resolve-NewsPublishConflict {
     return (Publish-NewsTickerDraft -UserId $UserId)
 }
 
+function Save-NewsLockRequest {
+    <# Persists the pending hand-over request beside the draft. The request
+       used to live only in memory while the draft it is about survives
+       restarts on disk: a restart inside the answer window killed the
+       request silently, and the requester who was promised an automatic
+       grant waited on nothing. No state, no file. #>
+    if ([string]::IsNullOrWhiteSpace($script:newsLockRequestFile)) { return $false }
+    try {
+        if (-not $script:NewsLockRequest) {
+            Remove-Item -LiteralPath $script:newsLockRequestFile -Force -ErrorAction SilentlyContinue
+            return $true
+        }
+        $json = $script:NewsLockRequest | ConvertTo-Json -Depth 8
+        $parent = Split-Path -Parent $script:newsLockRequestFile
+        if (-not (Test-Path -LiteralPath $parent)) { [IO.Directory]::CreateDirectory($parent) | Out-Null }
+        $temp = "$script:newsLockRequestFile.$([guid]::NewGuid().ToString('N')).tmp"
+        [IO.File]::WriteAllText($temp, $json, [Text.UTF8Encoding]::new($true))
+        [IO.File]::Move($temp, $script:newsLockRequestFile, $true)
+        return $true
+    } catch { Write-BridgeLog "Could not save news lock request: $($_.Exception.Message)" 'ERROR'; return $false }
+}
+
+function Import-NewsLockRequest {
+    <# Restores a request that outlived a restart. An already-expired window
+       is kept, not discarded: the next tick grants it, because silence
+       across a restart is still silence. A file that is not a request is
+       discarded — a corrupt hand-over must not block the ticker. #>
+    if ([string]::IsNullOrWhiteSpace($script:newsLockRequestFile)) { return }
+    if (-not (Test-Path -LiteralPath $script:newsLockRequestFile)) { return }
+    try {
+        $read = Get-Content -LiteralPath $script:newsLockRequestFile -Raw | ConvertFrom-Json -AsHashtable
+        if (-not $read -or -not $read.ContainsKey('RequesterUserId') -or -not $read.ContainsKey('OwnerUserId') -or -not $read.ContainsKey('RequestedAt')) {
+            throw 'not a lock request'
+        }
+        $stamp = [datetime]$read['RequestedAt']
+        $script:NewsLockRequest = @{
+            RequesterUserId = [long]$read['RequesterUserId']; RequesterChatId = [long](Get-JsonProp $read 'RequesterChatId')
+            OwnerUserId = [long]$read['OwnerUserId']; OwnerChatId = [long](Get-JsonProp $read 'OwnerChatId')
+            RequestedAt = $stamp
+        }
+        Write-BridgeLog "Restored a pending news lock request from $($read['RequesterUserId']) (requested $stamp)"
+    } catch { Write-BridgeLog "Could not load news lock request: $($_.Exception.Message)" 'WARN'; $script:NewsLockRequest = $null }
+}
+
 function Request-NewsLockRelease {
     <#
         Asks the current draft owner to hand the ticker over, and takes it if
@@ -344,6 +388,7 @@ function Request-NewsLockRelease {
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
         RequestedAt = (Get-Date)
     }
+    Save-NewsLockRequest | Out-Null
     Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
     Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Format-UserAuditActor -UserId $UserId)"
 
@@ -367,6 +412,7 @@ function Complete-NewsLockRelease {
     $request = $script:NewsLockRequest
     if (-not $request) { return $false }
     $script:NewsLockRequest = $null
+    Save-NewsLockRequest | Out-Null
 
     if ($Denied) {
         Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "⛔ رفض $(Get-UserDisplayName -UserId ([long]$request.OwnerUserId)) تسليم القفل؛ ما زال يعمل على المسودة."

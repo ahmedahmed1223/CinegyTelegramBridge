@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.25.2
+
+The news lock hand-over request now survives a restart: it is persisted
+on creation, cleared on settlement, and restored at startup, so an
+answer window spanning a restart still ends in an automatic grant on the
+first tick instead of dying silently.
+
 ## Version 8.25.1
 
 A usage-digest correction driven by one live report: the ranking is now

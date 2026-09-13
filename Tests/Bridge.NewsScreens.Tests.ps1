@@ -303,6 +303,7 @@ Describe 'News lock hand-over' {
     BeforeEach {
         $script:NewsLockRequest = $null
         $script:NewsLockGrant = $null
+        $script:newsLockRequestFile = Join-Path $TestDrive 'news-lock-request.json'
         $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
         Mock Send-TelegramMessage {}
         Mock Write-BridgeLog {}
@@ -364,6 +365,42 @@ Describe 'News lock hand-over' {
         Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
         Update-NewsLockRequest
         $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'survives a restart inside the window, then grants for the requester' {
+        # The request lived only in memory while the draft it is about
+        # survives restarts on disk: a restart inside the answer window
+        # killed it silently, and the promised automatic grant never came.
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Test-Path -LiteralPath $script:newsLockRequestFile | Should -BeTrue
+
+        # A restart: memory gone, disk kept.
+        $script:NewsLockRequest = $null
+        Import-NewsLockRequest
+        [long]$script:NewsLockRequest.RequesterUserId | Should -Be 21
+        [long]$script:NewsLockRequest.OwnerUserId | Should -Be 20
+
+        # The window passes with no reply from the holder: the lock goes to
+        # the requester, the holder's text handed back, the draft gone.
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-10)
+        Update-NewsLockRequest
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -match 'نصّ مسودتك' }
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 21 -and $Text -match 'بإمكانك التحرير' }
+    }
+
+    It 'clears the persisted request once the hand-over settles' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
+        Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null
+        Test-Path -LiteralPath $script:newsLockRequestFile | Should -BeFalse
+    }
+
+    It 'discards a corrupt persisted request instead of blocking the ticker' {
+        [IO.File]::WriteAllText($script:newsLockRequestFile, 'not json{{{', [Text.UTF8Encoding]::new($true))
+        Import-NewsLockRequest
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
     }
 }
 

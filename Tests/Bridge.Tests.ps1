@@ -1197,7 +1197,7 @@ Describe 'The operation history says what happened before it says what was done'
         $blocks = @(Get-MyOperationsBlocks -UserId 101)
 
         $blocks[0].type | Should -Be 'heading'
-        $blocks[1].text | Should -Be '2 عملية · ✅ 1 · ❌ 1'
+        $blocks[1].text | Should -Be 'عمليتان · ✅ 1 · ❌ 1'
     }
 
     It 'puts the newest first, not last' {

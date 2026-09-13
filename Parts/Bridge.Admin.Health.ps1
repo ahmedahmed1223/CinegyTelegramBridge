@@ -506,12 +506,13 @@ function Get-BridgeHealthRows {
     else { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
 
     $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
-    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(@($Warnings).Count) تحذير" } }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا')" } }
     else { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
 
     $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
-    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingCount حدث قادم" } }
-    else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingCount حدث قادم" } }
+    $upcomingText = Get-ArabicCountNoun -Count $upcomingCount -One 'حدث' -Two 'حدثان' -Few 'أحداث' -Many 'حدثًا'
+    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
+    else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
 
     $recentErrors = @()
     foreach ($service in @('Telegram', 'Cinegy')) {
@@ -595,7 +596,9 @@ function Get-BridgeHealthCenterBlocks {
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
 
     $usage = Get-BridgeUsageMetrics
-    $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $($usage.OperationsToday) عملية اليوم · $($usage.ActiveOperators) مشغّل · $($usage.OnAirCount) على الهواء" }
+    $operationsText = Get-ArabicCountNoun -Count $usage.OperationsToday -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $operatorsText = Get-ArabicCountNoun -Count $usage.ActiveOperators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا'
+    $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $operationsText اليوم · $operatorsText · $($usage.OnAirCount) على الهواء" }
     return $blocks
 }
 
@@ -749,7 +752,7 @@ function Start-TemplateTestReview {
     }
     $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_test_review'; UserId=$UserId; TemplateIndex=$TemplateIndex; TestLayer=$testLayer; AutoHideSeconds=$seconds }
-    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $seconds ثانية`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
 function Get-BridgeSupervisor {

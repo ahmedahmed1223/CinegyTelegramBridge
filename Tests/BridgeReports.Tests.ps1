@@ -380,7 +380,7 @@ Describe 'A day with no edit is a row, not an absence' {
                 LastPublishedAt = [datetime]'2026-08-31T18:00'; SilentDays = 2
             } -Now ([datetime]'2026-08-31T21:00'))
 
-        @($lines | Where-Object { $_ -match 'منذ 3 ساعة' }).Count | Should -Be 1
+        @($lines | Where-Object { $_ -match 'منذ 3 ساعات' }).Count | Should -Be 1
         @($lines | Where-Object { $_ -match 'أيام بلا نشرة: 2' }).Count | Should -Be 1
     }
 

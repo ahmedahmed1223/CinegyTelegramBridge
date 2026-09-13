@@ -157,8 +157,9 @@ function Get-OperationLogBlocks {
         return $blocks + @(@{ type = 'paragraph'; text = 'لم تُسجَّل أي عملية في هذه المدة.' })
     }
 
-    $verdict = if ($data.Failed -eq 0 -and $data.Blocked -eq 0) { "🟢 $($all.Count) عملية، كلّها ناجحة" }
-    else { "🟠 $($all.Count) عملية · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)" }
+    $operationsText = Get-ArabicCountNoun -Count $all.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $verdict = if ($data.Failed -eq 0 -and $data.Blocked -eq 0) { "🟢 $operationsText، كلّها ناجحة" }
+    else { "🟠 $operationsText · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)" }
     $blocks += @{ type = 'paragraph'; text = $verdict }
 
     $trimmed = Select-RichTableRows -Items $all
@@ -225,7 +226,7 @@ function Get-OperationLogText {
         $lines.Add('<i>لم تُسجَّل أي عملية في هذه المدة.</i>')
         return ($lines -join "`n")
     }
-    $lines.Add("📊 <b>الإجمالي</b> — $($all.Count) عملية · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)")
+    $lines.Add("📊 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $all.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)")
     $lines.Add('')
     $entries = @(foreach ($record in $all) {
             $mark = switch ([string]$record.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
@@ -555,14 +556,14 @@ function Get-WorkReportText {
     # line an operator had to scroll past eleven others to reach.
     if ($data.People.Count -gt 1) {
         $t = $data.Totals
-        $lines.Add("🎬 <b>الإجمالي</b> — $($t.Total) عملية · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed))")
+        $lines.Add("🎬 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $t.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed))")
         $lines.Add("👥 <b>المشغّلون</b> — $($t.Operators)")
         $lines.Add('')
     }
 
     $personLines = @(foreach ($person in $data.People) {
             $name = ConvertTo-HtmlText (Get-AuditOperatorName -UserId $person.UserId)
-            "👤 <b>$name</b> — $($person.Total) عملية · ✅ $($person.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed))"
+            "👤 <b>$name</b> — $(Get-ArabicCountNoun -Count $person.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · ✅ $($person.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed))"
             "     $(ConvertTo-HtmlText (Get-WorkReportDetailLine -OnAir $person.OnAir -TopTarget $person.TopTarget -LastAt $person.LastAt))"
         })
     $tag = if ($data.People.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
@@ -809,7 +810,7 @@ function Get-MojazReportBlocks {
         # same bulletin apart, and it does not deserve a column of its own.
         $mark = if ($run.Kind -eq 'scheduled') { '🕒 ' } else { '' }
         $cells += , @(
-            @{ text = "$mark$([string]$run.Name) · $([int]$run.Rows) صف" }
+            @{ text = "$mark$([string]$run.Name) · $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا')" }
             @{ text = $(if ($who) { $who } else { '—' }) }
             @{ text = $started }
             @{ text = (Get-MojazRunDuration -Run $run) }
@@ -822,11 +823,11 @@ function Get-MojazReportBlocks {
     # The total counts every run in the window, not just the rows shown: it is
     # the answer to "how much ran", and trimming it to the table would make
     # the report quietly understate the day.
-    $summary = "الإجمالي: $(@($data.Runs).Count) تشغيلًا · $([int]$data.Rows) صفًّا · $($data.Operators) مشغّلين"
+    $summary = "الإجمالي: $(Get-ArabicCountNoun -Count (@($data.Runs).Count) -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا') · $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا') · $(Get-ArabicCountNoun -Count $data.Operators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا')"
     if ([int]$data.Scheduled -gt 0) { $summary += " · $([int]$data.Scheduled) بالجدولة 🕒" }
     $blocks += @{ type = 'paragraph'; text = $summary }
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $(Get-ArabicCountNoun -Count $script:ReportMaxRecords -One 'سجل' -Two 'سجلّان' -Few 'سجلّات' -Many 'سجلًّا') فقط؛ اختر مدة أقصر لتقرير كامل." }
     }
     return $blocks
 }
@@ -844,14 +845,14 @@ function Get-MojazReportText {
     }
     # Totals first, runs quoted under them. The two rows of "━━━" were a
     # drawing of the separation a blockquote actually makes.
-    $lines.Add("📊 <b>الإجمالي</b> — $($runs.Count) تشغيلًا · $([int]$data.Rows) صفًّا")
+    $lines.Add("📊 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $runs.Count -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا') · $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا')")
     $lines.Add('')
 
     $runLines = @(foreach ($run in $runs) {
             $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
             $who = ConvertTo-HtmlText (Get-AuditOperatorName -UserId ([string]$run.UserId))
             $mark = if ($run.Kind -eq 'scheduled') { '🕒' } else { '▶️' }
-            "$mark $started · <b>$(ConvertTo-HtmlText ([string]$run.Name))</b> · $([int]$run.Rows) صف · $(ConvertTo-HtmlText (Get-MojazRunDuration -Run $run))"
+            "$mark $started · <b>$(ConvertTo-HtmlText ([string]$run.Name))</b> · $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا') · $(ConvertTo-HtmlText (Get-MojazRunDuration -Run $run))"
             if ($who) { "     المشغّل: $who" }
         })
     $tag = if ($runs.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
@@ -1015,9 +1016,9 @@ function Get-NewsReportHighlights {
     $lines = @()
     if ($Data.LastPublishedAt) {
         $ago = $Now - ([datetime]$Data.LastPublishedAt)
-        $since = if ($ago.TotalMinutes -lt 60) { "$([int]$ago.TotalMinutes) دقيقة" }
-        elseif ($ago.TotalHours -lt 24) { "$([int]$ago.TotalHours) ساعة" }
-        else { "$([int]$ago.TotalDays) يومًا" }
+        $since = if ($ago.TotalMinutes -lt 60) { Get-ArabicCountNoun -Count ([int]$ago.TotalMinutes) -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' }
+        elseif ($ago.TotalHours -lt 24) { Get-ArabicCountNoun -Count ([int]$ago.TotalHours) -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة' }
+        else { Get-ArabicCountNoun -Count ([int]$ago.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا' }
         $lines += "🕒 آخر نشرة: $(([datetime]$Data.LastPublishedAt).ToString('MM/dd HH:mm')) — منذ $since"
     }
     else { $lines += '🕒 لم تُنشر أي نشرة في هذه الفترة.' }

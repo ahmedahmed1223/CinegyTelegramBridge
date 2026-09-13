@@ -471,7 +471,7 @@ function Update-TemplateReminderQueue {
         $reminderId = [string](Get-JsonProp $item 'ReminderId')
         if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); $item.ReminderId = $reminderId }
         $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '✅ تمت المعالجة' "remack:$reminderId"))) }
-        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $($item.Minutes) دقيقة منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا." -ReplyMarkup $ackKeyboard
+        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا." -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
         $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
         if ($followUpMinutes -gt 0) {
@@ -1332,7 +1332,7 @@ function Get-WeeklyNoticesText {
         }
         $repeats = @($foundCauses | Sort-Object Count -Descending | Select-Object -First 5)
         if ($repeats.Count -gt 0) {
-            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $($_.Count) مرات" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $($_.Count) مرات" }) }
+            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')" }) }
             $found.Add("🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')")
         }
     }
@@ -1547,7 +1547,7 @@ function Update-MaterialEndWatchdog {
     $script:LastMaterialEndAlertId = $bareId
     $name = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $active 'Name'))
     $minutes = [math]::Max(1, [int][math]::Ceiling($left.TotalMinutes))
-    Send-AdminBroadcast -Text "⏳ المادة «$name» تنتهي بعد نحو $minutes دقائق ($($end.ToLocalTime().ToString('HH:mm'))). جهّز غرافيك الختام." -Urgent
+    Send-AdminBroadcast -Text "⏳ المادة «$name» تنتهي بعد نحو $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') ($($end.ToLocalTime().ToString('HH:mm'))). جهّز غرافيك الختام." -Urgent
     Write-BridgeLog "Material end alert: '$([string](Get-JsonProp $active 'Name'))' ends in $([int]$left.TotalMinutes)m"
 }
 
@@ -1661,7 +1661,7 @@ function Update-StaleOnAirWatchdog {
         $seen = if ($script:StaleOnAirAlerted.ContainsKey($layer)) { $script:StaleOnAirAlerted[$layer] } else { @{ Count = 0; LastAt = $now } }
         $script:StaleOnAirAlerted[$layer] = @{ Count = [int]$seen.Count + 1; LastAt = $now }
     }
-    $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $($_.Hours) ساعة" })
+    $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $(Get-ArabicCountNoun -Count $_.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة')" })
     Write-BridgeLog "Stale on-air record(s) reported: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
 
     # A button on the notice, not an instruction to go and find the layer. The
@@ -1692,7 +1692,7 @@ function Update-StaleOnAirWatchdog {
         if ($target -le 0) { $target = [long](Get-JsonProp $record 'UserId') }
         if ($target -le 0 -or $adminIds -contains $target) { continue }
         Send-TelegramMessage -ChatId $target -ParseMode HTML `
-            -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $($item.Hours) ساعة.`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
+            -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $(Get-ArabicCountNoun -Count $item.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة').`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
             -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "🙈 أخفِ طبقة $($item.Layer)" "hide:$($item.Layer)" -Style danger))) }
     }
 }

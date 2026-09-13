@@ -73,7 +73,7 @@ function Start-NewsTickerDraft {
     $reservation = Get-NewsLockReservation
     if ($reservation -and [long]$reservation.UserId -ne $UserId) {
         $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $secondsLeft ثانية بعد تسليم القفل له."}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية') بعد تسليم القفل له."}
     }
     if ($reservation) { Clear-NewsLockReservation }
     $snapshot = Get-NewsTickerConfiguredSnapshot
@@ -379,7 +379,7 @@ function Request-NewsLockRelease {
         # owner collected a new ping each time. A repeat tap now only reports
         # how long is left.
         $secondsLeft = [math]::Max(0, [int]([math]::Ceiling(($minutes * 60) - ((Get-Date) - [datetime]$existing.RequestedAt).TotalSeconds)))
-        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $secondsLeft ثانية قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية') قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
 
@@ -394,12 +394,12 @@ function Request-NewsLockRelease {
 
     if ([long]$draft.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
-            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $minutes دقيقة للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
+            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
             -ReplyMarkup @{inline_keyboard=@(,@(
                     @{text='✅ سلّم القفل';callback_data='news:lockgrant'},
                     @{text='⛔ ما زلت أعمل';callback_data='news:lockdeny'}))}
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $minutes دقيقة سيُمنح لك تلقائيًا." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') سيُمنح لك تلقائيًا." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 
@@ -450,7 +450,7 @@ function Complete-NewsLockRelease {
         Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text '🔓 سُلّم قفل شريط الأخبار وأُلغيت مسودتك.'
     }
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
-    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $hold ثانية." } else { '' }
+    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')." } else { '' }
     Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.$holdNote" `
         -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
     return $true

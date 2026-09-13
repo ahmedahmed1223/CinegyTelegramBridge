@@ -488,7 +488,7 @@ function Update-ScheduleQueue {
         if ($notifyMinutes -gt 0 -and $minutesUntil -gt 0 -and $minutesUntil -le $notifyMinutes -and
             [string](Get-JsonProp $scheduleEntry 'NotificationExecutionKey') -ne $occurrenceKey) {
             $roundedMinutes = [math]::Max(1, [math]::Ceiling($minutesUntil))
-            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $roundedMinutes دقائق.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $(Get-ArabicCountNoun -Count $roundedMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة').`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
             $scheduleEntry.NotificationExecutionKey = $occurrenceKey
             Save-ScheduleEvents | Out-Null
         }

@@ -398,9 +398,11 @@ function Get-MojazLoopFitNote {
     if ($aligned) {
         $times = [int][math]::Round($DelayFrames / $LoopFrames)
         if ($times -le 1) { return '' }
-        return "⚠️ المدة $times أضعاف طول اللوب ($LoopFrames إطار) — سيُعرض كل خبر $times مرات. اجعلها $LoopFrames إطارًا أو فعّل «مزامنة الظهور»."
+        $framesText = Get-ArabicCountNoun -Count $LoopFrames -One 'إطار' -Two 'إطاران' -Few 'إطارات' -Many 'إطارًا'
+        $timesText = Get-ArabicCountNoun -Count $times -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+        return "⚠️ المدة $times أضعاف طول اللوب ($framesText) — سيُعرض كل خبر $timesText. اجعلها $framesText أو فعّل «مزامنة الظهور»."
     }
-    return "⚠️ المدة لا توافق طول اللوب ($LoopFrames إطار) — سيتبدّل الخبر في منتصف الحركة. اجعلها من مضاعفات $LoopFrames أو فعّل «مزامنة الظهور»."
+    return "⚠️ المدة لا توافق طول اللوب ($(Get-ArabicCountNoun -Count $LoopFrames -One 'إطار' -Two 'إطاران' -Few 'إطارات' -Many 'إطارًا')) — سيتبدّل الخبر في منتصف الحركة. اجعلها من مضاعفات $LoopFrames أو فعّل «مزامنة الظهور»."
 }
 
 function Get-MojazBulletinLoopFitNote {

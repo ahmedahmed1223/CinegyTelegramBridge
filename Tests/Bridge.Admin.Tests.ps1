@@ -1881,7 +1881,7 @@ Describe 'The authorized users roster' {
         # and to the access request that was approved.
         $text | Should -Match '<code>111111111</code>'
         $text | Should -Match 'مالك'
-        $text | Should -Match 'مستخدمًا'
+        $text | Should -Match 'مستخدم'
     }
 
     It 'says who has no operational name rather than printing their id twice' {

@@ -830,8 +830,9 @@ function Register-BridgeStartup {
         $dayCount = @($stamps | Where-Object { $_ -gt $now.AddHours(-24) }).Count
         if ($threshold -gt 0 -and $dayCount -eq $threshold) {
             Write-BridgeLog "$threshold bridge startups inside 24 hours - notifying administrators once" 'WARN'
-            Add-AuditEntry "🔁 الجسر أُعيد تشغيله $threshold مرات خلال 24 ساعة — عمل إصدارات أم حلقة عطل؟"
-            Send-AdminBroadcast -Text "🔁 الجسر أُعيد تشغيله $threshold مرات خلال 24 ساعة. إن كان عمل إصدارات مخططًا فتجاهل هذا — وإلا راجع آخر أسطر bridge.log."
+            $timesText = Get-ArabicCountNoun -Count $threshold -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+            Add-AuditEntry "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة — عمل إصدارات أم حلقة عطل؟"
+            Send-AdminBroadcast -Text "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة. إن كان عمل إصدارات مخططًا فتجاهل هذا — وإلا راجع آخر أسطر bridge.log."
         }
     }
     catch { Write-BridgeLog "Could not record bridge startup: $($_.Exception.Message)" 'WARN' }

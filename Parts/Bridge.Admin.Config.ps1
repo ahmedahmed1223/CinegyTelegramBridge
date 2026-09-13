@@ -317,7 +317,7 @@ function Confirm-TemplateTest {
     $script:AutoHideQueue.Add(@{ Layer=$testLayer; At=(Get-Date).AddSeconds($seconds); ChatId=$ChatId; UserId=$UserId })
     Write-BridgeLog "Admin $UserId tested template '$($template.Key)' on isolated layer $testLayer for $seconds seconds" 'WARN'
     Add-AuditEntry "🧪 اختبار قالب $($template.Key) على طبقة $testLayer - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ بدأ اختبار '$($template.Key)' على طبقة التجربة $testLayer وسيُخفى خلال $seconds ثانية." -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ بدأ اختبار '$($template.Key)' على طبقة التجربة $testLayer وسيُخفى خلال $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')." -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
 }
 
 function Test-TemplateRegistryImport {
@@ -328,7 +328,7 @@ function Test-TemplateRegistryImport {
         $document = $rawText | ConvertFrom-Json -ErrorAction Stop
         $properties = @($document.PSObject.Properties)
         $maximumTemplates = Get-SettingInt 'TemplateRegistryImportMaxTemplates' 1
-        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw "يجب أن يحتوي السجل بين قالب واحد و$maximumTemplates قالب." }
+        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw "يجب أن يحتوي السجل بين قالب واحد و$(Get-ArabicCountNoun -Count $maximumTemplates -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا')." }
         foreach ($property in $properties) {
             if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw "مفتاح القالب '$($property.Name)' غير صالح." }
             $entry = $property.Value

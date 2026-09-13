@@ -207,7 +207,7 @@ function Get-HandoverAutoSummary {
         }
     }
     if ($topCause -and $found.Count -lt 3) {
-        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($topCount مرات)"
+        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($(Get-ArabicCountNoun -Count $topCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'))"
     }
     return @($found | Select-Object -First 3)
 }

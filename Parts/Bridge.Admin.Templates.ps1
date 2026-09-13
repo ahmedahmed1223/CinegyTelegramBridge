@@ -31,8 +31,9 @@ function Complete-TemplateReminderMinutes {
     $result = Save-TemplateReminderMinutes -TemplateKey ([string]$state.TemplateKey) -Minutes $minutes
     Clear-PendingState -ChatId $ChatId
     if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ تنبيه القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
-    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutes دقيقة - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    $message = if ($minutes -eq 0) { '✅ تم إيقاف تنبيه الظهور لهذا القالب.' } else { "✅ تم ضبط تنبيه الظهور بعد $minutes دقيقة." }
+    $minutesText = Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة'
+    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutesText - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    $message = if ($minutes -eq 0) { '✅ تم إيقاف تنبيه الظهور لهذا القالب.' } else { "✅ تم ضبط تنبيه الظهور بعد $minutesText." }
     Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)
 }
 

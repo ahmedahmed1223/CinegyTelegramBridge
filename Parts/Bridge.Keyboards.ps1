@@ -725,7 +725,7 @@ function Get-AuthorizedUsersText {
     $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
     $admins = @($users | Where-Object { $_.Role -ne 'operator' }).Count
     $disabled = @($users | Where-Object { $_.Disabled }).Count
-    $tally = "$($users.Count) مستخدمًا · $admins بصلاحية إشراف"
+    $tally = "$(Get-ArabicCountNoun -Count $users.Count -One 'مستخدم' -Two 'مستخدمان' -Few 'مستخدمين' -Many 'مستخدمًا') · $admins بصلاحية إشراف"
     if ($disabled -gt 0) { $tally += " · $disabled معطّل" }
     if ($window.PageCount -gt 1) { $tally += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
     $lines.Add("<i>$tally</i>")
@@ -956,10 +956,10 @@ function Get-FavoritesManagementText {
         $lines.Add('<i>⚠️ عدد المفضلة المعروضة مضبوط على صفر، فلن يظهر أي قالب في القائمة.</i>')
     }
     elseif ($selected.Count -eq 0) {
-        $lines.Add("<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $count قوالب استخدامًا تلقائيًا.</i>")
+        $lines.Add("<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $(Get-ArabicCountNoun -Count $count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا') استخدامًا تلقائيًا.</i>")
     }
     elseif ($selected.Count -gt $count) {
-        $lines.Add("<i>⚠️ اخترت $($selected.Count) قوالب، وتعرض القائمة أول $count منها فقط.</i>")
+        $lines.Add("<i>⚠️ اخترت $(Get-ArabicCountNoun -Count $selected.Count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا')، وتعرض القائمة أول $count منها فقط.</i>")
     }
     return ($lines -join "`n")
 }
@@ -1624,7 +1624,7 @@ function Get-BlockedChatsText {
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
-    $lines.Add("<i>$($blocked.Count) محادثة$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+    $lines.Add("<i>$(Get-ArabicCountNoun -Count $blocked.Count -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة')$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
     $lines.Add('')
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $entry = $blocked[$index]

@@ -819,7 +819,7 @@ function Invoke-ShowTemplateResult {
                 " ⚠️ لم يُضبط الإخفاء التلقائي لأن Cinegy لم يؤكد هوية المشهد؛ أخفه يدويًا."
             }
             elseif ($timerSaved) {
-                " سيُخفى تلقائيًا بعد $AutoHideSeconds ثانية."
+                " سيُخفى تلقائيًا بعد $(Get-ArabicCountNoun -Count $AutoHideSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')."
             }
             else {
                 " ⚠️ تعذّر حفظ مؤقت الإخفاء؛ أخفه يدويًا."
@@ -830,7 +830,7 @@ function Invoke-ShowTemplateResult {
                 $suffix += ' ⚠️ لم يُضبط تنبيه الظهور لأن Cinegy لم يؤكد هوية المشهد.'
             }
             elseif (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId $activeId -ActiveIdConfirmed $true) {
-                $suffix += " سيصل إليك تنبيه شخصي بعد $reminderMinutes دقيقة إذا بقي القالب ظاهرًا."
+                $suffix += " سيصل إليك تنبيه شخصي بعد $(Get-ArabicCountNoun -Count $reminderMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') إذا بقي القالب ظاهرًا."
             }
             else {
                 $suffix += ' ⚠️ تعذّر حفظ تنبيه ظهور القالب لإعادة التشغيل.'

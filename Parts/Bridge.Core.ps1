@@ -698,6 +698,35 @@ function Format-DurationSeconds {
     return $text
 }
 
+function Get-ArabicCountNoun {
+    <#
+        A counted noun with its right Arabic form, so a report never prints
+        "8 مرة" or "1 مرات" again.
+
+        1 keeps its number ("1 مرة" reads better than a bare "مرة" inside a
+        ranked list), 2 takes the bare dual ("مرتين"), 3-10 the plural
+        ("8 مرات"), and 0 and 11+ the singular ("0 مرة"، "359 مرة").
+    #>
+    param([int]$Count, [Parameter(Mandatory)][string]$One, [Parameter(Mandatory)][string]$Two, [Parameter(Mandatory)][string]$Few, [Parameter(Mandatory)][string]$Many)
+    switch ($Count) {
+        1 { return "1 $One" }
+        2 { return $Two }
+        default {
+            if ($Count -ge 3 -and $Count -le 10) { return "$Count $Few" }
+            return "$Count $Many"
+        }
+    }
+}
+
+function Format-CappedTail {
+    <# How many list items the cap hid: "" when nothing was hidden, so callers
+       can append it blindly. The settings notice capped at ten names and
+       dropped the rest silently. #>
+    param([int]$Total, [int]$Shown)
+    if ($Total -gt $Shown) { return " (+$($Total - $Shown) أخرى)" }
+    return ''
+}
+
 function Format-SettingDisplay {
     param([Parameter(Mandatory)][string]$Name, $Value)
     $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name

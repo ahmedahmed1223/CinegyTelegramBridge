@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.25.1
+
+A usage-digest correction driven by one live report: the ranking is now
+labelled cumulative, the outcome breakdown sits back under its own
+since-restart line, every counted noun uses the right Arabic form, the
+expired access request reads «طلب صلاحية» instead of its state key, and
+the changed-settings line admits how many names its cap hid.
+
 ## Version 8.25.0
 
 A log-driven stability release (26 days, 472 pushes): resume snapshots now

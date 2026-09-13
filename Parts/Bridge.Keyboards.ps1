@@ -621,7 +621,7 @@ function Get-TemplatePreviewText {
     # only the bridge's internal key - so showing it would be the same noise
     # the button just lost.
     $where = if ($device) { "طبقة الجهاز: $device" } else { "الطبقة: $($Template.Layer)" }
-    $uses = if ($script:UsageCounts.ContainsKey([string]$Template.Key)) { "$($script:UsageCounts[[string]$Template.Key]) مرة" } else { 'لم يُستخدم' }
+    $uses = if ($script:UsageCounts.ContainsKey([string]$Template.Key)) { Get-ArabicCountNoun -Count ([int]$script:UsageCounts[[string]$Template.Key]) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' } else { 'لم يُستخدم' }
     $live = if ($script:OnAir.ContainsKey([int]$Template.Layer)) { '🔴 على الهواء الآن' } else { '⚫️ غير معروض' }
 
     $lines = [System.Collections.Generic.List[string]]::new()

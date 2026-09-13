@@ -36,7 +36,10 @@ function Get-AbandonedDraftLabel {
     if ($mode -like 'news*') { return 'شريط الأخبار' }
     if ($mode -like 'mojaz*') { return 'الموجز' }
     if ($mode -like 'sched*') { return 'الجدولة' }
-    return $mode
+    if ($mode -eq 'access_request_name') { return 'طلب صلاحية' }
+    # Never leak the internal state name: an unmapped mode is a flow the
+    # table has not learned yet, not a word for an Arabic report.
+    return 'غير مصنّف'
 }
 
 function Save-ExpiredFlowSnapshot {
@@ -1200,7 +1203,7 @@ function Get-UsageDigestBlocks {
     $blocks = @(
         @{ type = 'heading'; text = '📊 ملخص الاستخدام'; size = 3 }
         @{ type = 'paragraph'; text = "🕒 $($now.ToString('yyyy-MM-dd HH:mm')) (محلي)" }
-        @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $total عملية · 📆 آخر 7 أيام: $weeklyOperations · متوسط $dailyAverage يوميًا" }
+        @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $(Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · 📆 آخر 7 أيام: $(Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · متوسط $dailyAverage يوميًا" }
     )
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
@@ -1346,9 +1349,10 @@ function Get-WeeklyNoticesText {
             if ($cur -cne $def) { $foundChanged += $name }
         }
         $changed = @($foundChanged | Select-Object -First 10)
+        $tail = Format-CappedTail -Total @($foundChanged).Count -Shown @($changed).Count
         if ($changed.Count -gt 0) {
             $safe = if ($AsPlain) { @($changed) } else { @($changed | ForEach-Object { "<code>$(ConvertTo-TelegramHtmlText ([string]$_))</code>" }) }
-            $found.Add("⚙️ إعدادات معدّلة عن الافتراضي: $($safe -join ' ')")
+            $found.Add("⚙️ إعدادات معدّلة عن الافتراضي: $($safe -join ' ')$tail")
         }
     }
     catch { Write-BridgeLog "Weekly notices: changed-settings signal failed: $($_.Exception.Message)" }
@@ -1373,15 +1377,19 @@ function Get-UsageDigestText {
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
     if ($ranked.Count -eq 0) { $lines.Add('<i>لم تُستخدم أي قوالب بعد.</i>') }
     else {
+        # Cumulative since counting began, not this week's: UsageCounts is
+        # persisted across restarts, so its leader can outnumber the weekly
+        # operations below without anything being broken. Labelled as such.
         $lines.Add('')
-        $lines.Add('<b>🏆 الأكثر استخدامًا</b>')
+        $lines.Add('<b>🏆 الأكثر استخدامًا</b> (تراكمي)')
         # The reports screens' own vocabulary: the name in bold and the
         # figures after a "·", at full size - where a <pre> ranking would be
         # aligned and small.
         $rank = 0
         $rankLines = @(foreach ($item in $ranked) {
                 $rank++
-                $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $($item.Value) مرة"
+                $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+                $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $uses"
                 if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
                     $line += " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
                 }
@@ -1404,19 +1412,22 @@ function Get-UsageDigestText {
     # screen lead, each line opening with its own glyph, and the outcome
     # breakdown follows as the detail behind them.
     #
-    # The tail used to be three sentences of three different shapes after a
-    # carefully built ranking - a week's estimate, a run total and an outcome
-    # tally, none of them looking like the others or like the list above.
+    # The breakdown sits directly under its own period, before the weekly
+    # line: it counts the in-memory counters since the last restart, and an
+    # earlier layout placed it after the weekly figure, where 200 weekly
+    # operations against "✅ ناجحة — 8" read as a broken week.
     $lines.Add('')
-    $lines.Add("🎬 <b>منذ آخر تشغيل</b> — $total عملية")
-    $lines.Add("📆 <b>آخر 7 أيام</b> — $weeklyOperations عملية · متوسط $dailyAverage يوميًا")
-    $lines.Add('')
+    $sinceRestart = Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $lines.Add("🎬 <b>منذ آخر تشغيل</b> — $sinceRestart")
     $lines.Add("<blockquote>✅ ناجحة — $($counters.Success)
 ❌ فاشلة — $($counters.Failed)
 ⛔ مرفوضة — $($counters.Blocked)</blockquote>")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
         $lines.Add('<i>راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.</i>')
     }
+    $weekOps = Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $lines.Add("📆 <b>آخر 7 أيام</b> — $weekOps · متوسط $dailyAverage يوميًا")
+    $lines.Add('')
     if ($script:CancelReasons.Count -gt 0) {
         $lines.Add('')
         $lines.Add('<b>↩️ أسباب التراجع المسجّلة</b>')
@@ -1457,7 +1468,8 @@ function Get-FlowTimingText {
     if ($slow.Count -gt 0) {
         $parts = @($slow | ForEach-Object {
                 $name = if ($AsPlain) { $_.Key } else { "<b>$(ConvertTo-TelegramHtmlText $_.Key)</b>" }
-                "$name — متوسط $($_.Average) ث ($($_.Count) مرات)"
+                $times = Get-ArabicCountNoun -Count ([int]$_.Count) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+                "$name — متوسط $($_.Average) ث ($times)"
             })
         $found.Add("🐢 الأبطأ وصولًا للهواء: $($parts -join ' · ')")
     }
@@ -1465,7 +1477,7 @@ function Get-FlowTimingText {
     if ($dropped.Count -gt 0) {
         $parts = @($dropped | ForEach-Object {
                 $name = if ($AsPlain) { [string]$_.Key } else { ConvertTo-TelegramHtmlText ([string]$_.Key) }
-                "$name — $($_.Value) مرات"
+                "$name — $(Get-ArabicCountNoun -Count ([int]$_.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')"
             })
         $found.Add("🗑 مسودات مهجورة: $($parts -join ' · ')")
     }

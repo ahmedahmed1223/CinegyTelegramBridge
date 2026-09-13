@@ -384,6 +384,23 @@ Describe 'Durations read like durations' {
         Format-DurationMinutes -Minutes 0 | Should -Be '0 دقيقة'
     }
 
+    It 'counts any noun the way Arabic counts it' {
+        # The digest glued one fixed noun onto every number: "8 مرة" and
+        # "1 مرات" in the same message.
+        Get-ArabicCountNoun -Count 0 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be '0 مرة'
+        Get-ArabicCountNoun -Count 1 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be '1 مرة'
+        Get-ArabicCountNoun -Count 2 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be 'مرتين'
+        Get-ArabicCountNoun -Count 8 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be '8 مرات'
+        Get-ArabicCountNoun -Count 8 -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' | Should -Be '8 عمليات'
+        Get-ArabicCountNoun -Count 359 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be '359 مرة'
+    }
+
+    It 'says how much of a list the cap hid' {
+        Format-CappedTail -Total 10 -Shown 10 | Should -Be ''
+        Format-CappedTail -Total 7 -Shown 7 | Should -Be ''
+        Format-CappedTail -Total 14 -Shown 10 | Should -Be ' (+4 أخرى)'
+    }
+
     It 'promotes seconds that do not divide evenly by sixty' {
         # Caught in review: promotion only fired on exact multiples of 60, so
         # an uptime of 3661 still read "3661 ثانية" - the very thing the

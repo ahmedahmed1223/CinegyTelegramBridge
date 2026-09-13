@@ -907,6 +907,48 @@ Describe 'Usage digest' {
         $script:AirOperationCounters = @{ Success = 4; Failed = 0; Blocked = 0 }
         ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Not -Match 'راجع 📜'
     }
+
+    It 'counts uses the way Arabic counts them' {
+        # The live report printed "8 مرة" and "5 مرة" in one ranking.
+        $script:UsageCounts = @{ 'a' = 8; 'b' = 5; 'c' = 2; 'd' = 1; 'e' = 359 }
+        $script:TemplateLastUsed = @{}
+        $text = ConvertFrom-TelegramHtmlText (Get-UsageDigestText)
+        $text | Should -Match '8 مرات'
+        $text | Should -Match '5 مرات'
+        $text | Should -Match 'مرتين'
+        $text | Should -Match '1 مرة'
+        $text | Should -Match '359 مرة'
+        $text | Should -Not -Match '8 مرة[^ت]'
+    }
+
+    It 'labels the ranking cumulative and keeps the breakdown with its own period' {
+        # UsageCounts survives restarts while the outcome counters do not, so
+        # the leader can outnumber the week; and the breakdown counts the run,
+        # not the week. The live report labelled neither, reading as broken.
+        $script:UsageCounts = @{ 'urgent' = 359 }
+        $script:TemplateLastUsed = @{}
+        $script:AirOperationCounters = @{ Success = 8; Failed = 0; Blocked = 0 }
+        $text = ConvertFrom-TelegramHtmlText (Get-UsageDigestText)
+        $text | Should -Match 'تراكمي'
+        $text.IndexOf('مرفوضة') | Should -BeLessThan $text.IndexOf('آخر 7 أيام')
+        $text.IndexOf('منذ آخر تشغيل') | Should -BeLessThan $text.IndexOf('مرفوضة')
+    }
+
+    It 'counts operations the way Arabic counts them' {
+        $script:UsageCounts = @{ 'ticker' = 1 }
+        $script:AirOperationCounters = @{ Success = 8; Failed = 0; Blocked = 0 }
+        ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match '8 عمليات'
+    }
+
+    It 'names an expired access request in Arabic, never by its state key' {
+        Get-AbandonedDraftLabel -State @{ Mode = 'access_request_name' } | Should -Be 'طلب صلاحية'
+        Get-AbandonedDraftLabel -State @{ Mode = 'some_future_flow' } | Should -Be 'غير مصنّف'
+        $script:AbandonedDrafts = @{ 'طلب صلاحية' = 1 }
+        $digest = Get-UsageDigestText
+        $digest | Should -Match 'طلب صلاحية — 1 مرة'
+        $digest | Should -Not -Match 'access_request_name'
+        $script:AbandonedDrafts = @{}
+    }
 }
 
 Describe 'Administrator restart' {

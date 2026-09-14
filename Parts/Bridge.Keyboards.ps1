@@ -489,33 +489,66 @@ function Get-LayerRemovalConfirmKeyboard {
 }
 
 function Get-AdminToolsKeyboard {
-    <# The rarely-used administrator surface, split out of the main menu so a
-       live-layer row is never pushed below the fold by configuration. #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    <#
+        The rarely-used administrator surface, split out of the main menu so
+        a live-layer row is never pushed below the fold by configuration.
+
+        Was one flat wall of ~15 buttons mixing user management, content,
+        diagnostics, and dangerous system actions - no grouping despite the
+        settings screen already solving exactly this with category tabs
+        (Get-SettingsKeyboard). This is that same picker pattern, reused
+        rather than reinvented: four categories here, the tools themselves
+        unchanged in Get-AdminToolsCategoryKeyboard below. Takes no ChatId/
+        UserId - unlike the category screen, this picker is the same for
+        every administrator, so callers pass none (matches Get-SettingsKeyboard).
+    #>
+    $categories = @(
+        @{ Key = 'users'; Icon = '👥'; Label = 'المستخدمون والصلاحيات' }
+        @{ Key = 'content'; Icon = '📚'; Label = 'المحتوى والقوالب' }
+        @{ Key = 'health'; Icon = '🩺'; Label = 'الصحة والتشخيص' }
+        @{ Key = 'system'; Icon = '⚙️'; Label = 'النظام والبث' }
+    )
+    $rows = @(foreach ($category in $categories) { , @( (New-Button "$($category.Icon) $($category.Label)" "admintools:$($category.Key)") ) })
+    $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-AdminToolsCategoryKeyboard {
+    <# The tools inside one Get-AdminToolsKeyboard category - the same
+       buttons the flat wall used to carry, just grouped by what they touch. #>
+    param([Parameter(Mandatory)][string]$Category, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
-    $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
-    $rows += , @( (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
-    $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
-    if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button "📢 التنويهات" "menu:announcements") ) }
-    $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
-
-    if (Get-Setting 'EnableLiveRelay') {
-        $relayRunning = [bool](Get-RunningRelayProcess)
-        $relayLabel = if ($relayRunning) { "⏹ إيقاف البث" } else { "▶️ بدء البث" }
-        $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
-        $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
+    switch ($Category) {
+        'users' {
+            $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
+            $rows += , @( (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
+        }
+        'content' {
+            $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
+            $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
+            if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button "📢 التنويهات" "menu:announcements") ) }
+        }
+        'health' {
+            $rows += , @( (New-Button "✅ جاهزية المناوبة" "menu:readiness") )
+            $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
+            $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
+            $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
+            if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
+            $rows += , $adminRow
+        }
+        'system' {
+            if (Get-Setting 'EnableLiveRelay') {
+                $relayRunning = [bool](Get-RunningRelayProcess)
+                $relayLabel = if ($relayRunning) { "⏹ إيقاف البث" } else { "▶️ بدء البث" }
+                $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
+                $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
+            }
+            $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
+            if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart" -Style danger) ) }
+        }
     }
-
-    $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
-    $rows += , @( (New-Button "✅ جاهزية المناوبة" "menu:readiness") )
-    $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
-    $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
-    if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart" -Style danger) ) }
-    $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
-    if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
-    $rows += , $adminRow
-    $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
+    $rows += , @( (New-Button "⬅️ أدوات الإدارة" "menu:admintools") )
     return @{ inline_keyboard = $rows }
 }
 

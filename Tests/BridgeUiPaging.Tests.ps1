@@ -56,6 +56,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-LayerNamesKeyboard'            = 'one button per known layer'
             'Get-HideAllLayerSettingsKeyboard'  = 'one button per known layer'
             'Get-SettingsKeyboard'              = 'one button per settings category, a fixed list'
+            'Get-AdminToolsKeyboard'            = 'one button per admin-tools category, a fixed list of four'
             'Get-SettingsCategoryKeyboard'      = 'the settings in one category, a fixed list in the source'
             'Get-DurationKeyboard'              = 'a fixed set of durations'
             'Get-SettingSmallRangeKeyboard'     = 'one button per value in a declared range of at most 24'

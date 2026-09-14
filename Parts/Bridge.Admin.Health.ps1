@@ -902,7 +902,7 @@ function Request-BridgeRestart {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     if (-not (Get-Setting 'AllowRemoteRestart')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ إعادة التشغيل من البوت معطّلة.`nفعّل AllowRemoteRestart من الإعدادات، وتأكد أولًا أن الجسر يعمل كخدمة أو كمهمة مجدولة تعيد تشغيله." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ إعادة التشغيل من البوت معطّلة.`nفعّل AllowRemoteRestart من الإعدادات، وتأكد أولًا أن الجسر يعمل كخدمة أو كمهمة مجدولة تعيد تشغيله." -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $supervisor = Get-BridgeSupervisor
@@ -912,7 +912,7 @@ function Request-BridgeRestart {
     # an outage with no way back in through the bot that just stopped.
     $relaunch = if ($supervisor.Supervised) { $null } else { Get-BridgeRelaunchCommand }
     if (-not $supervisor.Supervised -and -not $relaunch) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا توجد وسيلة لإعادة تشغيل الجسر (العملية الأصل: $($supervisor.Name))، ولا يمكن إعادة بناء أمر التشغيل.`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا توجد وسيلة لإعادة تشغيل الجسر (العملية الأصل: $($supervisor.Name))، ولا يمكن إعادة بناء أمر التشغيل.`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $who = if ($supervisor.Supervised) { $supervisor.Name } else { 'الجسر نفسه' }

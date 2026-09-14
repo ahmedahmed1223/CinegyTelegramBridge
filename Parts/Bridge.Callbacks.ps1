@@ -860,7 +860,7 @@ function Invoke-CallbackQuery {
         }
         'menu:stats' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $statsKeyboard = Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId
+                $statsKeyboard = Get-AdminToolsKeyboard
                 if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-BridgeStatsBlocks) -ReplyMarkup $statsKeyboard)) {
                     Send-TelegramMessage -ChatId $chatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup $statsKeyboard
                 }
@@ -912,7 +912,7 @@ function Invoke-CallbackQuery {
         }
         'menu:usagedigest' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                $usageKeyboard = Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId
+                $usageKeyboard = Get-AdminToolsKeyboard
                 if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UsageDigestBlocks) -ReplyMarkup $usageKeyboard)) {
                     Send-TelegramMessage -ChatId $chatId -Text (Get-UsageDigestText) -ParseMode HTML -ReplyMarkup $usageKeyboard
                 }
@@ -929,7 +929,14 @@ function Invoke-CallbackQuery {
         }
         'menu:admintools' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text '🗂 أدوات الإدارة' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text '🗂 أدوات الإدارة' -ReplyMarkup (Get-AdminToolsKeyboard)
+            }
+            break
+        }
+        'admintools:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $category = Get-CallbackArg $data 'admintools:'
+                Send-TelegramMessage -ChatId $chatId -Text '🗂 أدوات الإدارة' -ReplyMarkup (Get-AdminToolsCategoryKeyboard -Category $category -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -1598,7 +1605,7 @@ function Invoke-CallbackQuery {
         }
         'menu:userpresence' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivitySummaryText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (Get-UserActivitySummaryText) -ParseMode HTML -ReplyMarkup (Get-AdminToolsKeyboard)
             }
             break
         }

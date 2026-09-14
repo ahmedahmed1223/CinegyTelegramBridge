@@ -709,13 +709,22 @@ Describe 'Administrator tools grouping' {
 
     It 'still reaches every moved entry from the tools screen, with a way back' {
         Mock Test-Admin { $true }
-        $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+        Mock Get-RunningRelayProcess { $null }
+        $top = @((Get-AdminToolsKeyboard).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
+        $top | Should -Contain 'menu'
 
-        foreach ($moved in @('menu:usersadmin', 'menu:presetsadmin', 'menu:templatesadmin', 'menu:audit', 'menu:diagnostics')) {
-            $flat | Should -Contain $moved
+        # Each moved entry now sits one tap deeper, inside its category - the
+        # top-level picker only carries the four category buttons.
+        $byCategory = @{
+            usersadmin = 'users'; presetsadmin = 'content'; templatesadmin = 'content'
+            audit = 'health'; diagnostics = 'health'
         }
-        $flat | Should -Contain 'menu'
+        foreach ($moved in $byCategory.Keys) {
+            $flat = @((Get-AdminToolsCategoryKeyboard -Category $byCategory[$moved] -ChatId 100 -UserId 100).inline_keyboard |
+                    ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
+            $flat | Should -Contain "menu:$moved"
+        }
     }
 
     It 'shows no administrator surface at all to an operator' {
@@ -1077,7 +1086,7 @@ Describe 'Administrator restart' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableLiveRelay' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableRawCommand' }
 
-        $flat = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+        $flat = @((Get-AdminToolsCategoryKeyboard -Category 'system' -ChatId 100 -UserId 100).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
 
         $flat | Should -Not -Contain 'menu:restart'
@@ -1408,7 +1417,7 @@ Describe 'Version 6 administrator health center' {
 
         It 'shows the health center in administrator tools' {
             Mock Get-RunningRelayProcess { $null }
-            $callbacks = @((Get-AdminToolsKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+            $callbacks = @((Get-AdminToolsCategoryKeyboard -Category 'health' -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
 
             $callbacks | Should -Contain 'menu:healthcenter'
         }

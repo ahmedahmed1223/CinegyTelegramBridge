@@ -41,7 +41,7 @@ function Invoke-SettingsExport {
         Set-Content -LiteralPath $path -Value ($document | ConvertTo-Json -Depth 8) -Encoding utf8 -ErrorAction Stop
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "📤 نسخة الإعدادات ($($payload.Count) خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين."
@@ -148,7 +148,7 @@ function Receive-SettingsImport {
         if (-not $validation.Success) { throw $validation.Error }
         if (@($validation.Changes).Count -eq 0) {
             Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-            Send-TelegramMessage -ChatId $ChatId -Text '✅ الملف مطابق للإعدادات الحالية؛ لا يوجد ما يتغيّر.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+            Send-TelegramMessage -ChatId $ChatId -Text '✅ الملف مطابق للإعدادات الحالية؛ لا يوجد ما يتغيّر.' -ReplyMarkup (Get-AdminToolsKeyboard)
             return
         }
         $script:PendingSettingsImport = @{ Path = $staged; UserId = $UserId; Changes = @($validation.Changes) }
@@ -161,7 +161,7 @@ function Receive-SettingsImport {
     }
     catch {
         Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard)
     }
 }
 
@@ -169,24 +169,24 @@ function Confirm-SettingsImport {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Cancel)
     $pending = $script:PendingSettingsImport
     if (-not $pending -or [long]$pending.UserId -ne $UserId) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'انتهت مراجعة الاستيراد أو تغيّرت. ابدأ من جديد.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text 'انتهت مراجعة الاستيراد أو تغيّرت. ابدأ من جديد.' -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     if ($Cancel) {
         $script:PendingSettingsImport = $null
         Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ أُلغي الاستيراد؛ لم يتغيّر شيء.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ أُلغي الاستيراد؛ لم يتغيّر شيء.' -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     if (-not (Set-ImportedSettings -Changes @($pending.Changes))) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ استيراد الإعدادات؛ لم يُطبّق أي تغيير.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ استيراد الإعدادات؛ لم يُطبّق أي تغيير.' -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $script:PendingSettingsImport = $null
     Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
     Write-BridgeLog "Admin $UserId imported $(@($pending.Changes).Count) setting(s)" 'WARN'
     Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard)
     return $true
 }
 
@@ -209,18 +209,18 @@ function Invoke-BridgeSelfTest {
 
     $layer = Get-SettingInt 'TemplateTestLayer' 0
     if ($layer -le 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد طبقة تجربة. اضبط TemplateTestLayer على طبقة غير مستخدمة أولًا.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد طبقة تجربة. اضبط TemplateTestLayer على طبقة غير مستخدمة أولًا.' -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $conflict = @(Get-TemplateTestLayerConflict -Layer $layer)
     if ($conflict.Count -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $layer مستخدمة في قوالب الإنتاج: $($conflict -join '، ')" -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $layer مستخدمة في قوالب الإنتاج: $($conflict -join '، ')" -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $store = Get-TemplateStore
     $template = if ($store.Order.Count -gt 0) { $store.Map[$store.Order[0]] } else { $null }
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد قوالب مسجّلة لإجراء الفحص.' -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا توجد قوالب مسجّلة لإجراء الفحص.' -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
 
@@ -239,7 +239,7 @@ function Invoke-BridgeSelfTest {
     & $record "قراءة حالة الطبقة $layer" ([bool]$before.Success) $(if ($before.Success) { '' } else { [string]$before.Error })
     if (-not $before.Success -or [bool]$before.IsOnAir) {
         & $record 'الطبقة جاهزة للفحص' $false 'مشغولة أو غير مقروءة؛ لم يُرسل شيء'
-        Send-TelegramMessage -ChatId $ChatId -Text ("🧪 فحص المسار الحي — فشل`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text ("🧪 فحص المسار الحي — فشل`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
 
@@ -273,7 +273,7 @@ function Invoke-BridgeSelfTest {
     $header = if ($failed) { '🧪 فحص المسار الحي — فشل' } else { '🧪 فحص المسار الحي — نجح' }
     Write-BridgeLog "Live self-test on layer $layer by user ${UserId}: $(if ($failed) { 'FAILED' } else { 'passed' })" $(if ($failed) { 'WARN' } else { 'INFO' })
     Add-AuditEntry "🧪 فحص المسار الحي على طبقة $layer - $(if ($failed) { 'فشل' } else { 'نجح' }) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text ("$header`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text ("$header`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard)
     return (-not $failed)
 }
 

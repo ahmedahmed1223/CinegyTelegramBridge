@@ -458,7 +458,7 @@ Describe 'Administrative user activity status' {
 
     It 'adds a user activity summary to administrator tools' {
         Mock Get-RunningRelayProcess { $null }
-        $callbacks = @((Get-AdminToolsKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+        $callbacks = @((Get-AdminToolsCategoryKeyboard -Category 'users' -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
         $callbacks | Should -Contain 'menu:userpresence'
     }
 

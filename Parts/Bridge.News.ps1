@@ -774,7 +774,11 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         -not [string]::IsNullOrWhiteSpace([string](Get-Setting 'NewsSheetCsvUrl'))) {
         $rows += , @(@{text='⬇️ سحب ونشر';callback_data='news:sheet'}, @{text='📝 سحب إلى المسودة';callback_data='news:sheetdraft'})
     }
-    $rows += , @(@{text='🔄 تحديث';callback_data='news:refresh'}, @{text='⬅️ الرئيسية';callback_data='menu'})
+    # The automatic sheet sync publishes to air on its own clock and used to
+    # report only to bridge.log; this is where whoever owns the ticker asks
+    # whether it ran and what it pushed.
+    $rows += , @(@{text='🧾 سجل التنفيذ';callback_data='schedule:execlog:news'}, @{text='🔄 تحديث';callback_data='news:refresh'})
+    $rows += , @(@{text='⬅️ الرئيسية';callback_data='menu'})
     return @{inline_keyboard=$rows}
 }
 

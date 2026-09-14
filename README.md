@@ -13,6 +13,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.28.0
+
+The execution log now covers everything the bridge fires on a clock, not just
+scheduled graphics. A scheduled bulletin's outcome used to live on its own
+schedule record and die with it, and the automatic news-sheet sync — which
+publishes to air every few minutes — reported only to `bridge.log`. Both now
+write to the same log, read by the same screen, separated by a `Kind` field
+(`show` / `mojaz` / `news`) with its own glyph per kind. Records written before
+`Kind` existed are read as scheduled graphics rather than discarded, so the only
+scheduling history the station has survives the change. Reachable filtered from
+the bulletin schedules screen and from news-ticker management, or unfiltered
+from the schedule menu.
+
 ## Version 8.27.0
 
 A new **schedule execution log** screen under 📅 الجدولة. `Write-ScheduleExecutionEntry`

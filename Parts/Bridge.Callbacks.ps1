@@ -1172,6 +1172,14 @@ function Invoke-CallbackQuery {
             Show-ScheduleExecutionScreen -ChatId $chatId -UserId $userId
             break
         }
+        'schedule:execlog:*' {
+            # Same screen filtered, reached from the bulletin schedules and the
+            # ticker management screens where the question actually gets asked.
+            $execKind = Get-CallbackArg $data 'schedule:execlog:'
+            if ($execKind -notin @('show', 'mojaz', 'news')) { $execKind = '' }
+            Show-ScheduleExecutionScreen -ChatId $chatId -UserId $userId -Kind $execKind
+            break
+        }
         'schedule:list' {
             if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UpcomingScheduleBlocks) -ReplyMarkup (Get-UpcomingScheduleKeyboard))) {
                 Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText) -ParseMode 'HTML' `

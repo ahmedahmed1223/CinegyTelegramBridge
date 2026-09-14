@@ -2030,11 +2030,19 @@ function Update-NewsSheetSync {
     if ($script:NewsSheetLastSyncAt -and ((Get-Date) - $script:NewsSheetLastSyncAt).TotalMinutes -lt $minutes) { return }
     $script:NewsSheetLastSyncAt = Get-Date
     $result = Invoke-NewsSheetSync -Trigger auto
+    # Logged where the other clock-driven work is logged. This sync publishes
+    # to air on its own schedule and said so only to bridge.log, which no
+    # operator reads during a shift - an unchanged or skipped pass is not an
+    # event and stays out, so the screen shows publishes and failures only.
     if ($result.Success) {
-        Write-BridgeLog "News sheet sync published $(@($result.Items).Count) item(s)"
+        $count = @($result.Items).Count
+        Write-BridgeLog "News sheet sync published $count item(s)"
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'success' `
+            -Label "مزامنة الشيت · $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا')" | Out-Null
     }
     elseif (-not $result.Unchanged -and -not $result.Skipped) {
         Write-BridgeLog "News sheet sync did not publish: $($result.Error)" 'WARN'
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label 'مزامنة الشيت' -ErrorText ([string]$result.Error) | Out-Null
     }
 }
 

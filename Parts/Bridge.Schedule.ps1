@@ -301,22 +301,41 @@ function Save-ScheduleEvents {
     }
 }
 
-function Write-ScheduleExecutionEntry {
+function Write-BridgeExecutionRecord {
+    <#
+        One execution log for everything the bridge fires on a clock.
+
+        Scheduled graphics wrote here from the start; scheduled bulletins and
+        the automatic news sheet sync wrote nowhere an operator could read -
+        a bulletin's outcome lived on its schedule record and died with it,
+        and the sync said its piece to bridge.log alone. Same file, same
+        reader, one Kind field, so "what fired, when, and did it work" is one
+        screen rather than three half-answers.
+
+        Kind is absent from every record written before this, so the reader
+        treats a missing Kind as 'show' rather than discarding history.
+    #>
     param(
-        [Parameter(Mandatory)][hashtable]$ScheduleEntry,
+        [Parameter(Mandatory)][ValidateSet('show', 'mojaz', 'news')][string]$Kind,
         [Parameter(Mandatory)][ValidateSet('success', 'failed')][string]$Result,
-        [Parameter(Mandatory)][long]$DurationMs,
+        [string]$EventId = '',
+        [string]$ExecutionKey = '',
+        [string]$Label = '',
+        [int]$Layer = 0,
+        [string]$ScheduledAt = '',
+        [long]$DurationMs = 0,
         [int]$Attempt = 1,
         [string]$ErrorText = ''
     )
     try {
         $record = [ordered]@{
             Timestamp    = [datetimeoffset]::Now.ToString('o')
-            EventId      = [string]$ScheduleEntry.Id
-            ExecutionKey = [string]$ScheduleEntry.ExecutionKey
-            TemplateKey  = [string]$ScheduleEntry.TemplateKey
-            Layer        = [int](Get-JsonProp $ScheduleEntry 'Layer')
-            ScheduledAt  = [string]$ScheduleEntry.ScheduledAt
+            Kind         = $Kind
+            EventId      = $EventId
+            ExecutionKey = $ExecutionKey
+            TemplateKey  = $Label
+            Layer        = $Layer
+            ScheduledAt  = $ScheduledAt
             Attempt      = $Attempt
             Result       = $Result
             DurationMs   = $DurationMs
@@ -329,6 +348,23 @@ function Write-ScheduleExecutionEntry {
         Write-BridgeLog "Could not append schedule execution log: $($_.Exception.Message)" 'ERROR'
         return $false
     }
+}
+
+function Write-ScheduleExecutionEntry {
+    <# The scheduled-graphic caller, unchanged for its callers: it still takes
+       the schedule entry it already has and writes Kind 'show'. #>
+    param(
+        [Parameter(Mandatory)][hashtable]$ScheduleEntry,
+        [Parameter(Mandatory)][ValidateSet('success', 'failed')][string]$Result,
+        [Parameter(Mandatory)][long]$DurationMs,
+        [int]$Attempt = 1,
+        [string]$ErrorText = ''
+    )
+    return (Write-BridgeExecutionRecord -Kind 'show' -Result $Result `
+            -EventId ([string]$ScheduleEntry.Id) -ExecutionKey ([string]$ScheduleEntry.ExecutionKey) `
+            -Label ([string]$ScheduleEntry.TemplateKey) -Layer ([int](Get-JsonProp $ScheduleEntry 'Layer')) `
+            -ScheduledAt ([string]$ScheduleEntry.ScheduledAt) -DurationMs $DurationMs `
+            -Attempt $Attempt -ErrorText $ErrorText)
 }
 
 function Get-ScheduleExecutionHistory {
@@ -356,8 +392,13 @@ function Get-ScheduleExecutionHistory {
             # One torn line is one row lost, never the whole screen.
             try { $record = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if (-not $record) { continue }
+            # Records written before the log covered bulletins and the sheet
+            # sync carry no Kind at all - they are all scheduled graphics.
+            $kind = [string](Get-JsonProp $record 'Kind')
+            if ([string]::IsNullOrWhiteSpace($kind)) { $kind = 'show' }
             $records += [pscustomobject]@{
                 Timestamp   = [string](Get-JsonProp $record 'Timestamp')
+                Kind        = $kind
                 TemplateKey = [string](Get-JsonProp $record 'TemplateKey')
                 Layer       = [int](Get-JsonProp $record 'Layer')
                 ScheduledAt = [string](Get-JsonProp $record 'ScheduledAt')
@@ -376,9 +417,10 @@ function Get-ScheduleExecutionHistory {
 function Get-ScheduleExecutionRows {
     <# Shared by the rich screen and its text fallback, so the two cannot
        disagree about what ran. #>
-    param([ValidateRange(1, 500)][int]$TailLines = 120)
+    param([ValidateRange(1, 500)][int]$TailLines = 120, [ValidateSet('', 'show', 'mojaz', 'news')][string]$Kind = '')
     $rows = @()
     foreach ($record in @(Get-ScheduleExecutionHistory -TailLines $TailLines)) {
+        if ($Kind -and [string]$record.Kind -ne $Kind) { continue }
         $mark = if ([string]$record.Result -eq 'success') { '✅' } else { '❌' }
         $ranAt = [datetimeoffset]::MinValue
         $when = if ([datetimeoffset]::TryParse([string]$record.Timestamp, [ref]$ranAt)) {
@@ -390,24 +432,38 @@ function Get-ScheduleExecutionRows {
         elseif ($delay -le 2) { 'في وقتها' }
         else { "متأخرة $(Format-DurationSeconds -Seconds $delay)" }
         $attempt = if ([int]$record.Attempt -gt 1) { " · محاولة $($record.Attempt)" } else { '' }
+        # The kind glyph and the result glyph are different jobs: a column of
+        # ✅ says nothing about which line is a bulletin and which a strap.
+        $kindGlyph = switch ([string]$record.Kind) { 'mojaz' { '📑' } 'news' { '📰' } default { '▶️' } }
         $rows += [pscustomobject]@{
-            Mark     = $mark
-            When     = $when
-            Template = [string]$record.TemplateKey
-            Layer    = [int]$record.Layer
-            Lateness = "$lateness$attempt"
-            Error    = [string]$record.Error
+            Mark      = $mark
+            KindGlyph = $kindGlyph
+            Kind      = [string]$record.Kind
+            When      = $when
+            Template  = [string]$record.TemplateKey
+            Layer     = [int]$record.Layer
+            Lateness  = "$lateness$attempt"
+            Error     = [string]$record.Error
         }
     }
     return @($rows)
 }
 
+function Get-ScheduleExecutionHeading {
+    param([string]$Kind = '')
+    switch ($Kind) {
+        'mojaz' { return '🧾 سجل تنفيذ مواعيد الموجز' }
+        'news' { return '🧾 سجل تنفيذ شريط الأخبار' }
+        default { return '🧾 سجل التنفيذ' }
+    }
+}
+
 function Get-ScheduleExecutionBlocks {
-    param([ValidateRange(1, 500)][int]$TailLines = 120)
-    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines)
-    $blocks = @(@{ type = 'heading'; text = '🧾 سجل تنفيذ الجدولة'; size = 3 })
+    param([ValidateRange(1, 500)][int]$TailLines = 120, [ValidateSet('', 'show', 'mojaz', 'news')][string]$Kind = '')
+    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines -Kind $Kind)
+    $blocks = @(@{ type = 'heading'; text = (Get-ScheduleExecutionHeading -Kind $Kind); size = 3 })
     if ($rows.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لم يُنفَّذ أي حدث مجدول بعد.' })
+        return $blocks + @(@{ type = 'paragraph'; text = 'لم يُنفَّذ شيء بعد.' })
     }
     $failed = @($rows | Where-Object { $_.Mark -eq '❌' }).Count
     $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا')، كلّها ناجحة" }
@@ -422,9 +478,11 @@ function Get-ScheduleExecutionBlocks {
             @{ text = 'التأخير'; is_header = $true }
         ))
     foreach ($row in @($trimmed.Rows)) {
+        $what = if ([string]$row.Kind -eq 'show') { "$([string]$row.Template) · ط$($row.Layer)" }
+        else { [string]$row.Template }
         $cells += , @(
             @{ text = [string]$row.When }
-            @{ text = "$([string]$row.Template) · ط$($row.Layer)" }
+            @{ text = "$([string]$row.KindGlyph) $what" }
             @{ text = [string]$row.Mark }
             @{ text = [string]$row.Lateness }
         )
@@ -443,17 +501,19 @@ function Get-ScheduleExecutionBlocks {
 
 function Get-ScheduleExecutionText {
     <# The plain fallback for an API that will not take the rich blocks. #>
-    param([ValidateRange(1, 500)][int]$TailLines = 120)
-    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines)
+    param([ValidateRange(1, 500)][int]$TailLines = 120, [ValidateSet('', 'show', 'mojaz', 'news')][string]$Kind = '')
+    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines -Kind $Kind)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🧾 سجل تنفيذ الجدولة</b>')
+    $lines.Add("<b>$(Get-ScheduleExecutionHeading -Kind $Kind)</b>")
     if ($rows.Count -eq 0) {
-        $lines.Add('<i>لم يُنفَّذ أي حدث مجدول بعد.</i>')
+        $lines.Add('<i>لم يُنفَّذ شيء بعد.</i>')
         return ($lines -join "`n")
     }
     $trimmed = Select-RichTableRows -Items $rows
     foreach ($row in @($trimmed.Rows)) {
-        $line = "$($row.Mark) <code>$($row.When)</code> · $(ConvertTo-TelegramHtmlText ([string]$row.Template)) · ط$($row.Layer) · $(ConvertTo-TelegramHtmlText ([string]$row.Lateness))"
+        $what = if ([string]$row.Kind -eq 'show') { "$(ConvertTo-TelegramHtmlText ([string]$row.Template)) · ط$($row.Layer)" }
+        else { ConvertTo-TelegramHtmlText ([string]$row.Template) }
+        $line = "$($row.Mark) <code>$($row.When)</code> · $($row.KindGlyph) $what · $(ConvertTo-TelegramHtmlText ([string]$row.Lateness))"
         $lines.Add($line)
         if ($row.Mark -eq '❌' -and $row.Error) { $lines.Add("   ↳ $(ConvertTo-TelegramHtmlText ([string]$row.Error))") }
     }
@@ -463,14 +523,23 @@ function Get-ScheduleExecutionText {
 }
 
 function Show-ScheduleExecutionScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [ValidateSet('', 'show', 'mojaz', 'news')][string]$Kind = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $keyboard = @{ inline_keyboard = @(
-            , @( (New-Button '🔄 تحديث' 'schedule:execlog'), (New-Button '📋 الأحداث القادمة' 'schedule:list') )
-            , @( (New-Button '⬅️ الجدولة' 'menu:schedule') )
-        ) }
-    if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-ScheduleExecutionBlocks) -ReplyMarkup $keyboard)) {
-        Send-TelegramPagedText -ChatId $ChatId -Text (Get-ScheduleExecutionText) -ParseMode HTML -ReplyMarkup $keyboard
+    $refresh = if ($Kind) { "schedule:execlog:$Kind" } else { 'schedule:execlog' }
+    # Back to where the operator came from, not always to the schedule menu.
+    $back = switch ($Kind) {
+        'mojaz' { , @( (New-Button '⬅️ المواعيد' 'mojaz:times') ) }
+        'news' { , @( (New-Button '⬅️ شريط الأخبار' 'menu:news') ) }
+        default { , @( (New-Button '📋 الأحداث القادمة' 'schedule:list'), (New-Button '⬅️ الجدولة' 'menu:schedule') ) }
+    }
+    $rows = @(, @( (New-Button '🔄 تحديث' $refresh) ))
+    # Only from the all-kinds screen: a filtered one already answers its own
+    # question, and three more buttons under it would just be noise.
+    if (-not $Kind) { $rows += , @( (New-Button '📑 الموجز' 'schedule:execlog:mojaz'), (New-Button '📰 الأخبار' 'schedule:execlog:news') ) }
+    $rows += $back
+    $keyboard = @{ inline_keyboard = $rows }
+    if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-ScheduleExecutionBlocks -Kind $Kind) -ReplyMarkup $keyboard)) {
+        Send-TelegramPagedText -ChatId $ChatId -Text (Get-ScheduleExecutionText -Kind $Kind) -ParseMode HTML -ReplyMarkup $keyboard
     }
 }
 

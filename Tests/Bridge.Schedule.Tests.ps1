@@ -858,3 +858,61 @@ Describe 'The schedule execution log finally has a reader' {
         (Get-Content -LiteralPath $script:scheduleExecutionFile -Raw).Trim() | Should -Be 'untouched'
     }
 }
+
+Describe 'The execution log covers bulletins and the ticker too' {
+    # A scheduled bulletin's outcome used to live on its schedule record and
+    # die with it; the automatic sheet sync reported only to bridge.log.
+    BeforeEach {
+        $script:OriginalExecFileForKinds = $script:scheduleExecutionFile
+        $script:scheduleExecutionFile = Join-Path $TestDrive 'exec-kinds.jsonl'
+        Remove-Item -LiteralPath $script:scheduleExecutionFile -Force -ErrorAction SilentlyContinue
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach { $script:scheduleExecutionFile = $script:OriginalExecFileForKinds }
+
+    It 'writes and reads each kind, and filters to one of them' {
+        Write-BridgeExecutionRecord -Kind 'show' -Result 'success' -Label 'urgent' -Layer 4 | Should -BeTrue
+        Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'success' -Label 'نشرة التاسعة' | Should -BeTrue
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label 'مزامنة الشيت' -ErrorText 'sheet unreachable' | Should -BeTrue
+
+        @(Get-ScheduleExecutionRows).Count | Should -Be 3
+        @(Get-ScheduleExecutionRows -Kind 'mojaz').Count | Should -Be 1
+        (Get-ScheduleExecutionRows -Kind 'mojaz')[0].Template | Should -Be 'نشرة التاسعة'
+        (Get-ScheduleExecutionRows -Kind 'news')[0].KindGlyph | Should -Be '📰'
+        (Get-ScheduleExecutionText -Kind 'news') | Should -Match 'sheet unreachable'
+    }
+
+    It 'reads a record written before Kind existed as a scheduled graphic' {
+        # Real logs on the station carry no Kind at all. Dropping them would
+        # throw away the only scheduling history there is.
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        (@{ Timestamp = $due.ToString('o'); EventId = 'old'; TemplateKey = 'urgent'; Layer = 4
+            ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 5; Error = '' } |
+            ConvertTo-Json -Compress) | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+
+        $rows = @(Get-ScheduleExecutionRows)
+
+        $rows.Count | Should -Be 1
+        $rows[0].Kind | Should -Be 'show'
+        @(Get-ScheduleExecutionRows -Kind 'show').Count | Should -Be 1
+    }
+
+    It 'keeps the old scheduled-graphic writer working exactly as before' {
+        $entry = @{ Id = 'e1'; ExecutionKey = 'k1'; TemplateKey = 'urgent'; Layer = 4
+            ScheduledAt = ([datetimeoffset]::Now).ToString('o') }
+
+        Write-ScheduleExecutionEntry -ScheduleEntry $entry -Result 'success' -DurationMs 42 | Should -BeTrue
+
+        $record = @(Get-ScheduleExecutionHistory)[0]
+        $record.Kind | Should -Be 'show'
+        $record.TemplateKey | Should -Be 'urgent'
+        $record.DurationMs | Should -Be 42
+    }
+
+    It 'titles the screen by what the operator filtered to' {
+        Get-ScheduleExecutionHeading -Kind 'mojaz' | Should -Match 'الموجز'
+        Get-ScheduleExecutionHeading -Kind 'news' | Should -Match 'الأخبار'
+        Get-ScheduleExecutionHeading | Should -Match 'سجل التنفيذ'
+    }
+}

@@ -1009,6 +1009,9 @@ function Get-MojazSchedulesKeyboard {
         if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "mojazschedpage:$($window.Page + 1)") }
         $keyboard += , $pager
     }
+    # A booked moment says what WILL happen; this says what did - whether last
+    # night's bulletin actually started, and how late.
+    $keyboard += , @((New-Button '🧾 سجل التنفيذ' 'schedule:execlog:mojaz'))
     $keyboard += , @((New-Button '⬅️ الموجزات' 'menu:mojaz'), (New-Button '🏠 القائمة' 'menu:main'))
     return @{ inline_keyboard = $keyboard }
 }
@@ -1093,11 +1096,22 @@ function Update-MojazScheduleQueue {
     }
     $next = $due[0]
     $scheduleId = [string]$next.Id
+    $bulletinForLog = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$next.BulletinId)
     if (-not (Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'running' -Fields @{ StartedAt = $Now.ToString('o') })) { return }
     $script:MojazSelections[[string]$next.ChatId] = [string]$next.BulletinId
     # -Force: the urgent check above has already been made, and nobody is
     # watching a scheduled start to answer a question.
+    # Logged where scheduled graphics are logged. The outcome used to live on
+    # the schedule record alone and die with it, so nothing could answer "did
+    # last night's bulletin actually start, and how late?" after the fact.
+    $bulletinName = if ($bulletinForLog) { [string]$bulletinForLog.Name } else { [string]$next.BulletinId }
     if (-not (Start-MojazPlayback -ChatId ([long]$next.ChatId) -UserId ([long]$next.CreatedBy) -ScheduleId $scheduleId -Force)) {
         Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'failed' -Fields @{ LastError = 'playback_start_failed' } | Out-Null
+        Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'failed' -EventId $scheduleId -Label $bulletinName `
+            -ScheduledAt ([string](Get-JsonProp $next 'ScheduledAt')) -ErrorText 'playback_start_failed' | Out-Null
+    }
+    else {
+        Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'success' -EventId $scheduleId -Label $bulletinName `
+            -ScheduledAt ([string](Get-JsonProp $next 'ScheduledAt')) | Out-Null
     }
 }

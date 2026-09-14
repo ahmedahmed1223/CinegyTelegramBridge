@@ -613,6 +613,51 @@ Describe 'Reply markup serialisation' {
         Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'WARN' }
     }
 
+    It 'flattens a row that was nested one level too deep' {
+        # The readiness screen shipped exactly this shape: a keyboard literal
+        # whose rows carry BOTH a leading comma and a trailing comma joining
+        # them turns every row into [[button]] instead of [button], and
+        # Telegram refuses the whole message with 400 "InlineKeyboardButton
+        # must be an Object".
+        #
+        # The repair pass was already in place when this reached the air on
+        # 2026-09-14 and said nothing, because it tested a cell with
+        # $_ -is [pscustomobject] - which is TRUE for anything off a pipeline,
+        # arrays included. The buttons are right there, so they are flattened
+        # back into a row rather than dropped.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        Mock Write-BridgeLog { }
+        $nested = @{ inline_keyboard = @(
+                , @((New-BridgeButton -Text 'فحص' -CallbackData 'menu:selftest'), (New-BridgeButton -Text 'تسليم' -CallbackData 'menu:handover')),
+                , @((New-BridgeButton -Text 'رجوع' -CallbackData 'menu:admintools'))
+            ) }
+
+        $rows = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $nested | ConvertFrom-Json).inline_keyboard
+
+        @($rows).Count | Should -Be 2
+        @($rows[0]).Count | Should -Be 2
+        @($rows[1]).Count | Should -Be 1
+        # Every cell is a button object, which is the whole point.
+        $rows[0][0].callback_data | Should -Be 'menu:selftest'
+        $rows[0][1].callback_data | Should -Be 'menu:handover'
+        $rows[1][0].callback_data | Should -Be 'menu:admintools'
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'WARN' }
+    }
+
+    It 'still reports a repair when the nested row holds a single button' {
+        # Counting cells before and after misses this one - one nested button
+        # flattens to one button - and a silent repair is how the fault above
+        # stayed invisible. The warning is the only breadcrumb to the caller.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        Mock Write-BridgeLog { }
+        $nested = @{ inline_keyboard = @(, @(, @((New-BridgeButton -Text 'رجوع' -CallbackData 'menu')))) }
+
+        $rows = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $nested | ConvertFrom-Json).inline_keyboard
+
+        $rows[0][0].callback_data | Should -Be 'menu'
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'WARN' }
+    }
+
     It 'leaves a well-formed keyboard exactly as it was' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
         Mock Write-BridgeLog { }
@@ -1525,6 +1570,36 @@ Describe 'Every screen sent as HTML is HTML the Bot API accepts' {
                     @(Get-Content -LiteralPath $_.FullName) |
                         Where-Object { $_ -notmatch '^\s*#' } |
                         Where-Object { $_ -match '<(b|i|u|s|strong|em|ins|del|strike|tg-spoiler)>[^<]*<(code|pre)>' } |
+                        ForEach-Object { "$file : $($_.Trim())" }
+                })
+        $offenders | Should -BeNullOrEmpty
+    }
+
+    It 'no keyboard row carries both a leading and a trailing comma' {
+        # "        , @((New-Button ...), (New-Button ...)),"
+        #
+        # A leading comma makes the row an array; a trailing comma then joins
+        # it to the next row as ONE comma expression, and every row ends up
+        # wrapped a second time - [[button]] where Telegram wants [button].
+        # It answers 400 and drops the whole message, so the operator taps and
+        # nothing happens.
+        #
+        # Caught at the source because it is invisible on the screen and the
+        # log line names neither the screen nor the row. The send-time repair
+        # pass now flattens it, but a screen should not need repairing.
+        $offenders = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\Parts') -Filter '*.ps1' |
+                ForEach-Object {
+                    $file = $_.Name
+                    @(Get-Content -LiteralPath $_.FullName) |
+                        Where-Object { $_ -notmatch '^\s*#' } |
+                        Where-Object { $_ -match '^\s*, @\(.*\),\s*$' } |
+                        Where-Object {
+                            # A row whose buttons continue on the next line
+                            # also ends in a comma, and is fine. It leaves
+                            # brackets open; a complete row closes every one
+                            # it opened, so the comma after it joins rows.
+                            ([regex]::Matches($_, '\(')).Count -eq ([regex]::Matches($_, '\)')).Count
+                        } |
                         ForEach-Object { "$file : $($_.Trim())" }
                 })
         $offenders | Should -BeNullOrEmpty

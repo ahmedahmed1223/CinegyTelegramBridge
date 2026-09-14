@@ -71,6 +71,44 @@ function New-BridgeButton {
     return $button
 }
 
+function Test-TelegramButtonObject {
+    <#
+        Is this one button object, as opposed to a row, a string, or a number?
+
+        Deliberately NOT `$Value -is [pscustomobject]`. [pscustomobject] is an
+        alias for PSObject, and anything arriving from a pipeline is wrapped in
+        one - so `$_ -is [pscustomobject]` inside a Where-Object is TRUE for an
+        array, a string, an int, everything. Written that way, the guard below
+        accepted a nested array as a button and passed the malformed keyboard
+        straight through to Telegram, which is how the readiness screen still
+        lost its whole message on 2026-09-14 with the repair pass already in
+        place and silent. PSCustomObject (the real type) does not have that
+        problem.
+    #>
+    param($Value)
+    return ($Value -is [hashtable] -or $Value -is [System.Management.Automation.PSCustomObject])
+}
+
+function Expand-TelegramButtonRow {
+    <#
+        The button objects inside a row, however deeply the caller nested it.
+
+        The @() flattening trap in AGENTS.md produces a row wrapped one level
+        too deep, and the buttons are sitting right there - so flatten rather
+        than drop the row and leave the operator a screen with no way out.
+        Anything that is not a button and not a collection (a stray string, an
+        int) is dropped, because Telegram refuses the whole message over it.
+    #>
+    param($Row)
+    foreach ($item in @($Row)) {
+        if ($null -eq $item) { continue }
+        if (Test-TelegramButtonObject -Value $item) { $item; continue }
+        if ($item -is [System.Collections.IEnumerable] -and $item -isnot [string]) {
+            Expand-TelegramButtonRow -Row $item
+        }
+    }
+}
+
 function ConvertTo-ValidInlineKeyboard {
     <#
         Repairs a keyboard whose rows are not arrays of button objects.
@@ -95,13 +133,18 @@ function ConvertTo-ValidInlineKeyboard {
     foreach ($row in $Rows) {
         if ($null -eq $row) { $repairs++; continue }
         # A bare button where a row belongs - wrap it instead of dropping it.
-        if ($row -is [hashtable] -or $row -is [pscustomobject]) {
+        if (Test-TelegramButtonObject -Value $row) {
             $fixed += , @($row)
             $repairs++
             continue
         }
-        $cells = @(@($row) | Where-Object { $_ -is [hashtable] -or $_ -is [pscustomobject] })
-        if ($cells.Count -ne @($row).Count) { $repairs++ }
+        $cells = @(Expand-TelegramButtonRow -Row $row)
+        # Counted on shape, not on length: a row holding a single nested
+        # button flattens to the same count it came in with, and comparing
+        # counts let exactly that case repair itself in silence.
+        foreach ($item in @($row)) {
+            if (-not (Test-TelegramButtonObject -Value $item)) { $repairs++; break }
+        }
         if ($cells.Count -gt 0) { $fixed += , $cells }
     }
     if ($repairs -gt 0) {

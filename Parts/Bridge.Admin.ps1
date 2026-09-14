@@ -238,7 +238,7 @@ function Show-ShiftReadinessScreen {
     $lines.Add('')
     $lines.Add($(if ($ready) { '<b>جاهز ✅ — ابدأ بالفحص الحي للتأكد من المسار.</b>' } else { '<b>ليست نظيفة — صفِّ ما فوق ثم افحص المسار الحي.</b>' }))
     $keyboard = @{ inline_keyboard = @(
-        , @((New-Button '🧪 فحص المسار الحي' 'menu:selftest'), (New-Button '📋 التسليم' 'menu:handover')),
+        , @((New-Button '🧪 فحص المسار الحي' 'menu:selftest'), (New-Button '📋 التسليم' 'menu:handover'))
         , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
     ) }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard

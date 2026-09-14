@@ -13,6 +13,25 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.29.1
+
+`✅ جاهزية المناوبة` in admin tools did nothing at all: the screen was built and
+sent, and Telegram refused the whole message with 400 `InlineKeyboardButton must
+be an Object`. One row in `Show-ShiftReadinessScreen` was written with a leading
+comma *and* a trailing one — the first makes the row an array, the second joins
+it to the next row as a single comma expression, so every row ends up wrapped
+twice: `[[button]]` where the Bot API wants `[button]`. Nothing shows on screen,
+and the one log line names neither screen nor row.
+
+The repair pass added in 8.27.0 for exactly this shape was silently inert: it
+tested each cell with `$_ -is [pscustomobject]`, and since `[pscustomobject]` is
+an alias for `PSObject` — which wraps everything coming off a pipeline — that is
+`True` for arrays, strings and ints alike. It now tests the real
+`PSCustomObject` type, flattens an over-nested row back into its buttons rather
+than dropping the row, and counts a repair by shape rather than by cell count so
+a single nested button can no longer repair itself in silence. A test scans
+`Parts/` and rejects the source pattern outright.
+
 ## Version 8.29.0
 
 An audit of every file that records events and what actually bounds it.

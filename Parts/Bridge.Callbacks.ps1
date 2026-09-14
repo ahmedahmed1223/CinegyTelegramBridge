@@ -1819,8 +1819,12 @@ function Invoke-CallbackQuery {
             # from UpdatedAt, so saying "keep it" is the same act as editing it.
             $draft = Get-NewsTickerDraft -UserId $userId
             if ($draft) {
-                $draft | Add-Member -NotePropertyName 'UpdatedAt' -NotePropertyValue ((Get-Date).ToString('o')) -Force
-                $draft.PSObject.Properties.Remove('WarnedAt')
+                # Through Set-JsonProp: written with Add-Member this extension
+                # left the UpdatedAt key at its old value, so the draft stayed
+                # exactly as idle as it was and the warning kept arriving
+                # however many times the button was pressed.
+                Set-JsonProp -Object $draft -Name 'UpdatedAt' -Value ((Get-Date).ToString('o'))
+                Remove-JsonProp -Object $draft -Name 'WarnedAt'
                 Save-NewsTickerDraft | Out-Null
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⏳ مُدِّدت مهلة المسودة.'
             }

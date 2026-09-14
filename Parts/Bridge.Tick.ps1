@@ -1088,7 +1088,11 @@ function Update-NewsDraftExpiry {
         $warnAt = [math]::Max(1, [math]::Min(5, [int]($timeout / 4)))
         $warned = [string](Get-JsonProp $draft 'WarnedAt')
         if ($owner -gt 0 -and -not $warned -and ($timeout - $elapsed) -le $warnAt) {
-            $draft | Add-Member -NotePropertyName 'WarnedAt' -NotePropertyValue ((Get-Date).ToString('o')) -Force
+            # Through Set-JsonProp, because the draft is a dictionary here
+            # and a PSCustomObject elsewhere. Written with Add-Member it was
+            # neither saved nor read back, and this mark is the only thing
+            # standing between one warning and one every tick.
+            Set-JsonProp -Object $draft -Name 'WarnedAt' -Value ((Get-Date).ToString('o'))
             Save-NewsTickerDraft | Out-Null
             $items = @(Get-JsonProp $draft 'Items')
             Send-TelegramMessage -ChatId $owner -ParseMode HTML `

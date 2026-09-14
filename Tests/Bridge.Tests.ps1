@@ -569,6 +569,88 @@ Describe 'Bridge button construction' {
     }
 }
 
+Describe 'Reading a possibly-absent property' {
+    It 'reads a key out of every dictionary shape the bridge builds' {
+        # [ordered]@{} is an OrderedDictionary, not a Hashtable, and exposes no
+        # keys as PSObject properties - so a reader testing -is [hashtable]
+        # answered $null for every key of a live draft, and only started
+        # working after a restart reloaded it as a Hashtable.
+        Get-JsonProp ([ordered]@{ OwnerChatId = 41 }) 'OwnerChatId' | Should -Be 41
+        Get-JsonProp @{ OwnerChatId = 41 } 'OwnerChatId' | Should -Be 41
+        Get-JsonProp ([pscustomobject]@{ OwnerChatId = 41 }) 'OwnerChatId' | Should -Be 41
+    }
+
+    It 'also sees a note property added to a dictionary with Add-Member' {
+        # Both spellings exist in this codebase. A reader that stopped at the
+        # keys could not see the expiry warning's own mark, which turned one
+        # warning per draft into one per tick.
+        $draft = [ordered]@{ OwnerChatId = 41 }
+        $draft | Add-Member -NotePropertyName 'WarnedAt' -NotePropertyValue 'now' -Force
+
+        Get-JsonProp $draft 'WarnedAt' | Should -Be 'now'
+    }
+
+    It 'answers nothing for a missing name rather than a real .NET member' {
+        # The note-property fallback is restricted to NoteProperty for this:
+        # every dictionary has Count and Keys, and a missing key must not
+        # start resolving to them.
+        Get-JsonProp @{ a = 1 } 'Count' | Should -BeNullOrEmpty
+        Get-JsonProp ([ordered]@{ a = 1 }) 'Keys' | Should -BeNullOrEmpty
+        Get-JsonProp @{ a = 1 } 'nope' | Should -BeNullOrEmpty
+        Get-JsonProp $null 'anything' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Writing a property onto state of either shape' {
+    It 'writes a key on a dictionary, where ConvertTo-Json can still see it' {
+        # Add-Member on a dictionary adds a note property, and ConvertTo-Json
+        # serialises a dictionary's KEYS - so the value was written, saved, and
+        # silently gone. That is what turned the draft expiry warning into one
+        # message per tick on a live channel.
+        foreach ($state in ([ordered]@{ a = 1 }), @{ a = 1 }) {
+            Set-JsonProp -Object $state -Name 'WarnedAt' -Value 'now'
+
+            $state.Contains('WarnedAt') | Should -BeTrue
+            $reloaded = $state | ConvertTo-Json -Depth 5 | ConvertFrom-Json -AsHashtable
+            Get-JsonProp $reloaded 'WarnedAt' | Should -Be 'now'
+        }
+    }
+
+    It 'writes a note property on a PSCustomObject, which has no keys' {
+        $state = [pscustomobject]@{ a = 1 }
+
+        Set-JsonProp -Object $state -Name 'WarnedAt' -Value 'now'
+
+        Get-JsonProp $state 'WarnedAt' | Should -Be 'now'
+    }
+
+    It 'overwrites rather than duplicating, whichever shape it is' {
+        foreach ($state in ([ordered]@{ a = 1 }), @{ a = 1 }, ([pscustomobject]@{ a = 1 })) {
+            Set-JsonProp -Object $state -Name 'Mark' -Value 'first'
+            Set-JsonProp -Object $state -Name 'Mark' -Value 'second'
+
+            Get-JsonProp $state 'Mark' | Should -Be 'second'
+        }
+    }
+
+    It 'clears a mark written in either spelling' {
+        # A value written before Set-JsonProp existed may still be sitting on
+        # the object as a note property, so both are cleared.
+        $state = [ordered]@{ a = 1 }
+        $state | Add-Member -NotePropertyName 'Mark' -NotePropertyValue 'old' -Force
+        Set-JsonProp -Object $state -Name 'Mark' -Value 'new'
+
+        Remove-JsonProp -Object $state -Name 'Mark'
+
+        Get-JsonProp $state 'Mark' | Should -BeNullOrEmpty
+    }
+
+    It 'does nothing to a null object rather than throwing' {
+        { Set-JsonProp -Object $null -Name 'x' -Value 1 } | Should -Not -Throw
+        { Remove-JsonProp -Object $null -Name 'x' } | Should -Not -Throw
+    }
+}
+
 Describe 'Reply markup serialisation' {
     BeforeAll {
         $script:StyledMarkup = @{ inline_keyboard = @(

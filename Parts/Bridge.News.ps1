@@ -106,13 +106,12 @@ function Start-NewsTickerDraft {
         $existing['OwnerUserId'] = $UserId
         $existing['OwnerChatId'] = $ChatId
         $existing['UpdatedAt'] = (Get-Date).ToString('o')
-        $existing.Remove('IsOpen')
-        $existing.Remove('HandedOverBy'); $existing.Remove('HandedOverChatId'); $existing.Remove('HandedOverAt')
+        foreach ($mark in 'IsOpen', 'HandedOverBy', 'HandedOverChatId', 'HandedOverAt') {
+            Remove-JsonProp -Object $existing -Name $mark
+        }
         # The idle-expiry warning is addressed to an owner, and this draft has
-        # a new one who has not had their window yet. Cleared as both a key and
-        # a note property because the tick sets it either way.
-        $existing.Remove('WarnedAt')
-        $existing.PSObject.Properties.Remove('WarnedAt')
+        # a new one who has not had their window yet.
+        Remove-JsonProp -Object $existing -Name 'WarnedAt'
         if (-not (Save-NewsTickerDraft)) {
             Write-BridgeLog 'Adopted news draft could not be saved; it may revert to open on the next start.' 'ERROR'
         }
@@ -590,6 +589,8 @@ function Open-NewsTickerDraftToAll {
     # A fresh idle window for whoever takes it: the expiry clock measures how
     # long a draft sat untouched, and the next editor has not had their turn.
     $draft['UpdatedAt'] = (Get-Date).ToString('o')
+    # The window restarts, so the warning owes itself again to whoever holds it.
+    Remove-JsonProp -Object $draft -Name 'WarnedAt'
     if (-not (Save-NewsTickerDraft)) {
         Write-BridgeLog 'Opened news draft could not be saved; it may revert to its owner on the next start.' 'ERROR'
     }

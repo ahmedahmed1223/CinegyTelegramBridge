@@ -207,8 +207,65 @@ Describe 'News draft expiry' {
         Mock Send-TelegramMessage {}
         Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
         Mock Get-SettingInt { 30 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+        # The warn path reads other bounded numbers on its way out.
+        Mock Get-SettingInt { 10 }
     }
     AfterAll { $script:NewsTickerDraft = $null }
+
+    It 'warns once about a draft about to expire, not once per tick' {
+        # The tick runs about every second. Written as a note property, the
+        # WarnedAt mark neither survived Save-NewsTickerDraft nor was seen by
+        # Get-JsonProp reading the dictionary - so the operator was told the
+        # same thing every second until the draft died. On a live channel that
+        # is not a bug in a screen, it is a flood in the chat the alarms use.
+        Mock Save-NewsTickerDraft { $true }
+        $script:NewsTickerDraft = [ordered]@{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ', 'ب')
+            # Inside the warn window, still short of the timeout.
+            UpdatedAt = (Get-Date).AddMinutes(-28).ToString('o'); BaseHash = 'OLD'
+        }
+
+        1..10 | ForEach-Object { Update-NewsDraftExpiry }
+
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'على وشك الانتهاء' }
+    }
+
+    It 'keeps the warning mark where a save and a reload can still find it' {
+        # A note property is not serialised with a dictionary, so a restart
+        # used to forget the draft had been warned about and start again.
+        Mock Save-NewsTickerDraft { $true }
+        $script:NewsTickerDraft = [ordered]@{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ')
+            UpdatedAt = (Get-Date).AddMinutes(-28).ToString('o'); BaseHash = 'OLD'
+        }
+
+        Update-NewsDraftExpiry
+        $reloaded = $script:NewsTickerDraft | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+
+        [string](Get-JsonProp $reloaded 'WarnedAt') | Should -Not -BeNullOrEmpty
+    }
+
+    It 'lets an extension actually extend, so pressing مدّد ends the warning' {
+        # Written as a note property, the extension left the UpdatedAt KEY at
+        # its old value: the draft stayed exactly as idle as it was, and the
+        # warning kept arriving however many times the button was pressed.
+        Mock Save-NewsTickerDraft { $true }
+        $script:NewsTickerDraft = [ordered]@{
+            OwnerUserId = 42; OwnerChatId = 42; Items = @('أ')
+            UpdatedAt = (Get-Date).AddMinutes(-28).ToString('o'); BaseHash = 'OLD'
+        }
+        Update-NewsDraftExpiry
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'على وشك الانتهاء' }
+
+        # Exactly what the news:draft:extend handler does.
+        $script:NewsTickerDraft['UpdatedAt'] = (Get-Date).ToString('o')
+        $script:NewsTickerDraft.Remove('WarnedAt')
+        1..5 | ForEach-Object { Update-NewsDraftExpiry }
+
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'على وشك الانتهاء' }
+    }
 
     It 'drops a draft left open past the timeout' {
         # Reproduces the live incident: a draft started yesterday could never

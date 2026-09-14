@@ -13,6 +13,31 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.31.1
+
+After the bridge was updated, the **⏳ ticker draft is about to expire** warning
+started arriving on roughly every tick instead of once — a flood in the chat the
+alarms use. The `WarnedAt` mark that prevents the repeat was written with
+`Add-Member`, and `Add-Member` on a dictionary adds a note property while
+`ConvertTo-Json` serialises only the dictionary's keys: the mark was written,
+saved, and silently gone, and invisible to a reader looking the key up. The
+8.30.0 `Get-JsonProp` fix did not cause this — it exposed it, because before
+that the warning never fired at all (it could not read `OwnerChatId` either).
+
+The **⏳ extend** button had the same fault with a worse effect: it wrote
+`UpdatedAt` as a note property while the key kept its old value, so the draft
+stayed exactly as idle as it was and the warning kept arriving however many
+times the button was pressed. It now actually extends.
+
+Writing state goes through `Set-JsonProp` / `Remove-JsonProp`, the writing half
+of `Get-JsonProp`, so no caller has to know whether it holds a dictionary or a
+PSCustomObject. All 43 `Add-Member` call sites in the repository were audited:
+every other one targets a `[pscustomobject]` or a `ConvertFrom-Json` result and
+is correct; one (`Set-AirNoticeMuted`) hand-wrote the rule correctly but tested
+`-is [hashtable]`, and now shares the one spelling. `Get-JsonProp` reads the key
+first and falls back to a note property, restricted to `NoteProperty` so a
+missing key cannot resolve to a real .NET member such as `Count` or `Keys`.
+
 ## Version 8.31.0
 
 The 📰 news ticker and 📑 bulletin help chapters now cover what shipped after

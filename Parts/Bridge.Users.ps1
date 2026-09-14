@@ -295,9 +295,7 @@ function Set-AirNoticeMuted {
     if (-not $script:UserProfiles.ContainsKey($id)) {
         $script:UserProfiles[$id] = @{ AddedAt = ''; AddedByUserId = 0L; LastActivityAt = '' }
     }
-    $entry = $script:UserProfiles[$id]
-    if ($entry -is [hashtable]) { $entry['MutedAirNotices'] = $Muted }
-    else { $entry | Add-Member -NotePropertyName 'MutedAirNotices' -NotePropertyValue $Muted -Force }
+    Set-JsonProp -Object $script:UserProfiles[$id] -Name 'MutedAirNotices' -Value $Muted
     $script:UserProfilesDirty = $true
     Save-UserProfiles -Force | Out-Null
     return $Muted

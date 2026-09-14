@@ -42,10 +42,49 @@ function Get-JsonProp {
     # empty to every caller here until a restart reloaded it as a Hashtable.
     if ($Object -is [System.Collections.IDictionary]) {
         if ($Object.Contains($Name)) { return $Object[$Name] }
+        # Not a bare $null: a dictionary can ALSO carry note properties added
+        # with Add-Member, and a reader that stopped at the keys could not see
+        # them. That turned a once-per-draft expiry warning into one every
+        # tick. Restricted to NoteProperty so a missing key cannot start
+        # resolving to a real .NET member like Count or Keys.
+        $note = @($Object.PSObject.Properties.Match($Name) | Where-Object { $_.MemberType -eq 'NoteProperty' })
+        if ($note.Count -gt 0) { return $note[0].Value }
         return $null
     }
     if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }
     return $null
+}
+
+function Set-JsonProp {
+    <#
+        The writing half of Get-JsonProp, and it exists for the same reason.
+
+        State in this bridge is a dictionary in one place and a PSCustomObject
+        in another - a live draft is [ordered]@{}, a reloaded one is a
+        Hashtable, and a test builds one with [pscustomobject]. Add-Member is
+        right for exactly one of those: on a dictionary it adds a note property
+        that ConvertTo-Json does NOT serialise, so the value vanishes at the
+        next save and is invisible to any reader that looks the key up. That is
+        how a once-per-draft expiry warning became one per tick on air, and how
+        pressing 'extend' came to do nothing at all.
+
+        Write through here and the caller does not have to know which shape it
+        holds.
+    #>
+    param($Object, [Parameter(Mandatory)][string]$Name, $Value)
+    if ($null -eq $Object) { return }
+    if ($Object -is [System.Collections.IDictionary]) { $Object[$Name] = $Value; return }
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
+function Remove-JsonProp {
+    <# Clears a mark written by Set-JsonProp, in whichever shape it landed.
+       Both spellings are cleared because a value written before Set-JsonProp
+       existed may still be sitting on the object as a note property. #>
+    param($Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object) { return }
+    if ($Object -is [System.Collections.IDictionary]) { $Object.Remove($Name) }
+    $Object.PSObject.Properties.Remove($Name) | Out-Null
 }
 
 function Save-Config {

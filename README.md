@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.4
+
+The admin tools screen (`Get-AdminToolsKeyboard`) was a flat wall of ~15
+buttons mixing user management, content, live relay, and dangerous system
+actions — the same problem the settings screen already solved with category
+tabs. Reused that exact pattern: it's now a 4-category picker (users,
+content, health, system), with a new `Get-AdminToolsCategoryKeyboard`
+carrying the original buttons unchanged — same `callback_data` throughout,
+so no downstream handler needed touching.
+
 ## Version 8.26.3
 
 Two follow-ups from the earlier security/performance review: `Complete-StreamUrl`

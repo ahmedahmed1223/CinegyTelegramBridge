@@ -107,7 +107,6 @@ function Get-HelpChapters {
                 ''
                 '✏️ بدء التحرير: يفتح مسودة ويقفلها باسمك حتى لا يعدّلها اثنان معًا.'
                 '➕ إضافة خبر · 📝 تعديل وترتيب · 👁 معاينة.'
-                '✅ مراجعة ونشر: يعرض ما سيتغيّر ثم ينشر.'
                 '📥 استيراد TXT: ملف نصي يحل محل المسودة أو يُضاف إليها.'
                 '🕘 النسخ والاستعادة: كل نشر يحفظ نسخة يمكن الرجوع إليها.'
                 ''
@@ -115,6 +114,17 @@ function Get-HelpChapters {
                 '   رابطه). التفاصيل في باب «📊 الربط مع Google Sheets».'
                 ''
                 '🔒 إن كانت المسودة بيد زميل: 🔓 طلب فكّ القفل يرسل له طلبًا.'
+                ''
+                '🚪 ثلاث نهايات للمسودة، اختر بقصد:'
+                '↳ ✅ مراجعة ونشر: يعرض ما سيتغيّر، ثم ينشر ويُفتح القفل.'
+                '↳ 🤝 سلّم المسودة للتالي: لا تُحذف ولا تصل الهواء؛'
+                '   تبقى بكل أخبارها ويتابعها أول من يضغط ✏️ — للمغادرة منتصف العمل.'
+                '↳ 🗑 إلغاء المسودة: يُعيد إليك نصّ أخبارها رسالةً ثم يحذفها.'
+                ''
+                '⏳ مسودة تُترك بلا تعديل تنتهي صلاحيتها: يصلك تحذير قبلها،'
+                '   ونصّ ما كُتب بعدها، وزرّ لاستئنافها.'
+                '🧾 سجل التنفيذ: هل عملت مزامنة الشيت التلقائية، ومتى،'
+                '   وكم خبرًا نشرت — فهي تنشر على الهواء بساعتها الخاصة.'
             ) }
         @{ Key = 'sheet'; Title = '📊 الربط مع Google Sheets'; AdminOnly = $false; Body = @(
                 'الشيت والشريط وجهان لمحتوى واحد: ما في الشيت يصل الهواء،'
@@ -176,9 +186,6 @@ function Get-HelpChapters {
                 ''
                 '⏱ المدة: كم يبقى كل صف · ⏩ الأول: زيادة حركة الدخول ·'
                 '   ⏹ الأخير: بقاؤه قبل الخروج. صفرٌ يعني اتّباع القالب.'
-                '🎬 مزامنة الظهور: يتبدّل الصف داخل حركة ظهور المشهد فلا يُرى'
-                '   وهو يتغيّر. عندها يصير طول اللوب هو مدة الصف، ويُقصَّر'
-                '   من Titler لا من هنا.'
                 ''
                 '▶️ تشغيل · ⏹ إيقاف وخروج.'
                 '🕒 تشغيل لاحقًا: موعد محفوظ يبقى بعد إعادة تشغيل الجسر.'
@@ -186,6 +193,8 @@ function Get-HelpChapters {
                 '↳ الموعد يشغّل آخر نسخة محفوظة، لا نسخته وقت الحجز.'
                 '↳ موعدان معًا لا يتصادمان: الثاني ينتظر ويصلك إشعار واحد.'
                 '↳ تعديل الجدول أثناء البث يغيّر المرة القادمة لا ما يُعرض الآن.'
+                '🧾 سجل التنفيذ في شاشة المواعيد: هل بدأ موجز أمس فعلًا،'
+                '   وكم تأخّر عن موعده، وسبب فشله إن فشل.'
                 ''
                 '🚨 العاجل أولى: خروجه إلى الهواء يسحب الموجز. وقبل إرساله'
                 '   تُسأل: الآن أم بعد انتهاء الموجز؟ والمؤجَّل يخرج وحده.'
@@ -463,7 +472,15 @@ function Get-HelpRichBlocks {
         # left out.
         $entry = @{ type = 'details'; summary = [string]$chapter.Title; blocks = $body }
         $entryLength = (ConvertTo-RichMessagePayload -Blocks @($entry)).Length
-        if ($skipped.Count -eq 0 -and (Test-RichPayloadSize -Length ($used + $entryLength + 400))) {
+        # Every chapter that fits goes in, not just the unbroken run before the
+        # first one that does not. The manual has been bigger than one message
+        # for a long time - an operator's is 15000 characters against a 12000
+        # limit - so stopping at the first overflow spent the remaining budget
+        # on nothing and threw away 🆘 حين يحدث خطأ, the chapter most worth
+        # having on screen, to keep a contiguous run. Order is preserved and
+        # whatever is missing is still named below, so a gap reads as a gap
+        # rather than as an end.
+        if (Test-RichPayloadSize -Length ($used + $entryLength + 400)) {
             $blocks += $entry
             $used += $entryLength
             continue

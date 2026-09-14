@@ -13,6 +13,27 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.31.0
+
+The 📰 news ticker and 📑 bulletin help chapters now cover what shipped after
+they were written. The execution log both screens gained in 8.28.0 was not
+mentioned in the guide at all, and the draft hand-over is new in 8.30.0. The
+ticker chapter now lays out the three ways a draft can end — publish, hand to
+the next editor, or discard with the text returned — plus draft expiry and the
+log that says whether the automatic sheet sync ran. The bulletin chapter names
+its own execution log, and its appearance-sync explanation, which had been
+written out twice, is written once.
+
+The one-screen guide also stops wasting its budget. The manual has been larger
+than a single Telegram message for a long time (an operator's serialises to
+about 15000 characters against a 12000 limit), and the cap stopped at the first
+chapter that did not fit — leaving over a thousand characters unused and
+dropping 🆘 حين يحدث خطأ, the chapter most worth having on screen, to keep the
+run contiguous. Every chapter that fits is now included, in the manual's own
+order, with whatever is missing named as before: an operator sees 9 chapters of
+11 rather than 8, an administrator 8 of 14 rather than 7 — and that is with the
+new content above, not before it.
+
 ## Version 8.30.0
 
 Whoever holds the news draft lock now has a way out that is neither publishing

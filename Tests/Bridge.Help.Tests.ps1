@@ -263,6 +263,38 @@ Describe 'The manual covers what the bridge actually grew' {
         $body | Should -Match 'آخر نسخة محفوظة'
     }
 
+    It 'tells an operator every way a ticker draft can end' {
+        # Until 8.30.0 the only ways out were publishing or destroying the
+        # draft, so the hand-over is the one an operator cannot guess is
+        # there - and the discard now returns the text, which changes whether
+        # pressing it is safe.
+        $body = (@(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'news' })[0].Body) -join "`n"
+
+        $body | Should -Match 'سلّم المسودة للتالي'
+        $body | Should -Match 'يتابعها أول من يضغط'
+        $body | Should -Match 'يُعيد إليك نصّ أخبارها'
+        # The automatic sheet sync publishes to air on its own clock; the log
+        # is where an operator finds out whether it did.
+        $body | Should -Match 'سجل التنفيذ'
+        # A draft left alone does not survive forever, and that is worth
+        # knowing before leaving one open.
+        $body | Should -Match 'تنتهي صلاحيتها'
+    }
+
+    It 'tells an operator the bulletin keeps an execution log too' {
+        $body = (@(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'mojaz' })[0].Body) -join "`n"
+
+        $body | Should -Match 'سجل التنفيذ'
+    }
+
+    It 'explains the appearance sync once, not twice' {
+        # It was written out in full and then again three lines later, which
+        # cost the one-screen guide a whole chapter of its budget.
+        $body = @(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'mojaz' })[0].Body
+
+        @($body | Where-Object { $_ -match '^🎬 مزامنة الظهور' }).Count | Should -Be 1
+    }
+
     It 'tells administrators how the show and hide permissions read' {
         $body = (@(@(Get-HelpChapters -ChatId 100 -UserId 101) | Where-Object { $_.Key -eq 'settings' })[0].Body) -join "`n"
 
@@ -294,6 +326,24 @@ Describe 'The rich guide fits the message it is sent in' {
         Mock Test-StatusViewer { $true }
         $payload = ConvertTo-RichMessagePayload -Blocks (Get-HelpRichBlocks -ChatId 101 -UserId 101)
         Test-RichPayloadSize -Length $payload.Length | Should -BeTrue -Because "the administrator guide is $($payload.Length) characters"
+    }
+
+    It 'spends the budget it has instead of stopping at the first chapter that does not fit' {
+        # The manual is bigger than one message and has been for a long time.
+        # Stopping at the first overflow left more than a thousand characters
+        # unused and dropped 🆘 حين يحدث خطأ - the chapter most worth having on
+        # screen - to keep the run contiguous. Order is kept; gaps are named.
+        Mock Test-Admin { $false }
+        $blocks = @(Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        $shown = @($blocks | Where-Object { $_.type -eq 'details' } | ForEach-Object { [string]$_.summary })
+        $all = @(Get-HelpChapters -ChatId 101 -UserId 101 | ForEach-Object { [string]$_.Title })
+
+        $shown.Count | Should -BeLessThan $all.Count -Because 'this test is about what happens when it does not all fit'
+        @($shown | Where-Object { $_ -match 'حين يحدث خطأ' }).Count | Should -Be 1
+        # Kept in the manual's own order, so a chapter never appears before one
+        # that precedes it.
+        $positions = @($shown | ForEach-Object { $all.IndexOf($_) })
+        @($positions | Sort-Object) -join ',' | Should -Be ($positions -join ',')
     }
 
     It 'names the chapters it had to leave out rather than stopping silently' {

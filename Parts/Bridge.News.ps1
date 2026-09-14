@@ -388,7 +388,10 @@ function Request-NewsLockRelease {
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
         RequestedAt = (Get-Date)
     }
-    Save-NewsLockRequest | Out-Null
+    # The auto-grant promise below only holds if the request survives a
+    # restart - that is the whole reason this file exists. If the write
+    # failed, say so rather than promising something the disk did not accept.
+    $requestPersisted = [bool](Save-NewsLockRequest)
     Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
     Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Format-UserAuditActor -UserId $UserId)"
 
@@ -399,7 +402,8 @@ function Request-NewsLockRelease {
                     @{text='✅ سلّم القفل';callback_data='news:lockgrant'},
                     @{text='⛔ ما زلت أعمل';callback_data='news:lockdeny'}))}
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') سيُمنح لك تلقائيًا." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    $persistNote = if ($requestPersisted) { '' } else { "`n⚠️ تعذّر حفظ الطلب على القرص؛ إعادة تشغيل الجسر قبل الردّ ستُلغيه." }
+    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') سيُمنح لك تلقائيًا.$persistNote" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 
@@ -412,7 +416,11 @@ function Complete-NewsLockRelease {
     $request = $script:NewsLockRequest
     if (-not $request) { return $false }
     $script:NewsLockRequest = $null
-    Save-NewsLockRequest | Out-Null
+    # Clearing the file is what stops a settled request coming back at the next
+    # start and granting a lock somebody already handed over or refused.
+    if (-not (Save-NewsLockRequest)) {
+        Write-BridgeLog 'Settled news lock request could not be cleared from disk; it may be restored on the next start.' 'ERROR'
+    }
 
     if ($Denied) {
         Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "⛔ رفض $(Get-UserDisplayName -UserId ([long]$request.OwnerUserId)) تسليم القفل؛ ما زال يعمل على المسودة."

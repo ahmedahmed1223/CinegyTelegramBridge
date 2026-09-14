@@ -45,7 +45,12 @@ function Save-UsageCounts {
                 LastUsedUtc = if ($script:TemplateLastUsed.ContainsKey($key)) { ([datetime]$script:TemplateLastUsed[$key]).ToUniversalTime().ToString('o') } else { '' }
             }
         }
-        Write-BridgeValidatedJson -Path $usageFile -Json ($persisted | ConvertTo-Json -Depth 4) | Out-Null
+        # Checked, not assumed: the writer returns $false instead of throwing,
+        # so clearing the dirty flag regardless used to record "saved" for a
+        # write that never landed - with no log line either way.
+        if (-not (Write-BridgeValidatedJson -Path $usageFile -Json ($persisted | ConvertTo-Json -Depth 4))) {
+            throw 'Validated JSON write failed.'
+        }
         $script:UsageDirty = $false
     }
     catch { Write-BridgeLog "Could not write usage.json: $($_.Exception.Message)" "WARN" }

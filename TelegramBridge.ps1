@@ -1817,10 +1817,14 @@ Import-DraftStates
 Import-RecentFieldValues
 Import-ScheduleEvents
 Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s); pending timers: $(@(Get-UpcomingScheduleEvents).Count)."
-Initialize-CinegyOnAirState | Out-Null
-Restore-MojazPlayback | Out-Null
+# Both queues load BEFORE the Cinegy reconciliation, not after it.
+# Initialize-CinegyOnAirState drops auto-hide timers and template reminders for
+# layers Cinegy reports empty - a guard that ran against two empty in-memory
+# lists and was then undone two lines later by loading the un-pruned files.
 Import-AutoHideQueue
 Import-TemplateReminderQueue
+Initialize-CinegyOnAirState | Out-Null
+Restore-MojazPlayback | Out-Null
 Import-AuditTrail
 Import-UserOperationHistory
 Register-BotCommands

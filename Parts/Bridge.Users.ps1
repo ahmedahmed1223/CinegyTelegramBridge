@@ -337,10 +337,15 @@ function Import-AccessGuard {
 }
 
 function Save-AccessGuard {
+    <# Through the validated writer like every other state file: the old
+       hand-rolled temp+move used a shared .tmp name, never read the file back,
+       and left no .bak - so a truncated write moved straight into place and
+       Import-AccessGuard forgot every blocked chat on the next start. #>
     try {
-        $temporary = "$($script:accessGuardFile).tmp"
-        $script:AccessGuard | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:accessGuardFile -Force -ErrorAction Stop
+        $json = $script:AccessGuard | ConvertTo-Json -Depth 5
+        if (-not (Write-BridgeValidatedJson -Path $script:accessGuardFile -Json $json)) {
+            throw 'Validated JSON write failed.'
+        }
         return $true
     }
     catch { Write-BridgeLog "Could not write access-guard.json: $($_.Exception.Message)" 'WARN'; return $false }
@@ -554,10 +559,14 @@ function Import-DisabledUsers {
 }
 
 function Save-DisabledUsers {
+    <# Same validated writer as every other state file. A torn write here is
+       an authorization regression, not just lost state: Import-DisabledUsers
+       warns and moves on, so every disabled account comes back enabled. #>
     try {
-        $temporary = "$($script:disabledUsersFile).tmp"
-        $script:DisabledUserIds | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $script:disabledUsersFile -Force -ErrorAction Stop
+        $json = $script:DisabledUserIds | ConvertTo-Json -Depth 3
+        if (-not (Write-BridgeValidatedJson -Path $script:disabledUsersFile -Json $json)) {
+            throw 'Validated JSON write failed.'
+        }
         return $true
     }
     catch { Write-BridgeLog "Could not write disabled-users.json: $($_.Exception.Message)" 'WARN'; return $false }

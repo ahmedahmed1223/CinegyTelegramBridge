@@ -336,10 +336,23 @@ function Import-ScheduleEvents {
         $read = Read-ValidatedJsonState -Path $script:scheduleFile -AsHashtable
         if (-not $read) { return }
         $raw = $read.Data
-        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        # Built aside and assigned at the end: the live list used to be emptied
+        # here, before the loop, so an entry that threw below left it empty and
+        # the next Add-ScheduledShowEvent rewrote schedule.json from nothing.
+        $restored = [System.Collections.Generic.List[hashtable]]::new()
         $recovered = $false
+        $skipped = 0
         foreach ($scheduleEntry in @($raw)) {
             if (-not $scheduleEntry -or -not $scheduleEntry.ContainsKey('Id')) { continue }
+            # Status and ScheduledAt are read straight off the entry here and in
+            # every screen downstream, and a missing hashtable key THROWS under
+            # Set-StrictMode -Version Latest. The catch is outside this loop, so
+            # one entry from an older build used to take every future scheduled
+            # graphic with it - permanently. Skip that one entry instead.
+            if (-not $scheduleEntry.ContainsKey('Status') -or -not $scheduleEntry.ContainsKey('ScheduledAt')) {
+                $skipped++
+                continue
+            }
             if ([string]$scheduleEntry.Status -eq 'running') {
                 # The command may already have reached Cinegy before the crash.
                 # Never replay that occurrence automatically.
@@ -347,7 +360,11 @@ function Import-ScheduleEvents {
                 $scheduleEntry.LastResult = 'Bridge restarted while occurrence was running; not replayed.'
                 $recovered = $true
             }
-            $script:ScheduleEvents.Add($scheduleEntry)
+            $restored.Add($scheduleEntry)
+        }
+        $script:ScheduleEvents = $restored
+        if ($skipped -gt 0) {
+            Write-BridgeLog "Skipped $skipped unreadable schedule entry(ies); $($restored.Count) restored." 'WARN'
         }
         if ($recovered) { Save-ScheduleEvents | Out-Null }
     }

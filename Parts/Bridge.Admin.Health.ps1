@@ -559,7 +559,9 @@ function Save-HealthSnapshot {
             GeneratedUtc = (Get-Date).ToUniversalTime().ToString('o')
             Rows         = @($rows | ForEach-Object { [ordered]@{ Name = [string]$_.Name; Icon = [string]$_.Icon; Detail = [string]$_.Detail } })
         }
-        Write-BridgeValidatedJson -Path $script:healthSnapshotFile -Json ($payload | ConvertTo-Json -Depth 4) | Out-Null
+        if (-not (Write-BridgeValidatedJson -Path $script:healthSnapshotFile -Json ($payload | ConvertTo-Json -Depth 4))) {
+            throw 'Validated JSON write failed.'
+        }
     }
     catch { Write-BridgeLog "Could not write health-snapshot.json: $($_.Exception.Message)" "WARN" }
 }

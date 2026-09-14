@@ -564,6 +564,121 @@ Describe 'Persistent timed-show auto-hide timers' {
     }
 }
 
+Describe 'Re-showing onto a live layer clears it first' {
+    # Bridge.AirOperation.ps1:668-682. A scene already loaded keeps the values
+    # it started with, so the pre-show HIDE is what makes the NEW text appear
+    # at all. A failed clear is the exact condition that leaves the PREVIOUS
+    # headline on air under a SHOW that reported success - and neither branch
+    # had a test, on the most common path there is (re-showing a live layer).
+    BeforeEach {
+        $script:RollbackCandidates = @{}; $script:LastSuccessfulLayerShows = @{}; $script:OnAir = @{}
+        $script:PendingState.Clear(); $script:LayerLocks = @{}
+        $script:AutoHideQueue = [Collections.Generic.List[object]]::new()
+        Mock Get-TemplateStore {
+            @{ Order = @('beta'); Map = @{
+                    beta = @{ Key = 'beta'; Layer = 5; Path = 'C:\Scenes\Beta.cintitle'; Fields = @('Title'); FieldTypes = @{}; Presets = @() }
+                }; Errors = @() }
+        }
+        Mock Test-Admin { $false }
+        Mock Send-TelegramMessage { }
+        Mock Save-OnAirState { }
+        Mock Add-UsageCount { }
+        Mock Add-AuditEntry { }
+        Mock Write-BridgeLog { }
+        Mock Write-AirOperationResult { }
+        Mock Update-OnAirStateFromCinegy { [pscustomobject]@{ Added = @(); Removed = @(); Failed = @() } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = 'event-new'; Error = ''; Xml = '' } }
+    }
+
+    It 'hides the layer before re-showing onto it' {
+        $script:OnAir[5] = @{ Key = 'beta'; ActiveId = 'event-old'; At = (Get-Date); UserId = 10 }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; Xml = '' } }
+
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title = 'new' } -ChatId 10 -UserId 10 | Out-Null
+
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 5 }
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'does not clear a layer that was not already live' {
+        # Nothing to preserve and nothing to clear: the extra HIDE would only
+        # cost an air round-trip on every first show.
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; Xml = '' } }
+
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title = 'new' } -ChatId 10 -UserId 10 | Out-Null
+
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'warns loudly when the pre-show clear fails, whatever the XML log setting' {
+        $script:OnAir[5] = @{ Key = 'beta'; ActiveId = 'event-old'; At = (Get-Date); UserId = 10 }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $false; Error = 'timeout'; Xml = '' } }
+
+        Invoke-ShowTemplateResult -Key beta -Variables @{Title = 'new' } -ChatId 10 -UserId 10 | Out-Null
+
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter {
+            $Message -like '*Pre-show clear*' -and $Level -eq 'WARN'
+        }
+    }
+}
+
+Describe 'An auto-hide timer will not fire blind' {
+    # Bridge.Tick.ps1:264-267 refuses to hide when Cinegy cannot confirm the
+    # layer. Unreachable engine is not permission to hide whatever is there
+    # now - after an external change that may be a graphic this timer was
+    # never set for. The guard existed with no test driving Success=$false.
+    BeforeEach {
+        $script:OriginalAutoHideFileForTest = $script:autoHideFile
+        $script:autoHideFile = Join-Path $TestDrive 'autohide-blind.json'
+        $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        Mock Invoke-HideLayer { $true }
+        Mock Save-AutoHideQueue { $true }
+    }
+
+    AfterEach {
+        $script:AutoHideQueue = [System.Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{}
+        $script:autoHideFile = $script:OriginalAutoHideFileForTest
+    }
+
+    It 'skips the hide when the engine status cannot be read' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = '{ENGINE-1}'; At = $now.DateTime; UserId = 2L }
+        $script:AutoHideQueue.Add(@{
+                Layer = 7; At = $now; ChatId = 2L; UserId = 2L; TemplateKey = 'Urgent'
+                ActiveId = '{ENGINE-1}'; ActiveIdConfirmed = $true
+            })
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $false; IsOnAir = $false; ActiveId = ''; ActiveName = ''; ActiveTemplateName = '' }
+        }
+
+        Update-AutoHideQueue -Now $now
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly
+    }
+
+    It 'still hides when the engine confirms the same scene is up' {
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = '{ENGINE-1}'; At = $now.DateTime; UserId = 2L }
+        $script:AutoHideQueue.Add(@{
+                Layer = 7; At = $now; ChatId = 2L; UserId = 2L; TemplateKey = 'Urgent'
+                ActiveId = '{ENGINE-1}'; ActiveIdConfirmed = $true
+            })
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{ENGINE-1}'; ActiveName = ''; ActiveTemplateName = '' }
+        }
+
+        Update-AutoHideQueue -Now $now
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 }
+    }
+}
+
 Describe 'Snapshot source labels' {
     It 'labels a snapshot captured from the primary broadcast source' {
         Get-SnapshotSourceLabel -SourceIsPrimary $true | Should -Be 'البث الأساسي'

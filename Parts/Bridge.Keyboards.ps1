@@ -709,6 +709,24 @@ function Complete-TemplateSearch {
 }
 
 function Get-RetryDelaySeconds {
+    <#
+        NOT the backoff the scheduler runs on. The live one is
+        Get-BridgeScheduleRetryDecision in Modules/BridgeSchedulePolicy.psm1,
+        called from Bridge.Schedule.ps1, and that is what reads
+        ScheduleRetryDelaySeconds, ScheduleRetryBackoffFactor and
+        ScheduleRetryMaxDelaySeconds.
+
+        Nothing in the product calls this copy - only its tests do - and the
+        two formulas are identical today, which is precisely what makes it a
+        trap rather than merely spare: an edit here passes its tests, ships,
+        and changes nothing on air. This bridge has already paid for that
+        shape once, in a keyboard guard that looked live and was inert for two
+        releases.
+
+        Change the policy module. Delete this with the next release that
+        touches this file for a reason of its own - deleting it on its own
+        account would be spending a release on tidiness.
+    #>
     param([int]$BaseSeconds, [int]$Attempt, [int]$Factor = 2, [int]$MaxSeconds = 300)
     $base = [math]::Max(1, $BaseSeconds)
     $safeAttempt = [math]::Min(31, [math]::Max(1, $Attempt))

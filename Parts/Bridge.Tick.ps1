@@ -1095,7 +1095,7 @@ function Update-NewsDraftExpiry {
             Set-JsonProp -Object $draft -Name 'WarnedAt' -Value ((Get-Date).ToString('o'))
             Save-NewsTickerDraft | Out-Null
             $items = @(Get-JsonProp $draft 'Items')
-            Send-TelegramMessage -ChatId $owner -ParseMode HTML `
+            Send-TelegramMessage -ChatId $owner -ParseMode HTML -Cause 'news-draft-expiry-warning' `
                 -Text "⏳ <b>مسودة الشريط ($($items.Count) خبرًا) على وشك الانتهاء</b>`nستُحذف بعد $(Format-DurationMinutes -Minutes ([int][math]::Ceiling($timeout - $elapsed))) بلا تعديل. مدّدها أو انشرها." `
                 -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏳ تمديد' 'news:draft:extend'), (New-Button '📰 فتح المسودة' 'news:refresh'))) }
         }
@@ -1699,7 +1699,7 @@ function Update-StaleOnAirWatchdog {
         $target = [long](Get-JsonProp $record 'ChatId')
         if ($target -le 0) { $target = [long](Get-JsonProp $record 'UserId') }
         if ($target -le 0 -or $adminIds -contains $target) { continue }
-        Send-TelegramMessage -ChatId $target -ParseMode HTML `
+        Send-TelegramMessage -ChatId $target -ParseMode HTML -Cause 'stale-on-air-owner-notice' `
             -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $(Get-ArabicCountNoun -Count $item.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة').`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
             -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "🙈 أخفِ طبقة $($item.Layer)" "hide:$($item.Layer)" -Style danger))) }
     }
@@ -2058,7 +2058,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }

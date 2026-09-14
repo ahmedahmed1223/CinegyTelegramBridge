@@ -13,6 +13,33 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.32.0
+
+Asked after the 8.31.1 flood whether anything caps the number of notifications:
+nothing did. `RepeatAlertWindowHours` counted repeats and annotated them but
+sent every one; quiet hours are off by default and only defer non-urgent
+notices overnight; the outbox cap bounds the queue, not the send rate; and the
+429 handler reacts only after Telegram has already refused. The repeat counter
+could not even see the draft warning, whose text starts with ⏳ rather than one
+of the failure glyphs it matches.
+
+`AlertMaxPerCausePerHour` (default 10, 0 removes the cap) lives under Settings →
+notifications. Past it a cause is held, and one line arrives once it goes quiet:
+"🔇 كُتم ٤٧ تنبيهًا من نفس السبب خلال الساعة الماضية".
+
+Per cause, never a global budget — a global quota spent by one chatty fault
+would swallow the unrelated alert that mattered. Causes come from
+`Get-BridgeAlertCause`, which strips numbers, so every repeat of one fault
+shares a key however much its layer or countdown differ, and the count is per
+chat so one operator cannot mute another's notices.
+
+It is opt-in and must stay that way: only a message carrying `-Cause` is
+capped, and only unsolicited notices carry one. An operator putting fifteen
+graphics to air in an hour produces fifteen confirmations whose causes are
+identical once numbers are stripped, and capping those would hide the air
+itself. Every held notice is still written to `bridge.log` — the cap is quiet
+towards the operator, never towards whoever maintains the bridge.
+
 ## Version 8.31.1
 
 After the bridge was updated, the **⏳ ticker draft is about to expire** warning

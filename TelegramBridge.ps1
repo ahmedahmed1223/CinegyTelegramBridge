@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.31.1'
+$script:BridgeVersion = '8.32.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -300,6 +300,7 @@ $script:DefaultSettings = [ordered]@{
     EnableShiftHandover        = $true   # one screen a shift change needs
     NotifyAdminsOnMissingProxy = $false
     RepeatAlertWindowHours     = 6       # window for "this is the third time, same cause" (0 disables)
+    AlertMaxPerCausePerHour    = 10      # last resort against a fault that can talk; 0 removes the cap
     MaterialProxyLeadMinutes   = 30      # how long before air the local copy is checked
     MaterialEndAlertMinutes    = 0       # warn this many minutes before the active material ends (0 disables)
     EnableEngineHealth         = $false  # engine-health screen from /metrics; measures the box, off unless asked
@@ -415,6 +416,7 @@ $script:SettingDisplayMetadata = @{
     EnableShiftHandover = @{ Unit = ''; Description = 'زر التسليم: شاشة واحدة تجمع ما يحتاجه تبديل المناوبة' }
     NotifyAdminsOnMissingProxy = @{ Unit = ''; Description = 'تنبيه المشرفين إن قاربت مادة موعدها ولا نسخة محلية لها على السيرفر — عندها تُقرأ من المصدر أثناء البثّ' }
     RepeatAlertWindowHours = @{ Unit = 'ساعة'; Description = 'خلال كم ساعة يُحسب تكرار التنبيه: من الثالث فصاعدًا يقول التنبيه إنه تكرار ومتى بدأ (0 للتعطيل)' }
+    AlertMaxPerCausePerHour = @{ Unit = 'تنبيه'; Description = 'أقصى عدد تنبيهات من السبب الواحد في الساعة؛ ما بعده يُكتم ويُلخَّص في رسالة واحدة (0 لرفع السقف)' }
     MaterialProxyLeadMinutes = @{ Unit = 'دقيقة'; Description = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية' }
     MaterialEndAlertMinutes = @{ Unit = 'دقيقة'; Description = 'التنبيه قبل نهاية المادة الجارية بهذه الدقائق لتجهيز غرافيك الختام (0 للتعطيل)' }
     EnableEngineHealth = @{ Unit = ''; Description = 'شاشة صحة المحرك من عدادات Cinegy (إطارات مسقطة وترخيص) — معطلة افتراضيًا ويفعّلها المشرف' }
@@ -1079,6 +1081,10 @@ $script:StaleOnAirEscalationMinutes = @(15, 30)
 $script:MaterialProxyAlerted = [System.Collections.Generic.HashSet[string]]::new()
 # cause -> the times it alerted, inside the repeat window. See Add-BridgeAlertOccurrence.
 $script:AlertHistory = @{}
+# Per cause (and per chat), the sends inside the last hour and what was held
+# past the cap. In memory on purpose: a restart is a fresh hour, and the
+# window that matters is minutes.
+$script:AlertSuppression = @{}
 # P2: cause -> chat -> pinned message id. Unpinned by the sweep when the
 # cause goes quiet past the window.
 $script:PinnedRecurrences = @{}
@@ -1256,6 +1262,7 @@ foreach ($entry in @(
         @{ Category = 'notifications'; Names = @(
                 'EnableAnnouncements', 'AnnouncementMaxLength', 'AnnouncementDefaultExpiryHours',
                 'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd',
+                'AlertMaxPerCausePerHour',
                 'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat',
                 'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks',
                 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
@@ -1438,6 +1445,7 @@ $script:SettingNavigationLabels = @{
     EnableShiftHandover = 'شاشة تسليم المناوبة'
     NotifyAdminsOnMissingProxy = 'تنبيه المادة بلا نسخة محلية'
     RepeatAlertWindowHours = 'نافذة تكرار التنبيه'
+    AlertMaxPerCausePerHour = 'سقف تنبيهات السبب الواحد'
     MaterialProxyLeadMinutes = 'مهلة فحص النسخة المحلية'
     PendingApprovalExpiryHours = 'صلاحية طلب الوصول'
     PendingStateTimeoutMinutes = 'مهلة الإدخال غير المكتمل'
@@ -1500,6 +1508,7 @@ $script:SettingConstraints = @{
     # Zero is off, not a floor of one: an administrator who does not want
     # repetition counted has to be able to say so.
     RepeatAlertWindowHours        = @{ Minimum = 0; Maximum = 168 }
+    AlertMaxPerCausePerHour       = @{ Minimum = 0; Maximum = 1000 }
     # Hours of the day, which have twenty-four of them.
     HeartbeatHour                 = @{ Minimum = 0; Maximum = 23 }
     QuietHoursStart               = @{ Minimum = 0; Maximum = 23 }

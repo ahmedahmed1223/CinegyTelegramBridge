@@ -246,8 +246,14 @@ function Send-TelegramMessage {
         [Parameter(Mandatory)][long]$ChatId,
         [Parameter(Mandatory)][string]$Text,
         [hashtable]$ReplyMarkup,
-        [ValidateSet('', 'HTML')][string]$ParseMode = ''
+        [ValidateSet('', 'HTML')][string]$ParseMode = '',
+        # Set ONLY by unsolicited notices - anything the tick can send without
+        # the operator having asked. A screen, a reply, or a confirmation of
+        # something they just pressed must never carry one, or a busy hour on
+        # air would start hiding itself. See Test-BridgeNoticeSuppressed.
+        [AllowEmptyString()][string]$Cause = ''
     )
+    if ($Cause -and (Test-BridgeNoticeSuppressed -Cause $Cause -ChatId $ChatId)) { return }
     # D1: a quarantined chat already proved undeliverable three times. Trying
     # again on every alert is how forty-one failures filled a week of log.
     if (Test-DeadChat -ChatId $ChatId) {
@@ -1008,6 +1014,89 @@ function Update-PinnedRecurrenceSweep {
     }
 }
 
+function Test-BridgeNoticeSuppressed {
+    <#
+        Has this cause said enough for one hour?
+
+        The last resort against a fault that can talk. Every guard before this
+        one is specific - a cooldown here, a WarnedAt mark there - and each was
+        correct until the day it was not: a mark written where nothing could
+        read it turned one expiry warning into one per tick on a live channel,
+        and the only thing that eventually stopped it was Telegram's own 429.
+
+        Counted PER CAUSE, never globally. A global budget spent by one chatty
+        fault would swallow the unrelated alert that mattered, which is the
+        opposite of the point. Numbers are already stripped from a cause by
+        Get-BridgeAlertCause, so every repeat of one fault shares one key
+        however much its layer or its countdown differ.
+
+        Opt-in, and deliberately so: this must never reach a message the
+        operator asked for. An operator putting fifteen graphics to air in an
+        hour produces fifteen confirmations whose causes are identical once the
+        numbers are stripped, and capping those would hide the air itself.
+        Only unsolicited notices pass a -Cause.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Cause, [long]$ChatId = 0, [datetime]$Now = (Get-Date))
+    $max = Get-SettingInt 'AlertMaxPerCausePerHour'
+    if ($max -le 0) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Cause)) { return $false }
+
+    $key = "$ChatId|$Cause"
+    $cutoff = $Now.AddHours(-1)
+    $record = if ($script:AlertSuppression.ContainsKey($key)) { $script:AlertSuppression[$key] } else { $null }
+    $seen = [System.Collections.Generic.List[datetime]]::new()
+    if ($record) { foreach ($at in @($record.Sent)) { if ($at -gt $cutoff) { $seen.Add($at) } } }
+
+    if ($seen.Count -lt $max) {
+        $seen.Add($Now)
+        $script:AlertSuppression[$key] = @{
+            Sent = $seen.ToArray(); Held = if ($record) { [int]$record.Held } else { 0 }
+            Cause = $Cause; ChatId = $ChatId; LastAt = $Now
+        }
+        return $false
+    }
+
+    # Over the cap. Held rather than dropped: the count is what the summary
+    # reports when the hour rolls over, so nothing disappears unmentioned.
+    # A plain statement: PowerShell parses a parenthesised if here but runs it
+    # as a command, so the arithmetic never happens.
+    $held = 0
+    if ($record) { $held = [int]$record.Held }
+    $held++
+    $script:AlertSuppression[$key] = @{
+        Sent = $seen.ToArray(); Held = $held; Cause = $Cause; ChatId = $ChatId; LastAt = $Now
+    }
+    # Logged every time. The cap is quiet towards the operator, never towards
+    # whoever maintains the bridge.
+    Write-BridgeLog "Alert cap reached for cause '$Cause' (chat $ChatId): $max in the last hour, holding #$held" 'WARN'
+    return $true
+}
+
+function Update-AlertSuppressionSweep {
+    <# Says how much was held once the hour has rolled over and the fault has
+       gone quiet. A cap that swallows without a receipt is indistinguishable
+       from a bridge that stopped noticing. #>
+    $max = Get-SettingInt 'AlertMaxPerCausePerHour'
+    $now = Get-Date
+    $cutoff = $now.AddHours(-1)
+    foreach ($key in @($script:AlertSuppression.Keys)) {
+        $record = $script:AlertSuppression[$key]
+        $live = @(@($record.Sent) | Where-Object { $_ -gt $cutoff })
+        # Still inside its hour, or still arriving: nothing to summarise yet.
+        if ($live.Count -ge $max -and $max -gt 0) { continue }
+        if ([datetime]$record.LastAt -gt $now.AddMinutes(-2)) { continue }
+        $held = [int]$record.Held
+        $script:AlertSuppression.Remove($key)
+        if ($held -le 0) { continue }
+        $chat = [long]$record.ChatId
+        $text = "🔇 كُتم $(Get-ArabicCountNoun -Count $held -One 'تنبيه' -Two 'تنبيهان' -Few 'تنبيهات' -Many 'تنبيهًا') من نفس السبب خلال الساعة الماضية بعد بلوغ السقف.`n" +
+        "السبب: $(ConvertTo-TelegramHtmlText $([string]$record.Cause))"
+        Write-BridgeLog "Held $held alert(s) for cause '$($record.Cause)' (chat $chat) after the hourly cap" 'WARN'
+        if ($chat -gt 0) { Send-TelegramMessage -ChatId $chat -Text $text -ParseMode HTML }
+        else { Send-AdminBroadcast -Text $text }
+    }
+}
+
 function Send-AdminBroadcast {
     <#
         -Urgent bypasses quiet hours. Everything meaning the channel is wrong
@@ -1045,6 +1134,10 @@ function Send-AdminBroadcast {
         Write-BridgeLog "Held a non-urgent admin notice for the morning digest (queue: $($script:QuietHoursQueue.Count))"
         return
     }
+    # Capped once for the whole broadcast, not once per administrator: the
+    # alert is one event, and counting it three times because three people
+    # are listening would reach the cap three times faster.
+    if (Test-BridgeNoticeSuppressed -Cause (Get-BridgeAlertCause -Text $Text)) { return }
     $sentIds = @{}
     foreach ($adminId in @(Get-AdminNotifyIds)) {
         Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup | Out-Null

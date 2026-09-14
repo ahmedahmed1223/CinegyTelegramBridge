@@ -569,6 +569,103 @@ Describe 'Bridge button construction' {
     }
 }
 
+Describe 'A fault that can talk still cannot flood the chat' {
+    BeforeEach {
+        $script:AlertSuppression = @{}
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        Mock Send-AdminBroadcast { }
+        Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'AlertMaxPerCausePerHour' }
+    }
+    AfterAll { $script:AlertSuppression = @{} }
+
+    It 'lets the cap through and holds the rest of the same cause' {
+        # The live incident this exists for: a warning arriving on every tick
+        # because the mark that should have stopped it was written where
+        # nothing could read it. Every specific guard can fail that way; this
+        # is the one that does not have to be right about the cause.
+        $now = Get-Date
+        $sent = 0
+        1..50 | ForEach-Object {
+            if (-not (Test-BridgeNoticeSuppressed -Cause 'مسودة على وشك الانتهاء' -ChatId 99 -Now $now.AddSeconds($_))) { $sent++ }
+        }
+
+        $sent | Should -Be 10
+    }
+
+    It 'never lets one chatty fault starve an unrelated alert' {
+        # Per cause, never a global budget: an alert about black output must
+        # not be swallowed because a draft warning spent the hour's quota.
+        $now = Get-Date
+        1..40 | ForEach-Object { Test-BridgeNoticeSuppressed -Cause 'مسودة على وشك الانتهاء' -ChatId 99 -Now $now | Out-Null }
+
+        Test-BridgeNoticeSuppressed -Cause 'المخرج أسود' -ChatId 99 -Now $now | Should -BeFalse
+    }
+
+    It 'counts a cause per chat, so one operator cannot mute another' {
+        $now = Get-Date
+        1..40 | ForEach-Object { Test-BridgeNoticeSuppressed -Cause 'نفس السبب' -ChatId 11 -Now $now | Out-Null }
+
+        Test-BridgeNoticeSuppressed -Cause 'نفس السبب' -ChatId 22 -Now $now | Should -BeFalse
+    }
+
+    It 'has no cap at all when the setting is zero' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'AlertMaxPerCausePerHour' }
+        $now = Get-Date
+
+        $held = @(1..30 | Where-Object { Test-BridgeNoticeSuppressed -Cause 'أي سبب' -ChatId 99 -Now $now })
+
+        $held | Should -BeNullOrEmpty
+    }
+
+    It 'says how much it held once the fault goes quiet' {
+        # A cap that swallows without a receipt is indistinguishable from a
+        # bridge that stopped noticing.
+        $now = Get-Date
+        1..25 | ForEach-Object { Test-BridgeNoticeSuppressed -Cause 'سبب ثرثار' -ChatId 99 -Now $now.AddSeconds($_) | Out-Null }
+        $key = @($script:AlertSuppression.Keys)[0]
+        # The hour has rolled over and nothing new has arrived for a while.
+        $script:AlertSuppression[$key].Sent = @()
+        $script:AlertSuppression[$key].LastAt = $now.AddMinutes(-5)
+
+        Update-AlertSuppressionSweep
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'كُتم' -and $Text -match '15' }
+        $script:AlertSuppression.Count | Should -Be 0
+    }
+
+    It 'stays silent while the fault is still arriving' {
+        # Summarising mid-flood would itself become the flood.
+        $now = Get-Date
+        1..25 | ForEach-Object { Test-BridgeNoticeSuppressed -Cause 'سبب ثرثار' -ChatId 99 -Now $now.AddSeconds($_) | Out-Null }
+
+        Update-AlertSuppressionSweep
+
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+        $script:AlertSuppression.Count | Should -Be 1
+    }
+
+    It 'logs every held notice, because the cap is quiet only towards the operator' {
+        $now = Get-Date
+
+        1..15 | ForEach-Object { Test-BridgeNoticeSuppressed -Cause 'سبب' -ChatId 99 -Now $now.AddSeconds($_) | Out-Null }
+
+        Should -Invoke Write-BridgeLog -Times 5 -Exactly -ParameterFilter { $Level -eq 'WARN' -and $Message -match 'Alert cap reached' }
+    }
+
+    It 'leaves a message the operator asked for alone' {
+        # The rule that keeps this safe: only unsolicited notices pass a
+        # -Cause. Fifteen graphics put to air in an hour produce fifteen
+        # confirmations whose causes are identical once numbers are stripped,
+        # and capping those would hide the air itself.
+        $now = Get-Date
+
+        $anyHeld = @(1..40 | Where-Object { Test-BridgeNoticeSuppressed -Cause '' -ChatId 99 -Now $now })
+
+        $anyHeld | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Reading a possibly-absent property' {
     It 'reads a key out of every dictionary shape the bridge builds' {
         # [ordered]@{} is an OrderedDictionary, not a Hashtable, and exposes no

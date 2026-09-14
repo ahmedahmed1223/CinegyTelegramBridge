@@ -13,6 +13,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.5
+
+Three real bugs from a five-dimension audit, each verified in the code before
+being fixed. `Import-ScheduleEvents` emptied the live schedule list before its
+parse loop and read a hashtable key with no guard — and a missing key throws
+under `Set-StrictMode -Version Latest` — so one entry from an older build wiped
+every future scheduled graphic permanently. `Save-DisabledUsers` and
+`Save-AccessGuard` bypassed the validated atomic writer, so a torn write
+silently re-enabled every disabled account. And the startup guard that drops
+stale auto-hide timers ran before the imports that populate them, pruning two
+empty lists. Also adds tests for the two highest-risk untested branches: the
+pre-show layer clear and the auto-hide refusal when Cinegy is unreachable.
+
 ## Version 8.26.4
 
 The admin tools screen (`Get-AdminToolsKeyboard`) was a flat wall of ~15

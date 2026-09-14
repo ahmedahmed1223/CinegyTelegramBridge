@@ -508,7 +508,16 @@ function Get-AdminToolsKeyboard {
         @{ Key = 'health'; Icon = '🩺'; Label = 'الصحة والتشخيص' }
         @{ Key = 'system'; Icon = '⚙️'; Label = 'النظام والبث' }
     )
-    $rows = @(foreach ($category in $categories) { , @( (New-Button "$($category.Icon) $($category.Label)" "admintools:$($category.Key)") ) })
+    # Two to a row like the settings picker, not one per line: four stacked
+    # rows plus a back row is five screens' worth of thumb travel for four
+    # choices, and OneHandMode splits pairs back apart when that is wanted.
+    $rows = @()
+    $pair = @()
+    foreach ($category in $categories) {
+        $pair += (New-Button "$($category.Icon) $($category.Label)" "admintools:$($category.Key)")
+        if ($pair.Count -eq 2) { $rows += , $pair; $pair = @() }
+    }
+    if ($pair.Count -gt 0) { $rows += , $pair }
     $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
     return @{ inline_keyboard = $rows }
 }
@@ -521,12 +530,10 @@ function Get-AdminToolsCategoryKeyboard {
     $rows = @()
     switch ($Category) {
         'users' {
-            $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin") )
-            $rows += , @( (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
+            $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin"), (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
         }
         'content' {
-            $rows += , @( (New-Button "⚡ إدارة النصوص الجاهزة" "menu:presetsadmin") )
-            $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin") )
+            $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin"), (New-Button "⚡ النصوص الجاهزة" "menu:presetsadmin") )
             if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button "📢 التنويهات" "menu:announcements") ) }
         }
         'health' {

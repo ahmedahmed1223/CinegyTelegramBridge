@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.7
+
+Presentation fixes. The "What's New" renderer prefixes every `Items` element
+with a bullet, and the 8.26.2–8.26.6 entries had been written split across
+several elements as if they were wrapped lines — so half a sentence rendered
+as its own bullet. Each entry is one complete string again, with an Arabic
+proofreading pass over the same block. The admin tools picker now packs its
+four categories two to a row like the settings picker (three rows instead of
+five), and the users/content categories pair their buttons too; the restart
+button deliberately keeps its own row, as danger actions do throughout.
+
 ## Version 8.26.6
 
 A concurrency/re-entrancy audit found one real bug: `Set-PendingState`

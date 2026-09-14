@@ -2052,6 +2052,54 @@ function Update-NewsSheetSync {
         Write-BridgeLog "News sheet sync did not publish: $($result.Error)" 'WARN'
         Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label 'مزامنة الشيت' -ErrorText ([string]$result.Error) | Out-Null
     }
+    # A sheet that has stopped answering is the one failure nobody sees: this
+    # sync publishes to air on its own clock, so an editor whose sheet is
+    # unreachable watches the ticker keep showing yesterday and has no reason
+    # to suspect anything. It reported only to bridge.log and to a screen you
+    # have to open on purpose, which is to say: to nobody, during a shift.
+    #
+    # A single miss is weather, not news. The alert waits for a run of them.
+    Update-NewsSheetHealthNotice -Result $result
+}
+
+function Update-NewsSheetHealthNotice {
+    <# Tracks the run of consecutive failures and speaks on the threshold, then
+       once per further run of that length. -Cause puts it under the hourly
+       alert cap, so a sheet broken all night costs a few messages rather than
+       one every sync. #>
+    param([Parameter(Mandatory)]$Result)
+    # Reachable and correct, whether or not it had anything new to say.
+    if ($Result.Success -or $Result.Unchanged) {
+        $failed = [int]$script:NewsSheetFailureStreak
+        $script:NewsSheetFailureStreak = 0
+        $script:NewsSheetLastSuccessAt = Get-Date
+        if ($failed -ge (Get-SettingInt 'NewsSheetFailureAlertAfter')) {
+            $spell = Get-ArabicCountNoun -Count $failed -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة'
+            Write-BridgeLog "News sheet sync recovered after $failed consecutive failure(s)"
+            Send-NewsSheetNotice -Text "✅ عادت مزامنة الشيت بعد فشل $spell متتالية."
+        }
+        return
+    }
+    # A skipped cycle yielded to a draft on purpose; it is not a fault.
+    if ($Result.Skipped) { return }
+
+    $script:NewsSheetFailureStreak = [int]$script:NewsSheetFailureStreak + 1
+    $after = Get-SettingInt 'NewsSheetFailureAlertAfter'
+    if ($after -le 0) { return }
+    if (($script:NewsSheetFailureStreak % $after) -ne 0) { return }
+
+    $spell = Get-ArabicCountNoun -Count ([int]$script:NewsSheetFailureStreak) -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة'
+    $since = if ($script:NewsSheetLastSuccessAt) {
+        "آخر نشر ناجح منذ $(Format-Duration -Seconds ([int]((Get-Date) - $script:NewsSheetLastSuccessAt).TotalSeconds))."
+    }
+    else { 'ولم تنجح ولا مرة منذ إقلاع الجسر.' }
+    $reason = [string]$Result.Error
+    if ($reason.Length -gt 140) { $reason = $reason.Substring(0, 139) + '…' }
+    Send-NewsSheetNotice -Cause 'news-sheet-sync-failing' -Text (
+        "⚠️ مزامنة الشيت فشلت $spell متتالية.`n" +
+        "السبب: $reason`n" +
+        "$since`n" +
+        "الشريط على الهواء ما زال على آخر نص نُشر — تعديلات الشيت لا تصل.")
 }
 
 function Invoke-BridgeTick {

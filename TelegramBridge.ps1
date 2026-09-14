@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.32.0'
+$script:BridgeVersion = '8.33.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -226,6 +226,7 @@ $script:DefaultSettings = [ordered]@{
     NewsSheetSyncMinutes       = 5
     NewsSheetTimeoutSeconds    = 30
     NewsSheetNotifyScope       = 'all'    # none | admins | all authorised chats
+    NewsSheetFailureAlertAfter = 3       # consecutive failed auto syncs before anyone is told; 0 stays silent
     # Which templates announce themselves when they go on air, and to whom:
     # "Urgent=all, Banner=admins". Urgent is the example, not the rule.
     TemplateNotifyRules        = 'Urgent=all'
@@ -543,6 +544,7 @@ $script:SettingDisplayMetadata = @{
     NewsSheetSyncMinutes = @{ Unit = 'دقيقة'; Description = 'كل كم تُسحب نسخة من الشيت في الوضع التلقائي' }
     NewsSheetTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة تنزيل الشيت قبل اعتباره فاشلًا' }
     NewsSheetNotifyScope = @{ Unit = ''; Description = 'من يصله إشعار تغيّر الشيت: none بلا أحد · admins المشرفون · all كل المصرّح لهم' }
+    NewsSheetFailureAlertAfter = @{ Unit = 'محاولة'; Description = 'كم محاولة مزامنة فاشلة متتالية قبل التنبيه أن الشيت لا يصل (0 للصمت)' }
     TemplateNotifyRules = @{ Unit = ''; Description = 'قوالب تُعلن عن نفسها عند العرض: «القالب=الجهة» مفصولة بفاصلة (الجهة: none · admins · all)' }
     AllowOperatorsSheetPull = @{ Unit = ''; Description = 'يسمح للمشغّل بسحب الشيت، لا للمشرف وحده' }
     AllowOperatorsDeleteNews = @{ Unit = ''; Description = 'يسمح للمشغّل بحذف خبر من الشريط' }
@@ -1085,6 +1087,9 @@ $script:AlertHistory = @{}
 # past the cap. In memory on purpose: a restart is a fresh hour, and the
 # window that matters is minutes.
 $script:AlertSuppression = @{}
+# The run of consecutive failed automatic sheet syncs, and when one last worked.
+$script:NewsSheetFailureStreak = 0
+$script:NewsSheetLastSuccessAt = $null
 # P2: cause -> chat -> pinned message id. Unpinned by the sweep when the
 # cause goes quiet past the window.
 $script:PinnedRecurrences = @{}
@@ -1270,7 +1275,7 @@ foreach ($entry in @(
                 'TemplateNotifyRules',
                 'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes',
                 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds',
-                'NewsSheetNotifyScope', 'TemplateReminderFollowUpMinutes',
+                'NewsSheetNotifyScope', 'NewsSheetFailureAlertAfter', 'TemplateReminderFollowUpMinutes',
                 'StaleOnAirAlertHours', 'HealthFailureAlertThreshold',
                 'OutputMonitorFailureAlertThreshold', 'MissedEventsHours',
                 'StartupStormThreshold',
@@ -1319,6 +1324,7 @@ $script:SettingNavigationLabels = @{
     NewsSheetSyncMinutes = 'كل كم دقيقة تُزامن الشيت'
     NewsSheetTimeoutSeconds = 'مهلة تنزيل الشيت'
     NewsSheetNotifyScope = 'من يُنبَّه بعد مزامنة الشيت'
+    NewsSheetFailureAlertAfter = 'تنبيه فشل مزامنة الشيت'
     AllowOperatorsSheetPull = 'سماح المشغّلين بسحب الشيت'
     NewsMaxItemLength = 'الحد الأقصى لطول الخبر'
     NewsMaxItems = 'الحد الأقصى لعدد الأخبار'
@@ -1509,6 +1515,7 @@ $script:SettingConstraints = @{
     # repetition counted has to be able to say so.
     RepeatAlertWindowHours        = @{ Minimum = 0; Maximum = 168 }
     AlertMaxPerCausePerHour       = @{ Minimum = 0; Maximum = 1000 }
+    NewsSheetFailureAlertAfter    = @{ Minimum = 0; Maximum = 100 }
     # Hours of the day, which have twenty-four of them.
     HeartbeatHour                 = @{ Minimum = 0; Maximum = 23 }
     QuietHoursStart               = @{ Minimum = 0; Maximum = 23 }

@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.33.0
+
+A publish from Telegram writes the ticker **and** mirrors it back to the sheet,
+and the message said only that the ticker was written. So the one failure that
+matters here — the air is right and the sheet is now behind — reached the
+operator as an unqualified success, and the sheet stayed wrong until somebody
+read `bridge.log`. The publish message now names both, says plainly when the
+mirror failed (and that the air is nonetheless correct, which is what stops a
+needless re-publish), and stays silent about the sheet when no write-back is
+configured. It covers all three publish paths, since they share one function.
+
+The automatic sheet sync publishes to air on its own clock, and its failures
+went to `bridge.log` and to a screen you have to open on purpose — which during
+a shift means nowhere. An editor whose sheet had become unreachable watched the
+ticker keep showing yesterday with no reason to suspect anything. After
+`NewsSheetFailureAlertAfter` consecutive failures (default 3, 0 stays silent) an
+alert carries the reason and how long since the last successful publish, and a
+second line arrives when it recovers. One miss is weather, not news, so the
+alert waits for a run; it repeats only once per further run of that length
+rather than on every sync; and it carries a `-Cause`, so 8.32.0's hourly cap
+bounds it. A cycle skipped because someone holds the draft is the sync working
+as designed and does not count, and a sheet that was reached with nothing new
+resets the streak.
+
 ## Version 8.32.0
 
 Asked after the 8.31.1 flood whether anything caps the number of notifications:

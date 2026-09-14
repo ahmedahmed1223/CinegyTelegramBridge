@@ -544,3 +544,122 @@ Describe 'News sheet operator surface' {
             Should -Not -Contain 'news:sheet'
     }
 }
+
+Describe 'A publish says what it did in both places' {
+    It 'names the air and the sheet when both went through' {
+        # The mirror to the sheet was reported nowhere: the one failure that
+        # matters here - the air is right and the sheet is now behind - reached
+        # the operator as an unqualified success.
+        $result = [pscustomobject]@{ Success = $true; SheetSaved = $true; SheetError = '' }
+
+        $text = Get-NewsPublishOutcomeText -Result $result -Lead '✅ نُشر شريط الأخبار على الهواء.'
+
+        $text | Should -Match 'على الهواء'
+        $text | Should -Match 'وحُدِّث الشيت'
+    }
+
+    It 'says the air is right and the sheet is behind when the mirror failed' {
+        $result = [pscustomobject]@{ Success = $true; SheetSaved = $false; SheetError = 'رفض الشيت الكتابة' }
+
+        $text = Get-NewsPublishOutcomeText -Result $result -Lead '✅ نُشر شريط الأخبار على الهواء.'
+
+        $text | Should -Match 'تعذّر تحديث الشيت'
+        $text | Should -Match 'رفض الشيت الكتابة'
+        # The distinction that stops a needless re-publish.
+        $text | Should -Match 'ما على الهواء منشور'
+    }
+
+    It 'says nothing about a sheet nobody configured' {
+        $result = [pscustomobject]@{ Success = $true; SheetSaved = $false; SheetError = '' }
+
+        $text = Get-NewsPublishOutcomeText -Result $result -Lead '✅ نُشر شريط الأخبار على الهواء.'
+
+        $text | Should -Not -Match 'الشيت'
+    }
+
+    It 'trims a sheet error long enough to be a whole HTTP body' {
+        $result = [pscustomobject]@{ Success = $true; SheetSaved = $false; SheetError = ('x' * 500) }
+
+        $text = Get-NewsPublishOutcomeText -Result $result -Lead 'lead'
+
+        $text.Length | Should -BeLessThan 400
+        $text | Should -Match '…'
+    }
+}
+
+Describe 'A sheet that stopped answering says so' {
+    BeforeEach {
+        $script:NewsSheetFailureStreak = 0
+        $script:NewsSheetLastSuccessAt = (Get-Date).AddMinutes(-30)
+        Mock Write-BridgeLog { }
+        Mock Send-NewsSheetNotice { }
+        Mock Get-SettingInt { 3 } -ParameterFilter { $Name -eq 'NewsSheetFailureAlertAfter' }
+        # Set here, not in the Describe body: a variable there belongs to
+        # Pester's discovery pass and is gone by the time a test runs.
+        $script:failure = [pscustomobject]@{ Success = $false; Unchanged = $false; Skipped = $false; Error = 'تعذّر تنزيل الشيت' }
+    }
+    AfterAll { $script:NewsSheetFailureStreak = 0; $script:NewsSheetLastSuccessAt = $null }
+
+    It 'stays quiet for the first misses, because one is weather' {
+        1..2 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Should -Invoke Send-NewsSheetNotice -Times 0 -Exactly
+    }
+
+    It 'speaks on the third consecutive failure, with the reason' {
+        1..3 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Should -Invoke Send-NewsSheetNotice -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'فشلت' -and $Text -match 'تعذّر تنزيل الشيت' -and $Cause
+        }
+    }
+
+    It 'repeats only once per further run, not on every sync' {
+        # Five minutes between syncs: without this it would be a message every
+        # five minutes for as long as the sheet stayed broken.
+        1..9 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Should -Invoke Send-NewsSheetNotice -Times 3 -Exactly
+    }
+
+    It 'carries a cause, so the hourly cap applies to it' {
+        1..3 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Should -Invoke Send-NewsSheetNotice -Times 1 -Exactly -ParameterFilter { $Cause -eq 'news-sheet-sync-failing' }
+    }
+
+    It 'says it recovered, so the alert is not left hanging' {
+        1..3 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Update-NewsSheetHealthNotice -Result ([pscustomobject]@{ Success = $true; Unchanged = $false; Skipped = $false; Error = '' })
+
+        Should -Invoke Send-NewsSheetNotice -Times 1 -Exactly -ParameterFilter { $Text -match 'عادت مزامنة الشيت' }
+        $script:NewsSheetFailureStreak | Should -Be 0
+    }
+
+    It 'treats an unchanged sheet as healthy, because it was reached' {
+        1..3 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Update-NewsSheetHealthNotice -Result ([pscustomobject]@{ Success = $false; Unchanged = $true; Skipped = $false; Error = '' })
+
+        $script:NewsSheetFailureStreak | Should -Be 0
+    }
+
+    It 'does not count a cycle skipped for an open draft as a failure' {
+        # Yielding to somebody's draft is the sync working as designed.
+        1..5 | ForEach-Object {
+            Update-NewsSheetHealthNotice -Result ([pscustomobject]@{ Success = $false; Unchanged = $false; Skipped = $true; Error = '' })
+        }
+
+        $script:NewsSheetFailureStreak | Should -Be 0
+        Should -Invoke Send-NewsSheetNotice -Times 0 -Exactly
+    }
+
+    It 'stays silent altogether when the threshold is zero' {
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'NewsSheetFailureAlertAfter' }
+
+        1..20 | ForEach-Object { Update-NewsSheetHealthNotice -Result $script:failure }
+
+        Should -Invoke Send-NewsSheetNotice -Times 0 -Exactly
+    }
+}

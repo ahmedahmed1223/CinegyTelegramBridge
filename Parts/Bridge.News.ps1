@@ -743,6 +743,38 @@ function Get-NewsSheetNoticeText {
     return ($lines -join "`n")
 }
 
+function Get-NewsPublishOutcomeText {
+    <#
+        What the publish did, in both places it lands.
+
+        A publish from Telegram writes the ticker AND mirrors it back to the
+        sheet, and the message said only that the ticker was written. So the
+        one failure that matters here - the air is right and the sheet is now
+        behind - reached the operator as a success, and the sheet stayed wrong
+        until somebody happened to read bridge.log.
+
+        Silent about the sheet only when there is no write-back configured:
+        a station that never set one should not read a line about it on every
+        publish.
+    #>
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][string]$Lead)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add($Lead)
+    if ([bool](Get-JsonProp $Result 'SheetSaved')) {
+        $lines.Add('📄 وحُدِّث الشيت بالنص نفسه.')
+    }
+    else {
+        $reason = [string](Get-JsonProp $Result 'SheetError')
+        if ($reason) {
+            # Trimmed: this can carry a whole HTTP body from the Apps Script.
+            if ($reason.Length -gt 140) { $reason = $reason.Substring(0, 139) + '…' }
+            $lines.Add("⚠️ لكن تعذّر تحديث الشيت: $reason")
+            $lines.Add('ما على الهواء منشور فعلًا؛ الشيت وحده متأخّر عنه.')
+        }
+    }
+    return ($lines -join "`n")
+}
+
 function Get-NewsSheetNoticeAudience {
     <# Who hears that the ticker changed. Administrators by default: they own
        the sheet and are the ones who would have to undo a bad publish. "all"
@@ -758,9 +790,9 @@ function Get-NewsSheetNoticeAudience {
 }
 
 function Send-NewsSheetNotice {
-    param([Parameter(Mandatory)][string]$Text)
+    param([Parameter(Mandatory)][string]$Text, [AllowEmptyString()][string]$Cause = '')
     foreach ($chat in @(Get-NewsSheetNoticeAudience)) {
-        Send-TelegramMessage -ChatId ([long]$chat) -Text $Text
+        Send-TelegramMessage -ChatId ([long]$chat) -Text $Text -Cause $Cause
     }
 }
 

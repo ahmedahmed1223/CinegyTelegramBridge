@@ -198,7 +198,8 @@ function Invoke-CallbackQuery {
             # fresh draft. Saying just "لم يتم النشر" left people retrying the
             # same doomed publish and concluding their edits were ignored.
             if ($result.Success) {
-                Send-TelegramMessage -ChatId $chatId -Text '✅ نُشر شريط الأخبار مع إنشاء نسخة احتياطية.' -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
+                    -Text (Get-NewsPublishOutcomeText -Result $result -Lead '✅ نُشر شريط الأخبار على الهواء، مع نسخة احتياطية.')
             }
             elseif ($result.Conflict) {
                 Send-TelegramMessage -ChatId $chatId -Text "⚠️ تغيّر ملف الأخبار خارج البوت منذ أن بدأت المسودة، فلم يُنشر شيء.`nنظام آخر يكتب هذا الملف أيضًا، فاختر كيف تريد المتابعة:" -ReplyMarkup @{inline_keyboard=@(
@@ -258,12 +259,14 @@ function Invoke-CallbackQuery {
         }
         'news:rebaseappend' {
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode append
-            Send-TelegramMessage -ChatId $chatId -Text $(if ($result.Success) { '✅ أُضيفت أخبارك إلى النص الحالي ونُشر.' } else { "❌ لم يتم النشر: $($result.Error)" }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
+                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead '✅ أُضيفت أخبارك إلى النص الحالي ونُشرت على الهواء.' } else { "❌ لم يتم النشر: $($result.Error)" })
             break
         }
         'news:rebasereplace' {
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode replace
-            Send-TelegramMessage -ChatId $chatId -Text $(if ($result.Success) { '✅ استُبدل النص بالكامل بمسودتك ونُشر. النص السابق محفوظ في النسخ.' } else { "❌ لم يتم النشر: $($result.Error)" }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
+                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead '✅ استُبدل النص بالكامل بمسودتك ونُشر على الهواء. النص السابق محفوظ في النسخ.' } else { "❌ لم يتم النشر: $($result.Error)" })
             break
         }
         'news:lockrequest' { Request-NewsLockRelease -ChatId $chatId -UserId $userId | Out-Null; break }

@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.29.0
+
+An audit of every file that records events and what actually bounds it.
+`bridge.log`, `audit.jsonl`, snapshots and staged uploads were already bounded
+by declared settings. Three were not: `schedule-execution.jsonl` (trimmed at a
+number hardcoded in 8.27.0), `schedule.json` (finished occurrences were never
+removed, and the whole list is re-serialised on every change), and
+`access-guard.json` (nothing ever left it but a manual unblock). Each now has a
+registered setting — `ExecutionLogKeepRecords`, `ScheduleHistoryKeepDays`,
+`AccessGuardKeepDays` — under Settings → maintenance, where **0 means keep
+everything**, since "never trim" is a legitimate answer for an auditable record
+or a permanent deny list. Schedule trimming touches only `completed`/`failed`
+occurrences; `pending` and `interrupted` are still owed to someone and are
+never dropped, nor is any entry whose timestamp cannot be read.
+
 ## Version 8.28.0
 
 The execution log now covers everything the bridge fires on a clock, not just

@@ -916,3 +916,83 @@ Describe 'The execution log covers bulletins and the ticker too' {
         Get-ScheduleExecutionHeading | Should -Match 'سجل التنفيذ'
     }
 }
+
+Describe 'Nothing that records events grows without a configurable bound' {
+    BeforeEach {
+        $script:OriginalExecFileForBounds = $script:scheduleExecutionFile
+        $script:scheduleExecutionFile = Join-Path $TestDrive 'exec-bounds.jsonl'
+        Remove-Item -LiteralPath $script:scheduleExecutionFile -Force -ErrorAction SilentlyContinue
+        $script:OriginalScheduleFileForBounds = $script:scheduleFile
+        $script:scheduleFile = Join-Path $TestDrive 'schedule-bounds.json'
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach {
+        $script:scheduleExecutionFile = $script:OriginalExecFileForBounds
+        $script:scheduleFile = $script:OriginalScheduleFileForBounds
+        $script:ScheduleEvents = [System.Collections.Generic.List[hashtable]]::new()
+    }
+
+    It 'declares every new bound as a real setting, not a number in the code' {
+        foreach ($name in @('ExecutionLogKeepRecords', 'ScheduleHistoryKeepDays', 'AccessGuardKeepDays')) {
+            $script:DefaultSettings.Contains($name) | Should -BeTrue -Because "$name must be a declared setting"
+            $script:SettingConstraints.ContainsKey($name) | Should -BeTrue -Because "$name must declare its range"
+            $script:SettingConstraints[$name].Minimum | Should -Be 0 -Because 'zero must mean "keep everything"'
+        }
+    }
+
+    It 'honours the configured record count instead of a fixed one' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        @(1..60 | ForEach-Object {
+                @{ Timestamp = $due.ToString('o'); Kind = 'show'; EventId = "e$_"; TemplateKey = "t$_"; Layer = 4
+                    ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 1; Error = '' } | ConvertTo-Json -Compress
+            }) | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+        Mock Get-SettingInt { 25 } -ParameterFilter { $Name -eq 'ExecutionLogKeepRecords' }
+        $script:LastScheduleExecutionTrim = [datetime]::MinValue
+
+        Update-ScheduleExecutionLogTrim
+
+        @(Get-Content -LiteralPath $script:scheduleExecutionFile).Count | Should -Be 25
+    }
+
+    It 'keeps everything when the bound is turned off' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        @(1..40 | ForEach-Object {
+                @{ Timestamp = $due.ToString('o'); Kind = 'show'; EventId = "e$_"; TemplateKey = "t$_"; Layer = 4
+                    ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 1; Error = '' } | ConvertTo-Json -Compress
+            }) | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'ExecutionLogKeepRecords' }
+        $script:LastScheduleExecutionTrim = [datetime]::MinValue
+
+        Update-ScheduleExecutionLogTrim
+
+        @(Get-Content -LiteralPath $script:scheduleExecutionFile).Count | Should -Be 40
+    }
+
+    It 'drops finished schedule occurrences but never a pending one' {
+        $old = [datetimeoffset]::Now.AddDays(-90)
+        $script:ScheduleEvents.Add(@{ Id = 'done'; Status = 'completed'; ScheduledAt = $old.ToString('o'); TemplateKey = 'a' })
+        $script:ScheduleEvents.Add(@{ Id = 'failed'; Status = 'failed'; ScheduledAt = $old.ToString('o'); TemplateKey = 'b' })
+        $script:ScheduleEvents.Add(@{ Id = 'waiting'; Status = 'pending'; ScheduledAt = $old.ToString('o'); TemplateKey = 'c' })
+        $script:ScheduleEvents.Add(@{ Id = 'owed'; Status = 'interrupted'; ScheduledAt = $old.ToString('o'); TemplateKey = 'd' })
+        Mock Get-SettingInt { 30 } -ParameterFilter { $Name -eq 'ScheduleHistoryKeepDays' }
+        Mock Save-ScheduleEvents { $true }
+        $script:LastScheduleHistoryTrim = [datetime]::MinValue
+
+        Update-ScheduleHistoryTrim
+
+        @($script:ScheduleEvents.Id) | Should -Be @('waiting', 'owed')
+    }
+
+    It 'keeps a finished occurrence whose moment cannot be read' {
+        $script:ScheduleEvents.Add(@{ Id = 'nostamp'; Status = 'completed'; ScheduledAt = 'not a date'; TemplateKey = 'a' })
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'ScheduleHistoryKeepDays' }
+        Mock Save-ScheduleEvents { $true }
+        $script:LastScheduleHistoryTrim = [datetime]::MinValue
+
+        Update-ScheduleHistoryTrim
+
+        @($script:ScheduleEvents).Count | Should -Be 1
+    }
+}

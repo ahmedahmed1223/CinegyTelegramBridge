@@ -557,14 +557,17 @@ function Get-ScheduleExecutionDelaySeconds {
 
 function Update-ScheduleExecutionLogTrim {
     <# The file had no bound at all: appended on every occurrence, rotated by
-       nothing, read by nothing. Kept to the newest lines so a station running
-       for years does not carry its whole scheduling history on every disk
-       check. Runs from the tick, throttled like its neighbours. #>
+       nothing, read by nothing. Kept to the newest ExecutionLogKeepRecords so
+       a station running for years does not carry its whole scheduling history
+       on every disk check. Zero keeps everything - "never trim" is a real
+       answer for a record somebody may want to audit. Runs from the tick,
+       throttled like its neighbours. #>
     if (((Get-Date) - $script:LastScheduleExecutionTrim).TotalHours -lt 12) { return }
     $script:LastScheduleExecutionTrim = Get-Date
     if ([string]::IsNullOrWhiteSpace($script:scheduleExecutionFile)) { return }
     if (-not (Test-Path -LiteralPath $script:scheduleExecutionFile)) { return }
-    $keep = 2000
+    $keep = Get-SettingInt 'ExecutionLogKeepRecords' 0
+    if ($keep -le 0) { return }
     try {
         $all = @(Get-Content -LiteralPath $script:scheduleExecutionFile -ErrorAction Stop)
         if ($all.Count -le $keep) { return }
@@ -575,6 +578,37 @@ function Update-ScheduleExecutionLogTrim {
         Write-BridgeLog "Trimmed schedule-execution.jsonl from $($all.Count) to $($kept.Count) line(s)."
     }
     catch { Write-BridgeLog "Could not trim schedule-execution.jsonl: $($_.Exception.Message)" 'WARN' }
+}
+
+function Update-ScheduleHistoryTrim {
+    <#
+        Drops finished occurrences from schedule.json.
+
+        Events become 'completed'/'failed' and were never removed - the only
+        Remove in the file is the failed-add rollback. The whole list is
+        re-serialised on every tick that changes anything, so the station's
+        entire scheduling history was being rewritten to disk for the life of
+        the installation. Pending and interrupted events are never touched:
+        those are still owed to somebody.
+    #>
+    if (((Get-Date) - $script:LastScheduleHistoryTrim).TotalHours -lt 12) { return }
+    $script:LastScheduleHistoryTrim = Get-Date
+    $days = Get-SettingInt 'ScheduleHistoryKeepDays' 0
+    if ($days -le 0) { return }
+    $cutoff = [datetimeoffset]::Now.AddDays(-$days)
+    $doomed = @()
+    foreach ($entry in @($script:ScheduleEvents)) {
+        if ([string](Get-JsonProp $entry 'Status') -notin @('completed', 'failed')) { continue }
+        $stamp = [datetimeoffset]::MinValue
+        # No readable moment means no evidence it is old - keep it.
+        if (-not [datetimeoffset]::TryParse([string](Get-JsonProp $entry 'ScheduledAt'), [ref]$stamp)) { continue }
+        if ($stamp -lt $cutoff) { $doomed += $entry }
+    }
+    if ($doomed.Count -eq 0) { return }
+    foreach ($entry in $doomed) { $script:ScheduleEvents.Remove($entry) | Out-Null }
+    if (Save-ScheduleEvents) {
+        Write-BridgeLog "Trimmed $($doomed.Count) finished schedule occurrence(s) older than $days day(s)."
+    }
 }
 
 function Import-ScheduleEvents {

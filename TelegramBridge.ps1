@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.28.0'
+$script:BridgeVersion = '8.29.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -354,6 +354,9 @@ $script:DefaultSettings = [ordered]@{
     AuditTrailSize             = 50
     AuditTemplateValues        = $true   # record the text that went on air, so reports can show it
     AuditTemplateValuesMaxChars = 500    # audit.jsonl is permanent: cap what each record may add
+    ExecutionLogKeepRecords    = 2000    # schedule-execution.jsonl: newest kept, 0 never trims
+    ScheduleHistoryKeepDays    = 30      # drop finished schedule occurrences older than this, 0 keeps all
+    AccessGuardKeepDays        = 90      # forget a blocked stranger after this long, 0 remembers forever
     ConfigBackupKeepFiles      = 10
     DiskFreeWarningGB          = 2
     RuntimeStorageWarningMB    = 100
@@ -459,6 +462,9 @@ $script:SettingDisplayMetadata = @{
     LogMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'الحجم الأقصى لملف السجل' }
     LogKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد ملفات السجل المحتفَظ بها' }
     AuditMaxSizeMB = @{ Unit = 'ميغابايت'; Description = 'حجم سجل التدقيق قبل أرشفته في ملف جديد (0 = بلا أرشفة)' }
+    ExecutionLogKeepRecords = @{ Unit = 'سجل'; Description = 'عدد سجلات تنفيذ الجدولة المحتفَظ بها (0 = بلا تقليم)' }
+    ScheduleHistoryKeepDays = @{ Unit = 'يوم'; Description = 'مدة الاحتفاظ بالمواعيد المنتهية في ملف الجدولة (0 = الاحتفاظ بالكل)' }
+    AccessGuardKeepDays = @{ Unit = 'يوم'; Description = 'مدة تذكّر محادثة محظورة قبل نسيانها (0 = بلا نسيان)' }
     AuditArchiveKeepFiles = @{ Unit = 'ملفات'; Description = 'عدد أرشيفات التدقيق المحتفَظ بها (0 = الاحتفاظ بالكل)' }
     AuditTrailSize = @{ Unit = 'سجل'; Description = 'عدد عناصر سجل العمليات المحتفَظ بها' }
     AuditTemplateValues = @{ Unit = ''; Description = 'تسجيل نص القالب الذي ظهر على الهواء لعرضه في التقارير' }
@@ -641,6 +647,7 @@ $script:startupHistoryFile = Join-Path $logDir "startup-history.json"
 $script:healthSnapshotFile = Join-Path $logDir "health-snapshot.json"
 $script:LastHealthSnapshotFlush = [datetime]::MinValue
 $script:accessGuardFile = Join-Path $logDir "access-guard.json"
+$script:LastAccessGuardSweep = [datetime]::MinValue
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
@@ -649,6 +656,7 @@ $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
 $script:scheduleExecutionFile = Join-Path $logDir "schedule-execution.jsonl"
 $script:LastScheduleExecutionTrim = [datetime]::MinValue
+$script:LastScheduleHistoryTrim = [datetime]::MinValue
 $script:auditFile = Join-Path $logDir "audit.jsonl"
 $script:newsDraftFile = Join-Path $logDir 'news-draft.json'
 $script:newsLockRequestFile = Join-Path $logDir 'news-lock-request.json'
@@ -1265,6 +1273,7 @@ foreach ($entry in @(
         @{ Category = 'storage'; Names = @(
                 'SnapshotRetentionMinutes', 'UploadRetentionMinutes', 'NewsBackupKeepFiles',
                 'LogMaxSizeMB', 'LogKeepFiles', 'AuditMaxSizeMB', 'AuditArchiveKeepFiles',
+                'ExecutionLogKeepRecords', 'ScheduleHistoryKeepDays', 'AccessGuardKeepDays',
                 'AuditTrailSize', 'ConfigBackupKeepFiles', 'DiskFreeWarningGB',
                 'RuntimeStorageWarningMB', 'BackupStorageWarningMB'
             ) },
@@ -1401,6 +1410,9 @@ $script:SettingNavigationLabels = @{
     HeartbeatHour = 'ساعة النبض اليومي'
     LogKeepFiles = 'ملفات السجل المحفوظة'
     LogMaxSizeMB = 'حجم ملف السجل'
+    ExecutionLogKeepRecords = 'سجلات التنفيذ المحفوظة'
+    ScheduleHistoryKeepDays = 'تاريخ الجدولة المحفوظ'
+    AccessGuardKeepDays = 'مدة تذكّر المحظورين'
     MaintenanceWindowEnd = 'نهاية نافذة الصيانة'
     MaintenanceWindowStart = 'بداية نافذة الصيانة'
     MaxFieldLength = 'طول نص الحقل'
@@ -1501,6 +1513,11 @@ $script:SettingConstraints = @{
     # zero rather than a size. The ceiling is megabytes, not the line count an
     # earlier version of this setting was written in.
     AuditMaxSizeMB                = @{ Minimum = 0; Maximum = 10000 }
+    # Zero disables trimming in all three, which is why the floor is 0 and not
+    # a smallest sane size: "keep everything" is a real answer for an archive.
+    ExecutionLogKeepRecords       = @{ Minimum = 0; Maximum = 100000 }
+    ScheduleHistoryKeepDays       = @{ Minimum = 0; Maximum = 3650 }
+    AccessGuardKeepDays           = @{ Minimum = 0; Maximum = 3650 }
     DiskFreeWarningGB             = @{ Minimum = 1; Maximum = 10000 }
     MissedEventsHours             = @{ Minimum = 1; Maximum = 168 }
 }

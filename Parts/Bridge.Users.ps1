@@ -356,6 +356,38 @@ function Test-ChatBlocked {
     return $script:AccessGuard.Blocked.ContainsKey([string]$ChatId)
 }
 
+function Update-AccessGuardSweep {
+    <#
+        Forgets a blocked stranger after AccessGuardKeepDays.
+
+        Nothing ever left this file except by a manual unblock, so a bot that
+        strangers find accumulates one entry per stranger for the life of the
+        installation. Zero keeps them forever, which is the right answer for a
+        station that wants a permanent deny list - so the default forgets, and
+        turning it off is a decision rather than an oversight.
+    #>
+    if (((Get-Date) - $script:LastAccessGuardSweep).TotalHours -lt 12) { return }
+    $script:LastAccessGuardSweep = Get-Date
+    $days = Get-SettingInt 'AccessGuardKeepDays' 0
+    if ($days -le 0) { return }
+    $cutoff = (Get-Date).AddDays(-$days)
+    $removed = @()
+    foreach ($id in @($script:AccessGuard.Blocked.Keys)) {
+        $stamp = [datetime]::MinValue
+        # Unreadable stamp means no evidence it is old - keep the block.
+        if (-not [datetime]::TryParse([string](Get-JsonProp $script:AccessGuard.Blocked[$id] 'At'), [ref]$stamp)) { continue }
+        if ($stamp -lt $cutoff) { $removed += $id }
+    }
+    if ($removed.Count -eq 0) { return }
+    foreach ($id in $removed) {
+        $script:AccessGuard.Blocked.Remove($id)
+        $script:AccessGuard.Attempts.Remove($id)
+    }
+    if (Save-AccessGuard) {
+        Write-BridgeLog "Forgot $($removed.Count) access block(s) older than $days day(s)."
+    }
+}
+
 function Block-AccessChat {
     <# Silently, always. Telling someone they are blocked tells them the bot
        is worth a second account. #>

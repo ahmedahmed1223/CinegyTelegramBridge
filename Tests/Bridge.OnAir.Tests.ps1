@@ -1510,7 +1510,9 @@ Describe 'Main menu on-air priority' {
         try {
             $config.Settings | Add-Member -NotePropertyName OneHandMode -NotePropertyValue $true -Force
             $rows = @((ConvertTo-TelegramReplyMarkupJson -ReplyMarkup (Get-ScheduleMenuKeyboard) | ConvertFrom-Json).inline_keyboard)
-            @($rows).Count | Should -Be 3
+            # One row per button: the menu carries four across two rows, and
+            # the pass must hand back four single-button rows.
+            @($rows).Count | Should -Be 4
             @($rows | Where-Object { @($_).Count -gt 1 }) | Should -BeNullOrEmpty
         }
         finally {

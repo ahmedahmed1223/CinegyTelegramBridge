@@ -331,6 +331,183 @@ function Write-ScheduleExecutionEntry {
     }
 }
 
+function Get-ScheduleExecutionHistory {
+    <#
+        The execution log as records, newest first.
+
+        Write-ScheduleExecutionEntry has been appending every fired occurrence
+        since the feature shipped - the time, the template, the layer, the
+        moment it was DUE against the moment it ran, the attempt number, the
+        result, the duration, and the redacted reason on failure. Nothing ever
+        read it back: the only consumer in the tree was a file-size row on the
+        diagnostics screen, so "why did that scheduled graphic not appear?"
+        was answerable only by opening a .jsonl by hand.
+
+        Tail-read like the audit trail, because this file grows for the life of
+        the station and a screen must not parse a year to show ten rows.
+    #>
+    param([ValidateRange(1, 500)][int]$TailLines = 120)
+    $records = @()
+    if ([string]::IsNullOrWhiteSpace($script:scheduleExecutionFile)) { return $records }
+    if (-not (Test-Path -LiteralPath $script:scheduleExecutionFile)) { return $records }
+    try {
+        foreach ($line in @(Get-Content -LiteralPath $script:scheduleExecutionFile -Tail $TailLines -ErrorAction Stop)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            # One torn line is one row lost, never the whole screen.
+            try { $record = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+            if (-not $record) { continue }
+            $records += [pscustomobject]@{
+                Timestamp   = [string](Get-JsonProp $record 'Timestamp')
+                TemplateKey = [string](Get-JsonProp $record 'TemplateKey')
+                Layer       = [int](Get-JsonProp $record 'Layer')
+                ScheduledAt = [string](Get-JsonProp $record 'ScheduledAt')
+                Attempt     = [int](Get-JsonProp $record 'Attempt')
+                Result      = [string](Get-JsonProp $record 'Result')
+                DurationMs  = [long](Get-JsonProp $record 'DurationMs')
+                Error       = [string](Get-JsonProp $record 'Error')
+            }
+        }
+    }
+    catch { Write-BridgeLog "Could not read schedule-execution.jsonl: $($_.Exception.Message)" 'WARN' }
+    [array]::Reverse($records)
+    return @($records)
+}
+
+function Get-ScheduleExecutionRows {
+    <# Shared by the rich screen and its text fallback, so the two cannot
+       disagree about what ran. #>
+    param([ValidateRange(1, 500)][int]$TailLines = 120)
+    $rows = @()
+    foreach ($record in @(Get-ScheduleExecutionHistory -TailLines $TailLines)) {
+        $mark = if ([string]$record.Result -eq 'success') { '✅' } else { '❌' }
+        $ranAt = [datetimeoffset]::MinValue
+        $when = if ([datetimeoffset]::TryParse([string]$record.Timestamp, [ref]$ranAt)) {
+            $ranAt.ToLocalTime().ToString('MM-dd HH:mm')
+        }
+        else { '—' }
+        $delay = Get-ScheduleExecutionDelaySeconds -Record $record
+        $lateness = if ($null -eq $delay) { '—' }
+        elseif ($delay -le 2) { 'في وقتها' }
+        else { "متأخرة $(Format-DurationSeconds -Seconds $delay)" }
+        $attempt = if ([int]$record.Attempt -gt 1) { " · محاولة $($record.Attempt)" } else { '' }
+        $rows += [pscustomobject]@{
+            Mark     = $mark
+            When     = $when
+            Template = [string]$record.TemplateKey
+            Layer    = [int]$record.Layer
+            Lateness = "$lateness$attempt"
+            Error    = [string]$record.Error
+        }
+    }
+    return @($rows)
+}
+
+function Get-ScheduleExecutionBlocks {
+    param([ValidateRange(1, 500)][int]$TailLines = 120)
+    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines)
+    $blocks = @(@{ type = 'heading'; text = '🧾 سجل تنفيذ الجدولة'; size = 3 })
+    if ($rows.Count -eq 0) {
+        return $blocks + @(@{ type = 'paragraph'; text = 'لم يُنفَّذ أي حدث مجدول بعد.' })
+    }
+    $failed = @($rows | Where-Object { $_.Mark -eq '❌' }).Count
+    $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا')، كلّها ناجحة" }
+    else { "🟠 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا') · ❌ $failed" }
+    $blocks += @{ type = 'paragraph'; text = $verdict }
+
+    $trimmed = Select-RichTableRows -Items $rows
+    $cells = @(, @(
+            @{ text = 'الوقت'; is_header = $true }
+            @{ text = 'القالب'; is_header = $true }
+            @{ text = 'النتيجة'; is_header = $true }
+            @{ text = 'التأخير'; is_header = $true }
+        ))
+    foreach ($row in @($trimmed.Rows)) {
+        $cells += , @(
+            @{ text = [string]$row.When }
+            @{ text = "$([string]$row.Template) · ط$($row.Layer)" }
+            @{ text = [string]$row.Mark }
+            @{ text = [string]$row.Lateness }
+        )
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
+
+    # The reason belongs under the table, not squeezed into a column: it is the
+    # one thing the operator opened this screen to read.
+    foreach ($row in @($rows | Where-Object { $_.Mark -eq '❌' -and $_.Error } | Select-Object -First 3)) {
+        $blocks += @{ type = 'paragraph'; text = "❌ $($row.Template): $($row.Error)" }
+    }
+    return $blocks
+}
+
+function Get-ScheduleExecutionText {
+    <# The plain fallback for an API that will not take the rich blocks. #>
+    param([ValidateRange(1, 500)][int]$TailLines = 120)
+    $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🧾 سجل تنفيذ الجدولة</b>')
+    if ($rows.Count -eq 0) {
+        $lines.Add('<i>لم يُنفَّذ أي حدث مجدول بعد.</i>')
+        return ($lines -join "`n")
+    }
+    $trimmed = Select-RichTableRows -Items $rows
+    foreach ($row in @($trimmed.Rows)) {
+        $line = "$($row.Mark) <code>$($row.When)</code> · $(ConvertTo-TelegramHtmlText ([string]$row.Template)) · ط$($row.Layer) · $(ConvertTo-TelegramHtmlText ([string]$row.Lateness))"
+        $lines.Add($line)
+        if ($row.Mark -eq '❌' -and $row.Error) { $lines.Add("   ↳ $(ConvertTo-TelegramHtmlText ([string]$row.Error))") }
+    }
+    $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($note) { $lines.Add($note) }
+    return ($lines -join "`n")
+}
+
+function Show-ScheduleExecutionScreen {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $keyboard = @{ inline_keyboard = @(
+            , @( (New-Button '🔄 تحديث' 'schedule:execlog'), (New-Button '📋 الأحداث القادمة' 'schedule:list') )
+            , @( (New-Button '⬅️ الجدولة' 'menu:schedule') )
+        ) }
+    if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-ScheduleExecutionBlocks) -ReplyMarkup $keyboard)) {
+        Send-TelegramPagedText -ChatId $ChatId -Text (Get-ScheduleExecutionText) -ParseMode HTML -ReplyMarkup $keyboard
+    }
+}
+
+function Get-ScheduleExecutionDelaySeconds {
+    <# How late the occurrence actually ran. The number the screen exists for:
+       a graphic that fired four minutes after its slot did appear, and saying
+       only "success" hides that. Empty when either stamp is unreadable. #>
+    param([Parameter(Mandatory)][object]$Record)
+    $ranAt = [datetimeoffset]::MinValue
+    $dueAt = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string]$Record.Timestamp, [ref]$ranAt)) { return $null }
+    if (-not [datetimeoffset]::TryParse([string]$Record.ScheduledAt, [ref]$dueAt)) { return $null }
+    return [int][math]::Round(($ranAt - $dueAt).TotalSeconds)
+}
+
+function Update-ScheduleExecutionLogTrim {
+    <# The file had no bound at all: appended on every occurrence, rotated by
+       nothing, read by nothing. Kept to the newest lines so a station running
+       for years does not carry its whole scheduling history on every disk
+       check. Runs from the tick, throttled like its neighbours. #>
+    if (((Get-Date) - $script:LastScheduleExecutionTrim).TotalHours -lt 12) { return }
+    $script:LastScheduleExecutionTrim = Get-Date
+    if ([string]::IsNullOrWhiteSpace($script:scheduleExecutionFile)) { return }
+    if (-not (Test-Path -LiteralPath $script:scheduleExecutionFile)) { return }
+    $keep = 2000
+    try {
+        $all = @(Get-Content -LiteralPath $script:scheduleExecutionFile -ErrorAction Stop)
+        if ($all.Count -le $keep) { return }
+        $kept = @($all | Select-Object -Last $keep)
+        $temporary = "$($script:scheduleExecutionFile).$([guid]::NewGuid().ToString('N')).tmp"
+        Set-Content -LiteralPath $temporary -Value $kept -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $script:scheduleExecutionFile -Force -ErrorAction Stop
+        Write-BridgeLog "Trimmed schedule-execution.jsonl from $($all.Count) to $($kept.Count) line(s)."
+    }
+    catch { Write-BridgeLog "Could not trim schedule-execution.jsonl: $($_.Exception.Message)" 'WARN' }
+}
+
 function Import-ScheduleEvents {
     try {
         $read = Read-ValidatedJsonState -Path $script:scheduleFile -AsHashtable

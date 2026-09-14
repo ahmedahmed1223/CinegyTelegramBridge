@@ -1166,6 +1166,12 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text "اختر القالب المراد جدولته:" -ReplyMarkup (Get-TemplatesKeyboard -Prefix 'schtpl' -ChatId $chatId -UserId $userId)
             break
         }
+        'schedule:execlog' {
+            # Every fired occurrence has been logged since scheduling shipped;
+            # until now the only way to read it was opening the .jsonl by hand.
+            Show-ScheduleExecutionScreen -ChatId $chatId -UserId $userId
+            break
+        }
         'schedule:list' {
             if (-not (Send-TelegramRichMessage -ChatId $chatId -Blocks (Get-UpcomingScheduleBlocks) -ReplyMarkup (Get-UpcomingScheduleKeyboard))) {
                 Send-TelegramMessage -ChatId $chatId -Text (Get-UpcomingScheduleText) -ParseMode 'HTML' `

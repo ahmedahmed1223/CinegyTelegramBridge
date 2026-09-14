@@ -1074,7 +1074,7 @@ function Get-PresetReviewKeyboard {
 function Get-ScheduleMenuKeyboard {
     return @{ inline_keyboard = @(
             , @( (New-Button "➕ جدولة عرض" 'schedule:new'), (New-Button "📋 الأحداث القادمة" 'schedule:list') )
-            , @( (New-Button "⬅️ القائمة" 'menu') )
+            , @( (New-Button "🧾 سجل التنفيذ" 'schedule:execlog'), (New-Button "⬅️ القائمة" 'menu') )
         ) }
 }
 

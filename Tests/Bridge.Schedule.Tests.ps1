@@ -773,3 +773,88 @@ Describe 'Material-anchored scheduling (T-52)' {
         $script:ScheduleEvents[0].Status | Should -Be 'pending'
     }
 }
+
+Describe 'The schedule execution log finally has a reader' {
+    # Write-ScheduleExecutionEntry has appended every fired occurrence since
+    # scheduling shipped, and nothing ever read it back - the only consumer in
+    # the tree was a file-size row on the diagnostics screen.
+    BeforeEach {
+        $script:OriginalExecFileForReader = $script:scheduleExecutionFile
+        $script:scheduleExecutionFile = Join-Path $TestDrive 'exec-reader.jsonl'
+        Remove-Item -LiteralPath $script:scheduleExecutionFile -Force -ErrorAction SilentlyContinue
+        Mock Write-BridgeLog { }
+    }
+
+    AfterEach { $script:scheduleExecutionFile = $script:OriginalExecFileForReader }
+
+    It 'reads newest first and measures how late each occurrence ran' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        @(
+            (@{ Timestamp = $due.AddSeconds(1).ToString('o'); EventId = 'e1'; TemplateKey = 'urgent'; Layer = 4
+                ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 120; Error = '' } | ConvertTo-Json -Compress)
+            (@{ Timestamp = $due.AddMinutes(4).ToString('o'); EventId = 'e2'; TemplateKey = 'logo'; Layer = 9
+                ScheduledAt = $due.ToString('o'); Attempt = 2; Result = 'failed'; DurationMs = 900; Error = 'Cinegy timeout' } | ConvertTo-Json -Compress)
+        ) | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+
+        $records = @(Get-ScheduleExecutionHistory)
+
+        @($records).Count | Should -Be 2
+        $records[0].TemplateKey | Should -Be 'logo'   # newest first
+        Get-ScheduleExecutionDelaySeconds -Record $records[0] | Should -Be 240
+        Get-ScheduleExecutionDelaySeconds -Record $records[1] | Should -Be 1
+    }
+
+    It 'loses one torn line, not the whole screen' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        @(
+            '{not json at all'
+            (@{ Timestamp = $due.ToString('o'); EventId = 'e1'; TemplateKey = 'urgent'; Layer = 4
+                ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 10; Error = '' } | ConvertTo-Json -Compress)
+        ) | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+
+        @(Get-ScheduleExecutionHistory).Count | Should -Be 1
+    }
+
+    It 'says plainly when nothing has run rather than drawing an empty table' {
+        $blocks = @(Get-ScheduleExecutionBlocks)
+        ($blocks | Where-Object { $_.type -eq 'table' }) | Should -BeNullOrEmpty
+        ($blocks | Where-Object { $_.type -eq 'paragraph' }).text | Should -Match 'لم يُنفَّذ'
+    }
+
+    It 'puts the failure reason where the operator is looking' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        (@{ Timestamp = $due.ToString('o'); EventId = 'e1'; TemplateKey = 'urgent'; Layer = 4
+            ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'failed'; DurationMs = 10
+            Error = 'Cinegy refused the scene' } | ConvertTo-Json -Compress) |
+            Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+
+        $text = Get-ScheduleExecutionText
+        $text | Should -Match 'Cinegy refused the scene'
+        @(Get-ScheduleExecutionBlocks | Where-Object { $_.type -eq 'paragraph' -and $_.text -match 'Cinegy refused' }).Count | Should -Be 1
+    }
+
+    It 'trims a log that grew without any bound, keeping the newest lines' {
+        $due = [datetimeoffset]'2026-09-14T09:00:00+03:00'
+        $lines = @(1..2100 | ForEach-Object {
+                @{ Timestamp = $due.ToString('o'); EventId = "e$_"; TemplateKey = "t$_"; Layer = 4
+                    ScheduledAt = $due.ToString('o'); Attempt = 1; Result = 'success'; DurationMs = 1; Error = '' } | ConvertTo-Json -Compress
+            })
+        $lines | Set-Content -LiteralPath $script:scheduleExecutionFile -Encoding utf8
+        $script:LastScheduleExecutionTrim = [datetime]::MinValue
+
+        Update-ScheduleExecutionLogTrim
+
+        $after = @(Get-Content -LiteralPath $script:scheduleExecutionFile)
+        $after.Count | Should -Be 2000
+        $after[-1] | Should -Match '"EventId":"e2100"'
+    }
+
+    It 'does not rewrite the file again within the throttle window' {
+        $script:LastScheduleExecutionTrim = (Get-Date)
+        Set-Content -LiteralPath $script:scheduleExecutionFile -Value 'untouched' -Encoding utf8
+
+        Update-ScheduleExecutionLogTrim
+
+        (Get-Content -LiteralPath $script:scheduleExecutionFile -Raw).Trim() | Should -Be 'untouched'
+    }
+}

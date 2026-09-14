@@ -586,6 +586,48 @@ Describe 'Reply markup serialisation' {
         ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:StyledMarkup | Should -Match '"style":"success"'
     }
 
+    It 'wraps a bare button that was passed where a row belongs' {
+        # Telegram answers this shape with 400 "InlineKeyboardButton must be an
+        # Object" and drops the WHOLE message, so the operator taps and nothing
+        # happens. One such 400 reached bridge.log on 2026-09-14 and named
+        # neither screen nor row.
+        #
+        # Styles ON is the case that matters, and the live default: with them
+        # off the colour-stripping pass rebuilds every row and repairs this
+        # shape by accident, which is why the fault can hide on one machine
+        # and bite on another.
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        Mock Write-BridgeLog { }
+        $flat = @{ inline_keyboard = @(
+                (New-BridgeButton -Text 'واحد' -CallbackData 'one'),
+                (New-BridgeButton -Text 'اثنان' -CallbackData 'two')) }
+
+        $json = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $flat
+
+        # Every row is an array of button objects, so Telegram accepts it.
+        ($json | ConvertFrom-Json).inline_keyboard | ForEach-Object {
+            @($_)[0].callback_data | Should -Not -BeNullOrEmpty
+        }
+        $json | Should -Match 'one'
+        $json | Should -Match 'two'
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'WARN' }
+    }
+
+    It 'leaves a well-formed keyboard exactly as it was' {
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        Mock Write-BridgeLog { }
+        $good = @{ inline_keyboard = @(
+                , @((New-BridgeButton -Text 'أ' -CallbackData 'a'), (New-BridgeButton -Text 'ب' -CallbackData 'b'))
+                , @((New-BridgeButton -Text 'رجوع' -CallbackData 'menu'))) }
+
+        $rows = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $good | ConvertFrom-Json).inline_keyboard
+
+        @($rows).Count | Should -Be 2
+        @($rows[0]).Count | Should -Be 2
+        @($rows[1]).Count | Should -Be 1
+        Should -Invoke Write-BridgeLog -Times 0 -Exactly
+    }
+
     It 'drops the colour while the setting is off, keeping everything else' {
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
 

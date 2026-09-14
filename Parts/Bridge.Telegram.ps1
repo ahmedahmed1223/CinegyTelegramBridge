@@ -71,6 +71,45 @@ function New-BridgeButton {
     return $button
 }
 
+function ConvertTo-ValidInlineKeyboard {
+    <#
+        Repairs a keyboard whose rows are not arrays of button objects.
+
+        Telegram answers such a keyboard with 400 "can't parse
+        InlineKeyboardButton: InlineKeyboardButton must be an Object" and
+        refuses the WHOLE message - the operator taps a button and simply
+        nothing happens, while the only trace is one line in bridge.log that
+        names neither the screen nor the row. The @() flattening trap in
+        AGENTS.md ("فاصلة قبل كل صف") produces exactly this shape, and a
+        screen built from a collection that turns out empty can produce it
+        too.
+
+        Repaired here rather than refused: a menu missing one malformed row
+        still gets the operator where they were going, and the log line names
+        how many rows were wrong so the caller can be found. One chokepoint,
+        because every screen in the bridge passes through this function.
+    #>
+    param([AllowEmptyCollection()][object[]]$Rows = @())
+    $fixed = @()
+    $repairs = 0
+    foreach ($row in $Rows) {
+        if ($null -eq $row) { $repairs++; continue }
+        # A bare button where a row belongs - wrap it instead of dropping it.
+        if ($row -is [hashtable] -or $row -is [pscustomobject]) {
+            $fixed += , @($row)
+            $repairs++
+            continue
+        }
+        $cells = @(@($row) | Where-Object { $_ -is [hashtable] -or $_ -is [pscustomobject] })
+        if ($cells.Count -ne @($row).Count) { $repairs++ }
+        if ($cells.Count -gt 0) { $fixed += , $cells }
+    }
+    if ($repairs -gt 0) {
+        Write-BridgeLog "Repaired $repairs malformed inline keyboard row(s) before sending; a row must be an array of button objects (see the @() flattening trap in AGENTS.md)." 'WARN'
+    }
+    return , $fixed
+}
+
 function ConvertTo-TelegramReplyMarkupJson {
     <# The single place a keyboard becomes wire JSON.
 
@@ -113,6 +152,13 @@ function ConvertTo-TelegramReplyMarkupJson {
                     })
             })
         $markup = @{ inline_keyboard = $rows }
+    }
+    # Last gate before the wire: a malformed row costs the whole message.
+    if ($markup.ContainsKey('inline_keyboard')) {
+        $rebuilt = @{}
+        foreach ($key in $markup.Keys) { $rebuilt[$key] = $markup[$key] }
+        $rebuilt['inline_keyboard'] = ConvertTo-ValidInlineKeyboard -Rows @($markup['inline_keyboard'])
+        $markup = $rebuilt
     }
     return ($markup | ConvertTo-Json -Depth 10 -Compress)
 }

@@ -13,6 +13,26 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.27.0
+
+A new **schedule execution log** screen under 📅 الجدولة. `Write-ScheduleExecutionEntry`
+has recorded every fired occurrence since scheduling shipped — template, layer,
+due time versus actual time, attempt, result, duration, redacted failure reason —
+and a search of the tree found no reader at all: the only consumer was a
+file-size row on the diagnostics screen. The screen now answers "why didn't that
+scheduled graphic appear?", and leads with how late each occurrence ran, since a
+graphic that fired four minutes after its slot did appear and "success" alone
+hides that. The file also grew unbounded with no rotation; it is now trimmed to
+the newest 2000 lines every 12 hours.
+
+Also fixes a silent failure: one Telegram 400 (`InlineKeyboardButton must be an
+Object`) reached the log, which drops the *entire* message — the operator taps
+and nothing happens. Auditing every keyboard builder found none malformed, but
+revealed that the button-colour-stripping pass rebuilt rows and repaired that
+shape *by accident*, and is skipped entirely when `EnableButtonStyles` is on —
+the live default. `ConvertTo-TelegramReplyMarkupJson` now repairs malformed rows
+at the wire and logs how many, instead of losing the message silently.
+
 ## Version 8.26.7
 
 Presentation fixes. The "What's New" renderer prefixes every `Items` element

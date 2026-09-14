@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.26.7'
+$script:BridgeVersion = '8.27.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -648,6 +648,7 @@ $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
 $script:scheduleFile = Join-Path $logDir "schedule.json"
 $script:scheduleExecutionFile = Join-Path $logDir "schedule-execution.jsonl"
+$script:LastScheduleExecutionTrim = [datetime]::MinValue
 $script:auditFile = Join-Path $logDir "audit.jsonl"
 $script:newsDraftFile = Join-Path $logDir 'news-draft.json'
 $script:newsLockRequestFile = Join-Path $logDir 'news-lock-request.json'

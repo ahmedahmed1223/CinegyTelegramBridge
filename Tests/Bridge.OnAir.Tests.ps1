@@ -564,6 +564,47 @@ Describe 'Persistent timed-show auto-hide timers' {
     }
 }
 
+Describe 'Replacing a pending flow does not strand its layer lock' {
+    # Only Complete-PendingStateCleanup releases a lock, and it runs on an
+    # explicit clear or on expiry. A flow replaced by Set-PendingState (tapping
+    # a stale inline button from earlier in the chat) used to drop the old
+    # state with nothing pointing at it - the layer stayed locked to a stale
+    # owner until the bridge restarted, refusing every later SHOW on it.
+    BeforeEach {
+        $script:PendingState.Clear()
+        $script:LayerLocks = @{}
+        Mock Save-DraftStates { }
+        Mock Send-HeldAirNotices { }
+    }
+
+    AfterEach {
+        $script:PendingState.Clear()
+        $script:LayerLocks = @{}
+    }
+
+    It 'releases the lock when the replacing flow does not carry it' {
+        Lock-GfxLayer -Layer 5 -ChatId 10 -UserId 10 -Key 'beta' | Out-Null
+        Set-PendingState -ChatId 10 -State @{ Mode = 'show_fields'; UserId = 10; LockLayer = 5; Key = 'beta' }
+
+        # An unrelated flow replaces it without anyone calling Clear-PendingState.
+        Set-PendingState -ChatId 10 -State @{ Mode = 'template_search'; UserId = 10 }
+
+        $script:LayerLocks.ContainsKey(5) | Should -BeFalse
+    }
+
+    It 'keeps the lock while the same flow advances a step' {
+        # show_fields -> show_review carries LockLayer forward; releasing here
+        # would hand the layer away in the middle of the operator's own flow.
+        Lock-GfxLayer -Layer 5 -ChatId 10 -UserId 10 -Key 'beta' | Out-Null
+        Set-PendingState -ChatId 10 -State @{ Mode = 'show_fields'; UserId = 10; LockLayer = 5; Key = 'beta' }
+
+        Set-PendingState -ChatId 10 -State @{ Mode = 'show_review'; UserId = 10; LockLayer = 5; Key = 'beta' }
+
+        $script:LayerLocks.ContainsKey(5) | Should -BeTrue
+        [long]$script:LayerLocks[5].ChatId | Should -Be 10
+    }
+}
+
 Describe 'Re-showing onto a live layer clears it first' {
     # Bridge.AirOperation.ps1:668-682. A scene already loaded keeps the values
     # it started with, so the pre-show HIDE is what makes the NEW text appear

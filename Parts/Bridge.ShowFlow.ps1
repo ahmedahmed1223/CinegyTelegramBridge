@@ -58,8 +58,37 @@ function Unlock-GfxLayer {
 }
 
 function Set-PendingState {
+    <#
+        Replacing a flow releases whatever the outgoing one held and the new
+        one does not carry forward.
+
+        Only Complete-PendingStateCleanup releases a layer lock, and it runs
+        only on an explicit Clear-PendingState or on expiry. A flow REPLACED
+        instead of cleared - tap a stale inline button from further up the chat
+        while a show flow holds a layer, and its handler calls Set-PendingState
+        directly - dropped the old state with nothing left pointing at it. The
+        lock stayed in $script:LayerLocks for the life of the process: every
+        later SHOW on that layer refused, for every operator, until restart.
+
+        Carried-forward resources must NOT be released: show_fields advancing
+        to show_review keeps the same LockLayer, and unlocking there would hand
+        the layer away mid-flow.
+    #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
+    $previous = Get-PendingState -ChatId $ChatId
     Set-BridgePendingFlow -Store $script:PendingState -ChatId $ChatId -State $State
+    if ($previous -and -not [object]::ReferenceEquals($previous, $State)) {
+        $previousLayer = if ($previous.ContainsKey('LockLayer')) { [int]$previous.LockLayer } else { 0 }
+        $currentLayer = if ($State.ContainsKey('LockLayer')) { [int]$State.LockLayer } else { 0 }
+        if ($previousLayer -gt 0 -and $previousLayer -ne $currentLayer) {
+            Unlock-GfxLayer -ChatId $ChatId -Layer $previousLayer
+        }
+        $previousPath = if ($previous.ContainsKey('ImportStagedPath')) { [string]$previous.ImportStagedPath } else { '' }
+        $currentPath = if ($State.ContainsKey('ImportStagedPath')) { [string]$State.ImportStagedPath } else { '' }
+        if ($previousPath -and $previousPath -ne $currentPath -and (Test-Path -LiteralPath $previousPath)) {
+            Remove-Item -LiteralPath $previousPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ([string]$State.Mode -in @('show_fields', 'show_review')) { Save-DraftStates }
 }
 

@@ -13,6 +13,20 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.26.6
+
+A concurrency/re-entrancy audit found one real bug: `Set-PendingState`
+replaced a pending flow without releasing what the outgoing one held. Only
+`Complete-PendingStateCleanup` frees a layer lock, and it runs solely on an
+explicit clear or on expiry — so leaving a half-built template and tapping an
+older inline button still visible in the chat stranded the lock for the life
+of the process, refusing every later SHOW on that layer for every operator.
+Fixed once in `Set-PendingState` (≈50 call sites), releasing only what the
+incoming state does not carry forward, since `show_fields` → `show_review`
+legitimately keeps the same `LockLayer`. Everything else checked — single
+-threaded guarantees, tick-loop collection snapshots, and the whole
+BridgeManager UI/process lifecycle — came back clean.
+
 ## Version 8.26.5
 
 Three real bugs from a five-dimension audit, each verified in the code before

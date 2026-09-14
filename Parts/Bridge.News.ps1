@@ -36,6 +36,24 @@ function Get-NewsTickerDraft { param([long]$UserId = 0)
     return $script:NewsTickerDraft
 }
 
+function Test-NewsTickerDraftOpen {
+    <#
+        Is this draft open to whoever edits next?
+
+        An open draft is one its owner handed over on purpose: it keeps every
+        item, and simply belongs to nobody until the next ✏️ adopts it.
+
+        Marked by its own key rather than by OwnerUserId 0. A missing or
+        unreadable owner also reads as 0, so that spelling made every draft
+        whose owner could not be read look unlocked - a lock that fails open,
+        which is worse than no lock because everyone believes there is one.
+        An absent IsOpen means closed, so the failure goes the safe way.
+    #>
+    param($Draft)
+    if (-not $Draft) { return $false }
+    return [bool](Get-JsonProp $Draft 'IsOpen')
+}
+
 function Remove-NewsTickerDraft {
     $script:NewsTickerDraft = $null
     Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction SilentlyContinue
@@ -66,16 +84,41 @@ function Clear-NewsLockReservation { $script:NewsLockGrant = $null }
 
 function Start-NewsTickerDraft {
     param([long]$ChatId,[long]$UserId)
-    if ($script:NewsTickerDraft) {
-        if ([long]$script:NewsTickerDraft.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''} }
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا لدى $(Format-UserAuditActor -UserId ([long]$script:NewsTickerDraft.OwnerUserId))."}
+    $existing = $script:NewsTickerDraft
+    if ($existing -and [long]$existing.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$existing;Error=''} }
+    if ($existing -and -not (Test-NewsTickerDraftOpen -Draft $existing)) {
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا لدى $(Format-UserAuditActor -UserId ([long]$existing.OwnerUserId))."}
     }
+    # Past here the slot is this caller's to take: either it is empty, or it
+    # holds a draft its owner opened to whoever comes next. The reservation is
+    # checked for both, because a hand-over that reserved the slot must not be
+    # won by whoever merely happened to be looking at their screen.
     $reservation = Get-NewsLockReservation
     if ($reservation -and [long]$reservation.UserId -ne $UserId) {
         $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
         return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية') بعد تسليم القفل له."}
     }
     if ($reservation) { Clear-NewsLockReservation }
+    if ($existing) {
+        # Adopted with its items. The outgoing editor chose to leave the list
+        # behind rather than take it with them, so the next one continues it
+        # instead of starting again from whatever is on air.
+        $existing['OwnerUserId'] = $UserId
+        $existing['OwnerChatId'] = $ChatId
+        $existing['UpdatedAt'] = (Get-Date).ToString('o')
+        $existing.Remove('IsOpen')
+        $existing.Remove('HandedOverBy'); $existing.Remove('HandedOverChatId'); $existing.Remove('HandedOverAt')
+        # The idle-expiry warning is addressed to an owner, and this draft has
+        # a new one who has not had their window yet. Cleared as both a key and
+        # a note property because the tick sets it either way.
+        $existing.Remove('WarnedAt')
+        $existing.PSObject.Properties.Remove('WarnedAt')
+        if (-not (Save-NewsTickerDraft)) {
+            Write-BridgeLog 'Adopted news draft could not be saved; it may revert to open on the next start.' 'ERROR'
+        }
+        Add-AuditEntry "🤝 تبنّى $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار المفتوحة ($(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا'))"
+        return [pscustomobject]@{Success=$true;Draft=$existing;Error=''}
+    }
     $snapshot = Get-NewsTickerConfiguredSnapshot
     if (-not $snapshot.Success) { return [pscustomobject]@{Success=$false;Draft=$null;Error=$snapshot.Error} }
     $script:NewsTickerDraft = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
@@ -365,6 +408,12 @@ function Request-NewsLockRelease {
     $draft = Get-NewsTickerDraft
     if (-not $draft) { return $false }
     if ([long]$draft.OwnerUserId -eq $UserId) { return $false }
+    if (Test-NewsTickerDraftOpen -Draft $draft) {
+        # There is nobody left to ask, and a request against an owner of 0
+        # would sit until it auto-granted a lock that was never held.
+        Send-TelegramMessage -ChatId $ChatId -Text '🤝 المسودة مفتوحة أصلًا — اضغط ✏️ لتتابعها.' -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+        return $false
+    }
 
     $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     $existing = $script:NewsLockRequest
@@ -464,6 +513,93 @@ function Complete-NewsLockRelease {
     return $true
 }
 
+function Resolve-NewsLockRequestOnRelease {
+    <#
+        Settles a pending unlock request when the owner releases on their own.
+
+        Whoever asked has been waiting on a window measured in minutes, and
+        dropping the slot into a free-for-all would hand it to whoever
+        happened to be looking at their screen - the same race
+        Get-NewsLockReservation was written to end. So the request is closed in
+        their favour and the slot is held for them exactly as a granted
+        hand-over holds it.
+    #>
+    param([Parameter(Mandatory)][long]$OwnerUserId, [Parameter(Mandatory)][string]$Text)
+    $request = $script:NewsLockRequest
+    if (-not $request -or [long]$request.OwnerUserId -ne $OwnerUserId) { return 0 }
+    $script:NewsLockRequest = $null
+    if (-not (Save-NewsLockRequest)) {
+        Write-BridgeLog 'Settled news lock request could not be cleared from disk; it may be restored on the next start.' 'ERROR'
+    }
+    $requester = [long]$request.RequesterUserId
+    Set-NewsLockReservation -UserId $requester | Out-Null
+    $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
+    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')." } else { '' }
+    Write-BridgeLog "News lock request from $requester settled by the owner's own release"
+    Add-AuditEntry "🔓 سُوّي طلب فكّ قفل شريط الأخبار لصالح $(Get-UserDisplayName -UserId $requester) بعد تسليم المالك طوعًا"
+    if ([long]$request.RequesterChatId -gt 0) {
+        Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "$Text$holdNote" `
+            -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId $requester)
+    }
+    return $requester
+}
+
+function Send-NewsDraftReceipt {
+    <#
+        Hands a draft's items back to a person as text before it goes.
+
+        Every other way a draft ends already does this - the lock hand-over
+        since 5.5, the idle expiry since 8.x - except the one an operator
+        presses themselves. 🗑 إلغاء المسودة deleted the lot in silence, which
+        made it the most dangerous button on the screen and the easiest to
+        mis-tap.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, $Items, [string]$Header = '📄 نصّ مسودتك قبل حذفها، انسخه إن أردت:')
+    $list = @($Items)
+    if ($ChatId -le 0 -or $list.Count -eq 0) { return $false }
+    $numbered = @(for ($i = 0; $i -lt $list.Count; $i++) { "$($i + 1). $($list[$i])" })
+    Send-TelegramPagedText -ChatId $ChatId -Text ("$Header`n" + ($numbered -join "`n"))
+    return $true
+}
+
+function Open-NewsTickerDraftToAll {
+    <#
+        Hands the draft to whoever edits next, items and all.
+
+        Complete-NewsLockRelease does the opposite - it mails the items back
+        to their owner and deletes them - and deliberately so: handing
+        somebody's unpublished work to the person who just pressured them for
+        it would be worse than losing it. This is the other case entirely. The
+        owner decided, and the list they built is the very thing the next
+        editor needs, so the draft stays where it is and simply stops
+        belonging to anyone.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft) { return $false }
+    $count = @($draft.Items).Count
+    $draft['IsOpen'] = $true
+    $draft['OwnerUserId'] = 0
+    $draft['OwnerChatId'] = 0
+    # Kept so the draft still has somebody to talk to. Nobody owns it, but the
+    # expiry warning and the hand-back are addressed to a person, and without
+    # this an unclaimed draft would die in silence with its items.
+    $draft['HandedOverBy'] = $UserId
+    $draft['HandedOverChatId'] = $ChatId
+    $draft['HandedOverAt'] = (Get-Date).ToString('o')
+    # A fresh idle window for whoever takes it: the expiry clock measures how
+    # long a draft sat untouched, and the next editor has not had their turn.
+    $draft['UpdatedAt'] = (Get-Date).ToString('o')
+    if (-not (Save-NewsTickerDraft)) {
+        Write-BridgeLog 'Opened news draft could not be saved; it may revert to its owner on the next start.' 'ERROR'
+    }
+    Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
+    Add-AuditEntry "🤝 فتح $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار للجميع ($(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا'))"
+    Resolve-NewsLockRequestOnRelease -OwnerUserId $UserId `
+        -Text "🤝 فتح $(Get-UserDisplayName -UserId $UserId) المسودة للتحرير بما فيها. اضغط ✏️ لمتابعة نفس القائمة." | Out-Null
+    return $true
+}
+
 function Update-NewsLockRequest {
     <# Grants a pending request once its window has passed. Silence is the
        grant condition: an operator who has gone home cannot answer, and the
@@ -492,7 +628,8 @@ function Get-NewsSheetConfirmPrompt {
         $lines.Add('لن يصل الهواء شيء قبل أن تضغط «مراجعة ونشر».')
     }
     $draft = Get-NewsTickerDraft
-    if ($draft) { $lines.Add("🔒 المسودة الحالية بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))، وسيُستبدل محتواها.") }
+    if (Test-NewsTickerDraftOpen -Draft $draft) { $lines.Add("🤝 توجد مسودة مفتوحة للجميع ($(@($draft.Items).Count))، وسيُستبدل محتواها.") }
+    elseif ($draft) { $lines.Add("🔒 المسودة الحالية بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))، وسيُستبدل محتواها.") }
     return ($lines -join "`n")
 }
 
@@ -522,6 +659,9 @@ function Get-NewsSheetPullLockDenial {
     $draft = Get-NewsTickerDraft
     if (-not $draft) {
         return 'السحب من الشيت يحتاج قفل المسودة. اضغط ✏️ بدء التحرير أولًا.'
+    }
+    if (Test-NewsTickerDraftOpen -Draft $draft) {
+        return 'المسودة مفتوحة ولا مالك لها. اضغط ✏️ تابِع المسودة لتتبنّاها أولًا.'
     }
     if ([long]$draft.OwnerUserId -ne $UserId) {
         return "المسودة بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))؛ السحب من الشيت لمن يحمل القفل وحده."
@@ -653,10 +793,18 @@ function Invoke-NewsSheetSync {
     if ($draft) {
         $owner = [long]$draft.OwnerUserId
         if ($Trigger -eq 'auto') {
-            Write-BridgeLog "News sheet sync skipped: draft held by user $owner" 'WARN'
+            $held = if ($owner -gt 0) { "held by user $owner" } else { 'open to everyone' }
+            Write-BridgeLog "News sheet sync skipped: draft $held" 'WARN'
             return (& $stop 'مسودة الأخبار قيد التحرير؛ تُخطّيت هذه الدورة.' $true $false)
         }
-        if ($owner -ne $UserId) {
+        if (Test-NewsTickerDraftOpen -Draft $draft) {
+            # Nobody's lock is being broken - but somebody's unpublished work
+            # still is, so the confirmation stands for everyone.
+            if (-not $Confirmed) {
+                return (& $stop '🤝 توجد مسودة مفتوحة للجميع. التأكيد يستبدل محتواها بمحتوى الشيت.' $false $true)
+            }
+        }
+        elseif ($owner -ne $UserId) {
             # Breaking somebody else's lock is an administrator action
             # everywhere else in the news screens, and a sheet pull destroys
             # that draft just as surely as 🔓 إلغاء القفل does. An operator is
@@ -698,7 +846,10 @@ function Invoke-NewsSheetSync {
         $validated = ConvertFrom-NewsTickerText -Text $text -Separator ([string](Get-Setting 'NewsItemSeparator')) `
             -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
         if (-not $validated.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($validated.Error)") }
-        if ($draft -and [long]$draft.OwnerUserId -ne $UserId) { Remove-NewsTickerDraft }
+        # An open draft is adopted by Start-NewsTickerDraft below rather than
+        # thrown away: its items are about to be replaced by the sheet either
+        # way, but the draft itself is the thing somebody handed over.
+        if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft) -and [long]$draft.OwnerUserId -ne $UserId) { Remove-NewsTickerDraft }
         if (-not (Get-NewsTickerDraft -UserId $UserId)) {
             $started = Start-NewsTickerDraft -ChatId $ChatId -UserId $UserId
             if (-not $started.Success) { return (& $stop $started.Error) }
@@ -737,10 +888,17 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     $rows = @()
     $draft = Get-NewsTickerDraft
     $reservation = Get-NewsLockReservation
-    if (-not $draft -and $reservation -and [long]$reservation.UserId -ne $UserId) {
+    $isOpen = Test-NewsTickerDraftOpen -Draft $draft
+    if ((-not $draft -or $isOpen) -and $reservation -and [long]$reservation.UserId -ne $UserId) {
         # Showing the start button here would be a lie: the reservation refuses
-        # it for as long as it lasts.
+        # it for as long as it lasts. It covers an open draft too - the whole
+        # point of reserving is that the person who asked gets first refusal.
         $rows += , @(@{text="⏳ محجوز لـ $(Get-UserDisplayName -UserId ([long]$reservation.UserId))";callback_data='news:refresh'})
+    }
+    elseif ($isOpen) {
+        # Left open on purpose, with its items. Continuing it is the offer,
+        # so the button says so rather than saying 'start'.
+        $rows += , @(@{text="✏️ تابِع المسودة ($(@($draft.Items).Count))";callback_data='news:start'}, @{text='📥 استيراد TXT';callback_data='news:import'})
     }
     elseif (-not $draft) {
         $rows += , @(@{text='✏️ بدء التحرير';callback_data='news:start'}, @{text='📥 استيراد TXT';callback_data='news:import'})
@@ -751,6 +909,9 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsClearAllNews')) {
             $rows += , @((New-BridgeButton -Text '🧹 مسح الكل' -CallbackData 'news:clear' -Style 'danger'))
         }
+        # Leaving without publishing, which until now meant destroying the
+        # draft or waiting for somebody to ask for it.
+        $rows += , @(@{text='🤝 سلّم المسودة للتالي';callback_data='news:handover'})
         # The publish/discard row is the one place on this screen where a
         # mis-tap costs work, so it is the one place colour earns its keep.
         $rows += , @((New-BridgeButton -Text '✅ مراجعة ونشر' -CallbackData 'news:publish' -Style 'success'),
@@ -1307,7 +1468,12 @@ function Get-NewsTickerBackupsKeyboard {
 function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
     $snapshot=Get-NewsTickerConfiguredSnapshot
     $text=if($snapshot.Success){"📰 إدارة شريط الأخبار`nالحالي: $(@($snapshot.Items).Count) خبرًا."}else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}
-    if($script:NewsTickerDraft){$text+="`nالمسودة مقفلة للمستخدم $($script:NewsTickerDraft.OwnerUserId) وتحتوي $(@($script:NewsTickerDraft.Items).Count) خبرًا."}
+    if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) {
+        $by = [long](Get-JsonProp $script:NewsTickerDraft 'HandedOverBy')
+        $byText = if ($by -gt 0) { " سلّمها $(Get-UserDisplayName -UserId $by)" } else { '' }
+        $text += "`n🤝 مسودة مفتوحة للجميع$byText وفيها $(@($script:NewsTickerDraft.Items).Count) خبرًا — اضغط ✏️ لمتابعتها."
+    }
+    elseif($script:NewsTickerDraft){$text+="`nالمسودة مقفلة لدى $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) وتحتوي $(@($script:NewsTickerDraft.Items).Count) خبرًا."}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

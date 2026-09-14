@@ -129,13 +129,17 @@ function ConvertTo-ValidInlineKeyboard {
     #>
     param([AllowEmptyCollection()][object[]]$Rows = @())
     $fixed = @()
-    $repairs = 0
+    # What was wrong with each row, so the warning is a diagnosis rather than
+    # a count. A bare "repaired 1 row" says nothing a maintainer can act on.
+    $notes = [System.Collections.Generic.List[string]]::new()
+    $index = -1
     foreach ($row in $Rows) {
-        if ($null -eq $row) { $repairs++; continue }
+        $index++
+        if ($null -eq $row) { $notes.Add("row $index was null"); continue }
         # A bare button where a row belongs - wrap it instead of dropping it.
         if (Test-TelegramButtonObject -Value $row) {
             $fixed += , @($row)
-            $repairs++
+            $notes.Add("row $index was a bare button, not a row")
             continue
         }
         $cells = @(Expand-TelegramButtonRow -Row $row)
@@ -143,12 +147,26 @@ function ConvertTo-ValidInlineKeyboard {
         # button flattens to the same count it came in with, and comparing
         # counts let exactly that case repair itself in silence.
         foreach ($item in @($row)) {
-            if (-not (Test-TelegramButtonObject -Value $item)) { $repairs++; break }
+            if (Test-TelegramButtonObject -Value $item) { continue }
+            $what = if ($null -eq $item) { 'null' } else { $item.GetType().Name }
+            $notes.Add("row $index held $what where a button belongs")
+            break
         }
-        if ($cells.Count -gt 0) { $fixed += , $cells }
+        if ($cells.Count -eq 0) { $notes.Add("row $index had no buttons at all and was dropped") }
+        else { $fixed += , $cells }
     }
-    if ($repairs -gt 0) {
-        Write-BridgeLog "Repaired $repairs malformed inline keyboard row(s) before sending; a row must be an array of button objects (see the @() flattening trap in AGENTS.md)." 'WARN'
+    if ($notes.Count -gt 0) {
+        # Named, because the first version of this line said only that a row
+        # was repaired - and a warning that cannot be traced to a screen is a
+        # warning nobody can act on. The send path itself is skipped so the
+        # frame reported is the screen that built the keyboard.
+        $plumbing = @('ConvertTo-ValidInlineKeyboard', 'ConvertTo-TelegramReplyMarkupJson', 'ConvertTo-OneHandLayout',
+            'Send-TelegramMessage', 'Send-TelegramPagedText', 'Edit-TelegramMessageText', 'Send-TelegramPhoto', 'Send-TelegramDocument')
+        $caller = @(Get-PSCallStack | Select-Object -Skip 1 |
+                Where-Object { $_.Command -and $_.Command -notin $plumbing -and $_.Command -notlike '*.ps1' } |
+                Select-Object -First 1).Command
+        if (-not $caller) { $caller = 'unknown' }
+        Write-BridgeLog "Repaired $($notes.Count) malformed inline keyboard row(s) from $caller before sending ($($notes -join '; ')); a row must be an array of button objects (see the @() flattening trap in AGENTS.md)." 'WARN'
     }
     return , $fixed
 }

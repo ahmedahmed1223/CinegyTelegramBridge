@@ -1074,6 +1074,10 @@ function Update-NewsDraftExpiry {
     $stamp = [string](Get-JsonProp $draft 'UpdatedAt')
     if (-not [datetime]::TryParse($stamp, [ref]$updatedAt)) { return }
     $owner = [long](Get-JsonProp $draft 'OwnerChatId')
+    # An open draft belongs to nobody, so the warning and the hand-back go to
+    # whoever opened it. Without this an unclaimed draft expires in total
+    # silence and takes its items with it.
+    if ($owner -le 0) { $owner = [long](Get-JsonProp $draft 'HandedOverChatId') }
     $elapsed = ((Get-Date) - $updatedAt).TotalMinutes
     if ($elapsed -lt $timeout) {
         # A warning first, with a way to keep it. This expiry does not drop

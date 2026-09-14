@@ -291,7 +291,22 @@ function Invoke-CallbackQuery {
             $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $files[$i].FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
             if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
-        'news:cancel' { if(Get-NewsTickerDraft -UserId $userId){Remove-NewsTickerDraft};Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break }
+        'news:handover' {
+            if (Open-NewsTickerDraftToAll -ChatId $chatId -UserId $userId) {
+                Send-TelegramMessage -ChatId $chatId -Text '🤝 سُلّمت المسودة بما فيها. أول من يضغط ✏️ يتابع نفس القائمة.'
+            }
+            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break
+        }
+        'news:cancel' {
+            $doomed = Get-NewsTickerDraft -UserId $userId
+            if ($doomed) {
+                # Handed back before it goes: discarding is the one draft
+                # ending that used to cost every typed word in silence.
+                Send-NewsDraftReceipt -ChatId $chatId -Items $doomed.Items | Out-Null
+                Remove-NewsTickerDraft
+            }
+            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break
+        }
         'news:import' {
             $started=Start-NewsTickerDraft -ChatId $chatId -UserId $userId;if(-not $started.Success){Send-TelegramMessage -ChatId $chatId -Text $started.Error;break}
             Set-PendingState -ChatId $chatId -State @{Mode='news_import_upload';UserId=$userId;StartedAt=(Get-Date)}

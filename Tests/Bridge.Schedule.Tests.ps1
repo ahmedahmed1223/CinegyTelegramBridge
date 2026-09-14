@@ -996,3 +996,58 @@ Describe 'Nothing that records events grows without a configurable bound' {
         @($script:ScheduleEvents).Count | Should -Be 1
     }
 }
+
+Describe 'The execution log screen sends a keyboard Telegram accepts' {
+    BeforeEach {
+        Mock Send-TelegramRichMessage { $script:SentMarkup = $ReplyMarkup; $true }
+        Mock Send-TelegramPagedText { $script:SentMarkup = $ReplyMarkup }
+        # Non-empty: -Blocks is mandatory and rejects an empty array, and
+        # this test is about the keyboard, not the body.
+        Mock Get-ScheduleExecutionBlocks { @(@{ type = 'text'; text = 'x' }) }
+        Mock Get-ScheduleExecutionText { 'x' }
+        Mock Write-BridgeLog { }
+    }
+    AfterAll { $script:SentMarkup = $null }
+
+    It 'builds every row as an array of buttons, for every kind' -ForEach @(
+        @{ Kind = 'mojaz' }, @{ Kind = 'news' }, @{ Kind = 'show' }, @{ Kind = '' }
+    ) {
+        # The back row came out of a switch used as an expression, and a
+        # switch writes its result to the output stream - which unrolls one
+        # level and strips the leading comma that made it a row. The mojaz and
+        # news screens then sent a bare button where Telegram demands a row,
+        # and Telegram answers 400 and drops the WHOLE message: the operator
+        # opens the log and nothing arrives.
+        $script:SentMarkup = $null
+
+        Show-ScheduleExecutionScreen -ChatId 122238225 -UserId 122238225 -Kind $Kind
+
+        $rows = @($script:SentMarkup.inline_keyboard)
+        $rows.Count | Should -BeGreaterThan 1
+        foreach ($row in $rows) {
+            # Not piped: piping a row unrolls it into its buttons, and the
+            # assertion would then be about a button rather than the row.
+            ($row -is [hashtable]) | Should -BeFalse -Because 'a bare button where a row belongs costs the whole message'
+            foreach ($cell in @($row)) {
+                $cell.callback_data | Should -Not -BeNullOrEmpty
+            }
+        }
+    }
+
+    It 'passes the send-time repair pass untouched for every kind' -ForEach @(
+        @{ Kind = 'mojaz' }, @{ Kind = 'news' }, @{ Kind = 'show' }, @{ Kind = '' }
+    ) {
+        # The shape check above says the rows are right; this says the wire
+        # agrees, and that nothing had to be repaired on the way out.
+        $repaired = [System.Collections.Generic.List[string]]::new()
+        Mock Write-BridgeLog { $repaired.Add($Message) } -ParameterFilter { $Message -match 'malformed inline keyboard' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableButtonStyles' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'OneHandMode' }
+        $script:SentMarkup = $null
+
+        Show-ScheduleExecutionScreen -ChatId 122238225 -UserId 122238225 -Kind $Kind
+        ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $script:SentMarkup | Out-Null
+
+        @($repaired) | Should -BeNullOrEmpty
+    }
+}

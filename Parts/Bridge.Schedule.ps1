@@ -527,16 +527,24 @@ function Show-ScheduleExecutionScreen {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $refresh = if ($Kind) { "schedule:execlog:$Kind" } else { 'schedule:execlog' }
     # Back to where the operator came from, not always to the schedule menu.
-    $back = switch ($Kind) {
-        'mojaz' { , @( (New-Button '⬅️ المواعيد' 'mojaz:times') ) }
-        'news' { , @( (New-Button '⬅️ شريط الأخبار' 'menu:news') ) }
-        default { , @( (New-Button '📋 الأحداث القادمة' 'schedule:list'), (New-Button '⬅️ الجدولة' 'menu:schedule') ) }
+    #
+    # Assigned inside the branches rather than returned out of the switch. A
+    # switch used as an expression writes its result to the output stream,
+    # which unrolls one level - so the leading comma that makes this a ROW was
+    # stripped, and $rows += $back appended a bare button where a row belongs.
+    # Telegram refuses the whole message for that, and the mojaz and news
+    # screens were doing it on every open.
+    $back = @()
+    switch ($Kind) {
+        'mojaz' { $back = @( (New-Button '⬅️ المواعيد' 'mojaz:times') ) }
+        'news' { $back = @( (New-Button '⬅️ شريط الأخبار' 'menu:news') ) }
+        default { $back = @( (New-Button '📋 الأحداث القادمة' 'schedule:list'), (New-Button '⬅️ الجدولة' 'menu:schedule') ) }
     }
     $rows = @(, @( (New-Button '🔄 تحديث' $refresh) ))
     # Only from the all-kinds screen: a filtered one already answers its own
     # question, and three more buttons under it would just be noise.
     if (-not $Kind) { $rows += , @( (New-Button '📑 الموجز' 'schedule:execlog:mojaz'), (New-Button '📰 الأخبار' 'schedule:execlog:news') ) }
-    $rows += $back
+    $rows += , $back
     $keyboard = @{ inline_keyboard = $rows }
     if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-ScheduleExecutionBlocks -Kind $Kind) -ReplyMarkup $keyboard)) {
         Send-TelegramPagedText -ChatId $ChatId -Text (Get-ScheduleExecutionText -Kind $Kind) -ParseMode HTML -ReplyMarkup $keyboard

@@ -35,8 +35,13 @@ function Get-JsonProp {
        them as null, so every read of external JSON goes through here. #>
     param($Object, [Parameter(Mandatory)][string]$Name)
     if ($null -eq $Object) { return $null }
-    if ($Object -is [hashtable]) {
-        if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+    # IDictionary, not [hashtable]: [ordered]@{} is an OrderedDictionary, which
+    # is NOT a Hashtable and exposes none of its keys as PSObject properties.
+    # Read as a plain object it answered $null for every key, so anything the
+    # bridge builds with [ordered]@{} - the news draft among them - looked
+    # empty to every caller here until a restart reloaded it as a Hashtable.
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
         return $null
     }
     if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }

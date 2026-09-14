@@ -404,6 +404,104 @@ Describe 'News lock hand-over' {
     }
 }
 
+Describe 'Handing the draft to whoever edits next' {
+    BeforeEach {
+        $script:NewsLockRequest = $null
+        $script:NewsLockGrant = $null
+        $script:newsLockRequestFile = Join-Path $TestDrive 'news-lock-request.json'
+        $script:newsDraftFile = Join-Path $TestDrive 'news-draft.json'
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramPagedText {}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        Mock Get-UserDisplayName { "user$UserId" }
+        Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
+        Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'NewsLockRequestMinutes' }
+        Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsLockGrantHoldSeconds' }
+    }
+    AfterAll { $script:NewsTickerDraft = $null; $script:NewsLockRequest = $null; $script:NewsLockGrant = $null }
+
+    It 'keeps every item and leaves the draft owned by nobody' {
+        # The point of the button: until now the only ways out of a draft were
+        # publishing it or destroying it, so an editor leaving mid-shift took
+        # the newsroom's list with them.
+        Open-NewsTickerDraftToAll -ChatId 20 -UserId 20 | Should -BeTrue
+
+        @($script:NewsTickerDraft.Items).Count | Should -Be 2
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 0
+        Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft | Should -BeTrue
+    }
+
+    It 'lets the next editor adopt it with the list intact' {
+        Open-NewsTickerDraftToAll -ChatId 20 -UserId 20 | Out-Null
+
+        $taken = Start-NewsTickerDraft -ChatId 31 -UserId 31
+
+        $taken.Success | Should -BeTrue
+        @($script:NewsTickerDraft.Items) | Should -Be @('أ', 'ب')
+        [long]$script:NewsTickerDraft.OwnerUserId | Should -Be 31
+        # Every trace of the open state is gone, or the next reader still sees
+        # a draft that belongs to nobody.
+        Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft | Should -BeFalse
+    }
+
+    It 'treats a draft with no IsOpen marker as locked, not open' {
+        # The first spelling of this used OwnerUserId 0 as the marker, and an
+        # owner that could not be read is also 0 - so every draft looked
+        # unlocked and the second user to press ✏️ simply took it. A lock
+        # that fails open is worse than no lock, because everyone trusts it.
+        Test-NewsTickerDraftOpen -Draft @{ Items = @('أ') } | Should -BeFalse
+        Test-NewsTickerDraftOpen -Draft ([ordered]@{ OwnerUserId = 20 }) | Should -BeFalse
+        Test-NewsTickerDraftOpen -Draft $null | Should -BeFalse
+    }
+
+    It 'reads an ordered draft the same as a rehydrated one' {
+        # A live draft is [ordered]@{} and a restored one is a Hashtable. They
+        # must answer identically, or the rule changes at every restart.
+        $live = [ordered]@{ OwnerUserId = 0; IsOpen = $true; Items = @() }
+        $restored = @{ OwnerUserId = 0; IsOpen = $true; Items = @() }
+
+        Test-NewsTickerDraftOpen -Draft $live | Should -BeTrue
+        Test-NewsTickerDraftOpen -Draft $restored | Should -BeTrue
+    }
+
+    It 'settles a pending request in the requester favour and holds the slot' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+
+        Open-NewsTickerDraftToAll -ChatId 20 -UserId 20 | Should -BeTrue
+
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        [long]$script:NewsLockGrant.UserId | Should -Be 21
+        # A bystander must not win a hand-over somebody else waited out.
+        (Start-NewsTickerDraft -ChatId 99 -UserId 99).Success | Should -BeFalse
+        (Start-NewsTickerDraft -ChatId 21 -UserId 21).Success | Should -BeTrue
+    }
+
+    It 'refuses an unlock request against a draft that is already open' {
+        Open-NewsTickerDraftToAll -ChatId 20 -UserId 20 | Out-Null
+
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeFalse
+
+        # Nobody is left to answer it, and an unanswered request auto-grants a
+        # lock that was never held.
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+    }
+
+    It 'hands the words back before a discard deletes them' {
+        Send-NewsDraftReceipt -ChatId 20 -Items @($script:NewsTickerDraft.Items) | Should -BeTrue
+
+        Should -Invoke Send-TelegramPagedText -Times 1 -Exactly -ParameterFilter { $Text -match 'أ' -and $Text -match 'ب' }
+    }
+
+    It 'sends no receipt for an empty draft or a chat that cannot be reached' {
+        Send-NewsDraftReceipt -ChatId 20 -Items @() | Should -BeFalse
+        Send-NewsDraftReceipt -ChatId 0 -Items @('أ') | Should -BeFalse
+
+        Should -Invoke Send-TelegramPagedText -Times 0 -Exactly
+    }
+}
+
 Describe 'News lock under simultaneous requests' {
     BeforeEach {
         $script:NewsLockRequest = $null

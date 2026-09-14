@@ -13,6 +13,36 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.30.0
+
+Whoever holds the news draft lock now has a way out that is neither publishing
+nor destroying their work: **🤝 سلّم المسودة للتالي** leaves the draft exactly
+where it is and simply stops it belonging to anyone, so the next ✏️ adopts it
+with every headline intact. A pending unlock request is settled in the
+requester's favour and the slot held for them; an open draft keeps whoever
+handed it over as the person its expiry warning and hand-back are addressed to,
+so it cannot die in silence. 🗑 إلغاء المسودة now returns the text before
+deleting — it was the only draft ending that cost every typed word silently.
+
+Openness is marked by an explicit `IsOpen` key rather than `OwnerUserId = 0`,
+because 0 is also what an unreadable owner reads as: that spelling made every
+draft look unlocked, and a lock that fails open is worse than no lock.
+
+`Get-JsonProp` tested `-is [hashtable]`, but `[ordered]@{}` is an
+OrderedDictionary — not a Hashtable, and it exposes no keys as PSObject
+properties — so it answered `$null` for every key of anything the bridge builds
+with `[ordered]`. That reached further than the feature above: the news draft
+expiry warning and its hand-back read `OwnerChatId` through it and so never
+fired for a live draft, only for one reloaded after a restart. It now reads any
+`IDictionary`.
+
+The 🧾 execution log screens were sending a keyboard Telegram refuses outright.
+The back row came out of a `switch` used as an expression, and a switch writes
+its result to the output stream, which unrolls one level — stripping the leading
+comma that made it a row and leaving a bare button where a row belongs. The
+repair warning now names the function responsible and what was wrong with each
+row, instead of a count nobody can act on.
+
 ## Version 8.29.1
 
 `✅ جاهزية المناوبة` in admin tools did nothing at all: the screen was built and

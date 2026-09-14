@@ -228,7 +228,10 @@ function Show-ShiftReadinessScreen {
     $lines.Add($(if ($onAir -gt 0) { "🟠 طبقات على الهواء الآن: <code>$onAir</code> — راجعها قبل أن تلمس شيئًا." } else { '🟢 لا شيء على الهواء.' }))
     $pending = @($script:PendingState.Keys).Count
     $lines.Add($(if ($pending -gt 0) { "⏳ عمليات معلقة بانتظار أصحابها: <code>$pending</code>." } else { '✅ لا عمليات معلقة.' }))
-    $lines.Add($(if ($script:NewsTickerDraft) { "📰 مسودة شريط مفتوحة ($(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId'))))." } else { '✅ لا مسودة شريط.' }))
+    $lines.Add($(
+            if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) { "🤝 مسودة شريط مسلّمة بلا مالك — من يتابعها؟" }
+            elseif ($script:NewsTickerDraft) { "📰 مسودة شريط مفتوحة ($(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId'))))." }
+            else { '✅ لا مسودة شريط.' }))
     $dead = @($script:DeadChats.Keys).Count
     $lines.Add($(if ($dead -gt 0) { "💀 محادثات محجورة بانتظار قرار: <code>$dead</code>." } else { '✅ لا محادثات محجورة.' }))
     $pins = @($script:PinnedRecurrences.Keys).Count

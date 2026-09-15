@@ -1847,3 +1847,46 @@ Describe 'Preset index bounds' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'غير موجود' }
     }
 }
+
+Describe 'Keyboards that grow with the registry stay sendable' {
+    BeforeEach {
+        $script:BigRegistryMap = @{}
+        $script:BigRegistryOrder = @()
+        for ($i = 0; $i -lt 300; $i++) {
+            $key = "template-$i"
+            $script:BigRegistryOrder += $key
+            $script:BigRegistryMap[$key] = [pscustomobject]@{
+                Key = $key; Layer = (($i % 9) + 1); Path = 'scene.cintitle'
+                Fields = @('Headline.Text'); Presets = @(); Category = ''; Description = ''
+            }
+        }
+        Mock Get-TemplateStore {
+            @{ Map = $script:BigRegistryMap; Order = $script:BigRegistryOrder; Errors = @(); InvalidKeys = @(); SharedLayers = @{} }
+        }
+    }
+
+    It 'keeps the template list one page wide at three hundred templates' {
+        # Measured before paging: 301 rows and 29 KB of reply_markup, which
+        # Telegram will not send. The number is asserted rather than described
+        # because "it is paged" is exactly what was believed while it was not.
+        $keyboard = Get-TemplatesKeyboard -Prefix 'tpl'
+        $rows = @($keyboard.inline_keyboard)
+        $bytes = [Text.Encoding]::UTF8.GetByteCount(($keyboard | ConvertTo-Json -Depth 12 -Compress))
+
+        $rows.Count | Should -BeLessThan 30
+        $bytes | Should -BeLessThan 4096
+    }
+
+    It 'reaches the last page rather than hiding the tail' {
+        $lastPage = Get-TemplatesKeyboard -Prefix 'tpl' -Page 14
+        $labels = @($lastPage.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { [string]$_.text }) -join ' '
+
+        $labels | Should -Match 'template-299'
+    }
+
+    It 'pages the favourites picker too, since it walks the same registry' {
+        Mock Get-UserFavoriteSelection { @() }
+
+        @((Get-FavoritesManagementKeyboard -UserId 101).inline_keyboard).Count | Should -BeLessThan 30
+    }
+}

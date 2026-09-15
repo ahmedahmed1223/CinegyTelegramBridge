@@ -90,7 +90,7 @@ function Get-MojazText {
 }
 
 function Get-MojazKeyboard {
-    param($Bulletin)
+    param($Bulletin, [int]$Page = 0)
     $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $keyboard = @()
     if (Test-MojazOnAir -Bulletin $Bulletin) {
@@ -123,7 +123,14 @@ function Get-MojazKeyboard {
     }
     # A line per row: delete it, or move it up or down the rundown. Numbered
     # like the table above, so the button and the story line up by eye.
-    for ($i = 0; $i -lt $rows.Count; $i++) {
+    # Twenty-five to a page. A bulletin that long is already past what a
+    # phone can work with, so every real one renders exactly as before - the
+    # pager row appears only when there is a second page. The numbers stay
+    # the rundown's own, not the page's, so button 26 is story 26.
+    $rowWindow = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page -PageSize 25
+    $rowStart = if ($rowWindow.EndIndex -ge $rowWindow.StartIndex) { [int]$rowWindow.StartIndex } else { 0 }
+    $rowEnd = if ($rowWindow.EndIndex -ge $rowWindow.StartIndex) { [int]$rowWindow.EndIndex } else { -1 }
+    for ($i = $rowStart; $i -le $rowEnd; $i++) {
         $rowId = [string]$rows[$i].Id
         $line = @(
             (New-Button "✏️ $($i + 1)" "mojaz:row:$rowId")
@@ -133,6 +140,8 @@ function Get-MojazKeyboard {
         if ($i -lt ($rows.Count - 1)) { $line += (New-Button '⬇️' "mojaz:down:$rowId") }
         $keyboard += , $line
     }
+    $rowPager = @(Get-BridgePagerButtons -Window $rowWindow -Prefix 'mojazpage')
+    if ($rowPager.Count -gt 0) { $keyboard += , $rowPager }
     if ($rows.Count -gt 0) { $keyboard += , @((New-Button '🧹 مسح الجدول' 'mojaz:clear' -Style danger)) }
     $keyboard += , @(
         (New-Button '✏️ إعادة تسمية' 'mojaz:rename')
@@ -199,7 +208,7 @@ function Show-MojazPreviewScreen {
 }
 
 function Show-MojazScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-MojazAvailable)) {
         Send-TelegramMessage -ChatId $ChatId -Text "قالب '$($script:MojazTemplateKey)' غير موجود في سجل القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -208,7 +217,7 @@ function Show-MojazScreen {
     # The bulletin this chat had open can be gone - deleted from another chat.
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
-    $keyboard = Get-MojazKeyboard -Bulletin $bulletin
+    $keyboard = Get-MojazKeyboard -Bulletin $bulletin -Page $Page
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks -Bulletin $bulletin) -ReplyMarkup $keyboard) { return }
     Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText -Bulletin $bulletin) -ParseMode HTML -ReplyMarkup $keyboard
 }

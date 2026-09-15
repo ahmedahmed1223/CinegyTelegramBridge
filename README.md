@@ -13,6 +13,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.39.0
+
+The paging guard looked for `foreach (` and `ForEach-Object` and never for a
+classic `for (` index loop, so nineteen keyboard builders were never
+inspected at all — including `Get-TemplatesKeyboard`, the most-used screen in
+the bot. Measured: at 300 templates it built 301 rows and 29 KB of
+`reply_markup`, which Telegram will not send. The load test that appeared to
+cover this measured `Get-BridgePageWindow`'s arithmetic, not any keyboard.
+
+Six builders that grow with the registry are now paged through the existing
+window helper — templates, their categories, favourites, the preset picker,
+the preset list of one template, and the bulletin's rundown rows — with one
+shared `Get-BridgePagerButtons` row so the next screen cannot invent a
+seventh variant. Below a page there is no visible change at all: the pager
+row appears only when a second page exists. Search results are capped instead
+of paged, because a callback cannot carry the query back, and the cap says
+how many results it hid.
+
+The guard now sees `for (` too, and the fourteen builders that remain each
+carry a written reason that is the actual bound — `ConfigBackupKeepFiles`
+gained a declared range so that two of those reasons are true rather than
+hopeful.
+
 ## Version 8.38.2
 
 Two defects introduced by the previous two releases, found by reviewing them

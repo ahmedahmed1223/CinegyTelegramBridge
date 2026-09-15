@@ -594,22 +594,38 @@ function Get-TemplatesKeyboard {
        permission. Called without a user nothing is filtered - that is the
        registry's own view of itself. #>
     param([string]$Prefix = 'tpl', [string]$Category = '', [string]$Query = '', [switch]$BrowseControls,
-        [long]$ChatId = 0, [long]$UserId = 0)
+        [long]$ChatId = 0, [long]$UserId = 0, [int]$Page = 0, [int]$PageSize = 20)
     $store = Get-TemplateStore
     $rows = @()
     if ($BrowseControls -and $Prefix -eq 'tpl') {
         $rows += , @((New-Button '🔎 بحث' 'menu:templatesearch'), (New-Button '🗂 التصنيفات' 'menu:templatecategories'))
     }
-    $matched = 0
-    for ($i = 0; $i -lt $store.Order.Count; $i++) {
+    # Which templates qualify, gathered before any button is built: this list
+    # is what the page window measures, and it is the registry - it grows with
+    # the station. Measured at 300 templates the unpaged keyboard was 301 rows
+    # and 29 KB of reply_markup, which Telegram will not send.
+    $qualified = @(for ($i = 0; $i -lt $store.Order.Count; $i++) {
+            $candidate = $store.Map[$store.Order[$i]]
+            if ($Category -and -not ([string]$candidate.Category).Equals($Category, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            if ($Query) {
+                $haystack = "$($candidate.Key) $($candidate.Description) $($candidate.Category)"
+                if ($haystack.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+            }
+            if ($ChatId -gt 0 -and -not (Test-TemplateAccess -Key ([string]$candidate.Key) -Layer ([int]$candidate.Layer) -ChatId $ChatId -UserId $UserId).Allowed) { continue }
+            $i
+        })
+    $matched = @($qualified).Count
+    # A search is narrowed by the operator's own words, and its callback
+    # cannot carry them back - the query lives only in the message that asked
+    # for it. So search results are capped rather than paged, and the cap
+    # says what it hid instead of pretending to be the whole answer.
+    $pageIndexes = if ($Query) { @(@($qualified) | Select-Object -First $PageSize) }
+    else {
+        $window = Get-BridgePageWindow -ItemCount $matched -Page $Page -PageSize $PageSize
+        if ($window.EndIndex -ge $window.StartIndex) { @(@($qualified)[$window.StartIndex..$window.EndIndex]) } else { @() }
+    }
+    foreach ($i in @($pageIndexes)) {
         $t = $store.Map[$store.Order[$i]]
-        if ($Category -and -not ([string]$t.Category).Equals($Category, [StringComparison]::OrdinalIgnoreCase)) { continue }
-        if ($Query) {
-            $haystack = "$($t.Key) $($t.Description) $($t.Category)"
-            if ($haystack.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-        }
-        if ($ChatId -gt 0 -and -not (Test-TemplateAccess -Key ([string]$t.Key) -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId).Allowed) { continue }
-        $matched++
         # A lock badge here is the early warning: the operator sees the clash
         # before typing a single field, instead of after.
         $lockBadge = if ((Get-Setting 'ShowLayerLockBadge') -and $script:LayerLocks.ContainsKey([int]$t.Layer)) { '🔒 ' } else { '' }
@@ -634,14 +650,39 @@ function Get-TemplatesKeyboard {
     if ($matched -eq 0) {
         $rows += , @( (New-Button $(if ($Query -or $Category) { 'لا توجد نتائج مطابقة' } else { 'لا توجد قوالب معرّفة' }) "menu:templates") )
     }
+    elseif ($Query) {
+        $hiddenResults = $matched - @($pageIndexes).Count
+        if ($hiddenResults -gt 0) {
+            $rows += , @( (New-Button "🔎 ضيّق البحث · $hiddenResults نتيجة أخرى" 'menu:templatesearch') )
+        }
+    }
+    else {
+        # A category view pages by the category's own position, because the
+        # name is free text and callback_data is capped at 64 bytes.
+        $pagerPrefix = if ($Category) {
+            $categoryIndex = [array]::IndexOf(@(Get-TemplateCategories), $Category)
+            if ($categoryIndex -ge 0) { "tplcatpg:$categoryIndex" } else { '' }
+        }
+        else { "tplpage:$Prefix" }
+        if ($pagerPrefix) {
+            $pager = @(Get-BridgePagerButtons -Window $window -Prefix $pagerPrefix)
+            if ($pager.Count -gt 0) { $rows += , $pager }
+        }
+    }
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-TemplateCategoriesKeyboard {
+    param([int]$Page = 0)
     $categories = @(Get-TemplateCategories)
     $rows = @()
-    for ($i = 0; $i -lt $categories.Count; $i++) { $rows += , @((New-Button "🗂 $($categories[$i])" "tplcat:$i")) }
+    $window = Get-BridgePageWindow -ItemCount $categories.Count -Page $Page -PageSize 20
+    if ($window.EndIndex -ge $window.StartIndex) {
+        for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) { $rows += , @((New-Button "🗂 $($categories[$i])" "tplcat:$i")) }
+    }
+    $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'tplcatpage')
+    if ($pager.Count -gt 0) { $rows += , $pager }
     if ($categories.Count -eq 0) { $rows += , @((New-Button 'لا توجد تصنيفات معرّفة' 'menu:templates')) }
     $rows += , @((New-Button '📋 كل القوالب' 'menu:templates'), (New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
@@ -1022,17 +1063,45 @@ function Get-FavoritesManagementText {
     return ($lines -join "`n")
 }
 
+function Get-BridgePagerButtons {
+    <#
+        The previous/position/next row for a paged keyboard, or nothing at all
+        when there is only one page.
+
+        Get-TemplateAdminCatalogueKeyboard grew this row by hand and three
+        more screens were about to copy it. One builder because the shape is
+        the contract: the middle button shows "page of pages" and does
+        nothing, which is what stops an operator pressing it to find out.
+    #>
+    param([Parameter(Mandatory)]$Window, [Parameter(Mandatory)][string]$Prefix)
+    if ([int]$Window.PageCount -le 1) { return @() }
+    $pager = @()
+    if ($Window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "${Prefix}:$([int]$Window.Page - 1)") }
+    $pager += (New-Button "$([int]$Window.Page + 1)/$([int]$Window.PageCount)" "${Prefix}:$([int]$Window.Page)")
+    if ($Window.HasNext) { $pager += (New-Button 'التالي ➡️' "${Prefix}:$([int]$Window.Page + 1)") }
+    return $pager
+}
+
 function Get-FavoritesManagementKeyboard {
-    param([Parameter(Mandatory)][long]$UserId)
+    param([Parameter(Mandatory)][long]$UserId, [int]$Page = 0)
     # Get-UserFavoriteSelection, not Get-FavoriteTemplateKeys: the tick has to
     # follow what is stored, or a pick past FavoritesCount shows unticked and
     # the toggle can never turn it back off.
     $store = Get-TemplateStore; $selected = @(Get-UserFavoriteSelection -UserId $UserId); $rows = @()
-    for ($i = 0; $i -lt $store.Order.Count; $i++) {
-        $key = [string]$store.Order[$i]
-        $mark = if ($selected -contains $key) { '✅' } else { '▫️' }
-        $rows += , @((New-Button "$mark $key" "favtoggle:$i"))
+    # One row per template in the whole registry, so this grows with the
+    # station. Paged like its sibling catalogue rather than trusted to stay
+    # small: the index in favtoggle stays the registry position, so a toggle
+    # on page three still names the template its label showed.
+    $window = Get-BridgePageWindow -ItemCount $store.Order.Count -Page $Page -PageSize 20
+    if ($window.EndIndex -ge $window.StartIndex) {
+        for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
+            $key = [string]$store.Order[$i]
+            $mark = if ($selected -contains $key) { '✅' } else { '▫️' }
+            $rows += , @((New-Button "$mark $key" "favtoggle:$i"))
+        }
     }
+    $rows += , @(Get-BridgePagerButtons -Window $window -Prefix 'favpage')
+    $rows = @($rows | Where-Object { @($_).Count -gt 0 })
     $rows += , @((New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
 }
@@ -1051,24 +1120,39 @@ function Get-LayersKeyboard {
 }
 
 function Get-PresetAdminTemplatesKeyboard {
+    param([int]$Page = 0)
     $store = Get-TemplateStore
     $rows = @()
-    for ($i = 0; $i -lt $store.Order.Count; $i++) {
-        $template = $store.Map[$store.Order[$i]]
-        $rows += , @( (New-Button "$($template.Key) ($(@($template.Presets).Count))" "padm:$i") )
+    $window = Get-BridgePageWindow -ItemCount $store.Order.Count -Page $Page -PageSize 20
+    if ($window.EndIndex -ge $window.StartIndex) {
+        for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
+            $template = $store.Map[$store.Order[$i]]
+            $rows += , @( (New-Button "$($template.Key) ($(@($template.Presets).Count))" "padm:$i") )
+        }
     }
+    $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'padmpage')
+    if ($pager.Count -gt 0) { $rows += , $pager }
     $rows += , @( (New-Button "⬅️ القائمة" 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-PresetAdminKeyboard {
-    param([Parameter(Mandatory)][int]$TemplateIndex)
+    param([Parameter(Mandatory)][int]$TemplateIndex, [int]$Page = 0)
     $template = Get-TemplateByIndex -Index $TemplateIndex
     $rows = @()
     if ($template) {
-        for ($i = 0; $i -lt @($template.Presets).Count; $i++) {
-            $rows += , @( (New-Button "⚡ $($template.Presets[$i].Name)" "pa:$TemplateIndex`:$i") )
+        # An administrator adds these one at a time and rarely deletes, so the
+        # list only ever grows. Paged at the same size as its sibling screens:
+        # a template with fewer than twenty presets renders exactly as before,
+        # since the pager row appears only when there is a second page.
+        $presetWindow = Get-BridgePageWindow -ItemCount @($template.Presets).Count -Page $Page -PageSize 20
+        if ($presetWindow.EndIndex -ge $presetWindow.StartIndex) {
+            for ($i = $presetWindow.StartIndex; $i -le $presetWindow.EndIndex; $i++) {
+                $rows += , @( (New-Button "⚡ $($template.Presets[$i].Name)" "pa:$TemplateIndex`:$i") )
+            }
         }
+        $presetPager = @(Get-BridgePagerButtons -Window $presetWindow -Prefix "papage:$TemplateIndex")
+        if ($presetPager.Count -gt 0) { $rows += , $presetPager }
         $rows += , @( (New-Button "➕ إنشاء نص جاهز" "pac:$TemplateIndex") )
     }
     $rows += , @( (New-Button "⬅️ القوالب" 'menu:presetsadmin') )

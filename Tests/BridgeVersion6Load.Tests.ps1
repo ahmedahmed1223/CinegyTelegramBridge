@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeUiPaging.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeLiveScenes.psm1') -Force

@@ -679,6 +679,73 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'mojazpage:*' {
+            $mojazPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'mojazpage:'), [ref]$mojazPage) -and $mojazPage -ge 0) {
+                Show-MojazScreen -ChatId $chatId -UserId $userId -Page $mojazPage
+            }
+            break
+        }
+        'papage:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $paParts = @((Get-CallbackArg $data 'papage:') -split ':')
+                $paTemplate = -1
+                $paPage = 0
+                if ($paParts.Count -ge 2 -and
+                    [int]::TryParse($paParts[0], [ref]$paTemplate) -and
+                    [int]::TryParse($paParts[1], [ref]$paPage) -and $paPage -ge 0) {
+                    Show-PresetAdminTemplate -TemplateIndex $paTemplate -ChatId $chatId -Page $paPage
+                }
+            }
+            break
+        }
+        'tplpage:*' {
+            $tplPageParts = @((Get-CallbackArg $data 'tplpage:') -split ':')
+            $tplPage = 0
+            if ($tplPageParts.Count -ge 2 -and $tplPageParts[0] -in @('tpl', 'tplT', 'updtpl') -and
+                [int]::TryParse($tplPageParts[1], [ref]$tplPage) -and $tplPage -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text 'اختر القالب:' -ReplyMarkup (Get-TemplatesKeyboard -Prefix $tplPageParts[0] -BrowseControls -ChatId $chatId -UserId $userId -Page $tplPage)
+            }
+            break
+        }
+        'tplcatpg:*' {
+            $catPageParts = @((Get-CallbackArg $data 'tplcatpg:') -split ':')
+            $catIndex = -1
+            $catPage = 0
+            if ($catPageParts.Count -ge 2 -and
+                [int]::TryParse($catPageParts[0], [ref]$catIndex) -and
+                [int]::TryParse($catPageParts[1], [ref]$catPage) -and $catPage -ge 0) {
+                $knownCategories = @(Get-TemplateCategories)
+                if ($catIndex -ge 0 -and $catIndex -lt $knownCategories.Count) {
+                    $pagedCategory = [string]$knownCategories[$catIndex]
+                    Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$pagedCategory':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $pagedCategory -BrowseControls -ChatId $chatId -UserId $userId -Page $catPage)
+                }
+            }
+            break
+        }
+        'favpage:*' {
+            $favPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'favpage:'), [ref]$favPage) -and $favPage -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-FavoritesManagementText -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId -Page $favPage)
+            }
+            break
+        }
+        'padmpage:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $presetPage = 0
+                if ([int]::TryParse((Get-CallbackArg $data 'padmpage:'), [ref]$presetPage) -and $presetPage -ge 0) {
+                    Send-TelegramMessage -ChatId $chatId -Text "⚡ إدارة النصوص الجاهزة`nاختر القالب:" -ReplyMarkup (Get-PresetAdminTemplatesKeyboard -Page $presetPage)
+                }
+            }
+            break
+        }
+        'tplcatpage:*' {
+            $categoryPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'tplcatpage:'), [ref]$categoryPage) -and $categoryPage -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text '🗂 اختر تصنيف القوالب:' -ReplyMarkup (Get-TemplateCategoriesKeyboard -Page $categoryPage)
+            }
+            break
+        }
         'oplogcsv:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
             $csvParts = @((Get-CallbackArg $data 'oplogcsv:') -split ':')

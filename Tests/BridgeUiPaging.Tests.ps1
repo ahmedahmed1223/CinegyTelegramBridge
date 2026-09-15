@@ -66,6 +66,22 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'
             'Invoke-ShowTemplateResult'         = 'builds no keyboard; it prepends one fixed row to the main menu on the failure message'
+            # Reached by widening the guard to see classic index loops. Each
+            # reason is the bound itself, not a promise that it is small.
+            'Get-ConfigBackupsKeyboard'         = 'one row per saved configuration, and ConfigBackupKeepFiles declares its range'
+            'Get-TemplateBackupsKeyboard'       = 'one row per saved template registry, capped by the same ConfigBackupKeepFiles'
+            'Get-NewsTickerBackupsKeyboard'     = 'one row per saved ticker copy, and NewsBackupKeepFiles declares its range'
+            'Get-NewsTickerReorderKeyboard'     = 'paged by hand with Get-NewsTickerPageSize, and the item count is capped by NewsMaxItems'
+            'Get-FieldsKeyboard'                = 'one button per field of a single template, which the Cinegy scene defines - nobody adds fields at runtime'
+            'Get-FieldPromptKeyboard'           = 'the recent values of one field, capped by RecentValuesPerField'
+            'Get-MojazImageKeyboard'            = 'the loop stops at eight in its own condition'
+            'Get-HelpHomeKeyboard'              = 'one button per help chapter, a fixed list in the source'
+            'Get-ScheduleAnchorPickerKeyboard'  = 'one button per choice its caller passes in'
+            'Get-ScheduleHourKeyboard'          = 'twenty-four hours'
+            'Get-ScheduleMinuteKeyboard'        = 'four quarters of an hour'
+            'Get-SettingChoiceKeyboard'         = 'the declared values of one setting in $script:SettingChoices'
+            'Get-SettingStepperKeyboard'        = 'a fixed set of step presets'
+            'Update-NewsDraftExpiry'            = 'not a keyboard builder; the loop numbers the draft lines inside a warning'
             'ConvertTo-TelegramReplyMarkupJson' = 'serialises a keyboard, it does not build one'
             'Receive-SettingsImport'            = 'not a keyboard builder; it reports on an imported file'
             'Update-TemplateReminderQueue'      = 'not a keyboard builder; it sends one reminder per due item'
@@ -117,7 +133,13 @@ Describe 'Every screen built from a growing list is paged' {
             foreach ($name in @($builders.Keys | Sort-Object)) {
                 $body = $builders[$name].Body
                 if ($body -notmatch 'inline_keyboard') { continue }
-                if ($body -notmatch 'foreach\s*\(' -and $body -notmatch 'ForEach-Object') { continue }
+                # 'for (' as well as foreach: the guard looked only for the
+                # two foreach forms, and nineteen builders were written with a
+                # classic index loop - so the most-used screen in the bot, the
+                # template list, grew one row per template with nothing
+                # watching. Measured at 300 templates: 301 rows, 29 KB of
+                # reply_markup, which Telegram will not send.
+                if ($body -notmatch 'foreach\s*\(' -and $body -notmatch 'ForEach-Object' -and $body -notmatch 'for\s*\(') { continue }
                 if ($body -match 'Get-BridgePageWindow') { continue }
                 if ($script:BoundedScreens.ContainsKey($name)) { continue }
                 "$name ($($builders[$name].File))"
@@ -143,7 +165,13 @@ Describe 'Every screen built from a growing list is paged' {
             foreach ($name in @($builders.Keys | Sort-Object)) {
                 if ($name -notlike 'Get-*Blocks') { continue }
                 $body = $builders[$name].Body
-                if ($body -notmatch 'foreach\s*\(' -and $body -notmatch 'ForEach-Object') { continue }
+                # 'for (' as well as foreach: the guard looked only for the
+                # two foreach forms, and nineteen builders were written with a
+                # classic index loop - so the most-used screen in the bot, the
+                # template list, grew one row per template with nothing
+                # watching. Measured at 300 templates: 301 rows, 29 KB of
+                # reply_markup, which Telegram will not send.
+                if ($body -notmatch 'foreach\s*\(' -and $body -notmatch 'ForEach-Object' -and $body -notmatch 'for\s*\(') { continue }
                 # Every named way a builder can be bounded. Get-NewsTickerPageSize is
                 # the ticker's own page size, applied by hand in two places -
                 # bounded, but not through the shared helper, which is worth

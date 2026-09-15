@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 
@@ -2581,6 +2581,68 @@ Describe 'Shift readiness at a glance (P5)' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $Text -match 'على الهواء' -and $Text -match 'معلقة' -and $Text -match 'مسودة' -and
             $Text -match 'محجورة' -and $Text -match 'مثبّتة' -and $Text -notmatch 'جاهز ✅'
+        }
+    }
+}
+
+Describe 'Disabled guards on the readiness screen' {
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Send-TelegramMessage { }
+        $script:OnAir = @{}
+        $script:PendingState = @{}
+        $script:NewsTickerDraft = $null
+        $script:DeadChats = @{}
+        $script:PinnedRecurrences = @{}
+        $script:ManualQuietUntil = [datetime]::MinValue
+        # Every guard put in its SAFE position, so a test that expects a
+        # warning is provoking it rather than inheriting a default.
+        foreach ($safe in @(
+                @{ Name = 'QuietHoursEnabled'; Value = $false }
+                @{ Name = 'MaintenanceMode'; Value = $false }
+                @{ Name = 'SchedulePaused'; Value = $false }
+                @{ Name = 'EnableSafeRollback'; Value = $true }
+                @{ Name = 'ConfirmLayerRemoval'; Value = $true }
+                @{ Name = 'RequireUserLevelAuth'; Value = $true }
+                @{ Name = 'EnableFullTemplateManagement'; Value = $false }
+                @{ Name = 'BlockRejectedRequesters'; Value = $true }
+                @{ Name = 'LeaveUnknownGroups'; Value = $true }
+                @{ Name = 'EnableDpapiSecrets'; Value = $true }
+                @{ Name = 'NotifyAdminsOnMissingGraphic'; Value = $true }
+                @{ Name = 'EnableTextChecks'; Value = $true }
+                @{ Name = 'TemplateTestLayer'; Value = 9 }
+            )) {
+            $config.Settings | Add-Member -NotePropertyName $safe.Name -NotePropertyValue $safe.Value -Force
+        }
+    }
+
+    It 'says nothing is off when every guard is in its safe position' {
+        @(Get-DisabledGuardLines).Count | Should -Be 0
+        Show-ShiftReadinessScreen -ChatId 101 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'لا حماية معطّلة' }
+    }
+
+    It 'names the consequence and the setting for each guard that is off' {
+        # The exact shape this was written for: a bridge on its own defaults,
+        # where undo and the test layer ship disabled and nothing said so.
+        $config.Settings | Add-Member -NotePropertyName EnableSafeRollback -NotePropertyValue $false -Force
+        $config.Settings | Add-Member -NotePropertyName TemplateTestLayer -NotePropertyValue 0 -Force
+
+        $reported = @(Get-DisabledGuardLines)
+        $reported.Count | Should -Be 2
+        ($reported -join "`n") | Should -Match 'لا تراجع'
+        ($reported -join "`n") | Should -Match 'EnableSafeRollback'
+        ($reported -join "`n") | Should -Match 'لا طبقة تجربة'
+        ($reported -join "`n") | Should -Match 'TemplateTestLayer'
+    }
+
+    It 'keeps a disabled guard out of the ready verdict' {
+        # A standing configuration choice must not make a clean shift read
+        # dirty: a verdict that can never turn green stops being read.
+        $config.Settings | Add-Member -NotePropertyName EnableSafeRollback -NotePropertyValue $false -Force
+        Show-ShiftReadinessScreen -ChatId 101 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'جاهز ✅' -and $Text -match 'حمايات معطّلة'
         }
     }
 }

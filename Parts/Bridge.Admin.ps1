@@ -212,6 +212,59 @@ function Get-HandoverAutoSummary {
     return @($found | Select-Object -First 3)
 }
 
+function Get-DisabledGuardLines {
+    <#
+        Which protections are switched off right now, each said as its
+        consequence rather than its setting name.
+
+        The readiness screen below reads runtime state - what is on air, what
+        is pending, which chats are quarantined - and answers "is the station
+        clean". It never read configuration, so a shift could begin on a
+        bridge with safe rollback off and no test layer and nothing anywhere
+        said so. Three of these ship off by default (EnableSafeRollback,
+        TemplateTestLayer, EnableDpapiSecrets), which is the whole reason this
+        exists: a protection nobody was told about is a protection nobody has.
+
+        Each line leads with the RESULT - "no undo after a wrong graphic" is
+        something an operator can act on, where "EnableSafeRollback is off" is
+        a lookup. The setting name follows so it can be found and flipped.
+
+        EnableRawCommand is deliberately NOT here even though it is a
+        protected setting: it defaults to on and is admin-gated, so its line
+        would appear on every station forever and be acted on by none. This
+        screen dies the day it becomes wallpaper, and the repository has paid
+        for that lesson once already in the notification rules.
+
+        The table is fixed, so the output is bounded by construction: it
+        cannot grow with station data the way a template or user table can,
+        and so needs no trim note.
+    #>
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($guard in @(
+            @{ Name = 'MaintenanceMode'; WeakWhen = $true; Text = 'وضع الصيانة مفعّل — لا عرض ولا إخفاء حتى يُطفأ.' }
+            @{ Name = 'SchedulePaused'; WeakWhen = $true; Text = 'الجدولة موقوفة — المواعيد المؤجلة تبقى معلّقة ولا تُنفَّذ.' }
+            @{ Name = 'EnableSafeRollback'; WeakWhen = $false; Text = 'لا تراجع بعد عرض خاطئ — الإصلاح الوحيد إخفاء ثم إعادة عرض.' }
+            @{ Name = 'ConfirmLayerRemoval'; WeakWhen = $false; Text = 'الإخفاء ينفَّذ بلا تأكيد — ضغطة واحدة تُنزل ما على الهواء.' }
+            @{ Name = 'RequireUserLevelAuth'; WeakWhen = $false; Text = 'الصلاحية بالمحادثة لا بالشخص — كل عضو في مجموعة مصرّح لها يتحكّم بالهواء.' }
+            @{ Name = 'EnableFullTemplateManagement'; WeakWhen = $true; Text = 'تعديل بنية القوالب مفتوح من تيليجرام.' }
+            @{ Name = 'BlockRejectedRequesters'; WeakWhen = $false; Text = 'المرفوض يستطيع إعادة طلب الوصول بلا حدّ.' }
+            @{ Name = 'LeaveUnknownGroups'; WeakWhen = $false; Text = 'البوت يبقى في أي مجموعة يُضاف إليها.' }
+            @{ Name = 'EnableDpapiSecrets'; WeakWhen = $false; Text = 'التوكن مكتوب نصًّا في config.json.' }
+            @{ Name = 'NotifyAdminsOnMissingGraphic'; WeakWhen = $false; Text = 'لا تنبيه حين يغيب اللوغو أو الشريط عن الهواء.' }
+            @{ Name = 'EnableTextChecks'; WeakWhen = $false; Text = 'لا تنبيهات إملائية في شاشة المراجعة قبل النشر.' }
+        )) {
+        if ([bool](Get-Setting $guard.Name) -eq [bool]$guard.WeakWhen) {
+            $lines.Add("• $($guard.Text) <code>$($guard.Name)</code>")
+        }
+    }
+    # The one number in the list: 0 disables template testing entirely, so
+    # there is nowhere to try a template outside the programme.
+    if ((Get-SettingInt 'TemplateTestLayer') -le 0) {
+        $lines.Add('• لا طبقة تجربة — لا مكان لتجربة قالب خارج البرنامج. <code>TemplateTestLayer</code>')
+    }
+    return $lines.ToArray()
+}
+
 function Show-ShiftReadinessScreen {
     <#
         P5: the incoming shift starts from certainty, not from flipping
@@ -240,6 +293,19 @@ function Show-ShiftReadinessScreen {
     $ready = ($onAir -eq 0 -and $pending -eq 0 -and -not $script:NewsTickerDraft -and $dead -eq 0 -and $pins -eq 0)
     $lines.Add('')
     $lines.Add($(if ($ready) { '<b>جاهز ✅ — ابدأ بالفحص الحي للتأكد من المسار.</b>' } else { '<b>ليست نظيفة — صفِّ ما فوق ثم افحص المسار الحي.</b>' }))
+    # Kept out of $ready on purpose: a switched-off guard is a standing
+    # choice about how this station is configured, not dirt left by the
+    # outgoing shift. Folding it into the verdict would mean a bridge running
+    # its own defaults never reads clean, and a verdict that is never green
+    # stops being read.
+    $guards = @(Get-DisabledGuardLines)
+    $lines.Add('')
+    if ($guards.Count -gt 0) {
+        $lines.Add("🛡 <b>حمايات معطّلة</b> (<code>$($guards.Count)</code>) — اختيار إعداد، لا عطل:")
+        foreach ($guard in $guards) { $lines.Add($guard) }
+        $lines.Add('تُبدَّل من ⚙️ الإعدادات.')
+    }
+    else { $lines.Add('🛡 لا حماية معطّلة.') }
     $keyboard = @{ inline_keyboard = @(
         , @((New-Button '🧪 فحص المسار الحي' 'menu:selftest'), (New-Button '📋 التسليم' 'menu:handover'))
         , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))

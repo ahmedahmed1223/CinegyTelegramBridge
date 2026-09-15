@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.34.0
+
+The shift readiness screen read runtime state only — what is on air, what is
+pending, which chats are quarantined — and never read configuration. So a
+shift could begin on a bridge with safe rollback off and no test layer, and
+nothing anywhere said so. Three protections ship off by default
+(`EnableSafeRollback`, `TemplateTestLayer`, `EnableDpapiSecrets`), which is
+exactly the problem: a protection nobody was told about is a protection
+nobody has. The screen now lists every guard currently off, each stated as
+its consequence ("no undo after a wrong graphic") with the setting name after
+it so it can be found and flipped. A disabled guard is deliberately kept out
+of the ready/not-ready verdict: it is a standing configuration choice, not
+something the outgoing shift left behind, and a verdict that can never turn
+green stops being read.
+
 ## Version 8.33.0
 
 A publish from Telegram writes the ticker **and** mirrors it back to the sheet,

@@ -189,7 +189,12 @@ function Invoke-CallbackQuery {
             $publishMarkup = @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm';style='success'},@{text='إلغاء';callback_data='news:refresh'}))}
             $publishBlocks = @(Get-NewsPublishReviewBlocks -UserId $userId)
             if ($publishBlocks.Count -gt 0 -and (Send-TelegramRichMessage -ChatId $chatId -Blocks $publishBlocks -ReplyMarkup $publishMarkup)) { break }
-            Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ نعم، انشر';callback_data='news:publishconfirm';style='success'},@{text='إلغاء';callback_data='news:refresh'}))};break
+            $publishConfirm = @{ inline_keyboard = @(, @(
+                        @{ text = '✅ نعم، انشر'; callback_data = 'news:publishconfirm'; style = 'success' }
+                        @{ text = 'إلغاء'; callback_data = 'news:refresh' }
+                    )) }
+            Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup $publishConfirm
+            break
         }
         'news:publishconfirm' {
             $result=Publish-NewsTickerDraft -UserId $userId
@@ -236,7 +241,21 @@ function Invoke-CallbackQuery {
             Show-NewsTickerDeleteConfirm -ChatId $chatId -UserId $userId -Index ([int](Get-CallbackArg $data 'news:delask:')) -MessageId ([int]$msgObj.message_id) | Out-Null
             break
         }
-        'news:delete:*' { $i=[int](Get-CallbackArg $data 'news:delete:');$ok=Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i;if($ok){Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='⬅️ رجوع للترتيب';callback_data='news:list'}))}|Out-Null}else{Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'};break }
+        'news:delete:*' {
+            $i = [int](Get-CallbackArg $data 'news:delete:')
+            # The bounds live in Remove-NewsTickerDraftItem, which refuses an
+            # index outside the draft - so this reads its answer rather than
+            # repeating the check and risking the two drifting apart.
+            $ok = Remove-NewsTickerDraftItem -ChatId $chatId -UserId $userId -Index $i
+            if ($ok) {
+                $backToOrder = @{ inline_keyboard = @(, @( @{ text = '⬅️ رجوع للترتيب'; callback_data = 'news:list' } )) }
+                Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) -Text '🗑 حُذف هذا الخبر من المسودة.' -ReplyMarkup $backToOrder | Out-Null
+            }
+            else {
+                Send-TelegramMessage -ChatId $chatId -Text '⛔ الحذف غير مسموح.'
+            }
+            break
+        }
         'news:up:*' {
             $i=[int](Get-CallbackArg $data 'news:up:')
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta -1){Show-NewsTickerReorderScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)}
@@ -281,13 +300,43 @@ function Invoke-CallbackQuery {
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
         }
-        'news:unlock' { if(Test-CallbackAdmin -ChatId $chatId -UserId $userId){Remove-NewsTickerDraft;Clear-NewsLockReservation;$script:NewsLockRequest=$null;Save-NewsLockRequest|Out-Null;Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId};break }
-        'news:clear' { Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup @{inline_keyboard=@(,@(@{text='نعم، امسح المسودة';callback_data='news:clearconfirm';style='danger'},@{text='إلغاء';callback_data='news:refresh'}))};break }
-        'news:clearconfirm' { $ok=Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId;Send-TelegramMessage -ChatId $chatId -Text $(if($ok){'✅ مُسحت المسودة. لم يُمس الملف الحي.'}else{'⛔ غير مسموح.'}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break }
+        'news:unlock' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                # Four pieces of one act - drop the draft, release the lock,
+                # forget any queued request, and redraw - so a half-done
+                # unlock cannot leave a reservation nobody can see or clear.
+                Remove-NewsTickerDraft
+                Clear-NewsLockReservation
+                $script:NewsLockRequest = $null
+                Save-NewsLockRequest | Out-Null
+                Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+            }
+            break
+        }
+        'news:clear' {
+            $clearConfirm = @{ inline_keyboard = @(, @(
+                        @{ text = 'نعم، امسح المسودة'; callback_data = 'news:clearconfirm'; style = 'danger' }
+                        @{ text = 'إلغاء'; callback_data = 'news:refresh' }
+                    )) }
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ سيُمسح كل محتوى المسودة فقط. هل تؤكد؟' -ReplyMarkup $clearConfirm
+            break
+        }
+        'news:clearconfirm' {
+            $ok = Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId
+            $clearedText = if ($ok) { '✅ مُسحت المسودة. لم يُمس الملف الحي.' } else { '⛔ غير مسموح.' }
+            Send-TelegramMessage -ChatId $chatId -Text $clearedText -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'news:backups' { Send-TelegramMessage -ChatId $chatId -Text (Get-NewsTickerBackupsText) -ParseMode HTML -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
         'news:restore:*' {
-            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restore:')
-            Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ استعادة';callback_data="news:restoreconfirm:$i";style='danger'},@{text='إلغاء';callback_data='news:backups'}))};break
+            if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }
+            $i = [int](Get-CallbackArg $data 'news:restore:')
+            $restoreConfirm = @{ inline_keyboard = @(, @(
+                        @{ text = '✅ استعادة'; callback_data = "news:restoreconfirm:$i"; style = 'danger' }
+                        @{ text = 'إلغاء'; callback_data = 'news:backups' }
+                    )) }
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup $restoreConfirm
+            break
         }
         'news:restoreconfirm:*' {
             if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }

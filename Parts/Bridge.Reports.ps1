@@ -382,7 +382,12 @@ function Get-OperationLogKeyboard {
     $suffix = if ($PickedUserId -gt 0) { ":$PickedUserId" }
     elseif ($targetIndex -ge 0) { ":$targetIndex" }
     else { '' }
-    $isDay = $Day -gt [datetime]::MinValue
+    # A filter and a named day are different questions, and - the reason this
+    # is a guard rather than a preference - the filtered callbacks have no day
+    # form: "oplogu:day:2026-09-14" matches no handler, so the button would
+    # have been dead. A dead button is worse than a missing one, because the
+    # operator presses it and concludes the screen is broken.
+    $isDay = ($Day -gt [datetime]::MinValue) -and -not $filtered
     # $window, not $hours: PowerShell variable names are case-insensitive, so
     # a loop over $hours would be a loop over the -Hours parameter itself -
     # every window came out marked as the current one, and the scope button
@@ -416,8 +421,10 @@ function Get-OperationLogKeyboard {
         for ($index = 0; $index -lt $buttons.Count; $index += 2) {
             $rows += , @($buttons[$index..([math]::Min($index + 1, $buttons.Count - 1))])
         }
-        $yesterday = (Get-Date).Date.AddDays(-1)
-        $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
+        if (-not $filtered) {
+            $yesterday = (Get-Date).Date.AddDays(-1)
+            $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
+        }
     }
     if (-not $isDay -and (Test-Admin -ChatId $ChatId -UserId $UserId)) {
         $exportArg = if ($PickedUserId -gt 0) { "u:$PickedUserId" }
@@ -513,7 +520,8 @@ function Export-OperationLogCsv {
         [long]$UserId = 0,
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [long]$OnlyUserId = 0,
-        [string]$OnlyTarget = ''
+        [string]$OnlyTarget = '',
+        [long]$PickedUserId = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     # An administrator's export, because it names every operator in the
@@ -523,7 +531,11 @@ function Export-OperationLogCsv {
         return
     }
     $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -OnlyTarget $OnlyTarget
-    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $OnlyUserId -ChatId $ChatId -UserId $UserId -OnlyTarget $OnlyTarget -PickedUserId $OnlyUserId
+    # PickedUserId, not OnlyUserId: they are equal only when an administrator
+    # picked somebody, and "my operations" is a scope rather than a filter -
+    # passing it here offered to remove a filter nobody had set and took the
+    # all-users toggle away with it.
+    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $OnlyUserId -ChatId $ChatId -UserId $UserId -OnlyTarget $OnlyTarget -PickedUserId $PickedUserId
     $csv = Get-OperationLogCsv -Hours $Hours -OnlyUserId $OnlyUserId -OnlyTarget $OnlyTarget
     if ([string]::IsNullOrWhiteSpace($csv)) {
         Send-TelegramMessage -ChatId $ChatId -Text 'لا عمليات في هذه المدة، فلا شيء يُصدَّر.' -ReplyMarkup $keyboard

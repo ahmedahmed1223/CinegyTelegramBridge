@@ -2646,3 +2646,58 @@ Describe 'Disabled guards on the readiness screen' {
         }
     }
 }
+
+Describe 'Operation log keyboard emits no dead buttons' {
+    BeforeEach {
+        Mock Test-Admin { $true }
+        Mock Get-TemplateIndex { 3 }
+    }
+
+    It 'offers no day button while a filter is on, because no handler reads one' {
+        # The shape this was written for: a filtered window button carries
+        # its filter, and "oplogu:day:2026-09-14" matches no handler at all -
+        # so the button was dead, which reads as a broken screen rather than
+        # a missing feature.
+        $filtered = Get-OperationLogKeyboard -Hours 24 -ChatId 101 -UserId 101 -PickedUserId 77
+        $data = @($filtered.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { [string]$_.callback_data })
+
+        @($data | Where-Object { $_ -match ':day:' }).Count | Should -Be 0
+        # And what it does carry is the shape its handler parses: hours, then
+        # the picked operator.
+        @($data | Where-Object { $_ -match '^oplogu:\d+:77$' }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'keeps the day button when nothing is filtered' {
+        $plain = Get-OperationLogKeyboard -Hours 24 -ChatId 101 -UserId 101
+        $data = @($plain.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { [string]$_.callback_data })
+
+        @($data | Where-Object { $_ -match ':day:' }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'hands back an unfiltered keyboard after exporting my own operations' {
+        # The defect was in the export, not the keyboard: it passed OnlyUserId
+        # as PickedUserId, so "my operations" came back offering to remove a
+        # filter nobody set - with the all-users toggle gone behind it. An
+        # empty window is used so the export returns before touching disk.
+        Mock Read-AuditRecords { @() }
+        $script:ExportedMarkup = $null
+        Mock Send-TelegramMessage { $script:ExportedMarkup = $ReplyMarkup }
+
+        Export-OperationLogCsv -ChatId 101 -UserId 101 -Hours 24 -OnlyUserId 101
+
+        $labels = @($script:ExportedMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { [string]$_.text }) -join ' '
+        $labels | Should -Not -Match 'أزل التصفية'
+        $labels | Should -Match 'كل المشغّلين'
+    }
+
+    It 'treats my own operations as a scope, not a filter to be removed' {
+        # OnlyUserId is set for "mine" too; only an administrator picking
+        # somebody else is a filter. Conflating them offered "remove filter"
+        # over a view nobody had filtered, and hid the all-users toggle.
+        $mine = Get-OperationLogKeyboard -Hours 24 -OnlyUserId 101 -ChatId 101 -UserId 101
+        $labels = @($mine.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { [string]$_.text })
+
+        ($labels -join ' ') | Should -Not -Match 'أزل التصفية'
+        ($labels -join ' ') | Should -Match 'كل المشغّلين'
+    }
+}

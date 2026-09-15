@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.38.2
+
+Two defects introduced by the previous two releases, found by reviewing them
+rather than by a report.
+
+A filtered operation log still rendered the "yesterday" button, and the
+filtered callbacks have no day form: `oplogu:day:2026-09-14` matches no
+handler, so the button was dead. A dead button is worse than a missing one —
+the operator presses it and concludes the screen is broken. A filter and a
+named day are now mutually exclusive, which they already were in every path
+that reaches this code.
+
+And the CSV export passed `OnlyUserId` as `PickedUserId`, conflating "my
+operations" — a scope — with "an administrator picked this operator" — a
+filter. Exporting from one's own log handed back a keyboard offering to
+remove a filter nobody had set, with the all-users toggle hidden behind it.
+
 ## Version 8.38.1
 
 `NewsBackupKeepFiles` defaults to 20 and every reader of the ticker backups

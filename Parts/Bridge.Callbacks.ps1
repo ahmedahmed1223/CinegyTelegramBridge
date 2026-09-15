@@ -686,6 +686,7 @@ function Invoke-CallbackQuery {
             if ($csvParts.Count -lt 2 -or -not [int]::TryParse($csvParts[0], [ref]$csvHours) -or $csvHours -notin $script:OperationLogWindows) { break }
             $csvUserId = 0L
             $csvTarget = ''
+            $csvPicked = 0L
             # A flag rather than `break` inside this switch: `break` there
             # leaves the INNER switch and carries on to the export, so a
             # malformed filter argument would have exported EVERY operation
@@ -697,7 +698,7 @@ function Invoke-CallbackQuery {
                 'all' { }
                 'u' {
                     $pickedForCsv = 0L
-                    if ($csvParts.Count -ge 3 -and [long]::TryParse($csvParts[2], [ref]$pickedForCsv) -and $pickedForCsv -gt 0) { $csvUserId = $pickedForCsv }
+                    if ($csvParts.Count -ge 3 -and [long]::TryParse($csvParts[2], [ref]$pickedForCsv) -and $pickedForCsv -gt 0) { $csvUserId = $pickedForCsv; $csvPicked = $pickedForCsv }
                     else { $csvReady = $false }
                 }
                 't' {
@@ -713,7 +714,7 @@ function Invoke-CallbackQuery {
                 default { $csvReady = $false }
             }
             if ($csvReady) {
-                Export-OperationLogCsv -ChatId $chatId -UserId $userId -Hours $csvHours -OnlyUserId $csvUserId -OnlyTarget $csvTarget
+                Export-OperationLogCsv -ChatId $chatId -UserId $userId -Hours $csvHours -OnlyUserId $csvUserId -OnlyTarget $csvTarget -PickedUserId $csvPicked
             }
             break
         }

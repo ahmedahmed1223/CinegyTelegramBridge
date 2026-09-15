@@ -621,6 +621,44 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'oplogcsv:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $csvParts = @((Get-CallbackArg $data 'oplogcsv:') -split ':')
+            $csvHours = 48
+            if ($csvParts.Count -lt 2 -or -not [int]::TryParse($csvParts[0], [ref]$csvHours) -or $csvHours -notin $script:OperationLogWindows) { break }
+            $csvUserId = 0L
+            $csvTarget = ''
+            # A flag rather than `break` inside this switch: `break` there
+            # leaves the INNER switch and carries on to the export, so a
+            # malformed filter argument would have exported EVERY operation
+            # instead of none - wider than the button promised, which is the
+            # one direction an export must never fail in.
+            $csvReady = $true
+            switch ($csvParts[1]) {
+                'mine' { $csvUserId = $userId }
+                'all' { }
+                'u' {
+                    $pickedForCsv = 0L
+                    if ($csvParts.Count -ge 3 -and [long]::TryParse($csvParts[2], [ref]$pickedForCsv) -and $pickedForCsv -gt 0) { $csvUserId = $pickedForCsv }
+                    else { $csvReady = $false }
+                }
+                't' {
+                    $csvTemplateIndex = -1
+                    $csvTemplate = $null
+                    if ($csvParts.Count -ge 3 -and [int]::TryParse($csvParts[2], [ref]$csvTemplateIndex)) {
+                        $csvTemplate = Get-TemplateByIndex -Index $csvTemplateIndex
+                    }
+                    # A template that left the registry between the screen and
+                    # the button must export nothing, not everything.
+                    if ($csvTemplate) { $csvTarget = [string]$csvTemplate.Key } else { $csvReady = $false }
+                }
+                default { $csvReady = $false }
+            }
+            if ($csvReady) {
+                Export-OperationLogCsv -ChatId $chatId -UserId $userId -Hours $csvHours -OnlyUserId $csvUserId -OnlyTarget $csvTarget
+            }
+            break
+        }
         'oplogpick:*' {
             $pickHours = 48
             if ([int]::TryParse((Get-CallbackArg $data 'oplogpick:'), [ref]$pickHours) -and $pickHours -in $script:OperationLogWindows) {

@@ -746,3 +746,55 @@ Describe 'Operation log filters' {
         Get-OperationLogScopeLabel -Data (Get-OperationLogData -Hours 24 -OnlyUserId 42) -ViewerUserId 77 | Should -Be 'مشغّل 42'
     }
 }
+
+Describe 'Operation log CSV export' {
+    BeforeEach {
+        $script:CsvStamp = { param($MinutesAgo) (Get-Date).ToUniversalTime().AddMinutes(-$MinutesAgo).ToString('o') }
+        Mock Read-AuditRecords {
+            @(
+                [pscustomobject]@{ timestampUtc = (& $script:CsvStamp 30); event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $script:CsvStamp 20); event = 'air_control'; action = 'SHOW'; result = 'failed'; userId = '77'; target = 'شعار, كبير'; layer = '2'; message = 'timeout' }
+            )
+        }
+        Mock Get-AuditOperatorName { "مشغّل $UserId" }
+    }
+
+    It 'writes a header and one row per operation' {
+        $csv = Get-OperationLogCsv -Hours 24
+
+        @($csv -split "`r`n").Count | Should -Be 3
+        $csv | Should -Match 'القالب'
+        $csv | Should -Match 'عاجل'
+    }
+
+    It 'quotes a template whose name carries the separator instead of splitting the row' {
+        # News copy carries commas and quotes; a hand-rolled join breaks on
+        # exactly this row, which is why ConvertTo-Csv does the escaping.
+        $rows = @((Get-OperationLogCsv -Hours 24) -split "`r`n")
+
+        @($rows).Count | Should -Be 3
+        ($rows -join ' ') | Should -Match '"شعار, كبير"'
+    }
+
+    It 'exports what the filter shows, not the whole window' {
+        $filtered = Get-OperationLogCsv -Hours 24 -OnlyTarget 'عاجل'
+
+        @($filtered -split "`r`n").Count | Should -Be 2
+        $filtered | Should -Not -Match 'شعار'
+    }
+
+    It 'carries no editorial text, only which template went out' {
+        # The audit trail records the template, never the words on it, and an
+        # export is not the place to start keeping what the record does not.
+        $csv = Get-OperationLogCsv -Hours 24
+
+        $csv | Should -Not -Match 'Variables'
+        $csv | Should -Match 'timeout'
+    }
+
+    It 'returns nothing at all when the window is empty' {
+        Mock Read-AuditRecords { @() }
+
+        Get-OperationLogCsv -Hours 24 | Should -BeNullOrEmpty
+    }
+}

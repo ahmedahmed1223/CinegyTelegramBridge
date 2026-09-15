@@ -13,6 +13,28 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.38.0
+
+The reports export HTML, which is for reading; an archive, a monthly review,
+or a merge with the station's own as-run log needs columns, and a picture of
+a table has none. Administrators can now export the operation log window they
+are looking at as CSV, filters included. Two details decide whether the file
+is usable at all and neither is visible from the code: it is written UTF-8
+**with** a BOM, or Excel renders Arabic headlines as mojibake, and it is
+written with `ConvertTo-Csv -UseCulture`, because on an Arabic Windows the
+list separator is not a comma and a comma-separated file opens as a single
+column. Escaping is `ConvertTo-Csv`'s own, since news copy carries commas and
+quotes — the row a hand-rolled join breaks on. Editorial values are not
+exported: the audit records which template went out, never the words on it.
+A partial export says so in its caption rather than becoming the archive
+nobody knows has a hole in it.
+
+This also fixed an omission behind it: `Get-ReportRecords` dropped the
+`message` field that carries why a failed operation failed, so every report
+above it had the fact of a failure and nothing about its cause. It is carried
+now, and redacted on the way out — an engine error can quote a URL with a key
+in it.
+
 ## Version 8.37.0
 
 The operation log could be narrowed to a window and to "mine versus

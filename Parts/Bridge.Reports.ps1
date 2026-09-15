@@ -419,6 +419,13 @@ function Get-OperationLogKeyboard {
         $yesterday = (Get-Date).Date.AddDays(-1)
         $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
     }
+    if (-not $isDay -and (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        $exportArg = if ($PickedUserId -gt 0) { "u:$PickedUserId" }
+        elseif ($targetIndex -ge 0) { "t:$targetIndex" }
+        elseif ($scope -eq 'mine') { 'mine' }
+        else { 'all' }
+        $rows += , @( (New-Button '📤 تصدير CSV' "oplogcsv:$Hours`:$exportArg") )
+    }
     if ($filtered) {
         $rows += , @( (New-Button '✖️ أزل التصفية' "oplog:all:$Hours") )
     }
@@ -437,6 +444,111 @@ function Get-OperationLogKeyboard {
     }
     $rows += , @((New-Button '🧾 آخر عملياتي' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
     return @{ inline_keyboard = $rows }
+}
+
+function Get-OperationLogCsv {
+    <#
+        The window an administrator is looking at, as a table a machine can
+        read: one row per air operation, newest first.
+
+        The reports export HTML, which is for reading. An archive, a monthly
+        review, or a merge with the station's own as-run log needs columns,
+        and a picture of a table has none.
+
+        Two details decide whether this file is usable at all, and neither is
+        visible from the code:
+
+        - **UTF-8 WITH a byte-order mark.** Without it Excel opens Arabic
+          headlines as mojibake, and the operator's conclusion is that the
+          bridge exported rubbish.
+        - **ConvertTo-Csv -UseCulture.** On an Arabic Windows the list
+          separator is not a comma, and a comma-separated file opens as a
+          single column. -UseCulture writes the separator the machine reading
+          the file actually expects.
+
+        Escaping is ConvertTo-Csv's own: a headline with a comma, a quote or
+        a line break inside it is exactly the row a hand-rolled join breaks
+        on, and the shape is common enough in news copy to count on.
+
+        Editorial values are NOT exported. The audit trail records which
+        template went out, not the words on it, and an export is not the
+        place to start keeping what the record deliberately does not.
+    #>
+    param(
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
+        [long]$OnlyUserId = 0,
+        [datetime]$Day = [datetime]::MinValue,
+        [string]$OnlyTarget = ''
+    )
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day -OnlyTarget $OnlyTarget
+    $rows = @(foreach ($record in @($data.Records)) {
+            $when = [datetime]$record.When
+            [pscustomobject][ordered]@{
+                'التاريخ'       = $when.ToString('yyyy-MM-dd')
+                'الوقت'         = $when.ToString('HH:mm:ss')
+                'العملية'       = [string]$record.Action
+                'القالب'        = [string]$record.Target
+                'الطبقة'        = $(if ([int]$record.Layer -gt 0) { [int]$record.Layer } else { '' })
+                'النتيجة'       = [string]$record.Result
+                'المشغّل'       = [string](Get-AuditOperatorName -UserId ([string]$record.UserId))
+                'معرّف المشغّل' = [string]$record.UserId
+                # Redacted on the way out, not trusted from the record: the
+                # audit stores the engine's error verbatim, and an engine
+                # error can carry a URL with a key in it. Nothing else
+                # redacts on this path - Write-AirOperationResult protects
+                # the operator's name and passes the error through.
+                'الخطأ'         = [string](Protect-SensitiveText ([string]$record.Message))
+            }
+        })
+    if ($rows.Count -eq 0) { return '' }
+    return (($rows | ConvertTo-Csv -NoTypeInformation -UseCulture) -join "`r`n")
+}
+
+function Export-OperationLogCsv {
+    <# Writes the CSV beside the other runtime files, sends it, then removes
+       it - the same shape Export-BridgeReport and the settings export use.
+       The file is disposable; audit.jsonl stays the record. #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
+        [long]$OnlyUserId = 0,
+        [string]$OnlyTarget = ''
+    )
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    # An administrator's export, because it names every operator in the
+    # window - the same reason the all-users view is an administrator's.
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text '🔒 تصدير السجل للمشرفين.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -OnlyTarget $OnlyTarget
+    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $OnlyUserId -ChatId $ChatId -UserId $UserId -OnlyTarget $OnlyTarget -PickedUserId $OnlyUserId
+    $csv = Get-OperationLogCsv -Hours $Hours -OnlyUserId $OnlyUserId -OnlyTarget $OnlyTarget
+    if ([string]::IsNullOrWhiteSpace($csv)) {
+        Send-TelegramMessage -ChatId $ChatId -Text 'لا عمليات في هذه المدة، فلا شيء يُصدَّر.' -ReplyMarkup $keyboard
+        return
+    }
+    $path = Join-Path $script:logDir "operations-$((Get-Date).ToString('yyyyMMdd-HHmmss')).csv"
+    try {
+        # WITH a BOM: see Get-OperationLogCsv. [Text.UTF8Encoding]::new($true).
+        [IO.File]::WriteAllText($path, $csv, [Text.UTF8Encoding]::new($true))
+        $caption = "🧾 سجل العمليات — $($data.Label) · $(Get-OperationLogScopeLabel -Data $data -ViewerUserId $UserId)"
+        # A partial export that does not say it is partial is worse than no
+        # export: it becomes the archive nobody knows has a hole in it.
+        if ($data.Truncated) { $caption += "`n⚠️ بلغ السجل حدّ القراءة؛ قد تكون هناك عمليات أقدم داخل المدة لم تدخل الملف." }
+        $caption += "`nلا يحتوي نصوص ما عُرض على الشاشة."
+        if (-not (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption $caption)) {
+            Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر إرسال ملف السجل.' -ReplyMarkup $keyboard
+        }
+    }
+    catch {
+        Write-BridgeLog "Operation log CSV export failed: $($_.Exception.Message)" 'WARN'
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر إنشاء ملف السجل.' -ReplyMarkup $keyboard
+    }
+    finally {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-OperationLogCommand {
@@ -596,6 +708,12 @@ function Get-ReportRecords {
             # nothing to pair on and matched nothing.
             OperationId = (Get-AuditRecordField $record 'operationId')
             DurationMs  = $duration
+            # Why a failed operation failed. Write-AirOperationResult puts the
+            # error text here (as 'message', not 'errorText'), and this
+            # normaliser dropped it - so every reader above had the fact that
+            # something failed and nothing about what failed. Same omission as
+            # the two above it, one field later.
+            Message     = (Get-AuditRecordField $record 'message')
         }
     }
     return @{

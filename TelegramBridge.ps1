@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.38.0'
+$script:BridgeVersion = '8.38.1'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -1534,6 +1534,11 @@ $script:SettingConstraints = @{
     ExecutionLogKeepRecords       = @{ Minimum = 0; Maximum = 100000 }
     ScheduleHistoryKeepDays       = @{ Minimum = 0; Maximum = 3650 }
     AccessGuardKeepDays           = @{ Minimum = 0; Maximum = 3650 }
+    # Now that the restore screen shows every copy this keeps rather than a
+    # hard-coded ten, this number sizes a keyboard and a screen that reads
+    # each file to count its headlines. Hence a ceiling, and a floor of one:
+    # zero copies would mean a publish with no way back.
+    NewsBackupKeepFiles           = @{ Minimum = 1; Maximum = 30 }
     DiskFreeWarningGB             = @{ Minimum = 1; Maximum = 10000 }
     MissedEventsHours             = @{ Minimum = 1; Maximum = 168 }
 }

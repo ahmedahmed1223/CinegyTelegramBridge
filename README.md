@@ -13,6 +13,25 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.38.1
+
+`NewsBackupKeepFiles` defaults to 20 and every reader of the ticker backups
+capped at a hard-coded 10, so on a default install half the saved copies were
+on disk and reachable from no screen — while the setting told the editor
+twenty were kept. The readers now use the setting, which is the same promise
+seen from the other end, since it is also what prunes the folder.
+
+Two defects came with it. The restore confirmation re-derived the file list
+instead of calling the shared reader whose own comment states the invariant
+("line 3 in the text is the copy button 3 restores"); the two agreed only by
+coincidence, and fixing the cap in one alone would have split the numbering.
+And the confirmation checked only the upper bound, so a negative index would
+have restored the OLDEST copy onto the live ticker rather than failing — the
+shape fixed in the template presets one release earlier, here on a path that
+`AllowOperatorsRestoreNews` opens beyond administrators. Both now go through
+one accessor. The setting also declares a range at last, because it now sizes
+a screen that reads every listed file to count its headlines.
+
 ## Version 8.38.0
 
 The reports export HTML, which is for reading; an archive, a monthly review,

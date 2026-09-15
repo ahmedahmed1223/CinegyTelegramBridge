@@ -1448,10 +1448,34 @@ function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$
 }
 
 function Get-NewsTickerBackupFiles {
-    <# The saved copies, newest first. One reader for the list and the
-       keyboard, so line 3 in the text is the copy button 3 restores. #>
+    <#
+        The saved copies, newest first. One reader for the list, the keyboard
+        AND the restore, so line 3 in the text is the copy button 3 restores.
+
+        The cap is NewsBackupKeepFiles, which is also what prunes the folder,
+        because the two are the same promise seen from two ends. It used to be
+        a hard-coded ten while the setting defaulted to twenty: the bridge kept
+        twenty copies, offered ten, and an editor reading "كم نسخة يُحتفظ بها
+        = 20" could not reach half of what the disk held.
+    #>
     return @(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 10)
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First (Get-SettingInt 'NewsBackupKeepFiles' 1))
+}
+
+function Get-NewsTickerBackupByIndex {
+    <#
+        The saved copy a button names, or $null when the index names none.
+
+        PowerShell reads a negative index from the END of the array, so a
+        bounds check that tests only the upper end does not fail on a bad
+        index - it restores the OLDEST copy onto the live ticker. The same
+        shape was fixed in the template presets; this path is worse, because
+        AllowOperatorsRestoreNews opens it beyond administrators.
+    #>
+    param([int]$Index)
+    $files = @(Get-NewsTickerBackupFiles)
+    if ($Index -lt 0 -or $Index -ge $files.Count) { return $null }
+    return $files[$Index]
 }
 
 function Get-NewsTickerBackupsText {

@@ -1328,3 +1328,55 @@ Describe 'Expired news draft resume (D3)' {
         $script:NewsTickerDraft | Should -BeNullOrEmpty
     }
 }
+
+Describe 'News ticker backups: what is kept is what is offered' {
+    BeforeEach {
+        $script:newsBackupDirectory = Join-Path $TestDrive 'news-backups-reach'
+        New-Item -ItemType Directory -Path $script:newsBackupDirectory -Force | Out-Null
+        Get-ChildItem -LiteralPath $script:newsBackupDirectory -File | Remove-Item -Force
+        $config.Settings | Add-Member NewsBackupKeepFiles 20 -Force
+        $config.Settings | Add-Member NewsItemSeparator '|' -Force
+        $config.Settings | Add-Member NewsMaxItemLength 500 -Force
+        $config.Settings | Add-Member NewsMaxItems 100 -Force
+        # Sixteen copies, oldest first, each with its own write time so the
+        # newest-first order is real rather than incidental.
+        for ($copy = 0; $copy -lt 16; $copy++) {
+            $backupFile = Join-Path $script:newsBackupDirectory "news-$($copy.ToString('00')).txt"
+            Set-Content -LiteralPath $backupFile -Value "خبر النسخة $copy" -Encoding utf8
+            (Get-Item -LiteralPath $backupFile).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-100 + $copy)
+        }
+    }
+
+    It 'offers every copy it keeps, not a hard-coded ten' {
+        # The live shape: the setting kept twenty and every screen showed ten,
+        # so half the copies on disk could not be reached from any screen.
+        @(Get-NewsTickerBackupFiles).Count | Should -Be 16
+    }
+
+    It 'still stops at the number the setting keeps' {
+        $config.Settings | Add-Member NewsBackupKeepFiles 5 -Force
+
+        @(Get-NewsTickerBackupFiles).Count | Should -Be 5
+    }
+
+    It 'refuses a negative index instead of restoring the oldest copy' {
+        # PowerShell reads [-1] from the end, so the upper-bound-only check
+        # this replaced would have put the OLDEST copy on the live ticker.
+        Get-NewsTickerBackupByIndex -Index -1 | Should -BeNullOrEmpty
+        Get-NewsTickerBackupByIndex -Index 16 | Should -BeNullOrEmpty
+    }
+
+    It 'restores the copy the screen numbered, reading the same list the screen read' {
+        $listed = @(Get-NewsTickerBackupFiles)
+        $picked = Get-NewsTickerBackupByIndex -Index 2
+
+        $picked.FullName | Should -Be $listed[2].FullName
+        # Newest first: copy 15 was written last.
+        (Get-Content -LiteralPath (Get-NewsTickerBackupByIndex -Index 0).FullName -Raw).Trim() | Should -Be 'خبر النسخة 15'
+    }
+
+    It 'declares a range, because this number now sizes a screen' {
+        $script:SettingConstraints['NewsBackupKeepFiles'].Minimum | Should -Be 1
+        $script:SettingConstraints['NewsBackupKeepFiles'].Maximum | Should -Be 30
+    }
+}

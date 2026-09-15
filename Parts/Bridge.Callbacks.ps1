@@ -290,8 +290,17 @@ function Invoke-CallbackQuery {
             Send-TelegramMessage -ChatId $chatId -Text '⚠️ تأكيد الاستعادة؟ ستُحفظ الحالة الحالية أولًا.' -ReplyMarkup @{inline_keyboard=@(,@(@{text='✅ استعادة';callback_data="news:restoreconfirm:$i";style='danger'},@{text='إلغاء';callback_data='news:backups'}))};break
         }
         'news:restoreconfirm:*' {
-            if(-not(Test-Admin -ChatId $chatId -UserId $userId)-and -not(Get-Setting 'AllowOperatorsRestoreNews')){break};$i=[int](Get-CallbackArg $data 'news:restoreconfirm:');$files=@(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTimeUtc -Descending|Select-Object -First 10);if($i-ge $files.Count){break}
-            $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $files[$i].FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+            if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }
+            # Through the shared reader, not a second copy of its query. The
+            # two agreed only by coincidence, and the moment one of them
+            # learned the NewsBackupKeepFiles cap the numbering would have
+            # split: button 12 on the screen restoring a different copy, or
+            # none. Get-NewsTickerBackupByIndex also carries the lower bound
+            # this path was missing.
+            $i = [int](Get-CallbackArg $data 'news:restoreconfirm:')
+            $chosenBackup = Get-NewsTickerBackupByIndex -Index $i
+            if (-not $chosenBackup) { break }
+            $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $chosenBackup.FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
             if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){'✅ تمت الاستعادة وحفظت الحالة السابقة.'}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:handover' {

@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.35.0
+
+Every writer of `templates.json` has taken a timestamped copy since the
+registry screens were built — preset edits, definition edits, reminder
+minutes, registry imports — and there was no way to get one back: the copies
+accumulated on the server and an administrator who deleted the wrong template
+had to go find the folder. Two things follow from that. The registry backups
+now have a restore screen beside import/export, mirroring the configuration
+one: it names every template the restore would remove, change or add before
+writing anything, refuses outright when a template that is on air or booked in
+an upcoming event would be touched, and saves the current registry first so
+the restore is itself undoable. And the four writers now share one backup
+function, because only one of them pruned — the other three grew
+`templates.json.backups` without limit, and the only thing that ever noticed
+was the storage warning in the health screen, which offered nothing to do
+about it.
+
 ## Version 8.34.0
 
 The shift readiness screen read runtime state only — what is on air, what is

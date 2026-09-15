@@ -431,10 +431,7 @@ function Set-ImportedTemplateRegistry {
         $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
         $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
         if ($blocked.Count -gt 0) { throw "لا يمكن تغيير أو حذف قالب مستخدم على الهواء أو في جدولة قادمة: $($blocked -join '، ')" }
-        $backupDirectory = "$path.backups"
-        New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
-        $backupPath = Join-Path $backupDirectory "templates-import-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
-        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $backupPath = Backup-TemplateRegistryFile -Path $path
         [IO.File]::WriteAllText($temporary, ($validation.Document | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
         $script:TemplateCache = @{ WriteTime=[datetime]::MinValue; Path=''; Map=@{}; Order=@(); Errors=@() }

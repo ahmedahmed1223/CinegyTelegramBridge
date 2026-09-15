@@ -1923,6 +1923,14 @@ function Get-TemplateAdminCatalogueKeyboard {
         $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
         if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
         $rows += , $transferRow
+        # Beside import/export because it undoes them, and every other writer
+        # of the registry too. Shown only when there is something to restore:
+        # a button that opens an empty screen teaches nothing but its own
+        # emptiness.
+        $backupCount = @(Get-TemplateBackupFiles).Count
+        if ($backupCount -gt 0) {
+            $rows += , @( (New-Button "🗄 نسخ القوالب ($backupCount)" 'tplbak:list') )
+        }
     }
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
         $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
@@ -1999,6 +2007,81 @@ function Get-LayerNameEditKeyboard {
             , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer" -Style danger) )
             , @( (New-Button '⬅️ أسماء الطبقات' 'menu:layernames'), (New-Button '❌ إلغاء' 'menu:settings') )
         ) }
+}
+
+function Get-TemplateBackupsText {
+    <# Which saved registry is which. Age is what tells an administrator
+       whether a copy predates the edit being undone, so it is here beside
+       the timestamp rather than left to arithmetic. #>
+    param([string]$Path = (Get-TemplateRegistryFilePath))
+    $files = @(Get-TemplateBackupFiles -Path $Path)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>🗄 نسخ القوالب</b>')
+    if ($files.Count -eq 0) {
+        $lines.Add('<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل تعديل على القوالب.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add('')
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $age = [int]([math]::Max(0.0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
+        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { 'الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+    }
+    $lines.Add('')
+    $lines.Add('<i>الاستعادة تعرض ما سيتغيّر قبل الكتابة، وتُرفض إن مسّت قالبًا على الهواء أو في جدولة قادمة.</i>')
+    return ($lines -join "`n")
+}
+
+function Get-TemplateBackupsKeyboard {
+    param([string]$Path = (Get-TemplateRegistryFilePath))
+    $files = @(Get-TemplateBackupFiles -Path $Path)
+    $rows = @()
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $rows += , @( (New-Button "$($i + 1). 🗄 $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "tplbak:restore:$i" -Style danger) )
+    }
+    if ($files.Count -eq 0) { $rows += , @( (New-Button 'لا توجد نسخ محفوظة' 'menu:templatesadmin') ) }
+    $rows += , @( (New-Button '⬅️ رجوع' 'menu:templatesadmin') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-TemplateRestoreConfirmKeyboard {
+    return @{ inline_keyboard = @(
+            , @( (New-Button '⚠️ نعم، استعد هذه النسخة' 'tplbak:confirm' -Style danger), (New-Button '❌ إلغاء' 'tplbak:list') )
+        ) }
+}
+
+function Get-TemplateRestorePreviewText {
+    <#
+        What the restore will do, named template by template.
+
+        A count says something will change and nothing about whether it is
+        the change being undone; the names are the only thing an
+        administrator can check against what they remember doing. The lists
+        are capped because a restore across a large registry would otherwise
+        put every key on one screen and cross the payload limit.
+    #>
+    param([Parameter(Mandatory)]$Comparison, [Parameter(Mandatory)][datetime]$BackupTime)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<b>⚠️ تأكيد استعادة القوالب</b>')
+    $lines.Add("النسخة: <code>$($BackupTime.ToString('yyyy-MM-dd HH:mm'))</code>")
+    $lines.Add('')
+    foreach ($group in @(
+            @{ Label = '🗑 ستُحذف'; Keys = @($Comparison.Removed) }
+            @{ Label = '✏️ ستتغيّر'; Keys = @($Comparison.Changed) }
+            @{ Label = '➕ ستُضاف'; Keys = @($Comparison.Added) }
+        )) {
+        if (@($group.Keys).Count -eq 0) { continue }
+        $shown = @(@($group.Keys) | Select-Object -First 10)
+        $line = "$($group.Label) (<code>$(@($group.Keys).Count)</code>): $(ConvertTo-TelegramHtmlText ($shown -join '، '))"
+        if (@($group.Keys).Count -gt $shown.Count) { $line += " …و$(@($group.Keys).Count - $shown.Count) غيرها" }
+        $lines.Add($line)
+    }
+    if (@($Comparison.Removed).Count -eq 0 -and @($Comparison.Changed).Count -eq 0 -and @($Comparison.Added).Count -eq 0) {
+        $lines.Add('<i>لا فرق بين هذه النسخة والقوالب الحالية.</i>')
+    }
+    $lines.Add('')
+    $lines.Add('<i>تُحفظ نسخة من القوالب الحالية قبل الكتابة، فالاستعادة نفسها قابلة للتراجع.</i>')
+    return ($lines -join "`n")
 }
 
 function Get-ConfigBackupFiles {

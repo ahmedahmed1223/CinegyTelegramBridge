@@ -1879,6 +1879,64 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'tplbak:list' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                Clear-PendingState -ChatId $chatId
+                Send-TelegramMessage -ChatId $chatId -Text (Get-TemplateBackupsText) -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+            }
+            break
+        }
+        'tplbak:restore:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $backups = @(Get-TemplateBackupFiles)
+                $chosen = [int](Get-CallbackArg $data 'tplbak:restore:')
+                if ($chosen -lt 0 -or $chosen -ge $backups.Count) {
+                    Send-TelegramMessage -ChatId $chatId -Text 'النسخة المحددة لم تعد موجودة.' -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                    break
+                }
+                # Addressed by position, not by file name: callback_data is
+                # capped at 64 bytes and these names carry a timestamp and a
+                # guid.
+                $chosenFile = $backups[$chosen]
+                $preview = $null
+                try {
+                    $saved = Get-Content -LiteralPath $chosenFile.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $live = Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $preview = Get-TemplateRegistryImportComparison -Current $live -Imported $saved
+                }
+                catch {
+                    Send-TelegramMessage -ChatId $chatId -Text "❌ تعذّرت قراءة النسخة: $(Protect-SensitiveText $_.Exception.Message)" -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                    break
+                }
+                Clear-PendingState -ChatId $chatId
+                Set-PendingState -ChatId $chatId -State @{
+                    Mode = 'template_restore'; UserId = $userId; BackupPath = $chosenFile.FullName
+                } | Out-Null
+                Send-TelegramMessage -ChatId $chatId -Text (Get-TemplateRestorePreviewText -Comparison $preview -BackupTime $chosenFile.LastWriteTime) -ParseMode HTML -ReplyMarkup (Get-TemplateRestoreConfirmKeyboard)
+            }
+            break
+        }
+        'tplbak:confirm' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $restoreState = Get-PendingState -ChatId $chatId
+                if (-not $restoreState -or $restoreState.Mode -ne 'template_restore' -or [long]$restoreState.UserId -ne $userId) {
+                    Send-TelegramMessage -ChatId $chatId -Text 'انتهى أو تغيّر طلب الاستعادة. اختر النسخة من جديد.' -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                    break
+                }
+                $restoreFrom = [string]$restoreState.BackupPath
+                Clear-PendingState -ChatId $chatId
+                $outcome = Restore-TemplateRegistryBackup -BackupPath $restoreFrom
+                if ($outcome.Success) {
+                    Write-BridgeLog "Admin user $userId restored template registry backup '$([System.IO.Path]::GetFileName($restoreFrom))'" 'WARN'
+                    Add-AuditEntry "🗄 استعادة نسخة قوالب - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Send-TelegramMessage -ChatId $chatId -Text '✅ استُعيدت نسخة القوالب، وحُفظت نسخة من السابقة قبلها.' -ParseMode HTML -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
+                }
+                else {
+                    Send-TelegramMessage -ChatId $chatId -Text "❌ فشلت الاستعادة: $($outcome.Error)" -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                }
+            }
+            break
+        }
         'cfg:restoreconfirm' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $state = Get-PendingState -ChatId $chatId

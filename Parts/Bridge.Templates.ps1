@@ -12,6 +12,53 @@ function Get-TemplateRegistryFilePath {
     return (Join-Path $scriptRoot $configured)
 }
 
+function Backup-TemplateRegistryFile {
+    <#
+        One timestamped copy of templates.json before it is rewritten, and
+        the pruning that keeps the folder from growing forever.
+
+        Four writers took this backup with four copies of the same six lines,
+        and only ONE of them pruned - so a station that edited template
+        definitions, reminder minutes or imported a registry filled
+        templates.json.backups without limit, and the only thing that ever
+        noticed was the storage warning in the health screen, which offered
+        nothing to do about it. Pruning in one place is why this is a
+        function rather than a fifth copy.
+
+        Returns the backup path, or '' when there was no file to copy - a
+        first write has nothing to preserve and must not fail over it.
+    #>
+    param([string]$Path = (Get-TemplateRegistryFilePath))
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $backupDirectory = "$Path.backups"
+    New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+    $backupPath = Join-Path $backupDirectory "templates-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+    Copy-Item -LiteralPath $Path -Destination $backupPath -Force -ErrorAction Stop
+    # Shares ConfigBackupKeepFiles rather than adding a setting of its own:
+    # both answer the same operator question - how many undo steps this
+    # bridge keeps - and a second number would only ever be set wrong.
+    $keep = Get-SettingInt 'ConfigBackupKeepFiles' 1
+    if ($keep -gt 0) {
+        foreach ($old in @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -Skip $keep)) {
+            Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $backupPath
+}
+
+function Get-TemplateBackupFiles {
+    <# The saved registries, newest first. One reader for the list, the
+       keyboard and the restore, so the row pressed is the file read - the
+       same rule Get-ConfigBackupFiles states next door. #>
+    param([string]$Path = (Get-TemplateRegistryFilePath))
+    $backupDirectory = "$Path.backups"
+    if (-not (Test-Path -LiteralPath $backupDirectory)) { return @() }
+    return @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc, Name -Descending)
+}
+
 function Save-TemplatePresetChange {
     <# Mutates only the presets array of one template. A timestamped backup is
        taken first and the final JSON replaces the original atomically. #>
@@ -53,16 +100,8 @@ function Save-TemplatePresetChange {
         }
         $template | Add-Member -NotePropertyName presets -NotePropertyValue @($presets) -Force
 
-        $backupDir = "$path.backups"
-        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
-        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-        $backupPath = Join-Path $backupDir "templates-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
-        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
-        $keep = Get-SettingInt 'ConfigBackupKeepFiles' 1
-        if ($keep -gt 0) {
-            @(Get-ChildItem -LiteralPath $backupDir -Filter '*.json' -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip $keep) |
-                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-        }
+        $backupPath = Backup-TemplateRegistryFile -Path $path
+
 
         $temporary = "$path.tmp"
         $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
@@ -72,6 +111,58 @@ function Save-TemplatePresetChange {
     }
     catch {
         return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' }
+    }
+}
+
+function Restore-TemplateRegistryBackup {
+    <#
+        Puts a saved templates.json back, refusing the cases that would take
+        a graphic off air or break a booked event.
+
+        Every writer here has kept a timestamped copy since the registry
+        screens were built, and there was no way to get one back: the copies
+        accumulated and an administrator who deleted the wrong template had
+        to find the folder on the server. The config screens have had exactly
+        this for releases (Restore-ConfigBackup), and this mirrors it
+        deliberately rather than inventing a second shape.
+
+        The two refusals are the ones Set-ImportedTemplateRegistry already
+        makes, for the same reason: restoring a registry from before a
+        template existed REMOVES that template, and a removed template that
+        is on air right now leaves a graphic on screen the bridge can no
+        longer name or hide by key.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$BackupPath,
+        [string]$Path = (Get-TemplateRegistryFilePath)
+    )
+    $restoreTemporary = "$Path.restore.tmp"
+    try {
+        if (-not (Test-Path -LiteralPath $BackupPath)) { throw 'ملف النسخة غير موجود.' }
+        $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $candidate -or @($candidate.PSObject.Properties.Name).Count -eq 0) {
+            throw 'النسخة لا تحتوي أي قالب.'
+        }
+        $current = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $candidate
+        $unsafeKeys = @(@($comparison.Removed) + @($comparison.Changed) | Sort-Object -Unique)
+        $liveKeys = @($script:OnAir.Values | ForEach-Object { [string](Get-JsonProp $_ 'Key') })
+        $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
+        $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
+        if ($blocked.Count -gt 0) {
+            throw "لا يمكن تغيير أو حذف قالب على الهواء أو في جدولة قادمة: $($blocked -join '، ')"
+        }
+        # The registry as it stands becomes a backup of its own first, so the
+        # restore itself is undoable. A one-way undo is a trap.
+        Backup-TemplateRegistryFile -Path $Path | Out-Null
+        Copy-Item -LiteralPath $BackupPath -Destination $restoreTemporary -Force -ErrorAction Stop
+        Move-Item -LiteralPath $restoreTemporary -Destination $Path -Force -ErrorAction Stop
+        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+        return [pscustomobject]@{ Success = $true; Error = ''; Comparison = $comparison }
+    }
+    catch {
+        Remove-Item -LiteralPath $restoreTemporary -Force -ErrorAction SilentlyContinue
+        return [pscustomobject]@{ Success = $false; Error = Protect-SensitiveText $_.Exception.Message; Comparison = $null }
     }
 }
 
@@ -454,10 +545,8 @@ function Save-TemplateDefinitionChange {
                 if ($Definition.ContainsKey($name)) { $target | Add-Member -NotePropertyName $name -NotePropertyValue $Definition[$name] -Force }
             }
         }
-        $backupDir = "$path.backups"
-        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
-        $backupPath = Join-Path $backupDir "templates-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
-        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $backupPath = Backup-TemplateRegistryFile -Path $path
+
         $temporary = "$path.tmp"
         $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
@@ -480,10 +569,8 @@ function Save-TemplateReminderMinutes {
         $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $template = Get-JsonProp $raw $TemplateKey
         if (-not $template) { throw "القالب '$TemplateKey' غير موجود." }
-        $backupDir = "$path.backups"
-        New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
-        $backupPath = Join-Path $backupDir "templates-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
-        Copy-Item -LiteralPath $path -Destination $backupPath -Force -ErrorAction Stop
+        $backupPath = Backup-TemplateRegistryFile -Path $path
+
         $template | Add-Member -NotePropertyName reminderMinutes -NotePropertyValue $Minutes -Force
         $temporary = "$path.tmp"
         $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop

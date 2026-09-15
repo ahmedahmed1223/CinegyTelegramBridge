@@ -1742,3 +1742,76 @@ Describe 'Template last-air from the audit trail (P3)' {
         $map.Count | Should -Be 0
     }
 }
+
+Describe 'Template registry backups and restore' {
+    BeforeEach {
+        $script:OriginalRegistryPathForBackupTest = $config.TemplateRegistryPath
+        $script:BackupRegistryPathForTest = New-TempTemplateFile -Json '{ "urgent": { "path": "titles/urgent.cintitle", "layer": 4, "fields": ["Headline.Text"] }, "weather": { "path": "titles/weather.cintitle", "layer": 6, "fields": ["City.Text"] } }'
+        $script:OnAir.Clear()
+        Mock Get-UpcomingScheduleEvents { @() }
+        Mock Write-BridgeLog { }
+        $config.Settings | Add-Member -NotePropertyName ConfigBackupKeepFiles -NotePropertyValue 3 -Force
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:BackupRegistryPathForTest -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$($script:BackupRegistryPathForTest).backups" -Recurse -Force -ErrorAction SilentlyContinue
+        $config.TemplateRegistryPath = $script:OriginalRegistryPathForBackupTest
+        $script:OnAir.Clear()
+    }
+
+    It 'prunes the backup folder no matter which writer took the copy' {
+        # The exact shape this was built for: three of the four writers never
+        # pruned, so a station that edited definitions filled the folder
+        # without limit and only the storage warning ever noticed.
+        for ($edit = 5; $edit -lt 12; $edit++) {
+            $written = Save-TemplateDefinitionChange -TemplateKey 'urgent' -Action edit -Definition @{ path = 'titles/urgent.cintitle'; layer = $edit; fields = @('Headline.Text') }
+            $written.Success | Should -BeTrue
+        }
+
+        @(Get-TemplateBackupFiles -Path $script:BackupRegistryPathForTest).Count | Should -Be 3
+    }
+
+    It 'puts a deleted template back and keeps the registry it replaced' {
+        $before = @(Save-TemplateDefinitionChange -TemplateKey 'weather' -Action delete)[0]
+        $before.Success | Should -BeTrue
+        (Get-Content -LiteralPath $script:BackupRegistryPathForTest -Raw | ConvertFrom-Json).PSObject.Properties.Name | Should -Not -Contain 'weather'
+
+        $saved = @(Get-TemplateBackupFiles -Path $script:BackupRegistryPathForTest)[0]
+        $outcome = Restore-TemplateRegistryBackup -BackupPath $saved.FullName -Path $script:BackupRegistryPathForTest
+
+        $outcome.Success | Should -BeTrue
+        (Get-Content -LiteralPath $script:BackupRegistryPathForTest -Raw | ConvertFrom-Json).PSObject.Properties.Name | Should -Contain 'weather'
+        # The restore is itself undoable, which is the whole reason it takes
+        # a copy of what it is about to overwrite.
+        @(Get-TemplateBackupFiles -Path $script:BackupRegistryPathForTest).Count | Should -BeGreaterThan 1
+    }
+
+    It 'refuses a restore that would remove a template that is on air' {
+        $removed = Save-TemplateDefinitionChange -TemplateKey 'weather' -Action delete
+        $removed.Success | Should -BeTrue
+        # The registry no longer has 'urgent' in the saved copy's shape? It
+        # does - so provoke the real refusal: restore a copy taken BEFORE a
+        # template existed while that template is live.
+        $created = Save-TemplateDefinitionChange -TemplateKey 'breaking' -Action create -Definition @{ path = 'titles/urgent.cintitle'; layer = 8; fields = @('Headline.Text') }
+        $created.Success | Should -BeTrue
+        $script:OnAir[8] = @{ Key = 'breaking'; At = Get-Date; UserId = 10; ActiveId = '{A}' }
+
+        $oldest = @(Get-TemplateBackupFiles -Path $script:BackupRegistryPathForTest | Sort-Object LastWriteTimeUtc, Name)[0]
+        $outcome = Restore-TemplateRegistryBackup -BackupPath $oldest.FullName -Path $script:BackupRegistryPathForTest
+
+        $outcome.Success | Should -BeFalse
+        $outcome.Error | Should -Match 'على الهواء'
+        (Get-Content -LiteralPath $script:BackupRegistryPathForTest -Raw | ConvertFrom-Json).PSObject.Properties.Name | Should -Contain 'breaking'
+    }
+
+    It 'names every template the restore would touch instead of counting them' {
+        $comparison = [pscustomobject]@{ Added = @('breaking'); Removed = @('weather'); Changed = @('urgent'); Unchanged = @() }
+
+        $preview = Get-TemplateRestorePreviewText -Comparison $comparison -BackupTime ([datetime]'2026-09-15T10:00:00')
+
+        $preview | Should -Match 'weather'
+        $preview | Should -Match 'urgent'
+        $preview | Should -Match 'breaking'
+    }
+}

@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.36.0
+
+A failed push reported one thing — the error the push came back with — and
+that sentence is usually the symptom rather than the cause: a timeout does
+not say whether Cinegy is down, the scene file moved, or somebody else holds
+the layer. The operator's next move was to open the status screen, the layers
+screen and the template screen and assemble the answer mid-shift from three
+places. The failure message now carries a "why didn't it appear?" button that
+answers in one screen, in the order the question is actually asked: Cinegy's
+freshness first (when it is unreachable every other answer is noise), then
+whether the `.cintitle` is still where the registry says — the cause no
+status screen shows — then who holds the layer, whether this operator is
+allowed the template, and whether maintenance is blocking air commands. The
+check queries nothing and sends nothing: every line comes from cached state,
+configuration or the file system, so running it during a live fault cannot
+itself change what is on air.
+
 ## Version 8.35.1
 
 Five callers indexed a template's saved presets after checking the upper

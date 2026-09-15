@@ -1882,6 +1882,15 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'whynot:*' {
+            $failedTemplate = Get-TemplateByIndex -Index ([int](Get-CallbackArg $data 'whynot:'))
+            if (-not $failedTemplate) {
+                Send-TelegramMessage -ChatId $chatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            Send-TelegramMessage -ChatId $chatId -Text (Get-ShowFailureDiagnosisText -Key ([string]$failedTemplate.Key) -ChatId $chatId -UserId $userId) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
         'tplbak:list' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 Clear-PendingState -ChatId $chatId

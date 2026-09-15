@@ -64,6 +64,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'
+            'Invoke-ShowTemplateResult'         = 'builds no keyboard; it prepends one fixed row to the main menu on the failure message'
             'ConvertTo-TelegramReplyMarkupJson' = 'serialises a keyboard, it does not build one'
             'Receive-SettingsImport'            = 'not a keyboard builder; it reports on an imported file'
             'Update-TemplateReminderQueue'      = 'not a keyboard builder; it sends one reminder per due item'

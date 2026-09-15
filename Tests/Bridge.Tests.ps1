@@ -2439,3 +2439,62 @@ Describe 'Restart-storm notice (log-driven)' {
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
 }
+
+Describe 'Why a show did not reach the screen' {
+    BeforeEach {
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        $script:OnAir.Clear()
+        $script:LayerLocks.Clear()
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = (Get-Date)
+    }
+
+    It 'names the missing scene file rather than repeating the push error' {
+        # The exact shape it was built for: the push fails with a message
+        # about the push, and the cause - a moved .cintitle - appears on no
+        # screen the operator can reach.
+        Mock Get-TemplateStore {
+            @{
+                Map   = @{ urgent = [pscustomobject]@{ Key = 'urgent'; Layer = 4; Path = 'Z:\gone\urgent.cintitle'; Fields = @('Headline.Text') } }
+                Order = @('urgent'); Errors = @(); InvalidKeys = @(); SharedLayers = @{}
+            }
+        }
+
+        $reported = @(Get-ShowFailureDiagnosisLines -Key 'urgent') -join "`n"
+
+        $reported | Should -Match 'ملف المشهد غير موجود'
+        $reported | Should -Match 'urgent.cintitle'
+    }
+
+    It 'leads with Cinegy when there is no fresh state, because nothing else matters then' {
+        Mock Get-TemplateStore {
+            @{
+                Map   = @{ urgent = [pscustomobject]@{ Key = 'urgent'; Layer = 4; Path = 'titles/urgent.cintitle'; Fields = @('Headline.Text') } }
+                Order = @('urgent'); Errors = @(); InvalidKeys = @(); SharedLayers = @{}
+            }
+        }
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = [datetime]::MinValue
+
+        $reported = @(Get-ShowFailureDiagnosisLines -Key 'urgent')
+
+        $reported[0] | Should -Match 'لا حالة حديثة من Cinegy'
+    }
+
+    It 'says who holds the layer instead of leaving the operator to guess' {
+        Mock Get-TemplateStore {
+            @{
+                Map   = @{ urgent = [pscustomobject]@{ Key = 'urgent'; Layer = 4; Path = 'titles/urgent.cintitle'; Fields = @('Headline.Text') } }
+                Order = @('urgent'); Errors = @(); InvalidKeys = @(); SharedLayers = @{}
+            }
+        }
+        $script:LayerLocks[4] = @{ UserId = 909; At = (Get-Date) }
+
+        (@(Get-ShowFailureDiagnosisLines -Key 'urgent') -join "`n") | Should -Match 'محجوزة'
+    }
+
+    It 'answers about a template that is no longer in the registry' {
+        Mock Get-TemplateStore { @{ Map = @{}; Order = @(); Errors = @(); InvalidKeys = @(); SharedLayers = @{} } }
+
+        (@(Get-ShowFailureDiagnosisLines -Key 'deleted') -join "`n") | Should -Match 'لم يعد في سجل القوالب'
+    }
+}

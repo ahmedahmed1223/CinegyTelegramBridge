@@ -850,9 +850,139 @@ function Invoke-ShowTemplateResult {
     else {
         Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$result.Error)
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        # The error text names the symptom; the button names the cause. It is
+        # here rather than on the status screen because this message is where
+        # the operator already is when they need it.
+        $failureMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+        # Addressed by position because callback_data is capped at 64 bytes
+        # and a template key is free text. Read from the store this function
+        # already holds rather than re-reading it: a failure path that throws
+        # while reporting a failure replaces one fault with two, and the
+        # operator loses the message that was about to tell them what broke.
+        # Get-JsonProp rather than .ContainsKey or .Order directly: the store
+        # is a hashtable in the bridge and a PSCustomObject in places that
+        # build one, and Set-StrictMode throws on the missing property while
+        # PSCustomObject has no ContainsKey at all. @() then turns an absent
+        # Order into an empty array, whose IndexOf is -1 - no button, no throw.
+        $failureIndex = [array]::IndexOf(@(Get-JsonProp $store 'Order'), $Key)
+        if ($failureIndex -ge 0) {
+            $failureMenu.inline_keyboard = @(, @( (New-Button '🔍 لماذا لم يظهر؟' "whynot:$failureIndex") )) + @($failureMenu.inline_keyboard)
+        }
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup $failureMenu
     }
     return $result
+}
+
+function Get-ShowFailureDiagnosisLines {
+    <#
+        Why a template did not reach the screen, answered from what the
+        bridge already knows, in the order an operator would ask.
+
+        A failure said one thing - the error the push came back with - and
+        that sentence is usually the symptom, not the cause: "الطلب انتهت
+        مهلته" does not say whether Cinegy is down, the scene file moved, or
+        the layer is held by somebody else. The operator's next move was to
+        open the status screen, the layers screen and the template screen and
+        assemble the answer, mid-shift, from three places.
+
+        AGENTS.md has this lesson written down for the log - "إن عجزت عن
+        إعادة إنتاج عطل من السجل فاجعل السجل يقول أكثر". This is the same
+        move aimed at the person instead of the file.
+
+        Read-only by construction: it queries nothing and sends nothing. Every
+        line comes from cached state, configuration, or the file system, so it
+        can never itself change what is on air - which is the one thing a
+        diagnosis run during a live fault must not do.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [long]$ChatId = 0,
+        [long]$UserId = 0,
+        [datetime]$Now = (Get-Date)
+    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($Key)) {
+        $lines.Add("❌ القالب <code>$(ConvertTo-TelegramHtmlText $Key)</code> لم يعد في سجل القوالب — حُذف أو أُعيدت تسميته.")
+        return $lines.ToArray()
+    }
+    $template = $store.Map[$Key]
+    $layer = [int]$template.Layer
+
+    # 1. Cinegy first: when it is unreachable every other answer is noise.
+    $lastSuccess = if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }
+    $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
+        -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+    $lines.Add($(switch ([string]$freshness.State) {
+                'connected' { '✅ Cinegy يستجيب، وحالة الطبقات حديثة.' }
+                'stale' { "⚠️ حالة Cinegy متأخرة ($(ConvertTo-TelegramHtmlText ([string]$freshness.Label))) — قد يكون المحرّك مشغولًا أو الشبكة بطيئة." }
+                default { '❌ لا حالة حديثة من Cinegy — تحقّق من عنوان المحرّك ومن الشبكة قبل أي شيء آخر.' }
+            }))
+
+    # 2. The scene file, the cause a status screen never shows: a moved or
+    # renamed .cintitle fails the push with a message about the push.
+    $scenePath = Resolve-TemplateScenePath -Path ([string]$template.Path)
+    if ([string]::IsNullOrWhiteSpace($scenePath)) {
+        $lines.Add('❌ لا مسار مشهد لهذا القالب في سجل القوالب.')
+    }
+    elseif (Test-Path -LiteralPath $scenePath) {
+        $lines.Add('✅ ملف المشهد موجود في مساره.')
+    }
+    else {
+        $lines.Add("❌ ملف المشهد غير موجود: <code>$(ConvertTo-TelegramHtmlText $scenePath)</code> — نُقل أو أُعيدت تسميته أو تعذّر الوصول إلى المشاركة.")
+    }
+
+    # 3. Who is holding the layer, and what is standing on it.
+    if ($script:LayerLocks.ContainsKey($layer)) {
+        $holder = [long](Get-JsonProp $script:LayerLocks[$layer] 'UserId')
+        $lines.Add("⚠️ الطبقة $layer محجوزة الآن لـ$(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $holder)) — انتظر أو اطلب منه الإنهاء.")
+    }
+    elseif ($script:OnAir.ContainsKey($layer)) {
+        $lines.Add("ℹ️ الطبقة $layer عليها الآن <code>$(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $script:OnAir[$layer] 'Key')))</code> — العرض يستبدله لا يُضاف فوقه.")
+    }
+    else {
+        $lines.Add("✅ الطبقة $layer خالية.")
+    }
+
+    # 4. Whether the bridge refused before Cinegy was ever asked. Access is
+    # checked with the caller's own ids so the answer is about THIS operator,
+    # not about an administrator reading over their shoulder.
+    if ($ChatId -gt 0) {
+        $access = Test-TemplateAccess -Key $Key -Layer $layer -ChatId $ChatId -UserId $UserId
+        $lines.Add($(if ($access.Allowed) { '✅ هذا القالب مسموح لك.' } else { "⛔ القالب ممنوع عليك: $(ConvertTo-TelegramHtmlText ([string]$access.Reason))" }))
+    }
+
+    # 5. The two switches that stop everything, named rather than left to be
+    # discovered on the settings screen.
+    if ([bool](Get-Setting 'MaintenanceMode')) { $lines.Add('🛠 وضع الصيانة مفعّل — كل أوامر الهواء موقوفة.') }
+    elseif (Test-MaintenanceWindowActive) { $lines.Add('🛠 نافذة الصيانة المجدولة مفتوحة الآن — أوامر الهواء موقوفة حتى نهايتها.') }
+
+    # 6. A sibling on the same layer can never be up with it, and the clash
+    # reads as a mysterious replacement rather than a rule.
+    $sharedLayers = Get-JsonProp $store 'SharedLayers'
+    if ($sharedLayers -and $sharedLayers.Contains([string]$layer)) {
+        $siblings = @(@($sharedLayers[[string]$layer]) | Where-Object { $_ -ne $Key })
+        if ($siblings.Count -gt 0) {
+            $lines.Add("ℹ️ يتشارك الطبقة $layer أيضًا: $(ConvertTo-TelegramHtmlText ($siblings -join '، ')) — لا يظهر اثنان منها معًا.")
+        }
+    }
+    return $lines.ToArray()
+}
+
+function Get-ShowFailureDiagnosisText {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [long]$ChatId = 0,
+        [long]$UserId = 0,
+        [datetime]$Now = (Get-Date)
+    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>🔍 لماذا لم يظهر '$(ConvertTo-TelegramHtmlText $Key)'؟</b>")
+    $lines.Add('')
+    foreach ($line in @(Get-ShowFailureDiagnosisLines -Key $Key -ChatId $ChatId -UserId $UserId -Now $Now)) { $lines.Add($line) }
+    $lines.Add('')
+    $lines.Add('<i>فحص قراءة فقط: لم يُرسل شيء إلى Cinegy لإعداد هذه الشاشة.</i>')
+    return ($lines -join "`n")
 }
 
 function Get-LayerShowContext {

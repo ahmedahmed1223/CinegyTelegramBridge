@@ -1815,3 +1815,35 @@ Describe 'Template registry backups and restore' {
         $preview | Should -Match 'breaking'
     }
 }
+
+Describe 'Preset index bounds' {
+    BeforeEach {
+        Mock Send-TelegramMessage { }
+        Mock Write-BridgeLog { }
+        $script:PresetTemplateForBounds = [pscustomobject]@{
+            Key = 'urgent'; Layer = 4; Fields = @('Headline.Text')
+            Presets = @(
+                [pscustomobject]@{ Name = 'الأول'; Values = @('نص أول') }
+                [pscustomobject]@{ Name = 'الأخير'; Values = @('نص أخير') }
+            )
+        }
+    }
+
+    It 'refuses a negative index instead of reading the last preset' {
+        # The exact shape this was built for: PowerShell reads Presets[-1]
+        # from the END, so the missing lower bound selected the wrong entry
+        # silently rather than failing.
+        Get-TemplatePreset -Template $script:PresetTemplateForBounds -Index -1 | Should -BeNullOrEmpty
+        Get-TemplatePreset -Template $script:PresetTemplateForBounds -Index 2 | Should -BeNullOrEmpty
+        Get-TemplatePreset -Template $script:PresetTemplateForBounds -Index 0 | Select-Object -ExpandProperty Name | Should -Be 'الأول'
+    }
+
+    It 'puts nothing on air when the preset index names no preset' {
+        Mock Get-TemplateByIndex { $script:PresetTemplateForBounds }
+        Mock Start-ShowFlow { throw 'a preset that does not exist must not reach the air' }
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+
+        { Invoke-PresetShow -TemplateIndex 0 -PresetIndex -1 -ChatId 101 -UserId 101 } | Should -Not -Throw
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'غير موجود' }
+    }
+}

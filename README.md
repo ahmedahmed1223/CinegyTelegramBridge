@@ -13,6 +13,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.35.1
+
+Five callers indexed a template's saved presets after checking the upper
+bound only, and PowerShell reads a negative index from the end of the array —
+`Presets[-1]` is the last preset. So an out-of-range index did not fail, it
+quietly selected the wrong entry: the wrong text on air for a preset button,
+the wrong preset deleted for the delete button. Two other callers did check
+both bounds, which is how a guard drifts — written twice, remembered once.
+All seven now go through one `Get-TemplatePreset` accessor that returns
+`$null` outside either bound. Nothing reachable sends a negative index today,
+since the bridge builds every one of those buttons itself from a loop over
+the presets; this closes the missing bound rather than an open hole.
+
 ## Version 8.35.0
 
 Every writer of `templates.json` has taken a timestamped copy since the

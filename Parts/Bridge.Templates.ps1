@@ -477,6 +477,31 @@ function Get-TemplateByIndex {
     return $store.Map[$store.Order[$Index]]
 }
 
+function Get-TemplatePreset {
+    <#
+        One saved text set of a template, or $null when the index names none.
+
+        Five callers indexed $template.Presets after checking the UPPER bound
+        only, and PowerShell reads a negative index from the END of the array:
+        Presets[-1] is the last preset, so an out-of-range index did not fail,
+        it quietly selected the wrong entry - the wrong text on air for
+        'preset:', and the wrong preset deleted for 'pad:'. Two other callers
+        (Start-PresetAdminEditValues, Save-TemplatePresetChange) did check
+        both bounds, which is how a guard drifts: written twice, remembered
+        once.
+
+        Nothing reachable sends a negative index today - the bridge builds
+        every one of those buttons itself from a loop over the presets - so
+        this is the bound that was missing rather than a hole that was open.
+        It is here, once, so the two halves cannot disagree again.
+    #>
+    param($Template, [int]$Index)
+    if (-not $Template) { return $null }
+    $presets = @($Template.Presets)
+    if ($Index -lt 0 -or $Index -ge $presets.Count) { return $null }
+    return $presets[$Index]
+}
+
 function Get-TemplateIndex {
     param([Parameter(Mandatory)][string]$Key)
     $store = Get-TemplateStore

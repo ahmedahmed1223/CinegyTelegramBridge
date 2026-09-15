@@ -1065,11 +1065,11 @@ function Invoke-PresetShow {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $t = Get-TemplateByIndex -Index $TemplateIndex
-    if (-not $t -or $PresetIndex -ge $t.Presets.Count) {
+    $preset = Get-TemplatePreset -Template $t -Index $PresetIndex
+    if (-not $preset) {
         Send-TelegramMessage -ChatId $ChatId -Text "النص الجاهز غير موجود." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $preset = $t.Presets[$PresetIndex]
     $variables = @{}
     for ($i = 0; $i -lt $t.Fields.Count -and $i -lt $preset.Values.Count; $i++) {
         $variables[[string]$t.Fields[$i]] = [string]$preset.Values[$i]
@@ -1122,11 +1122,12 @@ function Start-PresetAdminCreate {
 function Start-PresetAdminEditValues {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $template = Get-TemplateByIndex -Index $TemplateIndex
-    if (-not $template -or $PresetIndex -lt 0 -or $PresetIndex -ge @($template.Presets).Count) { return }
+    $editing = Get-TemplatePreset -Template $template -Index $PresetIndex
+    if (-not $editing) { return }
     $state = @{
         Mode = 'preset_admin_values'; Action = 'edit'; TemplateIndex = $TemplateIndex
         TemplateKey = [string]$template.Key; PresetIndex = $PresetIndex; UserId = $UserId
-        Fields = @($template.Fields); Values = @(); Name = [string]$template.Presets[$PresetIndex].Name; Index = 0
+        Fields = @($template.Fields); Values = @(); Name = [string]$editing.Name; Index = 0
     }
     if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
     Set-PendingState -ChatId $ChatId -State $state

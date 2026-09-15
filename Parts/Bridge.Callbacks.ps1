@@ -1512,8 +1512,9 @@ function Invoke-CallbackQuery {
             $presetParts = $data -split ':'
             $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
             $template = Get-TemplateByIndex -Index $templateIndex
-            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
-            Send-TelegramMessage -ChatId $chatId -Text "⚡ $($template.Presets[$presetIndex].Name)`nاختر العملية المطلوبة:" -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
+            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
+            if (-not $chosenPreset) { break }
+            Send-TelegramMessage -ChatId $chatId -Text "⚡ $($chosenPreset.Name)`nاختر العملية المطلوبة:" -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
             break
         }
         'pac:*' {
@@ -1533,13 +1534,14 @@ function Invoke-CallbackQuery {
             $presetParts = $data -split ':'
             $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
             $template = Get-TemplateByIndex -Index $templateIndex
-            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
+            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
+            if (-not $chosenPreset) { break }
             Set-PendingState -ChatId $chatId -State @{
                 Mode = 'preset_admin_name'; Action = 'rename'; TemplateIndex = $templateIndex
                 TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
-                Fields = @($template.Fields); Values = @(); Name = [string]$template.Presets[$presetIndex].Name; Index = 0
+                Fields = @($template.Fields); Values = @(); Name = [string]$chosenPreset.Name; Index = 0
             }
-            Send-TelegramMessage -ChatId $chatId -Text "أرسل الاسم الجديد لـ '$($template.Presets[$presetIndex].Name)':" -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $chatId -Text "أرسل الاسم الجديد لـ '$($chosenPreset.Name)':" -ReplyMarkup (Get-CancelKeyboard)
             break
         }
         'pad:*' {
@@ -1547,12 +1549,13 @@ function Invoke-CallbackQuery {
             $presetParts = $data -split ':'
             $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
             $template = Get-TemplateByIndex -Index $templateIndex
-            if (-not $template -or $presetIndex -ge @($template.Presets).Count) { break }
+            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
+            if (-not $chosenPreset) { break }
             Show-PresetAdminReview -ChatId $chatId -State @{
                 Mode = 'preset_admin_review'; Action = 'delete'; TemplateIndex = $templateIndex
                 TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
-                Fields = @($template.Fields); Values = @($template.Presets[$presetIndex].Values)
-                Name = [string]$template.Presets[$presetIndex].Name; Index = 0
+                Fields = @($template.Fields); Values = @($chosenPreset.Values)
+                Name = [string]$chosenPreset.Name; Index = 0
             }
             break
         }

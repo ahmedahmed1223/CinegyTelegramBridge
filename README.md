@@ -13,6 +13,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.37.0
+
+The operation log could be narrowed to a window and to "mine versus
+everyone", and that is not the question a fault raises. "Who touched this
+template" and "what did this operator do" were both answered by reading forty
+rows looking for one name. The log now has a filter button that offers the
+operators and templates **present in the window being read**, most active
+first — a picker listing every operator the station ever had, or every
+template in the registry, would be mostly choices that return an empty
+screen, and an empty screen teaches people to distrust the filter rather than
+to narrow it. Filters survive a change of window, since widening from 24
+hours to 72 is the first thing anyone does after narrowing. The heading names
+whatever is filtered, so a narrowed screen is never read as the whole
+picture. Choosing another operator is gated exactly as the all-users view is:
+a non-administrator asking for somebody else gets their own log. Both lists
+are capped and say what they left out.
+
 ## Version 8.36.0
 
 A failed push reported one thing — the error the push came back with — and

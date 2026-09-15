@@ -84,6 +84,27 @@ function Get-OperationLogWindowLabel {
     return "$Hours ساعة"
 }
 
+function Get-OperationLogScopeLabel {
+    <#
+        What this screen is showing, in the words of its own filters.
+
+        Written once because the table screen and its text fallback both
+        print it, and a filtered screen whose heading still reads "كل
+        المشغّلين" is read as the whole picture - which is the one way a
+        filter can mislead rather than help.
+    #>
+    param([Parameter(Mandatory)]$Data, [long]$ViewerUserId = 0)
+    $parts = @()
+    if ([long]$Data.UserId -le 0) { $parts += 'كل المشغّلين' }
+    # An unknown viewer keeps the original wording: before an administrator
+    # could pick somebody else, a user filter could only ever mean "mine",
+    # and every caller that does not name a viewer still means exactly that.
+    elseif ($ViewerUserId -le 0 -or [long]$Data.UserId -eq $ViewerUserId) { $parts += 'عملياتي' }
+    else { $parts += (Get-AuditOperatorName -UserId ([string]$Data.UserId)) }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Data.Target)) { $parts += "📋 $([string]$Data.Target)" }
+    return ($parts -join ' · ')
+}
+
 function Get-OperationLogData {
     <#
         Air operations inside a window of hours, newest first.
@@ -98,7 +119,8 @@ function Get-OperationLogData {
     param(
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [long]$OnlyUserId = 0,
-        [datetime]$Day = [datetime]::MinValue
+        [datetime]$Day = [datetime]::MinValue,
+        [string]$OnlyTarget = ''
     )
     # A named day, or a window ending now. "What went out on Tuesday" is a
     # different question from "what went out in the last 48 hours", and a
@@ -118,6 +140,11 @@ function Get-OperationLogData {
     if ($OnlyUserId -gt 0) {
         $records = @($records | Where-Object { [string]$_.UserId -eq [string]$OnlyUserId })
     }
+    # "Who touched this template" is the question a fault actually raises, and
+    # it was answered by reading forty rows looking for one name.
+    if (-not [string]::IsNullOrWhiteSpace($OnlyTarget)) {
+        $records = @($records | Where-Object { ([string]$_.Target).Equals($OnlyTarget, [StringComparison]::OrdinalIgnoreCase) })
+    }
     # Newest first: this screen is opened to ask what just happened, and the
     # answer is at the end of a file written in order.
     $ordered = @($records | Sort-Object -Property When -Descending)
@@ -136,7 +163,91 @@ function Get-OperationLogData {
         Succeeded = ($ordered.Count - $failed - $blocked)
         Truncated = [bool]$window.Truncated
         Scope     = $(if ($OnlyUserId -gt 0) { 'mine' } else { 'all' })
+        Target    = [string]$OnlyTarget
+        UserId    = [long]$OnlyUserId
     }
+}
+
+function Get-OperationLogFilterOptions {
+    <#
+        Who and what actually appear in the window being read, most active
+        first, so a filter is chosen from a list rather than typed.
+
+        Built from the window's own records on purpose: a picker listing
+        every operator the station has ever had, or every template in the
+        registry, offers mostly choices that would return an empty screen -
+        and an empty screen teaches people to distrust the filter rather than
+        to narrow it.
+
+        Capped, and the caller is told what was left out. Operators are
+        bounded by the station's staff, but targets are bounded by the
+        registry, which the load tests take to a thousand - so this list
+        would grow with station data if it were not held.
+    #>
+    param(
+        [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
+        [long]$OnlyUserId = 0,
+        [datetime]$Day = [datetime]::MinValue,
+        [int]$Limit = 12
+    )
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day
+    $records = @($data.Records)
+    $operators = @($records | Where-Object { [long]$_.UserId -gt 0 } | Group-Object -Property UserId |
+            Sort-Object -Property Count, Name -Descending)
+    $targets = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Target) } |
+            Group-Object -Property Target | Sort-Object -Property Count, Name -Descending)
+    return [pscustomobject]@{
+        Operators       = @($operators | Select-Object -First $Limit | ForEach-Object {
+                [pscustomobject]@{ UserId = [long]$_.Name; Count = [int]$_.Count; Name = (Get-AuditOperatorName -UserId ([string]$_.Name)) }
+            })
+        Targets         = @($targets | Select-Object -First $Limit | ForEach-Object {
+                [pscustomobject]@{ Key = [string]$_.Name; Count = [int]$_.Count }
+            })
+        HiddenOperators = [math]::Max(0, $operators.Count - $Limit)
+        HiddenTargets   = [math]::Max(0, $targets.Count - $Limit)
+        Hours           = $Hours
+        Day             = $Day
+        Label           = [string]$data.Label
+    }
+}
+
+function Get-OperationLogFilterText {
+    param([Parameter(Mandatory)]$Options)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("<b>🔎 تصفية سجل العمليات</b> — $(ConvertTo-HtmlText ([string]$Options.Label))")
+    if (@($Options.Operators).Count -eq 0 -and @($Options.Targets).Count -eq 0) {
+        $lines.Add('<i>لا عمليات في هذه المدة، فلا شيء يُصفّى.</i>')
+        return ($lines -join "`n")
+    }
+    $lines.Add('<i>الخيارات من هذه المدة وحدها، والأكثر نشاطًا أولًا.</i>')
+    # Saying what was left out, not just showing what fits: a capped list
+    # that is silent about the cap reads as the whole truth.
+    if ([int]$Options.HiddenOperators -gt 0) { $lines.Add("<i>وأُخفي $([int]$Options.HiddenOperators) مشغّلًا أقل نشاطًا.</i>") }
+    if ([int]$Options.HiddenTargets -gt 0) { $lines.Add("<i>وأُخفي $([int]$Options.HiddenTargets) قالبًا أقل نشاطًا.</i>") }
+    return ($lines -join "`n")
+}
+
+function Get-OperationLogFilterKeyboard {
+    <# One button per choice, each carrying the window it was chosen in so
+       the filtered screen opens on the same period the question was asked
+       about. Addressed by user id and by template key - both stable, unlike
+       a position in a window that slides forward every minute. #>
+    param([Parameter(Mandatory)]$Options)
+    $rows = @()
+    foreach ($operator in @($Options.Operators)) {
+        $rows += , @( (New-Button "👤 $($operator.Name) ($($operator.Count))" "oplogu:$($Options.Hours):$($operator.UserId)") )
+    }
+    foreach ($target in @($Options.Targets)) {
+        $targetIndex = Get-TemplateIndex -Key ([string]$target.Key)
+        # A template that has since left the registry cannot be addressed by
+        # position, and inventing an id for it would filter on nothing. It is
+        # left out rather than offered as a button that answers wrongly.
+        if ($targetIndex -lt 0) { continue }
+        $rows += , @( (New-Button "📋 $($target.Key) ($($target.Count))" "oplogt:$($Options.Hours):$targetIndex") )
+    }
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا عمليات في هذه المدة' "oplog:all:$($Options.Hours)") ) }
+    $rows += , @( (New-Button '⬅️ السجل كاملًا' "oplog:all:$($Options.Hours)") )
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-OperationLogBlocks {
@@ -147,9 +258,9 @@ function Get-OperationLogBlocks {
         because something is suspected, and counting failures by reading
         forty rows is the work it exists to save.
     #>
-    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue)
-    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day
-    $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue, [string]$OnlyTarget = '', [long]$ViewerUserId = 0)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day -OnlyTarget $OnlyTarget
+    $who = Get-OperationLogScopeLabel -Data $data -ViewerUserId $ViewerUserId
     $blocks = @(@{ type = 'heading'; text = "🧾 سجل العمليات — $($data.Label) · $who"; size = 3 })
 
     $all = @($data.Records)
@@ -216,9 +327,9 @@ function Get-OperationLogBlocks {
 function Get-OperationLogText {
     <# The fallback, in the reports' shape: totals first, the rows quoted
        under them. #>
-    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue)
-    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day
-    $who = if ($data.Scope -eq 'mine') { 'عملياتي' } else { 'كل المشغّلين' }
+    param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue, [string]$OnlyTarget = '', [long]$ViewerUserId = 0)
+    $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day -OnlyTarget $OnlyTarget
+    $who = Get-OperationLogScopeLabel -Data $data -ViewerUserId $ViewerUserId
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>🧾 سجل العمليات</b> — $(ConvertTo-HtmlText $data.Label) · $who")
     $all = @($data.Records)
@@ -253,10 +364,24 @@ function Get-OperationLogKeyboard {
         [long]$OnlyUserId = 0,
         [long]$ChatId = 0,
         [long]$UserId = 0,
-        [datetime]$Day = [datetime]::MinValue
+        [datetime]$Day = [datetime]::MinValue,
+        [string]$OnlyTarget = '',
+        [long]$PickedUserId = 0
     )
     $scope = if ($OnlyUserId -gt 0) { 'mine' } else { 'all' }
-    $prefix = if ($scope -eq 'mine') { 'oplog' } else { 'oplog:all' }
+    # A filter has to survive a change of window, or the first thing an
+    # operator does after narrowing - widening from 24 hours to 72 - throws
+    # the narrowing away without saying so. So the window buttons carry the
+    # filter in their own callback rather than falling back to the plain one.
+    $filtered = ($PickedUserId -gt 0) -or -not [string]::IsNullOrWhiteSpace($OnlyTarget)
+    $targetIndex = if ([string]::IsNullOrWhiteSpace($OnlyTarget)) { -1 } else { Get-TemplateIndex -Key $OnlyTarget }
+    $prefix = if ($PickedUserId -gt 0) { 'oplogu' }
+    elseif ($targetIndex -ge 0) { 'oplogt' }
+    elseif ($scope -eq 'mine') { 'oplog' }
+    else { 'oplog:all' }
+    $suffix = if ($PickedUserId -gt 0) { ":$PickedUserId" }
+    elseif ($targetIndex -ge 0) { ":$targetIndex" }
+    else { '' }
     $isDay = $Day -gt [datetime]::MinValue
     # $window, not $hours: PowerShell variable names are case-insensitive, so
     # a loop over $hours would be a loop over the -Hours parameter itself -
@@ -265,7 +390,7 @@ function Get-OperationLogKeyboard {
     $buttons = @(foreach ($window in $script:OperationLogWindows) {
             $label = Get-OperationLogWindowLabel -Hours $window
             if ($window -eq $Hours) { $label = "• $label" }
-            New-Button $label "${prefix}:$window"
+            New-Button $label "${prefix}:$window$suffix"
         })
     $rows = @()
     if ($isDay) {
@@ -294,9 +419,15 @@ function Get-OperationLogKeyboard {
         $yesterday = (Get-Date).Date.AddDays(-1)
         $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
     }
+    if ($filtered) {
+        $rows += , @( (New-Button '✖️ أزل التصفية' "oplog:all:$Hours") )
+    }
+    elseif (-not $isDay) {
+        $rows += , @( (New-Button '🔎 تصفية' "oplogpick:$Hours") )
+    }
     # Everyone's operations is an administrator's view: an operator seeing who
     # else put what on air is not this screen's job.
-    if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+    if (-not $filtered -and (Test-Admin -ChatId $ChatId -UserId $UserId)) {
         $rows += , @($(if ($scope -eq 'mine') {
                     New-Button '👥 كل المشغّلين' "oplog:all:$Hours"
                 }
@@ -315,17 +446,24 @@ function Invoke-OperationLogCommand {
         [long]$UserId = 0,
         [ValidateSet(24, 48, 72, 168)][int]$Hours = 48,
         [switch]$AllUsers,
-        [datetime]$Day = [datetime]::MinValue
+        [datetime]$Day = [datetime]::MinValue,
+        [string]$OnlyTarget = '',
+        [long]$PickedUserId = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     # An operator who asks for everyone gets their own operations. The guard
     # is here rather than only on the button, because a callback can arrive
     # without one being pressed.
     $everyone = $AllUsers -and (Test-Admin -ChatId $ChatId -UserId $UserId)
-    $onlyUserId = if ($everyone) { 0 } else { $UserId }
-    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $onlyUserId -ChatId $ChatId -UserId $UserId -Day $Day
-    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-OperationLogBlocks -Hours $Hours -OnlyUserId $onlyUserId -Day $Day) -ReplyMarkup $keyboard) { return }
-    Send-TelegramPagedText -ChatId $ChatId -Text (Get-OperationLogText -Hours $Hours -OnlyUserId $onlyUserId -Day $Day) -ParseMode HTML -ReplyMarkup $keyboard
+    # Picking another operator is the same privilege as seeing everyone, so it
+    # passes the same guard and in the same place: a non-administrator asking
+    # for somebody else gets their own log, not an error and not a refusal
+    # they could probe.
+    $picked = if ($PickedUserId -gt 0 -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { $PickedUserId } else { 0 }
+    $onlyUserId = if ($picked -gt 0) { $picked } elseif ($everyone) { 0 } else { $UserId }
+    $keyboard = Get-OperationLogKeyboard -Hours $Hours -OnlyUserId $onlyUserId -ChatId $ChatId -UserId $UserId -Day $Day -OnlyTarget $OnlyTarget -PickedUserId $picked
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-OperationLogBlocks -Hours $Hours -OnlyUserId $onlyUserId -Day $Day -OnlyTarget $OnlyTarget -ViewerUserId $UserId) -ReplyMarkup $keyboard) { return }
+    Send-TelegramPagedText -ChatId $ChatId -Text (Get-OperationLogText -Hours $Hours -OnlyUserId $onlyUserId -Day $Day -OnlyTarget $OnlyTarget -ViewerUserId $UserId) -ParseMode HTML -ReplyMarkup $keyboard
 }
 
 function Get-ReportsMenuKeyboard {

@@ -654,3 +654,95 @@ Describe 'Work report' {
         @($table.cells)[0].Count | Should -Be 7
     }
 }
+
+Describe 'Operation log filters' {
+    BeforeEach {
+        $script:OplogStamp = { param($MinutesAgo) (Get-Date).ToUniversalTime().AddMinutes(-$MinutesAgo).ToString('o') }
+        Mock Read-AuditRecords {
+            @(
+                [pscustomobject]@{ timestampUtc = (& $script:OplogStamp 50); event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $script:OplogStamp 40); event = 'air_control'; action = 'HIDE'; result = 'success'; userId = '42'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $script:OplogStamp 30); event = 'air_control'; action = 'SHOW'; result = 'failed'; userId = '77'; target = 'عاجل'; layer = '4' }
+                [pscustomobject]@{ timestampUtc = (& $script:OplogStamp 20); event = 'air_control'; action = 'SHOW'; result = 'success'; userId = '77'; target = 'شعار'; layer = '2' }
+            )
+        }
+        Mock Get-AuditOperatorName { "مشغّل $UserId" }
+    }
+
+    It 'narrows the window to one template without touching the other rows' {
+        # The question a fault actually raises - what happened to THIS
+        # template - was answered by reading every row looking for one name.
+        $everything = Get-OperationLogData -Hours 24
+        $onlyLogo = Get-OperationLogData -Hours 24 -OnlyTarget 'شعار'
+
+        @($everything.Records).Count | Should -Be 4
+        @($onlyLogo.Records).Count | Should -Be 1
+        [string]@($onlyLogo.Records)[0].UserId | Should -Be '77'
+    }
+
+    It 'combines an operator with a template rather than replacing one by the other' {
+        $narrowed = Get-OperationLogData -Hours 24 -OnlyUserId 42 -OnlyTarget 'عاجل'
+
+        @($narrowed.Records).Count | Should -Be 2
+        @($narrowed.Records | Where-Object { [string]$_.UserId -ne '42' }).Count | Should -Be 0
+    }
+
+    It 'offers only what appears in the window, most active first' {
+        # A picker listing every operator and every template the station has
+        # would be mostly choices that return an empty screen.
+        $options = Get-OperationLogFilterOptions -Hours 24
+
+        @($options.Targets)[0].Key | Should -Be 'عاجل'
+        @($options.Targets)[0].Count | Should -Be 3
+        @($options.Targets).Key | Should -Not -Contain 'قالب لم يُستعمل'
+        @($options.Operators).Count | Should -Be 2
+    }
+
+    It 'says how many choices it left out instead of showing a short list silently' {
+        $options = Get-OperationLogFilterOptions -Hours 24 -Limit 1
+
+        $options.HiddenTargets | Should -Be 1
+        $options.HiddenOperators | Should -Be 1
+        Get-OperationLogFilterText -Options $options | Should -Match 'أُخفي'
+    }
+
+    It 'holds the chooser to its cap however many templates the window touched' {
+        # The paging guard is told this keyboard is bounded; this is the test
+        # that keeps that claim true as the registry grows - a station with a
+        # thousand templates must not get a thousand buttons.
+        Mock Read-AuditRecords {
+            @(0..29 | ForEach-Object {
+                    [pscustomobject]@{ timestampUtc = (& $script:OplogStamp $_); event = 'air_control'
+                        action = 'SHOW'; result = 'success'; userId = "$(100 + $_)"; target = "قالب-$_"; layer = '4' }
+                })
+        }
+
+        $options = Get-OperationLogFilterOptions -Hours 24
+        # Counted from the same window rather than written as a literal: how
+        # many of thirty stamps fall inside 24 hours depends on where the
+        # window edge lands, and a test pinned to a number would break at a
+        # time of day rather than on a defect.
+        $distinct = @(@(Get-OperationLogData -Hours 24).Records | Select-Object -ExpandProperty Target -Unique).Count
+
+        @($options.Targets).Count | Should -Be 12
+        @($options.Operators).Count | Should -Be 12
+        $distinct | Should -BeGreaterThan 12
+        $options.HiddenTargets | Should -Be ($distinct - 12)
+    }
+
+    It 'names the filter in the heading so a narrowed screen is not read as the whole picture' {
+        # The table screen, which is what an operator actually gets; its text
+        # fallback needs parts this test file does not dot-source.
+        $heading = @(Get-OperationLogBlocks -Hours 24 -OnlyTarget 'شعار')[0].text
+
+        $heading | Should -Match 'شعار'
+        $heading | Should -Match '📋'
+    }
+
+    It 'still calls the viewers own log عملياتي rather than their name' {
+        # The wording every existing screen uses; an administrator picking
+        # somebody else is the only case that should read as a name.
+        Get-OperationLogScopeLabel -Data (Get-OperationLogData -Hours 24 -OnlyUserId 42) -ViewerUserId 42 | Should -Be 'عملياتي'
+        Get-OperationLogScopeLabel -Data (Get-OperationLogData -Hours 24 -OnlyUserId 42) -ViewerUserId 77 | Should -Be 'مشغّل 42'
+    }
+}

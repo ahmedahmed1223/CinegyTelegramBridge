@@ -621,6 +621,54 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'oplogpick:*' {
+            $pickHours = 48
+            if ([int]::TryParse((Get-CallbackArg $data 'oplogpick:'), [ref]$pickHours) -and $pickHours -in $script:OperationLogWindows) {
+                # Built over the same records the operator is looking at, and
+                # over THEIR scope: an operator picking from a list of names
+                # they are not allowed to read would leak the roster this
+                # screen exists to keep to administrators.
+                $pickScope = if (Test-Admin -ChatId $chatId -UserId $userId) { 0 } else { $userId }
+                $pickOptions = Get-OperationLogFilterOptions -Hours $pickHours -OnlyUserId $pickScope
+                Send-TelegramMessage -ChatId $chatId -Text (Get-OperationLogFilterText -Options $pickOptions) -ParseMode HTML -ReplyMarkup (Get-OperationLogFilterKeyboard -Options $pickOptions)
+            }
+            break
+        }
+        'oplogu:*' {
+            $userFilterParts = @((Get-CallbackArg $data 'oplogu:') -split ':')
+            $userFilterHours = 48
+            $pickedOperator = 0L
+            if ($userFilterParts.Count -ge 2 -and
+                [int]::TryParse($userFilterParts[0], [ref]$userFilterHours) -and
+                $userFilterHours -in $script:OperationLogWindows -and
+                [long]::TryParse($userFilterParts[1], [ref]$pickedOperator) -and $pickedOperator -gt 0) {
+                Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Hours $userFilterHours -PickedUserId $pickedOperator
+            }
+            break
+        }
+        'oplogt:*' {
+            $targetFilterParts = @((Get-CallbackArg $data 'oplogt:') -split ':')
+            $targetFilterHours = 48
+            $targetFilterIndex = -1
+            if ($targetFilterParts.Count -ge 2 -and
+                [int]::TryParse($targetFilterParts[0], [ref]$targetFilterHours) -and
+                $targetFilterHours -in $script:OperationLogWindows -and
+                [int]::TryParse($targetFilterParts[1], [ref]$targetFilterIndex)) {
+                $filterTemplate = Get-TemplateByIndex -Index $targetFilterIndex
+                if ($filterTemplate) {
+                    # An administrator filtering by template asks about the
+                    # template, not about themselves - so the operator scope
+                    # widens with the same guard the all-users button uses.
+                    if (Test-Admin -ChatId $chatId -UserId $userId) {
+                        Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Hours $targetFilterHours -OnlyTarget ([string]$filterTemplate.Key) -AllUsers
+                    }
+                    else {
+                        Invoke-OperationLogCommand -ChatId $chatId -UserId $userId -Hours $targetFilterHours -OnlyTarget ([string]$filterTemplate.Key)
+                    }
+                }
+            }
+            break
+        }
         'oplog:all:*' {
             $hours = 48
             if ([int]::TryParse((Get-CallbackArg $data 'oplog:all:'), [ref]$hours) -and $hours -in $script:OperationLogWindows) {

@@ -62,6 +62,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-SettingSmallRangeKeyboard'     = 'one button per value in a declared range of at most 24'
             'Show-SettingTimePicker'            = 'twenty-four hours and four quarters, both fixed'
             'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
+            'Get-OperationLogFilterKeyboard'    = 'one button per choice from Get-OperationLogFilterOptions, which caps both lists at its Limit and reports what it left out'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'
             'Invoke-ShowTemplateResult'         = 'builds no keyboard; it prepends one fixed row to the main menu on the failure message'

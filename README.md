@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.40.1
+
+Paging the bulletin rundown in 8.39.0 exposed something the single-page
+screen had always done: every row-scoped action — move, delete, add — redrew
+at page zero. Invisible while the rundown fitted on one screen, and a lost
+place the moment it did not: moving row forty threw the view back to row one,
+every time, not only across a page boundary. The screen now follows the row.
+A move goes with it over a boundary, a delete lands beside the gap it left,
+and a new row opens on the page that holds it. The page is derived from the
+row id against the current rundown rather than remembered per chat, because
+a remembered position goes stale the moment somebody else reorders.
+
 ## Version 8.40.0
 
 A breaking-news board: a table of urgent lines that an operator manages

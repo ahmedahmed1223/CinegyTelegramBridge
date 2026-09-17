@@ -361,3 +361,44 @@ Describe 'The rich guide fits the message it is sent in' {
         }
     }
 }
+
+Describe 'The manual carries only what the station has' {
+    BeforeEach { Mock Test-Admin { $false } }
+
+    It 'offers the breaking-news board chapter only where the board exists' {
+        # 8.40.0 shipped 1200 lines of feature with no chapter at all; and a
+        # chapter about a scene this station has not got is dead text that
+        # costs a live chapter its place on the one screen.
+        Mock Test-UrgentBoardAvailable { $true }
+        @(Get-HelpChapters -ChatId 1 -UserId 1).Key | Should -Contain 'urgent'
+
+        Mock Test-UrgentBoardAvailable { $false }
+        @(Get-HelpChapters -ChatId 1 -UserId 1).Key | Should -Not -Contain 'urgent'
+    }
+
+    It 'drops the bulletin chapter on a bridge without the bulletin scene' {
+        Mock Test-MojazAvailable { $false }
+        @(Get-HelpChapters -ChatId 1 -UserId 1).Key | Should -Not -Contain 'mojaz'
+    }
+
+    It 'keeps the chapter you open when something is broken on the screen' {
+        # AGENTS.md names 🆘 حين يحدث خطأ the chapter most worth having on
+        # screen, and it has been squeezed off once before. Adding the board
+        # chapter pushed it off again until it was moved up beside the
+        # emergency chapter it belongs with.
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-MojazAvailable { $true }
+        $shown = @(Get-HelpRichBlocks -ChatId 1 -UserId 1 | Where-Object { $_.type -eq 'details' } | ForEach-Object { [string]$_.summary })
+
+        $shown | Should -Contain '🆘 حين يحدث خطأ'
+        $shown | Should -Contain '🚨 جدول العواجل'
+    }
+
+    It 'stays inside the payload limit it is measured against' {
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-Admin { $true }
+
+        (ConvertTo-RichMessagePayload -Blocks (Get-HelpRichBlocks -ChatId 1 -UserId 1)).Length | Should -BeLessThan 12000
+    }
+}

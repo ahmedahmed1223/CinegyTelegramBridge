@@ -93,6 +93,22 @@ function Get-HelpChapters {
                 '⚡ الإخفاء والخروج لهما أولوية على العرض داخل الدفعة نفسها،'
                 '   فأمر الطوارئ لا ينتظر خلف عملية عرض.'
             ) }
+        @{ Key = 'trouble'; Title = '🆘 حين يحدث خطأ'; AdminOnly = $false; Body = @(
+                'الشاشة تقول «فشل» ولا تعرف السبب:'
+                '↳ 🔍 لماذا لم يظهر؟ تحت رسالة الفشل: هل Cinegy يستجيب، وهل'
+                '   ملف المشهد في مكانه، ومن يحجز الطبقة. فحص قراءة فقط.'
+                '↳ 🧾 عملياتي يذكر سبب الفشل والإرشاد المناسب لكل حالة.'
+                '↳ انسخ 🔖 المرجع وأرسله للمشرف؛ يجد به سطر العملية في السجل.'
+                ''
+                'قالب ظاهر على الشاشة والجسر لا يعرفه، أو العكس:'
+                '↳ 🎚 الطبقات يفحص Cinegy مباشرة ويقارن — «خارجي» تعني أن'
+                '   شيئًا عُرض من خارج الجسر.'
+                '↳ 📸 صورة من البث تحسم الأمر بالنظر.'
+                ''
+                'لا شيء يستجيب:'
+                '↳ ℹ️ الحالة تبيّن إن كان Air غير متصل.'
+                '↳ أبلغ المشرف؛ مركز الصحة عنده يوضح أين الخلل.'
+            ) }
         @{ Key = 'time'; Title = '⏱ التوقيت والجدولة'; AdminOnly = $false; Body = @(
                 '⏱ عرض مؤقّت: يعرض القالب ويخفيه تلقائيًا بعد المدة.'
                 '↳ يمكن ربط مؤقّت بقالب موجود على الهواء من زر ⏱ بجانبه.'
@@ -101,6 +117,18 @@ function Get-HelpChapters {
                 '🔔 إن بقي قالب على الهواء طويلًا يصلك تنبيه ومعه زر'
                 '   «تمت المعالجة». إن لم تؤكد تصلك متابعة واحدة بعدها.'
                 '↳ المؤقتات والتنبيهات تُحفظ، فتستمر بعد إعادة تشغيل الجسر.'
+            ) }
+        @{ Key = 'urgent'; Title = '🚨 جدول العواجل'; AdminOnly = $false; Available = (Test-UrgentBoardAvailable); Body = @(
+                'أسطر عاجلة تُعرض واحدًا بعد الآخر بإيقاع ثابت، بلا أن تقف'
+                '   عند كل سطر لتكتبه وتنشره بيدك.'
+                '🚨 العواجل ← ➕ أضف سطرًا ← ✅ حدّد ما يُعرض ← ▶️ تشغيل.'
+                '↳ ⏹ إيقاف العواجل يظهر في القائمة ما دام الجدول يعمل.'
+                '⏱ لكل سطر فاصله، وإلا فالفاصل العام.'
+                '↳ 🔁 cycle يعيد الجدول كاملًا (١ ٢ ٣ · ١ ٢ ٣)، وitem'
+                '   يكرّر كل سطر ثم ينتقل (١ ١ · ٢ ٢). والسقف الزمني يقصّهما.'
+                '🎬 text يبدّل الكلمات في المشهد القائم، وexit يُخرجه ويعيده'
+                '   بالسطر التالي. لكل سطر نمطه، وإلا فالنمط العام.'
+                '⚙️ إعداداته في ⚙️ الإعدادات ← التشغيل على الهواء.'
             ) }
         @{ Key = 'news'; Title = '📰 شريط الأخبار'; AdminOnly = $false; Body = @(
                 'الشريط يُحرَّر كمسودة، ولا يصل الهواء إلا بالنشر.'
@@ -154,7 +182,7 @@ function Get-HelpChapters {
                 '↳ إن كانت المسودة بيد غيرك: «🔓 طلب فكّ القفل»، والاستبدال'
                 '   المباشر للمشرف وحده وبتأكيد.'
             ) }
-        @{ Key = 'mojaz'; Title = '📑 الموجز'; AdminOnly = $false; Body = @(
+        @{ Key = 'mojaz'; Title = '📑 الموجز'; AdminOnly = $false; Available = (Test-MojazAvailable); Body = @(
                 'نشرة كاملة من جدول: كل صف صورة وعنوان وخبر، تُعرض بالترتيب'
                 '   في مشهد واحد لا يُعاد عرضه بين خبر وآخر.'
                 ''
@@ -327,6 +355,10 @@ function Get-HelpChapters {
                 '↳ 📜 السجل و🧪 التشخيص و🛠 الأمر الخام.'
                 '↳ ✅ جاهزية المناوبة: طبقات على الهواء وعمليات معلَّقة ومسودة'
                 '   شريط ومحادثات محجورة وأعطال مثبَّتة، ثم حكم جاهز أو قائمة.'
+                '↳ وتحتها 🛡 الحمايات المعطّلة بنتيجتها واسم إعدادها — ثلاث منها'
+                '   تُشحن مطفأة. وهي اختيار إعداد، فلا تدخل حكم «جاهز».'
+                '↳ 🗄 نسخ القوالب في 📚 القوالب: استعادة تُسمّي ما ستحذف وتغيّر'
+                '   قبل الكتابة، وتُرفض إن مسّت قالبًا على الهواء أو مجدولًا.'
                 '🔇 هدوء ساعتين: في ⚙️ الإعدادات ← المراقبة، بجانب فترة الهدوء'
                 '   المجدولة. يحتجز غير العاجل فقط، وينتهي وحده مع إعادة التشغيل.'
                 '🩺 مركز الصحة: Telegram وCinegy والمخرج والتخزين والجدولة'
@@ -387,20 +419,6 @@ function Get-HelpChapters {
                 '🚪 المجموعات: البوت يغادر أي مجموعة يُضاف إليها ويخبرك.'
                 '↳ مجموعة في AllowedChatIds ليست مجهولة فلا يغادرها.'
             ) }
-        @{ Key = 'trouble'; Title = '🆘 حين يحدث خطأ'; AdminOnly = $false; Body = @(
-                'الشاشة تقول «فشل» ولا تعرف السبب:'
-                '↳ 🧾 عملياتي يذكر سبب الفشل والإرشاد المناسب لكل حالة.'
-                '↳ انسخ 🔖 المرجع وأرسله للمشرف؛ يجد به سطر العملية في السجل.'
-                ''
-                'قالب ظاهر على الشاشة والجسر لا يعرفه، أو العكس:'
-                '↳ 🎚 الطبقات يفحص Cinegy مباشرة ويقارن — «خارجي» تعني أن'
-                '   شيئًا عُرض من خارج الجسر.'
-                '↳ 📸 صورة من البث تحسم الأمر بالنظر.'
-                ''
-                'لا شيء يستجيب:'
-                '↳ ℹ️ الحالة تبيّن إن كان Air غير متصل.'
-                '↳ أبلغ المشرف؛ مركز الصحة عنده يوضح أين الخلل.'
-            ) }
         @{ Key = 'back'; Title = '↩️ الرجوع والإلغاء'; AdminOnly = $false; Body = @(
                 '• ⬅️ رجوع في أسفل كل شاشة يعود خطوة للخلف.'
                 '• 🏠 القائمة يرجعك للرئيسية في أي وقت، حتى أثناء إدخال نص.'
@@ -432,7 +450,22 @@ function Get-HelpChapters {
         $track.Body += '📊 الحالة الكاملة: للمشرف والمالك؛ تفحص المصدر يدويًا وتوضح حالة سيرفر المتابعة.'
     }
 
-    return @($chapters | Where-Object { -not $_.AdminOnly -or $isAdmin })
+    # A chapter about a scene this station has not got is dead text, and dead
+    # text is not free: the manual is already bigger than one message, so every
+    # paragraph that cannot apply costs a chapter that can its place on the
+    # screen.
+    #
+    # The test is what the station HAS, never what it has CONFIGURED. Gating
+    # the sheet chapter on a filled-in sheet URL hid the only page that
+    # explains how to fill it in - a chapter that appears once you have set
+    # the thing up can never be the chapter that teaches you to. A missing
+    # scene file cannot be fixed from the bot; a missing setting can, and this
+    # is where you learn how.
+    #
+    # ContainsKey, not a bare property read - Set-StrictMode throws on the
+    # missing key, and most chapters carry no Available at all.
+    $available = @($chapters | Where-Object { -not $_.ContainsKey('Available') -or [bool]$_.Available })
+    return @($available | Where-Object { -not $_.AdminOnly -or $isAdmin })
 }
 
 function Get-HelpRichBlocks {

@@ -89,6 +89,35 @@ function Get-MojazText {
     return ($lines -join "`n")
 }
 
+function Get-MojazRowPage {
+    <#
+        Which page of the rundown a row sits on, so a screen redrawn after an
+        edit opens where the operator was standing.
+
+        Every row-scoped action - move, delete, add, edit - redrew the bulletin
+        at page zero, which was invisible while the screen was one page and
+        became a lost place the moment it was paged: moving row forty threw the
+        view back to row one, every time. Derived from the row id rather than
+        remembered per chat, because the position is already in the data and a
+        remembered one would go stale the moment somebody else reordered.
+
+        Falls back to the last page when the row is gone - a delete leaves the
+        operator beside what it removed, not at the top of a long table.
+    #>
+    param([AllowEmptyCollection()]$Rows, [string]$RowId, [int]$PageSize = 25, [int]$FallbackIndex = -1)
+    $list = @($Rows)
+    $index = -1
+    if (-not [string]::IsNullOrWhiteSpace($RowId)) {
+        for ($i = 0; $i -lt $list.Count; $i++) {
+            if ([string]$list[$i].Id -eq $RowId) { $index = $i; break }
+        }
+    }
+    if ($index -lt 0) { $index = $FallbackIndex }
+    if ($index -lt 0 -or $list.Count -eq 0 -or $PageSize -le 0) { return 0 }
+    if ($index -ge $list.Count) { $index = $list.Count - 1 }
+    return [int][math]::Floor($index / $PageSize)
+}
+
 function Get-MojazKeyboard {
     param($Bulletin, [int]$Page = 0)
     $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
@@ -208,7 +237,7 @@ function Show-MojazPreviewScreen {
 }
 
 function Show-MojazScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0, [string]$FocusRowId = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-MojazAvailable)) {
         Send-TelegramMessage -ChatId $ChatId -Text "قالب '$($script:MojazTemplateKey)' غير موجود في سجل القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -217,6 +246,11 @@ function Show-MojazScreen {
     # The bulletin this chat had open can be gone - deleted from another chat.
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    # A row-scoped caller names the row it just touched and the screen finds
+    # its page; everything else keeps asking for page zero as before.
+    if (-not [string]::IsNullOrWhiteSpace($FocusRowId)) {
+        $Page = Get-MojazRowPage -Rows @(Get-JsonProp $bulletin 'Rows') -RowId $FocusRowId
+    }
     $keyboard = Get-MojazKeyboard -Bulletin $bulletin -Page $Page
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks -Bulletin $bulletin) -ReplyMarkup $keyboard) { return }
     Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText -Bulletin $bulletin) -ParseMode HTML -ReplyMarkup $keyboard
@@ -672,7 +706,11 @@ function Complete-MojazRowText {
         Add-AuditEntry "📑 أُضيف صف للموجز - بواسطة $(Format-UserAuditActor -UserId $userId)"
         $script:MojazSelections[[string]$ChatId] = $bulletinId
     }
-    Show-MojazScreen -ChatId $ChatId -UserId $userId
+    # A new row is appended, so the page that holds it is the last one. Adding
+    # the forty-first story and being shown the first is the same lost place
+    # as a move, one screen over.
+    $addedRows = @(Get-JsonProp (Get-MojazSelected -ChatId $ChatId) 'Rows')
+    Show-MojazScreen -ChatId $ChatId -UserId $userId -Page (Get-MojazRowPage -Rows $addedRows -RowId '' -FallbackIndex ($addedRows.Count - 1))
 }
 
 function Receive-MojazPhoto {
@@ -728,9 +766,12 @@ function Receive-MojazPhoto {
 
 function Remove-MojazRow {
     param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    # Where the row was, read before it goes, so the redraw lands beside the
+    # gap rather than at the top of a long rundown.
+    $removedPage = Get-MojazRowPage -Rows @(Get-JsonProp (Get-MojazSelected -ChatId $ChatId) 'Rows') -RowId $RowId
     $result = Remove-MojazBulletinRow -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -RowId $RowId -UserId $UserId
     Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
-    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId -Page $removedPage
 }
 
 function Move-MojazRow {
@@ -740,7 +781,9 @@ function Move-MojazRow {
     # Hitting the edge of the table is not worth a message: the screen simply
     # redraws unchanged.
     Invoke-MojazEdit -Result $result -ChatId $ChatId -Quiet | Out-Null
-    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+    # Follow the row across a page boundary: a move that pushes it onto the
+    # next page must not leave the operator looking at the page it left.
+    Show-MojazScreen -ChatId $ChatId -UserId $UserId -FocusRowId $RowId
 }
 
 function Clear-MojazRows {

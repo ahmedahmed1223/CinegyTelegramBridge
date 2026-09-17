@@ -2211,3 +2211,40 @@ Describe 'Fixing the loop-fit warning from its own button (T-12)' {
         Get-MojazDelayFrames -Bulletin (Get-MojazSelected -ChatId 100) | Should -Be 1500
     }
 }
+
+Describe 'A paged rundown keeps the operators place' {
+    BeforeEach {
+        $script:PagedRows = @(0..59 | ForEach-Object { [pscustomobject]@{ Id = "row-$_"; Title = "عنوان $_"; Text = "نصّ $_" } })
+    }
+
+    It 'finds the page a row sits on rather than always answering zero' {
+        # The shape this was built for: every row-scoped action redrew at page
+        # zero, which was invisible while the rundown was one page and became
+        # a lost place the moment it was paged.
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-0'  | Should -Be 0
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-24' | Should -Be 0
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-25' | Should -Be 1
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-59' | Should -Be 2
+    }
+
+    It 'follows a row across the page boundary it was moved over' {
+        # Row 24 is the last on page one; moving it down puts it on page two,
+        # and the redraw has to go with it.
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-25' | Should -Be 1
+    }
+
+    It 'lands beside the gap when the row it was given is gone' {
+        # A delete names a row that no longer exists; the fallback is where it
+        # was, not the top of a sixty-row table.
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-deleted' -FallbackIndex 40 | Should -Be 1
+    }
+
+    It 'answers zero for an empty rundown instead of dividing by nothing' {
+        Get-MojazRowPage -Rows @() -RowId 'row-0' | Should -Be 0
+        Get-MojazRowPage -Rows $script:PagedRows -RowId '' | Should -Be 0
+    }
+
+    It 'clamps a fallback past the end rather than paging past the table' {
+        Get-MojazRowPage -Rows $script:PagedRows -RowId '' -FallbackIndex 999 | Should -Be 2
+    }
+}

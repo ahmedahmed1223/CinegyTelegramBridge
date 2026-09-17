@@ -81,6 +81,23 @@ Describe 'The breaking-news board and the fixed urgent template' {
         $off | Should -Not -Match 'urgentb:open'
     }
 
+    It 'clears the previous kicker when the next story has no title' {
+        $values = Get-UrgentItemVariables -Item $script:UrgentBoard.Items[0]
+        $values.ContainsKey('Kicker.Text') | Should -BeTrue
+        $values['Kicker.Text'] | Should -Be ''
+    }
+
+    It 'shows a disabled line as disabled on the fallback text too' {
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $script:UrgentBoard = (Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field Enabled -Value $false).Value
+        Get-UrgentBoardText -ChatId 100 | Should -Match '⛔'
+    }
+
+    It 'warns about the sensitive template ceiling in fallback text' {
+        Mock Get-UrgentRunCeiling { @{ AutoHideSeconds = 30; Seconds = 30; Reason = 'autohide' } }
+        Get-UrgentBoardText -ChatId 100 | Should -Match 'حسّاس.*30'
+    }
+
     It 'leaves the fixed urgent template exactly where it was' {
         # The board is a second consumer of this scene, not a replacement. With
         # the board switched off the old path must still be the same call it
@@ -140,6 +157,28 @@ Describe 'The breaking-news board and the fixed urgent template' {
         $script:UrgentBoard = (Remove-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$items[0].Id)).Value
 
         @(Get-UrgentSelectedIds -ChatId 100).Count | Should -Be 1
+    }
+
+    It 'recovers the backup file when the primary is missing' {
+        Mock Write-BridgeLog {}
+        $script:UrgentBoard = (Set-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$script:UrgentBoard.Items[0].Id) -Field Text -Value 'من النسخة الاحتياطية').Value
+        $backupPath = Join-Path $TestDrive 'backup-only.json'
+        Mock Get-UrgentBoardFile { Join-Path $TestDrive 'backup-only.json' }
+        Set-Content -LiteralPath "$backupPath.bak" -Value ($script:UrgentBoard | ConvertTo-Json -Depth 20) -Encoding utf8
+
+        Import-UrgentBoard
+
+        @($script:UrgentBoard.Items)[0].Text | Should -Be 'من النسخة الاحتياطية'
+    }
+
+    It 'refuses a well-formed file that is not a board' {
+        Mock Write-BridgeLog {}
+        Set-Content -LiteralPath (Get-UrgentBoardFile) -Value '{"unexpected":true}' -Encoding utf8
+
+        Import-UrgentBoard
+
+        @($script:UrgentBoard.Items).Count | Should -Be 0
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Level -eq 'WARN' }
     }
 }
 
@@ -215,6 +254,25 @@ Describe 'Running the breaking-news board' {
         Mock Show-TitlerTemplate { @{ Success = $false; Error = 'offline' } }
         Move-UrgentBoardNext -ChatId 100 -UserId 101 | Should -BeFalse
         $script:UrgentBoardRun | Should -BeNullOrEmpty
+    }
+
+    It 'keeps a failed stop paused and available for another stop attempt' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Mock Invoke-ExitLayer { $false }
+        Stop-UrgentBoardRun -ChatId 100 -UserId 101 -Quiet | Should -BeFalse
+        $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
+        $script:UrgentBoardRun.Clock.IsRunning | Should -BeFalse
+        Step-TestUrgentRun
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'does not resume or skip after an unconfirmed exit' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Mock Invoke-ExitLayer { $false }
+        Stop-UrgentBoardRun -ChatId 100 -UserId 101 -Quiet | Out-Null
+        Resume-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeFalse
+        Move-UrgentBoardNext -ChatId 100 -UserId 101 | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
     }
 
     It 'puts the first line up through the ordinary pipeline' {
@@ -596,6 +654,76 @@ Describe 'Editing the board from its buttons' {
         $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
     }
 
+    It 'keeps a pending text edit attached to its original story after reordering' {
+        $original = [string]$script:UrgentBoard.Items[1].Id
+        Invoke-TestUrgentNumberCallback "urgentb:text:$($script:UrgentBoard.Items[1].Id)"
+        $script:UrgentBoard = (Remove-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$script:UrgentBoard.Items[0].Id)).Value
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value 'edited B' | Should -BeTrue
+        (Get-UrgentItem -Board $script:UrgentBoard -ItemId $original).Text | Should -Be 'edited B'
+        $script:UrgentBoard.Items[1].Text | Should -Be 'عاجل 3'
+    }
+
+    It 'keeps an old delete keyboard attached to its story after a move' {
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $keyboard = Get-UrgentItemKeyboard -Position 0
+        $action = @($keyboard.inline_keyboard | ForEach-Object { $_ } | Where-Object { $_.callback_data -like 'urgentb:itemdel:*' })[0].callback_data
+        $script:UrgentBoard = (Move-UrgentItem -Board $script:UrgentBoard -ItemId $id -Delta 1).Value
+        Invoke-TestUrgentNumberCallback $action
+        Get-UrgentItem -Board $script:UrgentBoard -ItemId $id | Should -BeNullOrEmpty
+        $script:UrgentBoard.Items[0].Text | Should -Be 'عاجل 2'
+    }
+
+    It 'reports a failed default save and restores the previous value' {
+        Mock Save-Config { $script:LastConfigSaveFailed = $true }
+        Set-UrgentBoardSetting -ChatId 100 -Name UrgentBoardIntervalSeconds -Value 25 | Should -BeFalse
+        Get-SettingInt 'UrgentBoardIntervalSeconds' 8 | Should -Be 10
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -like '*تعذّر حفظ*' }
+    }
+
+    It 'explains the actual scene floor on the interval picker' {
+        Mock Get-UrgentFloorSeconds { 4.5 }
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $script:UrgentBoard = (Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field IntervalSeconds -Value 1).Value
+        Invoke-TestUrgentNumberCallback "urgentb:interval:$id"
+        Should -Invoke Edit-TelegramMessageText -ParameterFilter { $Text -like '*4.5*' -and $Text -like '*المشهد*' }
+    }
+
+    It 'handles pre-upgrade selection and deletion buttons without throwing' {
+        foreach ($action in @('urgentb:all', 'urgentb:none', 'urgentb:delconfirm', 'urgentb:all:bad', 'urgentb:itemdel:0')) {
+            { Invoke-TestUrgentNumberCallback $action } | Should -Not -Throw
+        }
+        @($script:UrgentBoard.Items).Count | Should -Be 3
+    }
+
+    It 'ignores malformed action suffixes without changing selection' {
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        Set-UrgentSelectedIds -ChatId 100 -Ids @($id)
+        foreach ($action in @('urgentb:alljunk', 'urgentb:nonejunk', 'urgentb:delconfirmjunk')) {
+            { Invoke-TestUrgentNumberCallback $action } | Should -Not -Throw
+            @(Get-UrgentSelectedIds -ChatId 100) | Should -HaveCount 1
+            @(Get-UrgentSelectedIds -ChatId 100)[0] | Should -Be $id
+        }
+    }
+
+    It 'keeps selection on the displayed page' {
+        New-TestUrgentBoard -Count 20 | Out-Null
+        Mock Show-UrgentBoardScreen {}
+        $size = Get-UrgentBoardPageSize
+        Invoke-TestUrgentNumberCallback "urgentb:pick:$($script:UrgentBoard.Items[$size].Id)"
+        Should -Invoke Show-UrgentBoardScreen -Times 1 -Exactly -ParameterFilter { $Page -eq 1 }
+    }
+
+    It 'keeps select-all and clear-all on the displayed page' {
+        New-TestUrgentBoard -Count 20 | Out-Null
+        $keyboard = Get-UrgentBoardKeyboard -ChatId 100 -Page 1
+        Mock Show-UrgentBoardScreen {}
+        foreach ($action in @('all', 'none')) {
+            $button = @($keyboard.inline_keyboard | ForEach-Object { $_ } | Where-Object { $_.callback_data -like "urgentb:${action}*" })[0]
+            Invoke-TestUrgentNumberCallback $button.callback_data
+        }
+        Should -Invoke Show-UrgentBoardScreen -Times 2 -Exactly -ParameterFilter { $Page -eq 1 }
+    }
+
     It 'switches one line through all three display modes' {
         Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Should -BeTrue
 
@@ -657,7 +785,7 @@ Describe 'Editing the board from its buttons' {
 
     It 'keeps a per-item picker on the item that owns the token and lands on that item, not a neighbour' {
         New-TestUrgentBoard -Count 3 -IntervalSeconds 10 | Out-Null
-        Invoke-TestUrgentNumberCallback 'urgentb:interval:1'
+        Invoke-TestUrgentNumberCallback "urgentb:interval:$($script:UrgentBoard.Items[1].Id)"
         $pending = Get-PendingState -ChatId 100
         $pending.Mode | Should -Be 'urgent_number_picker'
         $itemId = [string]$script:UrgentBoard.Items[1].Id
@@ -671,7 +799,7 @@ Describe 'Editing the board from its buttons' {
 
     It 'refuses a pick from a stale token instead of moving the wrong item' {
         New-TestUrgentBoard -Count 2 | Out-Null
-        Invoke-TestUrgentNumberCallback 'urgentb:interval:0'
+        Invoke-TestUrgentNumberCallback "urgentb:interval:$($script:UrgentBoard.Items[0].Id)"
         Invoke-TestUrgentNumberCallback "urgentb:num:000000000000:+10"
         [int]$script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*انتهت صلاحية*' }
@@ -714,11 +842,25 @@ Describe 'Editing the board from its buttons' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*لا يزيد عن*' }
     }
 
+    It 'binds delete confirmation to the shown selection and consumes it once' {
+        $items = @($script:UrgentBoard.Items)
+        Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[0].Id)
+        Show-UrgentDeleteConfirm -ChatId 100 | Out-Null
+        $confirmation = Get-PendingState -ChatId 100
+        Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[2].Id)
+        $token = [string](Get-JsonProp $confirmation 'Token')
+        Invoke-UrgentSelectedDelete -ChatId 100 -UserId 101 -Token $token | Should -BeTrue
+        Get-UrgentItem -Board $script:UrgentBoard -ItemId $items[0].Id | Should -BeNullOrEmpty
+        Get-UrgentItem -Board $script:UrgentBoard -ItemId $items[2].Id | Should -Not -BeNullOrEmpty
+        Invoke-UrgentSelectedDelete -ChatId 100 -UserId 101 -Token $token | Should -BeFalse
+    }
+
     It 'deletes everything ticked in one save, not one save per line' {
         $items = @($script:UrgentBoard.Items)
         Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[0].Id, [string]$items[2].Id)
 
-        Invoke-UrgentSelectedDelete -ChatId 100 -UserId 101 | Should -BeTrue
+        Show-UrgentDeleteConfirm -ChatId 100 | Out-Null
+        Invoke-UrgentSelectedDelete -ChatId 100 -UserId 101 -Token ([string](Get-PendingState -ChatId 100).Token) | Should -BeTrue
 
         @($script:UrgentBoard.Items).Count | Should -Be 1
         [string]$script:UrgentBoard.Items[0].Text | Should -Be 'عاجل 2'
@@ -746,5 +888,74 @@ Describe 'Editing the board from its buttons' {
         $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text '<b>وسم</b> & علامة').Value
 
         (Get-UrgentBoardText -ChatId 100) | Should -Match '&lt;b&gt;وسم&lt;/b&gt; &amp; علامة'
+    }
+}
+
+Describe 'Urgent board persistence on an isolated real disk' {
+    BeforeEach {
+        Mock Get-UrgentBoardFile { Join-Path $TestDrive 'actual-board.json' }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Write-BridgeLog {}
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -IntervalSeconds 8 | Out-Null
+    }
+
+    It 'persists a picker interval for a separate PowerShell process and reload' {
+        Start-UrgentNumberPicker -ChatId 100 -UserId 101 -Kind interval -Position 0
+        $pending = Get-PendingState -ChatId 100
+        foreach ($delta in @('+10', '+5', '+1', '+1')) {
+            Invoke-UrgentNumberPick -ChatId 100 -UserId 101 -Argument "$($pending.Token):$delta" | Should -BeTrue
+        }
+        $file = (Get-UrgentBoardFile).Replace("'", "''")
+        $command = "(Get-Content -LiteralPath '$file' -Raw | ConvertFrom-Json).Items[0].IntervalSeconds"
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $output = & (Get-Process -Id $PID).Path -NoProfile -EncodedCommand $encoded
+        $LASTEXITCODE | Should -Be 0
+        [int]($output -join '') | Should -Be 25
+        $script:UrgentBoard = New-UrgentBoard
+        Import-UrgentBoard
+        $script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 25
+    }
+
+    It 'saves the default interval to an isolated configuration file' {
+        $originalPath = $script:ConfigPath
+        $script:ConfigPath = Join-Path $TestDrive 'settings-save.json'
+        Set-Variable -Name ConfigPath -Value $script:ConfigPath -Scope Local
+        $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $script:ConfigPath -Encoding utf8
+        Mock Protect-BridgeConfigurationAcl {}
+        try {
+            Set-UrgentBoardSetting -ChatId 100 -Name UrgentBoardIntervalSeconds -Value 25 | Should -BeTrue
+            (Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json).Settings.UrgentBoardIntervalSeconds | Should -Be 25
+        }
+        finally { $script:ConfigPath = $originalPath }
+    }
+
+    It 'rolls back the default interval when the real config write fails' {
+        $originalPath = $script:ConfigPath
+        $script:ConfigPath = Join-Path $TestDrive 'settings-locked.json'
+        Set-Variable -Name ConfigPath -Value $script:ConfigPath -Scope Local
+        $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $script:ConfigPath -Encoding utf8
+        Mock Protect-BridgeConfigurationAcl {}
+        # Block creation of the backup directory, without locking or reading production files.
+        Set-Content -LiteralPath "$($script:ConfigPath).backups" -Value 'blocked' -Encoding utf8
+        try {
+            Set-UrgentBoardSetting -ChatId 100 -Name UrgentBoardIntervalSeconds -Value 25 | Should -BeFalse
+            Get-SettingInt 'UrgentBoardIntervalSeconds' 8 | Should -Be 8
+            (Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json).Settings.UrgentBoardIntervalSeconds | Should -Be 8
+        }
+        finally { $script:ConfigPath = $originalPath }
+    }
+
+    It 'does not publish an edit when the actual board file is locked' {
+        Save-UrgentBoard -Board $script:UrgentBoard | Should -BeTrue
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $candidate = Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field IntervalSeconds -Value 25
+        $lock = [IO.File]::Open((Get-UrgentBoardFile), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try { Invoke-UrgentEdit -Result $candidate -ChatId 100 | Should -BeFalse }
+        finally { $lock.Dispose() }
+        $script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
+        (Get-Content -LiteralPath (Get-UrgentBoardFile) -Raw | ConvertFrom-Json).Items[0].IntervalSeconds | Should -Be 0
     }
 }

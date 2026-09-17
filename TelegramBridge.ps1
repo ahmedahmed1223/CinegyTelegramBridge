@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.41.0'
+$script:BridgeVersion = '8.42.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -187,6 +187,7 @@ $script:DefaultSettings = [ordered]@{
     DisabledTemplateKeys       = ''     # comma/semicolon-separated template keys blocked from SHOW
     SensitiveTemplateKeys      = ''     # templates that must always receive an automatic hide timer
     SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
+    TemplateMaxAirSeconds      = @{}    # per-template maximum; empty disables this policy
     TemplateTestLayer         = 0       # dedicated non-program test layer; 0 disables template testing
     TemplateTestAutoHideSeconds = 10    # short safety timeout for the dedicated test layer
     EnableSafeRollback         = $false # opt-in; preserves the current workflow by default
@@ -466,6 +467,7 @@ $script:SettingDisplayMetadata = @{
     StaleOnAirAlertHours = @{ Unit = 'ساعة'; Description = 'تنبيه المشرفين عن سجل على الهواء منذ هذه المدة (0 للتعطيل)' }
     StartupStormThreshold = @{ Unit = 'إقلاع'; Description = 'عدد إقلاعات الجسر خلال 24 ساعة قبل تنبيه واحد (0 للتعطيل)' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
+    TemplateMaxAirSeconds = @{ Unit = 'ثانية'; Description = 'حد مستقل لكل قالب يبدأ من العرض التالي؛ يُعدّل بأزرار القوالب فقط' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
     TemplateRegistryImportMaxTemplates = @{ Unit = 'قالب'; Description = 'الحد الأقصى لعدد القوالب في ملف استيراد سجل القوالب' }
@@ -1276,7 +1278,7 @@ foreach ($entry in @(
         @{ Category = 'templates'; Names = @(
                 'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
                 'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
-                'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateTestLayer',
+                'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateMaxAirSeconds', 'TemplateTestLayer',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
                 'LayerNames', 'EnableFavorites', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
@@ -1368,6 +1370,7 @@ $script:SettingNavigationLabels = @{
     LayersScreenAccess = 'من يرى زر الطبقات'
     DisabledTemplateKeys = 'القوالب المعطّلة'
     SensitiveTemplateKeys = 'القوالب الحساسة'
+    TemplateMaxAirSeconds = 'أقصى مدة لكل قالب'
     LayerNames = 'أسماء الطبقات'
     EnableFavorites = 'المفضلة'
     MaintenanceMode = 'وضع الصيانة'

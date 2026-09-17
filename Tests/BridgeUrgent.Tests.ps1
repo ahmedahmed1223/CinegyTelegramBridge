@@ -290,7 +290,185 @@ Describe 'Urgent run plan' {
         @($plan.Value.Notes) -join ' ' | Should -Match 'يخرج ويعود بالنصّ نفسه'
     }
 
-    It 'lets the first item that states an order or a repeat count carry the run' {
+    It 'uses each effective repeat count in <Order> order' -ForEach @(
+        @{ Order = 'cycle'; Positions = '0,1,2,0,1,1,1,1' }
+        @{ Order = 'item'; Positions = '0,0,1,1,1,1,1,2' }
+    ) {
+        $board = New-TestBoard
+        $board.Defaults.RepeatMode = $Order
+        $board.Items[0].Repeats = 2
+        $board.Items[1].Repeats = 5
+
+        $result = New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults
+
+        $result.Success | Should -BeTrue
+        ($result.Value.Steps.Position -join ',') | Should -Be $Positions
+        $result.Value.StepCount | Should -Be 8
+        $result.Value.TotalSeconds | Should -Be 64
+        $result.Value.RequestedCycles | Should -Be 5
+        $result.Value.Cycles | Should -Be 5
+    }
+
+    It 'costs differing repeats against the actual mixed-mode <Order> sequence at ceiling <Ceiling>' -ForEach @(
+        @{ Order = 'cycle'; Ceiling = 79; Cycles = 5; Total = 79; Positions = '0,1,2,0,1,1,1,1' }
+        @{ Order = 'cycle'; Ceiling = 68; Cycles = 4; Total = 68; Positions = '0,1,2,0,1,1,1' }
+        @{ Order = 'cycle'; Ceiling = 67.999; Cycles = 3; Total = 57; Positions = '0,1,2,0,1,1' }
+        @{ Order = 'item'; Ceiling = 82; Cycles = 5; Total = 82; Positions = '0,0,1,1,1,1,1,2' }
+        @{ Order = 'item'; Ceiling = 71; Cycles = 4; Total = 71; Positions = '0,0,1,1,1,1,2' }
+        @{ Order = 'item'; Ceiling = 70.999; Cycles = 3; Total = 60; Positions = '0,0,1,1,1,2' }
+        @{ Order = 'item'; Ceiling = 27; Cycles = 1; Total = 27; Positions = '0,1,2' }
+        @{ Order = 'cycle'; Ceiling = 27; Cycles = 1; Total = 27; Positions = '0,1,2' }
+    ) {
+        $board = New-TestBoard
+        $board.Defaults.RepeatMode = $Order
+        $board.Items[0].Repeats = 2
+        $board.Items[0].Mode = 'auto_hide'
+        $board.Items[1].Repeats = 5
+        $board.Items[1].Mode = 'exit'
+
+        $result = New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults -TransitionSeconds 3 -MaxSeconds $Ceiling -MaxReason 'autohide'
+
+        $result.Success | Should -BeTrue
+        $plan = $result.Value
+        ($plan.Steps.Position -join ',') | Should -Be $Positions
+        $plan.Cycles | Should -Be $Cycles
+        $plan.RequestedCycles | Should -Be 5
+        $plan.TotalSeconds | Should -Be $Total
+        $plan.ExitAtSeconds | Should -Be $Total
+        $plan.TotalSeconds | Should -BeLessOrEqual $Ceiling
+        @($plan.Steps.Position | Sort-Object -Unique) | Should -Be @(0, 1, 2)
+        if ($Cycles -lt 5) {
+            $plan.TrimmedBy | Should -Be 'autohide'
+            ($plan.Notes -join ' ') | Should -Match "قصّ التكرار من 5 إلى $Cycles"
+        }
+        else { $plan.TrimmedBy | Should -Be '' }
+    }
+
+    It 'refuses mixed-mode <_> runs when every item once exceeds the ceiling' -ForEach @('cycle', 'item') {
+        $board = New-TestBoard
+        $board.Defaults.RepeatMode = $_
+        $board.Items[0].Repeats = 2
+        $board.Items[0].Mode = 'auto_hide'
+        $board.Items[1].Repeats = 5
+        $board.Items[1].Mode = 'exit'
+
+        $result = New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults -TransitionSeconds 3 -MaxSeconds 26.999
+
+        $result.Success | Should -BeFalse
+        $result.ErrorCode | Should -Be 'no_fit'
+        $result.Value | Should -BeNullOrEmpty
+        $result.Error | Should -Match '27 ث'
+    }
+
+    It 'costs a full table against the ceiling without rebuilding a plan for every candidate cycle' {
+        # The worst case the shipped table allows: 40 lines x 99 repeats, and a
+        # ceiling that cannot hold even one cycle. Costing rejected candidates
+        # whole - steps and all - for every repeat count turns one plan into
+        # 99, which a reviewer measured at 12 seconds on this table alone.
+        $board = New-TestBoard -Count 40
+        $board.Defaults.IntervalSeconds = 1
+        $board.Defaults.Repeats = 99
+
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = New-UrgentRunPlan -Items @($board.Items) -Defaults $board.Defaults -MaxSeconds 30 -MaxReason 'autohide'
+        $clock.Stop()
+
+        $result.Success | Should -BeFalse
+        $result.ErrorCode | Should -Be 'no_fit'
+        $clock.ElapsedMilliseconds | Should -BeLessThan 2000
+    }
+
+    It 'materializes only the accepted plan when the ceiling trims a full mixed-mode table' {
+        # The fitting case on the same table: one pass over the candidates to
+        # cost them, and steps built once - for the plan that ships, not for
+        # the ones the ceiling threw away.
+        $board = New-TestBoard -Count 40
+        $board.Defaults.IntervalSeconds = 1
+        $board.Defaults.Repeats = 99
+        $board.Defaults.RepeatMode = 'cycle'
+        $board = (Set-UrgentItem -Board $board -ItemId $board.Items[0].Id -Field Mode -Value 'auto_hide').Value
+        $board = (Set-UrgentItem -Board $board -ItemId $board.Items[1].Id -Field Mode -Value 'exit').Value
+
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = New-UrgentRunPlan -Items @($board.Items) -Defaults $board.Defaults -TransitionSeconds 3 -MaxSeconds 100 -MaxReason 'autohide'
+        $clock.Stop()
+
+        # Each cycle: 40 one-second holds plus the auto_hide→exit transition
+        # (3s) at its second line; the exit→text pair costs nothing. Two cycles
+        # = 86s, three = 132s, so a 100-second ceiling holds two and trims.
+        $result.Success | Should -BeTrue
+        $plan = $result.Value
+        $plan.RequestedCycles | Should -Be 99
+        $plan.Cycles | Should -Be 2
+        $plan.TrimmedBy | Should -Be 'autohide'
+        $plan.TotalSeconds | Should -Be 86
+        $plan.StepCount | Should -Be 80
+        @($plan.Steps.Position | Sort-Object -Unique).Count | Should -Be 40
+        $plan.Steps[0].TransitionSeconds | Should -Be 0
+        $plan.Steps[1].TransitionSeconds | Should -Be 3
+        $plan.Steps[2].TransitionSeconds | Should -Be 0
+        $plan.Steps[41].TransitionSeconds | Should -Be 3
+        $clock.ElapsedMilliseconds | Should -BeLessThan 2000
+    }
+
+    It 'inherits counts independently of overrides in <_> order' -ForEach @('cycle', 'item') {
+        $board = New-TestBoard
+        $board.Defaults.RepeatMode = $_
+        $board.Defaults.Repeats = 4
+        $board.Items[0].Repeats = 1
+        $board.Items[2].Repeats = 2
+
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults).Value
+
+        @($plan.Steps | Where-Object Position -EQ 0).Count | Should -Be 1
+        @($plan.Steps | Where-Object Position -EQ 1).Count | Should -Be 4
+        @($plan.Steps | Where-Object Position -EQ 2).Count | Should -Be 2
+        $plan.RequestedCycles | Should -Be 4
+        $board.Items[1].Repeats | Should -Be 0
+    }
+
+    It 'charges transitions after exhausted items drop out of cycle order' {
+        $board = New-TestBoard
+        $board.Items[0].Mode = 'exit'
+        $board.Items[0].Repeats = 2
+        $board.Items[1].Repeats = 4
+        $board.Items[2].Mode = 'auto_hide'
+        $board.Items[2].Repeats = 3
+
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults -TransitionSeconds 2.5).Value
+
+        ($plan.Steps.Position -join ',') | Should -Be '0,1,2,0,1,2,1,2,1'
+        @($plan.Steps.TransitionSeconds) | Should -Be @(0, 0, 0, 2.5, 0, 0, 2.5, 0, 2.5)
+        @($plan.Steps.AtSeconds) | Should -Be @(0, 8, 16, 24, 34.5, 42.5, 50.5, 61, 69)
+        $plan.TotalSeconds | Should -Be 79.5
+    }
+
+    It 'retains the floor warning alongside per-item ceiling trimming' {
+        $board = New-TestBoard -Count 2
+        $board.Defaults.IntervalSeconds = 1
+        $board.Items[0].Repeats = 2
+        $board.Items[1].Repeats = 5
+
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults -FloorSeconds 4.5 -MaxSeconds 22.5).Value
+
+        $plan.Cycles | Should -Be 3
+        $plan.TotalSeconds | Should -Be 22.5
+        ($plan.Notes -join ' ') | Should -Match 'قصّ التكرار من 5 إلى 3'
+        ($plan.Notes -join ' ') | Should -Match 'رُفع فاصل 2'
+    }
+
+    It 'does not warn about repeating an exit item that only plays once' {
+        $board = New-TestBoard -Count 2
+        $board.Defaults.RepeatMode = 'item'
+        $board.Items[0].Mode = 'exit'
+        $board.Items[1].Repeats = 3
+
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults $board.Defaults).Value
+
+        ($plan.Notes -join ' ') | Should -Not -Match 'يخرج ويعود بالنصّ نفسه'
+    }
+
+    It 'lets the first item that states an order carry the run, but not its repeat count' {
         $board = New-TestBoard -Count 2
         $board.Defaults.Repeats = 1
         $board = (Set-UrgentItem -Board $board -ItemId $board.Items[1].Id -Field RepeatMode -Value 'item').Value
@@ -300,7 +478,20 @@ Describe 'Urgent run plan' {
 
         $plan.Value.RepeatMode | Should -Be 'item'
         $plan.Value.Cycles | Should -Be 3
-        $plan.Value.StepCount | Should -Be 6
+        $plan.Value.StepCount | Should -Be 4
+        ($plan.Value.Steps.Position -join ',') | Should -Be '0,1,1,1'
+    }
+
+    It 'carries rounded seconds into minutes for <Total> seconds' -ForEach @(
+        @{ Total = 59.6; Clock = '1:00' }
+        @{ Total = 119.6; Clock = '2:00' }
+        @{ Total = 3599.6; Clock = '60:00' }
+        @{ Total = 59.4; Clock = '0:59' }
+        @{ Total = 60; Clock = '1:00' }
+    ) {
+        $summary = Get-UrgentPlanSummary -Plan @{ TotalSeconds = $Total }
+        $summary | Should -Match "الزمن المتوقّع $Clock"
+        $summary | Should -Not -Match ':60(?:\s|$)'
     }
 
     It 'summarises the run in the line the operator reads before it starts' {

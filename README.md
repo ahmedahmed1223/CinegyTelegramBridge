@@ -13,6 +13,22 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.42.0
+
+Administrators can configure a separate maximum on-air duration per template
+under Settings → Templates, using bounded second steppers and presets. The
+shortest applicable limit wins; manual timers cannot extend past the original
+show deadline. Removing a rule requires confirmation. Rules are disabled by
+default and configuring them does not issue commands to current on-air scenes.
+
+Audit hardening across the urgent board: buttons and confirmations are bound
+to stable item ids, failed config saves now report failure and restore the
+previous value, failed scene exits freeze the run as retryable (and a final
+exit never announces completion it did not achieve), per-item repeat counts
+are honoured in both repeat orders, board import validates shape and recovers
+the backup, and the fallback text now shows disabled rows and the sensitive
+template ceiling.
+
 ## Version 8.41.0
 
 The urgent board now offers skip-current and pause/resume controls. Skip sends

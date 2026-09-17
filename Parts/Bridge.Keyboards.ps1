@@ -1882,7 +1882,7 @@ function Get-SettingsListKeyboard {
             $record = $items[$index]
             $name = [string]$record.Name
             $value = Get-Setting $name
-            $action = if ($script:DefaultSettings[$name] -is [bool]) { "cfg:t:$name" } elseif ($script:DefaultSettings[$name] -is [string]) { "cfg:s:$name" } else { "cfg:v:$name" }
+            $action = if ($script:DefaultSettings[$name] -is [bool]) { "cfg:t:$name" } elseif ($name -eq 'TemplateMaxAirSeconds' -or $script:DefaultSettings[$name] -is [string]) { "cfg:s:$name" } else { "cfg:v:$name" }
             $rows += , @((New-Button "$($record.Label) = $value" $action), (New-Button '↩️' "cfgr:$name"))
         }
     }
@@ -1938,6 +1938,9 @@ function Get-SettingsCategoryKeyboard {
                 $state = if ($value) { 'مفعّل' } else { 'معطّل' }
                 $lock = if ($script:ProtectedSettings -contains $name) { '🔒 ' } else { '' }
                 $rows += , @( (New-Button "$mark $lock$($metadata.Label) · $state" "cfg:t:$name" -MaxTextLength 64) )
+            }
+            elseif ($name -eq 'TemplateMaxAirSeconds') {
+                $rows += , @((New-Button "⏱ $($metadata.Label)" 'cfg:s:TemplateMaxAirSeconds'))
             }
             elseif ($script:DefaultSettings[$name] -is [string]) {
                 $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
@@ -2409,6 +2412,118 @@ function Show-TemplateNotifyEditor {
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
 }
 
+function Show-TemplateMaxAirEditor {
+    param([long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [switch]$KeepState)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-CallbackAdmin -ChatId $ChatId -UserId $UserId)) { return }
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $KeepState -or -not $state -or [string](Get-JsonProp $state 'Mode') -ne 'template_max_air') {
+        $state = @{ Mode = 'template_max_air'; UserId = $UserId; StartedAt = (Get-Date)
+            Token = [guid]::NewGuid().ToString('N').Substring(0,12); Keys = @((Get-TemplateStore).Order); Key = ''; ConfirmDisable = $false }
+        Set-PendingState -ChatId $ChatId -State $state
+    }
+    $prefix = "tmax:$($state.Token)"
+    $rows = @()
+    $text = "⏱ أقصى مدة لكل قالب`nاختر القالب. القاعدة تُطبّق على العروض الجديدة للجميع؛ مدة أقصر مسموحة، ولا يمكن تمديدها فوق الحد. لا تغيّر ما على الهواء الآن."
+    if (-not $state.Key) {
+        $window = Get-BridgePageWindow -ItemCount @($state.Keys).Count -Page $Page -PageSize 8
+        if ($window.EndIndex -ge $window.StartIndex) {
+            foreach ($index in $window.StartIndex..$window.EndIndex) {
+                $key = [string]$state.Keys[$index]
+                $maximum = [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $key)
+                $label = if ($maximum -gt 0) { "$maximum ث" } else { 'غير مضبوط' }
+                $rows += , @((New-Button "$key — $label" "${prefix}:item:$index"))
+            }
+        }
+        $nav = @()
+        if ($window.HasPrevious) { $nav += New-Button '⬅️ السابق' "${prefix}:page:$($window.Page - 1)" }
+        if ($window.HasNext) { $nav += New-Button 'التالي ➡️' "${prefix}:page:$($window.Page + 1)" }
+        if ($nav.Count) { $rows += , $nav }
+    }
+    else {
+        $current = [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') ([string]$state.Key))
+        $shownKey = [string]$state.Key
+        if ($shownKey.Length -gt 100) { $shownKey = $shownKey.Substring(0,100) }
+        $text = "⏱ $shownKey`nالحد الحالي: $current ثانية (0 = بلا قاعدة خاصة).`nالمدى: 1–3600 ثانية. كل ضغطة تُحفظ. القالب الحسّاس يحتفظ بحدّه الأقصر."
+        $rows += , @((New-Button '30 ث' "${prefix}:set:30"), (New-Button 'دقيقة' "${prefix}:set:60"), (New-Button 'دقيقتان' "${prefix}:set:120"))
+        $rows += , @((New-Button '3 دقائق' "${prefix}:set:180"), (New-Button '5 دقائق' "${prefix}:set:300"), (New-Button '10 دقائق' "${prefix}:set:600"))
+        $rows += , @((New-Button '−10 ث' "${prefix}:delta:-10"), (New-Button '+10 ث' "${prefix}:delta:10"))
+        $rows += , @((New-Button '−1 ث' "${prefix}:delta:-1"), (New-Button '+1 ث' "${prefix}:delta:1"))
+        if ($state.ConfirmDisable) {
+            $text += "`n⚠️ تأكيد إزالة الحد الخاص؟ تبقى مؤقتات العروض الحالية كما هي."
+            $rows += , @((New-Button 'نعم، إزالة الحد' "${prefix}:disable:yes" -Style danger))
+        }
+        else { $rows += , @((New-Button 'إزالة الحد…' "${prefix}:disable:ask")) }
+        $rows += , @((New-Button '⬅️ القوالب' "${prefix}:page:0"))
+    }
+    $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
+    $keyboard = @{ inline_keyboard = $rows }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard
+}
+
+function Invoke-TemplateMaxAirPick {
+    param([long]$ChatId, [long]$UserId = 0, [string]$Argument, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-CallbackAdmin -ChatId $ChatId -UserId $UserId)) { return $false }
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string](Get-JsonProp $state 'Mode') -ne 'template_max_air' -or
+        [long](Get-JsonProp $state 'UserId') -ne $UserId -or
+        $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable):(-?[0-9]{1,4}|ask|yes)$' -or
+        $Matches[1] -cne [string](Get-JsonProp $state 'Token')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ انتهت صلاحية الأزرار. افتح إعداد المدة من جديد.'
+        return $false
+    }
+    $action = $Matches[2]; $value = $Matches[3]; $page = 0
+    $state.StartedAt = Get-Date
+    if ($action -in @('page','item')) {
+        $index = 0
+        if (-not [int]::TryParse($value, [ref]$index) -or $index -lt 0) { return $false }
+        $state.ConfirmDisable = $false
+        $state.Token = [guid]::NewGuid().ToString('N').Substring(0,12)
+        if ($action -eq 'page') { $state.Key = ''; $page = $index }
+        else {
+            if ($index -ge @($state.Keys).Count) { return $false }
+            $state.Key = [string]$state.Keys[$index]
+        }
+    }
+    else {
+        $key = [string]$state.Key
+        if (-not $key -or -not (Get-TemplateStore).Map.ContainsKey($key)) { return $false }
+        if ($action -eq 'disable' -and $value -eq 'ask') { $state.ConfirmDisable = $true }
+        else {
+            $seconds = 0
+            if ($action -eq 'disable') {
+                if ($value -ne 'yes' -or -not $state.ConfirmDisable) { return $false }
+            }
+            else {
+                if (-not [int]::TryParse($value, [ref]$seconds)) { return $false }
+                if ($action -eq 'delta') {
+                    if ($seconds -notin @(-10,-1,1,10)) { return $false }
+                    $seconds += [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $key)
+                    $seconds = [math]::Max(1,[math]::Min(3600,$seconds))
+                }
+                if ($seconds -lt 1 -or $seconds -gt 3600) { return $false }
+            }
+            $previous = Get-Setting 'TemplateMaxAirSeconds'
+            $map = @{}
+            if ($previous) { $map = ($previous | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable) }
+            if ($seconds -eq 0) { $map.Remove($key) } else { $map[$key] = $seconds }
+            $script:LastConfigSaveFailed = $false
+            Set-Setting -Name TemplateMaxAirSeconds -Value $map
+            if ($script:LastConfigSaveFailed) {
+                Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
+                Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ الحد؛ بقيت القاعدة السابقة.'
+                return $false
+            }
+            $state.ConfirmDisable = $false
+            Write-BridgeLog "Template maximum on-air policy updated by $UserId to $seconds seconds."
+        }
+    }
+    Show-TemplateMaxAirEditor -ChatId $ChatId -UserId $UserId -MessageId $MessageId -Page $page -KeepState
+    return $true
+}
+
 function Get-SettingBounds {
     <# What this number may be, as a pair. An undeclared setting is bounded
        only below zero: no setting here means anything negative, and a minus
@@ -2775,6 +2890,10 @@ function Show-SettingChoices {
     }
     # Not through $script:SettingPickers: that picker ticks a value in or out
     # of a list, and this one has three states per template rather than two.
+    if ($Name -eq 'TemplateMaxAirSeconds') {
+        Show-TemplateMaxAirEditor -ChatId $ChatId -UserId $UserId
+        return
+    }
     if ($Name -eq 'TemplateNotifyRules') {
         Show-TemplateNotifyEditor -ChatId $ChatId -UserId $UserId
         return

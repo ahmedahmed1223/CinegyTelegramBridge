@@ -384,71 +384,83 @@ function New-UrgentRunPlan {
     # no single sequence to print. The first item that states one wins, which
     # is what the screen shows beside the button.
     $repeatMode = [string](Get-UrgentProperty $Defaults 'RepeatMode' 'cycle')
-    $requestedCycles = [int](Get-UrgentProperty $Defaults 'Repeats' 1)
+    # Cycles is the highest repeat count, not a replacement for each item's
+    # effective count. Exhausted items drop out of later rounds.
+    $requestedCycles = 1
     foreach ($timing in $timings) {
         if (-not $timing.RepeatModeInherited) { $repeatMode = $timing.RepeatMode; break }
     }
     foreach ($timing in $timings) {
-        if (-not $timing.RepeatsInherited) { $requestedCycles = $timing.Repeats; break }
+        $requestedCycles = [math]::Max($requestedCycles, [int]$timing.Repeats)
     }
     if (-not (Test-UrgentRepeatMode -RepeatMode $repeatMode)) { $repeatMode = 'cycle' }
     if ($requestedCycles -lt 1) { $requestedCycles = 1 }
-
-    # One pass of the board, costed. Each entry costs its own hold plus the
-    # transition its mode needs before it can be seen.
-    $cycleSeconds = 0.0
-    for ($timingIndex = 0; $timingIndex -lt $timings.Count; $timingIndex++) {
-        $timing = $timings[$timingIndex]
-        $previousMode = $timings[($timingIndex + $timings.Count - 1) % $timings.Count].Mode
-        $cycleSeconds += [double]$timing.HoldSeconds
-        if ($timing.Mode -eq 'exit' -or $previousMode -eq 'auto_hide') { $cycleSeconds += [math]::Max(0.0, $TransitionSeconds) }
-    }
-    # The very first line rides the SHOW that starts the run, so its entrance
-    # is not paid twice.
-    $firstTransition = 0.0
-    if ($timings[0].Mode -eq 'exit' -or $timings[-1].Mode -eq 'auto_hide') { $firstTransition = [math]::Max(0.0, $TransitionSeconds) }
-
-    if ($repeatMode -eq 'item') {
-        # Repeating each item introduces self-transitions, not the boundary
-        # transitions of another complete cycle (auto-hide -> exit overlaps).
-        $singlePass = $cycleSeconds - $firstTransition
-        $cycleSeconds = 0.0
-        foreach ($timing in $timings) {
-            $cycleSeconds += [double]$timing.HoldSeconds
-            if ($timing.Mode -in @('exit', 'auto_hide')) { $cycleSeconds += [math]::Max(0.0, $TransitionSeconds) }
-        }
-        $firstTransition = $cycleSeconds - $singlePass
-    }
 
     $notes = @()
     $cycles = $requestedCycles
     $trimmedBy = ''
     $ceiling = [math]::Max(0.0, $MaxSeconds)
-    if ($ceiling -gt 0) {
-        $oneCycle = $cycleSeconds - $firstTransition
-        if ($oneCycle -gt $ceiling) {
-            return (New-UrgentResult $false $null 'no_fit' "دورة واحدة تحتاج $([int][math]::Ceiling($oneCycle)) ث، والسقف $([int]$ceiling) ث.")
+    # Reduce the repeat cap, never truncate an item-order prefix: even the
+    # shortest candidate contains every playable item once. Cost the actual
+    # sequence because exhausted items change the mode transitions - but cost
+    # it as numbers, not as built steps: the candidates the ceiling rejects
+    # were being materialized whole, which turned one plan into one plan per
+    # candidate repeat count (a full 40-line table at 99 repeats measured
+    # seconds per plan). Steps are built once, for the plan that ships.
+    $at = 0.0
+    while ($true) {
+        # The order the lines actually play in, costed as it plays: the
+        # transition rule is the step rule (after the first line, charge it
+        # when this line exits or the one before hid itself), so one walk
+        # answers both - and this walk carries no steps, only seconds.
+        $at = 0.0
+        $stepCount = 0
+        $previousMode = ''
+        if ($repeatMode -eq 'item') {
+            for ($position = 0; $position -lt $playable.Count; $position++) {
+                $timing = $timings[$position]
+                for ($round = 0; $round -lt [math]::Min($cycles, [int]$timing.Repeats); $round++) {
+                    $transition = 0.0
+                    if ($stepCount -gt 0 -and ($timing.Mode -eq 'exit' -or $previousMode -eq 'auto_hide')) { $transition = [math]::Max(0.0, $TransitionSeconds) }
+                    $at += $transition + [double]$timing.HoldSeconds
+                    $previousMode = $timing.Mode
+                    $stepCount++
+                }
+            }
         }
-        $fits = [int][math]::Floor(($ceiling + $firstTransition) / $cycleSeconds)
-        if ($fits -lt 1) { $fits = 1 }
-        if ($fits -lt $cycles) {
-            $cycles = $fits
-            $trimmedBy = if ($MaxReason) { $MaxReason } else { 'total' }
-            $label = if ($trimmedBy -eq 'autohide') { 'الإخفاء التلقائي للقالب الحسّاس' } else { 'المدة الكلية' }
-            $notes += "⚠️ $label قصّ التكرار من $requestedCycles إلى $cycles."
+        else {
+            for ($round = 0; $round -lt $cycles; $round++) {
+                for ($position = 0; $position -lt $playable.Count; $position++) {
+                    if ($round -ge $timings[$position].Repeats) { continue }
+                    $timing = $timings[$position]
+                    $transition = 0.0
+                    if ($stepCount -gt 0 -and ($timing.Mode -eq 'exit' -or $previousMode -eq 'auto_hide')) { $transition = [math]::Max(0.0, $TransitionSeconds) }
+                    $at += $transition + [double]$timing.HoldSeconds
+                    $previousMode = $timing.Mode
+                    $stepCount++
+                }
+            }
         }
+
+        if ($ceiling -le 0 -or $at -le $ceiling) { break }
+        if ($cycles -eq 1) {
+            return (New-UrgentResult $false $null 'no_fit' "دورة واحدة تحتاج $([int][math]::Ceiling($at)) ث، والسقف $([int]$ceiling) ث.")
+        }
+        $cycles--
     }
 
-    # The order the lines actually play in.
-    $sequence = @()
+    # The candidate repeat counts are settled; build the plan that ships once.
+    $sequence = [System.Collections.Generic.List[int]]::new()
     if ($repeatMode -eq 'item') {
         for ($position = 0; $position -lt $playable.Count; $position++) {
-            for ($round = 0; $round -lt $cycles; $round++) { $sequence += $position }
+            for ($round = 0; $round -lt [math]::Min($cycles, $timings[$position].Repeats); $round++) { $sequence.Add($position) }
         }
     }
     else {
         for ($round = 0; $round -lt $cycles; $round++) {
-            for ($position = 0; $position -lt $playable.Count; $position++) { $sequence += $position }
+            for ($position = 0; $position -lt $playable.Count; $position++) {
+                if ($round -lt $timings[$position].Repeats) { $sequence.Add($position) }
+            }
         }
     }
 
@@ -474,9 +486,14 @@ function New-UrgentRunPlan {
         }
         $at += $transition + [double]$timing.HoldSeconds
     }
+    if ($cycles -lt $requestedCycles) {
+        $trimmedBy = if ($MaxReason) { $MaxReason } else { 'total' }
+        $label = if ($trimmedBy -eq 'autohide') { 'الإخفاء التلقائي للقالب الحسّاس' } else { 'المدة الكلية' }
+        $notes += "⚠️ $label قصّ التكرار من $requestedCycles إلى $cycles."
+    }
 
     if ($repeatMode -eq 'item' -and $cycles -gt 1) {
-        $repeatedExits = @($timings | Where-Object { $_.Mode -eq 'exit' })
+        $repeatedExits = @($timings | Where-Object { $_.Mode -eq 'exit' -and $_.Repeats -gt 1 })
         if ($repeatedExits.Count -gt 0) {
             $notes += '⚠️ ترتيب «كل عاجل مرّات»: عنصر بحركة خروج سيخرج ويعود بالنصّ نفسه.'
         }
@@ -508,8 +525,9 @@ function Get-UrgentPlanSummary {
     if (-not $Plan) { return '' }
     $order = if ([string](Get-UrgentProperty $Plan 'RepeatMode' 'cycle') -eq 'item') { 'كل عاجل مرّات ثم التالي' } else { 'الجدول كاملًا ثم يعيد' }
     $total = [double](Get-UrgentProperty $Plan 'TotalSeconds' 0)
-    $minutes = [int][math]::Floor($total / 60)
-    $seconds = [int][math]::Round($total - ($minutes * 60))
+    $roundedTotal = [long][math]::Round($total)
+    $minutes = [long][math]::Floor($roundedTotal / 60)
+    $seconds = [int]($roundedTotal % 60)
     $clock = "$minutes`:$($seconds.ToString('00'))"
     $exits = @(@(Get-UrgentProperty $Plan 'Steps' @()) | Where-Object { [string]$_.Mode -eq 'exit' }).Count
     $parts = @(

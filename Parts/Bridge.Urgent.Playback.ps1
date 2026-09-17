@@ -32,6 +32,7 @@ function Save-UrgentRunState {
         SavedAt = (Get-Date).ToString('o')
         ElapsedSeconds = Get-UrgentElapsedSeconds
         Paused = [bool](Get-JsonProp $run 'Paused')
+        StopFailed = [bool](Get-JsonProp $run 'StopFailed')
         StartedAt = [string]$run.StartedAt
         ChatId = [long]$run.ChatId
         UserId = [long]$run.UserId
@@ -169,6 +170,28 @@ function Start-UrgentBoardRun {
     return $true
 }
 
+function Set-UrgentRunStopFailed {
+    <#
+        Freezes a run whose exit could not be confirmed and keeps it stoppable.
+
+        A false answer, a thrown one, and a vanished template all land here:
+        in each the scene's state is unknown, so the engine may not write
+        again - but erasing the run would strand the breaking line on air with
+        no engine and no retry. The flag is persisted, and the refusal it
+        drives (Test-UrgentRunControl) survives a restart with it.
+    #>
+    param([Parameter(Mandatory)]$Run, [long]$ChatId = 0)
+    $Run.Clock.Stop()
+    $Run.Paused = $true
+    $Run.StopFailed = $true
+    $script:UrgentBoardRun = $Run
+    Save-UrgentRunState | Out-Null
+    if ($ChatId -gt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر تأكيد خروج العاجل. جُمّد الجدول؛ أعد محاولة الإيقاف وتحقّق من الطبقة.'
+    }
+    return $false
+}
+
 function Stop-UrgentBoardRun {
     <#
         Ends the run.
@@ -180,16 +203,30 @@ function Stop-UrgentBoardRun {
     param([long]$ChatId = 0, [long]$UserId = 0, [string]$Reason = 'stopped', [switch]$Quiet, [switch]$NoExit)
     if (-not $script:UrgentBoardRun) { return $false }
     $run = $script:UrgentBoardRun
+    # Detach only in memory to avoid Invoke-ExitLayer's recursive stop callback.
+    # Keep the durable snapshot until exit has actually succeeded.
     $script:UrgentBoardRun = $null
-    Clear-UrgentRunState
     if (-not $NoExit) {
-        $template = Get-UrgentTemplate
-        if ($template) {
-            $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$run.ChatId }
-            $user = if ($UserId -gt 0) { $UserId } else { [long]$run.UserId }
-            Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user | Out-Null
+        $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$run.ChatId }
+        $user = if ($UserId -gt 0) { $UserId } else { [long]$run.UserId }
+        $exited = $false
+        try {
+            $template = Get-UrgentTemplate
+            if ($template) {
+                $exited = Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user
+            }
+        }
+        catch {
+            # A missing template or a thrown exit cannot confirm removal.
+            Write-BridgeLog "Urgent board exit attempt failed: $($_.Exception.Message)" 'WARN'
+        }
+        if (-not $exited) {
+            # The engine must not continue writing to an uncertain scene,
+            # but its stop button must survive a failed exit for retry.
+            return (Set-UrgentRunStopFailed -Run $run -ChatId $chat)
         }
     }
+    Clear-UrgentRunState
     Write-UrgentRunEnd -Run $run -Reason $Reason -UserId $UserId -ChatId $ChatId
     Write-BridgeLog "Urgent board run ended ($Reason) after $([int]$run.Step + 1) step(s)."
     if (-not $Quiet -and $ChatId -gt 0) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId }
@@ -269,11 +306,12 @@ function Update-UrgentBoardRun {
         Start-Sleep -Milliseconds ([int][math]::Min(($script:UrgentPreRollSeconds * 1000), ($remaining * 1000)))
     }
     if ($isLast) {
-        Write-BridgeLog "Urgent board run finished after $($steps.Count) step(s)."
-        if (Get-Setting 'UrgentBoardNotifyOnFinish') {
-            Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text '⏹ انتهى جدول العواجل وخرج عن الهواء.'
+        if (Stop-UrgentBoardRun -Reason 'finished' -Quiet) {
+            Write-BridgeLog "Urgent board run finished after $($steps.Count) step(s)."
+            if (Get-Setting 'UrgentBoardNotifyOnFinish') {
+                Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text '⏹ انتهى جدول العواجل وخرج عن الهواء.'
+            }
         }
-        Stop-UrgentBoardRun -Reason 'finished' -Quiet | Out-Null
         return
     }
     $index++
@@ -360,8 +398,9 @@ function Restore-UrgentBoardRun {
     $template = Get-UrgentTemplate
     if (-not $template) { return $false }
     $layer = [int]$template.Layer
-    if (-not $script:OnAir.ContainsKey($layer)) {
-        Write-BridgeLog 'An urgent board run was interrupted; its layer is no longer on air, so the run was dropped.'
+    if (-not $script:OnAir.ContainsKey($layer) -or
+        [string](Get-JsonProp $script:OnAir[$layer] 'Key') -ne $script:MojazUrgentKey) {
+        Write-BridgeLog 'An urgent board run was interrupted; its scene no longer owns the layer, so the run was dropped.'
         return $false
     }
     $paused = (Get-JsonProp $state 'Paused') -eq $true
@@ -375,15 +414,18 @@ function Restore-UrgentBoardRun {
     $steps = @(Get-JsonProp $state 'Steps')
     $exitAt = [double](Get-JsonProp $state 'ExitAtSeconds')
     if ($steps.Count -lt 1) { return $false }
-    if ($elapsed -ge $exitAt) {
-        Write-BridgeLog 'An urgent board run outlived the restart; taking its scene off air.'
-        Invoke-ExitLayer -Layer $layer -ChatId ([long](Get-JsonProp $state 'ChatId')) -UserId ([long](Get-JsonProp $state 'UserId')) | Out-Null
-        return $false
+    # V2 Step is the last successfully sent line. Downtime must not advance
+    # it without a send; the next tick will deliver the first overdue line.
+    $step = [int](Get-JsonProp $state 'Step')
+    if ([int](Get-JsonProp $state 'SchemaVersion') -ge 2) {
+        if ($step -lt 0 -or $step -ge $steps.Count) { return $false }
     }
-    # Which line the clock says should be up now.
-    $step = 0
-    for ($index = 0; $index -lt $steps.Count; $index++) {
-        if ([double]$steps[$index].AtSeconds -le $elapsed) { $step = $index }
+    else {
+        # Preserve the legacy wall-clock-only recovery contract.
+        $step = 0
+        for ($index = 0; $index -lt $steps.Count; $index++) {
+            if ([double]$steps[$index].AtSeconds -le $elapsed) { $step = $index }
+        }
     }
     $script:UrgentBoardRun = @{
         Step = $step
@@ -394,6 +436,7 @@ function Restore-UrgentBoardRun {
         # restart is carried as an offset rather than pretended away.
         ClockOffset = [double]$elapsed
         Paused = $paused
+        StopFailed = [bool](Get-JsonProp $state 'StopFailed')
         Steps = $steps
         ExitAtSeconds = $exitAt
         BoardRevision = [int](Get-JsonProp $state 'BoardRevision')
@@ -403,6 +446,11 @@ function Restore-UrgentBoardRun {
     }
     if ($paused) { $script:UrgentBoardRun.Clock.Reset() }
     Save-UrgentRunState | Out-Null
+    if ($elapsed -ge $exitAt) {
+        Write-BridgeLog 'An urgent board run outlived the restart; taking its scene off air.'
+        Stop-UrgentBoardRun -Reason 'expired' -Quiet | Out-Null
+        return $false
+    }
     Write-BridgeLog "An urgent board run resumed after a restart at step $($step + 1) of $($steps.Count)."
     $restoreStatus = if ($paused) { 'بقي متوقفًا مؤقتًا' } else { 'استأنف' }
     Send-AdminBroadcast -Text "🚨 جدول العواجل $restoreStatus بعد إعادة التشغيل عند الخطوة $($step + 1) من $($steps.Count)." | Out-Null
@@ -412,6 +460,10 @@ function Restore-UrgentBoardRun {
 function Test-UrgentRunControl {
     param([long]$ChatId, [long]$UserId)
     if (-not $script:UrgentBoardRun) { return $false }
+    if ([bool](Get-JsonProp $script:UrgentBoardRun 'StopFailed')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ خروج المشهد غير مؤكّد؛ أعد محاولة الإيقاف أولًا.'
+        return $false
+    }
     $template = Get-UrgentTemplate
     if (-not $template) { return $false }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }

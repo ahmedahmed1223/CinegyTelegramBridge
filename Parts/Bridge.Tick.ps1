@@ -219,13 +219,26 @@ function Set-AutoHideTimer {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($Seconds -le 0) { return $false }
+    $deadline = [datetimeoffset]::Now.AddSeconds($Seconds)
+    $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
+    $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
+    $maximum = if ($key) { Get-EffectiveAutoHideSeconds -Key $key } else { 0 }
+    if ($maximum -gt 0) {
+        $shownAt = [datetimeoffset]::MinValue
+        if (-not $current -or -not [datetimeoffset]::TryParse([string](Get-JsonProp $current 'At'), [ref]$shownAt)) {
+            Write-BridgeLog 'Cannot set a capped timer without its show timestamp.' 'WARN'
+            return $false
+        }
+        $maximumAt = $shownAt.AddSeconds($maximum)
+        if ($maximumAt -lt $deadline) { $deadline = $maximumAt }
+    }
     $previous = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })
     for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
         if ([int](Get-JsonProp $script:AutoHideQueue[$i] 'Layer') -eq $Layer) { $script:AutoHideQueue.RemoveAt($i) }
     }
     $timer = @{
             Layer       = $Layer
-            At          = [datetimeoffset]::Now.AddSeconds($Seconds)
+            At          = $deadline
             ChatId      = $ChatId
             UserId      = $UserId
             TemplateKey = $TemplateKey

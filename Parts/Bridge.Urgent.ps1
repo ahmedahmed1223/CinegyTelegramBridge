@@ -131,10 +131,34 @@ function Save-UrgentBoard {
 function Import-UrgentBoard {
     $script:UrgentBoard = New-UrgentBoard
     $path = Get-UrgentBoardFile
-    if (-not (Test-Path -LiteralPath $path)) { return }
+    # The shared reader can recover a backup even when the primary is absent.
     try {
         $stored = Read-BridgeValidatedJson -Path $path
-        if ($stored -and $stored.Data) { $script:UrgentBoard = $stored.Data }
+        if ($stored -and $stored.Data) {
+            $candidate = $stored.Data
+            $itemsProperty = $candidate.PSObject.Properties['Items']
+            $revision = 0
+            if (-not $itemsProperty -or $itemsProperty.Value -isnot [array] -or
+                -not [int]::TryParse([string](Get-JsonProp $candidate 'Revision'), [ref]$revision) -or $revision -lt 1 -or
+                [string](Get-JsonProp $candidate 'SchemaVersion') -ne '1') { throw 'Invalid urgent board structure.' }
+            $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($entry in $itemsProperty.Value) {
+                $id = [string](Get-JsonProp $entry 'Id')
+                if ($id -notmatch '^u_[a-f0-9]{8}$' -or -not $ids.Add($id) -or
+                    [string]::IsNullOrWhiteSpace([string](Get-JsonProp $entry 'Text'))) { throw 'Invalid urgent item identity or text.' }
+                foreach ($field in @('Title', 'Mode', 'IntervalSeconds', 'TotalSeconds', 'Repeats', 'RepeatMode', 'Enabled', 'UpdatedAt', 'UpdatedBy')) {
+                    if (-not $entry.PSObject.Properties[$field]) { throw "Missing urgent item field: $field" }
+                }
+                foreach ($field in @('IntervalSeconds', 'TotalSeconds', 'Repeats')) {
+                    $number = 0
+                    $maximum = if ($field -eq 'Repeats') { 99 } else { 3600 }
+                    if (-not [int]::TryParse([string](Get-JsonProp $entry $field), [ref]$number) -or $number -lt 0 -or $number -gt $maximum) { throw 'Invalid urgent timing.' }
+                }
+                if ($entry.Enabled -isnot [bool] -or ($entry.Mode -and -not (Test-UrgentMode $entry.Mode)) -or
+                    ($entry.RepeatMode -and -not (Test-UrgentRepeatMode $entry.RepeatMode))) { throw 'Invalid urgent mode or enabled flag.' }
+            }
+            $script:UrgentBoard = $candidate
+        }
     }
     catch { Write-BridgeLog "Could not read the urgent board: $($_.Exception.Message)" 'WARN' }
 }
@@ -268,7 +292,8 @@ function Get-UrgentItemVariables {
     if ($fields.Count -lt 1) { return $values }
     $values[[string]$fields[0]] = [string](Get-UrgentProperty $Item 'Text' '')
     $title = [string](Get-UrgentProperty $Item 'Title' '')
-    if ($fields.Count -gt 1 -and $title) { $values[[string]$fields[1]] = $title }
+    # An omitted field retains the preceding story's title on text updates.
+    if ($fields.Count -gt 1) { $values[[string]$fields[1]] = $title }
     return $values
 }
 
@@ -309,8 +334,8 @@ function Get-UrgentBoardKeyboard {
             $text = [string](Get-UrgentProperty $item 'Text' '')
             $label = if ($text.Length -gt 22) { $text.Substring(0, 21) + '…' } else { $text }
             $row = @(
-                (New-Button "$tick $($index + 1). $label" "urgentb:pick:$index")
-                (New-Button '⚙️' "urgentb:item:$index")
+                (New-Button "$tick $($index + 1). $label" "urgentb:pick:$id")
+                (New-Button '⚙️' "urgentb:item:$id")
             )
             $rows += , $row
         }
@@ -324,8 +349,8 @@ function Get-UrgentBoardKeyboard {
     }
     $rows += , @(
         (New-Button '➕ إضافة' 'urgentb:add')
-        (New-Button '☑ تحديد الكل' 'urgentb:all')
-        (New-Button '☐ إلغاء التحديد' 'urgentb:none')
+        (New-Button '☑ تحديد الكل' "urgentb:all:$($window.Page)")
+        (New-Button '☐ إلغاء التحديد' "urgentb:none:$($window.Page)")
     )
     $rows += , @(
         (New-Button '⚙️ توقيتات الجدول' 'urgentb:timing')
@@ -441,6 +466,10 @@ function Get-UrgentBoardText {
     if ($runStatus) { $lines += $runStatus }
     $lines += "الافتراضي: فاصل $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) ث · $([int](Get-UrgentProperty $defaults 'Repeats' 1)) دورة"
     if (-not (Test-UrgentSceneLoop)) { $lines += '⚠️ مشهد العاجل بلا حلقة: «تحديث نص» سيُرى وهو يتبدّل.' }
+    $ceiling = Get-UrgentRunCeiling -Items $items
+    if ([int]$ceiling.AutoHideSeconds -gt 0) {
+        $lines += "⚠️ القالب حسّاس: يُخفى تلقائيًا بعد $([int]$ceiling.AutoHideSeconds) ث، وهذا سقف التشغيل كلّه."
+    }
     if ($items.Count -eq 0) {
         $lines += 'الجدول فارغ.'
         return ($lines -join "`n")
@@ -451,7 +480,8 @@ function Get-UrgentBoardText {
     foreach ($item in @($trimmed.Rows)) {
         $position++
         $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
-        $tick = if ($selected -contains [string](Get-UrgentProperty $item 'Id' '')) { '☑' } else { '☐' }
+        $enabled = [bool](Get-UrgentProperty $item 'Enabled' $true)
+        $tick = if (-not $enabled) { '⛔' } elseif ($selected -contains [string](Get-UrgentProperty $item 'Id' '')) { '☑' } else { '☐' }
         $mode = if ($timing.Mode -eq 'exit') { '🚪' } elseif ($timing.Mode -eq 'auto_hide') { '🙈' } else { '✏️' }
         # Escaped because a breaking line is text somebody typed, and this
         # message is sent as HTML.
@@ -489,20 +519,21 @@ function Get-UrgentItemKeyboard {
     if (-not $item) { return @{ inline_keyboard = @(, @( (New-Button '⬅️ العواجل' 'urgentb:open') )) } }
     $defaults = Get-UrgentBoardDefaults
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
-    $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$Position"), (New-Button '🏷 العنوان' "urgentb:title:$Position") )
-    $modeRow = @( (New-Button "النمط: $(Get-UrgentModeLabel -Mode $timing.Mode)" "urgentb:mode:$Position") )
-    if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$Position") }
+    $itemId = [string](Get-UrgentProperty $item 'Id' '')
+    $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId"), (New-Button '🏷 العنوان' "urgentb:title:$itemId") )
+    $modeRow = @( (New-Button "النمط: $(Get-UrgentModeLabel -Mode $timing.Mode)" "urgentb:mode:$itemId") )
+    if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$itemId") }
     $rows += , $modeRow
-    $intervalRow = @( (New-Button "⏱ الفاصل: $($timing.IntervalSeconds) ث" "urgentb:interval:$Position") )
-    if (-not $timing.IntervalInherited) { $intervalRow += (New-Button '↩️ من الجدول' "urgentb:intervalreset:$Position") }
+    $intervalRow = @( (New-Button "⏱ الفاصل: $($timing.IntervalSeconds) ث" "urgentb:interval:$itemId") )
+    if (-not $timing.IntervalInherited) { $intervalRow += (New-Button '↩️ من الجدول' "urgentb:intervalreset:$itemId") }
     $rows += , $intervalRow
-    $repeatRow = @( (New-Button "🔁 التكرار: $($timing.Repeats)" "urgentb:repeats:$Position") )
-    if (-not $timing.RepeatsInherited) { $repeatRow += (New-Button '↩️ من الجدول' "urgentb:repeatsreset:$Position") }
+    $repeatRow = @( (New-Button "🔁 التكرار: $($timing.Repeats)" "urgentb:repeats:$itemId") )
+    if (-not $timing.RepeatsInherited) { $repeatRow += (New-Button '↩️ من الجدول' "urgentb:repeatsreset:$itemId") }
     $rows += , $repeatRow
     $enabled = [bool](Get-UrgentProperty $item 'Enabled' $true)
     $toggle = if ($enabled) { '⛔ تعطيل' } else { '✅ تفعيل' }
-    $rows += , @( (New-Button $toggle "urgentb:enable:$Position"), (New-Button '🗑 حذف' "urgentb:itemdel:$Position" -Style danger) )
-    $rows += , @( (New-Button '⬆️ أعلى' "urgentb:up:$Position"), (New-Button '⬇️ أسفل' "urgentb:down:$Position") )
+    $rows += , @( (New-Button $toggle "urgentb:enable:$itemId"), (New-Button '🗑 حذف' "urgentb:itemdel:$itemId" -Style danger) )
+    $rows += , @( (New-Button '⬆️ أعلى' "urgentb:up:$itemId"), (New-Button '⬇️ أسفل' "urgentb:down:$itemId") )
     $rows += , @( (New-Button '⬅️ العواجل' 'urgentb:open') )
     return @{ inline_keyboard = $rows }
 }
@@ -702,16 +733,25 @@ function Show-UrgentDeleteConfirm {
         return $false
     }
     $rows = @()
-    $rows += , @( (New-Button "🗑 احذف $($selected.Count)" 'urgentb:delconfirm' -Style danger) )
+    $token = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    Set-PendingState -ChatId $ChatId -State @{ Mode = 'urgent_delete_confirm'; Token = $token; ItemIds = @($selected); StartedAt = (Get-Date) }
+    $rows += , @( (New-Button "🗑 احذف $($selected.Count)" "urgentb:delconfirm:$token" -Style danger) )
     $rows += , @( (New-Button '⬅️ رجوع' 'urgentb:open') )
     Send-TelegramMessage -ChatId $ChatId -Text "🗑 حذف $($selected.Count) عاجلًا من الجدول؟" -ReplyMarkup @{ inline_keyboard = $rows }
     return $true
 }
 
 function Invoke-UrgentSelectedDelete {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Token = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
+    $confirmation = Get-PendingState -ChatId $ChatId
+    if (-not $Token -or -not $confirmation -or [string](Get-JsonProp $confirmation 'Mode') -ne 'urgent_delete_confirm' -or
+        $Token -cne [string](Get-JsonProp $confirmation 'Token')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ انتهت صلاحية تأكيد الحذف. حدّد العواجل وأكّد من جديد.'
+        return $false
+    }
+    $selected = @(Get-JsonProp $confirmation 'ItemIds')
+    Clear-PendingState -ChatId $ChatId
     if ($selected.Count -eq 0) {
         Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId
         return $false
@@ -753,7 +793,13 @@ function Set-UrgentBoardSetting {
             if (-not [int]::TryParse([string]$Value, [ref]$number)) { throw 'اختر قيمة رقمية صحيحة من الأزرار.' }
             $Value = $number
         }
+        $previousSettings = (Get-JsonProp $config 'Settings') | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $script:LastConfigSaveFailed = $false
         Set-Setting -Name $Name -Value $Value
+        if ($script:LastConfigSaveFailed) {
+            Set-JsonProp $config 'Settings' $previousSettings
+            throw 'تعذّر حفظ الإعداد؛ بقيت القيمة السابقة.'
+        }
     }
     catch {
         # Redacted on the way out, like every other exception this bridge shows
@@ -813,8 +859,12 @@ function Show-UrgentNumberPicker {
     $valueLabel = if ($current -eq 0) { "0 — $($spec.Zero)" } else { [string]$current }
     $text = "🔢 $($spec.Label)`nالقيمة: $valueLabel`nالمدى: $($spec.Minimum)–$($spec.Maximum)`nاختر بالأزرار؛ كل ضغطة تُحفظ فورًا."
     if (-not $spec.Setting) {
-        $effective = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults)
-        $text += "`nالقيمة الفعلية: $(Get-UrgentProperty $effective $spec.Field 0)"
+        $effective = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
+        $effectiveField = if ($spec.Field -eq 'IntervalSeconds') { 'HoldSeconds' } else { $spec.Field }
+        $text += "`nالقيمة الفعلية: $(Get-UrgentProperty $effective $effectiveField 0)"
+        if ($spec.Field -eq 'IntervalSeconds' -and $effective.IntervalRaisedToFloor) {
+            $text += "`n⚠️ رُفع الفاصل إلى $($effective.HoldSeconds) ث: أقصر ممّا يسمح به المشهد."
+        }
     }
     $prefix = "urgentb:num:$($State.Token)"
     $rows = @()
@@ -916,7 +966,10 @@ function Complete-UrgentBoardText {
     $position = if ($state.ContainsKey('Position')) { [int]$state.Position } else { -1 }
     Clear-PendingState -ChatId $ChatId
     $board = $script:UrgentBoard
-    $item = if ($position -ge 0) { Get-UrgentItemByPosition -Position $position } else { $null }
+    $savedItemId = [string](Get-JsonProp $state 'ItemId')
+    $item = if ($savedItemId) { Get-UrgentItem -Board $board -ItemId $savedItemId }
+        elseif ($mode -in @('urgent_item_interval', 'urgent_item_repeats') -and $position -ge 0) { Get-UrgentItemByPosition -Position $position }
+        else { $null }
     $itemId = if ($item) { [string](Get-UrgentProperty $item 'Id' '') } else { '' }
     $maxLength = Get-SettingInt 'UrgentBoardMaxTextLength' 300
     $result = $null

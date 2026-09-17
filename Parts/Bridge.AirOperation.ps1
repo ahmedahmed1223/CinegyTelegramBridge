@@ -477,10 +477,16 @@ function Get-EffectiveAutoHideSeconds {
     $sensitiveKeys = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' |
         ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $isSensitive = @($sensitiveKeys | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
-    if (-not $isSensitive) { return [math]::Max(0, $RequestedSeconds) }
-    $requiredSeconds = Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1
-    if ($RequestedSeconds -gt 0) { return [math]::Min($RequestedSeconds, $requiredSeconds) }
-    return $requiredSeconds
+    $seconds = [math]::Max(0, $RequestedSeconds)
+    $templateMaximum = 0
+    $rawMaximum = Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $Key
+    if (-not [int]::TryParse([string]$rawMaximum, [ref]$templateMaximum)) { $templateMaximum = 0 }
+    $limits = @($templateMaximum)
+    if ($isSensitive) { $limits += Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1 }
+    foreach ($limit in $limits) {
+        if ($limit -gt 0 -and ($seconds -eq 0 -or $limit -lt $seconds)) { $seconds = $limit }
+    }
+    return $seconds
 }
 
 function Copy-ShowVariables {

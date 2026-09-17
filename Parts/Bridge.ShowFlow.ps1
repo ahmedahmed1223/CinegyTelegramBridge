@@ -831,7 +831,9 @@ function Set-LayerAutoHide {
     Write-BridgeLog "User $actor set an auto-hide timer of $Seconds s on layer $Layer"
     Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - بواسطة $actor"
     $timerText = if ($timerSaved) {
-        "⏱ سيتم إخفاء الطبقة $Layer بعد $(Format-Duration -Seconds $Seconds)."
+        $savedTimer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer }) | Select-Object -First 1
+        $remaining = if ($savedTimer) { [int][math]::Max(0.0, [math]::Ceiling(([datetimeoffset]$savedTimer.At - [datetimeoffset]::Now).TotalSeconds)) } else { $Seconds }
+        "⏱ سيتم إخفاء الطبقة $Layer خلال $(Format-Duration -Seconds $remaining)؛ لا يتجاوز حدّ القالب إن كان مضبوطًا."
     }
     else {
         "⚠️ ضُبط مؤقت الطبقة $Layer داخل الجسر، لكن تعذّر حفظه ليستمر بعد إعادة التشغيل."

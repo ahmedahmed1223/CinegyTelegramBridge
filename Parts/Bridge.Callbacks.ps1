@@ -132,7 +132,38 @@ function Invoke-CallbackQuery {
     Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
     Update-UserLastActivity -UserId $userId | Out-Null
 
+    if ($data -match '^urgentb:(all|none|page)(?::|$)') {
+        if ($data -notmatch '^urgentb:(all|none|page)(?::([0-9]{1,6}))?$') {
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ انتهت صلاحية الأزرار. افتح العواجل من جديد.'
+            return
+        }
+        $urgentPageAction = $Matches[1]
+        $urgentPage = if ($Matches.ContainsKey(2)) { [int]$Matches[2] } else { 0 }
+        $data = "urgentb:${urgentPageAction}:$urgentPage"
+    }
+    if ($data -eq 'urgentb:delconfirm') {
+        Invoke-UrgentSelectedDelete -ChatId $chatId -UserId $userId | Out-Null
+        return
+    }
+    # Resolve stable story IDs only after admission. Old positional buttons
+    # cannot prove which story they meant and are deliberately refused.
+    if ($data -match '^urgentb:(pick|item|text|title|interval|repeats|mode|modereset|intervalreset|repeatsreset|enable|up|down|itemdel):(.+)$') {
+        $urgentAction = $Matches[1]
+        $urgentId = $Matches[2]
+        $urgentPosition = -1
+        $urgentItems = @(Get-UrgentProperty $script:UrgentBoard 'Items' @())
+        for ($urgentIndex = 0; $urgentIndex -lt $urgentItems.Count; $urgentIndex++) {
+            if ([string](Get-UrgentProperty $urgentItems[$urgentIndex] 'Id' '') -ceq $urgentId) { $urgentPosition = $urgentIndex; break }
+        }
+        if ($urgentPosition -lt 0) {
+            Send-TelegramMessage -ChatId $chatId -Text '⚠️ تغيّر الجدول أو انتهت صلاحية الأزرار. افتح العواجل من جديد.'
+            return
+        }
+        $data = "urgentb:${urgentAction}:$urgentPosition"
+    }
+
     switch -Wildcard ($data) {
+        'tmax:*' { Invoke-TemplateMaxAirPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'tmax:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:resume' {
@@ -435,17 +466,18 @@ function Invoke-CallbackQuery {
         'urgentb:pick:*' {
             $item = Get-UrgentItemByPosition -Position ([int](Get-CallbackArg $data 'urgentb:pick:'))
             if ($item) { Switch-UrgentSelection -ChatId $chatId -ItemId ([string](Get-UrgentProperty $item 'Id' '')) | Out-Null }
-            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)
+            $page = [int][math]::Floor([int](Get-CallbackArg $data 'urgentb:pick:') / (Get-UrgentBoardPageSize))
+            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page $page
             break
         }
-        'urgentb:all' {
+        'urgentb:all:*' {
             Set-UrgentSelectedIds -ChatId $chatId -Ids @(@(Get-UrgentPlayableItems -Board $script:UrgentBoard) | ForEach-Object { [string](Get-UrgentProperty $_ 'Id' '') })
-            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)
+            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'urgentb:all:'))
             break
         }
-        'urgentb:none' {
+        'urgentb:none:*' {
             Set-UrgentSelectedIds -ChatId $chatId -Ids @()
-            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)
+            Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'urgentb:none:'))
             break
         }
         'urgentb:add' {
@@ -461,7 +493,7 @@ function Invoke-CallbackQuery {
             $position = [int](Get-CallbackArg $data 'urgentb:text:')
             $item = Get-UrgentItemByPosition -Position $position
             if (-not $item) { Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_text'; UserId = $userId; Position = $position; StartedAt = (Get-Date) }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_text'; UserId = $userId; ItemId = [string](Get-UrgentProperty $item 'Id' ''); StartedAt = (Get-Date) }
             Send-BridgeTextEditPrompt -ChatId $chatId -Prompt 'أرسل النصّ البديل للعاجل' -Current ([string](Get-UrgentProperty $item 'Text' '')) -CancelData 'urgentb:open'
             break
         }
@@ -469,7 +501,7 @@ function Invoke-CallbackQuery {
             $position = [int](Get-CallbackArg $data 'urgentb:title:')
             $item = Get-UrgentItemByPosition -Position $position
             if (-not $item) { Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_title'; UserId = $userId; Position = $position; StartedAt = (Get-Date) }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_title'; UserId = $userId; ItemId = [string](Get-UrgentProperty $item 'Id' ''); StartedAt = (Get-Date) }
             Send-BridgeTextEditPrompt -ChatId $chatId -Prompt 'أرسل عنوان العاجل' -Current ([string](Get-UrgentProperty $item 'Title' '')) -CancelData 'urgentb:open'
             break
         }
@@ -496,7 +528,7 @@ function Invoke-CallbackQuery {
         'urgentb:down:*' { Invoke-UrgentItemMove -ChatId $chatId -UserId $userId -Position ([int](Get-CallbackArg $data 'urgentb:down:')) -Delta 1 | Out-Null; break }
         'urgentb:itemdel:*' { Invoke-UrgentItemDelete -ChatId $chatId -UserId $userId -Position ([int](Get-CallbackArg $data 'urgentb:itemdel:')) | Out-Null; break }
         'urgentb:delask' { Show-UrgentDeleteConfirm -ChatId $chatId | Out-Null; break }
-        'urgentb:delconfirm' { Invoke-UrgentSelectedDelete -ChatId $chatId -UserId $userId | Out-Null; break }
+        'urgentb:delconfirm:*' { Invoke-UrgentSelectedDelete -ChatId $chatId -UserId $userId -Token (Get-CallbackArg $data 'urgentb:delconfirm:') | Out-Null; break }
         'urgentb:timing' { Clear-PendingState -ChatId $chatId; Show-UrgentTimingScreen -ChatId $chatId -MessageId ([int]$msgObj.message_id); break }
         'urgentb:dinterval' {
             Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dinterval -MessageId ([int](Get-JsonProp $msgObj 'message_id'))

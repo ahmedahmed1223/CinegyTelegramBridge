@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 
 Describe 'Release version format' {
     It 'packages a safe semantic-version prerelease identifier' {
@@ -33,6 +33,28 @@ Describe 'Release package safety' {
             $names | Should -Not -Contain $forbidden
         }
         @($names | Where-Object { $_ -match '(^|/)(logs|artifacts|backups?)(/|$)|\.(bak|tmp|log|jsonl)$' }).Count | Should -Be 0
+    }
+
+    It 'packages every file the bridge loads at startup' {
+        # The safety test above asks what must NOT be in the package. Nothing
+        # asked the other question, and the answer had quietly become "thirteen
+        # of them are missing": TelegramBridge.ps1 dot-sources each part by
+        # name, so an extracted release without one throws on the first load and
+        # never reaches a screen. Read off the loader itself rather than a
+        # second hand-kept list, because a hand-kept list is what drifted.
+        $bridge = Get-Content -LiteralPath (Join-Path $root 'TelegramBridge.ps1') -Raw
+        $required = @(
+            [regex]::Matches($bridge, "(?m)^\s+'(Bridge\.[A-Za-z.]+)'\s*$") | ForEach-Object { 'Parts/' + $_.Groups[1].Value + '.ps1' }
+            [regex]::Matches($bridge, 'Join-Path \$moduleRoot "([A-Za-z]+\.psm1)"') | ForEach-Object { 'Modules/' + $_.Groups[1].Value }
+        )
+        $required.Count | Should -BeGreaterThan 40 -Because 'the loader should have been read; a regex that matches nothing would pass this test vacuously'
+
+        $archive = [IO.Compression.ZipFile]::OpenRead($script:ReleaseZip)
+        try { $names = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }) }
+        finally { $archive.Dispose() }
+
+        $missing = @($required | Where-Object { $names -notcontains $_ } | Sort-Object)
+        $missing | Should -BeNullOrEmpty -Because "the bridge loads these by name and the package does not carry them, so the extracted release cannot start: $($missing -join ', ')"
     }
 
     It 'runs the managed-service lifecycle check in Windows CI' {

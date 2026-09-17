@@ -198,6 +198,15 @@ Describe 'Playing a bulletin' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
@@ -338,6 +347,15 @@ Describe 'Adjusting the bulletin timings' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         $script:bulletin = New-TestMojazLibrary -DelaySeconds 8
     }
 
@@ -642,6 +660,15 @@ Describe 'Deleting a bulletin' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         Mock Write-BridgeValidatedJson { $true }
         Mock Invoke-ExitLayer { $true }
         Mock Get-MojazSceneTiming { $null }
@@ -696,6 +723,15 @@ Describe 'Named bulletin playback isolation' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
@@ -738,6 +774,15 @@ Describe 'Reusable Mojaz schedules and overlap prevention' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }
         Mock Get-MojazSceneTiming { $null }
@@ -1042,6 +1087,15 @@ Describe 'Hiding the change behind the scene fade' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
+        # No engine round trip here: these tests are not about the anchor, and
+        # an unmocked one would reach for Cinegy over HTTP.
+        Mock Get-CinegyLayerStartedAtUtc { $null }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
@@ -1998,6 +2052,12 @@ Describe 'The timing anchor reports what it did' {
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
         Mock Add-AuditEntry {}
+        # This bridge has a Mojaz scene, which is what a bulletin plays on.
+        # Without it Start-MojazPlayback reads (Get-MojazTemplate).Layer off
+        # $null and throws under Set-StrictMode - and the SHOW below is mocked,
+        # so nothing else in the setup notices the scene is missing. That is how
+        # these tests have been red since the anchor landed in 8.19.0.
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'D:\cingy cg\mojaz.cintitle'; Layer = 5 } }
         Mock Write-AuditRecord {}
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }

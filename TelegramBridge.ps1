@@ -188,6 +188,9 @@ $script:DefaultSettings = [ordered]@{
     SensitiveTemplateKeys      = ''     # templates that must always receive an automatic hide timer
     SensitiveTemplateAutoHideSeconds = 30 # maximum on-air lifetime for a sensitive template
     TemplateMaxAirSeconds      = @{}    # per-template maximum; empty disables this policy
+    TemplateAirExtensionEnabled = $true # allow one bounded reply window at a non-sensitive template cap
+    TemplateAirExtensionResponseSeconds = 30 # unanswered offers expire and hide
+    TemplateAirExtensionMaxSeconds = 900 # maximum one-time operator extension
     TemplateTestLayer         = 0       # dedicated non-program test layer; 0 disables template testing
     TemplateTestAutoHideSeconds = 10    # short safety timeout for the dedicated test layer
     EnableSafeRollback         = $false # opt-in; preserves the current workflow by default
@@ -468,6 +471,9 @@ $script:SettingDisplayMetadata = @{
     StartupStormThreshold = @{ Unit = 'إقلاع'; Description = 'عدد إقلاعات الجسر خلال 24 ساعة قبل تنبيه واحد (0 للتعطيل)' }
     SensitiveTemplateAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الحد الأقصى لبقاء القالب الحساس على الهواء' }
     TemplateMaxAirSeconds = @{ Unit = 'ثانية'; Description = 'حد مستقل لكل قالب يبدأ من العرض التالي؛ يُعدّل بأزرار القوالب فقط' }
+    TemplateAirExtensionEnabled = @{ Unit = ''; Description = 'السماح بتمديد واحد عند بلوغ حد القالب؛ لا يشمل القوالب الحساسة' }
+    TemplateAirExtensionResponseSeconds = @{ Unit = 'ثانية'; Description = 'مهلة الرد على طلب التمديد؛ عند انتهائها دون تأكيد يُخفى القالب' }
+    TemplateAirExtensionMaxSeconds = @{ Unit = 'ثانية'; Description = 'أقصى مدة للتمديد الواحد؛ المدة المخصصة بالأزرار فقط' }
     TemplateTestLayer = @{ Unit = 'طبقة'; Description = 'طبقة تجربة القوالب المستقلة (0 للتعطيل)' }
     TemplateTestAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'مدة إخفاء اختبار القالب تلقائيًا' }
     TemplateRegistryImportMaxTemplates = @{ Unit = 'قالب'; Description = 'الحد الأقصى لعدد القوالب في ملف استيراد سجل القوالب' }
@@ -1214,7 +1220,7 @@ $script:HealthHistory = @{
 # chat button - by accident or by someone who got hold of an admin's phone -
 # silently weakens the security model, so they require an explicit confirm.
 $script:ProtectedSettings = @('RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets',
-    'BlockRejectedRequesters', 'LeaveUnknownGroups')
+    'BlockRejectedRequesters', 'LeaveUnknownGroups', 'TemplateAirExtensionEnabled')
 
 # Allowed values for string settings. A typo here would silently stop graphics
 # updating, so the choice is constrained rather than free text.
@@ -1279,6 +1285,7 @@ foreach ($entry in @(
                 'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
                 'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
                 'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateMaxAirSeconds', 'TemplateTestLayer',
+                'TemplateAirExtensionEnabled', 'TemplateAirExtensionResponseSeconds', 'TemplateAirExtensionMaxSeconds',
                 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
                 'LayerNames', 'EnableFavorites', 'FavoritesCount',
                 'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
@@ -1371,6 +1378,9 @@ $script:SettingNavigationLabels = @{
     DisabledTemplateKeys = 'القوالب المعطّلة'
     SensitiveTemplateKeys = 'القوالب الحساسة'
     TemplateMaxAirSeconds = 'أقصى مدة لكل قالب'
+    TemplateAirExtensionEnabled = 'تمديد واحد للمشغّل'
+    TemplateAirExtensionResponseSeconds = 'مهلة الرد على التمديد'
+    TemplateAirExtensionMaxSeconds = 'أقصى مدة للتمديد'
     LayerNames = 'أسماء الطبقات'
     EnableFavorites = 'المفضلة'
     MaintenanceMode = 'وضع الصيانة'
@@ -1569,6 +1579,8 @@ $script:SettingNavigationLabels = @{
 # bound somebody will one day need to exceed, and the argument about it costs
 # more than the mistake it prevents.
 $script:SettingConstraints = @{
+    TemplateAirExtensionResponseSeconds = @{ Minimum = 5; Maximum = 120 }
+    TemplateAirExtensionMaxSeconds = @{ Minimum = 60; Maximum = 3600 }
     # Anything that talks to Cinegy or Telegram on a clock.
     CinegyStateCheckSeconds       = @{ Minimum = 1; Maximum = 300 }
     CinegyHealthCheckSeconds      = @{ Minimum = 5; Maximum = 3600 }

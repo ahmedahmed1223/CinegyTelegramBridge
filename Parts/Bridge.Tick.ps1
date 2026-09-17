@@ -168,6 +168,14 @@ function Save-AutoHideQueue {
                     TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $_ 'ActiveIdConfirmed')
+                    Stage = [string](Get-JsonProp $_ 'Stage')
+                    Token = [string](Get-JsonProp $_ 'Token')
+                    ShowAt = [string](Get-JsonProp $_ 'ShowAt')
+                    ExtensionUsed = [bool](Get-JsonProp $_ 'ExtensionUsed')
+                    Choice = [int](Get-JsonProp $_ 'Choice')
+                    RetryCount = [int](Get-JsonProp $_ 'RetryCount')
+                    RetryAt = $(if (Get-JsonProp $_ 'RetryAt') { ([datetimeoffset]$_.RetryAt).ToString('o') } else { '' })
+                    NoticeAt = $(if (Get-JsonProp $_ 'NoticeAt') { ([datetimeoffset]$_.NoticeAt).ToString('o') } else { '' })
                 }
             })
         $json = ConvertTo-Json -InputObject $payload -Depth 4
@@ -199,6 +207,14 @@ function Import-AutoHideQueue {
                     TemplateKey = [string](Get-JsonProp $raw 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $raw 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $raw 'ActiveIdConfirmed')
+                    Stage = [string](Get-JsonProp $raw 'Stage')
+                    Token = [string](Get-JsonProp $raw 'Token')
+                    ShowAt = [string](Get-JsonProp $raw 'ShowAt')
+                    ExtensionUsed = [bool](Get-JsonProp $raw 'ExtensionUsed')
+                    Choice = [int](Get-JsonProp $raw 'Choice')
+                    RetryCount = [int](Get-JsonProp $raw 'RetryCount')
+                    RetryAt = [string](Get-JsonProp $raw 'RetryAt')
+                    NoticeAt = [string](Get-JsonProp $raw 'NoticeAt')
                 })
         }
         $script:AutoHideQueue = $restored
@@ -292,36 +308,167 @@ function Get-AutoHideTargetDecision {
     return [pscustomobject]@{ ShouldHide = $true; Reason = '' }
 }
 
+function Request-TemplateAirLimitNow {
+    <# Admin-only "apply the cap to the show on air right now". Shortens the
+       running show's timer to the remaining cap; never lengthens anything and
+       never sends an air command itself. #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    $layer = 0
+    $found = $false
+    foreach ($entry in $script:OnAir.GetEnumerator()) {
+        if ([string](Get-JsonProp $entry.Value 'Key') -ieq $Key) { $layer = [int]$entry.Key; $found = $true; break }
+    }
+    if (-not $found) { return $false }
+    $timer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $layer }) | Select-Object -First 1
+    if (-not $timer) { return $false }
+    $cap = Get-EffectiveAutoHideSeconds -Key $Key
+    $shownAt = [datetimeoffset]::MinValue
+    if ($cap -le 0 -or -not [datetimeoffset]::TryParse([string](Get-JsonProp $timer 'ShowAt'), [ref]$shownAt)) { return $false }
+    $deadline = $shownAt.AddSeconds($cap)
+    if ($deadline -ge [datetimeoffset]$timer.At) { return $false }
+    $previous = $timer.Clone()
+    $timer.Stage = 'hide'; $timer.At = $deadline
+    if (-not (Save-AutoHideQueue)) {
+        $timer.Clear(); foreach ($key in $previous.Keys) { $timer[$key] = $previous[$key] }
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ التقصير؛ بقي الموعد السابق.'
+        return $false
+    }
+    Write-BridgeLog "Template cap applied now to layer $layer by admin $UserId at $([datetimeoffset]$Now.ToString('o'))."
+    return $true
+}
+
+function Invoke-TemplateAirExtensionReply {
+    param([string]$Argument, [long]$ChatId, [long]$UserId, [int]$MessageId = 0, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId) -or
+        $Argument -notmatch '^([a-f0-9]{12}):(extend|custom|delta|confirm|hide):(-?[0-9]{1,4})$') { return $false }
+    $token = $Matches[1]; $action = $Matches[2]; $value = [int]$Matches[3]
+    $timer = @($script:AutoHideQueue | Where-Object { [string](Get-JsonProp $_ 'Token') -ceq $token }) | Select-Object -First 1
+    if (-not $timer -or [string](Get-JsonProp $timer 'Stage') -ne 'offer' -or
+        $Now -ge [datetimeoffset]$timer.At -or [bool](Get-JsonProp $timer 'ExtensionUsed')) { return $false }
+    if ([long]$timer.UserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    if (-not (Get-AutoHideTargetDecision -Timer $timer).ShouldHide) { return $false }
+    $live = $script:OnAir[[int]$timer.Layer]
+    if ([datetimeoffset]$timer.ShowAt -ne [datetimeoffset]([string](Get-JsonProp $live 'At'))) { return $false }
+    $maximum = [math]::Clamp((Get-SettingInt 'TemplateAirExtensionMaxSeconds' 60),60,3600)
+    $previous = $timer.Clone()
+    if ($action -eq 'hide') { $timer.Stage = 'hide'; $timer.At = $Now }
+    else {
+        if (-not (Get-Setting 'TemplateAirExtensionEnabled')) { return $false }
+        $sensitive = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() }) -contains ([string]$timer.TemplateKey)
+        if ($sensitive) { return $false }
+        if ($action -eq 'delta') {
+            if ($value -notin @(-60,-10,10,60)) { return $false }
+            $timer.Choice = [math]::Clamp(([int]$timer.Choice + $value),1,$maximum)
+        }
+        elseif ($action -in @('extend','confirm')) {
+            $seconds = if ($action -eq 'confirm') { [int]$timer.Choice } else { $value }
+            if ($seconds -lt 1 -or $seconds -gt $maximum) { return $false }
+            $timer.Stage = 'extended'; $timer.ExtensionUsed = $true; $timer.At = $Now.AddSeconds($seconds)
+        }
+    }
+    if (-not (Save-AutoHideQueue)) {
+        $timer.Clear(); foreach ($key in $previous.Keys) { $timer[$key] = $previous[$key] }
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ الاختيار؛ لم يتغير موعد الإخفاء.'
+        return $false
+    }
+    if ($action -eq 'hide') { Update-AutoHideQueue -Now $Now }
+    elseif ($action -in @('custom','delta')) { Show-TemplateAirExtensionOffer -Timer $timer -MessageId $MessageId -Custom }
+    else { Send-TelegramMessage -ChatId $ChatId -Text "⏱ تم التمديد مرة واحدة؛ الإخفاء عند $(([datetimeoffset]$timer.At).ToLocalTime().ToString('HH:mm:ss'))." }
+    return $true
+}
+
+function Show-TemplateAirExtensionOffer {
+    param([hashtable]$Timer, [int]$MessageId = 0, [switch]$Custom)
+    $prefix = "airext:$($Timer.Token)"
+    $text = "⏱ بلغ القالب $($Timer.TemplateKey) حدّه على الهواء.`nتمديد واحد فقط. إذا لم تؤكّد قبل $(([datetimeoffset]$Timer.At).ToLocalTime().ToString('HH:mm:ss')) فسيُخفى تلقائيًا."
+    $rows = @()
+    if ($Custom) {
+        $text += "`nالمدة المختارة: $($Timer.Choice) ثانية. تعديلها لا يمدّد مهلة الرد."
+        $rows += , @((New-Button '− دقيقة' "${prefix}:delta:-60"),(New-Button '+ دقيقة' "${prefix}:delta:60"))
+        $rows += , @((New-Button '−10 ث' "${prefix}:delta:-10"),(New-Button '+10 ث' "${prefix}:delta:10"))
+        $rows += , @((New-Button 'تأكيد التمديد' "${prefix}:confirm:0"))
+    }
+    else {
+        $preset = [math]::Min(300,(Get-SettingInt 'TemplateAirExtensionMaxSeconds' 60))
+        $label = if ($preset -eq 300) { '٥ دقائق' } else { "$preset ثانية" }
+        $rows += , @((New-Button $label "${prefix}:extend:$preset"),(New-Button 'مدة مخصصة' "${prefix}:custom:0"))
+    }
+    $rows += , @((New-Button 'إخفاء الآن' "${prefix}:hide:0" -Style danger))
+    $markup = @{ inline_keyboard = $rows }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId ([long]$Timer.ChatId) -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
+    Send-TelegramMessage -ChatId ([long]$Timer.ChatId) -Text $text -ReplyMarkup $markup
+}
+
 function Update-AutoHideQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
-    if ($script:AutoHideQueue.Count -eq 0) { return }
-    $due = @($script:AutoHideQueue | Where-Object { [datetimeoffset]$_.At -le $Now })
+    $due = @($script:AutoHideQueue | Where-Object {
+        [datetimeoffset]$_.At -le $Now -and
+        (-not (Get-JsonProp $_ 'RetryAt') -or [datetimeoffset]$_.RetryAt -le $Now)
+    })
     foreach ($item in $due) {
-        $index = $script:AutoHideQueue.IndexOf($item)
-        $script:AutoHideQueue.RemoveAt($index)
-        if (-not (Save-AutoHideQueue)) {
-            $script:AutoHideQueue.Insert($index, $item)
-            Write-BridgeLog "Deferred due auto-hide on layer $($item.Layer): could not persist timer consumption." 'WARN'
-            continue
+        try {
+            $decision = Get-AutoHideTargetDecision -Timer $item
+            if ($decision.ShouldHide -and [bool](Get-JsonProp $item 'ActiveIdConfirmed')) {
+                $liveStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+                    -AirChannelNumber $config.AirChannelNumber -Layer ([int]$item.Layer) `
+                    -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+                if (-not $liveStatus -or -not [bool](Get-JsonProp $liveStatus 'Success')) { throw 'Cinegy status unavailable' }
+                $decision = Get-AutoHideTargetDecision -Timer $item -LiveStatus $liveStatus
+            }
+            if ($decision.ShouldHide -and (Get-Setting 'TemplateAirExtensionEnabled') -and
+                -not [bool](Get-JsonProp $item 'ExtensionUsed') -and -not (Get-JsonProp $item 'Stage')) {
+                $key = [string](Get-JsonProp $item 'TemplateKey')
+                $cap = 0
+                [int]::TryParse([string](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $key), [ref]$cap) | Out-Null
+                $sensitive = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;
+\n]+' | ForEach-Object { $_.Trim() }) -contains $key
+                $live = $script:OnAir[[int]$item.Layer]
+                $shownAt = [datetimeoffset]::MinValue
+                if ($cap -gt 0 -and -not $sensitive -and
+                    [datetimeoffset]::TryParse([string](Get-JsonProp $live 'At'), [ref]$shownAt) -and
+                    [datetimeoffset]$item.At -ge $shownAt.AddSeconds($cap)) {
+                    $item.Stage = 'offer'
+                    $item.Token = [guid]::NewGuid().ToString('N').Substring(0,12)
+                    $item.ShowAt = $shownAt.ToString('o')
+                    $item.At = $Now.AddSeconds([math]::Clamp((Get-SettingInt 'TemplateAirExtensionResponseSeconds' 5),5,120))
+                    $item.Choice = [math]::Min(300,(Get-SettingInt 'TemplateAirExtensionMaxSeconds' 60))
+                    if (-not (Save-AutoHideQueue)) {
+                        $item.Stage = 'hide'; $item.At = $Now
+                        throw 'Could not persist extension offer'
+                    }
+                    Show-TemplateAirExtensionOffer -Timer $item
+                    continue
+                }
+            }
+            if (-not $decision.ShouldHide) {
+                Write-BridgeLog "Skipped stale auto-hide timer on layer $($item.Layer): $($decision.Reason)" 'WARN'
+                Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ لم يُنفَّذ المؤقت للطبقة $($item.Layer): $($decision.Reason)"
+            }
+            if ($decision.ShouldHide) {
+                if (-not (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet)) {
+                    throw 'Hide not confirmed'
+                }
+            }
+            $script:AutoHideQueue.Remove($item) | Out-Null
+            if (-not (Save-AutoHideQueue)) {
+                if (-not $script:AutoHideQueue.Contains($item)) { $script:AutoHideQueue.Add($item) }
+                throw 'Could not persist timer settlement'
+            }
+            if ($decision.ShouldHide) { Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏱ تم الإخفاء التلقائي للطبقة $($item.Layer)." }
         }
-        $decision = Get-AutoHideTargetDecision -Timer $item
-        if ($decision.ShouldHide -and [bool](Get-JsonProp $item 'ActiveIdConfirmed')) {
-            $liveStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
-                -AirChannelNumber $config.AirChannelNumber -Layer ([int]$item.Layer) `
-                -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-            $decision = Get-AutoHideTargetDecision -Timer $item -LiveStatus $liveStatus
-        }
-        if (-not $decision.ShouldHide) {
-            Write-BridgeLog "Skipped stale auto-hide timer on layer $($item.Layer): $($decision.Reason)" 'WARN'
-            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ لم يُنفَّذ المؤقت للطبقة $($item.Layer): $($decision.Reason)"
-            continue
-        }
-        Write-BridgeLog "Auto-hiding layer $($item.Layer) (timed show by user $($item.UserId))"
-        if (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet) {
-            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏱ تم الإخفاء التلقائي للطبقة $($item.Layer)."
-        }
-        else {
-            Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ فشل الإخفاء التلقائي للطبقة $($item.Layer) - أخفها يدويًا."
+        catch {
+            $item.RetryCount = [math]::Min(6, (1 + [int](Get-JsonProp $item 'RetryCount')))
+            $item.RetryAt = $Now.AddSeconds([math]::Min(60, 5 * [math]::Pow(2, $item.RetryCount - 1)))
+            $noticeAt = Get-JsonProp $item 'NoticeAt'
+            if (-not $noticeAt -or $Now -ge ([datetimeoffset]$noticeAt).AddMinutes(1)) {
+                $item.NoticeAt = $Now
+                Write-BridgeLog "Auto-hide retained for retry on layer $($item.Layer): $($_.Exception.Message)" 'WARN'
+                try { Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ تعذّر تأكيد الإخفاء للطبقة $($item.Layer). ستتكرر المحاولة؛ تحقّق من الهواء." }
+                catch { Write-BridgeLog "Could not deliver the auto-hide retry notice for layer $($item.Layer): $($_.Exception.Message)" 'WARN' }
+            }
+            Save-AutoHideQueue | Out-Null
         }
     }
 }

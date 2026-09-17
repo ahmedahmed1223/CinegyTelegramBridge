@@ -457,6 +457,13 @@ function Invoke-CallbackQuery {
         # sharing a prefix is how a stale button from one ends up answered by
         # the other. Items are addressed by position: callback_data is 64
         # bytes and an id does not fit beside a prefix and a page.
+        'airext:*' {
+            $argument = Get-CallbackArg -Data $data -Prefix 'airext:'
+            $ok = Invoke-TemplateAirExtensionReply -Argument $argument -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id)
+            if (-not $ok) { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text '⚠️ انتهت صلاحية عرض التمديد أو تم استخدامه.' -Alert }
+            else { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id }
+            break
+        }
         'urgentb:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         'urgentb:noop' { break }
         'urgentb:page:*' {

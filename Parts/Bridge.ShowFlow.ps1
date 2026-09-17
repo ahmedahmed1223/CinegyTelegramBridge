@@ -176,6 +176,7 @@ function Start-ShowFlow {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
+    $requestedAutoHideSeconds = $AutoHideSeconds
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key ([string]$t.Key) -RequestedSeconds $AutoHideSeconds
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
     if (-not $lock.Success) {
@@ -204,6 +205,7 @@ function Start-ShowFlow {
             Limits = @($t.FieldLimits); Required = $required
             Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
             Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+            RequestedAutoHideSeconds = $requestedAutoHideSeconds
             LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
             FlowStartedAt = (Get-Date).ToString('o')
         }
@@ -217,6 +219,7 @@ function Start-ShowFlow {
         Required = $required
         Sensitives = @(Get-JsonProp $t 'FieldSensitive' | Where-Object { $null -ne $_ })
         Index = 0; Values = $draftValues; UserId = $UserId; AutoHideSeconds = $AutoHideSeconds
+        RequestedAutoHideSeconds = $requestedAutoHideSeconds
         LockLayer = [int]$t.Layer; ReplacementContext = $replacementContext
         FlowStartedAt = (Get-Date).ToString('o')
     }
@@ -266,6 +269,7 @@ function Resume-ExpiredFlow {
         Required = @($saved.Required); Sensitives = @($saved.Sensitives)
         Values = @{}; Index = [int](Get-JsonProp $saved 'Index'); UserId = $UserId
         AutoHideSeconds = [int](Get-JsonProp $saved 'AutoHideSeconds')
+        RequestedAutoHideSeconds = [int](Get-JsonProp $saved 'RequestedAutoHideSeconds')
         LockLayer = $layer; ReplacementContext = $null; StartedAt = (Get-Date)
     }
     foreach ($name in @(if ($saved.Values) { $saved.Values.Keys } else { @() })) { $state.Values[[string]$name] = [string]$saved.Values[$name] }
@@ -361,7 +365,11 @@ function Format-ShowReviewText {
             $lines.Add("<b>⚠️ هذه الطبقة يتشاركها أيضًا</b>: $(ConvertTo-TelegramHtmlText ($siblings -join '، ')) — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
         }
     }
-    if ($State.AutoHideSeconds -gt 0) { $lines.Add("الإخفاء التلقائي: <code>$($State.AutoHideSeconds)</code> ثانية") }
+    if ($State.AutoHideSeconds -gt 0) {
+        $lines.Add("الإخفاء التلقائي: <code>$($State.AutoHideSeconds)</code> ثانية")
+        $note = Get-TemplateAirLimitExplanation -Key ([string]$State.Key) -RequestedSeconds ([int]$State.RequestedAutoHideSeconds)
+        if ($note) { $lines.Add("$(ConvertTo-TelegramHtmlText $note)") }
+    }
     $lines.Add("")
     $lines.Add("📺 <b>ما سيظهر على الشاشة:</b>")
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {

@@ -2454,7 +2454,8 @@ function Show-TemplateMaxAirEditor {
             $rows += , @((New-Button 'نعم، إزالة الحد' "${prefix}:disable:yes" -Style danger))
         }
         else { $rows += , @((New-Button 'إزالة الحد…' "${prefix}:disable:ask")) }
-        $rows += , @((New-Button '⬅️ القوالب' "${prefix}:page:0"))
+        $rows += , @((New-Button '⬅️ القوالب' "${prefix}:page:0"), (New-Button '⚖️ طبّق الآن' "${prefix}:now:yes"))
+        $text += "`n⚖️ «طبّق الآن» يقصّر بقاء العرض الحالي إلى الحد إذا كان أطول منه؛ لا يطيل ولا يخفي فورًا."
     }
     $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
     $keyboard = @{ inline_keyboard = $rows }
@@ -2469,7 +2470,7 @@ function Invoke-TemplateMaxAirPick {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string](Get-JsonProp $state 'Mode') -ne 'template_max_air' -or
         [long](Get-JsonProp $state 'UserId') -ne $UserId -or
-        $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable):(-?[0-9]{1,4}|ask|yes)$' -or
+        $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable|now):(-?[0-9]{1,4}|ask|yes)$' -or
         $Matches[1] -cne [string](Get-JsonProp $state 'Token')) {
         Send-TelegramMessage -ChatId $ChatId -Text '⚠️ انتهت صلاحية الأزرار. افتح إعداد المدة من جديد.'
         return $false
@@ -2490,7 +2491,14 @@ function Invoke-TemplateMaxAirPick {
     else {
         $key = [string]$state.Key
         if (-not $key -or -not (Get-TemplateStore).Map.ContainsKey($key)) { return $false }
-        if ($action -eq 'disable' -and $value -eq 'ask') { $state.ConfirmDisable = $true }
+        if ($action -eq 'now') {
+            if ($value -ne 'yes') { return $false }
+            if (Request-TemplateAirLimitNow -Key $key -ChatId $ChatId -UserId $UserId) {
+                Send-TelegramMessage -ChatId $ChatId -Text "⚖️ قُصِّر بقاء العرض الحالي لقالب $key إلى الحد المضبوط."
+            }
+            else { Send-TelegramMessage -ChatId $ChatId -Text 'لا عرض حالي لهذا القالب أطول من الحد، أو لا مؤقّت له.' }
+        }
+        elseif ($action -eq 'disable' -and $value -eq 'ask') { $state.ConfirmDisable = $true }
         else {
             $seconds = 0
             if ($action -eq 'disable') {

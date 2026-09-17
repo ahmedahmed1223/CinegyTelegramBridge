@@ -257,6 +257,18 @@ function Get-UrgentRunCeiling {
     return [pscustomobject]@{ Seconds = $seconds; Reason = $reason; AutoHideSeconds = $autoHide }
 }
 
+function Get-UrgentAutoHideLabel {
+    param([int]$Seconds)
+    # The shared duration helper is authoritative; identify which configured
+    # policy supplied that value without changing the planner's reason contract.
+    $maximum = 0
+    $raw = Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $script:MojazUrgentKey
+    if ([int]::TryParse([string]$raw, [ref]$maximum) -and $maximum -gt 0 -and $maximum -eq $Seconds) {
+        return 'الحد الأقصى للقالب'
+    }
+    return 'الإخفاء التلقائي للقالب الحسّاس'
+}
+
 function New-UrgentBoardPlan {
     <#
         The board, costed against this scene and this template's rules.
@@ -270,9 +282,14 @@ function New-UrgentBoardPlan {
     $board = $script:UrgentBoard
     $items = @(Get-UrgentPlayableItems -Board $board -SelectedIds (Get-UrgentSelectedIds -ChatId $ChatId) -SelectedOnly:$SelectedOnly)
     $ceiling = Get-UrgentRunCeiling -Items $items
-    return (New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults) `
-            -FloorSeconds (Get-UrgentFloorSeconds) -TransitionSeconds (Get-UrgentTransitionSeconds) `
-            -MaxSeconds $ceiling.Seconds -MaxReason $ceiling.Reason)
+    $result = New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults) `
+        -FloorSeconds (Get-UrgentFloorSeconds) -TransitionSeconds (Get-UrgentTransitionSeconds) `
+        -MaxSeconds $ceiling.Seconds -MaxReason $ceiling.Reason
+    if ($result.Success -and $ceiling.Reason -eq 'autohide') {
+        $label = Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds
+        $result.Value.Notes = @($result.Value.Notes | ForEach-Object { $_.Replace('الإخفاء التلقائي للقالب الحسّاس', $label) })
+    }
+    return $result
 }
 
 function Get-UrgentItemVariables {
@@ -360,12 +377,17 @@ function Get-UrgentBoardKeyboard {
     # A button that refuses is a button that teaches the operator to distrust
     # the screen.
     if ($script:UrgentBoardRun) {
-        $rows += , @( (New-Button '⏹ إيقاف التشغيل' 'urgentb:stop' -Style danger) )
-        if ([bool](Get-JsonProp $script:UrgentBoardRun 'Paused')) {
-            $pauseButton = New-Button '▶️ استئناف' 'urgentb:resume'
+        if ([bool](Get-JsonProp $script:UrgentBoardRun 'StopFailed')) {
+            $rows += , @( (New-Button '🔁 إعادة الإيقاف' 'urgentb:stop' -Style danger) )
         }
-        else { $pauseButton = New-Button '⏸ مؤقت' 'urgentb:pause' }
-        $rows += , @( (New-Button '⏭ تخطي الحالي' 'urgentb:skip'), $pauseButton )
+        else {
+            $rows += , @( (New-Button '⏹ إيقاف التشغيل' 'urgentb:stop' -Style danger) )
+            if ([bool](Get-JsonProp $script:UrgentBoardRun 'Paused')) {
+                $pauseButton = New-Button '▶️ استئناف' 'urgentb:resume'
+            }
+            else { $pauseButton = New-Button '⏸ مؤقت' 'urgentb:pause' }
+            $rows += , @( (New-Button '⏭ تخطي الحالي' 'urgentb:skip'), $pauseButton )
+        }
     }
     elseif ($items.Count -gt 0) {
         $playRow = @()
@@ -380,8 +402,27 @@ function Get-UrgentBoardKeyboard {
 function Get-UrgentRunStatusText {
     if (-not $script:UrgentBoardRun) { return '' }
     $run = $script:UrgentBoardRun
-    $status = if ([bool](Get-JsonProp $run 'Paused')) { '⏸ متوقف مؤقتًا؛ العاجل يبقى ظاهرًا' } else { '▶️ يعمل' }
-    return "$status — الخبر $([int]$run.Step + 1) من $(@($run.Steps).Count). التخطي ينتقل فورًا للتالي؛ الإيقاف ينهي الجدول. مؤقّت أمان القالب لا يتوقف."
+    $failed = [bool](Get-JsonProp $run 'StopFailed')
+    $status = if ($failed) { '⚠️ تعذّر تأكيد الإيقاف؛ التشغيل مجمّد وحالة الهواء غير مؤكدة. أعد محاولة الإيقاف، لا الاستئناف.' }
+        elseif ([bool](Get-JsonProp $run 'Paused')) { '⏸ متوقف مؤقتًا؛ العاجل يبقى ظاهرًا. مؤقّت أمان القالب لا يتوقف.' }
+        else { '▶️ يعمل' }
+    $steps = @(Get-JsonProp $run 'Steps')
+    $position = [int](Get-JsonProp $run 'Step')
+    $lines = @($status)
+    if ($position -ge 0 -and $position -lt $steps.Count) {
+        $lines += "الخبر $($position + 1) من $($steps.Count)"
+        # Read the immutable run snapshot, not the board being edited meanwhile.
+        $current = [string](Get-JsonProp $steps[$position] 'Text')
+        if ($current.Length -gt 120) { $current = $current.Substring(0, 119) + '…' }
+        $lines += "الحالي: $current"
+        if ($position + 1 -lt $steps.Count) {
+            $next = [string](Get-JsonProp $steps[$position + 1] 'Text')
+            if ($next.Length -gt 120) { $next = $next.Substring(0, 119) + '…' }
+            $lines += "التالي: $next"
+        }
+        else { $lines += 'التالي: نهاية الجدول' }
+    }
+    return ($lines -join "`n")
 }
 
 function Get-UrgentBoardBlocks {
@@ -406,7 +447,7 @@ function Get-UrgentBoardBlocks {
     }
     $ceiling = Get-UrgentRunCeiling -Items $items
     if ([int]$ceiling.AutoHideSeconds -gt 0) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ القالب حسّاس: يُخفى تلقائيًا بعد $([int]$ceiling.AutoHideSeconds) ث، وهذا سقف التشغيل كلّه." }
+        $blocks += @{ type = 'paragraph'; text = "⚠️ $(Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds): يُخفى تلقائيًا بعد $([int]$ceiling.AutoHideSeconds) ث؛ قد ينتهي الجدول قبل ذلك." }
     }
 
     if ($items.Count -eq 0) {
@@ -463,12 +504,12 @@ function Get-UrgentBoardText {
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
     $lines = @("🚨 <b>العواجل</b> — $($items.Count) عاجلًا")
     $runStatus = Get-UrgentRunStatusText
-    if ($runStatus) { $lines += $runStatus }
+    if ($runStatus) { $lines += (ConvertTo-TelegramHtmlText -Text $runStatus) }
     $lines += "الافتراضي: فاصل $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) ث · $([int](Get-UrgentProperty $defaults 'Repeats' 1)) دورة"
     if (-not (Test-UrgentSceneLoop)) { $lines += '⚠️ مشهد العاجل بلا حلقة: «تحديث نص» سيُرى وهو يتبدّل.' }
     $ceiling = Get-UrgentRunCeiling -Items $items
     if ([int]$ceiling.AutoHideSeconds -gt 0) {
-        $lines += "⚠️ القالب حسّاس: يُخفى تلقائيًا بعد $([int]$ceiling.AutoHideSeconds) ث، وهذا سقف التشغيل كلّه."
+        $lines += "⚠️ $(Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds): يُخفى تلقائيًا بعد $([int]$ceiling.AutoHideSeconds) ث؛ قد ينتهي الجدول قبل ذلك."
     }
     if ($items.Count -eq 0) {
         $lines += 'الجدول فارغ.'
@@ -476,6 +517,9 @@ function Get-UrgentBoardText {
     }
     $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize (Get-UrgentBoardPageSize)
     $trimmed = Select-RichTableRows -Items @($items[$window.StartIndex..$window.EndIndex])
+    if ($window.PageCount -gt 1) {
+        $lines += "المعروض: $($window.StartIndex + 1)–$($window.EndIndex + 1) · صفحة $($window.Page + 1) من $($window.PageCount)"
+    }
     $position = $window.StartIndex
     foreach ($item in @($trimmed.Rows)) {
         $position++
@@ -521,7 +565,7 @@ function Get-UrgentItemKeyboard {
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $itemId = [string](Get-UrgentProperty $item 'Id' '')
     $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId"), (New-Button '🏷 العنوان' "urgentb:title:$itemId") )
-    $modeRow = @( (New-Button "النمط: $(Get-UrgentModeLabel -Mode $timing.Mode)" "urgentb:mode:$itemId") )
+    $modeRow = @( (New-Button '🎬 نمط العرض' "urgentb:mode:$itemId") )
     if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$itemId") }
     $rows += , $modeRow
     $intervalRow = @( (New-Button "⏱ الفاصل: $($timing.IntervalSeconds) ث" "urgentb:interval:$itemId") )
@@ -534,7 +578,8 @@ function Get-UrgentItemKeyboard {
     $toggle = if ($enabled) { '⛔ تعطيل' } else { '✅ تفعيل' }
     $rows += , @( (New-Button $toggle "urgentb:enable:$itemId"), (New-Button '🗑 حذف' "urgentb:itemdel:$itemId" -Style danger) )
     $rows += , @( (New-Button '⬆️ أعلى' "urgentb:up:$itemId"), (New-Button '⬇️ أسفل' "urgentb:down:$itemId") )
-    $rows += , @( (New-Button '⬅️ العواجل' 'urgentb:open') )
+    $boardPage = [int][math]::Floor($Position / (Get-UrgentBoardPageSize))
+    $rows += , @( (New-Button '⬅️ العواجل' "urgentb:page:$boardPage") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -547,7 +592,8 @@ function Show-UrgentItemScreen {
     }
     $defaults = Get-UrgentBoardDefaults
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
-    $lines = @("🚨 <b>عاجل $($Position + 1)</b>")
+    $itemCount = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()).Count
+    $lines = @("🚨 <b>الخبر $($Position + 1) من $itemCount</b>")
     $lines += (ConvertTo-TelegramHtmlText -Text ([string](Get-UrgentProperty $item 'Text' '')))
     $title = [string](Get-UrgentProperty $item 'Title' '')
     if ($title) { $lines += "🏷 $(ConvertTo-TelegramHtmlText -Text $title)" }
@@ -604,7 +650,7 @@ function Show-UrgentReviewScreen {
         at thirty seconds. A run that quietly played half the table is
         indistinguishable from one that played all of it.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $plan = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
     if (-not $plan.Success) {
@@ -614,6 +660,15 @@ function Show-UrgentReviewScreen {
     $scope = if ($SelectedOnly) { 'المحدَّد' } else { 'الجدول كاملًا' }
     $lines = @("▶️ <b>مراجعة قبل التشغيل</b> — $scope", '')
     $lines += (Get-UrgentPlanSummary -Plan $plan.Value)
+    $holds = @($plan.Value.Steps | ForEach-Object { [double]$_.HoldSeconds } | Sort-Object -Unique)
+    $holdLabel = if ($holds.Count -eq 1) { "$($holds[0])" } else { "$($holds[0])–$($holds[-1])" }
+    $lines += "الفاصل الفعلي: $holdLabel ث"
+    $items = @(Get-UrgentPlayableItems -Board $script:UrgentBoard -SelectedIds (Get-UrgentSelectedIds -ChatId $ChatId) -SelectedOnly:$SelectedOnly)
+    $ceiling = Get-UrgentRunCeiling -Items $items
+    if ($ceiling.Seconds -gt 0) {
+        $reason = if ($ceiling.Reason -eq 'autohide') { Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds } else { 'المدة الكلية' }
+        $lines += "سقف التشغيل: $($ceiling.Seconds) ث — $reason"
+    }
     foreach ($note in @(Get-UrgentProperty $plan.Value 'Notes' @())) { $lines += $note }
     if (-not (Test-UrgentSceneLoop)) {
         $textSteps = @(@(Get-UrgentProperty $plan.Value 'Steps' @()) | Where-Object { [string]$_.Mode -eq 'text' })
@@ -623,7 +678,10 @@ function Show-UrgentReviewScreen {
     $rows = @()
     $rows += , @( (New-Button '🚨 ابدأ الآن' $data -Style success) )
     $rows += , @( (New-Button '⬅️ رجوع' 'urgentb:open') )
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup @{ inline_keyboard = $rows } -ParseMode 'HTML'
+    $text = $lines -join "`n"
+    $keyboard = @{ inline_keyboard = $rows }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return $true }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
     return $true
 }
 

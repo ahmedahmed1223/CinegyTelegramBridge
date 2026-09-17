@@ -334,7 +334,7 @@ function Get-HelpChapters {
                 '↳ وهي: RequireUserLevelAuth، EnableSelfServiceRequests،'
                 '   EnableRawCommand، EnableFullTemplateManagement،'
                 '   EnableDpapiSecrets، BlockRejectedRequesters،'
-                '   LeaveUnknownGroups.'
+                '   LeaveUnknownGroups، TemplateAirExtensionEnabled.'
                 ''
                 '♻️ التراجع:'
                 '↳ لكل إعداد زر يعيده إلى الافتراضي بتأكيد، و«استعادة الافتراضي»'

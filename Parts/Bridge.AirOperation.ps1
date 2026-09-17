@@ -489,6 +489,15 @@ function Get-EffectiveAutoHideSeconds {
     return $seconds
 }
 
+function Get-TemplateAirLimitExplanation {
+    param([string]$Key, [int]$RequestedSeconds = 0)
+    $effective = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $RequestedSeconds
+    if ($RequestedSeconds -le 0 -or $effective -ge $RequestedSeconds -or $effective -le 0) { return '' }
+    $sensitive = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() }) -contains $Key
+    $reason = if ($sensitive -and (Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1) -eq $effective) { 'سقف القالب الحسّاس' } else { 'حد القالب' }
+    return "⏱ المدة المطلوبة $RequestedSeconds ثانية؛ خُفّضت إلى $effective ثانية — $reason."
+}
+
 function Copy-ShowVariables {
     param([hashtable]$Variables = @{})
     $copy = @{}

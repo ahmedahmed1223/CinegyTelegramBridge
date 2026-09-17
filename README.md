@@ -21,6 +21,14 @@ shortest applicable limit wins; manual timers cannot extend past the original
 show deadline. Removing a rule requires confirmation. Rules are disabled by
 default and configuring them does not issue commands to current on-air scenes.
 
+At a non-sensitive template's cap the operator receives one extension offer —
+a five-minute preset, a button-stepped custom duration, or hide now. No reply
+within the configured window hides the template; sensitive templates never
+extend. The offer, its deadline and its use persist in autohide.json. Failed
+auto-hides retry with backoff and a throttled notice instead of being consumed
+silently, an admin "apply now" button shortens a running show to its cap, and
+the pre-send review states when a requested duration was shortened.
+
 Audit hardening across the urgent board: buttons and confirmations are bound
 to stable item ids, failed config saves now report failure and restore the
 previous value, failed scene exits freeze the run as retryable (and a final

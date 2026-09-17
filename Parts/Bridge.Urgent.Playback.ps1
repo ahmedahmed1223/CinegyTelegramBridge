@@ -28,7 +28,10 @@ function Save-UrgentRunState {
     if (-not $script:UrgentBoardRun) { return $false }
     $run = $script:UrgentBoardRun
     $state = [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
+        SavedAt = (Get-Date).ToString('o')
+        ElapsedSeconds = Get-UrgentElapsedSeconds
+        Paused = [bool](Get-JsonProp $run 'Paused')
         StartedAt = [string]$run.StartedAt
         ChatId = [long]$run.ChatId
         UserId = [long]$run.UserId
@@ -252,6 +255,7 @@ function Update-UrgentBoardRun {
     #>
     if (-not $script:UrgentBoardRun) { return }
     $run = $script:UrgentBoardRun
+    if ([bool](Get-JsonProp $run 'Paused')) { return }
     $steps = @($run.Steps)
     $index = [int]$run.Step
     $isLast = ($index -ge ($steps.Count - 1))
@@ -274,7 +278,8 @@ function Update-UrgentBoardRun {
     }
     $index++
     $step = $steps[$index]
-    $sent = Send-UrgentBoardStep -Step $step
+    $hidePrevious = [string]$steps[$index - 1].Mode -eq 'auto_hide'
+    $sent = Send-UrgentBoardStep -Step $step -ForceExit:$hidePrevious
     if (-not $sent.Success) {
         Write-BridgeLog "Urgent board step $($index + 1) failed: $([string]$sent.Error)" 'WARN'
         Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text "❌ توقّف جدول العواجل عند الخطوة $($index + 1): $([string]$sent.Error)"
@@ -303,9 +308,9 @@ function Send-UrgentBoardStep {
         authorised once, at its start; this is the same authorised graphic
         continuing.
     #>
-    param([Parameter(Mandatory)]$Step)
+    param([Parameter(Mandatory)]$Step, [switch]$ForceExit)
     $values = Get-UrgentItemVariables -Item $Step
-    if ([string]$Step.Mode -ne 'exit') {
+    if (-not $ForceExit -and [string]$Step.Mode -ne 'exit') {
         $posted = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Values $values -TimeoutSec (Get-AirTimeout)
         if (Get-Setting 'LogAirXml') { Write-BridgeLog "Urgent board POSTBOX XML: $($posted.Xml)" }
@@ -359,7 +364,14 @@ function Restore-UrgentBoardRun {
         Write-BridgeLog 'An urgent board run was interrupted; its layer is no longer on air, so the run was dropped.'
         return $false
     }
+    $paused = (Get-JsonProp $state 'Paused') -eq $true
     $elapsed = ($Now - $startedAt).TotalSeconds
+    if ([int](Get-JsonProp $state 'SchemaVersion') -ge 2) {
+        $savedAt = [datetime]::MinValue
+        if (-not [datetime]::TryParse([string](Get-JsonProp $state 'SavedAt'), [ref]$savedAt)) { return $false }
+        $elapsed = [double](Get-JsonProp $state 'ElapsedSeconds')
+        if (-not $paused) { $elapsed += [math]::Max(0.0, ($Now - $savedAt).TotalSeconds) }
+    }
     $steps = @(Get-JsonProp $state 'Steps')
     $exitAt = [double](Get-JsonProp $state 'ExitAtSeconds')
     if ($steps.Count -lt 1) { return $false }
@@ -381,6 +393,7 @@ function Restore-UrgentBoardRun {
         # The stopwatch starts at zero now, so the elapsed time before the
         # restart is carried as an offset rather than pretended away.
         ClockOffset = [double]$elapsed
+        Paused = $paused
         Steps = $steps
         ExitAtSeconds = $exitAt
         BoardRevision = [int](Get-JsonProp $state 'BoardRevision')
@@ -388,8 +401,71 @@ function Restore-UrgentBoardRun {
         Summary = [string](Get-JsonProp $state 'Summary')
         OperationId = [string](Get-JsonProp $state 'OperationId')
     }
+    if ($paused) { $script:UrgentBoardRun.Clock.Reset() }
     Save-UrgentRunState | Out-Null
     Write-BridgeLog "An urgent board run resumed after a restart at step $($step + 1) of $($steps.Count)."
-    Send-AdminBroadcast -Text "🚨 استأنف جدول العواجل بعد إعادة التشغيل عند الخطوة $($step + 1) من $($steps.Count)." | Out-Null
+    $restoreStatus = if ($paused) { 'بقي متوقفًا مؤقتًا' } else { 'استأنف' }
+    Send-AdminBroadcast -Text "🚨 جدول العواجل $restoreStatus بعد إعادة التشغيل عند الخطوة $($step + 1) من $($steps.Count)." | Out-Null
+    return $true
+}
+
+function Test-UrgentRunControl {
+    param([long]$ChatId, [long]$UserId)
+    if (-not $script:UrgentBoardRun) { return $false }
+    $template = Get-UrgentTemplate
+    if (-not $template) { return $false }
+    if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $access = Test-TemplateAccess -Key $script:MojazUrgentKey -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
+    if (-not $access.Allowed) {
+        Send-TelegramMessage -ChatId $ChatId -Text $access.Reason
+        return $false
+    }
+    return $true
+}
+
+function Suspend-UrgentBoardRun {
+    param([long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-UrgentRunControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $script:UrgentBoardRun.Clock.Stop()
+    $script:UrgentBoardRun.Paused = $true
+    Save-UrgentRunState | Out-Null
+    return $true
+}
+
+function Resume-UrgentBoardRun {
+    param([long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-UrgentRunControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $script:UrgentBoardRun.Paused = $false
+    $script:UrgentBoardRun.Clock.Start()
+    Save-UrgentRunState | Out-Null
+    return $true
+}
+
+function Move-UrgentBoardNext {
+    # Step means successfully displayed, never merely selected. Force a full
+    # transition even when the next line normally uses the postbox.
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    if (-not (Test-UrgentRunControl -ChatId $ChatId -UserId $UserId)) { return $false }
+    $run = $script:UrgentBoardRun
+    $next = [int]$run.Step + 1
+    if ($next -ge @($run.Steps).Count) {
+        return (Stop-UrgentBoardRun -Reason 'skip_last' -ChatId $ChatId -UserId $UserId -Quiet)
+    }
+    $step = $run.Steps[$next]
+    $sent = Send-UrgentBoardStep -Step $step -ForceExit
+    if (-not $sent.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الانتقال للعاجل التالي؛ أُوقف الجدول. راجع حالة الطبقة.'
+        Stop-UrgentBoardRun -Reason 'skip_failed' -ChatId $ChatId -UserId $UserId -Quiet -NoExit | Out-Null
+        return $false
+    }
+    $run.Step = $next
+    $run.Clock.Restart()
+    $run.ClockOffset = [double]$step.AtSeconds
+    $run.Paused = $false
+    Save-UrgentRunState | Out-Null
+    Add-AuditEntry "⏭ تخطي العاجل الحالي — بواسطة $(Format-UserAuditActor -UserId $UserId)"
     return $true
 }

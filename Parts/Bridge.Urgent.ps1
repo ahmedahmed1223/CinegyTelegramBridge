@@ -274,9 +274,19 @@ function Get-UrgentItemVariables {
 
 # ----------------------------------------------------------------- screens
 
+function Get-UrgentNextMode {
+    param([string]$Mode)
+    switch ($Mode) {
+        'text' { return 'exit' }
+        'exit' { return 'auto_hide' }
+        default { return 'text' }
+    }
+}
+
 function Get-UrgentModeLabel {
     param([string]$Mode)
     if ($Mode -eq 'exit') { return '🚪 مع حركة خروج' }
+    if ($Mode -eq 'auto_hide') { return '🙈 إخفاء بعد المدة' }
     return '✏️ تحديث نص'
 }
 
@@ -326,6 +336,11 @@ function Get-UrgentBoardKeyboard {
     # the screen.
     if ($script:UrgentBoardRun) {
         $rows += , @( (New-Button '⏹ إيقاف التشغيل' 'urgentb:stop' -Style danger) )
+        if ([bool](Get-JsonProp $script:UrgentBoardRun 'Paused')) {
+            $pauseButton = New-Button '▶️ استئناف' 'urgentb:resume'
+        }
+        else { $pauseButton = New-Button '⏸ مؤقت' 'urgentb:pause' }
+        $rows += , @( (New-Button '⏭ تخطي الحالي' 'urgentb:skip'), $pauseButton )
     }
     elseif ($items.Count -gt 0) {
         $playRow = @()
@@ -337,6 +352,13 @@ function Get-UrgentBoardKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-UrgentRunStatusText {
+    if (-not $script:UrgentBoardRun) { return '' }
+    $run = $script:UrgentBoardRun
+    $status = if ([bool](Get-JsonProp $run 'Paused')) { '⏸ متوقف مؤقتًا؛ العاجل يبقى ظاهرًا' } else { '▶️ يعمل' }
+    return "$status — الخبر $([int]$run.Step + 1) من $(@($run.Steps).Count). التخطي ينتقل فورًا للتالي؛ الإيقاف ينهي الجدول. مؤقّت أمان القالب لا يتوقف."
+}
+
 function Get-UrgentBoardBlocks {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
     $board = $script:UrgentBoard
@@ -344,6 +366,8 @@ function Get-UrgentBoardBlocks {
     $items = @(Get-UrgentProperty $board 'Items' @())
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
     $blocks = @(@{ type = 'heading'; text = "🚨 العواجل — $($items.Count) عاجلًا"; size = 3 })
+    $runStatus = Get-UrgentRunStatusText
+    if ($runStatus) { $blocks += @{ type = 'paragraph'; text = $runStatus } }
 
     $order = if ([string](Get-UrgentProperty $defaults 'RepeatMode' 'cycle') -eq 'item') { '١ ١ · ٢ ٢' } else { '١ ٢ ٣ · ١ ٢ ٣' }
     $total = [int](Get-UrgentProperty $defaults 'TotalSeconds' 0)
@@ -394,7 +418,7 @@ function Get-UrgentBoardBlocks {
         $mark = if ([bool](Get-UrgentProperty $item 'Enabled' $true)) { $tick } else { '⛔' }
         $text = [string](Get-UrgentProperty $item 'Text' '')
         $shown = if ($text.Length -gt 60) { $text.Substring(0, 59) + '…' } else { $text }
-        $mode = if ($timing.Mode -eq 'exit') { '🚪' } else { '✏️' }
+        $mode = if ($timing.Mode -eq 'exit') { '🚪' } elseif ($timing.Mode -eq 'auto_hide') { '🙈' } else { '✏️' }
         $interval = if ($timing.IntervalInherited) { "$($timing.HoldSeconds) ث" } else { "$($timing.HoldSeconds) ث ✱" }
         $cells += , @(@{ text = "$mark $position" }, @{ text = $shown }, @{ text = $mode }, @{ text = $interval })
     }
@@ -413,6 +437,8 @@ function Get-UrgentBoardText {
     $items = @(Get-UrgentProperty $board 'Items' @())
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
     $lines = @("🚨 <b>العواجل</b> — $($items.Count) عاجلًا")
+    $runStatus = Get-UrgentRunStatusText
+    if ($runStatus) { $lines += $runStatus }
     $lines += "الافتراضي: فاصل $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) ث · $([int](Get-UrgentProperty $defaults 'Repeats' 1)) دورة"
     if (-not (Test-UrgentSceneLoop)) { $lines += '⚠️ مشهد العاجل بلا حلقة: «تحديث نص» سيُرى وهو يتبدّل.' }
     if ($items.Count -eq 0) {
@@ -426,7 +452,7 @@ function Get-UrgentBoardText {
         $position++
         $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
         $tick = if ($selected -contains [string](Get-UrgentProperty $item 'Id' '')) { '☑' } else { '☐' }
-        $mode = if ($timing.Mode -eq 'exit') { '🚪' } else { '✏️' }
+        $mode = if ($timing.Mode -eq 'exit') { '🚪' } elseif ($timing.Mode -eq 'auto_hide') { '🙈' } else { '✏️' }
         # Escaped because a breaking line is text somebody typed, and this
         # message is sent as HTML.
         $safe = ConvertTo-TelegramHtmlText -Text ([string](Get-UrgentProperty $item 'Text' ''))
@@ -603,8 +629,7 @@ function Invoke-UrgentItemEdit {
 }
 
 function Invoke-UrgentItemModeSwitch {
-    <# The two modes, on one button. A toggle rather than a picker because
-       there are exactly two and the label says which one is live. #>
+    # Keep both original modes available; the third mode hides this line at its deadline.
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [Parameter(Mandatory)][int]$Position)
     $item = Get-UrgentItemByPosition -Position $Position
     if (-not $item) {
@@ -612,7 +637,7 @@ function Invoke-UrgentItemModeSwitch {
         return $false
     }
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults)
-    $next = if ($timing.Mode -eq 'exit') { 'text' } else { 'exit' }
+    $next = Get-UrgentNextMode -Mode $timing.Mode
     return (Invoke-UrgentItemEdit -ChatId $ChatId -UserId $UserId -Position $Position -Field 'Mode' -Value $next)
 }
 
@@ -720,7 +745,16 @@ function Set-UrgentBoardSetting {
         clamps. A second validator here would be a second rule to keep in step.
     #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Name, $Value)
-    try { Set-Setting -Name $Name -Value $Value }
+    try {
+        # Set-Setting checks bounds only when TryParse succeeds. Never persist
+        # numeric text it cannot parse: Get-SettingInt would silently read 8.
+        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds')) {
+            $number = 0
+            if (-not [int]::TryParse([string]$Value, [ref]$number)) { throw 'اختر قيمة رقمية صحيحة من الأزرار.' }
+            $Value = $number
+        }
+        Set-Setting -Name $Name -Value $Value
+    }
     catch {
         # Redacted on the way out, like every other exception this bridge shows
         # a chat: a chat is the widest audience it has, and redaction costs
@@ -732,12 +766,12 @@ function Set-UrgentBoardSetting {
 }
 
 function Invoke-UrgentDefaultSwitch {
-    <# The table's two either/or settings, each on its own button. #>
+    # The same mode cycle as the item screen, and a separate repeat-order toggle.
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][ValidateSet('Mode', 'RepeatMode')][string]$Field)
     $defaults = Get-UrgentBoardDefaults
     $next = ''
     if ($Field -eq 'Mode') {
-        $next = if ([string]$defaults.Mode -eq 'exit') { 'text' } else { 'exit' }
+        $next = Get-UrgentNextMode -Mode ([string]$defaults.Mode)
     }
     else {
         $next = if ([string]$defaults.RepeatMode -eq 'item') { 'cycle' } else { 'item' }
@@ -745,6 +779,123 @@ function Invoke-UrgentDefaultSwitch {
     if (-not (Set-UrgentBoardSetting -ChatId $ChatId -Name "UrgentBoard$Field" -Value $next)) { return $false }
     Show-UrgentTimingScreen -ChatId $ChatId
     return $true
+}
+
+# ------------------------------------------------------------- numeric input
+
+function Get-UrgentNumberSpec {
+    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal')][string]$Kind)
+    $spec = @{ Field = 'IntervalSeconds'; Setting = ''; Label = 'فاصل هذا العاجل (ثانية)'; Minimum = 0; Maximum = 3600; Zero = 'من الجدول' }
+    switch ($Kind) {
+        'repeats' { $spec.Field = 'Repeats'; $spec.Label = 'تكرار هذا العاجل'; $spec.Maximum = 99 }
+        'dinterval' { $spec.Setting = 'UrgentBoardIntervalSeconds'; $spec.Label = 'فاصل الجدول (ثانية)'; $spec.Minimum = 1 }
+        'drepeats' { $spec.Setting = 'UrgentBoardRepeats'; $spec.Field = 'Repeats'; $spec.Label = 'تكرار الجدول'; $spec.Minimum = 1 }
+        'dtotal' { $spec.Setting = 'UrgentBoardTotalSeconds'; $spec.Field = 'TotalSeconds'; $spec.Label = 'المدة الكلية (ثانية)'; $spec.Zero = 'بلا سقف' }
+    }
+    if ($spec.Setting) {
+        $bounds = Get-SettingBounds -Name $spec.Setting
+        $spec.Minimum = [int]$bounds.Minimum
+        $spec.Maximum = [int]$bounds.Maximum
+    }
+    return $spec
+}
+
+function Show-UrgentNumberPicker {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State, [int]$MessageId = 0)
+    $spec = Get-UrgentNumberSpec -Kind $State.Kind
+    $current = 0
+    if ($spec.Setting) { $current = Get-SettingInt $spec.Setting ([int]$script:DefaultSettings[$spec.Setting]) }
+    else {
+        $item = Get-UrgentItem -Board $script:UrgentBoard -ItemId $State.ItemId
+        if (-not $item) { Clear-PendingState -ChatId $ChatId; Show-UrgentBoardScreen -ChatId $ChatId; return }
+        $current = [int](Get-UrgentProperty $item $spec.Field 0)
+    }
+    $valueLabel = if ($current -eq 0) { "0 — $($spec.Zero)" } else { [string]$current }
+    $text = "🔢 $($spec.Label)`nالقيمة: $valueLabel`nالمدى: $($spec.Minimum)–$($spec.Maximum)`nاختر بالأزرار؛ كل ضغطة تُحفظ فورًا."
+    if (-not $spec.Setting) {
+        $effective = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults)
+        $text += "`nالقيمة الفعلية: $(Get-UrgentProperty $effective $spec.Field 0)"
+    }
+    $prefix = "urgentb:num:$($State.Token)"
+    $rows = @()
+    $rows += , @((New-Button '−10' "${prefix}:-10"), (New-Button '−5' "${prefix}:-5"), (New-Button '−1' "${prefix}:-1"))
+    $rows += , @((New-Button '+1' "${prefix}:+1"), (New-Button '+5' "${prefix}:+5"), (New-Button '+10' "${prefix}:+10"))
+    if ($spec.Maximum -gt 99) { $rows += , @((New-Button '−60' "${prefix}:-60"), (New-Button '+60' "${prefix}:+60")) }
+    $minLabel = if ($spec.Minimum -eq 0) { "↩️ $($spec.Zero)" } else { "الأدنى: $($spec.Minimum)" }
+    $rows += , @((New-Button $minLabel "${prefix}:min"), (New-Button "الأقصى: $($spec.Maximum)" "${prefix}:max"))
+    $rows += , @((New-Button '✅ تمّ / رجوع' "${prefix}:done"))
+    $keyboard = @{ inline_keyboard = $rows }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard
+}
+
+function Start-UrgentNumberPicker {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
+        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal')][string]$Kind,
+        [int]$Position = -1, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Clear-PendingState -ChatId $ChatId
+    $spec = Get-UrgentNumberSpec -Kind $Kind
+    $itemId = ''
+    if (-not $spec.Setting) {
+        $item = Get-UrgentItemByPosition -Position $Position
+        if (-not $item) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId; return }
+        $itemId = [string](Get-UrgentProperty $item 'Id' '')
+    }
+    # The short nonce rejects older keyboards; the saved id, not the displayed
+    # position, keeps repeated taps on the same item after a concurrent move.
+    $state = @{ Mode = 'urgent_number_picker'; Kind = $Kind; ItemId = $itemId; UserId = $UserId
+        Token = [guid]::NewGuid().ToString('N').Substring(0, 12); StartedAt = (Get-Date) }
+    Set-PendingState -ChatId $ChatId -State $state
+    Show-UrgentNumberPicker -ChatId $ChatId -State $state -MessageId $MessageId
+}
+
+function Invoke-UrgentNumberPick {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$Argument, [int]$MessageId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string](Get-JsonProp $state 'Mode') -ne 'urgent_number_picker' -or
+        [long](Get-JsonProp $state 'UserId') -ne $UserId -or
+        $Argument -notmatch '^([a-f0-9]{12}):(done|min|max|[+-](?:1|5|10|60))$' -or
+        $Matches[1] -cne [string](Get-JsonProp $state 'Token')) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ انتهت صلاحية هذه الأزرار. افتح شاشة الرقم من جديد.'
+        return $false
+    }
+    $operation = $Matches[2]
+    $spec = Get-UrgentNumberSpec -Kind $state.Kind
+    $item = $null
+    if (-not $spec.Setting) {
+        $item = Get-UrgentItem -Board $script:UrgentBoard -ItemId $state.ItemId
+        if (-not $item) { Clear-PendingState -ChatId $ChatId; Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId; return $false }
+    }
+    if ($operation -eq 'done') {
+        Clear-PendingState -ChatId $ChatId
+        if ($spec.Setting) { Show-UrgentTimingScreen -ChatId $ChatId -MessageId $MessageId }
+        else { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -MessageId $MessageId }
+        return $true
+    }
+    $current = if ($spec.Setting) { Get-SettingInt $spec.Setting ([int]$script:DefaultSettings[$spec.Setting]) } else { [int](Get-UrgentProperty $item $spec.Field 0) }
+    $base = $current
+    if ($item -and $current -eq 0 -and $operation -notin @('min', 'max')) {
+        $base = [int](Get-UrgentProperty (Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults)) $spec.Field 0)
+    }
+    $target = switch ($operation) {
+        'min' { $spec.Minimum }
+        'max' { $spec.Maximum }
+        default { $base + [int]$operation }
+    }
+    $target = [math]::Max([int]$spec.Minimum, [math]::Min([int]$spec.Maximum, [int]$target))
+    $saved = $true
+    if ($target -ne $current) {
+        if ($spec.Setting) { $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name $spec.Setting -Value $target }
+        else {
+            $result = Set-UrgentItem -Board $script:UrgentBoard -ItemId $state.ItemId -Field $spec.Field -Value $target -UserId $UserId
+            $saved = Invoke-UrgentEdit -Result $result -ChatId $ChatId
+        }
+    }
+    $state.StartedAt = Get-Date
+    Show-UrgentNumberPicker -ChatId $ChatId -State $state -MessageId $MessageId
+    return $saved
 }
 
 # ------------------------------------------------------------- typed input
@@ -792,19 +943,19 @@ function Complete-UrgentBoardText {
         # The table's own numbers are settings, so they are written through
         # Set-Setting and answered on the timing screen rather than the board.
         'urgent_default_interval' {
-            Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardIntervalSeconds' -Value $Value | Out-Null
+            $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardIntervalSeconds' -Value $Value
             Show-UrgentTimingScreen -ChatId $ChatId
-            return $true
+            return $saved
         }
         'urgent_default_repeats' {
-            Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardRepeats' -Value $Value | Out-Null
+            $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardRepeats' -Value $Value
             Show-UrgentTimingScreen -ChatId $ChatId
-            return $true
+            return $saved
         }
         'urgent_default_total' {
-            Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardTotalSeconds' -Value $Value | Out-Null
+            $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardTotalSeconds' -Value $Value
             Show-UrgentTimingScreen -ChatId $ChatId
-            return $true
+            return $saved
         }
         default { return $false }
     }

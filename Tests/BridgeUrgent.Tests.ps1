@@ -24,6 +24,25 @@ BeforeAll {
 }
 
 Describe 'Urgent board domain' {
+    It 'budgets the exit of an auto-hide line before the following text line' {
+        $board = New-TestBoard -Count 2
+        $board = (Set-UrgentItem -Board $board -ItemId $board.Items[0].Id -Field Mode -Value 'auto_hide').Value
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults (New-UrgentDefaults) -TransitionSeconds 3).Value
+        $plan.Steps[1].TransitionSeconds | Should -Be 3
+        $plan.TotalSeconds | Should -Be 19
+    }
+
+    It 'does not let per-item repeats exceed a hard ceiling after auto-hide transitions' {
+        $board = New-TestBoard -Count 2
+        $board = (Set-UrgentItem -Board $board -ItemId $board.Items[0].Id -Field Mode -Value 'auto_hide').Value
+        $defaults = New-UrgentDefaults
+        $defaults.RepeatMode = 'item'
+        $defaults.Repeats = 2
+        $board = (Set-UrgentItem -Board $board -ItemId $board.Items[1].Id -Field Mode -Value 'exit').Value
+        $plan = (New-UrgentRunPlan -Items $board.Items -Defaults $defaults -TransitionSeconds 3 -MaxSeconds 38).Value
+        $plan.TotalSeconds | Should -BeLessOrEqual 38
+    }
+
     It 'adds normalized items with stable ids and refuses empty or oversized text' {
         $board = New-UrgentBoard
         $added = Add-UrgentItem -Board $board -Text "  خبر    عاجل  " -UserId 11

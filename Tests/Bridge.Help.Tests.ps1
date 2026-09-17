@@ -365,6 +365,14 @@ Describe 'The rich guide fits the message it is sent in' {
 Describe 'The manual carries only what the station has' {
     BeforeEach { Mock Test-Admin { $false } }
 
+    It 'measures the complete manual with the urgent board enabled' {
+        Mock Test-UrgentBoardAvailable { $true }
+        $blocks = @(Get-HelpRichBlocks -ChatId 101 -UserId 101)
+        $payload = ConvertTo-RichMessagePayload -Blocks $blocks
+        Write-Host "HELP_MEASURE length=$($payload.Length) tail=$([string]$blocks[-1].text)"
+        Test-RichPayloadSize -Length $payload.Length | Should -BeTrue
+    }
+
     It 'offers the breaking-news board chapter only where the board exists' {
         # 8.40.0 shipped 1200 lines of feature with no chapter at all; and a
         # chapter about a scene this station has not got is dead text that

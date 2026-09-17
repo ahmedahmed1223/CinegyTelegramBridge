@@ -92,7 +92,7 @@ function New-UrgentBoard {
 
 function Test-UrgentMode {
     param([string]$Mode)
-    return (@('text', 'exit') -contains ([string]$Mode).ToLowerInvariant())
+    return (@('text', 'exit', 'auto_hide') -contains ([string]$Mode).ToLowerInvariant())
 }
 
 function Test-UrgentRepeatMode {
@@ -397,14 +397,28 @@ function New-UrgentRunPlan {
     # One pass of the board, costed. Each entry costs its own hold plus the
     # transition its mode needs before it can be seen.
     $cycleSeconds = 0.0
-    foreach ($timing in $timings) {
+    for ($timingIndex = 0; $timingIndex -lt $timings.Count; $timingIndex++) {
+        $timing = $timings[$timingIndex]
+        $previousMode = $timings[($timingIndex + $timings.Count - 1) % $timings.Count].Mode
         $cycleSeconds += [double]$timing.HoldSeconds
-        if ($timing.Mode -eq 'exit') { $cycleSeconds += [math]::Max(0.0, $TransitionSeconds) }
+        if ($timing.Mode -eq 'exit' -or $previousMode -eq 'auto_hide') { $cycleSeconds += [math]::Max(0.0, $TransitionSeconds) }
     }
     # The very first line rides the SHOW that starts the run, so its entrance
     # is not paid twice.
     $firstTransition = 0.0
-    if ($timings[0].Mode -eq 'exit') { $firstTransition = [math]::Max(0.0, $TransitionSeconds) }
+    if ($timings[0].Mode -eq 'exit' -or $timings[-1].Mode -eq 'auto_hide') { $firstTransition = [math]::Max(0.0, $TransitionSeconds) }
+
+    if ($repeatMode -eq 'item') {
+        # Repeating each item introduces self-transitions, not the boundary
+        # transitions of another complete cycle (auto-hide -> exit overlaps).
+        $singlePass = $cycleSeconds - $firstTransition
+        $cycleSeconds = 0.0
+        foreach ($timing in $timings) {
+            $cycleSeconds += [double]$timing.HoldSeconds
+            if ($timing.Mode -in @('exit', 'auto_hide')) { $cycleSeconds += [math]::Max(0.0, $TransitionSeconds) }
+        }
+        $firstTransition = $cycleSeconds - $singlePass
+    }
 
     $notes = @()
     $cycles = $requestedCycles
@@ -445,7 +459,7 @@ function New-UrgentRunPlan {
         $timing = $timings[$position]
         $item = $playable[$position]
         $transition = 0.0
-        if ($timing.Mode -eq 'exit' -and $step -gt 0) { $transition = [math]::Max(0.0, $TransitionSeconds) }
+        if ($step -gt 0 -and ($timing.Mode -eq 'exit' -or $timings[$sequence[$step - 1]].Mode -eq 'auto_hide')) { $transition = [math]::Max(0.0, $TransitionSeconds) }
         $steps += [pscustomobject]@{
             Step = $step
             Position = $position

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.40.1'
+$script:BridgeVersion = '8.41.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -263,7 +263,7 @@ $script:DefaultSettings = [ordered]@{
     EnableUrgentBoard          = $false  # shows 🚨 العواجل in the menu, where the Urgent template exists
     UrgentBoardIntervalSeconds = 8       # how long each breaking line holds, unless the line overrides it
     UrgentBoardRepeats         = 1       # how many times the run repeats; what "a repeat" means is the order below
-    UrgentBoardMode            = 'text'  # the display mode a line takes when it does not state its own: text = update the words, exit = play the outro and come back
+    UrgentBoardMode            = 'text'  # the display mode a line takes when it does not state its own: text = update words, exit = outro before this line, auto_hide = outro after this line
     UrgentBoardRepeatMode      = 'cycle' # cycle = 1 2 3 · 1 2 3 (the whole board, then again); item = 1 1 · 2 2
     UrgentBoardTotalSeconds    = 0       # ceiling on the whole run; 0 means the repeats alone decide
     UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
@@ -510,7 +510,7 @@ $script:SettingDisplayMetadata = @{
     EnableUrgentBoard = @{ Unit = ''; Description = 'يفعّل 🚨 إدارة العواجل: جدول عواجل يُعرض بالتتابع. زرّ العاجل الثابت يبقى كما هو سواء فُعّل أو لا' }
     UrgentBoardIntervalSeconds = @{ Unit = 'ثانية'; Description = 'كم يبقى كل عاجل قبل الذي يليه، ما لم يحدّد العاجل نفسه فاصلًا' }
     UrgentBoardRepeats = @{ Unit = 'مرة'; Description = 'كم مرة يُعاد تشغيل الجدول. معنى «المرة» يحدّده ترتيب التكرار' }
-    UrgentBoardMode = @{ Unit = ''; Description = 'نمط العرض الافتراضي للعواجل: text يبدّل النصّ في المشهد القائم، وexit يُخرج المشهد ويعيده بالعاجل التالي' }
+    UrgentBoardMode = @{ Unit = ''; Description = 'نمط العرض الافتراضي: text يحدّث النصّ، exit يُخرج المشهد قبل هذا العاجل، auto_hide يُخرجه عند انتهاء مدة هذا العاجل' }
     UrgentBoardRepeatMode = @{ Unit = ''; Description = 'ترتيب التكرار: cycle يعيد الجدول كاملًا (١ ٢ ٣ · ١ ٢ ٣)، وitem يكرّر كل عاجل ثم ينتقل (١ ١ · ٢ ٢)' }
     UrgentBoardTotalSeconds = @{ Unit = 'ثانية'; Description = 'سقف زمني للتشغيل كلّه، يقصّ التكرارات إن لزم. صفر يعني بلا سقف' }
     UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
@@ -1230,7 +1230,7 @@ $script:SettingChoices = @{
     BroadcastFps = @('25', '50', '60')
     # Spelled out rather than free text: both are read by name in the board's
     # own screens, and a typo would silently fall back to the first of them.
-    UrgentBoardMode = @('text', 'exit')
+    UrgentBoardMode = @('text', 'exit', 'auto_hide')
     UrgentBoardRepeatMode = @('cycle', 'item')
 }
 

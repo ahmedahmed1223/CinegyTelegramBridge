@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.41.0
+
+The urgent board now offers skip-current and pause/resume controls. Skip sends
+the next line before advancing the pointer; skipping the last line ends the run.
+Pause freezes the schedule without hiding the graphic, survives a restart, and
+does not disable the template's independent safety timer. The new `auto_hide`
+mode exits the current line at its deadline before showing the next one, even
+when that next line uses text updates. Both previous modes remain available.
+
+Numeric board settings and item overrides use bounded, immediately saved button
+steppers. Stale picker tokens cannot edit a different item after reordering.
+Invalid numeric defaults are rejected instead of being saved as text and later
+read back as the eight-second fallback. All verification uses offline mocks;
+updating the running station still requires its approved change window.
+
 ## Version 8.40.1
 
 Paging the bulletin rundown in 8.39.0 exposed something the single-page

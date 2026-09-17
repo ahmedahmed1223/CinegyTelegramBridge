@@ -165,6 +165,58 @@ Describe 'Running the breaking-news board' {
     }
     AfterEach { $script:UrgentBoardRun = $null; $script:MojazPlayback = $null }
 
+    It 'sends the next line before moving the skip pointer' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Move-UrgentBoardNext -ChatId 100 | Should -BeTrue
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Variables['Headline.Text'] -eq 'عاجل 2' }
+        $script:UrgentBoardRun.Step | Should -Be 1
+        (Get-UrgentElapsedSeconds) | Should -BeLessThan 11
+    }
+
+    It 'pauses from the button without hiding and resumes the frozen clock' {
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserNameFromTelegram {}
+        Mock Update-UserLastActivity {}
+        Mock Test-Authorized { $true }
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Invoke-TestUrgentNumberCallback -Data 'urgentb:pause'
+        $script:UrgentBoardRun.Clock.IsRunning | Should -BeFalse
+        Get-UrgentBoardText -ChatId 100 | Should -Match 'متوقف مؤقتًا'
+        Step-TestUrgentRun
+        $script:UrgentBoardRun.Step | Should -Be 0
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        Invoke-TestUrgentNumberCallback -Data 'urgentb:resume'
+        $script:UrgentBoardRun.Clock.IsRunning | Should -BeTrue
+        Step-TestUrgentRun
+        $script:UrgentBoardRun.Step | Should -Be 1
+    }
+
+    It 'refuses playback controls when template access is denied' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Mock Test-TemplateAccess { @{ Allowed = $false; Reason = 'ممنوع' } }
+        Move-UrgentBoardNext -ChatId 100 -UserId 102 | Should -BeFalse
+        Suspend-UrgentBoardRun -ChatId 100 -UserId 102 | Should -BeFalse
+        Resume-UrgentBoardRun -ChatId 100 -UserId 102 | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+        $script:UrgentBoardRun.Step | Should -Be 0
+    }
+
+    It 'stops on the last skipped line without showing anything else' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        $script:UrgentBoardRun.Step = 2
+        Move-UrgentBoardNext -ChatId 100 -UserId 101 | Should -BeTrue
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
+    It 'does not claim a failed skip was displayed' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Mock Show-TitlerTemplate { @{ Success = $false; Error = 'offline' } }
+        Move-UrgentBoardNext -ChatId 100 -UserId 101 | Should -BeFalse
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+    }
+
     It 'puts the first line up through the ordinary pipeline' {
         Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeTrue
 
@@ -225,6 +277,18 @@ Describe 'Running the breaking-news board' {
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
         Should -Invoke Exit-TitlerScene -Times 0 -Exactly
         [int]$script:UrgentBoardRun.Step | Should -Be 1
+    }
+
+    It 'hides an auto-hide line at its deadline even when the next line uses text mode' {
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $edited = Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field Mode -Value 'auto_hide'
+        $edited.Success | Should -BeTrue
+        $script:UrgentBoard = $edited.Value
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeTrue
+        Step-TestUrgentRun
+        Should -Invoke Exit-TitlerScene -Times 1 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Variables['Headline.Text'] -eq 'عاجل 2' }
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
     }
 
     It 'takes an exit-mode line out and brings it back' {
@@ -452,6 +516,23 @@ Describe 'A board run that outlived a restart' {
         $script:OnAir.Remove(7)
     }
 
+    It 'keeps a paused run frozen across a restart' {
+        $now = [datetime]'2026-09-17T12:00:00'
+        $state = @{
+            SchemaVersion = 2; StartedAt = $now.AddMinutes(-10).ToString('o'); SavedAt = $now.AddMinutes(-5).ToString('o')
+            ElapsedSeconds = 4; Paused = $true; ChatId = 100; UserId = 101
+            Step = 0; ExitAtSeconds = 30; BoardRevision = 1; OperationId = 'urgent-x'; Summary = 's'
+            Steps = @(@{ Step = 0; AtSeconds = 0; Mode = 'text'; Text = 'أ' }, @{ Step = 1; AtSeconds = 10; Mode = 'text'; Text = 'ب' })
+        }
+        Set-Content -LiteralPath (Get-UrgentRunFile) -Value ($state | ConvertTo-Json -Depth 8) -Encoding utf8
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = $now }
+        Restore-UrgentBoardRun -Now $now | Should -BeTrue
+        $script:UrgentBoardRun.Clock.IsRunning | Should -BeFalse
+        Get-UrgentElapsedSeconds | Should -Be 4
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        $script:OnAir.Remove(7)
+    }
+
     It 'drops a run whose layer somebody already dealt with' {
         $state = [pscustomobject]@{
             SchemaVersion = 1; StartedAt = (Get-Date).ToString('o'); ChatId = 100; UserId = 101
@@ -484,8 +565,26 @@ Describe 'A board run that outlived a restart' {
     }
 }
 
+function global:Invoke-TestUrgentNumberCallback {
+    param([string]$Data, [long]$UserId = 101, [int]$MessageId = 42)
+    Invoke-CallbackQuery -CallbackQuery @{
+        id = 'urgent-number-test'; data = $Data
+        from = @{ id = $UserId; first_name = 'Test' }
+        message = @{ message_id = $MessageId; chat = @{ id = [long]100; type = 'private' } }
+    }
+}
+
 Describe 'Editing the board from its buttons' {
     BeforeEach {
+        Mock Invoke-RestMethod { throw 'offline test: no HTTP' }
+        Mock Invoke-WebRequest { throw 'offline test: no HTTP' }
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'offline test: no Cinegy' }
+        Mock Save-Config {}
+        Mock Write-BridgeLog {}
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserNameFromTelegram {}
+        Mock Update-UserLastActivity {}
+        Mock Test-Authorized { $true }
         Mock Write-BridgeValidatedJson { $true }
         Mock Send-TelegramMessage {}
         Mock Send-TelegramRichMessage { $false }
@@ -497,13 +596,15 @@ Describe 'Editing the board from its buttons' {
         $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
     }
 
-    It 'switches one line between the two display modes' {
+    It 'switches one line through all three display modes' {
         Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Should -BeTrue
 
         [string]$script:UrgentBoard.Items[0].Mode | Should -Be 'exit'
 
         Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Out-Null
 
+        [string]$script:UrgentBoard.Items[0].Mode | Should -Be 'auto_hide'
+        Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Out-Null
         [string]$script:UrgentBoard.Items[0].Mode | Should -Be 'text'
     }
 
@@ -515,6 +616,82 @@ Describe 'Editing the board from its buttons' {
 
         [int]$script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
         (Get-UrgentEffectiveTiming -Item $script:UrgentBoard.Items[0] -Defaults (Get-UrgentBoardDefaults)).IntervalInherited | Should -BeTrue
+    }
+
+    It 'saves a per-line interval override typed by the operator and keeps it on screen' {
+        $position = 0
+        $itemId = [string]$script:UrgentBoard.Items[$position].Id
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_item_interval'; UserId = 101; Position = $position; StartedAt = (Get-Date) }
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '25' | Should -BeTrue
+
+        $stored = Get-UrgentItem -Board $script:UrgentBoard -ItemId $itemId
+        [int]$stored.IntervalSeconds | Should -Be 25
+        (Get-UrgentEffectiveTiming -Item $stored -Defaults (Get-UrgentBoardDefaults)).IntervalSeconds | Should -Be 25
+    }
+
+    It 'rejects a non-numeric interval typed by the operator and keeps the chat waiting' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_item_interval'; UserId = 101; Position = 0; StartedAt = (Get-Date) }
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value 'ثمانية' | Out-Null
+
+        [int]$script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*بين 0 و3600*' }
+    }
+
+    It 'changes eight to twenty-five through the actual default interval buttons and settings' {
+        New-TestUrgentBoard -IntervalSeconds 8 | Out-Null
+        Invoke-TestUrgentNumberCallback 'urgentb:dinterval'
+        $pending = Get-PendingState -ChatId 100
+        $pending.Mode | Should -Be 'urgent_number_picker'
+        Test-PendingStateAdmission -State $pending -ChatId 100 -UserId 101 | Should -BeTrue
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+10"
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+5"
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+1"
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+1"
+        (Get-SettingInt 'UrgentBoardIntervalSeconds' 8) | Should -Be 25
+        (Get-UrgentBoardDefaults).IntervalSeconds | Should -Be 25
+        Should -Invoke Save-Config -Times 4 -Exactly
+        Should -Invoke Edit-TelegramMessageText -ParameterFilter { $MessageId -eq 42 -and $Text -like '*25*' }
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):done"
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+    }
+
+    It 'keeps a per-item picker on the item that owns the token and lands on that item, not a neighbour' {
+        New-TestUrgentBoard -Count 3 -IntervalSeconds 10 | Out-Null
+        Invoke-TestUrgentNumberCallback 'urgentb:interval:1'
+        $pending = Get-PendingState -ChatId 100
+        $pending.Mode | Should -Be 'urgent_number_picker'
+        $itemId = [string]$script:UrgentBoard.Items[1].Id
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+10"
+        Invoke-TestUrgentNumberCallback "urgentb:num:$($pending.Token):+5"
+        $stored = Get-UrgentItem -Board $script:UrgentBoard -ItemId $itemId
+        [int]$stored.IntervalSeconds | Should -Be 25
+        @(0, 2) | ForEach-Object { [int](Get-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$script:UrgentBoard.Items[$_].Id)).IntervalSeconds | Should -Be 0 }
+        (Get-UrgentEffectiveTiming -Item $stored -Defaults (Get-UrgentBoardDefaults)).IntervalSeconds | Should -Be 25
+    }
+
+    It 'refuses a pick from a stale token instead of moving the wrong item' {
+        New-TestUrgentBoard -Count 2 | Out-Null
+        Invoke-TestUrgentNumberCallback 'urgentb:interval:0'
+        Invoke-TestUrgentNumberCallback "urgentb:num:000000000000:+10"
+        [int]$script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*انتهت صلاحية*' }
+    }
+
+    It 'still accepts a valid legacy numeric pending flow through admission and completion' {
+        New-TestUrgentBoard -IntervalSeconds 8 | Out-Null
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_default_interval'; UserId = 101; StartedAt = (Get-Date) }
+        Test-PendingStateAdmission -State (Get-PendingState -ChatId 100) -ChatId 100 -UserId 101 | Should -BeTrue
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '25' | Should -BeTrue
+        (Get-UrgentBoardDefaults).IntervalSeconds | Should -Be 25
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+    }
+
+    It 'does not report success or save an unparseable default interval which reads back as eight' {
+        New-TestUrgentBoard -IntervalSeconds 8 | Out-Null
+        Invoke-TestUrgentNumberCallback 'urgentb:dinterval'
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '٢٥' | Should -BeFalse
+        [string](Get-Setting 'UrgentBoardIntervalSeconds') | Should -Be '8'
+        Should -Invoke Save-Config -Times 0 -Exactly
     }
 
     It 'switches the table between the two repeat orders, through the settings door' {

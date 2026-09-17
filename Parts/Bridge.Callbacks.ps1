@@ -475,14 +475,12 @@ function Invoke-CallbackQuery {
         }
         'urgentb:interval:*' {
             $position = [int](Get-CallbackArg $data 'urgentb:interval:')
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_interval'; UserId = $userId; Position = $position; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text 'أرسل فاصل هذا العاجل بالثواني (0 = خذه من الجدول):'
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind interval -Position $position -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'urgentb:repeats:*' {
             $position = [int](Get-CallbackArg $data 'urgentb:repeats:')
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_item_repeats'; UserId = $userId; Position = $position; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text 'أرسل عدد تكرارات هذا العاجل (0 = خذه من الجدول):'
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind repeats -Position $position -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'urgentb:mode:*' {
@@ -501,20 +499,18 @@ function Invoke-CallbackQuery {
         'urgentb:delconfirm' { Invoke-UrgentSelectedDelete -ChatId $chatId -UserId $userId | Out-Null; break }
         'urgentb:timing' { Clear-PendingState -ChatId $chatId; Show-UrgentTimingScreen -ChatId $chatId -MessageId ([int]$msgObj.message_id); break }
         'urgentb:dinterval' {
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_default_interval'; UserId = $userId; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text 'أرسل فاصل الجدول بالثواني:'
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dinterval -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'urgentb:drepeats' {
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_default_repeats'; UserId = $userId; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text 'أرسل عدد تكرارات الجدول:'
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind drepeats -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'urgentb:dtotal' {
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_default_total'; UserId = $userId; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text 'أرسل المدة الكلية بالثواني (0 = بلا سقف):'
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dtotal -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
+        'urgentb:num:*' { Invoke-UrgentNumberPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'urgentb:num:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
         'urgentb:dorder' { Invoke-UrgentDefaultSwitch -ChatId $chatId -Field RepeatMode | Out-Null; break }
         'urgentb:dmode' { Invoke-UrgentDefaultSwitch -ChatId $chatId -Field Mode | Out-Null; break }
         'urgentb:review:sel' { Show-UrgentReviewScreen -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
@@ -522,6 +518,9 @@ function Invoke-CallbackQuery {
         'urgentb:play:sel' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
         'urgentb:play:all' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; break }
         'urgentb:stop' { Stop-UrgentBoardRun -ChatId $chatId -UserId $userId -Reason 'manual' | Out-Null; break }
+        'urgentb:pause' { Suspend-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        'urgentb:resume' { Resume-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        'urgentb:skip' { Move-UrgentBoardNext -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
         'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }

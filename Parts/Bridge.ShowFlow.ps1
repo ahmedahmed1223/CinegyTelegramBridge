@@ -520,6 +520,8 @@ function Invoke-HideLayer {
     # happened - recorded as finished, ticker recalled, scene possibly still
     # walking rows on air.
     Stop-MojazForLayer -Layer $Layer | Out-Null
+    # The breaking-news board walks a scene the same way, and stops the same way.
+    Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
     $rollbackSnapshot = $null
     if (-not $Quiet -and (Get-Setting 'EnableSafeRollback')) {
         $preHideStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
@@ -583,6 +585,8 @@ function Invoke-ExitLayer {
     # rows into a scene nobody can see. After the gate, for the same reason as
     # the hide above.
     Stop-MojazForLayer -Layer $Layer | Out-Null
+    # The breaking-news board walks a scene the same way, and stops the same way.
+    Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
     $rollbackSnapshot = $null
     if (Get-Setting 'EnableSafeRollback') {
         $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `

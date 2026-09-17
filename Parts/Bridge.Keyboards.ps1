@@ -113,6 +113,13 @@ function Get-MainMenuKeyboard {
         $rows += , @( (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) )
     }
 
+    # Same reasoning for a breaking-news board that is walking its table: the
+    # plain hide above would cut the scene and leave the run writing lines into
+    # something nobody can see. Only while a run is actually up.
+    if ($script:UrgentBoardRun) {
+        $rows += , @( (New-Button "⏹ إيقاف العواجل" "urgentb:stop" -Style danger) )
+    }
+
     # A rollback used to be reachable only from the message that offered it,
     # so navigating away lost it for the rest of its window. The fastest human
     # error is pressing the wrong template; undo has to survive a tap on the
@@ -195,6 +202,9 @@ function Get-MainMenuKeyboard {
     # Offered only where the template exists: the screen is that scene's, and
     # a bridge without it has nothing to play.
     if (Test-MojazAvailable) { $contentRow += (New-Button '📑 الموجز' 'menu:mojaz') }
+    # Offered only where the scene exists and the newsroom asked for the board.
+    # The single urgent template keeps its own button either way.
+    if (Test-UrgentBoardAvailable) { $contentRow += (New-Button '🚨 العواجل' 'urgentb:open') }
     if ($contentRow.Count -gt 0) { $rows += , $contentRow }
 
     if (Get-Setting 'EnableSnapshot') {

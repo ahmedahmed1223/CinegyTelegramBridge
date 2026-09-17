@@ -2106,7 +2106,7 @@ function Invoke-BridgeTick {
     <# Everything time-based happens here, between long-polls. Each helper is
        cheap and non-blocking; any failure is logged rather than allowed to
        kill the loop. #>
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -2124,15 +2124,35 @@ function Get-BasePollTimeout {
     return $value
 }
 
+function Test-AirRunActive {
+    <#
+        Is anything walking a scene on air right now?
+
+        One question with one answer, because two engines now need the same
+        one - the bulletin and the breaking-news board - and the thing that
+        reads it is the long-poll timeout. A second copy of this condition is
+        a copy that will be updated when a third engine arrives, or will not.
+    #>
+    if ($script:MojazPlayback) { return $true }
+    return ($null -ne $script:UrgentBoardRun)
+}
+
 function Get-EffectivePollTimeout {
     <# Long-poll for the configured time normally, but collapse to 1 second
        whenever async work is outstanding so a finished snapshot or a dead
        relay is noticed within a second instead of up to 30. #>
     if ($script:PostShowQueue.Count -gt 0) { return 1 }
-    # A bulletin on air has a moment to hit every few seconds, and the write
-    # has to land inside a fade that lasts about a second. Polling for the
-    # configured half-minute would miss every one of them.
-    if ($script:MojazPlayback) { return 1 }
+    # A bulletin or a breaking-news board on air has a moment to hit every few
+    # seconds, and the write has to land inside a fade that lasts about a
+    # second. Polling for the configured half-minute would miss every one of
+    # them.
+    #
+    # Asked as one question rather than two: the board was added with its tick
+    # step registered and this line forgotten, which left an engine timed to
+    # the millisecond being called up to thirty seconds late. Every test still
+    # passed - the arithmetic was right, and nothing in the process was wrong
+    # except when it ran.
+    if (Test-AirRunActive) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout
     $upcoming = @(Get-UpcomingScheduleEvents)

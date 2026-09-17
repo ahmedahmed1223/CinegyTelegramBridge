@@ -1,0 +1,573 @@
+#requires -Version 7
+
+. (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
+
+function global:New-TestUrgentTemplate {
+    <#
+        A registry with an Urgent scene on layer 7, which is what makes the
+        board available at all.
+
+        The path is rooted through GetTempPath rather than written as C:\... :
+        the registry drops any template whose path is not absolute, and a
+        hard-coded Windows path makes every test in this file pass on the
+        playout machine and fail everywhere else. The file need not exist - the
+        scene timing is mocked in every test that reads it.
+    #>
+    param([int]$Layer = 7)
+    New-TempTemplateFile -Json (@{
+            Urgent = @{
+                description = 'breaking'
+                path        = (Join-Path ([System.IO.Path]::GetTempPath()) 'Urgent.cintitle')
+                layer       = $Layer
+                fields      = @('Headline.Text', 'Kicker.Text')
+            }
+        } | ConvertTo-Json -Depth 6) | Out-Null
+}
+
+function global:New-TestUrgentBoard {
+    <# A board of three lines, table defaults, nothing selected. #>
+    param([int]$Count = 3, [int]$IntervalSeconds = 10)
+    $board = New-UrgentBoard
+    # The table's own numbers are settings now, not fields on the file.
+    $config.Settings | Add-Member -NotePropertyName 'UrgentBoardIntervalSeconds' -NotePropertyValue $IntervalSeconds -Force
+    $config.Settings | Add-Member -NotePropertyName 'UrgentBoardRepeats' -NotePropertyValue 1 -Force
+    $config.Settings | Add-Member -NotePropertyName 'UrgentBoardTotalSeconds' -NotePropertyValue 0 -Force
+    $config.Settings | Add-Member -NotePropertyName 'UrgentBoardMode' -NotePropertyValue 'text' -Force
+    $config.Settings | Add-Member -NotePropertyName 'UrgentBoardRepeatMode' -NotePropertyValue 'cycle' -Force
+    for ($index = 1; $index -le $Count; $index++) {
+        $board = (Add-UrgentItem -Board $board -Text "عاجل $index" -UserId 1).Value
+    }
+    $script:UrgentBoard = $board
+    $script:UrgentSelections = @{}
+    $script:UrgentBoardRun = $null
+    $script:UrgentBoardStarting = $false
+    return $board
+}
+
+function global:Step-TestUrgentRun {
+    <# Wait out the next moment without waiting: the run measures itself
+       with a stopwatch, and ClockOffset is there so a test can move time
+       instead of sleeping through it. #>
+    $index = [int]$script:UrgentBoardRun.Step
+    $steps = @($script:UrgentBoardRun.Steps)
+    $moment = if ($index -ge ($steps.Count - 1)) {
+        [double]$script:UrgentBoardRun.ExitAtSeconds
+    }
+    else { [double]$steps[$index + 1].AtSeconds }
+    $script:UrgentBoardRun.ClockOffset = $moment + 1
+    Update-UrgentBoardRun
+}
+
+Describe 'The breaking-news board and the fixed urgent template' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Add-AuditEntry {}
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard | Out-Null
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
+    }
+    AfterEach { $script:UrgentBoardRun = $null }
+
+    It 'offers its button only where the scene exists and the newsroom asked for it' {
+        $on = ConvertTo-Json (Get-MainMenuKeyboard -ChatId 100 -UserId 100) -Depth 8
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $false -Force
+        $off = ConvertTo-Json (Get-MainMenuKeyboard -ChatId 100 -UserId 100) -Depth 8
+
+        $on | Should -Match 'urgentb:open'
+        $off | Should -Not -Match 'urgentb:open'
+    }
+
+    It 'leaves the fixed urgent template exactly where it was' {
+        # The board is a second consumer of this scene, not a replacement. With
+        # the board switched off the old path must still be the same call it
+        # always was.
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $false -Force
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = '{x}' } }
+        Mock Update-OnAirStateFromCinegy { }
+
+        Invoke-ShowTemplateResult -Key 'Urgent' -Variables @{ 'Headline.Text' = 'خبر' } -ChatId 100 -UserId 100 | Out-Null
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'pages the board keyboard rather than growing one row per line' {
+        New-TestUrgentBoard -Count 30 | Out-Null
+
+        $rows = @((Get-UrgentBoardKeyboard -ChatId 100).inline_keyboard)
+
+        # Every row is a row: a flattened cell would mean the comma before the
+        # row was lost, and Telegram answers that with 400.
+        foreach ($row in $rows) { , $row | Should -BeOfType [System.Object[]] }
+        $rows.Count | Should -BeLessThan 20
+        (ConvertTo-Json $rows -Depth 8) | Should -Match 'urgentb:page:1'
+    }
+
+    It 'numbers the table with the same numbers as the buttons on that page' {
+        # The keyboard pages and the table did not, so page two listed the
+        # buttons for lines 9-16 above a table that still started at line 1.
+        # Every number an operator reads would have pointed at the wrong line.
+        New-TestUrgentBoard -Count 20 | Out-Null
+        $size = Get-UrgentBoardPageSize
+        $first = $size + 1
+
+        $text = Get-UrgentBoardText -ChatId 100 -Page 1
+        $keyboard = ConvertTo-Json (Get-UrgentBoardKeyboard -ChatId 100 -Page 1) -Depth 8
+
+        $text | Should -Match "$first\. ✏️ عاجل $first"
+        $text | Should -Not -Match 'عاجل 1 —'
+        $keyboard | Should -Match "$first\. عاجل $first" 
+    }
+
+    It 'keeps one chat''s ticks out of another chat''s run' {
+        # Selection is an operator's act, not a property of the shared table.
+        $items = @($script:UrgentBoard.Items)
+        Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[0].Id)
+        Set-UrgentSelectedIds -ChatId 200 -Ids @([string]$items[1].Id, [string]$items[2].Id)
+
+        @(Get-UrgentSelectedIds -ChatId 100).Count | Should -Be 1
+        @(Get-UrgentSelectedIds -ChatId 200).Count | Should -Be 2
+        @(New-UrgentBoardPlan -ChatId 200 -SelectedOnly).Value.ItemCount | Should -Be 2
+    }
+
+    It 'forgets a tick whose line has been deleted' {
+        $items = @($script:UrgentBoard.Items)
+        Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[0].Id, [string]$items[1].Id)
+        $script:UrgentBoard = (Remove-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$items[0].Id)).Value
+
+        @(Get-UrgentSelectedIds -ChatId 100).Count | Should -Be 1
+    }
+}
+
+Describe 'Running the breaking-news board' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Add-AuditEntry {}
+        Mock Write-AuditRecord {}
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-ExitLayer { $true }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true } }
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true } }
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -Count 3 -IntervalSeconds 10 | Out-Null
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateKeys' -NotePropertyValue '' -Force
+        $script:MojazPlayback = $null
+    }
+    AfterEach { $script:UrgentBoardRun = $null; $script:MojazPlayback = $null }
+
+    It 'puts the first line up through the ordinary pipeline' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeTrue
+
+        # Not a direct SHOW: maintenance mode, the layer policy, the live
+        # Cinegy check and the audit trail all live on that path.
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        [int]$script:UrgentBoardRun.Step | Should -Be 0
+        @($script:UrgentBoardRun.Steps).Count | Should -Be 3
+    }
+
+    It 'does not stop itself with the show that starts it' {
+        # The rule "a manual urgent stops a running board" reads the same
+        # template key this SHOW carries. Without the starting flag the board
+        # would kill itself the instant it reached air - and only after it was
+        # already on air, leaving a line up with no engine behind it.
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeTrue
+
+        $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
+        $script:UrgentBoardStarting | Should -BeFalse
+    }
+
+    It 'stands down when somebody sends a single urgent over it' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-UrgentBoardForManualUrgent -ChatId 100 -UserId 102 | Should -BeTrue
+
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        # Told, not silent: a table that stopped without a word reads as a
+        # table that finished.
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*توقّف جدول العواجل*' }
+        # The caller is putting its own graphic up; exiting here would play an
+        # outro over it.
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'ends when its layer is taken off air by something else' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-UrgentBoardForLayer -Layer 7 | Should -BeTrue
+
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'ignores a layer that is not its own' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-UrgentBoardForLayer -Layer 4 | Should -BeFalse
+
+        $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
+    }
+
+    It 'writes a text-mode line into the running scene and never shows it again' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Step-TestUrgentRun
+
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+        Should -Invoke Exit-TitlerScene -Times 0 -Exactly
+        [int]$script:UrgentBoardRun.Step | Should -Be 1
+    }
+
+    It 'takes an exit-mode line out and brings it back' {
+        $items = @($script:UrgentBoard.Items)
+        $script:UrgentBoard = (Set-UrgentItem -Board $script:UrgentBoard -ItemId ([string]$items[1].Id) -Field Mode -Value 'exit').Value
+
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Step-TestUrgentRun
+
+        Should -Invoke Exit-TitlerScene -Times 1 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'stops at the first failed line instead of walking a table nobody can see' {
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $false; Error = 'لا اتصال'; Xml = '' } }
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Step-TestUrgentRun
+
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*توقّف جدول العواجل عند الخطوة 2*لا اتصال*' }
+    }
+
+    It 'exits at the end of the run and says so once' {
+        $config.Settings | Add-Member -NotePropertyName 'UrgentBoardNotifyOnFinish' -NotePropertyValue $true -Force
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        Step-TestUrgentRun
+        Step-TestUrgentRun
+        Step-TestUrgentRun
+
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*انتهى جدول العواجل*' }
+    }
+
+    It 'refuses to start a second run on top of the first' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+    }
+
+    It 'refuses to start underneath a running bulletin' {
+        $script:MojazPlayback = @{ ChatId = 100 }
+
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
+    It 'keeps the long poll at one second while a run is live' {
+        # The engine is timed in tenths of a second. Without this the tick that
+        # drives it would be called up to thirty seconds late, every window
+        # would be missed, and every unit test would still pass.
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Test-AirRunActive | Should -BeTrue
+        Get-EffectivePollTimeout | Should -Be 1
+    }
+}
+
+Describe 'What can cut a board run short' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -Count 2 -IntervalSeconds 10 | Out-Null
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateKeys' -NotePropertyValue '' -Force
+    }
+
+    It 'treats the forced hide of a sensitive template as the ceiling on the whole run' {
+        # Listing Urgent as sensitive is a reasonable thing for a newsroom to
+        # do, and it means every SHOW of it carries a timer. A board that
+        # ignored it would keep writing lines into a scene that had been hidden
+        # underneath it, with nothing on any screen saying so.
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateKeys' -NotePropertyValue 'Urgent' -Force
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateAutoHideSeconds' -NotePropertyValue 45 -Force
+        $config.Settings | Add-Member -NotePropertyName 'UrgentBoardRepeats' -NotePropertyValue 5 -Force
+
+        $ceiling = Get-UrgentRunCeiling -Items @($script:UrgentBoard.Items)
+        $plan = New-UrgentBoardPlan -ChatId 100
+
+        $ceiling.Reason | Should -Be 'autohide'
+        $ceiling.Seconds | Should -Be 45
+        $plan.Value.Cycles | Should -Be 2
+        $plan.Value.TrimmedBy | Should -Be 'autohide'
+        @($plan.Value.Notes) -join ' ' | Should -Match 'الإخفاء التلقائي'
+    }
+
+    It 'refuses the run outright when not even one pass fits under that hide' {
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateKeys' -NotePropertyValue 'Urgent' -Force
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateAutoHideSeconds' -NotePropertyValue 5 -Force
+
+        $plan = New-UrgentBoardPlan -ChatId 100
+
+        $plan.Success | Should -BeFalse
+        $plan.ErrorCode | Should -Be 'no_fit'
+    }
+
+    It 'takes the operator''s own total when it is the shorter of the two' {
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateKeys' -NotePropertyValue 'Urgent' -Force
+        $config.Settings | Add-Member -NotePropertyName 'SensitiveTemplateAutoHideSeconds' -NotePropertyValue 300 -Force
+        $config.Settings | Add-Member -NotePropertyName 'UrgentBoardTotalSeconds' -NotePropertyValue 60 -Force
+
+        $ceiling = Get-UrgentRunCeiling -Items @($script:UrgentBoard.Items)
+
+        $ceiling.Seconds | Should -Be 60
+        $ceiling.Reason | Should -Be 'total'
+    }
+}
+
+Describe 'The board and the scene it plays on' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Add-AuditEntry {}
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -Count 2 | Out-Null
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
+    }
+
+    It 'says on the board itself when the scene has no loop to hide a text change in' {
+        # A breaking strap cut as entrance-hold-exit has no fade to write
+        # inside, so "text only" would swap the words in front of the viewer.
+        # The operator has to learn this before writing eight lines in that
+        # mode, not after pressing play.
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1; LoopSeconds = 0; OutroSeconds = 1 } }
+
+        Test-UrgentSceneLoop | Should -BeFalse
+        (Get-UrgentBoardText -ChatId 100) | Should -Match 'بلا حلقة'
+    }
+
+    It 'says nothing of the sort when the scene does loop' {
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1; LoopSeconds = 8; OutroSeconds = 1 } }
+
+        Test-UrgentSceneLoop | Should -BeTrue
+        (Get-UrgentBoardText -ChatId 100) | Should -Not -Match 'بلا حلقة'
+    }
+
+    It 'takes the shortest usable interval from the scene, not from the settings' {
+        Mock Get-MojazSceneTiming { [pscustomobject]@{ Fps = 25; IntroSeconds = 1.5; LoopSeconds = 8; OutroSeconds = 2 } }
+        $config.Settings | Add-Member -NotePropertyName 'UrgentMinIntervalSeconds' -NotePropertyValue 4 -Force
+
+        # Entrance plus exit: the least time a change can take without being
+        # seen. Re-cutting the scene in Titler re-times the board.
+        Get-UrgentFloorSeconds | Should -Be 3.5
+        Get-UrgentTransitionSeconds | Should -Be 3.5
+    }
+
+    It 'falls back to the setting only when the scene cannot be read' {
+        Mock Get-MojazSceneTiming { $null }
+        $config.Settings | Add-Member -NotePropertyName 'UrgentMinIntervalSeconds' -NotePropertyValue 6 -Force
+
+        Get-UrgentFloorSeconds | Should -Be 6
+    }
+
+    It 'maps a line onto the field names the scene declares' {
+        $item = @{ Text = 'خبر عاجل'; Title = 'كسر' }
+
+        $values = Get-UrgentItemVariables -Item $item
+
+        $values['Headline.Text'] | Should -Be 'خبر عاجل'
+        $values['Kicker.Text'] | Should -Be 'كسر'
+    }
+
+    It 'reads two scenes without either evicting the other from the cache' {
+        # One cache slot is not a cache when two callers alternate: each call
+        # would evict the other and re-read the file, on the path that draws a
+        # screen.
+        $first = Join-Path $TestDrive 'a.cintitle'
+        $second = Join-Path $TestDrive 'b.cintitle'
+        Set-Content -LiteralPath $first -Encoding utf8 -Value '<CinegyTitler><Scene Fps="25" LoopStartFrame="25" LoopEndFrame="225" Duration="250" /></CinegyTitler>'
+        Set-Content -LiteralPath $second -Encoding utf8 -Value '<CinegyTitler><Scene Fps="25" LoopStartFrame="50" LoopEndFrame="150" Duration="200" /></CinegyTitler>'
+        $script:MojazSceneTimingCache.Clear()
+
+        Get-MojazSceneTiming -Path $first | Out-Null
+        Get-MojazSceneTiming -Path $second | Out-Null
+
+        $script:MojazSceneTimingCache.Count | Should -Be 2
+        [double](Get-MojazSceneTiming -Path $first).LoopSeconds | Should -Be 8
+        [double](Get-MojazSceneTiming -Path $second).LoopSeconds | Should -Be 4
+    }
+}
+
+Describe 'A board run that outlived a restart' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-AdminBroadcast {}
+        Mock Invoke-ExitLayer { $true }
+        Mock Write-AuditRecord {}
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -Count 3 -IntervalSeconds 10 | Out-Null
+        $script:UrgentBoardRun = $null
+    }
+    AfterEach { $script:UrgentBoardRun = $null; Clear-UrgentRunState }
+
+    It 'rejoins its own schedule where the clock says it should be' {
+        $started = (Get-Date).AddSeconds(-12)
+        $state = [pscustomobject]@{
+            SchemaVersion = 1; StartedAt = $started.ToString('o'); ChatId = 100; UserId = 101
+            Step = 0; ExitAtSeconds = 30; BoardRevision = 1; OperationId = 'urgent-x'; Summary = 's'
+            Steps = @(
+                [pscustomobject]@{ Step = 0; AtSeconds = 0; Mode = 'text'; Text = 'أ' }
+                [pscustomobject]@{ Step = 1; AtSeconds = 10; Mode = 'text'; Text = 'ب' }
+                [pscustomobject]@{ Step = 2; AtSeconds = 20; Mode = 'text'; Text = 'ج' }
+            )
+        }
+        Set-Content -LiteralPath (Get-UrgentRunFile) -Value ($state | ConvertTo-Json -Depth 8) -Encoding utf8
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date) }
+
+        Restore-UrgentBoardRun | Should -BeTrue
+
+        # Twelve seconds in: the second line is the one that should be up.
+        [int]$script:UrgentBoardRun.Step | Should -Be 1
+        [double]$script:UrgentBoardRun.ClockOffset | Should -BeGreaterThan 11
+        $script:OnAir.Remove(7)
+    }
+
+    It 'drops a run whose layer somebody already dealt with' {
+        $state = [pscustomobject]@{
+            SchemaVersion = 1; StartedAt = (Get-Date).ToString('o'); ChatId = 100; UserId = 101
+            Step = 0; ExitAtSeconds = 30; BoardRevision = 1; OperationId = 'urgent-x'; Summary = 's'
+            Steps = @([pscustomobject]@{ Step = 0; AtSeconds = 0; Mode = 'text'; Text = 'أ' })
+        }
+        Set-Content -LiteralPath (Get-UrgentRunFile) -Value ($state | ConvertTo-Json -Depth 8) -Encoding utf8
+        $script:OnAir.Remove(7)
+
+        Restore-UrgentBoardRun | Should -BeFalse
+
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'takes a scene off air when the run it belonged to is long past its end' {
+        $state = [pscustomobject]@{
+            SchemaVersion = 1; StartedAt = (Get-Date).AddMinutes(-10).ToString('o'); ChatId = 100; UserId = 101
+            Step = 0; ExitAtSeconds = 30; BoardRevision = 1; OperationId = 'urgent-x'; Summary = 's'
+            Steps = @([pscustomobject]@{ Step = 0; AtSeconds = 0; Mode = 'text'; Text = 'أ' })
+        }
+        Set-Content -LiteralPath (Get-UrgentRunFile) -Value ($state | ConvertTo-Json -Depth 8) -Encoding utf8
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date) }
+
+        Restore-UrgentBoardRun | Should -BeFalse
+
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+        $script:OnAir.Remove(7)
+    }
+}
+
+Describe 'Editing the board from its buttons' {
+    BeforeEach {
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Send-TelegramMessage {}
+        Mock Send-TelegramRichMessage { $false }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Add-AuditEntry {}
+        Mock Get-MojazSceneTiming { $null }
+        New-TestUrgentTemplate
+        New-TestUrgentBoard -Count 3 | Out-Null
+        $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $true -Force
+    }
+
+    It 'switches one line between the two display modes' {
+        Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Should -BeTrue
+
+        [string]$script:UrgentBoard.Items[0].Mode | Should -Be 'exit'
+
+        Invoke-UrgentItemModeSwitch -ChatId 100 -UserId 101 -Position 0 | Out-Null
+
+        [string]$script:UrgentBoard.Items[0].Mode | Should -Be 'text'
+    }
+
+    It 'puts an overridden number back to the table''s own' {
+        $id = [string]$script:UrgentBoard.Items[0].Id
+        $script:UrgentBoard = (Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field IntervalSeconds -Value 25).Value
+
+        Invoke-UrgentItemReset -ChatId 100 -UserId 101 -Position 0 -Field IntervalSeconds | Should -BeTrue
+
+        [int]$script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
+        (Get-UrgentEffectiveTiming -Item $script:UrgentBoard.Items[0] -Defaults (Get-UrgentBoardDefaults)).IntervalInherited | Should -BeTrue
+    }
+
+    It 'switches the table between the two repeat orders, through the settings door' {
+        Mock Save-Config {}
+
+        Invoke-UrgentDefaultSwitch -ChatId 100 -Field RepeatMode | Should -BeTrue
+
+        [string](Get-UrgentBoardDefaults).RepeatMode | Should -Be 'item'
+        (Get-Setting 'UrgentBoardRepeatMode') | Should -Be 'item'
+    }
+
+    It 'refuses a table number outside its declared range instead of clamping it' {
+        Mock Save-Config {}
+        $before = Get-SettingInt 'UrgentBoardRepeats' 1
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_default_repeats'; UserId = 101; StartedAt = (Get-Date) }
+
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '500' | Out-Null
+
+        (Get-SettingInt 'UrgentBoardRepeats' 1) | Should -Be $before
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -like '*لا يزيد عن*' }
+    }
+
+    It 'deletes everything ticked in one save, not one save per line' {
+        $items = @($script:UrgentBoard.Items)
+        Set-UrgentSelectedIds -ChatId 100 -Ids @([string]$items[0].Id, [string]$items[2].Id)
+
+        Invoke-UrgentSelectedDelete -ChatId 100 -UserId 101 | Should -BeTrue
+
+        @($script:UrgentBoard.Items).Count | Should -Be 1
+        [string]$script:UrgentBoard.Items[0].Text | Should -Be 'عاجل 2'
+        @(Get-UrgentSelectedIds -ChatId 100).Count | Should -Be 0
+        Should -Invoke Write-BridgeValidatedJson -Times 1 -Exactly
+    }
+
+    It 'adds a typed line and refuses an empty one without swallowing the next message' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_add_text'; UserId = 101; StartedAt = (Get-Date) }
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value 'خبر مكتوب' | Should -BeTrue
+
+        @($script:UrgentBoard.Items).Count | Should -Be 4
+        # The pending state is cleared before the value is used, so a refusal
+        # does not leave the chat waiting to swallow whatever is typed next.
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_add_text'; UserId = 101; StartedAt = (Get-Date) }
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '   ' | Should -BeFalse
+
+        @($script:UrgentBoard.Items).Count | Should -Be 4
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+    }
+
+    It 'escapes a line somebody typed before it reaches a screen' {
+        $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text '<b>وسم</b> & علامة').Value
+
+        (Get-UrgentBoardText -ChatId 100) | Should -Match '&lt;b&gt;وسم&lt;/b&gt; &amp; علامة'
+    }
+}

@@ -10,12 +10,32 @@
     "_comment_fields": "A field is either a plain variable name, or an object with label, maxLength, required, and sensitive. sensitive=true prevents recent-value storage. Limit resolution: field maxLength -> template maxLength -> Settings.MaxFieldLength.",
     "maxLength": 120,
     "fields": [
-      { "name": "TopText.Text", "label": "العنوان الرئيسي", "maxLength": 40, "required": true },
-      { "name": "BottomText.Text", "label": "السطر الثاني" }
+      {
+        "name": "TopText.Text",
+        "label": "العنوان الرئيسي",
+        "maxLength": 40,
+        "required": true
+      },
+      {
+        "name": "BottomText.Text",
+        "label": "السطر الثاني"
+      }
     ],
     "presets": [
-      { "name": "ترحيب", "values": ["أهلاً بكم", "نتابع معكم البث المباشر"] },
-      { "name": "فاصل", "values": ["فاصل قصير", "نعود إليكم بعد قليل"] }
+      {
+        "name": "ترحيب",
+        "values": [
+          "أهلاً بكم",
+          "نتابع معكم البث المباشر"
+        ]
+      },
+      {
+        "name": "فاصل",
+        "values": [
+          "فاصل قصير",
+          "نعود إليكم بعد قليل"
+        ]
+      }
     ]
   },
   "breaking-news": {
@@ -24,7 +44,29 @@
     "path": "C:\\Cinegy\\Titler\\Scenes\\BreakingNews.cintitle",
     "layer": 6,
     "order": 20,
-    "fields": ["Headline.Text"]
+    "fields": [
+      "Headline.Text"
+    ]
+  },
+  "Urgent": {
+    "_comment_urgentBoard": "The breaking-news scene. The single urgent button drives it one line at a time; with EnableUrgentBoard on, the table screen walks several lines on it. The board fills the FIRST field with the line and the second, if there is one, with its title.",
+    "description": "Urgent breaking line - also the scene the 'العواجل' board plays on",
+    "category": "أخبار",
+    "path": "C:\\\\Cinegy\\\\Titler\\\\Scenes\\\\Urgent.cintitle",
+    "layer": 7,
+    "order": 25,
+    "fields": [
+      {
+        "name": "Headline.Text",
+        "label": "نص العاجل",
+        "maxLength": 120,
+        "required": true
+      },
+      {
+        "name": "Kicker.Text",
+        "label": "العنوان الصغير"
+      }
+    ]
   },
   "sponsor-bug": {
     "_comment_longRunning": "A graphic meant to stay on air all day. Exempts it from the 'on air suspiciously long' alert and from personal elapsed-time reminders, which otherwise report a permanent logo or ticker. Cinegy's own declared Duration is honoured too, so this is only needed when the engine does not give one.",

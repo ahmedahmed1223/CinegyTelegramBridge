@@ -311,7 +311,11 @@ function Get-MojazSceneTiming {
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     $stamp = (Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue).LastWriteTimeUtc
     $key = "$Path|$stamp"
-    if ($script:MojazSceneTimingKey -eq $key) { return $script:MojazSceneTiming }
+    # Keyed by path, not a single slot. Two scenes are read now - the bulletin's
+    # and the breaking-news board's - and a one-slot cache is not a cache when
+    # two callers alternate: each call would evict the other's entry and re-read
+    # the file from disk, on the path that draws a screen.
+    if ($script:MojazSceneTimingCache.ContainsKey($key)) { return $script:MojazSceneTimingCache[$key] }
     $timing = $null
     try {
         $scene = ([xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)).CinegyTitler.Scene
@@ -334,9 +338,11 @@ function Get-MojazSceneTiming {
             }
         }
     }
-    catch { Write-BridgeLog "Could not read the Mojaz scene timing: $($_.Exception.Message)" 'WARN' }
-    $script:MojazSceneTimingKey = $key
-    $script:MojazSceneTiming = $timing
+    catch { Write-BridgeLog "Could not read the scene timing of '$Path': $($_.Exception.Message)" 'WARN' }
+    # Bounded on purpose: this only ever holds one entry per scene file per
+    # write time, and a scene re-cut all day would otherwise grow it forever.
+    if ($script:MojazSceneTimingCache.Count -gt 16) { $script:MojazSceneTimingCache.Clear() }
+    $script:MojazSceneTimingCache[$key] = $timing
     return $timing
 }
 

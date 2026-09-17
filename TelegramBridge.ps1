@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.39.0'
+$script:BridgeVersion = '8.40.0'
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Join-Path $scriptRoot 'Modules'
@@ -74,6 +74,7 @@ Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMojaz.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeUrgent.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
@@ -94,6 +95,8 @@ foreach ($part in @(
         'Bridge.Mojaz.Design'
         'Bridge.Mojaz.Screens'
         'Bridge.Mojaz.Playback'
+        'Bridge.Urgent'
+        'Bridge.Urgent.Playback'
         'Bridge.Users'
         'Bridge.Templates'
         'Bridge.OnAir'
@@ -253,6 +256,21 @@ $script:DefaultSettings = [ordered]@{
     MojazHidesTicker           = $false  # off: this newsroom keeps the strip up through a bulletin. Turn on to have it stand down and return
     MojazImageWidth            = 538     # what the exporter really produces; 0 reads the size off the scene's plate instead
     MojazImageHeight           = 303
+    # The breaking-news board: several urgent lines walked on one scene. Off
+    # until a newsroom asks for it - the single fixed Urgent template keeps
+    # working exactly as before either way, and is still the fastest path for
+    # one line.
+    EnableUrgentBoard          = $false  # shows 🚨 العواجل in the menu, where the Urgent template exists
+    UrgentBoardIntervalSeconds = 8       # how long each breaking line holds, unless the line overrides it
+    UrgentBoardRepeats         = 1       # how many times the run repeats; what "a repeat" means is the order below
+    UrgentBoardMode            = 'text'  # the display mode a line takes when it does not state its own: text = update the words, exit = play the outro and come back
+    UrgentBoardRepeatMode      = 'cycle' # cycle = 1 2 3 · 1 2 3 (the whole board, then again); item = 1 1 · 2 2
+    UrgentBoardTotalSeconds    = 0       # ceiling on the whole run; 0 means the repeats alone decide
+    UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
+    UrgentMinIntervalSeconds   = 4       # floor used only when the scene cannot be read; the scene's own timing wins
+    UrgentSyncLeadMs           = 120     # sent this early, so it arrives on the moment rather than after it
+    UrgentBoardNotifyOnFinish  = $true   # tell the chat when a board run ends by itself, minutes after the operator looked away
+    UrgentBoardMaxTextLength   = 300     # longest breaking line the board will store
     DropPendingUpdatesOnStart  = $true   # never replay a pre-restart button press on air
     AirCommandTimeoutSeconds   = 3       # Air Pro is normally on localhost/LAN
     TelegramRequestTimeoutSeconds = 15   # bounded timeout for sendMessage/photo/document
@@ -489,6 +507,17 @@ $script:SettingDisplayMetadata = @{
     MojazNotifyOnFinish = @{ Unit = ''; Description = 'إشعار في المحادثة حين ينتهي الموجز وحده ويخرج عن الهواء. الطرق الأخرى لإنهائه تقول ذلك أصلًا' }
     MojazScheduleNoticeSeconds = @{ Unit = 'ثانية'; Description = 'ينبّه قبل بدء موجز مجدول بهذه المدة. صفر يوقف التنبيه' }
     MojazHidesTicker = @{ Description = 'شريط الأخبار يخرج عند بدء الموجز ويعود بعد انتهائه، لأنهما يتقاسمان أسفل الشاشة. لا يُعاد شريط لم يكن على الهواء أصلًا' }
+    EnableUrgentBoard = @{ Unit = ''; Description = 'يفعّل 🚨 إدارة العواجل: جدول عواجل يُعرض بالتتابع. زرّ العاجل الثابت يبقى كما هو سواء فُعّل أو لا' }
+    UrgentBoardIntervalSeconds = @{ Unit = 'ثانية'; Description = 'كم يبقى كل عاجل قبل الذي يليه، ما لم يحدّد العاجل نفسه فاصلًا' }
+    UrgentBoardRepeats = @{ Unit = 'مرة'; Description = 'كم مرة يُعاد تشغيل الجدول. معنى «المرة» يحدّده ترتيب التكرار' }
+    UrgentBoardMode = @{ Unit = ''; Description = 'نمط العرض الافتراضي للعواجل: text يبدّل النصّ في المشهد القائم، وexit يُخرج المشهد ويعيده بالعاجل التالي' }
+    UrgentBoardRepeatMode = @{ Unit = ''; Description = 'ترتيب التكرار: cycle يعيد الجدول كاملًا (١ ٢ ٣ · ١ ٢ ٣)، وitem يكرّر كل عاجل ثم ينتقل (١ ١ · ٢ ٢)' }
+    UrgentBoardTotalSeconds = @{ Unit = 'ثانية'; Description = 'سقف زمني للتشغيل كلّه، يقصّ التكرارات إن لزم. صفر يعني بلا سقف' }
+    UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
+    UrgentMinIntervalSeconds = @{ Unit = 'ثانية'; Description = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج' }
+    UrgentSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
+    UrgentBoardNotifyOnFinish = @{ Unit = ''; Description = 'إشعار في المحادثة حين ينتهي تشغيل جدول العواجل وحده' }
+    UrgentBoardMaxTextLength = @{ Unit = 'حرف'; Description = 'أطول نصّ عاجل يقبله الجدول' }
     MojazImageWidth = @{ Unit = 'بكسل'; Description = 'عرض صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     MojazImageHeight = @{ Unit = 'بكسل'; Description = 'ارتفاع صورة صف الموجز كما يُصدِّرها Titler فعلًا. صفر يعني قراءة المقاس من لوحة القالب' }
     RequireUserLevelAuth = @{ Unit = ''; Description = 'يتحقق من هوية المستخدم لا من المحادثة وحدها؛ في المجموعات لا تكفي عضوية المحادثة للتحكم بالهواء' }
@@ -1054,8 +1083,9 @@ $script:MojazSelections = @{}
 $script:MojazPlayback = $null
 # The scene's own durations and its declared picture, each cached on the
 # file's path and write time.
-$script:MojazSceneTiming = $null
-$script:MojazSceneTimingKey = ''
+# Keyed by scene path and write time, so the bulletin's scene and the
+# breaking-news board's scene do not evict each other.
+$script:MojazSceneTimingCache = @{}
 $script:MojazSceneImage = ''
 $script:MojazSceneImageKey = ''
 # The size the scene's own plate gives the picture, cached the same way.
@@ -1063,6 +1093,24 @@ $script:MojazImageSize = $null
 $script:MojazImageSizeKey = ''
 # Which chat the picture keyboard is being drawn for.
 $script:MojazImageChatId = 0
+# The breaking-news board: the saved table, what each chat has selected in it,
+# and the run in progress ($null when nothing is playing).
+$script:UrgentBoard = New-UrgentBoard
+# Selection is one operator's act, not a property of the table: keyed by chat
+# id as a string, exactly like the bulletin's own selection. Kept out of the
+# saved board so a second operator opening the screen never finds - and never
+# plays - somebody else's ticks.
+$script:UrgentSelections = @{}
+$script:UrgentBoardRun = $null
+# Raised only while the board's own opening SHOW is in flight. The rule that a
+# manual urgent stops a running board would otherwise stop the board with the
+# SHOW that starts it: the board goes to air through the same pipeline as every
+# other graphic, urgent key and all.
+$script:UrgentBoardStarting = $false
+# How long the engine may block waiting out the remainder of a moment, so a
+# write lands inside the fade rather than after it.
+$script:UrgentPreRollSeconds = 1.5
+
 # Built on first use from the settings table: the manual mentions setting
 # names in prose, and a name is worth setting in code only if it is real.
 $script:HelpCodeTermPattern = ''
@@ -1180,6 +1228,10 @@ $script:SettingChoices = @{
     NewsItemSeparator = @('|', '•', '—', '؛', '/')
     LayersScreenAccess = @('all', 'admin', 'owner')
     BroadcastFps = @('25', '50', '60')
+    # Spelled out rather than free text: both are read by name in the board's
+    # own screens, and a typo would silently fall back to the first of them.
+    UrgentBoardMode = @('text', 'exit')
+    UrgentBoardRepeatMode = @('cycle', 'item')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -1240,7 +1292,11 @@ foreach ($entry in @(
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
                 'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds',
-                'AllowOperatorsSheetPull'
+                'AllowOperatorsSheetPull',
+                'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
+                'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
+                'UrgentMinIntervalSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
+                'UrgentBoardMaxTextLength'
             ) },
         @{ Category = 'schedule'; Names = @(
                 'ScheduleConflictWindowMinutes', 'SchedulePaused',
@@ -1387,6 +1443,17 @@ $script:SettingNavigationLabels = @{
     MojazNotifyOnFinish = 'إشعار انتهاء الموجز'
     MojazScheduleNoticeSeconds = 'تنبيه قبل الموعد'
     MojazHidesTicker = 'إخفاء الشريط أثناء الموجز'
+    EnableUrgentBoard = 'إدارة العواجل'
+    UrgentBoardIntervalSeconds = 'فاصل العواجل'
+    UrgentBoardRepeats = 'تكرار العواجل'
+    UrgentBoardMode = 'نمط عرض العواجل'
+    UrgentBoardRepeatMode = 'ترتيب التكرار'
+    UrgentBoardTotalSeconds = 'المدة الكلية للعواجل'
+    UrgentBoardMaxItems = 'حدّ عدد العواجل'
+    UrgentMinIntervalSeconds = 'أقصر فاصل للعواجل'
+    UrgentSyncLeadMs = 'تعويض زمن الشبكة للعواجل'
+    UrgentBoardNotifyOnFinish = 'إشعار انتهاء العواجل'
+    UrgentBoardMaxTextLength = 'أطول نصّ عاجل'
     MojazImageWidth = 'عرض صورة الصف'
     MojazImageHeight = 'ارتفاع صورة الصف'
     AirCommandTimeoutSeconds = 'مهلة أمر Cinegy'
@@ -1539,6 +1606,16 @@ $script:SettingConstraints = @{
     # each file to count its headlines. Hence a ceiling, and a floor of one:
     # zero copies would mean a publish with no way back.
     NewsBackupKeepFiles           = @{ Minimum = 1; Maximum = 30 }
+    # The board's numbers. Zero is a real answer for the ceiling - "no ceiling,
+    # the repeats decide" - and not for the interval, which is a duration on
+    # air and cannot be nothing.
+    UrgentBoardIntervalSeconds    = @{ Minimum = 1; Maximum = 3600 }
+    UrgentBoardRepeats            = @{ Minimum = 1; Maximum = 99 }
+    UrgentBoardTotalSeconds       = @{ Minimum = 0; Maximum = 3600 }
+    UrgentBoardMaxItems           = @{ Minimum = 1; Maximum = 40 }
+    UrgentMinIntervalSeconds      = @{ Minimum = 1; Maximum = 60 }
+    UrgentSyncLeadMs              = @{ Minimum = 0; Maximum = 5000 }
+    UrgentBoardMaxTextLength      = @{ Minimum = 10; Maximum = 1000 }
     # Sizes two restore screens - the configuration one and the template
     # registry one - each a row per saved copy. Floor of one for the same
     # reason as the ticker's: zero copies is a save with no way back.
@@ -1875,6 +1952,8 @@ Update-SnapshotCleanup -Force   # clear anything orphaned by a previous run
 Update-UploadCleanup -Force     # and any staged upload left behind with it
 Import-MojazLibrary             # named bulletins, migrating the old singleton once
 Import-MojazSchedules           # reusable future runs and their queue state
+Import-UrgentBoard              # the breaking-news table
+Restore-UrgentBoardRun | Out-Null   # a board run that was on air when this stopped
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
@@ -2042,6 +2121,7 @@ try {
         'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -like 'urgent_*' } { Complete-UrgentBoardText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -like 'template_create_*' } { Complete-TemplateCreateWizardStep -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text | Out-Null }
                                 { $_ -in @('schedule_fields', 'schedule_time', 'schedule_end_date') } { Complete-ScheduleText -ChatId $chatId -Value $text | Out-Null }

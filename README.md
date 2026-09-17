@@ -13,6 +13,44 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.40.0
+
+A breaking-news board: a table of urgent lines that an operator manages
+(add, edit, delete, reorder, select) and plays out in sequence on the same
+`Urgent` scene the single fixed template uses. That fixed path is untouched
+— same call, same behaviour — and the board ships behind `EnableUrgentBoard`,
+off by default.
+
+Each line carries its own display mode. **Text update** writes the new values
+into the scene already on air through the postbox, so nothing is cut and, on a
+looping scene, the swap lands inside the fade where it cannot be seen. **With
+exit animation** plays the outro and brings the scene back with the next line,
+which is what a separate story should look like. Interval, repeat count and
+total duration are set for the whole table or overridden per line, and repeats
+run in one of two orders: the whole table then again (1 2 3 · 1 2 3, the
+default), or each line several times then the next (1 1 · 2 2).
+
+Three defects were found by reviewing the plan against the existing code
+before any of it was written, each at a seam that had been assumed rather than
+read, and each of which would have shipped behind green tests. The guard that
+stops a board when somebody sends a single urgent reads the same template key
+the board's own opening SHOW carries, so the board would have stopped itself
+*after* reaching air; it is now skipped for that one call through an explicit
+flag. `Get-EffectivePollTimeout` collapses the long poll to one second only
+while a bulletin is playing, so an engine timed in tenths of a second would
+have been called up to thirty seconds late with every unit test still passing;
+both engines now answer one question, `Test-AirRunActive`. And a template
+listed in `SensitiveTemplateKeys` receives a forced hide of at most thirty
+seconds, which the board would have kept writing underneath; that hide is now
+a hard ceiling read before the plan is built, trimming the repeats and saying
+so, or refusing the run when not even one pass fits.
+
+Two smaller ones came with them: "text update" depends on the scene having a
+loop, which many breaking straps do not, so the board says so on screen while
+the lines are being written rather than when play is pressed — and never
+silently falls back to the other mode. And selection is per chat rather than
+stored in the shared table, so one operator never plays another's ticks.
+
 ## Version 8.39.0
 
 The paging guard looked for `foreach (` and `ForEach-Object` and never for a

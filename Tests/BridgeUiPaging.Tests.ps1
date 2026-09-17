@@ -91,6 +91,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Show-ShiftReadinessScreen'         = 'its keyboard is two fixed rows; the loop it holds walks Get-DisabledGuardLines, a fixed table of guards in the source'
             'Show-MaterialScheduleScreen'       = 'a fixed refresh-and-back keyboard; the loop builds text, trimmed by Select-RichTableRows and paged by Send-TelegramPagedText'
             'Show-ShiftHandoverScreen'          = 'a fixed keyboard of three buttons; the loops build text, paged by Send-TelegramPagedText'
+            'Show-UrgentReviewScreen'           = 'its keyboard is two fixed rows - start and back; the loop it holds walks the plan notes, of which New-UrgentRunPlan emits at most three'
         }
 
         # Rich-table screens whose rows are a fixed list rather than the

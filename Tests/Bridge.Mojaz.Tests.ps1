@@ -396,14 +396,14 @@ Describe 'Timing read from the scene itself' {
     BeforeEach {
         Mock Write-BridgeValidatedJson { $true }
         $script:bulletin = New-TestMojazLibrary -DelaySeconds 20
-        $script:MojazSceneTiming = $null; $script:MojazSceneTimingKey = ''
+        $script:MojazSceneTimingCache.Clear()
         # One settings object for the whole suite: these tests are about what
         # the scene says, so the newsroom defaults that outrank it are cleared.
         $config.Settings | Add-Member -NotePropertyName 'MojazIntroExtraFrames' -NotePropertyValue 0 -Force
         $config.Settings | Add-Member -NotePropertyName 'MojazLastRowFrames' -NotePropertyValue 0 -Force
         $config.Settings | Add-Member -NotePropertyName 'BroadcastFps' -NotePropertyValue '25' -Force
     }
-    AfterAll { $script:MojazSceneTiming = $null; $script:MojazSceneTimingKey = '' }
+    AfterAll { $script:MojazSceneTimingCache.Clear() }
 
     It 'turns the loop markers into the entrance, the loop and the exit' {
         # The three durations a bulletin needs are already written in the

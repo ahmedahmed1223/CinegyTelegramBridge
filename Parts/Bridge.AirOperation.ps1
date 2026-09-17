@@ -657,7 +657,17 @@ function Invoke-ShowTemplateResult {
     # that changed the channel by being denied. Nothing that alters the air may
     # run before the answer to "may they" is known - and now that includes an
     # unreachable Cinegy, which is refused above.
-    if ($Key -eq $script:MojazUrgentKey) { Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null }
+    if ($Key -eq $script:MojazUrgentKey) {
+        Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null
+        # And the board, which plays on this same scene. The older, simpler
+        # path wins: an operator reaching for the single urgent button during a
+        # board run is asking for that one line, now.
+        #
+        # This is skipped while the board's own opening SHOW is in flight -
+        # that SHOW carries this very key, so without the flag the board would
+        # be stopped by the command that starts it.
+        Stop-UrgentBoardForManualUrgent -ChatId $ChatId -UserId $UserId | Out-Null
+    }
 
     # A scene that is already loaded on the layer keeps running with the values
     # it was started with, so a second SHOW can leave the PREVIOUS text on air.

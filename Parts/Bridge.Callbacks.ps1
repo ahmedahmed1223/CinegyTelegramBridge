@@ -163,6 +163,32 @@ function Invoke-CallbackQuery {
     }
 
     switch -Wildcard ($data) {
+        'urgmode:*' {
+            $mode = Get-CallbackArg $data 'urgmode:'
+            if ($mode -in @('manual','auto')) {
+                $script:UrgentManualMode[[long]$chatId] = ($mode -eq 'manual')
+                Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
+        'urgread:*' {
+            $argument = Get-CallbackArg $data 'urgread:'
+            if ($argument -match '^(u_[a-f0-9]{8}):([0-9]{1,6})$') {
+                Show-UrgentReader -ChatId $chatId -UserId $userId -ItemId $Matches[1] -Page ([int]$Matches[2]) -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
+        'urgsingle:*' {
+            $itemId = Get-CallbackArg $data 'urgsingle:'
+            if ($itemId -match '^u_[a-f0-9]{8}$') { Show-UrgentManualConfirm -ChatId $chatId -UserId $userId -ItemId $itemId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
+            break
+        }
+        'urgmanual:*' {
+            if (-not (Invoke-UrgentManualAction -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'urgmanual:'))) {
+                Send-TelegramMessage -ChatId $chatId -Text '⚠️ لم يُنفّذ الطلب: تغيّر الخبر أو العرض أو انتهت صلاحية التأكيد. افتح الخبر من جديد.'
+            }
+            break
+        }
         'tmax:*' { Invoke-TemplateMaxAirPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'tmax:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }

@@ -1109,6 +1109,8 @@ $script:UrgentBoard = New-UrgentBoard
 # saved board so a second operator opening the screen never finds - and never
 # plays - somebody else's ticks.
 $script:UrgentSelections = @{}
+$script:UrgentManualMode = @{}
+$script:UrgentManualLive = @{}
 $script:UrgentBoardRun = $null
 # Raised only while the board's own opening SHOW is in flight. The rule that a
 # manual urgent stops a running board would otherwise stop the board with the

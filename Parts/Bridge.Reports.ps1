@@ -595,6 +595,7 @@ function Get-ReportsMenuKeyboard {
             , @((New-Button '🖼 البنرات' 'rep:banners:today'), (New-Button '📰 الأخبار' 'rep:news:today'))
             , @((New-Button '📑 الموجزات' 'rep:mojaz:today'))
             , @((New-Button '👥 تقرير العمل' 'rep:work:today'))
+            , @((New-Button '📋 تقرير أسبوعي' 'weekly:open'))
             , @((New-Button '🧾 سجل العمليات' 'oplog:48'))
             , @((New-Button '🏠 القائمة' 'menu:main'))
         )

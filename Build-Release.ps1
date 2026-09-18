@@ -31,7 +31,7 @@ $allowList = @(
     # were split, and nothing noticed because the package was only ever checked
     # for what must NOT be in it. Tests\Release.Tests.ps1 now checks the other
     # direction against the built zip.
-    'Parts\Bridge.Core.ps1', 'Parts\Bridge.Telegram.ps1', 'Parts\Bridge.News.ps1', 'Parts\Bridge.Users.ps1', 'Parts\Bridge.Templates.ps1', 'Parts\Bridge.OnAir.ps1', 'Parts\Bridge.Schedule.ps1', 'Parts\Bridge.Keyboards.ps1', 'Parts\Bridge.ShowFlow.ps1', 'Parts\Bridge.Admin.ps1', 'Parts\Bridge.Media.ps1', 'Parts\Bridge.Commands.ps1', 'Parts\Bridge.Callbacks.ps1', 'Parts\Bridge.Tick.ps1', 'Parts\Bridge.Reports.ps1', 'Parts\Bridge.Announcements.ps1',
+    'Parts\Bridge.Core.ps1', 'Parts\Bridge.Telegram.ps1', 'Parts\Bridge.News.ps1', 'Parts\Bridge.Users.ps1', 'Parts\Bridge.Templates.ps1', 'Parts\Bridge.OnAir.ps1', 'Parts\Bridge.Schedule.ps1', 'Parts\Bridge.Keyboards.ps1', 'Parts\Bridge.ShowFlow.ps1', 'Parts\Bridge.Admin.ps1', 'Parts\Bridge.Media.ps1', 'Parts\Bridge.Commands.ps1', 'Parts\Bridge.Callbacks.ps1', 'Parts\Bridge.Tick.ps1', 'Parts\Bridge.Reports.ps1', 'Parts\Bridge.Weekly.ps1', 'Parts\Bridge.Announcements.ps1',
     'Parts\Bridge.Mojaz.ps1', 'Parts\Bridge.Mojaz.Design.ps1', 'Parts\Bridge.Mojaz.Screens.ps1', 'Parts\Bridge.Mojaz.Playback.ps1',
     'Parts\Bridge.Urgent.ps1', 'Parts\Bridge.Urgent.Playback.ps1',
     'Parts\Bridge.WhatsNew.ps1', 'Parts\Bridge.Help.ps1', 'Parts\Bridge.AirOperation.ps1',

@@ -1524,7 +1524,17 @@ function Get-NewsTickerBackupsKeyboard {
 
 function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
     $snapshot=Get-NewsTickerConfiguredSnapshot
-    $text=if($snapshot.Success){"📰 إدارة شريط الأخبار`nالحالي: $(@($snapshot.Items).Count) خبرًا."}else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}
+    $text=if($snapshot.Success){
+        $items = @($snapshot.Items)
+        $header = "📰 إدارة شريط الأخبار`nالحالي: $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') على الهواء."
+        if ($items.Count -gt 0) {
+            $shown = $items | Select-Object -First 8
+            $n = 0
+            $body = ($shown | ForEach-Object { "$(++$n). $_" }) -join "`n"
+            $tail = if ($items.Count -gt 8) { "`n… و$(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') آخر" } else { "" }
+            "$header`n`n$body$tail"
+        } else { "$header`nالشريط فارغ." }
+    }else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}
     if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) {
         $by = [long](Get-JsonProp $script:NewsTickerDraft 'HandedOverBy')
         $byText = if ($by -gt 0) { " سلّمها $(Get-UserDisplayName -UserId $by)" } else { '' }

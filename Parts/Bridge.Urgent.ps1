@@ -344,20 +344,27 @@ function Get-UrgentBoardKeyboard {
     $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize (Get-UrgentBoardPageSize)
     $manual = $script:UrgentManualMode.ContainsKey($ChatId) -and [bool]$script:UrgentManualMode[$ChatId]
     $rows = @()
+
+    # Mode selector — single button toggles between manual and auto
     $rows += , @((New-Button "$(if($manual){'✅ '})يدوي — خبر واحد" 'urgmode:manual'), (New-Button "$(if(-not $manual){'✅ '})تلقائي — بالتتابع" 'urgmode:auto'))
+
     if ($items.Count -gt 0) {
         for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
             $item = $items[$index]
             $id = [string](Get-UrgentProperty $item 'Id' '')
             $tick = if ($selected -contains $id) { '☑' } else { '☐' }
             $text = [string](Get-UrgentProperty $item 'Text' '')
-            $label = if ($text.Length -gt 22) { $text.Substring(0, 21) + '…' } else { $text }
-            $row = @(
-                (New-Button "$tick $($index + 1). $label" "urgentb:pick:$id")
-                (New-Button '👁 قراءة' "urgread:${id}:0")
-                (New-Button '⚙️' "urgentb:item:$id")
+            $label = if ($text.Length -gt 30) { $text.Substring(0, 29) + '…' } else { $text }
+            $enabled = [bool](Get-UrgentProperty $item 'Enabled')
+
+            # Story text on its own row (full-width, Mojaz style)
+            $rows += , @((New-Button "$tick $($index + 1). $label$(if(-not $enabled){' ⛔'})" "urgentb:pick:$id"))
+
+            # Action buttons below: read + settings
+            $rows += , @(
+                (New-Button "👁 قراءة" "urgread:${id}:0")
+                (New-Button "⚙️ إجراءات" "urgentb:item:$id")
             )
-            $rows += , $row
         }
     }
     if ($window.PageCount -gt 1) {
@@ -367,6 +374,7 @@ function Get-UrgentBoardKeyboard {
         if ($window.HasNext) { $nav += (New-Button 'التالي ➡️' "urgentb:page:$($window.Page + 1)") }
         $rows += , $nav
     }
+    # Table-level controls
     $rows += , @(
         (New-Button '➕ إضافة' 'urgentb:add')
         (New-Button '☑ تحديد الكل' "urgentb:all:$($window.Page)")
@@ -377,8 +385,6 @@ function Get-UrgentBoardKeyboard {
         (New-Button '🗑 حذف المحدَّد' 'urgentb:delask' -Style danger)
     )
     # Play only where there is something to play and nothing already playing.
-    # A button that refuses is a button that teaches the operator to distrust
-    # the screen.
     if ($script:UrgentBoardRun) {
         if ([bool](Get-JsonProp $script:UrgentBoardRun 'StopFailed')) {
             $rows += , @( (New-Button '🔁 إعادة الإيقاف' 'urgentb:stop' -Style danger) )

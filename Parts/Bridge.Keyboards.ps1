@@ -190,22 +190,11 @@ function Get-MainMenuKeyboard {
     $rows += , $fourthRow
     $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule'), (New-Button "📊 تقارير" 'menu:reports') )
     $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops'), (New-Button "🕘 ماذا فاتني" 'menu:digest') )
-    # The ticker and the bulletin are one job - the words going out under the
-    # picture - so they read as one row. Each is optional, so the row may
-    # carry one of them or neither.
-    #
-    # "إدارة شريط الأخبار" became "شريط الأخبار" to fit beside the bulletin.
-    # The screen it opens is the management screen; the word was label length,
-    # not information.
-    $contentRow = @()
-    if (Get-Setting 'EnableNewsTickerManagement') { $contentRow += (New-Button "📰 شريط الأخبار" 'menu:news') }
-    # Offered only where the template exists: the screen is that scene's, and
-    # a bridge without it has nothing to play.
-    if (Test-MojazAvailable) { $contentRow += (New-Button '📑 الموجز' 'menu:mojaz') }
-    # Offered only where the scene exists and the newsroom asked for the board.
-    # The single urgent template keeps its own button either way.
-    if (Test-UrgentBoardAvailable) { $contentRow += (New-Button '🚨 العواجل' 'urgentb:open') }
-    if ($contentRow.Count -gt 0) { $rows += , $contentRow }
+    # Each management button on its own row: one tap, no crowding.
+    # Order: News Ticker first (daily driver), then Mojaz (bulletin), then Urgent (breaking news).
+    if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button "📰 شريط الأخبار" 'menu:news') ) }
+    if (Test-MojazAvailable) { $rows += , @( (New-Button '📑 إدارة الموجز' 'menu:mojaz') ) }
+    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button '🚨 إدارة العواجل' 'urgentb:open') ) }
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )

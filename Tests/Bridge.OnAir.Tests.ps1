@@ -1454,8 +1454,11 @@ Describe 'Main menu on-air priority' {
             Should -Be @('menu:status', 'menu:fullstatus')
         @((& $rowOf 'menu:schedule') | ForEach-Object { $_['callback_data'] }) |
             Should -Be @('menu:schedule', 'menu:reports')
+        # Each management button on its own row: news, mojaz, urgent stacked vertically
+        @((& $rowOf 'menu:news') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('menu:news')
         @((& $rowOf 'menu:mojaz') | ForEach-Object { $_['callback_data'] }) |
-            Should -Contain 'menu:news'
+            Should -Be @('menu:mojaz')
     }
 
     It 'splits every pair back apart for a thumb in one-hand mode' {

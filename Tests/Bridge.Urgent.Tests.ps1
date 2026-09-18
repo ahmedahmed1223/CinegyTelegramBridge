@@ -120,8 +120,14 @@ Describe 'The breaking-news board and the fixed urgent template' {
         # Every row is a row: a flattened cell would mean the comma before the
         # row was lost, and Telegram answers that with 400.
         foreach ($row in $rows) { , $row | Should -BeOfType [System.Object[]] }
-        $rows.Count | Should -BeLessThan 20
+        # Mojaz-style layout: story text on its own row + action buttons below = 2 rows per story
+        # With page size 10 that's 20 story rows + nav + controls = ~26 rows
+        $rows.Count | Should -BeLessThan 35
         (ConvertTo-Json $rows -Depth 8) | Should -Match 'urgentb:page:1'
+        # Each story spans two rows: text row (pick) + action row (read/actions)
+        $storyTextRows = @($rows | Where-Object { @($_ | ForEach-Object { $_['callback_data'] }) -like 'urgentb:pick:*' })
+        $actionRows = @($rows | Where-Object { @($_ | ForEach-Object { $_['callback_data'] }) -like 'urgread:*' })
+        $storyTextRows.Count | Should -Be $actionRows.Count
     }
 
     It 'numbers the table with the same numbers as the buttons on that page' {

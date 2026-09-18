@@ -2094,6 +2094,25 @@ function Invoke-CallbackQuery {
             Invoke-PresetShow -TemplateIndex ([int]$parts[1]) -PresetIndex ([int]$parts[2]) -ChatId $chatId -UserId $userId
             break
         }
+        'remsnooze:*' {
+            $reminderId = Get-CallbackArg $data 'remsnooze:'
+            $item = @($script:TemplateReminderQueue | Where-Object {
+                [string](Get-JsonProp $_ 'ReminderId') -eq $reminderId -and [long](Get-JsonProp $_ 'UserId') -eq $userId
+            } | Select-Object -First 1)
+            if ($item.Count -eq 0) {
+                Send-TelegramMessage -ChatId $chatId -Text 'انتهى التنبيه أو أنه مخصص لمستخدم آخر.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                break
+            }
+            $item.Stage = 'initial'
+            $item.At = [datetimeoffset]::Now.AddMinutes(5)
+            $item.Minutes = [int](Get-JsonProp $item 'Minutes') + 5
+            if (Save-TemplateReminderQueue) {
+                Send-TelegramMessage -ChatId $chatId -Text '⏰ تم ضبط التذكير: سيصلك تنبيه جديد بعد 5 دقائق إن بقي القالب ظاهرًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            } else {
+                Send-TelegramMessage -ChatId $chatId -Text '⚠️ تعذّر حفظ التذكير. حاول مجددًا.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }
         'remack:*' {
             $failureReason = ''

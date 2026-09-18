@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.46.0
+
+**Template reminder improvements:**
+- Reminder message now displays the actual `AirCopy` text shown on air, alongside the template name and layer.
+- Reminder keyboard now has a **"🙈 إخفاء القالب"** button — directly hides the template from the reminder message.
+- The original **"✅ تمت المعالجة"** button replaced with **"⏰ ذكّرني لاحقًا"** — snoozes for 5 more minutes if the template is still on air.
+- Help section (timing & scheduling) updated to document the new reminder behavior.
+- 4,750 stray `templates.test-*.json` files cleaned up.
+
 ## Version 8.45.0
 
 **Weekly digest report (T-31):** New `Parts/Bridge.Weekly.ps1` — a weekly report showing: screens near their 70% payload limit (`Get-RichPayloadPeak`), templates idle 30+ days, top 5 repeated failure reasons (`AlertHistory`), recently changed setting names only (compared against defaults — values are secrets), ticker publish summary (`news_publish` audit count + last publish timestamp), and urgent board activity (`urgent_board_run` START/STOP tally). Window is `Get-ReportPeriod 'week'`, bounded scan at `ReportMaxRecords = 5000`. Wired into reports menu (`rep:weekly:open` → `Show-WeeklyReport`). 3 TDD tests.

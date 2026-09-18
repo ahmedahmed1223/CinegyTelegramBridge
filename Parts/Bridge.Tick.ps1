@@ -638,7 +638,7 @@ function Update-TemplateReminderQueue {
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += "`n📝 النص: $onAirCopy"
         }
-        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '✅ تمت المعالجة' "remack:$reminderId"), (New-Button '🙈 إخفاء القالب' "hidego:$($item.Layer)"))) }
+        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '⏰ ذكّرني لاحقًا' "remsnooze:$reminderId"), (New-Button '🙈 إخفاء القالب' "hidego:$($item.Layer)"))) }
         Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text $reminderText -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
         $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))

@@ -1971,6 +1971,7 @@ Import-MojazLibrary             # named bulletins, migrating the old singleton o
 Import-MojazSchedules           # reusable future runs and their queue state
 Import-UrgentBoard              # the breaking-news table
 Restore-UrgentBoardRun | Out-Null   # a board run that was on air when this stopped
+Import-UrgentManualState | Out-Null # manual show identity + per-chat mode (8.43.0+)
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"

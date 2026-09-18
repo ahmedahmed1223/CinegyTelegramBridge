@@ -651,6 +651,7 @@ function Invoke-UrgentManualAction {
         if (-not (Test-TemplateAccess -Key $liveKey -Layer ([int]$state.Layer) -ChatId $ChatId -UserId $UserId).Allowed) { return $false }
         if (-not (Invoke-HideLayer -Layer ([int]$state.Layer) -ChatId $ChatId -UserId $UserId)) { return $false }
         $script:UrgentManualLive.Remove($ChatId) | Out-Null
+        Save-UrgentManualState | Out-Null
         return $true
     }
     if ([string](Get-JsonProp $state 'Mode') -ne 'urgent_manual_confirm') { return $false }
@@ -674,6 +675,7 @@ function Invoke-UrgentManualAction {
     $liveState = @{ Mode='urgent_manual_live'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
         StartedAt=Get-Date; UserId=$UserId; Layer=[int]$template.Layer; LiveStamp=$stamp }
     $script:UrgentManualLive[$ChatId] = $liveState
+    Save-UrgentManualState | Out-Null
     Send-TelegramMessage -ChatId $ChatId -Text '🚨 عُرض الخبر وحده. لن ينتقل للخبر التالي تلقائيًا.' -ReplyMarkup @{
         inline_keyboard = @(
             , @((New-Button 'إخفاء الخبر المعروض' "urgmanual:hide:$($liveState.Token)" -Style danger))

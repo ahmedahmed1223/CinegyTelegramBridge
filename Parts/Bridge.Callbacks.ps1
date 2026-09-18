@@ -167,6 +167,7 @@ function Invoke-CallbackQuery {
             $mode = Get-CallbackArg $data 'urgmode:'
             if ($mode -in @('manual','auto')) {
                 $script:UrgentManualMode[[long]$chatId] = ($mode -eq 'manual')
+                Save-UrgentManualState | Out-Null
                 Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             }
             break

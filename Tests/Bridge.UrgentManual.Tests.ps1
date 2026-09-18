@@ -167,6 +167,21 @@ Describe 'Full urgent reader and manual single story' {
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument (Get-CallbackArg $button 'urgmanual:') | Should -BeTrue
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
     }
+    It 'persists manual show identity and mode across a restart' {
+        Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
+        Mock Invoke-HideLayer { $true }
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'urgent-manual.json' }
+        $id=$script:UrgentBoard.Items[0].Id
+        Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
+        Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
+        $savedLive = $script:UrgentManualLive[100L]
+        $savedLive | Should -Not -BeNullOrEmpty
+        # Simulate restart: clear in-memory state, then re-import from disk
+        $script:UrgentManualLive = @{}; $script:UrgentManualMode = @{}
+        Import-UrgentManualState
+        $script:UrgentManualLive[100L].Token | Should -Be $savedLive.Token
+    }
     It 'keeps the complete long story in field mapping and the bot detail screen' {
         $item = @($script:UrgentBoard.Items)[0]
         (Get-UrgentItemVariables -Item $item).Text | Should -Be $script:ManualText

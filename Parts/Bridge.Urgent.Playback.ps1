@@ -15,6 +15,10 @@ function Get-UrgentRunFile {
     return (Join-Path $logDir 'urgent-run.json')
 }
 
+function Get-UrgentManualFile {
+    return (Join-Path $logDir 'urgent-manual.json')
+}
+
 function Get-UrgentElapsedSeconds {
     <# Monotonic, and anchored at the moment the scene actually went up.
        ClockOffset exists so a test can move time without a stopwatch. #>
@@ -55,6 +59,67 @@ function Clear-UrgentRunState {
     if (Test-Path -LiteralPath $path) {
         try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
         catch { Write-BridgeLog "Could not remove urgent-run.json: $($_.Exception.Message)" 'WARN' }
+    }
+}
+
+function Save-UrgentManualState {
+    <# Persist the live manual show identity to disk so the hide button
+       survives a restart. The operator was told a story is live and how
+       to hide it; a restart must not take that promise off air with no
+       way back. #>
+    if (-not $script:UrgentManualLive -or $script:UrgentManualLive.Count -eq 0) {
+        $path = Get-UrgentManualFile
+        if (Test-Path -LiteralPath $path) {
+            try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+            catch { Write-BridgeLog "Could not remove urgent-manual.json: $($_.Exception.Message)" 'WARN' }
+        }
+        return $true
+    }
+    $payload = [pscustomobject]@{
+        SchemaVersion = 1
+        SavedAt = (Get-Date).ToString('o')
+        States = @($script:UrgentManualLive.GetEnumerator() | ForEach-Object {
+            [pscustomobject]@{ ChatId = [long]$_.Key; State = $_.Value }
+        })
+        ManualMode = @($script:UrgentManualMode.GetEnumerator() | ForEach-Object {
+            [pscustomobject]@{ ChatId = [long]$_.Key; Mode = [bool]$_.Value }
+        })
+    }
+    if (-not (Write-BridgeValidatedJson -Path (Get-UrgentManualFile) -Json ($payload | ConvertTo-Json -Depth 8))) {
+        Write-BridgeLog 'Could not write the urgent manual state.' 'WARN'
+        return $false
+    }
+    return $true
+}
+
+function Import-UrgentManualState {
+    <# Restore the manual show identity from disk at startup. Loads both
+       $script:UrgentManualLive (hide button tokens) and
+       $script:UrgentManualMode (per-chat manual/auto preference). #>
+    $path = Get-UrgentManualFile
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $json = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+        $payload = $json | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-BridgeLog "Could not read urgent-manual.json: $($_.Exception.Message)" 'WARN'
+        return
+    }
+    if (-not $payload) { return }
+    $states = Get-JsonProp $payload 'States'
+    if ($states) {
+        foreach ($entry in @($states)) {
+            $cid = [long](Get-JsonProp $entry 'ChatId')
+            if ($cid -gt 0) { $script:UrgentManualLive[$cid] = $entry.State }
+        }
+    }
+    $modes = Get-JsonProp $payload 'ManualMode'
+    if ($modes) {
+        foreach ($entry in @($modes)) {
+            $cid = [long](Get-JsonProp $entry 'ChatId')
+            if ($cid -gt 0) { $script:UrgentManualMode[$cid] = [bool](Get-JsonProp $entry 'Mode') }
+        }
     }
 }
 

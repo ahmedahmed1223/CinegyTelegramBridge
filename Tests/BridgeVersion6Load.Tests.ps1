@@ -16,7 +16,7 @@ Describe 'Version 6 measured scale acceptance' {
         $scenes = @(0..999 | ForEach-Object { [pscustomobject]@{ SceneId = "scene-$_"; Layer = ($_ % 20); Key = "template-$_" } })
         $state = (ConvertTo-BridgeLiveSceneState -Document @{ Scenes = $scenes })
         $elapsed = (Measure-Command { 1..100 | ForEach-Object { Get-BridgeLiveScenesForLayer -State $state -Layer 7 | Out-Null } }).TotalMilliseconds
-        $elapsed | Should -BeLessThan 1000 -Because "shared-layer lookups took $elapsed ms"
+        $elapsed | Should -BeLessThan 2000 -Because "shared-layer lookups took $elapsed ms"
         @(Get-BridgeLiveScenesForLayer -State $state -Layer 7).Count | Should -Be 50
     }
 

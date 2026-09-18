@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.45.0
+
+**Weekly digest report (T-31):** New `Parts/Bridge.Weekly.ps1` — a weekly report showing: screens near their 70% payload limit (`Get-RichPayloadPeak`), templates idle 30+ days, top 5 repeated failure reasons (`AlertHistory`), recently changed setting names only (compared against defaults — values are secrets), ticker publish summary (`news_publish` audit count + last publish timestamp), and urgent board activity (`urgent_board_run` START/STOP tally). Window is `Get-ReportPeriod 'week'`, bounded scan at `ReportMaxRecords = 5000`. Wired into reports menu (`rep:weekly:open` → `Show-WeeklyReport`). 3 TDD tests.
+
+**Ticker screen expansion:** `Show-NewsTickerManagementScreen` now displays the first 8 live items directly with an Arabic count tail for the rest, instead of just the count. Uses `Get-ArabicCountNoun` for proper Arabic phrasing.
+
 ## Version 8.44.0
 
 Stability, warning-to-fix buttons, and UI restructuring:

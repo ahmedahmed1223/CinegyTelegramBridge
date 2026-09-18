@@ -273,6 +273,10 @@ function Complete-SettingValue {
         }
     }
     $previous = Get-Setting $state.Name
+    if ($previous -eq $parsed) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ القيمة الحالية مطابقة بالفعل ($parsed). لم يتغيّر شيء." -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
+        return
+    }
     Set-Setting -Name $state.Name -Value $parsed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $parsed"
     Add-AuditEntry "⚙️ $($state.Name) = $parsed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"

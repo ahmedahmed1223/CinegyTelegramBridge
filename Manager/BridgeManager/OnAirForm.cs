@@ -19,7 +19,7 @@ namespace BridgeManager;
 /// </summary>
 public sealed class OnAirForm : Form
 {
-    internal sealed record OnAirRow(int Layer, string Key, DateTime? AtLocal, long UserId, string Source);
+    internal sealed record OnAirRow(int Layer, string Key, string AirCopy, DateTime? AtLocal, long UserId, string Source);
 
     private readonly string _bridgeRoot;
     private readonly ListView _list;
@@ -62,11 +62,12 @@ public sealed class OnAirForm : Form
             BorderStyle = BorderStyle.FixedSingle,
             Margin = new Padding(18, 8, 18, 8)
         };
-        _list.Columns.Add("الطبقة", 150);
-        _list.Columns.Add("القالب", 220);
-        _list.Columns.Add("منذ", 130);
-        _list.Columns.Add("الناشر", 150);
-        _list.Columns.Add("المصدر", 110);
+        _list.Columns.Add("الطبقة", 120);
+        _list.Columns.Add("القالب", 150);
+        _list.Columns.Add("النص", 200);
+        _list.Columns.Add("منذ", 110);
+        _list.Columns.Add("الناشر", 130);
+        _list.Columns.Add("المصدر", 80);
 
         _emptyLabel = new Label
         {
@@ -126,6 +127,7 @@ public sealed class OnAirForm : Form
                 var since = row.AtLocal is null ? "—" : "منذ " + MainForm.FormatSpan(DateTime.Now - row.AtLocal.Value);
                 var item = new ListViewItem($"الطبقة {row.Layer}{layerName}");
                 item.SubItems.Add(template);
+                item.SubItems.Add(row.AirCopy);
                 item.SubItems.Add(since);
                 item.SubItems.Add(ResolveActor(row.UserId, aliases));
                 item.SubItems.Add(string.Equals(row.Source, "bridge", StringComparison.OrdinalIgnoreCase) ? "الجسر" : "خارجي");
@@ -201,7 +203,8 @@ public sealed class OnAirForm : Form
                 var key = (string?)scene["Key"] ?? "";
                 if (key.Length == 0) continue;
                 TryReadInt64(scene["UserId"], out var userId);
-                rows.Add(new OnAirRow(layer, key, ParseOnAirStamp((string?)scene["At"]),
+                var airCopy = (string?)scene["AirCopy"] ?? "";
+                rows.Add(new OnAirRow(layer, key, airCopy, ParseOnAirStamp((string?)scene["At"]),
                     userId, (string?)scene["Source"] ?? ""));
             }
         }

@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.47.0
+
+**On-air screen text column, setting-change guard, and startup on-air notice:**
+
+- Manager's on-air screen (`OnAirForm.cs`) now shows an **AirCopy column** — the actual text displayed on air for each template. `OnAirRow` record carries the copy; `ParseOnAirRows` reads it from `onair.json`; `Program.cs` SelfTest covers present and missing copy.
+- **Setting-change guard** (`Bridge.Commands.ps1`): when the operator sends a numeric setting value that matches the current value, the bridge warns "⚠️ القيمة الحالية مطابقة بالفعل" instead of logging a no-op change.
+- **Startup on-air notice** (`Send-BridgeStartupNotification`): if templates are still on air after a restart, the bridge lists each one (name, layer, AirCopy) in the admin broadcast — so the operator is never surprised by what the screen shows.
+- 3 new SelfTest checks for the AirCopy column (present + missing).
+
 ## Version 8.46.0
 
 **Template reminder improvements:**

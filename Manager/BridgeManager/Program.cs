@@ -342,6 +342,10 @@ internal static class SelfTest
             OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\",\"UserId\":122238225}]}")[0].UserId == 122238225);
         Check("reads numbers written as JSON strings",
             OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":\"9\",\"Key\":\"logo\",\"UserId\":\"122238225\"}]}")[0].Layer == 9);
+        Check("reads the AirCopy when present",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\",\"AirCopy\":\"عاجل الآن\"}]}").AirCopy == "عاجل الآن");
+        Check("treats a missing AirCopy as blank",
+            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\"}]}").AirCopy == "");
         Check("a blank stamp is no stamp", OnAirForm.ParseOnAirStamp("  ") is null);
 
         var templateNames = OnAirForm.ReadTemplateNames("{\"Urgent\":{\"description\":\"عاجل متحرك\"},\"logo\":{}}");

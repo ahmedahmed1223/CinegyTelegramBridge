@@ -2192,7 +2192,21 @@ function Set-TelegramConnectionState {
 }
 
 function Send-BridgeStartupNotification {
-    Send-AdminBroadcast -Text "🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion`nAir: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)"
+    $airCount = $script:OnAir.Count
+    $startupLines = @("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion", "Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
+    if ($airCount -gt 0) {
+        $startupLines.Add("")
+        $startupLines.Add("📡 يوجد $airCount مشهدًا لا يزال على الهواء من التشغيل السابق:")
+        foreach ($scene in $script:OnAir.Values) {
+            $key = [string](Get-JsonProp $scene 'Key')
+            $layer = [string](Get-JsonProp $scene 'Layer')
+            $airCopy = [string](Get-JsonProp $scene 'AirCopy')
+            $line = "   • $key — الطبقة $layer"
+            if (-not [string]::IsNullOrWhiteSpace($airCopy)) { $line += " — $airCopy" }
+            $startupLines.Add($line)
+        }
+    }
+    Send-AdminBroadcast -Text ($startupLines -join "`n")
 }
 
 function Update-NewsSheetSync {

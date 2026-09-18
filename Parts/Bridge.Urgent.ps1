@@ -348,6 +348,15 @@ function Get-UrgentBoardKeyboard {
     # Mode selector — single button toggles between manual and auto
     $rows += , @((New-Button "$(if($manual){'✅ '})يدوي — خبر واحد" 'urgmode:manual'), (New-Button "$(if(-not $manual){'✅ '})تلقائي — بالتتابع" 'urgmode:auto'))
 
+    # T-12: كل تحذير يحمل زر حلّه
+    if (-not (Test-UrgentSceneLoop)) {
+        $rows += , @( (New-Button '⚠️ المشهد بلا حلقة — اضبط الآن' 'urgentb:timing' -Style primary) )
+    }
+    $ceiling = Get-UrgentRunCeiling -Items $items
+    if ([int]$ceiling.AutoHideSeconds -gt 0) {
+        $rows += , @( (New-Button "⏱ إخفاء تلقائي بعد $($ceiling.AutoHideSeconds) ث — تغيير" 'urgentb:timing' -Style primary) )
+    }
+
     if ($items.Count -gt 0) {
         for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
             $item = $items[$index]
@@ -818,6 +827,9 @@ function Show-UrgentReviewScreen {
     $data = if ($SelectedOnly) { 'urgentb:play:sel' } else { 'urgentb:play:all' }
     $rows = @()
     $rows += , @( (New-Button '🚨 ابدأ الآن' $data -Style success) )
+    if (-not (Test-UrgentSceneLoop) -and $textSteps.Count -gt 0) {
+        $rows += , @( (New-Button '⚠️ اضبط التبديل — الحلقة مفقودة' 'urgentb:timing' -Style primary) )
+    }
     $rows += , @( (New-Button '⬅️ رجوع' 'urgentb:open') )
     $text = $lines -join "`n"
     $keyboard = @{ inline_keyboard = $rows }

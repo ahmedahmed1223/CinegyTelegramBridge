@@ -630,8 +630,16 @@ function Update-TemplateReminderQueue {
         }
         $reminderId = [string](Get-JsonProp $item 'ReminderId')
         if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); $item.ReminderId = $reminderId }
-        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '✅ تمت المعالجة' "remack:$reminderId"))) }
-        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⏰ تنبيه: مرّت $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا." -ReplyMarkup $ackKeyboard
+        $onAirCopy = ''
+        if ($script:OnAir.ContainsKey([int]$item.Layer)) {
+            $onAirCopy = [string](Get-JsonProp $script:OnAir[[int]$item.Layer] 'AirCopy')
+        }
+        $reminderText = "⏰ تنبيه: مرّت $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا."
+        if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
+            $reminderText += "`n📝 النص: $onAirCopy"
+        }
+        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '✅ تمت المعالجة' "remack:$reminderId"), (New-Button '🙈 إخفاء القالب' "hidego:$($item.Layer)"))) }
+        Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text $reminderText -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
         $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
         if ($followUpMinutes -gt 0) {

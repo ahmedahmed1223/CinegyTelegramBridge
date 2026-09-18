@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.44.0
+
+Stability, warning-to-fix buttons, and UI restructuring:
+
+- **Restart survival:** Manual show identity (`$script:UrgentManualLive`) and per-chat mode (`$script:UrgentManualMode`) now persist to `logs/urgent-manual.json` on every change and restore at startup — the hide button and mode choice survive a restart.
+- **T-12 (no warning without a fix):** Every advisory warning carries its fix button — loopless scene → "Adjust now" opens timing screen, auto-hide → "Change" opens timing screen, review warning → "Adjust switching".
+- **Main menu:** Each management button on its own row — News Ticker, then Mojaz, then Urgent — instead of crowding into one row.
+- **Urgent board:** Story text on its own full-width row with read/action buttons below — Mojaz style.
+
 ## Version 8.43.0
 
 The urgent board adds full-text reading and a manual single-story mode:

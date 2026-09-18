@@ -24,9 +24,10 @@
 | T-53 تنبيه البروكسي | 8.18.0 | `Update-MaterialProxyWatchdog` — خيارًا، مطفأ افتراضًا |
 | زرّ التعديل في المراجعة | 8.18.1 | `Resume-ShowFlow` → `-HasFields` |
 | T-02 الاسم بدل الرقم | 8.19.0 | `Update-UserNameFromTelegram` |
-| T-32 تكرار السبب نفسه | 8.19.0 | `Add-BridgeAlertOccurrence` |
-| هيكلة شاشتَي الحالة بلا طيّ | 8.19.0 | `Get-StatusRichBlocks` |
-| قاعدة المنفذ 5521 | 8.19.0 | AGENTS.md §6 + `Get-CinegyExposureWarning` |
+| T-12 | لا تحذير بلا زر | 8.44.0 | `Get-UrgentBoardKeyboard` + `Show-UrgentReviewScreen` |
+| القراءة الكاملة والتشغيل اليدوي | 8.43.0 | `Parts/Bridge.Urgent.ps1` (`Show-UrgentReader`, `Show-UrgentManualConfirm`, `Invoke-UrgentManualAction`, `Split-UrgentReaderText`) |
+| استقرار الحالة اليدوية والتحديدات عبر إعادة التشغيل | 8.44.0 | `Parts/Bridge.Urgent.Playback.ps1` (`Save-UrgentManualState`, `Import-UrgentManualState`, `urgent-manual.json`) |
+| إصلاح CI | 8.44.0 | `.github/workflows/windows-ci.yml` (تثبيت Pester 5.x فقط) |
 
 ## الفكرة الحاكمة
 
@@ -134,9 +135,9 @@
   `TemplateTestAutoHideSeconds = 3`، عبر `🧪 فحص المسار الحي` القائم، **ومراقبة
   المخرج بالعين أثناءها**. ظهور أي شيء = الطبقة على الهواء.
 
-### T-12 · لا تحذير بلا زرّ ⭐
-- **الحالة:** جاهزة للتنفيذ · **الجهد:** صغير-متوسط · **الخطر:** منخفض
-- **المشكلة:** تحذير حقيقي وصل مشغّلاً في 2026-09-09:
+### T-12 · لا تحذير بلا زرّ ✅ — منفَّذة في 8.44.0
+- **الحالة:** ✅ شُحنت بثلاثة مواضع: زر `⚠️ المشهد بلا حلقة — اضبط الآن` في لوحة المفاتيح، وزر `⏱ إخفاء تلقائي بعد N ث — تغيير`، وزر `⚠️ اضبط التبديل — الحلقة المفقودة` في شاشة المراجعة. كلها تفتح شاشة التوقيت حيث يُحلّ التحذير.
+- *(ما دونه أدناه هو التحليل الذي قادها، محفوظًا للسياق.)*
   > «المدة ٢ أضعاف طول اللوب (٧٥٠ إطار) — سيُعرض كل خبر مرتين. اجعلها ٧٥٠
   > إطاراً أو فعّل مزامنة الظهور.»
 

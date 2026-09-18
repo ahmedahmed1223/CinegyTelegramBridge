@@ -66,8 +66,15 @@ function Save-UrgentManualState {
     <# Persist the live manual show identity to disk so the hide button
        survives a restart. The operator was told a story is live and how
        to hide it; a restart must not take that promise off air with no
-       way back. #>
-    if (-not $script:UrgentManualLive -or $script:UrgentManualLive.Count -eq 0) {
+       way back.
+
+       Also persists per-chat manual/auto mode and selections so table
+       preferences survive a restart even when no manual show is active. #>
+    $hasContent = ($script:UrgentManualLive -and $script:UrgentManualLive.Count -gt 0) -or
+                  ($script:UrgentManualMode -and $script:UrgentManualMode.Count -gt 0) -or
+                  ($script:UrgentSelections -and $script:UrgentSelections.Count -gt 0)
+
+    if (-not $hasContent) {
         $path = Get-UrgentManualFile
         if (Test-Path -LiteralPath $path) {
             try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
@@ -76,13 +83,16 @@ function Save-UrgentManualState {
         return $true
     }
     $payload = [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         SavedAt = (Get-Date).ToString('o')
         States = @($script:UrgentManualLive.GetEnumerator() | ForEach-Object {
             [pscustomobject]@{ ChatId = [long]$_.Key; State = $_.Value }
         })
         ManualMode = @($script:UrgentManualMode.GetEnumerator() | ForEach-Object {
             [pscustomobject]@{ ChatId = [long]$_.Key; Mode = [bool]$_.Value }
+        })
+        Selections = @($script:UrgentSelections.GetEnumerator() | ForEach-Object {
+            [pscustomobject]@{ ChatId = [string]$_.Key; Ids = @($_.Value) }
         })
     }
     if (-not (Write-BridgeValidatedJson -Path (Get-UrgentManualFile) -Json ($payload | ConvertTo-Json -Depth 8))) {
@@ -119,6 +129,13 @@ function Import-UrgentManualState {
         foreach ($entry in @($modes)) {
             $cid = [long](Get-JsonProp $entry 'ChatId')
             if ($cid -gt 0) { $script:UrgentManualMode[$cid] = [bool](Get-JsonProp $entry 'Mode') }
+        }
+    }
+    $selections = Get-JsonProp $payload 'Selections'
+    if ($selections) {
+        foreach ($entry in @($selections)) {
+            $cid = [string](Get-JsonProp $entry 'ChatId')
+            if ($cid) { $script:UrgentSelections[$cid] = @(Get-JsonProp $entry 'Ids') }
         }
     }
 }

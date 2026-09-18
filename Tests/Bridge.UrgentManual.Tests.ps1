@@ -11,6 +11,9 @@ Describe 'Full urgent reader and manual single story' {
         $script:ManualPayload = $null
         $script:ManualText = ('تفاصيل الخبر الطويل <نص> & ' * 8) + 'نهاية الخبر'
         $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text $script:ManualText -UserId 101).Value
+        # Clean up any leftover manual state file from previous tests
+        $leftover = Join-Path $TestDrive 'urgent-manual.json'
+        if (Test-Path $leftover) { Remove-Item $leftover -Force -ErrorAction SilentlyContinue }
         Mock Get-UrgentTemplate { @{ Key='urgent'; Layer=7; Fields=@('Text','Kicker') } }
         Mock Get-UrgentSceneTiming { @{ LoopSeconds=8; IntroSeconds=2; OutroSeconds=2 } }
         Mock Send-TelegramMessage { $script:ManualPayload = @{Text=$Text; Markup=$ReplyMarkup} }
@@ -167,20 +170,64 @@ Describe 'Full urgent reader and manual single story' {
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument (Get-CallbackArg $button 'urgmanual:') | Should -BeTrue
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
     }
+    It 'selections are saved to disk when Save-UrgentManualState runs' {
+        $testFile = Join-Path $env:TEMP "urgent-manual-save-$(New-Guid).json"
+        Mock Get-UrgentManualFile { $testFile }
+        Set-UrgentSelectedIds -ChatId 100 -Ids @('u_sel0001', 'u_sel0002')
+        Save-UrgentManualState | Out-Null
+        (Get-Content $testFile -Raw | ConvertFrom-Json).Selections.Count | Should -Be 1
+        if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
+    }
     It 'persists manual show identity and mode across a restart' {
+        $script:TestManualFile = Join-Path $env:TEMP "urgent-manual-persist-$(New-Guid).json"
+        Mock Get-UrgentManualFile { $script:TestManualFile }
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
         Mock Invoke-HideLayer { $true }
-        Mock Get-UrgentManualFile { Join-Path $TestDrive 'urgent-manual.json' }
         $id=$script:UrgentBoard.Items[0].Id
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
         $savedLive = $script:UrgentManualLive[100L]
         $savedLive | Should -Not -BeNullOrEmpty
-        # Simulate restart: clear in-memory state, then re-import from disk
         $script:UrgentManualLive = @{}; $script:UrgentManualMode = @{}
         Import-UrgentManualState
         $script:UrgentManualLive[100L].Token | Should -Be $savedLive.Token
+        if (Test-Path $script:TestManualFile) { Remove-Item $script:TestManualFile -Force -ErrorAction SilentlyContinue }
+    }
+    It 'clears the manual state file when all live shows end' {
+        $testFile = Join-Path $env:TEMP "urgent-manual-clear-$(New-Guid).json"
+        Mock Get-UrgentManualFile { $testFile }
+        try {
+            Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
+            Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
+            Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
+            $id=$script:UrgentBoard.Items[0].Id
+            Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
+            Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
+            $script:UrgentManualLive.Count | Should -BeGreaterThan 0
+            $button=@($script:ManualPayload.Markup.inline_keyboard | ForEach-Object { $_ } | Where-Object callback_data -like 'urgmanual:hide:*')[0].callback_data
+            Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument (Get-CallbackArg $button 'urgmanual:') | Should -BeTrue
+            $script:UrgentManualLive.Count | Should -Be 0
+        } finally {
+            if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    It 'recovers safely from a corrupt manual state file' {
+        $testFile = Join-Path $env:TEMP "urgent-manual-corrupt-$(New-Guid).json"
+        Mock Get-UrgentManualFile { $testFile }
+        Set-Content -Path $testFile -Value '{ invalid json [[}' -Encoding utf8
+        { Import-UrgentManualState } | Should -Not -Throw
+        $script:UrgentManualLive.Count | Should -Be 0
+        $script:UrgentManualMode.Count | Should -Be 0
+        if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
+    }
+    It 'shows T-12 fix buttons in the board keyboard when warnings apply' {
+        Mock Test-Authorized { $true }
+        Mock Test-UrgentSceneLoop { $false }
+        Mock Get-UrgentRunCeiling { @{Seconds=30;AutoHideSeconds=30;Reason='autohide'} }
+        $kb = Get-UrgentBoardKeyboard -ChatId 100
+        $all = @($kb.inline_keyboard | ForEach-Object { $_ } | ForEach-Object { $_.callback_data })
+        $all | Should -Contain 'urgentb:timing'
     }
     It 'keeps the complete long story in field mapping and the bot detail screen' {
         $item = @($script:UrgentBoard.Items)[0]

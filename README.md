@@ -13,6 +13,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.43.0
+
+The urgent board adds full-text reading and a manual single-story mode:
+
+- **👁 Read button** on every row opens the complete story with page navigation:
+  - Previous/Next part for long stories spanning multiple pages
+  - Previous/Next story buttons to move between items
+  - **🚨 Show this story alone** opens the confirmation screen for manual playout
+  - Pure reading — no air commands are issued
+
+- **Manual — Single Story** mode in the mode bar (next to Auto — Sequential):
+  - Operator picks one story, opens it for reading, presses "Show this story" → confirmation → goes on air
+  - The automatic sequence does not advance; "Pick another story" returns to the reader, "Hide shown story" hides only that one
+  - The hide button is bound to that specific show, re-checks template/layer access *at press time*, and rejects if access was revoked
+
+- **Secure check ordering**: Template access (`Test-TemplateAccess`) and show policy (`Test-TemplateShowPolicy`) are verified *before* stopping any automatic run — a denied request cannot remove currently airing content
+
+- **Independent live-hide identity**: `$script:UrgentManualLive` stores the live hide button separately from the temporary confirmation state (`$script:PendingState`), so it survives:
+  - Confirmation timeout expiry
+  - Opening the text reader or another edit screen
+  - A new show confirmation for the same chat
+
+- 11 offline TDD tests covering: full reading, page transitions, manual single-story playout, stale button rejection, revoked access, and live-hide persistence
+
 ## Version 8.42.0
 
 Administrators can configure a separate maximum on-air duration per template

@@ -79,16 +79,31 @@ function Get-MainMenuKeyboard {
     # every row above the fix is a row they must scroll past to reach it.
     if ($script:OnAir.Count -gt 0) {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
-            $liveRow = @( (New-Button "🔴 إخفاء $layer · $($script:OnAir[$layer].Key)" "hide:$layer" -Style danger) )
-            # A timer can be attached to something already live, not just at
-            # the moment it is put on air.
+            $liveRow = @()
+            # Per-layer status: show if template is on air with AirCopy preview
+            $onAirKey = $script:OnAir[$layer].Key
+            $onAirCopy = [string](Get-JsonProp $script:OnAir[$layer] 'AirCopy')
+            $hideLabel = if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
+                "🔴 إخفاء $layer · $onAirKey — $onAirCopy"
+            } else {
+                "🔴 إخفاء $layer · $onAirKey"
+            }
+            $liveRow += (New-Button $hideLabel "hide:$layer" -Style danger)
+            # Quick +30s extension button for live layers
             if (Get-Setting 'EnableTimedShow') {
                 $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
-                $label = if ($pending.Count -gt 0) {
-                    "⏱ $([int](($pending[0].At - (Get-Date)).TotalSeconds)) ث"
+                $timerLabel = if ($pending.Count -gt 0) {
+                    $remaining = [int](($pending[0].At - (Get-Date)).TotalSeconds)
+                    "⏱ +30ث ($remaining ث)"
+                } else {
+                    "⏱ مؤقت"
                 }
-                else { "⏱ مؤقت" }
-                $liveRow += (New-Button $label "timer:$layer")
+                $liveRow += (New-Button $timerLabel "timer:$layer")
+            }
+            # Quick re-show last hidden template
+            if ($script:LastShow.ContainsKey($ChatId)) {
+                $lastKey = [string](Get-JsonProp $script:LastShow[$ChatId] 'Key')
+                $liveRow += (New-Button "↩️ إعادة عرض $lastKey" "menu:repeat")
             }
             $rows += , $liveRow
         }

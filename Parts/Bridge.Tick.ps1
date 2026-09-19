@@ -2191,11 +2191,23 @@ function Set-TelegramConnectionState {
     }
 }
 
+function Test-TelegramReady {
+    return [string]$script:RuntimeState.Monitoring.TelegramConnectionState -eq 'connected'
+}
+
+function Test-CinegyReady {
+    return [string]$script:RuntimeState.Monitoring.CinegyHealthState -eq 'healthy'
+}
+
 function Send-BridgeStartupNotification {
     $airCount = $script:OnAir.Count
     $startupLines = [System.Collections.Generic.List[string]]::new()
     $startupLines.Add("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion")
     $startupLines.Add("Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
+    # Connection status at startup — so admins know immediately if something is wrong
+    $tgStatus = if (Test-TelegramReady) { "✅" } else { "❌" }
+    $cgStatus = if (Test-CinegyReady) { "✅" } else { "❌" }
+    $startupLines.Add("Telegram: $tgStatus | Cinegy: $cgStatus")
     if ($airCount -gt 0) {
         $startupLines.Add("")
         $startupLines.Add("📡 يوجد $airCount مشهدًا لا يزال على الهواء من التشغيل السابق:")

@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.48.0
+
+**Startup connection status, repeat-last-show button:**
+- Startup notification now shows Telegram ✅/❌ and Cinegy ✅/❌ connection status immediately
+- Repeat-last-show button re-displays the last hidden template with one tap
+- Per-layer hide buttons show AirCopy text so operators know exactly what they're hiding
+
 ## Version 8.47.2
 
 **Layer status indicator:** The Layers button now shows a 🟢 (empty) or 🔴 (busy) indicator based on whether any template is currently on air.

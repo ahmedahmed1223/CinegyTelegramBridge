@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.49.2'
+$script:BridgeVersion = '8.49.4'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1113,6 +1113,7 @@ $script:UrgentBoard = New-UrgentBoard
 $script:UrgentSelections = @{}
 $script:UrgentManualMode = @{}
 $script:UrgentManualLive = @{}
+$script:UrgentBoardFilters = @{}
 $script:UrgentBoardRun = $null
 # Raised only while the board's own opening SHOW is in flight. The rule that a
 # manual urgent stops a running board would otherwise stop the board with the

@@ -336,14 +336,130 @@ function Get-UrgentBoardPageSize {
     return [math]::Max(1, [math]::Min(10, (Get-SettingInt 'NewsListPageSize' 8)))
 }
 
+function Get-UrgentBoardFilter {
+    param([Parameter(Mandatory)][long]$ChatId)
+    $value = if ($script:UrgentBoardFilters.ContainsKey([string]$ChatId)) {
+        [string]$script:UrgentBoardFilters[[string]$ChatId]
+    } else { 'all' }
+    if ($value -notin @('all', 'ready', 'selected', 'air', 'disabled', 'latest')) { return 'all' }
+    return $value
+}
+
+function Set-UrgentBoardFilter {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Filter)
+    if ($Filter -notin @('all', 'ready', 'selected', 'air', 'disabled', 'latest')) { return $false }
+    if ($PSCmdlet.ShouldProcess("chat $ChatId", "set urgent board filter to $Filter")) {
+        $script:UrgentBoardFilters[[string]$ChatId] = $Filter
+    }
+    return $true
+}
+
+function Get-UrgentCurrentItemId {
+    $template = Get-UrgentTemplate
+    if (-not $template) { return '' }
+    if ($script:UrgentBoardRun) {
+        $steps = @(Get-JsonProp $script:UrgentBoardRun 'Steps')
+        $step = [int](Get-JsonProp $script:UrgentBoardRun 'Step')
+        if ($step -ge 0 -and $step -lt $steps.Count) {
+            return [string](Get-JsonProp $steps[$step] 'Id')
+        }
+    }
+    foreach ($entry in @($script:UrgentManualLive.Values)) {
+        if ([int](Get-UrgentProperty $entry 'Layer' 0) -eq [int]$template.Layer) {
+            return [string](Get-JsonProp $entry 'ItemId')
+        }
+    }
+    return ''
+}
+
+function Test-UrgentItemOnAir {
+    param([Parameter(Mandatory)]$Item)
+    $id = [string](Get-JsonProp $Item 'Id')
+    return $id -and $id -ceq (Get-UrgentCurrentItemId)
+}
+
+function Get-UrgentItemStateLabel {
+    param([Parameter(Mandatory)]$Item, [string[]]$Selected = @())
+    $id = [string](Get-JsonProp $Item 'Id')
+    if (-not [bool](Get-UrgentProperty $Item 'Enabled' $true)) { return '⛔ معطّل' }
+    if (Test-UrgentItemOnAir -Item $Item) { return '🔴 على الهواء' }
+    if ($Selected -contains $id) { return '✅ محدد' }
+    return '🟢 جاهز'
+}
+
+function Get-UrgentVisibleItems {
+    param([Parameter(Mandatory)][long]$ChatId)
+    $items = @(Get-UrgentProperty $script:UrgentBoard 'Items' @())
+    $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
+    $filter = Get-UrgentBoardFilter -ChatId $ChatId
+    if ($filter -eq 'all') { return $items }
+    if ($filter -eq 'latest') {
+        return @($items | Sort-Object {
+                $stamp = [datetimeoffset]::MinValue
+                [datetimeoffset]::TryParse([string](Get-UrgentProperty $_ 'UpdatedAt' ''), [ref]$stamp) | Out-Null
+                $stamp
+            } -Descending)
+    }
+    return @($items | Where-Object {
+        $enabled = [bool](Get-UrgentProperty $_ 'Enabled' $true)
+        $isSelected = $selected -contains [string](Get-JsonProp $_ 'Id')
+        $onAir = Test-UrgentItemOnAir -Item $_
+        switch ($filter) {
+            'ready' { $enabled -and -not $onAir }
+            'selected' { $isSelected }
+            'air' { $onAir }
+            'disabled' { -not $enabled }
+        }
+    })
+}
+
+function Get-UrgentRelativeTime {
+    param([object]$Value)
+    $when = [datetimeoffset]::MinValue
+    if (-not $Value -or -not [datetimeoffset]::TryParse([string]$Value, [ref]$when)) { return 'وقت التحديث غير معروف' }
+    $seconds = [math]::Max(0, ([datetimeoffset]::Now - $when).TotalSeconds)
+    if ($seconds -lt 60) { return 'منذ أقل من دقيقة' }
+    if ($seconds -lt 3600) { return "منذ $([int][math]::Floor($seconds / 60)) د" }
+    if ($seconds -lt 86400) { return "منذ $([int][math]::Floor($seconds / 3600)) س" }
+    return "منذ $([int][math]::Floor($seconds / 86400)) يوم"
+}
+
+function Get-UrgentBoardSummary {
+    param([Parameter(Mandatory)][long]$ChatId)
+    $items = @(Get-UrgentProperty $script:UrgentBoard 'Items' @())
+    $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
+    $enabled = @($items | Where-Object { [bool](Get-UrgentProperty $_ 'Enabled' $true) })
+    $disabled = $items.Count - $enabled.Count
+    $onAir = 0
+    foreach ($summaryItem in $items) {
+        if (Test-UrgentItemOnAir -Item $summaryItem) { $onAir++ }
+    }
+    return "الإجمالي $($items.Count) · جاهز $($enabled.Count - $onAir) · على الهواء $onAir · معطّل $disabled · محدد $($selected.Count)"
+}
+
 function Get-UrgentBoardKeyboard {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
-    $board = $script:UrgentBoard
-    $items = @(Get-UrgentProperty $board 'Items' @())
+    $items = @(Get-UrgentVisibleItems -ChatId $ChatId)
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
     $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize (Get-UrgentBoardPageSize)
     $manual = $script:UrgentManualMode.ContainsKey($ChatId) -and [bool]$script:UrgentManualMode[$ChatId]
     $rows = @()
+    $filter = Get-UrgentBoardFilter -ChatId $ChatId
+    $filterLabel = switch ($filter) {
+        'ready' { 'الجاهز' }; 'selected' { 'المحدد' }; 'air' { 'على الهواء' };         'disabled' { 'المعطّل' }; 'latest' { 'الأحدث' }; default { 'الكل' }
+    }
+    $rows += , @((New-Button "📊 $filterLabel — $([string](Get-UrgentBoardSummary -ChatId $ChatId))" 'urgentb:noop'))
+    $rows += , @(
+        (New-Button 'الكل' 'urgentb:filter:all' -Style $(if ($filter -eq 'all') { 'primary' } else { '' }))
+        (New-Button '🟢 جاهز' 'urgentb:filter:ready' -Style $(if ($filter -eq 'ready') { 'primary' } else { '' }))
+        (New-Button '🔴 على الهواء' 'urgentb:filter:air' -Style $(if ($filter -eq 'air') { 'primary' } else { '' }))
+    )
+    $rows += , @(
+        (New-Button '✅ محدد' 'urgentb:filter:selected' -Style $(if ($filter -eq 'selected') { 'primary' } else { '' }))
+        (New-Button '⛔ معطّل' 'urgentb:filter:disabled' -Style $(if ($filter -eq 'disabled') { 'primary' } else { '' }))
+        (New-Button '🕒 الأحدث' 'urgentb:filter:latest' -Style $(if ($filter -eq 'latest') { 'primary' } else { '' }))
+    )
 
     # Mode selector — single button toggles between manual and auto
     $rows += , @((New-Button "$(if($manual){'✅ '})يدوي — خبر واحد" 'urgmode:manual'), (New-Button "$(if(-not $manual){'✅ '})تلقائي — بالتتابع" 'urgmode:auto'))
@@ -365,23 +481,21 @@ function Get-UrgentBoardKeyboard {
             $text = [string](Get-UrgentProperty $item 'Text' '')
             $label = if ($text.Length -gt 30) { $text.Substring(0, 29) + '…' } else { $text }
             $enabled = [bool](Get-UrgentProperty $item 'Enabled')
-            $template = Get-UrgentTemplate
-            $onAir = $false
-            if ($template -and $script:OnAir.ContainsKey([int]$template.Layer)) {
-                $live = $script:OnAir[[int]$template.Layer]
-                $onAir = [string](Get-JsonProp $live 'Key') -ieq [string](Get-JsonProp $template 'Key')
-            }
-            $stateMark = if (-not $enabled) { '⛔' } elseif ($onAir) { '🔴' } elseif ($selected -contains $id) { '✅' } else { '🟢' }
+            $onAir = Test-UrgentItemOnAir -Item $item
+            $stateMark = (Get-UrgentItemStateLabel -Item $item -Selected $selected).Substring(0, 2).Trim()
 
             # Story text on its own row (full-width, Mojaz style)
             $rowStyle = if (-not $enabled) { 'danger' } elseif ($selected -contains $id) { 'primary' } else { $null }
-            $rows += , @((New-Button "$stateMark $tick $($index + 1). $label" "urgentb:pick:$id" -Style $rowStyle))
+            $rows += , @((New-Button "$stateMark $tick $($index + 1). $label · $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt'))" "urgentb:pick:$id" -Style $rowStyle))
 
             # Action buttons below: read + settings
             $rows += , @(
                 (New-Button "👁 قراءة" "urgread:${id}:0" -Style primary)
                 (New-Button "⚙️ إجراءات" "urgentb:item:$id" -Style primary)
             )
+            if ($onAir) {
+                $rows += , @((New-Button '⏹ إيقاف العاجل الحالي' 'urgentb:hide' -Style danger))
+            }
         }
     }
     if ($window.PageCount -gt 1) {
@@ -420,6 +534,7 @@ function Get-UrgentBoardKeyboard {
         if ($selected.Count -gt 0) { $playRow += (New-Button "▶️ تشغيل المحدَّد ($($selected.Count))" 'urgentb:review:sel' -Style success) }
         $playRow += (New-Button '⏭ تشغيل الكل' 'urgentb:review:all' -Style success)
         $rows += , $playRow
+        $rows += , @((New-Button '⏭ تشغيل التالي الجاهز' 'urgentb:next' -Style success))
     }
     $rows += , @( (New-Button '🔄 تحديث' 'urgentb:open'), (New-Button '⬅️ القائمة' 'menu:main') )
     return @{ inline_keyboard = $rows }
@@ -455,9 +570,11 @@ function Get-UrgentBoardBlocks {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
     $board = $script:UrgentBoard
     $defaults = Get-UrgentBoardDefaults
-    $items = @(Get-UrgentProperty $board 'Items' @())
+    $items = @(Get-UrgentVisibleItems -ChatId $ChatId)
+    $allItems = @(Get-UrgentProperty $board 'Items' @())
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
-    $blocks = @(@{ type = 'heading'; text = "🚨 العواجل — $($items.Count) عاجلًا"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = "🚨 العواجل — $($allItems.Count) عاجلًا"; size = 3 })
+    $blocks += @{ type = 'paragraph'; text = "$(Get-UrgentBoardSummary -ChatId $ChatId) · التصفية: $(Get-UrgentBoardFilter -ChatId $ChatId)" }
     $runStatus = Get-UrgentRunStatusText
     if ($runStatus) { $blocks += @{ type = 'paragraph'; text = $runStatus } }
 
@@ -517,7 +634,7 @@ function Get-UrgentBoardBlocks {
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
     $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown (@($trimmed.Rows).Count)
     if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
-    $blocks += @{ type = 'paragraph'; text = '✱ = قيمة خاصة بالعنصر · ⛔ = معطَّل · التحديد يخصّ محادثتك وحدها.' }
+    $blocks += @{ type = 'paragraph'; text = '🟢 جاهز · 🔴 على الهواء · ✅ محدد · ⛔ معطّل · ✱ = قيمة خاصة بالعنصر · التحديد يخصّ محادثتك وحدها.' }
     return $blocks
 }
 
@@ -526,9 +643,11 @@ function Get-UrgentBoardText {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
     $board = $script:UrgentBoard
     $defaults = Get-UrgentBoardDefaults
-    $items = @(Get-UrgentProperty $board 'Items' @())
+    $items = @(Get-UrgentVisibleItems -ChatId $ChatId)
+    $allItems = @(Get-UrgentProperty $board 'Items' @())
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
-    $lines = @("🚨 <b>العواجل</b> — $($items.Count) عاجلًا")
+    $lines = @("🚨 <b>العواجل</b> — $($allItems.Count) عاجلًا")
+    $lines += (ConvertTo-TelegramHtmlText -Text "$(Get-UrgentBoardSummary -ChatId $ChatId) · التصفية: $(Get-UrgentBoardFilter -ChatId $ChatId)")
     $runStatus = Get-UrgentRunStatusText
     if ($runStatus) { $lines += (ConvertTo-TelegramHtmlText -Text $runStatus) }
     $lines += "الافتراضي: فاصل $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) ث · $([int](Get-UrgentProperty $defaults 'Repeats' 1)) دورة"
@@ -550,13 +669,13 @@ function Get-UrgentBoardText {
     foreach ($item in @($trimmed.Rows)) {
         $position++
         $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
-        $enabled = [bool](Get-UrgentProperty $item 'Enabled' $true)
-        $tick = if (-not $enabled) { '⛔' } elseif ($selected -contains [string](Get-UrgentProperty $item 'Id' '')) { '☑' } else { '☐' }
+        $tick = if ($selected -contains [string](Get-UrgentProperty $item 'Id' '')) { '☑' } else { '☐' }
+        $mark = (Get-UrgentItemStateLabel -Item $item -Selected $selected).Split(' ')[0]
         $mode = if ($timing.Mode -eq 'exit') { '🚪' } elseif ($timing.Mode -eq 'auto_hide') { '🙈' } else { '✏️' }
         # Escaped because a breaking line is text somebody typed, and this
         # message is sent as HTML.
         $safe = ConvertTo-TelegramHtmlText -Text ([string](Get-UrgentProperty $item 'Text' ''))
-        $lines += "$tick $position. $mode $safe — $($timing.HoldSeconds) ث"
+        $lines += "$mark $tick $position. $mode $safe — $($timing.HoldSeconds) ث · $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt'))"
     }
     $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown (@($trimmed.Rows).Count)
     if ($note) { $lines += $note }
@@ -590,7 +709,12 @@ function Get-UrgentItemKeyboard {
     $defaults = Get-UrgentBoardDefaults
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $itemId = [string](Get-UrgentProperty $item 'Id' '')
-    $rows += , @( (New-Button '🚨 تشغيل على الهواء' "urgsingle:$itemId" -Style success) )
+    if (Test-UrgentItemOnAir -Item $item) {
+        $rows += , @( (New-Button '🔴 على الهواء الآن' 'urgentb:noop' -Style primary), (New-Button '⏹ إيقاف الحالي' 'urgentb:hide' -Style danger) )
+    }
+    else {
+        $rows += , @( (New-Button '🚨 تشغيل على الهواء' "urgsingle:$itemId" -Style success) )
+    }
     $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId"), (New-Button '🏷 العنوان' "urgentb:title:$itemId") )
     $modeRow = @( (New-Button '🎬 نمط العرض' "urgentb:mode:$itemId") )
     if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$itemId") }
@@ -632,9 +756,16 @@ function Show-UrgentManualConfirm {
         LiveStamp=(Get-UrgentLiveStamp -Layer ([int]$template.Layer)); HadRun=[bool]$script:UrgentBoardRun }
     Set-PendingState -ChatId $ChatId -State $state | Out-Null
     $text = "🚨 عرض خبر واحد فقط — دون انتقال تلقائي.`nتظل قواعد الإخفاء والتمديد سارية."
-    if ($state.LiveStamp) { $text += "`n⚠️ استبدال الخبر أو المشهد الحالي بهذا الخبر؟" }
+    if ($state.LiveStamp) {
+        $currentId = Get-UrgentCurrentItemId
+        $currentItem = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) |
+            Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $currentId } | Select-Object -First 1
+        $currentText = if ($currentItem) { [string](Get-UrgentProperty $currentItem 'Text' '') } else { 'مشهد حالي غير معروف' }
+        if ($currentText.Length -gt 120) { $currentText = $currentText.Substring(0, 119) + '…' }
+        $text += "`n⚠️ سيتم استبدال الخبر الحالي:`n«$currentText»`nبالخبر:`n«$($state.Text)»"
+    }
     if ($state.HadRun) { $text += "`nسيُوقف الجدول التلقائي أولًا؛ إن فشل الإيقاف فلن يُعرض الخبر." }
-    $text += "`n`n$($state.Text)"
+    if (-not $state.LiveStamp) { $text += "`n`n$($state.Text)" }
     if ($text.Length -gt 3900) { $text = $text.Substring(0,3800) + "`n… اقرأ النص الكامل من زر العودة قبل التأكيد." }
     $markup = @{ inline_keyboard = @(
         , @((New-Button 'عرض هذا الخبر' "urgmanual:show:$($state.Token)" -Style success))
@@ -663,6 +794,7 @@ function Invoke-UrgentManualAction {
         Save-UrgentManualState | Out-Null
         return $true
     }
+
     if ([string](Get-JsonProp $state 'Mode') -ne 'urgent_manual_confirm') { return $false }
     $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $state.ItemId } | Select-Object -First 1
     $template = Get-UrgentTemplate
@@ -682,7 +814,8 @@ function Invoke-UrgentManualAction {
     $stamp = Get-UrgentLiveStamp -Layer ([int]$template.Layer)
     if (-not $stamp) { return $true }
     $liveState = @{ Mode='urgent_manual_live'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
-        StartedAt=Get-Date; UserId=$UserId; Layer=[int]$template.Layer; LiveStamp=$stamp }
+        StartedAt=Get-Date; UserId=$UserId; ItemId=[string](Get-JsonProp $state 'ItemId')
+        Layer=[int]$template.Layer; LiveStamp=$stamp }
     $script:UrgentManualLive[$ChatId] = $liveState
     Save-UrgentManualState | Out-Null
     Send-TelegramMessage -ChatId $ChatId -Text '🚨 عُرض الخبر وحده. لن ينتقل للخبر التالي تلقائيًا.' -ReplyMarkup @{
@@ -692,6 +825,22 @@ function Invoke-UrgentManualAction {
         )
     }
     return $true
+}
+
+function Stop-UrgentCurrentAir {
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    if ($script:UrgentBoardRun) {
+        return (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Reason 'manual_hide')
+    }
+    foreach ($entry in @($script:UrgentManualLive.GetEnumerator())) {
+        $liveState = $entry.Value
+        if ([long](Get-UrgentProperty $liveState 'UserId' 0) -ne $UserId) { continue }
+        $token = [string](Get-UrgentProperty $liveState 'Token' '')
+        if ($token -and (Invoke-UrgentManualAction -ChatId $ChatId -UserId $UserId -Argument "hide:$token")) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Split-UrgentReaderText {
@@ -754,7 +903,7 @@ function Show-UrgentItemScreen {
     $defaults = Get-UrgentBoardDefaults
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $itemCount = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()).Count
-    $lines = @("🚨 <b>الخبر $($Position + 1) من $itemCount</b>")
+    $lines = @("$(Get-UrgentItemStateLabel -Item $item -Selected @(Get-UrgentSelectedIds -ChatId $ChatId)) · <b>الخبر $($Position + 1) من $itemCount</b>")
     $lines += (ConvertTo-TelegramHtmlText -Text ([string](Get-UrgentProperty $item 'Text' '')))
     $title = [string](Get-UrgentProperty $item 'Title' '')
     if ($title) { $lines += "🏷 $(ConvertTo-TelegramHtmlText -Text $title)" }
@@ -764,6 +913,11 @@ function Show-UrgentItemScreen {
     $lines += "التكرار: $($timing.Repeats)$(if ($timing.RepeatsInherited) { ' (من الجدول)' } else { '' })"
     if ($timing.IntervalRaisedToFloor) { $lines += "⚠️ رُفع الفاصل إلى $($timing.HoldSeconds) ث: أقصر ممّا يسمح به المشهد." }
     if ($timing.Mode -eq 'text' -and -not (Test-UrgentSceneLoop)) { $lines += '⚠️ هذا المشهد بلا حلقة: التبديل سيُرى.' }
+    $disabledReason = [string](Get-UrgentProperty $item 'DisabledReason' '')
+    if (-not [bool](Get-UrgentProperty $item 'Enabled' $true)) {
+        $lines += "سبب التعطيل: $(if ($disabledReason) { ConvertTo-TelegramHtmlText -Text $disabledReason } else { 'تعطيل يدوي' })"
+    }
+    $lines += "آخر تعديل: $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt'))"
     $keyboard = Get-UrgentItemKeyboard -Position $Position
     $text = $lines -join "`n"
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }

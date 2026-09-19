@@ -136,8 +136,36 @@ Describe 'Urgent board rendered operator screens' {
     It 'keeps review in the originating message when its id is supplied' {
         Show-UrgentReviewScreen -ChatId 100 -MessageId 77 | Should -BeTrue
         $script:UrgentUxPayload.Method | Should -Be 'editMessageText'
+    }
+
+    It 'shows a Telegram-safe summary and filters without changing the saved order' {
+        $before = @($script:UrgentBoard.Items | ForEach-Object { $_.Id })
+        $script:UrgentBoard.Items[0].Enabled = $false
+        Set-UrgentBoardFilter -ChatId 100 -Filter ready | Should -BeTrue
+        $script:RichMessagesUnavailable = $true
+        Show-UrgentBoardScreen -ChatId 100 -MessageId 77
+
+        $script:UrgentUxPayload.Text | Should -Match 'الإجمالي 12'
+        $script:UrgentUxPayload.Text | Should -Match 'التصفية: ready'
+        $script:UrgentUxPayload.Text | Should -Not -Match 'خبر 1'
+        $buttons = @($script:UrgentUxPayload.ReplyMarkup.inline_keyboard | ForEach-Object { $_ })
+        $buttons.callback_data | Should -Contain 'urgentb:filter:latest'
+        foreach ($button in $buttons) {
+            [System.Text.Encoding]::UTF8.GetByteCount([string]$button.callback_data) | Should -BeLessOrEqual 64
+        }
+        @($script:UrgentBoard.Items | ForEach-Object { $_.Id }) | Should -Be $before
         $script:UrgentUxPayload.MessageId | Should -Be 77
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+    }
+
+    It 'sorts malformed update timestamps last in the latest filter' {
+        $script:UrgentBoard.Items[0].UpdatedAt = 'not-a-timestamp'
+        $script:UrgentBoard.Items[1].UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')
+        Set-UrgentBoardFilter -ChatId 100 -Filter latest | Should -BeTrue
+
+        $latest = @(Get-UrgentVisibleItems -ChatId 100)
+        $latest[0].Id | Should -Be $script:UrgentBoard.Items[1].Id
+        @($latest).Count | Should -Be 12
     }
 
     It 'opens a numbered detail with short actions and a return to its board page' {

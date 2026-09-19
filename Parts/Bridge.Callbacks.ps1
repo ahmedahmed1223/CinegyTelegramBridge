@@ -493,6 +493,12 @@ function Invoke-CallbackQuery {
         }
         'urgentb:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         'urgentb:noop' { break }
+        'urgentb:filter:*' {
+            if (Set-UrgentBoardFilter -ChatId $chatId -Filter (Get-CallbackArg $data 'urgentb:filter:')) {
+                Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
         'urgentb:page:*' {
             Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'urgentb:page:'))
             break
@@ -505,7 +511,7 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:all:*' {
-            Set-UrgentSelectedIds -ChatId $chatId -Ids @(@(Get-UrgentPlayableItems -Board $script:UrgentBoard) | ForEach-Object { [string](Get-UrgentProperty $_ 'Id' '') })
+            Set-UrgentSelectedIds -ChatId $chatId -Ids @(@(Get-UrgentVisibleItems -ChatId $chatId) | Where-Object { [bool](Get-UrgentProperty $_ 'Enabled' $true) } | ForEach-Object { [string](Get-UrgentProperty $_ 'Id' '') })
             Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'urgentb:all:'))
             break
         }
@@ -587,6 +593,21 @@ function Invoke-CallbackQuery {
         'urgentb:pause' { Suspend-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         'urgentb:resume' { Resume-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         'urgentb:skip' { Move-UrgentBoardNext -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        'urgentb:next' {
+            $ready = @(Get-UrgentVisibleItems -ChatId $chatId | Where-Object { [bool](Get-UrgentProperty $_ 'Enabled' $true) -and -not (Test-UrgentItemOnAir -Item $_) })
+            if ($ready.Count -eq 0) { Send-TelegramMessage -ChatId $chatId -Text 'ℹ️ لا يوجد عاجل جاهز للتشغيل.' }
+            else {
+                Set-UrgentSelectedIds -ChatId $chatId -Ids @([string](Get-JsonProp $ready[0] 'Id'))
+                Start-UrgentBoardRun -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null
+            }
+            break
+        }
+        'urgentb:hide' {
+            if (-not (Stop-UrgentCurrentAir -ChatId $chatId -UserId $userId)) {
+                Send-TelegramMessage -ChatId $chatId -Text 'ℹ️ لا يوجد تشغيل جدول يمكن إيقافه الآن.'
+            }
+            break
+        }
         'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
         'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }

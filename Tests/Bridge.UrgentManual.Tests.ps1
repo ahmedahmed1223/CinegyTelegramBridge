@@ -156,6 +156,18 @@ Describe 'Full urgent reader and manual single story' {
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument (Get-CallbackArg $button 'urgmanual:') | Should -BeFalse
         Should -Invoke Invoke-HideLayer -Times 0 -Exactly
     }
+    It 'stops a manually displayed story from the urgent board control' {
+        Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
+        Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
+        $id = $script:UrgentBoard.Items[0].Id
+        Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
+        Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
+
+        Stop-UrgentCurrentAir -ChatId 100 -UserId 101 | Should -BeTrue
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+        $script:UrgentManualLive.Count | Should -Be 0
+    }
     It 'keeps the live hide button after canceled replacement and expired unrelated editing' {
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }

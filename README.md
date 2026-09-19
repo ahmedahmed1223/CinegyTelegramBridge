@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.4
+
+**Urgent-board reliability:**
+- Stopping the current urgent now works for both automated board runs and manually displayed urgent stories.
+- Latest-first filtering safely handles legacy or malformed update timestamps instead of breaking the screen.
+
+## Version 8.49.3
+
+**Urgent-board operations:**
+- Operators get a state summary, per-chat filters, relative update times, and an “latest first” view.
+- The board exposes safe “play next ready” and “stop current” controls; state labels remain meaningful when Telegram clients ignore button styles.
+
 ## Version 8.49.2
 
 **Urgent-board visual states:**

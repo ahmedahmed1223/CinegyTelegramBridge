@@ -672,6 +672,7 @@ Describe 'Editing the board from its buttons' {
     It 'keeps an old delete keyboard attached to its story after a move' {
         $id = [string]$script:UrgentBoard.Items[0].Id
         $keyboard = Get-UrgentItemKeyboard -Position 0
+        @($keyboard.inline_keyboard | ForEach-Object { $_ } | Where-Object { $_.callback_data -eq "urgsingle:$id" }).Count | Should -Be 1
         $action = @($keyboard.inline_keyboard | ForEach-Object { $_ } | Where-Object { $_.callback_data -like 'urgentb:itemdel:*' })[0].callback_data
         $script:UrgentBoard = (Move-UrgentItem -Board $script:UrgentBoard -ItemId $id -Delta 1).Value
         Invoke-TestUrgentNumberCallback $action

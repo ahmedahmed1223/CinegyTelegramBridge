@@ -13,6 +13,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.1
+
+**Startup status and clearer on-air controls:**
+- Startup connection indicators show ⏳ until the first Telegram/Cinegy check completes, instead of reporting a premature failure.
+- The repeat-last-show button now appears once in the on-air tools row, rather than being duplicated beside every live layer.
+- Urgent-board item screens now include a direct "Play on air" action that still opens the existing confirmation and authorization checks.
+
 ## Version 8.49.0
 
 **Custom duration, quick timer adjust, countdown in reminders:**

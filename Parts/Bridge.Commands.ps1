@@ -298,6 +298,10 @@ function Complete-TemplateMaxAirCustom {
     if ($trimmed -match '^(\d{1,3}):(\d{1,2})$') {
         $minutes = [int]$Matches[1]
         $secs = [int]$Matches[2]
+        if ($secs -gt 59) {
+            Send-TelegramMessage -ChatId $ChatId -Text "⚠️ صيغة غير صالحة. الثواني يجب أن تكون من 0 إلى 59." -ReplyMarkup (Get-SettingsKeyboard)
+            return
+        }
         $seconds = ($minutes * 60) + $secs
     }
     elseif ($trimmed -match '^\d{1,4}$') {

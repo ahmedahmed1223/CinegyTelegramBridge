@@ -642,7 +642,6 @@ function Update-TemplateReminderQueue {
                 }
             }
         }
-        $elapsed = [int](($Now - [datetimeoffset]::Now.AddMinutes(-$item.Minutes)).TotalMinutes)
         $reminderText = "⏰ تنبيه: مرّ $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا.$remainingText"
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += "`n📝 النص: $onAirCopy"
@@ -2377,4 +2376,3 @@ function Get-EffectivePollTimeout {
     $base = [Math]::Min($base, (Get-CinegyStateCheckInterval))
     return [Math]::Min($base, (Get-SettingInt 'CinegyHealthCheckSeconds' 1))
 }
-

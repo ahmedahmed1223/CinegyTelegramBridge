@@ -100,16 +100,15 @@ function Get-MainMenuKeyboard {
                 }
                 $liveRow += (New-Button $timerLabel "timer:$layer")
             }
-            # Quick re-show last hidden template
-            if ($script:LastShow.ContainsKey($ChatId)) {
-                $lastKey = [string](Get-JsonProp $script:LastShow[$ChatId] 'Key')
-                $liveRow += (New-Button "↩️ إعادة عرض $lastKey" "menu:repeat")
-            }
             $rows += , $liveRow
         }
         # A frame from the actual output, next to what the bridge believes is
         # on air - so the operator can check the claim without leaving the chat.
         $onAirTools = @()
+        if ($script:LastShow.ContainsKey($ChatId)) {
+            $lastKey = [string](Get-JsonProp $script:LastShow[$ChatId] 'Key')
+            $onAirTools += (New-Button "↩️ إعادة عرض $lastKey" "menu:repeat")
+        }
         if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger) }
         if (Get-Setting 'EnableSnapshot') { $onAirTools += (New-Button "📷 لقطة الآن" "menu:snapshot") }
         $onAirTools += (New-Button "📋 نسخ الحالة" "menu:sharestatus")
@@ -198,7 +197,9 @@ function Get-MainMenuKeyboard {
     if ((Get-Setting 'EnableHideAll') -and $script:OnAir.Count -eq 0) {
         $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger)
     }
-    if ($script:LastShow.ContainsKey($ChatId)) { $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat") }
+    if ($script:OnAir.Count -eq 0 -and $script:LastShow.ContainsKey($ChatId)) {
+        $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat")
+    }
     if ($thirdRow.Count -gt 0) { $rows += , $thirdRow }
 
     $fourthRow = @( (New-Button "✏️ تحديث نص" "menu:update") )

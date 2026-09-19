@@ -582,6 +582,7 @@ function Get-UrgentItemKeyboard {
     $defaults = Get-UrgentBoardDefaults
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $itemId = [string](Get-UrgentProperty $item 'Id' '')
+    $rows += , @( (New-Button '🚨 تشغيل على الهواء' "urgsingle:$itemId" -Style success) )
     $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId"), (New-Button '🏷 العنوان' "urgentb:title:$itemId") )
     $modeRow = @( (New-Button '🎬 نمط العرض' "urgentb:mode:$itemId") )
     if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$itemId") }

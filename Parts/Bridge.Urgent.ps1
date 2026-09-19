@@ -490,10 +490,14 @@ function Get-UrgentBoardKeyboard {
             $rows += , @((New-Button "$stateMark $tick $($index + 1). $label · $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt'))" "urgentb:pick:$id" -Style $rowStyle))
 
             # Action buttons below: read + settings
-            $rows += , @(
-                (New-Button "👁 قراءة" "urgread:${id}:0" -Style primary)
-                (New-Button "⚙️ إجراءات" "urgentb:item:$id" -Style primary)
+            $actionRow = @(
+                (New-Button "👁 قراءة" "urgread:${id}:0")
+                (New-Button "⚙️ إجراءات" "urgentb:item:$id")
             )
+            if ($selected -contains $id -and -not $onAir -and $enabled) {
+                $actionRow += (New-Button '🚨 تشغيل على الهواء' "urgsingle:$id" -Style success)
+            }
+            $rows += , $actionRow
             if ($onAir) {
                 $rows += , @((New-Button '⏹ إيقاف العاجل الحالي' 'urgentb:hide' -Style danger))
             }

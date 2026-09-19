@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.6
+
+**Urgent-board action buttons:**
+- Read and action controls use Telegram's default neutral appearance again.
+- Selecting an enabled story exposes a direct “Play on air” action.
+
 ## Version 8.49.5
 
 **Clearer urgent-board filtering:**

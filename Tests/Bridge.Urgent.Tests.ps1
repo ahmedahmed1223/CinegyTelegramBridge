@@ -680,7 +680,7 @@ Describe 'Editing the board from its buttons' {
         $script:UrgentBoard.Items[0].Text | Should -Be 'عاجل 2'
     }
 
-    It 'marks selected and disabled stories and styles their safe actions' {
+    It 'marks selected and disabled stories and offers selected stories for on-air playback' {
         $id = [string]$script:UrgentBoard.Items[0].Id
         $script:UrgentBoard.Items[1].Enabled = $false
         Set-UrgentSelectedIds -ChatId 100 -Ids @($id)
@@ -689,8 +689,11 @@ Describe 'Editing the board from its buttons' {
 
         $json | Should -Match '✅ ☑ 1\.'
         $json | Should -Match '⛔ ☐ 2\.'
-        $json | Should -Match '"text": "👁 قراءة"[\s\S]*?"style": "primary"'
-        $json | Should -Match '"text": "⚙️ إجراءات"[\s\S]*?"style": "primary"'
+        $json | Should -Match '"text": "👁 قراءة"[\s\S]*?"callback_data": "urgread:'
+        $json | Should -Match '"text": "⚙️ إجراءات"[\s\S]*?"callback_data": "urgentb:item:'
+        $json | Should -Match '"text": "🚨 تشغيل على الهواء"[\s\S]*?"callback_data": "urgsingle:'
+        $json | Should -Not -Match '"text": "👁 قراءة"[\s\S]*?"style": "primary"'
+        $json | Should -Not -Match '"text": "⚙️ إجراءات"[\s\S]*?"style": "primary"'
     }
 
     It 'reports a failed default save and restores the previous value' {

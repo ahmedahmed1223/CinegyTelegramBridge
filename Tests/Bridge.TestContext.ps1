@@ -24,13 +24,13 @@ BeforeAll {
 
     function New-TempTemplateFile {
         <# Unique name per call: Get-TemplateStore caches on path + write time,
-           so a fresh path guarantees a fresh parse. The file is created next
-           to the script because the registry path is resolved relative to it. #>
+           so a fresh path guarantees a fresh parse. Keep it in Pester's
+           TestDrive so repeated test runs never leave registries in the repo. #>
         param([Parameter(Mandatory)][string]$Json)
         $name = "templates.test-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
-        $full = Join-Path $script:Root $name
+        $full = Join-Path $TestDrive $name
         Set-Content -Path $full -Value $Json -Encoding utf8
-        $config.TemplateRegistryPath = $name
+        $config.TemplateRegistryPath = $full
         return $full
     }
 
@@ -68,4 +68,3 @@ BeforeAll {
     $script:MaterialScheduleCache = @()
     $script:MaterialScheduleCacheAt = [datetimeoffset]::Now
 }
-

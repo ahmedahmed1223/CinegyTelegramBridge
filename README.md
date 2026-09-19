@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.2
+
+**Urgent-board visual states:**
+- Each urgent item now shows a clear state marker for disabled, on-air, selected, or ready items.
+- Read and action buttons use a consistent primary style, while destructive and on-air actions retain distinct emphasis.
+
 ## Version 8.49.1
 
 **Startup status and clearer on-air controls:**

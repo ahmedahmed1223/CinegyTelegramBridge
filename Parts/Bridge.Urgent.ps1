@@ -365,14 +365,22 @@ function Get-UrgentBoardKeyboard {
             $text = [string](Get-UrgentProperty $item 'Text' '')
             $label = if ($text.Length -gt 30) { $text.Substring(0, 29) + '…' } else { $text }
             $enabled = [bool](Get-UrgentProperty $item 'Enabled')
+            $template = Get-UrgentTemplate
+            $onAir = $false
+            if ($template -and $script:OnAir.ContainsKey([int]$template.Layer)) {
+                $live = $script:OnAir[[int]$template.Layer]
+                $onAir = [string](Get-JsonProp $live 'Key') -ieq [string](Get-JsonProp $template 'Key')
+            }
+            $stateMark = if (-not $enabled) { '⛔' } elseif ($onAir) { '🔴' } elseif ($selected -contains $id) { '✅' } else { '🟢' }
 
             # Story text on its own row (full-width, Mojaz style)
-            $rows += , @((New-Button "$tick $($index + 1). $label$(if(-not $enabled){' ⛔'})" "urgentb:pick:$id"))
+            $rowStyle = if (-not $enabled) { 'danger' } elseif ($selected -contains $id) { 'primary' } else { $null }
+            $rows += , @((New-Button "$stateMark $tick $($index + 1). $label" "urgentb:pick:$id" -Style $rowStyle))
 
             # Action buttons below: read + settings
             $rows += , @(
-                (New-Button "👁 قراءة" "urgread:${id}:0")
-                (New-Button "⚙️ إجراءات" "urgentb:item:$id")
+                (New-Button "👁 قراءة" "urgread:${id}:0" -Style primary)
+                (New-Button "⚙️ إجراءات" "urgentb:item:$id" -Style primary)
             )
         }
     }

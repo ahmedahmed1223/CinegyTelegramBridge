@@ -13,6 +13,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.47.2
+
+**Layer status indicator:** The Layers button now shows a 🟢 (empty) or 🔴 (busy) indicator based on whether any template is currently on air.
+
 ## Version 8.47.0
 
 **On-air screen text column, setting-change guard, and startup on-air notice:**

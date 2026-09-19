@@ -136,7 +136,8 @@ function Get-MainMenuKeyboard {
     # Layers are the raw controls - hide, exit, push to a bare layer number -
     # and a newsroom may want them kept to whoever owns the rundown.
     if (Test-LayersScreenAccess -ChatId $ChatId -UserId $UserId) {
-        $templateRow += (New-Button "🎚 الطبقات" "menu:layers")
+        $layerStatus = if ($script:OnAir.Count -gt 0) { '🔴' } else { '🟢' }
+        $templateRow += (New-Button "🎚 الطبقات $layerStatus" "menu:layers")
     }
     $rows += , $templateRow
     # Paired rather than stacked, and paired by meaning rather than to save

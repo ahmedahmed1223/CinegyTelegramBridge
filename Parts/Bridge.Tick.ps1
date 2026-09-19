@@ -2193,11 +2193,13 @@ function Set-TelegramConnectionState {
 
 function Send-BridgeStartupNotification {
     $airCount = $script:OnAir.Count
-    $startupLines = @("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion", "Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
+    $startupLines = [System.Collections.Generic.List[string]]::new()
+    $startupLines.Add("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion")
+    $startupLines.Add("Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
     if ($airCount -gt 0) {
         $startupLines.Add("")
         $startupLines.Add("📡 يوجد $airCount مشهدًا لا يزال على الهواء من التشغيل السابق:")
-        foreach ($scene in $script:OnAir.Values) {
+        foreach ($scene in @($script:OnAir.Values)) {
             $key = [string](Get-JsonProp $scene 'Key')
             $layer = [string](Get-JsonProp $scene 'Layer')
             $airCopy = [string](Get-JsonProp $scene 'AirCopy')

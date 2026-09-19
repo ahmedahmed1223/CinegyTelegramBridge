@@ -2213,15 +2213,15 @@ function Send-BridgeStartupNotification {
     $startupLines = [System.Collections.Generic.List[string]]::new()
     $startupLines.Add("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion")
     $startupLines.Add("Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
-    # Connection status at startup — inline check so it works in Pester mocks too
+    # Connection status — show ⏳ if not yet checked, ✅/❌ after first poll
     $tgState = if ($null -ne $script:RuntimeState -and $null -ne $script:RuntimeState.Monitoring) {
         [string]$script:RuntimeState.Monitoring.TelegramConnectionState
-    } else { '' }
+    } else { 'unknown' }
     $cgState = if ($null -ne $script:RuntimeState -and $null -ne $script:RuntimeState.Monitoring) {
         [string]$script:RuntimeState.Monitoring.CinegyHealthState
-    } else { '' }
-    $tgStatus = if ($tgState -eq 'connected') { '✅' } else { '❌' }
-    $cgStatus = if ($cgState -eq 'healthy') { '✅' } else { '❌' }
+    } else { 'unknown' }
+    $tgStatus = if ($tgState -eq 'connected') { '✅' } elseif ($tgState -in @('', 'unknown')) { '⏳' } else { '❌' }
+    $cgStatus = if ($cgState -eq 'healthy') { '✅' } elseif ($cgState -in @('', 'unknown')) { '⏳' } else { '❌' }
     $startupLines.Add("Telegram: $tgStatus | Cinegy: $cgStatus")
     if ($airCount -gt 0) {
         $startupLines.Add("")

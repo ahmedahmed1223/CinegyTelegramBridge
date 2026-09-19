@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.48.0'
+$script:BridgeVersion = '8.49.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -2110,6 +2110,8 @@ try {
                                 'stream_url' { Complete-StreamUrl -ChatId $chatId -Value $text | Out-Null }
                                 'setting_value' { Complete-SettingValue -ChatId $chatId -Value $text | Out-Null }
                                 'setting_text' { Complete-SettingText -ChatId $chatId -Value $text | Out-Null }
+                                'template_max_air_custom' { Complete-TemplateMaxAirCustom -ChatId $chatId -Value $text | Out-Null }
+                                'template_reminder_minutes' { Complete-TemplateReminderMinutes -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'settings_search' { Complete-SettingsSearch -ChatId $chatId -Value $text | Out-Null }
                                 'mojaz_row_image' { Complete-MojazRowImage -ChatId $chatId -Value $text }
                                 'mojaz_row_title' { Complete-MojazRowTitle -ChatId $chatId -Value $text }

@@ -2084,6 +2084,20 @@ function Invoke-CallbackQuery {
             }
             break
         }
+        'timeradd:*' {
+            $parts = $data -split ':'
+            $layer = [int]$parts[1]
+            $adjustSeconds = [int]$parts[2]
+            $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq $layer })
+            if ($pending.Count -gt 0) {
+                $currentRemaining = [int](($pending[0].At - (Get-Date)).TotalSeconds)
+                $newSeconds = [math]::Max(5, $currentRemaining + $adjustSeconds)
+                Set-LayerAutoHide -Layer $layer -Seconds $newSeconds -ChatId $chatId -UserId $userId
+            } else {
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ لا يوجد مؤقت نشط للطبقة $layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+            }
+            break
+        }
         'tpl:*' {
             $idx = [int]((Get-CallbackArg $data 'tpl:'))
             Start-ShowFlow -TemplateIndex $idx -ChatId $chatId -UserId $userId

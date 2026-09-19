@@ -283,6 +283,56 @@ function Complete-SettingValue {
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $previous -To $parsed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
+function Complete-TemplateMaxAirCustom {
+    param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "")
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state) { return }
+    Clear-PendingState -ChatId $ChatId
+    $trimmed = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+        return
+    }
+    # Parse duration: "2:30" = 2 min 30 sec, "90" = 90 sec
+    $seconds = 0
+    if ($trimmed -match '^(\d{1,3}):(\d{1,2})$') {
+        $minutes = [int]$Matches[1]
+        $secs = [int]$Matches[2]
+        $seconds = ($minutes * 60) + $secs
+    }
+    elseif ($trimmed -match '^\d{1,4}$') {
+        $seconds = [int]$trimmed
+    }
+    else {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ صيغة غير صالحة. استخدم «دقائق:ثوانٍ» مثل 2:30 أو ثوانٍ فقط مثل 90." -ReplyMarkup (Get-SettingsKeyboard)
+        return
+    }
+    if ($seconds -lt 1 -or $seconds -gt 3600) {
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ المدى 1–3600 ثانية (حتى ساعة)." -ReplyMarkup (Get-SettingsKeyboard)
+        return
+    }
+    $previous = Get-Setting 'TemplateMaxAirSeconds'
+    $map = @{}
+    if ($previous) { $map = ($previous | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable) }
+    $key = [string](Get-JsonProp $state 'Key')
+    $map[$key] = $seconds
+    $script:LastConfigSaveFailed = $false
+    Set-Setting -Name TemplateMaxAirSeconds -Value $map
+    if ($script:LastConfigSaveFailed) {
+        Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
+        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ تعذّر حفظ الحد؛ بقيت القاعدة السابقة." -ReplyMarkup (Get-SettingsKeyboard)
+        return
+    }
+    $state.ConfirmDisable = $false
+    $friendly = if ($seconds -ge 60) {
+        $m = [math]::Floor($seconds / 60)
+        $s = $seconds % 60
+        if ($s -eq 0) { "$m دقيقة" } else { "$m دقيقة و$s ثانية" }
+    } else { "$seconds ثانية" }
+    Write-BridgeLog "Template maximum on-air policy updated by $($state.UserId) to $seconds seconds (custom input)."
+    Send-TelegramMessage -ChatId $ChatId -Text "✅ تم ضبط الحد الأقصى لـ '$key' على $friendly." -ReplyMarkup (Get-SettingsKeyboard)
+}
+
 function Reset-SettingsToDefault {
     <#
         Asks first, because this is the one button that rewrites every

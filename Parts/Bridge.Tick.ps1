@@ -631,10 +631,19 @@ function Update-TemplateReminderQueue {
         $reminderId = [string](Get-JsonProp $item 'ReminderId')
         if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); $item.ReminderId = $reminderId }
         $onAirCopy = ''
+        $remainingText = ''
         if ($script:OnAir.ContainsKey([int]$item.Layer)) {
             $onAirCopy = [string](Get-JsonProp $script:OnAir[[int]$item.Layer] 'AirCopy')
+            $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$item.Layer })
+            if ($pending.Count -gt 0) {
+                $remainingSec = [int](($pending[0].At - (Get-Date)).TotalSeconds)
+                if ($remainingSec -gt 0) {
+                    $remainingText = "`n⏱ يتبقى $(Get-ArabicCountNoun -Count $remainingSec -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')"
+                }
+            }
         }
-        $reminderText = "⏰ تنبيه: مرّت $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا."
+        $elapsed = [int](($Now - [datetimeoffset]::Now.AddMinutes(-$item.Minutes)).TotalMinutes)
+        $reminderText = "⏰ تنبيه: مرّ $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا.$remainingText"
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += "`n📝 النص: $onAirCopy"
         }
@@ -2204,9 +2213,15 @@ function Send-BridgeStartupNotification {
     $startupLines = [System.Collections.Generic.List[string]]::new()
     $startupLines.Add("🟢 بدأ تشغيل Cinegy Telegram Bridge v$script:BridgeVersion")
     $startupLines.Add("Air: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)")
-    # Connection status at startup — so admins know immediately if something is wrong
-    $tgStatus = if (Test-TelegramReady) { "✅" } else { "❌" }
-    $cgStatus = if (Test-CinegyReady) { "✅" } else { "❌" }
+    # Connection status at startup — inline check so it works in Pester mocks too
+    $tgState = if ($null -ne $script:RuntimeState -and $null -ne $script:RuntimeState.Monitoring) {
+        [string]$script:RuntimeState.Monitoring.TelegramConnectionState
+    } else { '' }
+    $cgState = if ($null -ne $script:RuntimeState -and $null -ne $script:RuntimeState.Monitoring) {
+        [string]$script:RuntimeState.Monitoring.CinegyHealthState
+    } else { '' }
+    $tgStatus = if ($tgState -eq 'connected') { '✅' } else { '❌' }
+    $cgStatus = if ($cgState -eq 'healthy') { '✅' } else { '❌' }
     $startupLines.Add("Telegram: $tgStatus | Cinegy: $cgStatus")
     if ($airCount -gt 0) {
         $startupLines.Add("")

@@ -1358,8 +1358,14 @@ function Get-AfterShowKeyboard {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     $first = @( (New-Button "🙈 إخفاء هذا (طبقة $Layer)" "hide:$Layer" -Style danger), (New-Button "🚪 خروج" "exit:$Layer" -Style danger) )
-    if (Get-Setting 'EnableTimedShow') { $first += (New-Button "⏱ مؤقت" "timer:$Layer") }
-    $rows = @( , $first )
+    # Quick timer adjustment buttons: +30s, +1m, -30s, -1m
+    $timerAdjust = @(
+        (New-Button "⏱ +30ث" "timeradd:${Layer}:30"),
+        (New-Button "⏱ +1د" "timeradd:${Layer}:60"),
+        (New-Button "⏱ -30ث" "timeradd:${Layer}:-30"),
+        (New-Button "⏱ -1د" "timeradd:${Layer}:-60")
+    )
+    $rows = @( , $first, $timerAdjust )
     if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ تراجع آمن' "rollback:$Layer")) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard = $rows }
@@ -2454,6 +2460,7 @@ function Show-TemplateMaxAirEditor {
         $rows += , @((New-Button '3 دقائق' "${prefix}:set:180"), (New-Button '5 دقائق' "${prefix}:set:300"), (New-Button '10 دقائق' "${prefix}:set:600"))
         $rows += , @((New-Button '−10 ث' "${prefix}:delta:-10"), (New-Button '+10 ث' "${prefix}:delta:10"))
         $rows += , @((New-Button '−1 ث' "${prefix}:delta:-1"), (New-Button '+1 ث' "${prefix}:delta:1"))
+        $rows += , @((New-Button '⌨️ مقدار مخصص' "${prefix}:custom:ask"))
         if ($state.ConfirmDisable) {
             $text += "`n⚠️ تأكيد إزالة الحد الخاص؟ تبقى مؤقتات العروض الحالية كما هي."
             $rows += , @((New-Button 'نعم، إزالة الحد' "${prefix}:disable:yes" -Style danger))
@@ -2461,6 +2468,7 @@ function Show-TemplateMaxAirEditor {
         else { $rows += , @((New-Button 'إزالة الحد…' "${prefix}:disable:ask")) }
         $rows += , @((New-Button '⬅️ القوالب' "${prefix}:page:0"), (New-Button '⚖️ طبّق الآن' "${prefix}:now:yes"))
         $text += "`n⚖️ «طبّق الآن» يقصّر بقاء العرض الحالي إلى الحد إذا كان أطول منه؛ لا يطيل ولا يخفي فورًا."
+        $text += "`n⌨️ «مقدار مخصص» لكتابة Duration مثل 2:30 أو 90."
     }
     $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
     $keyboard = @{ inline_keyboard = $rows }
@@ -2502,6 +2510,13 @@ function Invoke-TemplateMaxAirPick {
                 Send-TelegramMessage -ChatId $ChatId -Text "⚖️ قُصِّر بقاء العرض الحالي لقالب $key إلى الحد المضبوط."
             }
             else { Send-TelegramMessage -ChatId $ChatId -Text 'لا عرض حالي لهذا القالب أطول من الحد، أو لا مؤقّت له.' }
+        }
+        elseif ($action -eq 'custom') {
+            if ($value -eq 'ask') {
+                Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_max_air_custom'; UserId = $UserId; Key = $key; StartedAt = (Get-Date) }
+                Send-TelegramMessage -ChatId $ChatId -Text "⌨️ أرسل المدة بـ«دقائق:ثوانٍ» (مثل 2:30) أو ثوانٍ فقط (مثل 90).`nللإلغاء: /الغاء"
+            }
+            return $false
         }
         elseif ($action -eq 'disable' -and $value -eq 'ask') { $state.ConfirmDisable = $true }
         else {

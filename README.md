@@ -13,6 +13,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.0
+
+**Custom duration, quick timer adjust, countdown in reminders:**
+- "Custom amount" button in template max-air editor accepts free-form duration like "2:30" or "90"
+- Quick +30s, +1m, -30s, -1m buttons in after-show keyboard for timer adjustment without leaving the screen
+- Personal on-air reminder now shows remaining time before auto-hide
+- Repeat-last-show button only appears when there's actually a previous show
+
 ## Version 8.48.0
 
 **Startup connection status, repeat-last-show button:**

@@ -13,6 +13,11 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.5
+
+**Clearer urgent-board filtering:**
+- The filter controls now have a dedicated visual heading, separating them from the status summary and playback controls.
+
 ## Version 8.49.4
 
 **Urgent-board reliability:**

@@ -158,6 +158,18 @@ Describe 'Urgent board rendered operator screens' {
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
     }
 
+    It 'separates the urgent filter controls from the status summary' {
+        $keyboard = Get-UrgentBoardKeyboard -ChatId 100
+        $rows = @($keyboard.inline_keyboard)
+        $summaryIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -like '📊 *' })[0]))
+        $filterHeadingIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -eq '🔎 قسم التصفية' })[0]))
+
+        $summaryIndex | Should -Be 0
+        $filterHeadingIndex | Should -Be 1
+        $rows[$filterHeadingIndex][0].callback_data | Should -Be 'urgentb:noop'
+        $rows[$filterHeadingIndex + 1][0].callback_data | Should -Be 'urgentb:filter:all'
+    }
+
     It 'sorts malformed update timestamps last in the latest filter' {
         $script:UrgentBoard.Items[0].UpdatedAt = 'not-a-timestamp'
         $script:UrgentBoard.Items[1].UpdatedAt = (Get-Date).ToUniversalTime().ToString('o')

@@ -450,6 +450,7 @@ function Get-UrgentBoardKeyboard {
         'ready' { 'الجاهز' }; 'selected' { 'المحدد' }; 'air' { 'على الهواء' };         'disabled' { 'المعطّل' }; 'latest' { 'الأحدث' }; default { 'الكل' }
     }
     $rows += , @((New-Button "📊 $filterLabel — $([string](Get-UrgentBoardSummary -ChatId $ChatId))" 'urgentb:noop'))
+    $rows += , @((New-Button '🔎 قسم التصفية' 'urgentb:noop'))
     $rows += , @(
         (New-Button 'الكل' 'urgentb:filter:all' -Style $(if ($filter -eq 'all') { 'primary' } else { '' }))
         (New-Button '🟢 جاهز' 'urgentb:filter:ready' -Style $(if ($filter -eq 'ready') { 'primary' } else { '' }))

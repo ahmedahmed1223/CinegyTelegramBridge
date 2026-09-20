@@ -875,7 +875,14 @@ Describe 'Button colour policy' {
     It 'colours the act that takes a template off air, not the menu that opens it' {
         $script:OnAir[7] = @{ Key = 'urgent'; Values = @{}; ShownAt = (Get-Date) }
         try {
-            $json = (Get-AfterShowKeyboard -Layer 7 -ChatId 101 -UserId 101 | ConvertTo-Json -Depth 10)
+            $keyboard = Get-AfterShowKeyboard -Layer 7 -ChatId 101 -UserId 101
+            foreach ($row in @($keyboard.inline_keyboard)) {
+                @($row).Count | Should -BeGreaterThan 0
+                foreach ($button in @($row)) {
+                    $button | Should -BeOfType [hashtable]
+                }
+            }
+            $json = ($keyboard | ConvertTo-Json -Depth 10)
             $json | Should -Match '"callback_data": "hide:7"[\s\S]*?"style": "danger"'
             $json | Should -Match '"callback_data": "exit:7"[\s\S]*?"style": "danger"'
         }

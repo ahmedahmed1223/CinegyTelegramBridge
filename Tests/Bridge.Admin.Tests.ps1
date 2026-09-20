@@ -949,6 +949,22 @@ Describe 'Usage digest' {
         ConvertFrom-TelegramHtmlText (Get-UsageDigestText) | Should -Match '8 عمليات'
     }
 
+    It 'separates changed settings into a readable escaped list' {
+        Mock Get-TemplateStore { [pscustomobject]@{ Map = @{} } }
+        $name = 'EnableAnnouncements'
+        $oldValue = Get-JsonProp $config.Settings $name
+        try {
+            Set-JsonProp $config.Settings $name (-not [bool]$oldValue)
+            $text = Get-UsageDigestText
+        }
+        finally {
+            Set-JsonProp $config.Settings $name $oldValue
+        }
+        $text | Should -Match '<b>إعدادات معدّلة عن الافتراضي</b>'
+        $text | Should -Match '<blockquote>• <code>'
+        $text | Should -Not -Match 'إعدادات معدّلة عن الافتراضي: .*<code>.*<code>'
+    }
+
     It 'names an expired access request in Arabic, never by its state key' {
         Get-AbandonedDraftLabel -State @{ Mode = 'access_request_name' } | Should -Be 'طلب صلاحية'
         Get-AbandonedDraftLabel -State @{ Mode = 'some_future_flow' } | Should -Be 'غير مصنّف'

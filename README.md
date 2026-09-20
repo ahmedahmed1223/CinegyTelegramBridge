@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.7
+
+**Clearer status and stable post-air controls:**
+- Changed settings in the usage digest are rendered as a readable escaped list instead of one long line.
+- The post-air keyboard now builds each row explicitly, preventing malformed nested rows and Telegram keyboard repair warnings.
+
 ## Version 8.49.6
 
 **Urgent-board action buttons:**

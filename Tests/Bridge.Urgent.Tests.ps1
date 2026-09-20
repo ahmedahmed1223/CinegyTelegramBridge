@@ -685,13 +685,15 @@ Describe 'Editing the board from its buttons' {
         $script:UrgentBoard.Items[1].Enabled = $false
         Set-UrgentSelectedIds -ChatId 100 -Ids @($id)
 
-        $json = Get-UrgentBoardKeyboard -ChatId 100 | ConvertTo-Json -Depth 10
+        $keyboard = Get-UrgentBoardKeyboard -ChatId 100
+        $json = $keyboard | ConvertTo-Json -Depth 10
 
         $json | Should -Match '✅ ☑ 1\.'
         $json | Should -Match '⛔ ☐ 2\.'
-        $json | Should -Match '"text": "👁 قراءة"[\s\S]*?"callback_data": "urgread:'
-        $json | Should -Match '"text": "⚙️ إجراءات"[\s\S]*?"callback_data": "urgentb:item:'
-        $json | Should -Match '"text": "🚨 تشغيل على الهواء"[\s\S]*?"callback_data": "urgsingle:'
+        $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
+        @($buttons | Where-Object { $_.callback_data -like 'urgread:*' -and $_.text -eq '👁 قراءة' }).Count | Should -BeGreaterThan 0
+        @($buttons | Where-Object { $_.callback_data -like 'urgentb:item:*' -and $_.text -eq '⚙️ إجراءات' }).Count | Should -BeGreaterThan 0
+        @($buttons | Where-Object { $_.callback_data -like 'urgsingle:*' -and $_.text -eq '🚨 تشغيل على الهواء' }).Count | Should -BeGreaterThan 0
         $json | Should -Not -Match '"text": "👁 قراءة"[\s\S]*?"style": "primary"'
         $json | Should -Not -Match '"text": "⚙️ إجراءات"[\s\S]*?"style": "primary"'
     }

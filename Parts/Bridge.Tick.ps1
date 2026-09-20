@@ -1535,8 +1535,18 @@ function Get-WeeklyNoticesText {
         $changed = @($foundChanged | Select-Object -First 10)
         $tail = Format-CappedTail -Total @($foundChanged).Count -Shown @($changed).Count
         if ($changed.Count -gt 0) {
-            $safe = if ($AsPlain) { @($changed) } else { @($changed | ForEach-Object { "<code>$(ConvertTo-TelegramHtmlText ([string]$_))</code>" }) }
-            $found.Add("⚙️ إعدادات معدّلة عن الافتراضي: $($safe -join ' ')$tail")
+            $safe = if ($AsPlain) {
+                @($changed | ForEach-Object { "• $($_)" })
+            }
+            else {
+                @($changed | ForEach-Object { "• <code>$(ConvertTo-TelegramHtmlText ([string]$_))</code>" })
+            }
+            if ($AsPlain) {
+                $found.Add("⚙️ إعدادات معدّلة عن الافتراضي:`n$($safe -join "`n")$(if ($tail) { "`n• $tail" })")
+            }
+            else {
+                $found.Add("⚙️ <b>إعدادات معدّلة عن الافتراضي</b>`n<blockquote>$($safe -join "`n")$(if ($tail) { "`n• $tail" })</blockquote>")
+            }
         }
     }
     catch { Write-BridgeLog "Weekly notices: changed-settings signal failed: $($_.Exception.Message)" }

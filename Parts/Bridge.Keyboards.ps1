@@ -1366,7 +1366,12 @@ function Get-AfterShowKeyboard {
         (New-Button "⏱ -30ث" "timeradd:${Layer}:-30"),
         (New-Button "⏱ -1د" "timeradd:${Layer}:-60")
     )
-    $rows = @( , $first, $timerAdjust )
+    # Keep each button collection as one keyboard row. A comma inside the
+    # array literal lets PowerShell unwrap the collections and produces the
+    # malformed Object[] row that the Telegram repair guard has been reporting.
+    $rows = @()
+    $rows += , $first
+    $rows += , $timerAdjust
     if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ تراجع آمن' "rollback:$Layer")) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard = $rows }

@@ -168,6 +168,13 @@ Describe 'Urgent board rendered operator screens' {
         $filterHeadingIndex | Should -Be 1
         $rows[$filterHeadingIndex][0].callback_data | Should -Be 'urgentb:noop'
         $rows[$filterHeadingIndex + 1][0].callback_data | Should -Be 'urgentb:filter:all'
+
+        $filterDividerIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -eq '━━━━━━━━━━━━━━━━' })[0]))
+        $newsDividerIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -like '*صفوف الأخبار*' })[0]))
+        $filterDividerIndex | Should -BeGreaterThan ($filterHeadingIndex + 1)
+        $newsDividerIndex | Should -BeGreaterThan $filterDividerIndex
+        $rows[$filterDividerIndex][0].callback_data | Should -Be 'urgentb:noop'
+        $rows[$newsDividerIndex][0].callback_data | Should -Be 'urgentb:noop'
     }
 
     It 'sorts malformed update timestamps last in the latest filter' {

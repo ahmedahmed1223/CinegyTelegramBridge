@@ -698,6 +698,25 @@ Describe 'Editing the board from its buttons' {
         $json | Should -Not -Match '"text": "⚙️ إجراءات"[\s\S]*?"style": "primary"'
     }
 
+    It 'renders the selected story page from the active filter position' {
+        $config.Settings | Add-Member -NotePropertyName NewsListPageSize -NotePropertyValue 8 -Force
+        for ($index = 0; $index -lt 12; $index++) {
+            $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text "خبر إضافي $index" -UserId 1).Value
+        }
+        for ($index = 0; $index -lt 6; $index++) {
+            $script:UrgentBoard.Items[$index].Enabled = $false
+        }
+        Set-UrgentBoardFilter -ChatId 100 -Filter ready | Should -BeTrue
+        Mock Show-UrgentBoardScreen { $script:SelectedUrgentPage = $Page }
+
+        $visible = @(Get-UrgentVisibleItems -ChatId 100)
+        $target = $visible[4]
+        $targetId = [string](Get-JsonProp $target 'Id')
+        Invoke-TestUrgentNumberCallback "urgentb:pick:$targetId"
+
+        $script:SelectedUrgentPage | Should -Be 0
+    }
+
     It 'reports a failed default save and restores the previous value' {
         Mock Save-Config { $script:LastConfigSaveFailed = $true }
         Set-UrgentBoardSetting -ChatId 100 -Name UrgentBoardIntervalSeconds -Value 25 | Should -BeFalse

@@ -492,6 +492,8 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        # The dispatcher acknowledges every admitted callback before entering
+        # the action switch. A noop must not answer the same query twice.
         'urgentb:noop' { break }
         'urgentb:filter:*' {
             if (Set-UrgentBoardFilter -ChatId $chatId -Filter (Get-CallbackArg $data 'urgentb:filter:')) {
@@ -504,9 +506,22 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:pick:*' {
-            $item = Get-UrgentItemByPosition -Position ([int](Get-CallbackArg $data 'urgentb:pick:'))
+            $originalPosition = [int](Get-CallbackArg $data 'urgentb:pick:')
+            $item = Get-UrgentItemByPosition -Position $originalPosition
             if ($item) { Switch-UrgentSelection -ChatId $chatId -ItemId ([string](Get-UrgentProperty $item 'Id' '')) | Out-Null }
-            $page = [int][math]::Floor([int](Get-CallbackArg $data 'urgentb:pick:') / (Get-UrgentBoardPageSize))
+            $visibleItems = @(Get-UrgentVisibleItems -ChatId $chatId)
+            $visiblePosition = -1
+            if ($item) {
+                $itemId = [string](Get-UrgentProperty $item 'Id' '')
+                for ($visibleIndex = 0; $visibleIndex -lt $visibleItems.Count; $visibleIndex++) {
+                    if ([string](Get-UrgentProperty $visibleItems[$visibleIndex] 'Id' '') -ceq $itemId) {
+                        $visiblePosition = $visibleIndex
+                        break
+                    }
+                }
+            }
+            $pagePosition = if ($visiblePosition -ge 0) { $visiblePosition } else { $originalPosition }
+            $page = [int][math]::Floor($pagePosition / (Get-UrgentBoardPageSize))
             Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page $page
             break
         }

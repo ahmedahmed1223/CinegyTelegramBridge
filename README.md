@@ -13,6 +13,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.9
+
+**More reliable urgent-board interaction:**
+- No-op separator presses now receive exactly one Telegram callback acknowledgement.
+- Selecting a story from a filtered board keeps the operator on the page containing that story.
+
+## Version 8.49.8
+
+**Clearer urgent-board sections:**
+- Visual separator rows now distinguish filter controls from table actions and news rows.
+- Separator rows are safe no-op callbacks because Telegram's `InlineKeyboardMarkup` has no native divider or disabled-button element.
+
 ## Version 8.49.7
 
 **Clearer status and stable post-air controls:**

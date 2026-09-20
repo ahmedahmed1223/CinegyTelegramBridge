@@ -461,6 +461,10 @@ function Get-UrgentBoardKeyboard {
         (New-Button '⛔ معطّل' 'urgentb:filter:disabled' -Style $(if ($filter -eq 'disabled') { 'primary' } else { '' }))
         (New-Button '🕒 الأحدث' 'urgentb:filter:latest' -Style $(if ($filter -eq 'latest') { 'primary' } else { '' }))
     )
+    # Telegram has no divider or disabled-button primitive in InlineKeyboardMarkup.
+    # A noop row is the compatible visual separator; its callback is answered
+    # immediately so tapping the rule never leaves a loading spinner.
+    $rows += , @((New-Button '━━━━━━━━━━━━━━━━' 'urgentb:noop'))
 
     # Mode selector — single button toggles between manual and auto
     $rows += , @((New-Button "$(if($manual){'✅ '})يدوي — خبر واحد" 'urgmode:manual'), (New-Button "$(if(-not $manual){'✅ '})تلقائي — بالتتابع" 'urgmode:auto'))
@@ -475,6 +479,7 @@ function Get-UrgentBoardKeyboard {
     }
 
     if ($items.Count -gt 0) {
+        $rows += , @((New-Button '──────── صفوف الأخبار ────────' 'urgentb:noop'))
         for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
             $item = $items[$index]
             $id = [string](Get-UrgentProperty $item 'Id' '')

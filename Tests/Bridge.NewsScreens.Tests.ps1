@@ -200,6 +200,29 @@ Describe 'News reorder callback acknowledgement' {
     }
 }
 
+Describe 'News draft resume callback acknowledgement' {
+    BeforeEach {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity { }
+        Mock Resume-ExpiredNewsDraft { }
+    }
+
+    It 'acknowledges an expired draft resume exactly once' {
+        $callback = [pscustomobject]@{
+            id = 'news-resume-once'
+            from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 59; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = 'news:resume'
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $CallbackQueryId -eq 'news-resume-once' }
+        Should -Invoke Resume-ExpiredNewsDraft -Times 1 -Exactly -ParameterFilter { $ChatId -eq 101 -and $UserId -eq 101 }
+    }
+}
+
 Describe 'News draft expiry' {
     BeforeEach {
         $script:NewsTickerDraft = $null
@@ -353,6 +376,39 @@ Describe 'News publish conflict reporting' {
         $result.Success | Should -BeFalse
         # Every caller branches on Conflict, so it must exist on every path.
         $result.PSObject.Properties.Name | Should -Contain 'Conflict'
+    }
+}
+
+Describe 'Manual news publish notifications' {
+    BeforeEach {
+        $script:OriginalPublishNotifyScope = Get-JsonProp $config.Settings 'NewsPublishNotifyScope'
+        $config.Settings | Add-Member -NotePropertyName 'NewsPublishNotifyScope' -NotePropertyValue 'admins_and_publisher' -Force
+        Mock Get-AdminNotifyIds { @(101, 202) }
+        Mock Get-UserDisplayName { 'المشغّل' }
+        Mock Send-TelegramMessage { }
+    }
+
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'NewsPublishNotifyScope' -NotePropertyValue $script:OriginalPublishNotifyScope -Force
+    }
+
+    It 'notifies administrators by default and does not duplicate the publisher result' {
+        Send-NewsPublishNotice -UserId 101 -ItemCount 3
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 202 -and $Text -match 'نُشر شريط الأخبار يدويًا' -and $Text -match '3'
+        }
+    }
+
+    It 'supports disabling or widening the manual publish audience' {
+        $config.Settings.NewsPublishNotifyScope = 'none'
+        Send-NewsPublishNotice -UserId 101 -ItemCount 1
+        Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+
+        $config.Settings.NewsPublishNotifyScope = 'all'
+        $config.AllowedChatIds = @(101, 202, 303)
+        Send-NewsPublishNotice -UserId 101 -ItemCount 1
+        Should -Invoke Send-TelegramMessage -Times 2 -Exactly
     }
 }
 

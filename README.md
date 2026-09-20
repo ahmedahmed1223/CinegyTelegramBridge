@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.49.11
+
+**Manual news-publish notifications:**
+- Manual ticker publishes now notify administrators by default. The publisher keeps the detailed result message, while the configurable notification scope can disable or widen the notice.
+
+## Version 8.49.10
+
+**Reliable news-draft resume:**
+- Resuming an expired news draft now acknowledges the Telegram callback exactly once, avoiding duplicate callback-query errors.
+
 ## Version 8.49.9
 
 **More reliable urgent-board interaction:**

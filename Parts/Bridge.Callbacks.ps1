@@ -194,7 +194,6 @@ function Invoke-CallbackQuery {
         'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
         'news:resume' {
-            Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id | Out-Null
             Resume-ExpiredNewsDraft -ChatId $chatId -UserId $userId
             break
         }

@@ -296,9 +296,41 @@ function Publish-NewsTickerDraft { param([long]$UserId)
         if ($mirror.Attempted -and -not $mirror.Success) {
             Write-BridgeLog "News published but the sheet write-back failed: $($mirror.Error)" 'WARN'
         }
+        Send-NewsPublishNotice -UserId $UserId -ItemCount (@($draft.Items).Count)
         Remove-NewsTickerDraft
     }
+
     return $result
+}
+
+function Get-NewsPublishNoticeAudience {
+    param([long]$PublisherUserId)
+    $scope = [string](Get-Setting 'NewsPublishNotifyScope')
+    if ($scope -eq 'none') { return @() }
+    $admins = @(Get-AdminNotifyIds | ForEach-Object { [long]$_ })
+    $audience = if ($scope -eq 'all') {
+        @($admins + @(@(Get-JsonProp $config 'AllowedChatIds') | ForEach-Object { [long]$_ }))
+    }
+    elseif ($scope -eq 'admins') {
+        $admins
+    }
+    else {
+        @($admins + [long]$PublisherUserId)
+    }
+    return @($audience | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+}
+
+function Send-NewsPublishNotice {
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount)
+    $actor = Get-UserDisplayName -UserId $UserId
+    $text = "📰 نُشر شريط الأخبار يدويًا بواسطة ${actor}: $ItemCount خبرًا."
+    foreach ($chat in @(Get-NewsPublishNoticeAudience -PublisherUserId $UserId)) {
+        # The publisher already receives the detailed success result; avoid
+        # sending the same event twice while retaining the setting's audience.
+        if ([long]$chat -ne $UserId) {
+            Send-TelegramMessage -ChatId ([long]$chat) -Text $text -Cause 'news-publish-manual'
+        }
+    }
 }
 
 function Write-NewsPublishRecord {
@@ -1575,4 +1607,3 @@ function Receive-NewsTickerImport { param($Document,[long]$ChatId,[long]$UserId)
     } catch { Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الاستيراد: $(Protect-SensitiveText $_.Exception.Message)" }
     finally {Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue}
 }
-

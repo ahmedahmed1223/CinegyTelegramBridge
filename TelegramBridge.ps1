@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.49.9'
+$script:BridgeVersion = '8.49.11'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -235,6 +235,7 @@ $script:DefaultSettings = [ordered]@{
     NewsSheetSyncMinutes       = 5
     NewsSheetTimeoutSeconds    = 30
     NewsSheetNotifyScope       = 'all'    # none | admins | all authorised chats
+    NewsPublishNotifyScope     = 'admins_and_publisher' # none | admins | admins_and_publisher | all authorised chats
     NewsSheetFailureAlertAfter = 3       # consecutive failed auto syncs before anyone is told; 0 stays silent
     # Which templates announce themselves when they go on air, and to whom:
     # "Urgent=all, Banner=admins". Urgent is the example, not the rule.
@@ -583,6 +584,7 @@ $script:SettingDisplayMetadata = @{
     NewsSheetSyncMinutes = @{ Unit = 'دقيقة'; Description = 'كل كم تُسحب نسخة من الشيت في الوضع التلقائي' }
     NewsSheetTimeoutSeconds = @{ Unit = 'ثانية'; Description = 'مهلة تنزيل الشيت قبل اعتباره فاشلًا' }
     NewsSheetNotifyScope = @{ Unit = ''; Description = 'من يصله إشعار تغيّر الشيت: none بلا أحد · admins المشرفون · all كل المصرّح لهم' }
+    NewsPublishNotifyScope = @{ Unit = ''; Description = 'من يصله إشعار النشر اليدوي: none بلا أحد · admins المشرفون · admins_and_publisher المشرفون والناشر · all كل المصرّح لهم' }
     NewsSheetFailureAlertAfter = @{ Unit = 'محاولة'; Description = 'كم محاولة مزامنة فاشلة متتالية قبل التنبيه أن الشيت لا يصل (0 للصمت)' }
     TemplateNotifyRules = @{ Unit = ''; Description = 'قوالب تُعلن عن نفسها عند العرض: «القالب=الجهة» مفصولة بفاصلة (الجهة: none · admins · all)' }
     AllowOperatorsSheetPull = @{ Unit = ''; Description = 'يسمح للمشغّل بسحب الشيت، لا للمشرف وحده' }
@@ -1235,6 +1237,7 @@ $script:SettingChoices = @{
     NewsListLayout = @('text', 'stacked', 'inline', 'compact')
     NewsSheetSyncMode = @('manual', 'auto')
     NewsSheetNotifyScope = @('none', 'admins', 'all')
+    NewsPublishNotifyScope = @('none', 'admins', 'admins_and_publisher', 'all')
     # One character, typed - and a space typed after it silently became part
     # of the separator, so every headline on the strip gained a gap nobody
     # could see in the setting.
@@ -1306,6 +1309,7 @@ foreach ($entry in @(
                 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
                 'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds',
+                'NewsPublishNotifyScope',
                 'AllowOperatorsSheetPull',
                 'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
                 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
@@ -1398,6 +1402,7 @@ $script:SettingNavigationLabels = @{
     NewsSheetSyncMinutes = 'كل كم دقيقة تُزامن الشيت'
     NewsSheetTimeoutSeconds = 'مهلة تنزيل الشيت'
     NewsSheetNotifyScope = 'من يُنبَّه بعد مزامنة الشيت'
+    NewsPublishNotifyScope = 'من يُنبَّه بعد النشر اليدوي'
     NewsSheetFailureAlertAfter = 'تنبيه فشل مزامنة الشيت'
     AllowOperatorsSheetPull = 'سماح المشغّلين بسحب الشيت'
     NewsMaxItemLength = 'الحد الأقصى لطول الخبر'

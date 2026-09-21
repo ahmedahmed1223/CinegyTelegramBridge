@@ -241,7 +241,16 @@ function Invoke-CallbackQuery {
         'news:preview' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
             $position=0;$preview=@($draft.Items|ForEach-Object {$position++;"$position. $_"}) -join "`n"
-            Send-TelegramMessage -ChatId $chatId -Text "👁 معاينة المسودة ($(@($draft.Items).Count)):`n$preview" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            # Paged, not concatenated. At the configured maxima - NewsMaxItems
+            # 200 by NewsMaxItemLength 1000 - this one tap built a 200,000
+            # character message, which Send-TelegramMessage split into about
+            # fifty back-to-back sends: past Telegram's per-chat rate limit, so
+            # the tail 429'd into the outbox and came back minutes later
+            # interleaved with whatever the editor did next. The keyboard rode
+            # only on the last chunk, so the buttons were under a wall of text
+            # the editor had to scroll up through. Paging puts the first page
+            # and the keyboard together, with 📄 المزيد for the rest.
+            Send-TelegramPagedText -ChatId $chatId -Text "👁 معاينة المسودة ($(@($draft.Items).Count)):`n$preview" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:publish' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}

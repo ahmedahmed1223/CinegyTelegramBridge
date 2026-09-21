@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -458,7 +458,31 @@ function Update-TelegramOutbox {
         }
         else {
             Remove-TelegramOutboxFiles -Item $item
-            if (-not $request.Success) { Write-BridgeLog 'Dropped deferred Telegram request after retry failure.' 'ERROR' }
+            if (-not $request.Success) {
+                # Named, because "dropped a request" is a line nobody can act
+                # on. An alert to an on-call administrator and a navigation
+                # screen produced the same sentence, so the morning after a
+                # graphic was missing all night the log could not say which of
+                # three administrators never heard about it - the fault had to
+                # be reproduced to find out. That is precisely what the
+                # AGENTS.md rule about unattributable warnings forbids.
+                $droppedChat = [string](Get-JsonProp $item.Body 'chat_id')
+                $droppedEndpoint = ([string]$item.Uri -split '/')[-1]
+                Write-BridgeLog "Dropped deferred Telegram $droppedEndpoint to chat $droppedChat after $([int]$item.Attempts) attempt(s): $([string](Get-JsonProp $request 'Error'))" 'ERROR'
+                # Counted as a real delivery failure like the live path does at
+                # the first send, so a chat that has stopped accepting messages
+                # reaches the dead-chat quarantine instead of being retried for
+                # ever, one anonymous line at a time.
+                # The status is passed because the quarantine only counts 401
+                # and 403 - a 400 is our own malformed message and must not
+                # hide behind a roster. Without it every drop arrived as 0 and
+                # counted for nothing.
+                if ($droppedChat) {
+                    Register-TelegramSendFailure -ChatId ([long]$droppedChat) `
+                        -StatusCode ([int](Get-JsonProp $request 'StatusCode')) `
+                        -ErrorText ([string](Get-JsonProp $request 'Error')) | Out-Null
+                }
+            }
         }
     }
     $now = Get-Date
@@ -719,9 +743,20 @@ function Send-TelegramRichMessage {
     }
     if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
         $script:TelegramRateLimitHits++
-        $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
-        Add-TelegramOutboxItem -Uri "$apiBase/sendRichMessage" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
-        return $true
+        # $false, so the caller's text fallback runs NOW. This used to queue
+        # the rich send and answer $true, which is the caller's signal that the
+        # screen arrived - so the mandatory plain-text version was skipped.
+        # When the queue was full the item was dropped without a log line, and
+        # even when it was accepted a later terminal failure discarded it long
+        # after the fallback had been skipped. An operator pressing 📊 during an
+        # on-air fault got nothing at all, and nothing in the log named their
+        # chat or their screen.
+        #
+        # Send-TelegramMessage already owns deferral - retry_after, the priority
+        # rules, the per-chat log line - so the text fallback is deferred
+        # properly by the one place that knows how. Two deferral paths is the
+        # guard written twice that AGENTS.md says will drift.
+        return $false
     }
     Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'sendRichMessage' -PayloadLength $rich.Length
     return $false
@@ -770,9 +805,20 @@ function Edit-TelegramRichMessage {
     }
     if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
         $script:TelegramRateLimitHits++
-        $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
-        Add-TelegramOutboxItem -Uri "$apiBase/editMessageText" -Body $body -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
-        return $true
+        # $false, so the caller's text fallback runs NOW. This used to queue
+        # the rich send and answer $true, which is the caller's signal that the
+        # screen arrived - so the mandatory plain-text version was skipped.
+        # When the queue was full the item was dropped without a log line, and
+        # even when it was accepted a later terminal failure discarded it long
+        # after the fallback had been skipped. An operator pressing 📊 during an
+        # on-air fault got nothing at all, and nothing in the log named their
+        # chat or their screen.
+        #
+        # Send-TelegramMessage already owns deferral - retry_after, the priority
+        # rules, the per-chat log line - so the text fallback is deferred
+        # properly by the one place that knows how. Two deferral paths is the
+        # guard written twice that AGENTS.md says will drift.
+        return $false
     }
     Resolve-RichSendFailure -ErrorText ([string]$request.Error) -Blocks $Blocks -Context 'editMessageText' -PayloadLength $rich.Length
     return $false
@@ -1345,6 +1391,19 @@ function New-CopyButton {
         looking exactly like them.
     #>
     param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][AllowEmptyString()][string]$Payload)
+    # copy_text.text is capped at 256 characters by the Bot API, and a payload
+    # over it does not truncate - Telegram refuses the WHOLE sendMessage with
+    # 400. That matters here more than it looks: these buttons ride on edit
+    # prompts, so the refused message is the prompt itself, and the pending
+    # input state has already been armed. The operator sees nothing happen,
+    # then types - and their next message is taken as the new value for a
+    # field they never saw the prompt for. With UrgentBoardMaxTextLength at
+    # its default of 300, a perfectly ordinary breaking line does this.
+    #
+    # $null rather than a truncated button: half a headline on the clipboard
+    # is worse than no button, and every caller already prints the value in a
+    # <code> block, which Telegram copies on tap.
+    if ([string]$Payload -and $Payload.Length -gt 256) { return $null }
     # Not through New-BridgeButton: that one builds a button around a
     # callback, the single thing this button must not have. Clients older
     # than 9.4 ignore the style, and ConvertTo-TelegramReplyMarkupJson strips
@@ -1400,6 +1459,10 @@ function Send-BridgeTextEditPrompt {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(ConvertTo-TelegramHtmlText $Prompt)</b>")
     $rows = @()
+    # Declared before the branch: Set-StrictMode throws on an unassigned
+    # variable, and the notice below asks about it whether or not there was
+    # a current value at all.
+    $copyButton = $null
     if ([string]::IsNullOrWhiteSpace($Current)) {
         $lines.Add('<i>لا يوجد نص حالي.</i>')
     }
@@ -1407,11 +1470,15 @@ function Send-BridgeTextEditPrompt {
         $lines.Add('')
         $lines.Add('النص الحالي — اضغط عليه لنسخه:')
         $lines.Add("<code>$(ConvertTo-TelegramHtmlText $Current)</code>")
-        $rows += , @((New-CopyButton -Text $CopyLabel -Payload $Current))
+        # Only when there is a button: over 256 characters New-CopyButton
+        # declines, and a row holding $null is the malformed shape the repair
+        # guard exists to catch.
+        $copyButton = New-CopyButton -Text $CopyLabel -Payload $Current
+        if ($copyButton) { $rows += , @($copyButton) }
     }
     $lines.Add('')
     $lines.Add('⌨️ <b>اكتب النص الجديد في صندوق الرسالة وأرسله</b>، أو انسخ الحالي وعدّله.')
-    if (-not [string]::IsNullOrWhiteSpace($Current)) {
+    if ($copyButton) {
         # Named after the button as it is actually labelled, minus its emoji:
         # a notice pointing at a button that reads something else is worse
         # than no notice.

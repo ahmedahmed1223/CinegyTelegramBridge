@@ -38,7 +38,6 @@
     "EnableHideAll": true,
     "HideAllLayers": "all",
     "EnableFavorites": true,
-    "SharedFavoritesEnabled": false,
     "EnablePersistentMenuButton": true,
     "ButtonTextMaxLength": 32,
     "EnableNewsTickerManagement": true,

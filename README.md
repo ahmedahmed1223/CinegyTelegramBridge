@@ -1,4 +1,4 @@
-﻿# Cinegy Air Pro / Titler Telegram Bridge
+# Cinegy Air Pro / Titler Telegram Bridge
 
 A Telegram bot that lets whitelisted operators drive Cinegy Air Pro's Titler
 graphics layer from chat: push a named title template on air with text
@@ -12,6 +12,17 @@ It's built directly on the HTTP control surfaces that Cinegy demonstrates in
 those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
+
+## Version 8.54.0
+
+**Telegram limits that were dropping whole screens in silence, and an updated manual:**
+- `copy_text.text` is capped at 256 characters and an over-long payload does not truncate — Telegram refuses the entire `sendMessage` with 400. These buttons ride on edit prompts, so the refused message was the prompt itself while the pending input state had already been armed: the operator saw nothing, typed, and their next message was taken as the new value for a field whose prompt never arrived. With `UrgentBoardMaxTextLength` at its default of 300, an ordinary breaking line did this. The button now declines rather than truncating; the value is still tap-to-copy in its `<code>` block.
+- A rate-limited rich screen reported success, so the mandatory plain-text fallback was skipped and the operator got nothing at all. It now returns `$false` and the text version is sent immediately through the one deferral path that owns `retry_after`, priority and per-chat logging.
+- The terminal drop of a deferred request now names the chat, the endpoint, the attempt count and the reason, and counts as a real send failure so a dead chat reaches quarantine.
+- The news draft preview is paged; at the configured maxima one tap built a 200,000-character message that split into roughly fifty back-to-back sends.
+- `SharedFavoritesEnabled` removed from `config.example.json` and the README; it has been dead in the code since 8.9.0 while the example seeded it into every new station's config.
+- `CHANGELOG.md`: restored the 8.47.0 heading a commit had folded into 8.47.2, and gave 8.47.2 its real section.
+- Help updated for the urgent gap, the typed-command layer refusal, and secret masking — measured before and after at 10999 characters against the 12000 limit, so no chapter was pushed off the single screen.
 
 ## Version 8.53.0
 
@@ -4097,7 +4108,6 @@ menu:
 - **⭐ المفضلة** → every operator edits an independent list from
   **إدارة المفضلة**. Selections live in `logs/favorites.json`; usage-ranked
   templates remain the fallback until the user makes a selection.
-  `SharedFavoritesEnabled` is reserved for a future unified list and is off.
 - Administrators set an operator Alias with `/alias USER_ID الاسم` and remove
   it with `/alias USER_ID -`. Aliases are stored in `logs/user-aliases.json`.
 - **🙈 اخفاء طبقة** / **🚪 خروج من المشهد** → shows a button per known GFX

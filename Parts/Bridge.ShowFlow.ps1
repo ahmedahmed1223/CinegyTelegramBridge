@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -973,7 +973,11 @@ function Get-MyOperationsKeyboard {
     if ($reference) {
         # Through the shared helper rather than a hand-built hashtable, so
         # there is one place that knows what a copy button looks like.
-        $rows += , @((New-CopyButton -Text "📋 $(Get-MyOperationsCopyLabel -Reference $reference)" -Payload $reference))
+        # An operation reference is well under the 256-character copy_text cap,
+        # but the button is asked for rather than assumed - a row holding $null
+        # is the shape that refuses the whole message.
+        $referenceCopy = New-CopyButton -Text "📋 $(Get-MyOperationsCopyLabel -Reference $reference)" -Payload $reference
+        if ($referenceCopy) { $rows += , @($referenceCopy) }
     }
     if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
         $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))

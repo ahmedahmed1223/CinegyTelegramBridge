@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Tests.ps1 — Pester tests for the bridge's pure logic.
 
@@ -2500,5 +2500,50 @@ Describe 'Why a show did not reach the screen' {
         Mock Get-TemplateStore { @{ Map = @{}; Order = @(); Errors = @(); InvalidKeys = @(); SharedLayers = @{} } }
 
         (@(Get-ShowFailureDiagnosisLines -Key 'deleted') -join "`n") | Should -Match 'لم يعد في سجل القوالب'
+    }
+}
+
+Describe 'A copy button that Telegram would refuse is not drawn' {
+    <#
+        copy_text.text is capped at 256 characters by the Bot API, and an
+        over-long payload does not truncate - Telegram refuses the WHOLE
+        sendMessage with 400. These buttons ride on edit prompts, so the
+        refused message is the prompt itself while the pending input state has
+        already been armed: the operator sees nothing happen, types, and their
+        next message is taken as the new value for a field whose prompt never
+        arrived. With UrgentBoardMaxTextLength at its default of 300, an
+        ordinary breaking line does this.
+    #>
+    It 'builds the button for a payload Telegram accepts' {
+        $button = New-CopyButton -Text '📋 نسخ' -Payload ('x' * 256)
+        $button | Should -Not -BeNullOrEmpty
+        $button.copy_text.text.Length | Should -Be 256
+    }
+
+    It 'declines rather than truncating a payload past the cap' {
+        # Half a headline on the clipboard is worse than no button, and every
+        # caller already prints the value in a <code> block that copies on tap.
+        New-CopyButton -Text '📋 نسخ' -Payload ('x' * 257) | Should -BeNullOrEmpty
+    }
+
+    It 'leaves the edit prompt sendable when the current text is too long to copy' {
+        Mock Send-TelegramMessage {}
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'عدّل النص' -Current ('ن' * 300) -CancelData 'menu:main'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            # No copy button at all, and therefore no row holding $null - the
+            # malformed shape the repair guard exists to catch.
+            $copyRows = @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_ -and $_.ContainsKey('copy_text') })
+            $copyRows.Count -eq 0
+        }
+    }
+
+    It 'still offers the button when the current text fits' {
+        Mock Send-TelegramMessage {}
+        Send-BridgeTextEditPrompt -ChatId 100 -Prompt 'عدّل النص' -Current 'خبر قصير' -CancelData 'menu:main'
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_ -and $_.ContainsKey('copy_text') }).Count -eq 1
+        }
     }
 }

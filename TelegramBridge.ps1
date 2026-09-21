@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.57.0'
+$script:BridgeVersion = '8.58.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -76,6 +76,7 @@ Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMojaz.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUrgent.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeContentBoards.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
@@ -98,6 +99,7 @@ foreach ($part in @(
         'Bridge.Mojaz.Playback'
         'Bridge.Urgent'
         'Bridge.Urgent.Playback'
+        'Bridge.Boards'
         'Bridge.Users'
         'Bridge.Templates'
         'Bridge.OnAir'
@@ -276,6 +278,9 @@ $script:DefaultSettings = [ordered]@{
     UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
     UrgentMinIntervalSeconds   = 4       # floor used only when the scene cannot be read; the scene's own timing wins
     UrgentExitGapSeconds       = 0       # deliberate blank gap between stories in exit mode; 0 leaves only the scene's own outro
+    EnableContentBoards        = $false  # programme content boards; off until a station asks, like every other new door
+    MaxContentBoards           = 20      # named boards allowed at once
+    BoardMaxItems              = 100     # prepared rows per board
     UrgentSyncLeadMs           = 120     # sent this early, so it arrives on the moment rather than after it
     UrgentBoardNotifyOnFinish  = $true   # tell the chat when a board run ends by itself, minutes after the operator looked away
     UrgentBoardMaxTextLength   = 300     # longest breaking line the board will store
@@ -530,6 +535,9 @@ $script:SettingDisplayMetadata = @{
     UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
     UrgentMinIntervalSeconds = @{ Unit = 'ثانية'; Description = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج' }
     UrgentExitGapSeconds = @{ Unit = 'ثانية'; Description = 'فاصل شاشة فارغة بين خبر وآخر في وضع حركة الخروج (0 = حركة المشهد وحدها). يرفع أقصر فاصل مسموح بالقدر نفسه' }
+    EnableContentBoards = @{ Unit = ''; Description = 'جداول محتوى البرامج: يجهّز المعدّ نصوص البرنامج مسبقًا ويعرضها المنفّذ صفًّا صفًّا' }
+    MaxContentBoards = @{ Unit = 'جدولًا'; Description = 'أقصى عدد جداول محتوى في وقت واحد' }
+    BoardMaxItems = @{ Unit = 'صفًّا'; Description = 'أقصى عدد صفوف في الجدول الواحد' }
     UrgentSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
     UrgentBoardNotifyOnFinish = @{ Unit = ''; Description = 'إشعار في المحادثة حين ينتهي تشغيل جدول العواجل وحده' }
     UrgentBoardMaxTextLength = @{ Unit = 'حرف'; Description = 'أطول نصّ عاجل يقبله الجدول' }
@@ -1127,6 +1135,12 @@ $script:UrgentSelections = @{}
 $script:UrgentManualMode = @{}
 $script:UrgentManualLive = @{}
 $script:UrgentBoardFilters = @{}
+# Programme content boards: id -> board, filled from logs/boards/ at startup.
+# The directory is the index; there is no index file to drift from it.
+$script:ContentBoards = [ordered]@{}
+# Which row of which board is on each LAYER. Keyed by layer because two
+# boards may share one, and the second to be shown replaces the first.
+$script:BoardsLive = @{}
 $script:UrgentBoardRun = $null
 # Raised only while the board's own opening SHOW is in flight. The rule that a
 # manual urgent stops a running board would otherwise stop the board with the
@@ -1325,6 +1339,7 @@ foreach ($entry in @(
                 'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
                 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
                 'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
+                'EnableContentBoards', 'MaxContentBoards', 'BoardMaxItems',
                 'UrgentBoardMaxTextLength'
             ) },
         @{ Category = 'schedule'; Names = @(
@@ -1486,6 +1501,9 @@ $script:SettingNavigationLabels = @{
     UrgentBoardMaxItems = 'حدّ عدد العواجل'
     UrgentMinIntervalSeconds = 'أقصر فاصل للعواجل'
     UrgentExitGapSeconds = 'الفاصل بين الأخبار'
+    EnableContentBoards = 'محتوى البرامج'
+    MaxContentBoards = 'أقصى عدد الجداول'
+    BoardMaxItems = 'أقصى صفوف الجدول'
     UrgentSyncLeadMs = 'تعويض زمن الشبكة للعواجل'
     UrgentBoardNotifyOnFinish = 'إشعار انتهاء العواجل'
     UrgentBoardMaxTextLength = 'أطول نصّ عاجل'
@@ -1653,6 +1671,8 @@ $script:SettingConstraints = @{
     UrgentBoardMaxItems           = @{ Minimum = 1; Maximum = 40 }
     UrgentMinIntervalSeconds      = @{ Minimum = 1; Maximum = 60 }
     UrgentExitGapSeconds          = @{ Minimum = 0; Maximum = 300 }
+    MaxContentBoards              = @{ Minimum = 1; Maximum = 100 }
+    BoardMaxItems                 = @{ Minimum = 1; Maximum = 500 }
     UrgentSyncLeadMs              = @{ Minimum = 0; Maximum = 5000 }
     UrgentBoardMaxTextLength      = @{ Minimum = 10; Maximum = 1000 }
     # Sizes two restore screens - the configuration one and the template
@@ -1994,6 +2014,8 @@ Import-MojazSchedules           # reusable future runs and their queue state
 Import-UrgentBoard              # the breaking-news table
 Restore-UrgentBoardRun | Out-Null   # a board run that was on air when this stopped
 Import-UrgentManualState | Out-Null # manual show identity + per-chat mode (8.43.0+)
+Import-ContentBoards            # programme content boards, one file each
+Import-BoardsLive               # which prepared row is on which layer
 
 $store = Get-TemplateStore
 Write-BridgeLog "Bridge v$($script:BridgeVersion) starting. Air $($config.AirServerAddress):$(5521 + $config.AirChannelNumber), templates: $($store.Order.Count), allowed chats: $(@(Get-JsonProp $config 'AllowedChatIds').Count)"
@@ -2163,6 +2185,7 @@ try {
         'timed_custom' { Complete-TimedShowCustom -ChatId $chatId -Value $text | Out-Null }
                                 'layer_timer_custom' { Complete-LayerTimerCustom -ChatId $chatId -Value $text | Out-Null }
                                 'template_definition_json' { Complete-TemplateDefinitionJson -ChatId $chatId -Value $text | Out-Null }
+                                { $_ -like 'board_*' } { Complete-BoardText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -like 'urgent_*' } { Complete-UrgentBoardText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -like 'template_create_*' } { Complete-TemplateCreateWizardStep -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 { $_ -in @('preset_admin_name', 'preset_admin_values') } { Complete-PresetAdminText -ChatId $chatId -Value $text | Out-Null }

@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 
 BeforeAll {
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\BridgeUiPaging.psm1') -Force
@@ -64,6 +64,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
             'Get-OperationLogFilterKeyboard'    = 'one button per choice from Get-OperationLogFilterOptions, which caps both lists at its Limit and reports what it left out'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
+            'Get-BoardItemKeyboard'             = 'one row per text field the bound scene declares - a .cintitle contract, not a collection that grows with the station''s data'
             'ConvertTo-OneHandLayout'           = 'rearranges rows it is given; it builds none'
             'Invoke-ShowTemplateResult'         = 'builds no keyboard; it prepends one fixed row to the main menu on the failure message'
             # Reached by widening the guard to see classic index loops. Each

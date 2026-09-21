@@ -503,6 +503,164 @@ function Invoke-CallbackQuery {
             else { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id }
             break
         }
+        'boards:open' { Clear-PendingState -ChatId $chatId; Show-BoardsScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'boards:noop' { break }
+        'boards:page:*' { Show-BoardsScreen -ChatId $chatId -UserId $userId -Page ([int](Get-CallbackArg $data 'boards:page:')) -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'boards:b:*' { Show-BoardScreen -BoardId ([string](Get-CallbackArg $data 'boards:b:')) -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'boards:bp:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:bp:') -split ':')
+            Show-BoardScreen -BoardId $parts[0] -ChatId $chatId -UserId $userId -Page ([int]$parts[1]) -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
+        'boards:i:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:i:') -split ':')
+            Show-BoardItemScreen -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
+        'boards:show:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:show:') -split ':')
+            Show-BoardItemOnAir -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId | Out-Null
+            Show-BoardItemScreen -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId
+            break
+        }
+        'boards:hide:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:hide:') -split ':')
+            $hideBoard = Get-ContentBoard -BoardId $parts[0]
+            if ($hideBoard) {
+                $hideTemplate = (Get-TemplateStore).Map[[string](Get-BoardProperty $hideBoard 'TemplateKey' '')]
+                # Through Invoke-HideLayer, which since 8.50.0 asks the same
+                # per-layer permission the hide BUTTON asks. A protected layer
+                # stays protected from here too, with no line written for it.
+                if ($hideTemplate -and (Invoke-HideLayer -Layer ([int]$hideTemplate.Layer) -ChatId $chatId -UserId $userId -Quiet)) {
+                    Clear-BoardItemLive -Layer ([int]$hideTemplate.Layer)
+                }
+            }
+            Show-BoardItemScreen -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId
+            break
+        }
+        'boards:en:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:en:') -split ':')
+            $enBoard = Get-ContentBoard -BoardId $parts[0]
+            if ($enBoard) {
+                $enItem = Get-BoardItem -Board $enBoard -ItemId $parts[1]
+                $enNow = -not [bool](Get-BoardProperty $enItem 'Enabled' $true)
+                Invoke-BoardEdit -Result (Set-BoardItemEnabled -Board $enBoard -ItemId $parts[1] -Enabled $enNow -UserId $userId) `
+                    -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null
+            }
+            break
+        }
+        'boards:mv:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:mv:') -split ':')
+            $mvBoard = Get-ContentBoard -BoardId $parts[0]
+            if ($mvBoard) {
+                Invoke-BoardEdit -Result (Move-BoardItem -Board $mvBoard -ItemId $parts[1] -Delta ([int]$parts[2]) -UserId $userId) `
+                    -BoardId $parts[0] -ItemId $parts[1] -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null
+            }
+            break
+        }
+        'boards:rm:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:rm:') -split ':')
+            $rmBoard = Get-ContentBoard -BoardId $parts[0]
+            if ($rmBoard -and (Test-BoardEditAllowed -Board $rmBoard -ChatId $chatId -UserId $userId)) {
+                Invoke-BoardEdit -Result (Remove-BoardItem -Board $rmBoard -ItemId $parts[1] -UserId $userId) `
+                    -BoardId $parts[0] -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null
+            }
+            break
+        }
+        'boards:f:*' {
+            $parts = @([string](Get-CallbackArg $data 'boards:f:') -split ':')
+            $fBoard = Get-ContentBoard -BoardId $parts[0]
+            if ($fBoard -and (Test-BoardEditAllowed -Board $fBoard -ChatId $chatId -UserId $userId)) {
+                $fFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $fBoard 'TemplateKey' '')))
+                $fIndex = [int]$parts[2]
+                if ($fIndex -ge 0 -and $fIndex -lt $fFields.Count) {
+                    $fItem = Get-BoardItem -Board $fBoard -ItemId $parts[1]
+                    Set-PendingState -ChatId $chatId -State @{ Mode = 'board_field'; UserId = $userId; BoardId = $parts[0]; ItemId = $parts[1]; FieldIndex = $fIndex; StartedAt = (Get-Date) }
+                    Send-BridgeTextEditPrompt -ChatId $chatId -Prompt "أرسل قيمة «$($fFields[$fIndex])»" `
+                        -Current ([string](Get-BoardProperty (Get-BoardProperty $fItem 'Values' $null) $fFields[$fIndex] '')) -CancelData "boards:i:$($parts[0]):$($parts[1])"
+                }
+            }
+            break
+        }
+        'boards:add:*' {
+            $addId = [string](Get-CallbackArg $data 'boards:add:')
+            $addBoard = Get-ContentBoard -BoardId $addId
+            if ($addBoard -and (Test-BoardEditAllowed -Board $addBoard -ChatId $chatId -UserId $userId)) {
+                $addFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $addBoard 'TemplateKey' '')))
+                Set-PendingState -ChatId $chatId -State @{ Mode = 'board_add'; UserId = $userId; BoardId = $addId; StartedAt = (Get-Date) }
+                $addHint = if ($addFields.Count -gt 1) { "أرسل الصفّ: $($addFields -join ' | ')" } else { 'أرسل نصّ الصفّ' }
+                Send-TelegramMessage -ChatId $chatId -Text $addHint -ReplyMarkup (Get-CancelKeyboard)
+            }
+            break
+        }
+        'boards:paste:*' {
+            $pasteId = [string](Get-CallbackArg $data 'boards:paste:')
+            $pasteBoard = Get-ContentBoard -BoardId $pasteId
+            if ($pasteBoard -and (Test-BoardEditAllowed -Board $pasteBoard -ChatId $chatId -UserId $userId)) {
+                $pasteFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $pasteBoard 'TemplateKey' '')))
+                Set-PendingState -ChatId $chatId -State @{ Mode = 'board_paste'; UserId = $userId; BoardId = $pasteId; StartedAt = (Get-Date) }
+                $pasteHint = @('📋 ألصق الصفوف، سطرًا لكل صفّ.')
+                if ($pasteFields.Count -gt 1) { $pasteHint += "الحقول بترتيب المشهد مفصولة بـ | : $($pasteFields -join ' | ')" }
+                # Said before the paste, not after it is truncated: Telegram caps
+                # one inbound message at 4096 characters, so a long block arrives
+                # cut and the producer would never know which rows were lost.
+                $pasteHint += 'الرسالة الواحدة محدودة بـ4096 حرفًا — ألصق على دفعات، فاللصق يُضيف ولا يستبدل.'
+                Send-TelegramMessage -ChatId $chatId -Text ($pasteHint -join "`n") -ReplyMarkup (Get-CancelKeyboard)
+            }
+            break
+        }
+        'boards:new' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-BoardTemplatePicker -ChatId $chatId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
+            break
+        }
+        'boards:pickp:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Show-BoardTemplatePicker -ChatId $chatId -Page ([int](Get-CallbackArg $data 'boards:pickp:')) -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
+            break
+        }
+        'boards:pick:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            # Resolved against the same list the button was drawn from, because
+            # the button carries a position: a template key is free text and an
+            # Arabic one would not fit the 64-byte callback cap.
+            $candidates = @(Get-BoardEligibleTemplates)
+            $pickIndex = [int](Get-CallbackArg $data 'boards:pick:')
+            if ($pickIndex -lt 0 -or $pickIndex -ge $candidates.Count) { break }
+            $picked = $candidates[$pickIndex]
+            if (-not $picked.Usable) {
+                Send-TelegramMessage -ChatId $chatId -Text "⛔ $($picked.Reason)"
+                break
+            }
+            if (@(Get-ContentBoards).Count -ge (Get-SettingInt 'MaxContentBoards' 1)) {
+                Send-TelegramMessage -ChatId $chatId -Text "⛔ بلغت الجداول سقفها ($(Get-SettingInt 'MaxContentBoards' 1))."
+                break
+            }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'board_new_name'; UserId = $userId; TemplateKey = [string]$picked.Key; StartedAt = (Get-Date) }
+            Send-TelegramMessage -ChatId $chatId -Text "أرسل اسم الجدول (مثلًا: بنر برنامج الاقتصاد)." -ReplyMarkup (Get-CancelKeyboard)
+            break
+        }
+        'boards:del:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $delId = [string](Get-CallbackArg $data 'boards:del:')
+            $delBoard = Get-ContentBoard -BoardId $delId
+            if ($delBoard) {
+                # Confirmed, because this is a producer's prepared work and not a
+                # setting that can be typed again in a moment.
+                Send-TelegramMessage -ChatId $chatId -Text "⚠️ حذف «$(ConvertTo-TelegramHtmlText ([string](Get-BoardProperty $delBoard 'Name' '')))» ومعه $(@(Get-BoardProperty $delBoard 'Items' @()).Count) صفًّا. لا تراجع." `
+                    -ParseMode 'HTML' -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '🗑 نعم، احذف' "boards:delgo:$delId" -Style danger), (New-Button '↩️ إلغاء' "boards:b:$delId"))) }
+            }
+            break
+        }
+        'boards:delgo:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $delGoId = [string](Get-CallbackArg $data 'boards:delgo:')
+            $delGoBoard = Get-ContentBoard -BoardId $delGoId
+            if ($delGoBoard) {
+                Add-AuditEntry "🗑 حذف جدول محتوى «$([string](Get-BoardProperty $delGoBoard 'Name' ''))» - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Remove-ContentBoardFile -BoardId $delGoId
+            }
+            Show-BoardsScreen -ChatId $chatId -UserId $userId
+            break
+        }
         'urgentb:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
         # The dispatcher acknowledges every admitted callback before entering
         # the action switch. A noop must not answer the same query twice.

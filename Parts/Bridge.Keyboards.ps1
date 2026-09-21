@@ -212,6 +212,9 @@ function Get-MainMenuKeyboard {
     if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button "📰 شريط الأخبار" 'menu:news') ) }
     if (Test-MojazAvailable) { $rows += , @( (New-Button '📑 إدارة الموجز' 'menu:mojaz') ) }
     if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button '🚨 إدارة العواجل' 'urgentb:open') ) }
+    # One door however many programmes there are. A button per board would
+    # grow this menu without a bound, and the menu is already sixteen rows.
+    if (Test-BoardsAvailable) { $rows += , @( (New-Button '🗂 محتوى البرامج' 'boards:open') ) }
 
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )

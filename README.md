@@ -13,6 +13,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.58.0
+
+**محتوى البرامج: a prepared table of texts per programme template.** The urgent board and the mojaz each solve one station-wide job and are shaped around it. Programme banners are a different job with a different division of labour: a producer writes the episode's texts in advance, and the operator on air only chooses which line goes up and when. There is no fixed number of these — the station cuts new programme scenes as it commissions new programmes — so this is a general mechanism rather than a fourth hard-coded board.
+
+- One door: 🗂 محتوى البرامج in the main menu. An admin creates a board, names it ("بنر برنامج الاقتصاد"), and binds it to a template.
+- **The scene declares the fields.** `Get-BoardTextFields` filters `Get-MojazDesignFields` to text kinds; nothing invents a field name, and a template that declares none is shown in the picker as ineligible with the reason, rather than offered and then failing.
+- Entry both ways: row by row in the bot, or one pasted block — one line per row, fields separated by `|`. Short lines fill their tail fields; over-long ones are refused **by line number with the reason**, because "23 rows added" with no mention of the seven skipped is how an operator stops believing a screen.
+- Rows reorder, disable without deleting (ten prepared, six needed today), and delete. ▶️ shows through `Invoke-ShowTemplateResult`, so the audit trail, the layer protection and the on-air identity are the ones already in place — a second path to air would be a second set of bugs.
+- Per-board edit role: all / admin / owner. Default `all`, because a table nobody may fill is dead on delivery.
+- **A field the scene no longer declares is not sent and not destroyed.** Re-cutting a scene in Titler must not silently delete a producer's text; `Get-BoardOrphanFields` names it on the screen instead.
+- Text only, deliberately. Images are a different problem (upload, storage, lifetime) and are not in scope here.
+- New: `Modules/BridgeContentBoards.psm1` (pure domain, no I/O) and `Parts/Bridge.Boards.ps1` (storage, screens, air). Boards live one file per board under `logs/boards/`, so the directory *is* the index — no index file to fall out of step with it.
+
 ## Version 8.57.0
 
 **The gap between stories is now where an operator looks for it.** Reported: "I cannot find the gap option in إدارة العواجل." `UrgentExitGapSeconds` was registered on the general settings screen only, while every other board timing — interval, repeats, order, total, default mode — lives on ⚙️ توقيتات الجدول inside the urgent board. A setting reachable only from somewhere else is a setting nobody finds.

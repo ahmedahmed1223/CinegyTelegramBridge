@@ -47,8 +47,8 @@ function Get-ActiveLiveStreamConfig {
 
 function Get-SnapshotSourceLabel {
     param([Parameter(Mandatory)][bool]$SourceIsPrimary)
-    if ($SourceIsPrimary) { return 'البث الأساسي' }
-    return 'بث Cinegy الاحتياطي'
+    if ($SourceIsPrimary) { return (T 'media.primary') }
+    return (T 'media.backup')
 }
 
 function Set-OutputMonitorFallbackActive {
@@ -75,7 +75,7 @@ function Set-OutputMonitorFallbackActive {
             # ShouldRun set so the watchdog can spend the remaining retry budget.
             if ($notify) { $script:RelayState.ShouldRun = $false }
             Write-BridgeLog "Live relay source switch failed: $(Protect-SensitiveText $_.Exception.Message)" 'ERROR'
-            Send-AdminBroadcast -Text '❌ تعذرت إعادة تشغيل البث بعد تبديل المصدر.' -Urgent
+            Send-AdminBroadcast -Text (T 'media.restartFailed') -Urgent
         }
     }
     return $true
@@ -148,7 +148,7 @@ function Start-SnapshotJob {
     if ($UserId -eq 0) { $UserId = $ChatId }
 
     if (-not (Get-Setting 'EnableSnapshot')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "خاصية الصور معطّلة من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.snapshotsDisabled') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -162,19 +162,19 @@ function Start-SnapshotJob {
     }
 
     if ($script:SnapshotJobs.Count -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⏳ لقطة أخرى قيد الالتقاط الآن - انتظر لحظات ثم أعد المحاولة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.snapshotBusy') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
     $ls = Get-ActiveLiveStreamConfig
     $sourceUrl = [string]$ls.SourceUrl
     if ([string]::IsNullOrWhiteSpace($sourceUrl)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ LiveStream.SourceUrl غير مضبوط في config.json." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.sourceUrlUnset') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $ffmpeg = Get-FfmpegPath
     if (-not $ffmpeg) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يتم العثور على ffmpeg.exe. ثبّته أولًا (winget install ffmpeg)." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.ffmpegMissing') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     try {
@@ -207,7 +207,7 @@ function Start-SnapshotJob {
             SourceIsPrimary = (-not $script:OutputMonitorFallbackActive)
             Deadline = (Get-Date).AddSeconds($timeout)
         })
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ جاري التقاط صورة من البث..."
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.grabbing')
 }
 
 function Update-SnapshotJobs {
@@ -225,8 +225,8 @@ function Update-SnapshotJobs {
             Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
             $failed = $true
-            $script:LastCaptureErrorDetail = 'انتهت مهلة التقاط الصورة'
-            $msg = "❌ انتهت مهلة التقاط الصورة - تأكد أن المصدر قابل للوصول."
+            $script:LastCaptureErrorDetail = (T 'media.grabTimedOut')
+            $msg = (T 'media.grabTimedOutMsg')
         }
         elseif ($job.Proc.ExitCode -ne 0 -or -not (Test-Path $job.OutPath)) {
             $detail = Get-LastErrorLine -Path $job.ErrLog
@@ -247,7 +247,7 @@ function Update-SnapshotJobs {
                 # the hourly watchdog. Retry this same request from Cinegy's
                 # standby input after switching the active source.
                 $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId }
-                Send-TelegramMessage -ChatId $job.ChatId -Text '⚠️ تعذّر التقاط الأساسي؛ أجرب الآن مصدر Cinegy الاحتياطي.'
+                Send-TelegramMessage -ChatId $job.ChatId -Text (T 'media.tryingBackup')
             }
             else {
                 Send-TelegramMessage -ChatId $job.ChatId -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
@@ -361,35 +361,35 @@ function Get-OutputMonitorStatus {
     $ffmpeg = Get-FfmpegPath
     $serverName = [Environment]::MachineName
     $serverState = if (-not $ffmpeg) {
-        'متوقف — ffmpeg غير موجود'
+        (T 'media.stoppedNoFfmpeg')
     }
     elseif ($intervalMinutes -le 0) {
-        'يعمل، والمراقبة الدورية معطلة'
+        (T 'media.runningMonitorOff')
     }
     else {
-        'يعمل'
+        (T 'media.running')
     }
 
-    $probeState = 'لم يُنفّذ'
+    $probeState = (T 'media.notRun')
     $luminance = $null
     if ($Probe) {
         if (-not $ffmpeg) {
-            $probeState = 'تعذّر — ffmpeg غير موجود'
+            $probeState = (T 'media.failedNoFfmpeg')
         }
         elseif ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceUrl'))) {
-            $probeState = 'تعذّر — رابط المصدر الأساسي غير مضبوط'
+            $probeState = (T 'media.failedNoUrl')
         }
         else {
             $probePath = Get-MonitorFrame -TimeoutSeconds $timeout
             if (-not $probePath) {
-                $probeState = 'غير متاح'
+                $probeState = (T 'media.unavailable')
             }
             else {
                 try { $luminance = Get-BridgeFrameLuminance -Path $probePath }
                 catch { $luminance = $null }
                 finally { Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue }
                 if ($null -eq $luminance) {
-                    $probeState = 'تم التقاط الصورة (تعذّر قياس السطوع)'
+                    $probeState = (T 'media.grabbedNoLuma')
                 }
                 elseif ($luminance -le (Get-SettingInt 'OutputBlackLuminance' 6)) {
                     $probeState = "متاح لكن أسود (سطوع $luminance)"
@@ -401,16 +401,16 @@ function Get-OutputMonitorStatus {
         }
     }
 
-    $activeSource = if ($script:OutputMonitorFallbackActive -and $backup) { 'Cinegy الاحتياطي' } else { 'المصدر الأساسي' }
-    $primaryType = if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceType'))) { 'غير مضبوط' } else { [string](Get-JsonProp $primary 'SourceType') }
-    $backupText = if ($backup) { "مضبوط ($([string]$backup.SourceType))" } else { 'غير مضبوط' }
+    $activeSource = if ($script:OutputMonitorFallbackActive -and $backup) { (T 'media.cinegyBackup') } else { (T 'media.primarySource') }
+    $primaryType = if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceType'))) { (T 'media.notSet') } else { [string](Get-JsonProp $primary 'SourceType') }
+    $backupText = if ($backup) { "مضبوط ($([string]$backup.SourceType))" } else { (T 'media.notSet') }
     $lastCheck = if ($script:LastOutputMonitorAt -gt [datetime]::MinValue) {
         ([datetime]$script:LastOutputMonitorAt).ToString('yyyy-MM-dd HH:mm:ss')
     }
-    else { 'لم يبدأ بعد' }
-    $periodic = if ($intervalMinutes -gt 0) { "كل $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')" } else { 'معطلة' }
+    else { (T 'media.notStarted') }
+    $periodic = if ($intervalMinutes -gt 0) { "كل $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')" } else { (T 'media.monitorDisabled') }
     $text = @(
-        '📡 مراقب المصدر',
+        (T 'media.sourceMonitor'),
         "🖥️ سيرفر المتابعة: $serverState · $serverName",
         "🔎 الفحص اليدوي للمصدر الأساسي: $probeState",
         "🎚 المصدر المستخدم حالياً: $activeSource",
@@ -551,7 +551,7 @@ function Update-OutputBlackWatchdog {
             # had tested. The primary is asked directly.
             if (Test-PrimaryMonitorSourceBack -TimeoutSeconds $timeout) {
                 if (Set-OutputMonitorFallbackActive -Active $false) {
-                    Send-AdminBroadcast -Text '💡 عاد المصدر الأساسي؛ تمت العودة إليه من مصدر Cinegy الاحتياطي.' -Urgent
+                    Send-AdminBroadcast -Text (T 'media.primaryReturned') -Urgent
                 }
             }
             else {
@@ -617,7 +617,7 @@ function Get-OutputFailureDiagnosis {
     <#
         Which link in the chain looks broken, not merely that something is.
 
-        "تعذّر الوصول إلى مخرج البث" names a symptom and leaves the reader to
+        (T 'media.outputUnreachable') names a symptom and leaves the reader to
         work out where to start, at the moment they have least patience for
         it. There are three candidates and the bridge can already see all
         three: the channel itself, the relay process that republishes it, and
@@ -637,24 +637,24 @@ function Get-OutputFailureDiagnosis {
     $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not $status.Success) {
-        $lines += '• القناة: لا تُجيب — ابدأ من Cinegy Air نفسه.'
-        $nextStep = '🔎 الخطوة التالية: افتح Cinegy Air وتأكد أن المحرك يعمل.'
+        $lines += (T 'media.channelSilent')
+        $nextStep = (T 'media.nextOpenAir')
     }
     elseif ($status.OutputState -and $status.OutputState -ne 'Normal') {
         $lines += "• القناة: تُجيب، ومخرجها مضبوط على <b>$(ConvertTo-TelegramHtmlText $status.OutputState)</b> — أي أنّ السواد مقصود لا عطل."
     }
     else {
-        $lines += '• القناة: تُجيب ومخرجها طبيعي.'
+        $lines += (T 'media.channelNormal')
     }
 
     # Then the relay, when one is meant to be running: an ffmpeg that died is
     # a break the operator can fix without touching playout.
     if ($script:RelayState.ShouldRun) {
         $running = Get-RunningRelayProcess
-        if ($running) { $lines += '• الترحيل: يعمل.' }
+        if ($running) { $lines += (T 'media.relayRunning') }
         else {
-            $lines += '• الترحيل: مطلوب تشغيله لكنه غير عامل — أعد تشغيل البث المباشر.'
-            if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: أعد تشغيل البث المباشر من القائمة.' }
+            $lines += (T 'media.relayShouldRun')
+            if (-not $nextStep) { $nextStep = (T 'media.nextRestartRelay') }
         }
     }
 
@@ -667,7 +667,7 @@ function Get-OutputFailureDiagnosis {
         $safe = ConvertTo-TelegramHtmlText $short
         if (Test-MediaSourceUnreachable -Detail $serverDetail) {
             $lines += "• سيرفر البث: آخر خطأ يشير إلى أن الخادم لا يجيب — $safe"
-            if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: تحقق من سيرفر البث وشبكته.' }
+            if (-not $nextStep) { $nextStep = (T 'media.nextCheckServer') }
         }
         else {
             $lines += "• سيرفر البث: آخر خطأ مسجّل — $safe"
@@ -680,12 +680,12 @@ function Get-OutputFailureDiagnosis {
     $active = Get-ActiveLiveStreamConfig
     $label = Get-SnapshotSourceLabel -SourceIsPrimary (-not $script:OutputMonitorFallbackActive)
     if ([string]::IsNullOrWhiteSpace([string]$active.SourceUrl)) {
-        $lines += '• المصدر: غير مضبوط في الإعدادات.'
+        $lines += (T 'media.sourceUnset')
     }
     else {
         $lines += "• المصدر المستعمل: $label — تحقّق من خادمه وشبكته."
     }
-    if (-not $nextStep) { $nextStep = '🔎 الخطوة التالية: اطلب لقطة من القائمة لترى الصورة الحالية.' }
+    if (-not $nextStep) { $nextStep = (T 'media.nextAskSnapshot') }
     $lines += $nextStep
     return $lines
 }
@@ -696,7 +696,7 @@ function Send-OutputMonitorFailureNotification {
        link rather than the symptom: see Get-OutputFailureDiagnosis. #>
     param([int]$FailureCount = 0, [switch]$Recovered)
     if ($Recovered) {
-        Send-AdminBroadcast -Text '💡 عاد الوصول إلى مخرج البث بعد تعذّر التقاطه.' -Urgent
+        Send-AdminBroadcast -Text (T 'media.outputBack') -Urgent
         return
     }
     $diagnosis = @(Get-OutputFailureDiagnosis)
@@ -709,7 +709,7 @@ function Send-OutputMonitorFailureNotification {
     $script:LastFailureDiagnosisPlain = @{
         Text = ($text -replace '<[^>]+>', ''); At = (Get-Date); Failures = $FailureCount
     }
-    $copyRow = @{ inline_keyboard = @(, @(@{ text = '📋 نسخة جاهزة للنسخ'; callback_data = 'diag:copy' })) }
+    $copyRow = @{ inline_keyboard = @(, @(@{ text = (T 'media.copyReady'); callback_data = 'diag:copy' })) }
     Send-AdminBroadcast -Text $text -ReplyMarkup $copyRow -Urgent
 }
 
@@ -823,16 +823,16 @@ function Get-RunningRelayProcess {
 function Get-LiveRelayStatusText {
     $proc = Get-RunningRelayProcess
     if ($proc) { return "🟢 يعمل (PID $($proc.Id))" }
-    if ($script:RelayState.ShouldRun) { return "🟠 متوقف - محاولة إعادة التشغيل" }
-    return "⚪ متوقف"
+    if ($script:RelayState.ShouldRun) { return (T 'media.stoppedRetrying') }
+    return (T 'media.stopped')
 }
 
 function Build-RelayArguments {
     $ls = Get-ActiveLiveStreamConfig
     $rtmp = [string]$ls.RtmpDestination
-    if ([string]::IsNullOrWhiteSpace($rtmp)) { throw "لم يتم ضبط رابط RTMP بعد - استخدم زر 🔗 رابط البث أولًا." }
+    if ([string]::IsNullOrWhiteSpace($rtmp)) { throw (T 'media.rtmpUnset') }
     $sourceUrl = [string]$ls.SourceUrl
-    if ([string]::IsNullOrWhiteSpace($sourceUrl)) { throw "LiveStream.SourceUrl غير مضبوط في config.json." }
+    if ([string]::IsNullOrWhiteSpace($sourceUrl)) { throw (T 'media.sourceUrlUnsetPlain') }
 
     $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string]$ls.SourceType) -SourceUrl $sourceUrl -Realtime)
 
@@ -857,7 +857,7 @@ function Start-RelayProcess {
        Returns $true if the process started (startup success is verified later,
        asynchronously, so the caller never blocks). #>
     $ffmpeg = Get-FfmpegPath
-    if (-not $ffmpeg) { throw "لم يتم العثور على ffmpeg.exe. ثبّته أولًا (winget install ffmpeg)." }
+    if (-not $ffmpeg) { throw (T 'media.ffmpegMissingPlain') }
     $relayArgs = @(Build-RelayArguments)
     $stdoutLog = Join-Path $logDir "relay-stdout.log"
     $stderrLog = Join-Path $logDir "relay-stderr.log"
@@ -882,11 +882,11 @@ function Start-LiveRelay {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Get-Setting 'EnableLiveRelay')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "البث المباشر معطّل من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.relayDisabled') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     if (Get-RunningRelayProcess) {
-        Send-TelegramMessage -ChatId $ChatId -Text "البث يعمل بالفعل." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.alreadyRunning') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     try { Start-RelayProcess | Out-Null }
@@ -900,7 +900,7 @@ function Start-LiveRelay {
     $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
     Write-BridgeLog "User $UserId started live relay (PID $($script:RelayState.Process.Id))"
     Add-AuditEntry "▶️ بدء البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ جاري بدء البث..." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.starting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Stop-LiveRelay {
@@ -910,14 +910,14 @@ function Stop-LiveRelay {
     $script:RelayState.VerifyAt = $null
     $proc = Get-RunningRelayProcess
     if (-not $proc) {
-        Send-TelegramMessage -ChatId $ChatId -Text "لا يوجد بث يعمل حاليًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.noneRunning') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     try {
         Stop-Process -Id $proc.Id -Force -ErrorAction Stop
         Write-BridgeLog "User $UserId stopped live relay (PID $($proc.Id))"
         Add-AuditEntry "⏹ إيقاف البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-        Send-TelegramMessage -ChatId $ChatId -Text "⏹ تم إيقاف البث." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.stoppedOk') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     catch {
         Send-TelegramMessage -ChatId $ChatId -Text "فشل إيقاف البث: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -950,7 +950,7 @@ function Update-RelayWatchdog {
             }
         }
         elseif ($notify) {
-            Send-TelegramMessage -ChatId $notify -Text "▶️ البث يعمل الآن." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $notify)
+            Send-TelegramMessage -ChatId $notify -Text (T 'media.runningNow') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $notify)
         }
         return
     }
@@ -974,7 +974,7 @@ function Update-RelayWatchdog {
     if ($decision.Action -eq 'stay_down') {
         $script:RelayState.ShouldRun = $false
         Write-BridgeLog "Live relay died and RelayAutoRestart is off - staying down" "WARN"
-        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "⚠️ توقف البث المباشر (إعادة التشغيل التلقائي معطّلة)." }
+        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text (T 'media.relayStopped') }
         return
     }
 
@@ -1002,7 +1002,7 @@ function Start-StreamUrlPrompt {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'stream_url'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل رابط RTMP الكامل (الخادم + المفتاح معًا) من إعدادات بث فيديو تشات تليجرام:" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.sendRtmp') -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-StreamUrl {
@@ -1012,7 +1012,7 @@ function Complete-StreamUrl {
     Clear-PendingState -ChatId $ChatId
     $trimmed = $Value.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "لم يتم إدخال رابط، لم يتغيّر شيء." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.noUrlGiven') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
         return
     }
     # ffmpeg resolves the output protocol from the URL scheme itself, so a
@@ -1020,7 +1020,7 @@ function Complete-StreamUrl {
     # output away from the network. Admin-only already, but the allowlist
     # costs nothing and closes it outright rather than trusting intent.
     if ($trimmed -notmatch '^rtmps?://') {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ الرابط يجب أن يبدأ بـ rtmp:// أو rtmps://." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.rtmpPrefix') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
         return
     }
     $ls = Get-LiveStreamConfig

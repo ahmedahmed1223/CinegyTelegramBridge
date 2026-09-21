@@ -55,10 +55,10 @@ function Get-SettingValueDisplay {
        مفعّل/معطّل there, not True/False. #>
     param([Parameter(Mandatory)][string]$Name, $Value)
     if ($script:DefaultSettings[$Name] -is [bool]) {
-        return $(if ([bool]$Value) { 'مفعّل' } else { 'معطّل' })
+        return $(if ([bool]$Value) { (T 'cmd.enabled') } else { (T 'cmd.disabled') })
     }
     $text = [string](Format-SettingDisplay -Name $Name -Value $Value)
-    return $(if ([string]::IsNullOrWhiteSpace($text)) { '(فارغ)' } else { $text })
+    return $(if ([string]::IsNullOrWhiteSpace($text)) { (T 'cmd.empty') } else { $text })
 }
 
 function Get-SettingChangeText {
@@ -110,7 +110,7 @@ function Show-SettingsCategoryScreen {
         $lines.Add($line)
     }
     $lines.Add('')
-    $lines.Add('اضغط خيارًا لتبديله أو تغيير قيمته.')
+    $lines.Add((T 'cmd.pressToToggle'))
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page)
 }
 
@@ -118,7 +118,7 @@ function Show-HideAllLayerSettings {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layers = @(Get-HideAllTargetLayers)
-    $scopeText = if ($layers.Count -gt 0) { $layers -join '، ' } else { 'لا توجد طبقات محددة' }
+    $scopeText = if ($layers.Count -gt 0) { $layers -join '، ' } else { (T 'cmd.noLayersSelected') }
     Send-TelegramMessage -ChatId $ChatId -Text "🚨 طبقات إخفاء الكل الحالية: $scopeText`nاضغط طبقة لتضمينها أو استبعادها. هذا التحديد هو فقط ما سيخفيه زر الطوارئ." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
 }
 
@@ -138,7 +138,7 @@ function Set-LayerName {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $trimmed = $Name.Trim()
     if ($trimmed.Length -gt 60 -or $trimmed.IndexOfAny([char[]]';=') -ge 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم يجب أن يكون حتى 60 حرفًا، ولا يحتوي على ; أو =. لم يتغيّر شيء.' -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.nameTooLong') -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
         return $false
     }
 
@@ -172,7 +172,7 @@ function Start-LayerNamePrompt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'layer_name'; Layer = $Layer; UserId = $UserId }
     $current = Get-LayerName -Layer $Layer
-    $currentText = if ($current) { "الاسم الحالي: $current" } else { 'لا يوجد اسم حاليًا.' }
+    $currentText = if ($current) { "الاسم الحالي: $current" } else { (T 'cmd.noNameYet') }
     Send-TelegramMessage -ChatId $ChatId -Text "🏷️ طبقة $Layer`n$currentText`nأرسل الاسم الجديد فقط." -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
 }
 
@@ -182,7 +182,7 @@ function Complete-LayerName {
     if (-not $state -or $state.Mode -ne 'layer_name') { return }
     Clear-PendingState -ChatId $ChatId
     if ([string]::IsNullOrWhiteSpace($Value)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم فارغ. استخدم زر «مسح الاسم» إن أردت حذفه.' -ReplyMarkup (Get-LayerNameEditKeyboard -Layer ([int]$state.Layer))
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.nameEmpty') -ReplyMarkup (Get-LayerNameEditKeyboard -Layer ([int]$state.Layer))
         return
     }
     Set-LayerName -Layer ([int]$state.Layer) -Name $Value -ChatId $ChatId -UserId ([long]$state.UserId) | Out-Null
@@ -202,7 +202,7 @@ function Set-HideAllLayerSelection {
     elseif ($ClearAll) { $value = '' }
     else {
         if ($known -notcontains $Layer) {
-            Send-TelegramMessage -ChatId $ChatId -Text "هذه الطبقة لم تعد ضمن القوالب المعرّفة." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerNotInTemplates') -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
             return
         }
         $selected = @(Get-HideAllTargetLayers)
@@ -258,11 +258,11 @@ function Complete-SettingValue {
     Clear-PendingState -ChatId $ChatId
     $parsed = 0
     if (-not [int]::TryParse($Value.Trim(), [ref]$parsed)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة يجب أن تكون رقمًا صحيحًا. لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.mustBeWholeNumber') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     if ($parsed -lt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة لا يمكن أن تكون سالبة." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.notNegative') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     if ($state.Name -eq 'TemplateTestLayer') {
@@ -290,7 +290,7 @@ function Complete-TemplateMaxAirCustom {
     Clear-PendingState -ChatId $ChatId
     $trimmed = $Value.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.valueEmpty') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     # Parse duration: "2:30" = 2 min 30 sec, "90" = 90 sec
@@ -299,7 +299,7 @@ function Complete-TemplateMaxAirCustom {
         $minutes = [int]$Matches[1]
         $secs = [int]$Matches[2]
         if ($secs -gt 59) {
-            Send-TelegramMessage -ChatId $ChatId -Text "⚠️ صيغة غير صالحة. الثواني يجب أن تكون من 0 إلى 59." -ReplyMarkup (Get-SettingsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.secondsRange') -ReplyMarkup (Get-SettingsKeyboard)
             return
         }
         $seconds = ($minutes * 60) + $secs
@@ -308,11 +308,11 @@ function Complete-TemplateMaxAirCustom {
         $seconds = [int]$trimmed
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ صيغة غير صالحة. استخدم «دقائق:ثوانٍ» مثل 2:30 أو ثوانٍ فقط مثل 90." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.durationFormat') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     if ($seconds -lt 1 -or $seconds -gt 3600) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ المدى 1–3600 ثانية (حتى ساعة)." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.range1to3600') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     $previous = Get-Setting 'TemplateMaxAirSeconds'
@@ -324,7 +324,7 @@ function Complete-TemplateMaxAirCustom {
     Set-Setting -Name TemplateMaxAirSeconds -Value $map
     if ($script:LastConfigSaveFailed) {
         Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ تعذّر حفظ الحد؛ بقيت القاعدة السابقة." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.limitSaveFailed') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     $state.ConfirmDisable = $false
@@ -355,9 +355,9 @@ function Reset-SettingsToDefault {
         foreach ($name in $script:DefaultSettings.Keys) { $values[$name] = Get-Setting $name }
         $modified = @(Get-ModifiedBridgeSettings -Schema $script:SettingSchema -Values $values)
         $lines = [System.Collections.Generic.List[string]]::new()
-        $lines.Add('<b>♻️ استعادة كل الإعدادات الافتراضية؟</b>')
+        $lines.Add((T 'cmd.resetAllTitle'))
         if ($modified.Count -eq 0) {
-            $lines.Add('<i>لا إعداد يخالف الافتراضي الآن، فلن يتغيّر شيء.</i>')
+            $lines.Add((T 'cmd.nothingDiffers'))
         }
         else {
             $lines.Add("<i>$($modified.Count) إعدادًا ستعود إلى قيمتها الأصلية:</i>")
@@ -368,7 +368,7 @@ function Reset-SettingsToDefault {
             if ($modified.Count -gt 8) { $lines.Add("… و$($modified.Count - 8) غيرها.") }
         }
         $lines.Add('')
-        $lines.Add('تُحفظ نسخة من الإعدادات الحالية قبل الكتابة، وتجدها في 🗄 نسخ الإعدادات.')
+        $lines.Add((T 'cmd.backupBeforeWrite'))
         Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsResetConfirmKeyboard)
         return
     }
@@ -380,7 +380,7 @@ function Reset-SettingsToDefault {
     Save-Config
     Write-BridgeLog "User $UserId reset all settings to defaults" "WARN"
     Add-AuditEntry "♻️ استعادة الإعدادات الافتراضية - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "♻️ تمت استعادة جميع الإعدادات الافتراضية." -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.allRestored') -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Show-SettingsListScreen {
@@ -398,13 +398,13 @@ function Show-SettingsListScreen {
         }
         'search' { @(Find-BridgeSettings -Schema $script:SettingSchema -Query $Query) }
     })
-    $title = switch ($Mode) { 'simple' { '🧭 الإعدادات المبسطة' }; 'advanced' { '🛠 كل الإعدادات' }; 'modified' { '📝 الإعدادات المعدّلة' }; default { "🔎 نتائج البحث عن «$Query»" } }
+    $title = switch ($Mode) { 'simple' { (T 'cmd.simpleSettings') }; 'advanced' { (T 'cmd.allSettings') }; 'modified' { (T 'cmd.changedSettings') }; default { "🔎 نتائج البحث عن «$Query»" } }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $title)</b>")
     if ($records.Count -eq 0) {
         # A title over an empty keyboard read as a screen that had failed to
         # load. This says the search found nothing, and where to look instead.
-        $lines.Add('<i>لا إعداد يطابق. جرّب كلمة أقصر، أو افتح 📝 المعدّل فقط أو أحد الأبواب.</i>')
+        $lines.Add((T 'cmd.noSettingMatches'))
     }
     else {
         # The same page the keyboard is about to draw, so the lines and the
@@ -422,7 +422,7 @@ function Start-SettingsSearch {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'settings_search'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text 'أرسل اسم الإعداد أو وصفه بالعربية:' -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.searchPrompt') -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-SettingsSearch {
@@ -458,11 +458,11 @@ function Invoke-AdminRawCommand {
     param([string]$ArgText, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Get-Setting 'EnableRawCommand')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "الأمر الخام معطّل من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.rawDisabled') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "هذا الأمر مخصص للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.adminsOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $parts = $ArgText -split '\s+', 3
@@ -521,7 +521,7 @@ function Invoke-HideCommand {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layer = 0
     if (-not [int]::TryParse($ArgText.Trim(), [ref]$layer)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "اختر الطبقة:" -ReplyMarkup (Get-LayersKeyboard -Prefix 'hide')
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.pickLayer') -ReplyMarkup (Get-LayersKeyboard -Prefix 'hide')
         return
     }
     Invoke-HideLayer -Layer $layer -ChatId $ChatId -UserId $UserId | Out-Null
@@ -532,7 +532,7 @@ function Invoke-ExitCommand {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layer = 0
     if (-not [int]::TryParse($ArgText.Trim(), [ref]$layer)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "اختر الطبقة:" -ReplyMarkup (Get-LayersKeyboard -Prefix 'exit')
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.pickLayer') -ReplyMarkup (Get-LayersKeyboard -Prefix 'exit')
         return
     }
     Invoke-ExitLayer -Layer $layer -ChatId $ChatId -UserId $UserId
@@ -559,7 +559,7 @@ function Invoke-SetCommand {
 function Invoke-UserAliasCommand {
     param([string]$ArgText, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'هذا الخيار للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.adminsOnlyOption') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     if ($ArgText -notmatch '^\s*(\d+)\s*(.*)$') {
@@ -574,7 +574,7 @@ function Invoke-UserAliasCommand {
         Add-AuditEntry "👤 اسم بديل للمستخدم $(Format-UserAuditActor -UserId ([long]$targetUserId)) عُدّل بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text $result -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
-    else { Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر حفظ الاسم المستعار.' }
+    else { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.aliasSaveFailed') }
 }
 
 function Invoke-BridgeCommand {
@@ -594,7 +594,7 @@ function Invoke-BridgeCommand {
 
     $text = $Text.Trim()
     if ($text -notmatch '^/(\S+)\s*(.*)$') {
-        Send-TelegramMessage -ChatId $ChatId -Text "أرسل /بدء لعرض القائمة الرئيسية." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.sendStart') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     # Telegram appends @BotName to commands in groups.
@@ -602,14 +602,14 @@ function Invoke-BridgeCommand {
     $argText = $Matches[2]
 
     switch ($command) {
-        { $_ -in @('بدء', 'start') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "أهلاً! اختر من القائمة:" }
+        { $_ -in @('بدء', 'start') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro (T 'cmd.welcome') }
         { $_ -in @('قائمة', 'القائمة', 'menu') } { Show-MainMenu -ChatId $ChatId -UserId $UserId }
-        { $_ -in @('الغاء', 'إلغاء', 'cancel') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro "❌ تم إلغاء أي عملية معلّقة. اختر من القائمة:" }
+        { $_ -in @('الغاء', 'إلغاء', 'cancel') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro (T 'cmd.cancelled') }
         { $_ -in @('مساعدة', 'help') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-HelpHomeText -ChatId $ChatId -UserId $UserId) -ReplyMarkup (Get-HelpHomeKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
         { $_ -in @('الجديد', 'whatsnew') } { Send-TelegramPagedText -ChatId $ChatId -Parts (Get-WhatsNewParts) -ReplyMarkup (Get-WhatsNewKeyboard -ChatId $ChatId -UserId $UserId) -ParseMode HTML }
         { $_ -in @('digest', 'ملخص') } { Send-TelegramMessage -ChatId $ChatId -Text (Get-MissedEventsText -Hours (Get-SettingInt 'MissedEventsHours' 1)) -ParseMode HTML -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         { $_ -like 'who*' -or $_ -like 'من *' } {
-            if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+            if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.adminsOnlyThis') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
             else {
                 $query = ($_ -replace '^(who|من)\s*', '').Trim()
                 $historyKeyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
@@ -625,7 +625,7 @@ function Invoke-BridgeCommand {
                     Send-TelegramMessage -ChatId $ChatId -Text (Get-BridgeStatsText) -ParseMode HTML -ReplyMarkup $statsKeyboard
                 }
             }
-            else { Send-TelegramMessage -ChatId $ChatId -Text 'هذا الأمر للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+            else { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.adminsOnlyThis') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         }
         { $_ -in @('قوالب', 'templates') } { Invoke-TemplatesCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('عرض', 'show') } { Invoke-ShowCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
@@ -635,8 +635,8 @@ function Invoke-BridgeCommand {
             # a mute with no route out is how a person loses the alerts they
             # did want.
             $muted = Test-AirNoticeMuted -UserId $UserId
-            $noticeText = if ($muted) { '🔕 تنبيهات العرض متوقّفة لك حاليًا.' } else { '🔔 تنبيهات العرض تصلك حاليًا.' }
-            $noticeButton = if ($muted) { New-Button '🔔 أعد التنبيهات' 'notice:unmute' } else { New-Button '🔕 أوقف تنبيهاتي' 'notice:mute' }
+            $noticeText = if ($muted) { (T 'cmd.noticesOffNow') } else { (T 'cmd.noticesOnNow') }
+            $noticeButton = if ($muted) { New-Button (T 'cmd.noticesBack') 'notice:unmute' } else { New-Button (T 'cmd.noticesStop') 'notice:mute' }
             Send-TelegramMessage -ChatId $ChatId -Text $noticeText -ReplyMarkup @{ inline_keyboard = @(, @($noticeButton)) }
         }
         { $_ -in @('اخفاءالكل', 'hideall') } { Request-HideAllConfirmation -ChatId $ChatId -UserId $UserId }
@@ -648,7 +648,7 @@ function Invoke-BridgeCommand {
         { $_ -in @('تشخيص', 'diagnostics', 'diag') } { Invoke-DiagnosticsCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('حزمةتشخيص', 'diagbundle') } { Invoke-DiagnosticBundleCommand -ChatId $ChatId -UserId $UserId }
         { $_ -in @('صورة', 'snapshot') } { Start-SnapshotJob -ChatId $ChatId -UserId $UserId }
-        { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text "📅 الجدولة:" -ReplyMarkup (Get-ScheduleMenuKeyboard) }
+        { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.scheduling') -ReplyMarkup (Get-ScheduleMenuKeyboard) }
         { $_ -in @('سجل', 'audit') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Invoke-AuditCommand -ChatId $ChatId -UserId $UserId }
             else { Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }

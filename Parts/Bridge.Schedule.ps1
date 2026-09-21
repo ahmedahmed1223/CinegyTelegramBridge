@@ -75,10 +75,10 @@ function Get-ScheduleCalendarKeyboard {
     # Back only where there is somewhere to go: the month containing today is
     # the earliest one that can hold a future date.
     $nav = @()
-    if ($first -gt $today) { $nav += , (New-BridgeButton -Text '◀️ السابق' -CallbackData "schcal:$($first.AddMonths(-1).ToString('yyyy-MM'))") }
-    $nav += , (New-BridgeButton -Text 'التالي ▶️' -CallbackData "schcal:$($first.AddMonths(1).ToString('yyyy-MM'))")
+    if ($first -gt $today) { $nav += , (New-BridgeButton -Text (T 'sch.prev') -CallbackData "schcal:$($first.AddMonths(-1).ToString('yyyy-MM'))") }
+    $nav += , (New-BridgeButton -Text (T 'sch.next') -CallbackData "schcal:$($first.AddMonths(1).ToString('yyyy-MM'))")
     $rows += , @($nav)
-    $rows += , @((New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    $rows += , @((New-BridgeButton -Text (T 'sch.cancel') -CallbackData 'cancel'))
     return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
@@ -97,8 +97,8 @@ function Get-ScheduleHourKeyboard {
             else { New-BridgeButton -Text ('{0:00}' -f $hour) -CallbackData "schhour:${Date}:$hour" })
         if ($row.Count -eq 6) { $rows += , @($row); $row = @() }
     }
-    $rows += , @((New-BridgeButton -Text '◀️ التاريخ' -CallbackData "schcal:$($day.ToString('yyyy-MM'))"),
-        (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    $rows += , @((New-BridgeButton -Text (T 'sch.backDate') -CallbackData "schcal:$($day.ToString('yyyy-MM'))"),
+        (New-BridgeButton -Text (T 'sch.cancel') -CallbackData 'cancel'))
     return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
@@ -115,8 +115,8 @@ function Get-ScheduleMinuteKeyboard {
             else { New-BridgeButton -Text ('{0:00}' -f $minute) -CallbackData "schmin:${Date}:${Hour}:$minute" })
         if ($row.Count -eq 6) { $rows += , @($row); $row = @() }
     }
-    $rows += , @((New-BridgeButton -Text '◀️ الساعة' -CallbackData "schday:$Date"),
-        (New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+    $rows += , @((New-BridgeButton -Text (T 'sch.backHour') -CallbackData "schday:$Date"),
+        (New-BridgeButton -Text (T 'sch.cancel') -CallbackData 'cancel'))
     return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
@@ -126,11 +126,11 @@ function Get-ScheduleTimePromptKeyboard {
        is another way in, not a replacement. #>
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     return @{ inline_keyboard = @(
-            , @((New-BridgeButton -Text '⏱ +15 د' -CallbackData 'schrel:15'),
-                (New-BridgeButton -Text '⏱ +30 د' -CallbackData 'schrel:30'),
-                (New-BridgeButton -Text '⏱ +60 د' -CallbackData 'schrel:60'))
-            , @((New-BridgeButton -Text '📅 اختر من التقويم' -CallbackData "schcal:$($Now.ToString('yyyy-MM'))"))
-            , @((New-BridgeButton -Text '❌ إلغاء' -CallbackData 'cancel'))
+            , @((New-BridgeButton -Text (T 'sch.plus15') -CallbackData 'schrel:15'),
+                (New-BridgeButton -Text (T 'sch.plus30') -CallbackData 'schrel:30'),
+                (New-BridgeButton -Text (T 'sch.plus60') -CallbackData 'schrel:60'))
+            , @((New-BridgeButton -Text (T 'sch.calendar') -CallbackData "schcal:$($Now.ToString('yyyy-MM'))"))
+            , @((New-BridgeButton -Text (T 'sch.cancel') -CallbackData 'cancel'))
         ) }
 }
 
@@ -216,7 +216,7 @@ function ConvertFrom-OperatorScheduleTime {
         $localTime = $localTime.AddSeconds(-$localTime.Second).AddMilliseconds(-$localTime.Millisecond)
     }
     elseif ($value -match '^(اليوم|غدا|غدًا|غداً|بكرة|بكره)\s+(\d{1,2}):(\d{2})$') {
-        $day = if ($Matches[1] -eq 'اليوم') { $today } else { $today.AddDays(1) }
+        $day = if ($Matches[1] -eq (T 'sch.today')) { $today } else { $today.AddDays(1) }
         if (-not (Test-ScheduleClockParts -Hour $Matches[2] -Minute $Matches[3])) {
             return [pscustomobject]@{ Success = $false; Error = "ساعة أو دقيقة خارج المدى.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
         }
@@ -250,11 +250,11 @@ function ConvertFrom-OperatorScheduleTime {
     $localTime = [datetime]::SpecifyKind($localTime, [System.DateTimeKind]::Unspecified)
     $zone = [System.TimeZoneInfo]::Local
     if ($zone.IsInvalidTime($localTime) -or $zone.IsAmbiguousTime($localTime)) {
-        return [pscustomobject]@{ Success = $false; Error = 'الوقت غير واضح بسبب تغيير التوقيت المحلي؛ اختر وقتًا آخر.'; TimeZoneId = $zone.Id }
+        return [pscustomobject]@{ Success = $false; Error = (T 'sch.ambiguousTime'); TimeZoneId = $zone.Id }
     }
     $scheduledAt = [datetimeoffset]::new($localTime, $zone.GetUtcOffset($localTime))
     if ($scheduledAt -le $Now) {
-        return [pscustomobject]@{ Success = $false; Error = 'يجب أن يكون الموعد في المستقبل.'; TimeZoneId = $zone.Id }
+        return [pscustomobject]@{ Success = $false; Error = (T 'sch.mustBeFuture'); TimeZoneId = $zone.Id }
     }
     return [pscustomobject]@{ Success = $true; ScheduledAt = $scheduledAt; TimeZoneId = $zone.Id; Error = '' }
 }
@@ -429,7 +429,7 @@ function Get-ScheduleExecutionRows {
         else { '—' }
         $delay = Get-ScheduleExecutionDelaySeconds -Record $record
         $lateness = if ($null -eq $delay) { '—' }
-        elseif ($delay -le 2) { 'في وقتها' }
+        elseif ($delay -le 2) { (T 'sch.onTime') }
         else { "متأخرة $(Format-DurationSeconds -Seconds $delay)" }
         $attempt = if ([int]$record.Attempt -gt 1) { " · محاولة $($record.Attempt)" } else { '' }
         # The kind glyph and the result glyph are different jobs: a column of
@@ -452,9 +452,9 @@ function Get-ScheduleExecutionRows {
 function Get-ScheduleExecutionHeading {
     param([string]$Kind = '')
     switch ($Kind) {
-        'mojaz' { return '🧾 سجل تنفيذ مواعيد الموجز' }
-        'news' { return '🧾 سجل تنفيذ شريط الأخبار' }
-        default { return '🧾 سجل التنفيذ' }
+        'mojaz' { return (T 'sch.mojazExecLog') }
+        'news' { return (T 'sch.newsExecLog') }
+        default { return (T 'sch.execLog') }
     }
 }
 
@@ -463,7 +463,7 @@ function Get-ScheduleExecutionBlocks {
     $rows = @(Get-ScheduleExecutionRows -TailLines $TailLines -Kind $Kind)
     $blocks = @(@{ type = 'heading'; text = (Get-ScheduleExecutionHeading -Kind $Kind); size = 3 })
     if ($rows.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لم يُنفَّذ شيء بعد.' })
+        return $blocks + @(@{ type = 'paragraph'; text = (T 'sch.nothingRunYet') })
     }
     $failed = @($rows | Where-Object { $_.Mark -eq '❌' }).Count
     $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions')، كلّها ناجحة" }
@@ -472,10 +472,10 @@ function Get-ScheduleExecutionBlocks {
 
     $trimmed = Select-RichTableRows -Items $rows
     $cells = @(, @(
-            @{ text = 'الوقت'; is_header = $true }
-            @{ text = 'القالب'; is_header = $true }
-            @{ text = 'النتيجة'; is_header = $true }
-            @{ text = 'التأخير'; is_header = $true }
+            @{ text = (T 'sch.col.time'); is_header = $true }
+            @{ text = (T 'sch.col.template'); is_header = $true }
+            @{ text = (T 'sch.col.result'); is_header = $true }
+            @{ text = (T 'sch.col.delay'); is_header = $true }
         ))
     foreach ($row in @($trimmed.Rows)) {
         $what = if ([string]$row.Kind -eq 'show') { "$([string]$row.Template) · ط$($row.Layer)" }
@@ -506,7 +506,7 @@ function Get-ScheduleExecutionText {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(Get-ScheduleExecutionHeading -Kind $Kind)</b>")
     if ($rows.Count -eq 0) {
-        $lines.Add('<i>لم يُنفَّذ شيء بعد.</i>')
+        $lines.Add((T 'sch.nothingRunYetHtml'))
         return ($lines -join "`n")
     }
     $trimmed = Select-RichTableRows -Items $rows
@@ -536,14 +536,14 @@ function Show-ScheduleExecutionScreen {
     # screens were doing it on every open.
     $back = @()
     switch ($Kind) {
-        'mojaz' { $back = @( (New-Button '⬅️ المواعيد' 'mojaz:times') ) }
-        'news' { $back = @( (New-Button '⬅️ شريط الأخبار' 'menu:news') ) }
-        default { $back = @( (New-Button '📋 الأحداث القادمة' 'schedule:list'), (New-Button '⬅️ الجدولة' 'menu:schedule') ) }
+        'mojaz' { $back = @( (New-Button (T 'sch.backToTimes') 'mojaz:times') ) }
+        'news' { $back = @( (New-Button (T 'sch.backToNews') 'menu:news') ) }
+        default { $back = @( (New-Button (T 'sch.upcoming') 'schedule:list'), (New-Button (T 'sch.backToScheduling') 'menu:schedule') ) }
     }
-    $rows = @(, @( (New-Button '🔄 تحديث' $refresh) ))
+    $rows = @(, @( (New-Button (T 'sch.refresh') $refresh) ))
     # Only from the all-kinds screen: a filtered one already answers its own
     # question, and three more buttons under it would just be noise.
-    if (-not $Kind) { $rows += , @( (New-Button '📑 الموجز' 'schedule:execlog:mojaz'), (New-Button '📰 الأخبار' 'schedule:execlog:news') ) }
+    if (-not $Kind) { $rows += , @( (New-Button (T 'sch.bulletin') 'schedule:execlog:mojaz'), (New-Button (T 'sch.news') 'schedule:execlog:news') ) }
     $rows += , $back
     $keyboard = @{ inline_keyboard = $rows }
     if (-not (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-ScheduleExecutionBlocks -Kind $Kind) -ReplyMarkup $keyboard)) {
@@ -725,8 +725,8 @@ function Get-ScheduleAnchorLabel {
     $bare = $anchorId.Trim('{', '}')
     $match = @($Items | Where-Object { ([string](Get-JsonProp $_ 'Id')).Trim('{', '}') -eq $bare }) | Select-Object -First 1
     $name = if ($match) { [string](Get-JsonProp $match 'Name') } else { '' }
-    if ([string]::IsNullOrWhiteSpace($name)) { $name = 'مادة لم تعد في الجدول' }
-    $after = if ($offset -eq 0) { 'مع بدء' } elseif ($offset -lt 60) { "بعد بدء بـ $offset ث" } else { "بعد بدء بـ $([int]($offset / 60)) د" }
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = (T 'sch.materialGone') }
+    $after = if ($offset -eq 0) { (T 'sch.withStart') } elseif ($offset -lt 60) { "بعد بدء بـ $offset ث" } else { "بعد بدء بـ $([int]($offset / 60)) د" }
     return "🎞 مربوط: $after «$name»"
 }
 
@@ -737,7 +737,7 @@ function Get-ScheduledTemplateStatus {
     param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
     $key = [string](Get-JsonProp $ScheduleEntry 'TemplateKey')
     if ([string]::IsNullOrWhiteSpace($key)) {
-        return [pscustomobject]@{ Success = $false; State = 'invalid'; Key = ''; Layer = 0; Path = ''; Error = 'الحدث المجدول بلا مفتاح قالب.' }
+        return [pscustomobject]@{ Success = $false; State = 'invalid'; Key = ''; Layer = 0; Path = ''; Error = (T 'sch.noTemplateKey') }
     }
     try {
         $store = Get-TemplateStore
@@ -931,7 +931,7 @@ function Format-ScheduleEventHtml {
         administrator, so it is escaped like any other human text.
     #>
     param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
-    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { (T 'sch.daily') }; 'weekly' { (T 'sch.weekly') }; default { (T 'sch.once') } }
     $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
     $zone = [string](Get-JsonProp $ScheduleEntry 'TimeZoneId')
     if ([string]::IsNullOrWhiteSpace($zone)) { $zone = [System.TimeZoneInfo]::Local.Id }
@@ -948,7 +948,7 @@ function Format-ScheduleEventHtml {
 
 function Format-ScheduleEvent {
     param([Parameter(Mandatory)][hashtable]$ScheduleEntry)
-    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $recurrence = switch ([string]$ScheduleEntry.Recurrence) { 'daily' { (T 'sch.daily') }; 'weekly' { (T 'sch.weekly') }; default { (T 'sch.once') } }
     $at = [datetimeoffset]$ScheduleEntry.ScheduledAt
     $zone = [string](Get-JsonProp $ScheduleEntry 'TimeZoneId')
     if ([string]::IsNullOrWhiteSpace($zone)) { $zone = [System.TimeZoneInfo]::Local.Id }
@@ -967,11 +967,11 @@ function Start-ScheduleMutationFlow {
     )
     $entry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq $EventId -and [string]$_.Status -eq 'pending' }) | Select-Object -First 1
     if (-not $entry) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الحدث لم يعد متاحًا للنسخ أو التعديل.' -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.eventGone') -ReplyMarkup (Get-ScheduleMenuKeyboard)
         return
     }
     if ([long]$entry.UserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'يمكنك تعديل أحداثك فقط.' -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.yourEventsOnly') -ReplyMarkup (Get-ScheduleMenuKeyboard)
         return
     }
     $values = @{}
@@ -985,7 +985,7 @@ function Start-ScheduleMutationFlow {
         AnchorOffsetSeconds = [string](Get-JsonProp $entry 'AnchorOffsetSeconds')
     }
     Set-PendingState -ChatId $ChatId -State $state
-    $verb = if ($Action -eq 'copy') { 'نسخ الحدث إلى موعد جديد' } else { 'تعديل موعد الحدث' }
+    $verb = if ($Action -eq 'copy') { (T 'sch.copyEvent') } else { (T 'sch.editEventTime') }
     Send-TelegramMessage -ChatId $ChatId -Text "📅 $verb`nالموعد الحالي: $(([datetimeoffset]$entry.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($entry.TimeZoneId)`nأرسل الموعد الجديد بصيغة YYYY-MM-DD HH:mm" -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -1017,11 +1017,11 @@ function Complete-ScheduleText {
     if ($state.Mode -eq 'schedule_end_date') {
         $endDate = [datetime]::MinValue
         if (-not [datetime]::TryParseExact($Value.Trim(), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$endDate)) {
-            Send-TelegramMessage -ChatId $ChatId -Text '❌ أرسل تاريخ الانتهاء بصيغة YYYY-MM-DD.' -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.sendEndDate') -ReplyMarkup (Get-CancelKeyboard)
             return
         }
         if ($endDate.Date -lt ([datetimeoffset]$state.ScheduledAt).Date) {
-            Send-TelegramMessage -ChatId $ChatId -Text '❌ تاريخ الانتهاء يجب ألا يسبق أول موعد.' -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.endBeforeStart') -ReplyMarkup (Get-CancelKeyboard)
             return
         }
         $state.RecurrenceUntil = $endDate.ToString('yyyy-MM-dd')
@@ -1031,7 +1031,7 @@ function Complete-ScheduleText {
     if ($state.Mode -eq 'schedule_fields') {
         $required = $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
         if ($required -and [string]::IsNullOrWhiteSpace($Value)) {
-            Send-TelegramMessage -ChatId $ChatId -Text "هذا الحقل إلزامي ولا يمكن تركه فارغًا." -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.fieldRequired') -ReplyMarkup (Get-CancelKeyboard)
             return
         }
         $limit = if ($state.Index -lt @($state.Limits).Count) { [int]$state.Limits[$state.Index] } else { 0 }
@@ -1059,10 +1059,10 @@ function Complete-ScheduleText {
 
 function Show-ScheduleReview {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
-    $recurrence = switch ([string]$State.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+    $recurrence = switch ([string]$State.Recurrence) { 'daily' { (T 'sch.daily') }; 'weekly' { (T 'sch.weekly') }; default { (T 'sch.once') } }
     $reviewTitle = if ($State.ContainsKey('MutationAction')) {
-        if ([string]$State.MutationAction -eq 'copy') { '🔎 مراجعة نسخة الحدث' } else { '🔎 مراجعة تعديل موعد الحدث' }
-    } else { '🔎 مراجعة الجدولة' }
+        if ([string]$State.MutationAction -eq 'copy') { (T 'sch.reviewCopy') } else { (T 'sch.reviewEdit') }
+    } else { (T 'sch.review') }
     $lines = @(
         $reviewTitle, "القالب: $($State.TemplateKey)",
         "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
@@ -1081,7 +1081,7 @@ function Show-ScheduleReview {
         $lines += "⚠️ تعارض محتمل على الطبقة $($State.Layer):"
         foreach ($conflict in $conflicts) { $lines += "• $(Format-ScheduleEvent -ScheduleEntry $conflict)" }
     }
-    $lines += ''; $lines += 'لن يُحفظ الحدث حتى تضغط تأكيد الجدولة.'
+    $lines += ''; $lines += (T 'sch.notSavedUntilConfirm')
     $State.Mode = 'schedule_review'; Set-PendingState -ChatId $ChatId -State $State
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-ScheduleReviewKeyboard -State $State)
 }
@@ -1120,15 +1120,15 @@ function Get-ScheduleAnchorPickerKeyboard {
         if ($name.Length -gt 28) { $name = $name.Substring(0, 28) + '…' }
         $rows += , @((New-Button "$at $name" "schanchor:$i"))
     }
-    $rows += , @((New-Button '❌ رجوع' 'schedule:anchorback'))
+    $rows += , @((New-Button (T 'sch.back') 'schedule:anchorback'))
     return @{ inline_keyboard = $rows }
 }
 
 function Get-ScheduleAnchorOffsetKeyboard {
     $rows = @(
-        , @((New-Button 'بعد البدء بـ 30 ثانية' 'schoff:30'), (New-Button 'بعد البدء بدقيقة' 'schoff:60'))
-        , @((New-Button 'بعد البدء بـ 5 دقائق' 'schoff:300'), (New-Button 'مع بدء المادة' 'schoff:0'))
-        , @((New-Button '❌ رجوع' 'schedule:anchorback'))
+        , @((New-Button (T 'sch.after30s') 'schoff:30'), (New-Button (T 'sch.after1m') 'schoff:60'))
+        , @((New-Button (T 'sch.after5m') 'schoff:300'), (New-Button (T 'sch.atMaterialStart') 'schoff:0'))
+        , @((New-Button (T 'sch.back') 'schedule:anchorback'))
     )
     return @{ inline_keyboard = $rows }
 }
@@ -1177,12 +1177,12 @@ function Confirm-ScheduledShow {
     Clear-PendingState -ChatId $ChatId
     if ($saved) {
         $auditAction = if ($state.ContainsKey('MutationAction')) { [string]$state.MutationAction } else { 'created' }
-        $auditLabel = switch ($auditAction) { 'updated' { 'تعديل' } 'deleted' { 'حذف' } default { 'إنشاء' } }
+        $auditLabel = switch ($auditAction) { 'updated' { (T 'sch.edit') } 'deleted' { (T 'sch.delete') } default { (T 'sch.create') } }
         Add-AuditEntry "📅 جدولة: $auditLabel $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ الجدولة.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ ملف الجدولة، لذلك لم يُعتمد الحدث." -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.saveFailed') -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }
 }
 

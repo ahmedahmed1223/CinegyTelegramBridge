@@ -20,7 +20,7 @@ function Get-LayerLockNotice {
     if (-not $script:LayerLocks.ContainsKey($Layer)) { return '' }
     $lock = $script:LayerLocks[$Layer]
     if ([long]$lock.UserId -eq $UserId) { return '' }
-    $held = if ($lock.StartedAt -is [datetime]) { Format-Duration -Seconds ([int]((Get-Date) - $lock.StartedAt).TotalSeconds) } else { 'فترة' }
+    $held = if ($lock.StartedAt -is [datetime]) { Format-Duration -Seconds ([int]((Get-Date) - $lock.StartedAt).TotalSeconds) } else { (T 'flow.period') }
     return "⚠️ $(Get-UserDisplayName -UserId ([long]$lock.UserId)) يجهّز '$($lock.Key)' على الطبقة $Layer منذ $held."
 }
 
@@ -168,7 +168,7 @@ function Start-ShowFlow {
     Clear-PendingState -ChatId $ChatId
     $t = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $t) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب غير معروف (ربما تغيّر ملف القوالب). افتح 📋 القوالب من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.templateUnknown') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
@@ -241,18 +241,18 @@ function Resume-ExpiredFlow {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (Get-PendingState -ChatId $ChatId) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لديك عملية جارية — أتممها أو ألغها أولًا، ثم استأنف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.operationInProgress') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     if (-not $script:ExpiredFlowResume.ContainsKey($ChatId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا مسودة منتهية قابلة للاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noResumableDraft') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $saved = $script:ExpiredFlowResume[$ChatId]
     $template = Get-TemplateByIndex -Index (Get-TemplateIndex -Key ([string](Get-JsonProp $saved 'Key')))
     if (-not $template) {
         $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
-        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا — لا يمكن الاستئناف.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.templateGoneNoResume') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $layer = [int](Get-JsonProp $saved 'LockLayer')
@@ -296,7 +296,7 @@ function Resume-ShowFlow {
     if (-not $state) { return }
     $isRequired = $state.Required -and $state.Index -lt @($state.Required).Count -and [bool]$state.Required[$state.Index]
     if ($isRequired -and ($Skip -or [string]::IsNullOrWhiteSpace($Value))) {
-        $message = if ($Skip) { "❌ هذا الحقل مطلوب ولا يمكن تخطيه." } else { "❌ هذا الحقل مطلوب ولا يمكن تركه فارغًا." }
+        $message = if ($Skip) { (T 'flow.fieldRequiredNoSkip') } else { (T 'flow.fieldRequiredNoEmpty') }
         Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
         return
     }
@@ -342,15 +342,15 @@ function Format-ShowReviewText {
     # to put it on air. Telegram has no text colour for a bot to use; a
     # monospace span is the strongest distinction it does have, and it is
     # tap-to-copy as well.
-    $lines.Add("<b>🔎 مراجعة قبل الإرسال</b>")
+    $lines.Add((T 'flow.reviewTitle'))
     $lines.Add("القالب: <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b> · الطبقة <code>$($State.LockLayer)</code>")
     $context = Get-JsonProp $State 'ReplacementContext'
     if ($context -and -not [bool](Get-JsonProp $context 'IsKnown')) {
-        $lines.Add("<b>⚠️ تعذّر التحقق من حداثة حالة الطبقة</b>؛ راجع شاشة الحالة قبل التأكيد عند الشك.")
+        $lines.Add((T 'flow.freshnessWarning'))
     }
     if ($context -and [bool](Get-JsonProp $context 'IsOnAir')) {
         $currentKey = [string](Get-JsonProp $context 'Key')
-        if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = 'مشهد غير مسمّى' }
+        if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = (T 'flow.unnamedScene') }
         $currentUserId = [long](Get-JsonProp $context 'UserId')
         $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
         $lines.Add("<b>⚠️ سيتم استبدال القالب الحالي</b>: $(ConvertTo-TelegramHtmlText $currentKey) ($(ConvertTo-TelegramHtmlText $sourceText))")
@@ -371,7 +371,7 @@ function Format-ShowReviewText {
         if ($note) { $lines.Add("$(ConvertTo-TelegramHtmlText $note)") }
     }
     $lines.Add("")
-    $lines.Add("📺 <b>ما سيظهر على الشاشة:</b>")
+    $lines.Add((T 'flow.whatWillShow'))
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
         $name = [string]$State.Fields[$i]
         $label = $name
@@ -399,12 +399,12 @@ function Format-ShowReviewText {
             })
         if ($notes.Count -gt 0) {
             $lines.Add("")
-            $lines.Add("<b>✍️ تنبيهات إملائية</b> (إرشادية — لا تمنع الإرسال):")
+            $lines.Add((T 'flow.spellingWarnings'))
             foreach ($note in @($notes | Select-Object -Unique -First 6)) { $lines.Add($note) }
         }
     }
     $lines.Add("")
-    $lines.Add("<i>لن يُرسل شيء إلى Cinegy حتى تضغط تأكيد الإرسال.</i>")
+    $lines.Add((T 'flow.nothingUntilConfirm'))
     return ($lines -join "`n")
 }
 
@@ -456,7 +456,7 @@ function Get-FieldPromptText {
     # The last line is the one that was missing. Every other screen in the
     # bridge answers a button press with more buttons, so an operator who has
     # just pressed one waits for the next - and this is the single screen that
-    # wants typing instead. It said "أرسل نص الحقل" inside a sentence about the
+    # wants typing instead. It said (T 'flow.sendFieldText') inside a sentence about the
     # template and left the rest implied.
     #
     # Progress is drawn rather than counted: ▰▰▱ is read without arithmetic,
@@ -490,7 +490,7 @@ function Get-FieldPromptText {
     $lines.Add($shownLabel)
     if ($limit -gt 0) { $lines.Add("     <i>الحد: $limit حرفًا</i>") }
     $lines.Add('')
-    $lines.Add('⌨️ <b>اكتب النص في صندوق الرسالة بالأسفل وأرسله.</b>')
+    $lines.Add((T 'flow.typeInBox'))
     return ($lines -join "`n")
 }
 
@@ -661,11 +661,11 @@ function Start-SafeRollbackReview {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
     if (-not $candidate) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد تراجع صالح لهذه الطبقة، أو انتهت مدته.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noValidRollback') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $snapshot = $candidate.Restore
-    $expected = if ([string]$candidate.ExpectedState -eq 'hidden') { 'يجب أن تبقى الطبقة فارغة' } else { 'يجب أن يبقى المشهد الحالي نفسه دون تغيير خارجي' }
+    $expected = if ([string]$candidate.ExpectedState -eq 'hidden') { (T 'flow.layerMustStayEmpty') } else { (T 'flow.sceneMustStay') }
     Set-PendingState -ChatId $ChatId -State @{ Mode='safe_rollback_review'; UserId=$UserId; Layer=$Layer; CandidateId=[string]$candidate.Id }
     # T-15: show, don't describe. The before frame was kept by reference at
     # SHOW time; the after is taken now, on demand. Either may be missing -
@@ -674,14 +674,14 @@ function Start-SafeRollbackReview {
     if ($script:RollbackBeforeFiles.ContainsKey($Layer)) {
         $beforePath = [string]$script:RollbackBeforeFiles[$Layer]
         if (-not [string]::IsNullOrWhiteSpace($beforePath) -and (Test-Path -LiteralPath $beforePath)) {
-            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $beforePath -Caption '📷 قبل النشر' }
+            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $beforePath -Caption (T 'flow.beforePublish') }
             catch { Write-BridgeLog "Rollback review: before-frame send failed: $($_.Exception.Message)" }
         }
     }
     try {
         $afterPath = Get-MonitorFrame -TimeoutSeconds (Get-SettingInt 'SnapshotTimeoutSeconds' 3)
         if ($afterPath) {
-            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $afterPath -Caption '📷 الآن على الهواء' }
+            try { Send-TelegramPhoto -ChatId $ChatId -FilePath $afterPath -Caption (T 'flow.nowOnAir') }
             finally { Remove-Item -LiteralPath $afterPath -Force -ErrorAction SilentlyContinue }
         }
     }
@@ -696,13 +696,13 @@ function Confirm-SafeRollback {
     $candidate = Get-RollbackCandidate -Layer $Layer -UserId $UserId
     Clear-PendingState -ChatId $ChatId
     if (-not $candidate -or [string]$candidate.Id -ne [string]$state.CandidateId) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'انتهى أو تغير مرشح التراجع. لم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.rollbackExpired') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
     $lock = Lock-GfxLayer -Layer $Layer -ChatId $ChatId -UserId $UserId -Key ([string]$candidate.Restore.Key)
     if (-not $lock.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الطبقة قيد عملية أخرى؛ لم يُنفذ التراجع.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.layerBusy') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     try {
@@ -716,7 +716,7 @@ function Confirm-SafeRollback {
         }
         if (-not $safe) {
             $script:RollbackCandidates.Remove($Layer) | Out-Null
-            Send-TelegramMessage -ChatId $ChatId -Text '⛔ تغيرت حالة Cinegy أو تعذر التحقق منها؛ أُلغي التراجع ولم يُرسل شيء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.cinegyChangedRollback') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
             return
         }
         $restore = $candidate.Restore
@@ -848,7 +848,7 @@ function Set-LayerAutoHide {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($Seconds -le 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "المدة يجب أن تكون أكبر من صفر." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.durationPositive') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
@@ -876,7 +876,7 @@ function Set-LayerAutoHide {
         -ExpectedActiveId $expectedActiveId -AllowAnonymousActiveId
     if (-not $identity.Success) {
         Write-BridgeLog "Refused auto-hide timer on layer $Layer because live identity could not be verified: $($identity.Error)" 'WARN'
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لم يُضبط المؤقت: تعذّر ربط المشهد الحالي بهوية Cinegy مؤكدة. أخفه يدويًا عند الحاجة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.timerNotSet') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $current.ActiveId = [string]$identity.ActiveId
@@ -904,7 +904,7 @@ function Complete-TimedShowCustom {
     if (-not $state) { return }
     $seconds = 0
     if (-not [int]::TryParse($Value.Trim(), [ref]$seconds) -or $seconds -le 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل رقمًا صحيحًا أكبر من صفر (بالثواني)." -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendPositiveSeconds') -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     Clear-PendingState -ChatId $ChatId
@@ -917,7 +917,7 @@ function Complete-LayerTimerCustom {
     if (-not $state) { return }
     $seconds = 0
     if (-not [int]::TryParse($Value.Trim(), [ref]$seconds) -or $seconds -le 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ أرسل رقمًا صحيحًا أكبر من صفر (بالثواني)." -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendPositiveSeconds') -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     Clear-PendingState -ChatId $ChatId
@@ -928,13 +928,13 @@ function Invoke-RepeatLastShow {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:LastShow.ContainsKey($ChatId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "لا يوجد إظهار سابق لإعادته." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noPreviousShow') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $last = $script:LastShow[$ChatId]
     $templateIndex = Get-TemplateIndex -Key ([string]$last.Key)
     if ($templateIndex -lt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب السابق لم يعد موجودًا في ملف القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.previousTemplateGone') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId -InitialValues $last.Variables
@@ -992,13 +992,13 @@ function Get-MyOperationsKeyboard {
         if ($referenceCopy) { $rows += , @($referenceCopy) }
     }
     if ($script:LastShowAttempts.ContainsKey([string]$UserId)) {
-        $rows += , @((New-Button '🔁 إعادة محاولة آمنة' 'ops:retry'))
+        $rows += , @((New-Button (T 'flow.safeRetry') 'ops:retry'))
     }
     # The window that reaches past this screen. What is above comes from
     # memory - twenty entries a person, and only since the last restart - so
     # a supervisor asking what went out last night was shown this morning.
-    $rows += , @((New-Button '📅 سجل 48 ساعة' 'oplog:48'))
-    $rows += , @((New-Button '🔄 تحديث' 'menu:myops'), (New-Button '🏠 القائمة' 'menu:main'))
+    $rows += , @((New-Button (T 'flow.log48h') 'oplog:48'))
+    $rows += , @((New-Button (T 'flow.refresh') 'menu:myops'), (New-Button (T 'flow.home') 'menu:main'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -1064,13 +1064,13 @@ function Invoke-MyOperationsCommand {
             -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)) { return }
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
     if ($history.Count -eq 0) {
-        # Not "منذ آخر تشغيل" any more: the history is rebuilt from audit.jsonl
+        # Not (T 'flow.sinceLastStart') any more: the history is rebuilt from audit.jsonl
         # at startup, so an empty screen now genuinely means nothing was done.
         Send-TelegramMessage -ChatId $ChatId -Text "🧾 آخر عملياتك`n━━━━━━━━━━━━━━`nلم تُسجَّل لك أي عملية بعد." -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
         return
     }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('🧾 آخر عملياتك')
+    $lines.Add((T 'flow.myLatest'))
     $lines.Add('━━━━━━━━━━━━━━')
     foreach ($item in $history) {
         $icon = switch ([string]$item.Result) {
@@ -1095,8 +1095,8 @@ function Invoke-MyOperationsCommand {
         if ($reference) { $lines.Add("      🔖 مرجع $reference") }
 
         $advice = switch ([string]$item.Result) {
-            'failed' { 'افحص الاتصال ثم أعد المحاولة' }
-            'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
+            'failed' { (T 'flow.checkConnection') }
+            'blocked' { (T 'flow.checkPermission') }
             default { '' }
         }
         if ($advice) { $lines.Add("      ↳ $advice") }
@@ -1105,7 +1105,7 @@ function Invoke-MyOperationsCommand {
     if ($copyReference) {
         $lines.Add('')
         $lines.Add((Get-CopyButtonNotice -Label (Get-MyOperationsCopyLabel -Reference $copyReference) `
-                    -Hint 'أرسله للمشرف مع وصف ما حدث.'))
+                    -Hint (T 'flow.sendToAdmin')))
     }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
 }
@@ -1115,13 +1115,13 @@ function Invoke-RetryLastShowAttempt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $key = [string]$UserId
     if (-not $script:LastShowAttempts.ContainsKey($key)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد محاولة عرض قابلة للمراجعة.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noAttemptToReview') -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
         return
     }
     $attempt = $script:LastShowAttempts[$key]
     $templateIndex = Get-TemplateIndex -Key ([string]$attempt.Key)
     if ($templateIndex -lt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'القالب المستخدم في المحاولة لم يعد موجودًا.' -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.attemptTemplateGone') -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
         return
     }
     Start-ShowFlow -TemplateIndex $templateIndex -ChatId $ChatId -UserId $UserId `
@@ -1134,7 +1134,7 @@ function Invoke-PresetShow {
     $t = Get-TemplateByIndex -Index $TemplateIndex
     $preset = Get-TemplatePreset -Template $t -Index $PresetIndex
     if (-not $preset) {
-        Send-TelegramMessage -ChatId $ChatId -Text "النص الجاهز غير موجود." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.presetMissing') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $variables = @{}
@@ -1148,7 +1148,7 @@ function Show-PresetAdminTemplate {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب لم يعد موجودًا." -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.templateGone') -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
         return
     }
     Send-TelegramMessage -ChatId $ChatId -Text "⚡ النصوص الجاهزة للقالب '$($template.Key)'`nاختر نصًا لإدارته أو أنشئ نصًا جديدًا:" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $TemplateIndex -Page $Page)
@@ -1157,9 +1157,9 @@ function Show-PresetAdminTemplate {
 function Show-PresetAdminReview {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][hashtable]$State)
     $actionLabel = switch ([string]$State.Action) {
-        'create' { 'إنشاء' }; 'edit' { 'تعديل القيم' }; 'rename' { 'إعادة تسمية' }; 'delete' { 'حذف' }
+        'create' { (T 'flow.presetCreate') }; 'edit' { (T 'flow.presetEdit') }; 'rename' { (T 'flow.presetRename') }; 'delete' { (T 'flow.presetDelete') }
     }
-    $lines = @("🔎 مراجعة تغيير النص الجاهز", "العملية: $actionLabel", "القالب: $($State.TemplateKey)")
+    $lines = @((T 'flow.reviewPreset'), "العملية: $actionLabel", "القالب: $($State.TemplateKey)")
     if ($State.Name) { $lines += "الاسم: $($State.Name)" }
     if ($State.Action -in @('create', 'edit')) {
         for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
@@ -1168,7 +1168,7 @@ function Show-PresetAdminReview {
         }
     }
     $lines += ''
-    $lines += 'لن يُعدّل ملف القوالب حتى تضغط حفظ التغيير.'
+    $lines += (T 'flow.notWrittenUntilSave')
     $State.Mode = 'preset_admin_review'
     Set-PendingState -ChatId $ChatId -State $State
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-PresetReviewKeyboard)
@@ -1207,7 +1207,7 @@ function Complete-PresetAdminText {
     if (-not $state) { return }
     if ($state.Mode -eq 'preset_admin_name') {
         if ([string]::IsNullOrWhiteSpace($Value)) {
-            Send-TelegramMessage -ChatId $ChatId -Text "الاسم لا يمكن أن يكون فارغًا." -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.nameNotEmpty') -ReplyMarkup (Get-CancelKeyboard)
             return
         }
         $state.Name = $Value.Trim()
@@ -1231,7 +1231,7 @@ function Confirm-PresetAdminChange {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'preset_admin_review' -or [long]$state.UserId -ne $UserId) {
-        Send-TelegramMessage -ChatId $ChatId -Text "انتهت مراجعة التغيير. ابدأ من جديد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.reviewExpired') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $templateIndex = [int]$state.TemplateIndex
@@ -1240,7 +1240,7 @@ function Confirm-PresetAdminChange {
     if ($result.Success) {
         Write-BridgeLog "Admin $UserId applied preset $($state.Action) to template '$($state.TemplateKey)'"
         Add-AuditEntry "⚡ Preset $($state.Action) / $($state.TemplateKey) - admin $UserId"
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ تغيير النص الجاهز، وأُنشئت نسخة احتياطية." -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.presetSaved') -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ التغيير: $($result.Error)" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
@@ -1252,7 +1252,7 @@ function Invoke-TemplatesCommand {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $store = Get-TemplateStore
     if ($store.Order.Count -eq 0) {
-        $text = "لا توجد قوالب معرّفة حاليًا."
+        $text = (T 'flow.noTemplatesDefined')
         if ($store.Errors.Count -gt 0) { $text += "`n⚠️ " + ($store.Errors -join "`n⚠️ ") }
         Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return

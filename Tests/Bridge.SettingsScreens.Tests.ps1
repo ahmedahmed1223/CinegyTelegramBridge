@@ -589,17 +589,35 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.59.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.59.0'
+        $script:BridgeVersion | Should -Be '8.60.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.60.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
         $definitions = @(Get-SettingCategoryDefinitions)
 
         @($definitions.Key) | Should -Be @(
-            'security', 'onair', 'templates', 'news',
+            'security', 'onair', 'templates', 'news', 'urgent', 'boards',
             'schedule', 'monitoring', 'storage', 'notifications', 'advanced'
         )
+    }
+
+    It 'keeps the urgent board and the programme boards out of the news ticker door' {
+        <#
+            Both were born out of the news ticker and were filed with it, so
+            "شريط الأخبار" had grown to carry three unrelated systems and
+            thirty-four settings. Nobody looking for the urgent board's
+            interval thinks to open a door named after the ticker - which is
+            exactly how UrgentExitGapSeconds went unfound in 8.57.0.
+        #>
+        (Get-SettingNavigationMetadata -Name 'UrgentBoardIntervalSeconds').Category | Should -Be 'urgent'
+        (Get-SettingNavigationMetadata -Name 'UrgentExitGapSeconds').Category | Should -Be 'urgent'
+        (Get-SettingNavigationMetadata -Name 'EnableContentBoards').Category | Should -Be 'boards'
+        (Get-SettingNavigationMetadata -Name 'BoardMaxItems').Category | Should -Be 'boards'
+        (Get-SettingNavigationMetadata -Name 'NewsFilePath').Category | Should -Be 'news'
+
+        @(Get-SettingsInCategory -Category 'news') | Should -Not -Contain 'EnableUrgentBoard'
+        @(Get-SettingsInCategory -Category 'news') | Should -Not -Contain 'EnableContentBoards'
     }
 
     It 'gives protected authentication settings an Arabic operational identity' {

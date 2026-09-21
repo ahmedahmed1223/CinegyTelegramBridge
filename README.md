@@ -15,6 +15,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.60.0
+
+**The urgent board and the programme boards each have their own settings door.** Both were born out of the news ticker and were filed with it, so 📰 شريط الأخبار had grown to carry three unrelated systems and thirty-four settings. Nobody looking for the urgent board's interval opens a door named after the ticker — which is exactly how `UrgentExitGapSeconds` stayed unfound until 8.57.0 moved its button, and the underlying filing was never corrected.
+
+- New categories 🚨 جدول العواجل (eleven settings) and 🗂 محتوى البرامج (three). The news door keeps the ticker, its file, its limits and the Google Sheets link — nothing else.
+- Eleven doors now, and the manual counts them rather than a developer doing it by hand: `Bridge.Help.Tests.ps1` asserts the settings chapter names every category the code defines, which is how the ninth door came to be missing from a list that said "eight".
+- No setting changed, no value changed, no callback changed. `Get-SettingNavigationMetadata` reports the new category and every setting is still reachable from exactly one door — a test that has held since Version 6 and still does.
+
 ## Version 8.59.0
 
 **Hide-all now honours per-layer protection for an ordinary operator, and the repository is fit for GitHub.**

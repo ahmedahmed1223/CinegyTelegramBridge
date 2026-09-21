@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.59.0'
+$script:BridgeVersion = '8.60.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1287,6 +1287,11 @@ $script:SettingCategoryDefinitions = @(
     [pscustomobject]@{ Key = 'onair';      Label = 'التشغيل على الهواء';      Icon = '🔴'; Summary = 'ما يظهر ويختفي على الشاشة: أزرار العرض والإخفاء والطوارئ، وكيف يتعامل الجسر مع Cinegy.' }
     [pscustomobject]@{ Key = 'templates';  Label = 'القوالب والطبقات';        Icon = '📚'; Summary = 'أي قالب متاح، وعلى أي طبقة، وبأي اسم يراه المشغّل.' }
     [pscustomobject]@{ Key = 'news';       Label = 'شريط الأخبار';            Icon = '📰'; Summary = 'الشريط وملفه وحدوده، والربط مع Google Sheets، وما يُسمح به للمشغّل.' }
+    # العواجل والبرامج كانا داخل «شريط الأخبار» لأنهما وُلدا منه، لا لأنهما
+    # منه: من يبحث عن توقيت جدول العواجل لا يخطر له أن يفتح بابًا اسمه شريط
+    # الأخبار، وقد صار الباب يحمل ثلاثة أنظمة وأربعًا وثلاثين إعدادًا.
+    [pscustomobject]@{ Key = 'urgent';     Label = 'جدول العواجل';            Icon = '🚨'; Summary = 'الجدول الذي يتقدّم وحده: توقيته وتكراره ونمطه وحدود نصّه، والفاصل بين خبر وآخر.' }
+    [pscustomobject]@{ Key = 'boards';     Label = 'محتوى البرامج';           Icon = '🗂'; Summary = 'جداول النصوص المجهَّزة لقوالب البرامج: كم جدولًا، وكم صفًّا في الجدول الواحد.' }
     [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅'; Summary = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.' }
     [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊'; Summary = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.' }
     [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️'; Summary = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.' }
@@ -1335,12 +1340,16 @@ foreach ($entry in @(
                 'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
                 'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds',
                 'NewsPublishNotifyScope',
-                'AllowOperatorsSheetPull',
+                'AllowOperatorsSheetPull'
+            ) },
+        @{ Category = 'urgent'; Names = @(
                 'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
                 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
                 'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
-                'EnableContentBoards', 'MaxContentBoards', 'BoardMaxItems',
                 'UrgentBoardMaxTextLength'
+            ) },
+        @{ Category = 'boards'; Names = @(
+                'EnableContentBoards', 'MaxContentBoards', 'BoardMaxItems'
             ) },
         @{ Category = 'schedule'; Names = @(
                 'ScheduleConflictWindowMinutes', 'SchedulePaused',

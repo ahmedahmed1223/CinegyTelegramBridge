@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -15,7 +15,7 @@ function Add-AbandonedDraft {
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Label)
     $name = $Label.Trim()
-    if ([string]::IsNullOrWhiteSpace($name)) { $name = 'غير مصنّف' }
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = (T 'tick.uncategorised') }
     $count = 0
     [int]::TryParse([string]$script:AbandonedDrafts[$name], [ref]$count) | Out-Null
     $script:AbandonedDrafts[$name] = $count + 1
@@ -26,20 +26,20 @@ function Get-AbandonedDraftLabel {
        belonged to, or the kind of work when there is no template. Values,
        aliases and chat ids never leave this function. #>
     param($State)
-    if (-not $State) { return 'غير مصنّف' }
+    if (-not $State) { return (T 'tick.uncategorised') }
     $mode = [string](Get-JsonProp $State 'Mode')
     $key = [string](Get-JsonProp $State 'TemplateKey')
     if ([string]::IsNullOrWhiteSpace($key)) { $key = [string](Get-JsonProp $State 'Key') }
     if ($mode -in @('show_fields', 'show_review', 'schedule_fields', 'schedule_time', 'schedule_recurrence', 'schedule_review') -and -not [string]::IsNullOrWhiteSpace($key)) {
         return "قالب $key"
     }
-    if ($mode -like 'news*') { return 'شريط الأخبار' }
-    if ($mode -like 'mojaz*') { return 'الموجز' }
-    if ($mode -like 'sched*') { return 'الجدولة' }
-    if ($mode -eq 'access_request_name') { return 'طلب صلاحية' }
+    if ($mode -like 'news*') { return (T 'tick.newsTicker') }
+    if ($mode -like 'mojaz*') { return (T 'tick.bulletin') }
+    if ($mode -like 'sched*') { return (T 'tick.scheduling') }
+    if ($mode -eq 'access_request_name') { return (T 'tick.accessRequest') }
     # Never leak the internal state name: an unmapped mode is a flow the
     # table has not learned yet, not a word for an Arabic report.
-    return 'غير مصنّف'
+    return (T 'tick.uncategorised')
 }
 
 function Save-ExpiredFlowSnapshot {
@@ -65,7 +65,7 @@ function Save-ExpiredFlowSnapshot {
 function New-ExpiredFlowResumeKeyboard {
     # D3: the expiry message's way back, beside the menu. No loop inside -
     # see Save-ExpiredFlowSnapshot for why the two live apart.
-    return @{ inline_keyboard = @(, @(@{ text = '↩️ استئناف من حيث توقفت'; callback_data = 'flow:resume' }, @{ text = '⬅️ القائمة'; callback_data = 'menu' })) }
+    return @{ inline_keyboard = @(, @(@{ text = (T 'tick.resumeWhereLeft'); callback_data = 'flow:resume' }, @{ text = (T 'tick.menu'); callback_data = 'menu' })) }
 }
 
 function Update-PendingExpiry {
@@ -86,7 +86,7 @@ function Update-PendingExpiry {
             Clear-PendingState -ChatId ([long]$chatId)
             Add-AbandonedDraft -Label (Get-AbandonedDraftLabel -State $state)
             Write-BridgeLog "Expired abandoned '$($state.Mode)' flow for chat $chatId" "WARN"
-            Send-TelegramMessage -ChatId ([long]$chatId) -Text "⌛ انتهت مهلة الإدخال ولم يُنفّذ شيء." -ReplyMarkup $resumeKeyboard
+            Send-TelegramMessage -ChatId ([long]$chatId) -Text (T 'tick.inputTimedOut') -ReplyMarkup $resumeKeyboard
             continue
         }
         # A minute's notice, with a way to take more time.
@@ -99,8 +99,8 @@ function Update-PendingExpiry {
         if ($stateTimeout -ge 2 -and $elapsed -ge ($stateTimeout - 1) -and -not $state.ContainsKey('WarnedAt')) {
             $state.WarnedAt = Get-Date
             Send-TelegramMessage -ChatId ([long]$chatId) `
-                -Text "⏳ لم يصل نصّك بعد، وستُلغى العملية بعد دقيقة. أرسل النص الآن أو اضغط «تمديد»." `
-                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏳ تمديد' 'flow:extend'), (New-Button '❌ إلغاء' 'menu:main'))) }
+                -Text (T 'tick.textNotArrived') `
+                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'tick.extend') 'flow:extend'), (New-Button (T 'tick.cancel') 'menu:main'))) }
         }
     }
 
@@ -332,7 +332,7 @@ function Request-TemplateAirLimitNow {
     $timer.Stage = 'hide'; $timer.At = $deadline
     if (-not (Save-AutoHideQueue)) {
         $timer.Clear(); foreach ($key in $previous.Keys) { $timer[$key] = $previous[$key] }
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ التقصير؛ بقي الموعد السابق.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tick.shortenSaveFailed')
         return $false
     }
     Write-BridgeLog "Template cap applied now to layer $layer by admin $UserId at $([datetimeoffset]$Now.ToString('o'))."
@@ -370,7 +370,7 @@ function Invoke-TemplateAirExtensionReply {
     }
     if (-not (Save-AutoHideQueue)) {
         $timer.Clear(); foreach ($key in $previous.Keys) { $timer[$key] = $previous[$key] }
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ الاختيار؛ لم يتغير موعد الإخفاء.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tick.choiceSaveFailed')
         return $false
     }
     if ($action -eq 'hide') { Update-AutoHideQueue -Now $Now }
@@ -386,16 +386,16 @@ function Show-TemplateAirExtensionOffer {
     $rows = @()
     if ($Custom) {
         $text += "`nالمدة المختارة: $($Timer.Choice) ثانية. تعديلها لا يمدّد مهلة الرد."
-        $rows += , @((New-Button '− دقيقة' "${prefix}:delta:-60"),(New-Button '+ دقيقة' "${prefix}:delta:60"))
-        $rows += , @((New-Button '−10 ث' "${prefix}:delta:-10"),(New-Button '+10 ث' "${prefix}:delta:10"))
-        $rows += , @((New-Button 'تأكيد التمديد' "${prefix}:confirm:0"))
+        $rows += , @((New-Button (T 'tick.minusMinute') "${prefix}:delta:-60"),(New-Button (T 'tick.plusMinute') "${prefix}:delta:60"))
+        $rows += , @((New-Button (T 'tick.minus10s') "${prefix}:delta:-10"),(New-Button (T 'tick.plus10s') "${prefix}:delta:10"))
+        $rows += , @((New-Button (T 'tick.confirmExtension') "${prefix}:confirm:0"))
     }
     else {
         $preset = [math]::Min(300,(Get-SettingInt 'TemplateAirExtensionMaxSeconds' 60))
-        $label = if ($preset -eq 300) { '٥ دقائق' } else { "$preset ثانية" }
-        $rows += , @((New-Button $label "${prefix}:extend:$preset"),(New-Button 'مدة مخصصة' "${prefix}:custom:0"))
+        $label = if ($preset -eq 300) { (T 'tick.fiveMinutes') } else { "$preset ثانية" }
+        $rows += , @((New-Button $label "${prefix}:extend:$preset"),(New-Button (T 'tick.customDuration') "${prefix}:custom:0"))
     }
-    $rows += , @((New-Button 'إخفاء الآن' "${prefix}:hide:0" -Style danger))
+    $rows += , @((New-Button (T 'tick.hideNow') "${prefix}:hide:0" -Style danger))
     $markup = @{ inline_keyboard = $rows }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId ([long]$Timer.ChatId) -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
     Send-TelegramMessage -ChatId ([long]$Timer.ChatId) -Text $text -ReplyMarkup $markup
@@ -585,26 +585,26 @@ function Set-TemplateReminder {
 function Get-TemplateReminderTargetDecision {
     param([Parameter(Mandatory)][hashtable]$Reminder)
     $layer = [int](Get-JsonProp $Reminder 'Layer')
-    if (-not $script:OnAir.ContainsKey($layer)) { return [pscustomobject]@{ ShouldNotify = $false; Reason = 'لم تعد الطبقة على الهواء.' } }
+    if (-not $script:OnAir.ContainsKey($layer)) { return [pscustomobject]@{ ShouldNotify = $false; Reason = (T 'tick.layerGone') } }
     $current = $script:OnAir[$layer]
     $savedId = [string](Get-JsonProp $Reminder 'ActiveId')
     $currentId = [string](Get-JsonProp $current 'ActiveId')
     if ($savedId -and $currentId -and -not $savedId.Trim().Trim('{', '}').Equals($currentId.Trim().Trim('{', '}'), [StringComparison]::OrdinalIgnoreCase)) {
-        return [pscustomobject]@{ ShouldNotify = $false; Reason = 'تغيّر المشهد على الطبقة.' }
+        return [pscustomobject]@{ ShouldNotify = $false; Reason = (T 'tick.sceneChanged') }
     }
     $savedKey = [string](Get-JsonProp $Reminder 'TemplateKey')
     $currentKey = [string](Get-JsonProp $current 'Key')
     if ($savedKey -and $currentKey -and -not $savedKey.Equals($currentKey, [StringComparison]::OrdinalIgnoreCase)) {
-        return [pscustomobject]@{ ShouldNotify = $false; Reason = 'تغيّر القالب على الطبقة.' }
+        return [pscustomobject]@{ ShouldNotify = $false; Reason = (T 'tick.templateChanged') }
     }
     $store = Get-TemplateStore
     if ($store.Map.ContainsKey($savedKey)) {
         $template = $store.Map[$savedKey]
         if ([bool](Get-JsonProp $template 'LongRunning')) {
-            return [pscustomobject]@{ ShouldNotify = $false; Reason = 'القالب أصبح Long run.' }
+            return [pscustomobject]@{ ShouldNotify = $false; Reason = (T 'tick.becameLongRun') }
         }
         if ([int](Get-JsonProp $template 'ReminderMinutes') -le 0) {
-            return [pscustomobject]@{ ShouldNotify = $false; Reason = 'أُوقف تنبيه الظهور للقالب.' }
+            return [pscustomobject]@{ ShouldNotify = $false; Reason = (T 'tick.noticeStopped') }
         }
     }
     return [pscustomobject]@{ ShouldNotify = $true; Reason = '' }
@@ -650,7 +650,7 @@ function Update-TemplateReminderQueue {
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += "`n📝 النص: $onAirCopy"
         }
-        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button '⏰ ذكّرني لاحقًا' "remsnooze:$reminderId"), (New-Button '🙈 إخفاء القالب' "hidego:$($item.Layer)"))) }
+        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'tick.remindLater') "remsnooze:$reminderId"), (New-Button (T 'tick.hideTemplate') "hidego:$($item.Layer)"))) }
         Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text $reminderText -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
         $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
@@ -719,30 +719,30 @@ function Get-BridgeStatsBlocks {
     $uptime = $now - $script:BridgeStartedAt
     $counters = $script:AirOperationCounters
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
-    $verdict = if ($uptime.TotalMinutes -lt 15) { '🟠 التشغيل حديث — قد يكون الجسر يُعاد تشغيله' }
-    elseif ([int]$script:TelegramRateLimitHits -gt 0) { '🟠 تيليجرام يحدّ من الإرسال' }
-    else { '🟢 تشغيل مستقر' }
-    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
+    $verdict = if ($uptime.TotalMinutes -lt 15) { (T 'tick.recentStart') }
+    elseif ([int]$script:TelegramRateLimitHits -gt 0) { (T 'tick.telegramLimiting') }
+    else { (T 'tick.stableRun') }
+    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
 
     $rows = @(
-        , @('⏱ مدة التشغيل', "$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
-        , @('📅 منذ', $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
-        , @('🎬 عمليات الهواء', "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
-        , @('🚦 حدّ تيليجرام (429)', [string]$script:TelegramRateLimitHits)
-        , @('📭 أُسقطت من الطابور', [string]$script:TelegramOutboxDropped)
-        , @('📡 اتصال Telegram', [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
-        , @('🎛 صحة Cinegy', [string]$script:RuntimeState.Monitoring.CinegyHealthState)
-        , @('💚 آخر نبضة يومية', $lastBeat)
-        , @('🔴 مشاهد على الهواء', [string]$script:OnAir.Count)
+        , @((T 'tick.uptime'), "$([int]$uptime.TotalDays) ي $($uptime.Hours) س $($uptime.Minutes) د")
+        , @((T 'tick.since'), $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
+        , @((T 'tick.airOperations'), "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
+        , @((T 'tick.telegramLimit'), [string]$script:TelegramRateLimitHits)
+        , @((T 'tick.droppedFromQueue'), [string]$script:TelegramOutboxDropped)
+        , @((T 'tick.telegramConnection'), [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
+        , @((T 'tick.cinegyHealth'), [string]$script:RuntimeState.Monitoring.CinegyHealthState)
+        , @((T 'tick.lastHeartbeat'), $lastBeat)
+        , @((T 'tick.scenesOnAir'), [string]$script:OnAir.Count)
     )
     # What is closest to losing its table. A screen crosses the payload limit
     # gradually as the station's day fills up, and until this line the first
     # to know was the operator whose table had already vanished.
     $peak = Get-RichPayloadPeak
     if ($peak.Length -gt 0) {
-        $rows += , @('📐 أكبر شاشة أُرسلت', "$($peak.Percent)% من الحدّ · $($peak.Screen)")
+        $rows += , @((T 'tick.largestScreen'), "$($peak.Percent)% من الحدّ · $($peak.Screen)")
     }
-    $cells = @(, @(@{ text = 'البند'; is_header = $true }, @{ text = 'القيمة'; is_header = $true }))
+    $cells = @(, @(@{ text = (T 'tick.col.item'); is_header = $true }, @{ text = (T 'tick.col.value'); is_header = $true }))
     foreach ($row in $rows) { $cells += , @(@{ text = [string]$row[0] }, @{ text = [string]$row[1] }) }
 
     return @(
@@ -780,9 +780,9 @@ function Get-BridgeStatsText {
     # exists to show - a bridge up for eleven minutes has been restarting -
     # with Telegram's flood limit beside it, the other thing that is wrong
     # while every individual figure still looks ordinary.
-    $verdict = if ($uptime.TotalMinutes -lt 15) { '🟠 التشغيل حديث — قد يكون الجسر يُعاد تشغيله' }
-    elseif ([int]$script:TelegramRateLimitHits -gt 0) { '🟠 تيليجرام يحدّ من الإرسال' }
-    else { '🟢 تشغيل مستقر' }
+    $verdict = if ($uptime.TotalMinutes -lt 15) { (T 'tick.recentStart') }
+    elseif ([int]$script:TelegramRateLimitHits -gt 0) { (T 'tick.telegramLimiting') }
+    else { (T 'tick.stableRun') }
 
     $peakMeasurement = Get-RichPayloadPeak
     $peakLine = if ($peakMeasurement.Length -gt 0) {
@@ -792,7 +792,7 @@ function Get-BridgeStatsText {
     $lines.Add("<b>📈 أرقام التشغيل</b> — <code>v$($script:BridgeVersion)</code>")
     $lines.Add("🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)")
     $lines.Add("<b>$verdict</b>")
-    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { 'لم تُرسل بعد' }
+    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
 
     # Full-size text, each line opening with its own glyph. A <pre> table
     # aligns the values into a column and Telegram draws it two sizes down;
@@ -822,7 +822,7 @@ function Get-OnAirShareText {
     $now = Get-Date
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("حالة الهواء — $($now.ToString('yyyy-MM-dd HH:mm'))")
-    if ($script:OnAir.Count -eq 0) { $lines.Add('لا شيء على الهواء.') }
+    if ($script:OnAir.Count -eq 0) { $lines.Add((T 'tick.nothingOnAir')) }
     else {
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
             $record = $script:OnAir[$layer]
@@ -910,12 +910,12 @@ function Get-MissedEventsBlocks {
 
     $blocks = @(@{ type = 'heading'; text = "🕘 ماذا فاتني — آخر $Hours ساعة"; size = 3 })
     # On air first: it is the question this screen is opened to answer.
-    $blocks += @{ type = 'paragraph'; text = $(if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
+    $blocks += @{ type = 'paragraph'; text = $(if ($script:OnAir.Count -eq 0) { (T 'tick.nothingOnAirNow') }
             else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join '، ')" }) }
     $blocks += @{ type = 'divider' }
 
     if ($records.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = 'لا شيء مسجّل في هذه الفترة.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'tick.nothingInPeriod') }
         return $blocks
     }
 
@@ -926,10 +926,10 @@ function Get-MissedEventsBlocks {
         # Four columns, as everywhere else here: the width is divided evenly,
         # so a fifth would cost the graphic's name a fifth of the screen.
         $cells = @(, @(
-                @{ text = 'القالب'; is_header = $true }
-                @{ text = 'مرات'; is_header = $true }
-                @{ text = 'آخرها'; is_header = $true }
-                @{ text = 'المشغّل'; is_header = $true }
+                @{ text = (T 'tick.col.template'); is_header = $true }
+                @{ text = (T 'tick.col.times'); is_header = $true }
+                @{ text = (T 'tick.col.last'); is_header = $true }
+                @{ text = (T 'tick.col.operator'); is_header = $true }
             ))
         foreach ($group in ($shows | Group-Object -Property Target | Sort-Object Count -Descending | Select-Object -First 8)) {
             $tally = Get-OperatorTally -Records @($group.Group)
@@ -959,7 +959,7 @@ function Get-MissedEventsBlocks {
     if ($failures.Count -gt 0 -or $blocked.Count -gt 0) {
         $blocks += @{ type = 'heading'; text = "⚠️ فشل: $($failures.Count) · مرفوض: $($blocked.Count)"; size = 5 }
         foreach ($failure in @($failures | Select-Object -Last 3)) {
-            $detail = if ($failure.Message) { $failure.Message } else { 'بلا تفصيل' }
+            $detail = if ($failure.Message) { $failure.Message } else { (T 'tick.noDetail') }
             $blocks += @{ type = 'paragraph'; text = "$($failure.When.ToString('HH:mm')) — $($failure.Action) $($failure.Target): $detail" }
         }
     }
@@ -1031,7 +1031,7 @@ function Get-MissedEventsText {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>🕘 ماذا فاتني</b> — آخر <code>$Hours</code> ساعة")
     if ($records.Count -eq 0) {
-        $lines.Add('<i>لا شيء مسجّل في هذه الفترة.</i>')
+        $lines.Add((T 'tick.nothingInPeriodHtml'))
         return ($lines -join "`n")
     }
 
@@ -1082,7 +1082,7 @@ function Get-MissedEventsText {
     $notable = @($activity | Where-Object { $_.Message -match '📰|⚙️|👤|🔓|🚨|♻️' })
     if ($notable.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('<b>📌 أحداث تستحق الانتباه</b>')
+        $lines.Add((T 'tick.worthAttention'))
         # A blockquote, because this is quoted material - lines the bridge
         # wrote elsewhere, shown here rather than summarised. Telegram draws
         # the bar, which is what marks them as not this screen's own words.
@@ -1103,7 +1103,7 @@ function Get-MissedEventsText {
         # message rather than dropping one of them.
         $lines.Add("<b>⚠️ فشل:</b> <code>$($failures.Count)</code> · <b>مرفوض:</b> <code>$($blocked.Count)</code>")
         foreach ($failure in @($failures | Select-Object -Last 3)) {
-            $detail = if ($failure.Message) { [string]$failure.Message } else { 'بلا تفصيل' }
+            $detail = if ($failure.Message) { [string]$failure.Message } else { (T 'tick.noDetail') }
             $lines.Add("• <code>$($failure.When.ToString('HH:mm'))</code> — $(ConvertTo-TelegramHtmlText ([string]$failure.Action)) <b>$(ConvertTo-TelegramHtmlText ([string]$failure.Target))</b>: $(ConvertTo-TelegramHtmlText $detail)")
         }
     }
@@ -1112,7 +1112,7 @@ function Get-MissedEventsText {
     # digest is read at a handover, and the last thing the person taking over
     # needs is the current state, not the history.
     $lines.Add('')
-    $nowLine = if ($script:OnAir.Count -eq 0) { '⚫️ لا شيء على الهواء الآن' }
+    $nowLine = if ($script:OnAir.Count -eq 0) { (T 'tick.nothingOnAirNow') }
     else {
         $live = @($script:OnAir.Keys | Sort-Object | ForEach-Object { ConvertTo-TelegramHtmlText ([string]$script:OnAir[$_].Key) })
         "🔴 <b>على الهواء</b>: $($live -join '، ')"
@@ -1134,13 +1134,13 @@ function Get-TemplateHistoryBlocks {
 
     $blocks = @(@{ type = 'heading'; text = "👤 من استخدم «$needle»"; size = 3 })
     if ($hits.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لا يوجد سجل ضمن ما هو محفوظ.' })
+        return $blocks + @(@{ type = 'paragraph'; text = (T 'tick.noRecordKept') })
     }
     $cells = @(, @(
-            @{ text = 'متى'; is_header = $true }
-            @{ text = 'المشغّل'; is_header = $true }
-            @{ text = 'العملية'; is_header = $true }
-            @{ text = 'النتيجة'; is_header = $true }
+            @{ text = (T 'tick.col.when'); is_header = $true }
+            @{ text = (T 'tick.col.operator'); is_header = $true }
+            @{ text = (T 'tick.col.operation'); is_header = $true }
+            @{ text = (T 'tick.col.result'); is_header = $true }
         ))
     # Capped like every other table here. This one searches the audit trail,
     # so its length is the station's history rather than anything this screen
@@ -1149,7 +1149,7 @@ function Get-TemplateHistoryBlocks {
     $trimmed = Select-RichTableRows -Items @($hits)
     foreach ($hit in @($trimmed.Rows)) {
         $stamp = [datetime]::MinValue
-        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
+        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { (T 'tick.questionMark') }
         $cells += , @(
             @{ text = $when }
             @{ text = [string](Get-UserDisplayName -UserId ([long]$hit.userId)) }
@@ -1169,7 +1169,7 @@ function Get-TemplateHistoryText {
        machine, which nobody does mid-shift. #>
     param([Parameter(Mandatory)][string]$Query, [int]$MaxResults = 10)
     $needle = $Query.Trim()
-    if ([string]::IsNullOrWhiteSpace($needle)) { return 'اكتب اسم القالب بعد الأمر، مثل: /who الانتخابات' }
+    if ([string]::IsNullOrWhiteSpace($needle)) { return (T 'tick.whoUsage') }
 
     $hits = @(Read-AuditRecords -MaxLines 2000 | Where-Object {
             [string]$_.target -and ([string]$_.target).IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
@@ -1185,7 +1185,7 @@ function Get-TemplateHistoryText {
     $lines.Add('')
     foreach ($hit in $hits) {
         $stamp = [datetime]::MinValue
-        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { '؟' }
+        $when = if ([datetime]::TryParse([string]$hit.timestampUtc, [ref]$stamp)) { $stamp.ToLocalTime().ToString('MM-dd HH:mm') } else { (T 'tick.questionMark') }
         $lines.Add("• <code>$when</code> — <b>$(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId ([long]$hit.userId)))</b> — $(ConvertTo-TelegramHtmlText ([string]$hit.action)) (<i>$(ConvertTo-TelegramHtmlText ([string]$hit.result))</i>)")
     }
     return ($lines -join "`n")
@@ -1277,7 +1277,7 @@ function Update-NewsDraftExpiry {
             $items = @(Get-JsonProp $draft 'Items')
             Send-TelegramMessage -ChatId $owner -ParseMode HTML -Cause 'news-draft-expiry-warning' `
                 -Text "⏳ <b>مسودة الشريط ($($items.Count) خبرًا) على وشك الانتهاء</b>`nستُحذف بعد $(Format-DurationMinutes -Minutes ([int][math]::Ceiling($timeout - $elapsed))) بلا تعديل. مدّدها أو انشرها." `
-                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '⏳ تمديد' 'news:draft:extend'), (New-Button '📰 فتح المسودة' 'news:refresh'))) }
+                -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'tick.extend') 'news:draft:extend'), (New-Button (T 'tick.openDraft') 'news:refresh'))) }
         }
         return
     }
@@ -1286,13 +1286,13 @@ function Update-NewsDraftExpiry {
     $count = $items.Count
     Save-ExpiredNewsDraftSnapshot -Draft $draft
     Remove-NewsTickerDraft
-    Add-AbandonedDraft -Label 'شريط الأخبار'
+    Add-AbandonedDraft -Label (T 'tick.newsTicker')
     Write-BridgeLog "Expired an abandoned news draft ($count item(s), idle for $timeout+ minutes)" 'WARN'
     if ($owner -gt 0) {
         # Raw button shapes, not New-Button: this path runs under strict
         # Get-SettingInt mocks in tests, and two static labels need no
         # length policy anyway.
-        $resumeRow = @{ inline_keyboard = @(, @(@{ text = '↩️ استئناف المسودة'; callback_data = 'news:resume' }, @{ text = '⬅️ القائمة'; callback_data = 'menu' })) }
+        $resumeRow = @{ inline_keyboard = @(, @(@{ text = (T 'tick.resumeDraft'); callback_data = 'news:resume' }, @{ text = (T 'tick.menu'); callback_data = 'menu' })) }
         Send-TelegramMessage -ChatId $owner -Text "⌛ انتهت صلاحية مسودة شريط الأخبار ($count خبرًا) بعد $(Format-DurationMinutes -Minutes $timeout) بلا تعديل، ولم يُنشر شيء.`nابدأ مسودة جديدة لتعمل على النص الحالي." -ReplyMarkup $resumeRow
         # Handed back, not merely counted. An unpublished draft is somebody's
         # work, and telling an operator how many items they just lost is worse
@@ -1308,19 +1308,19 @@ function Update-NewsDraftExpiry {
 function Get-CancelReasonLabel {
     param([Parameter(Mandatory)][string]$Reason)
     switch ($Reason) {
-        'template' { 'قالب خاطئ' }
-        'timing' { 'توقيت خاطئ' }
-        'director' { 'طلب المخرج' }
-        'other' { 'سبب آخر' }
+        'template' { (T 'tick.reason.wrongTemplate') }
+        'timing' { (T 'tick.reason.wrongTiming') }
+        'director' { (T 'tick.reason.directorAsked') }
+        'other' { (T 'tick.reason.other') }
         default { $Reason }
     }
 }
 
 function Get-CancelReasonKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button '🎬 قالب خاطئ' 'cancelreason:template'), (New-Button '⏱ توقيت خاطئ' 'cancelreason:timing') )
-            , @( (New-Button '🎧 طلب المخرج' 'cancelreason:director'), (New-Button '❔ سبب آخر' 'cancelreason:other') )
-            , @( (New-Button 'تخطٍّ' 'menu') )
+            , @( (New-Button (T 'tick.reasonBtn.wrongTemplate') 'cancelreason:template'), (New-Button (T 'tick.reasonBtn.wrongTiming') 'cancelreason:timing') )
+            , @( (New-Button (T 'tick.reasonBtn.directorAsked') 'cancelreason:director'), (New-Button (T 'tick.reasonBtn.other') 'cancelreason:other') )
+            , @( (New-Button (T 'tick.skip') 'menu') )
         ) }
 }
 
@@ -1389,21 +1389,21 @@ function Get-UsageDigestBlocks {
     $dailyAverage = [math]::Round($weeklyOperations / 7, 1)
 
     $blocks = @(
-        @{ type = 'heading'; text = '📊 ملخص الاستخدام'; size = 3 }
+        @{ type = 'heading'; text = (T 'tick.usageDigest'); size = 3 }
         @{ type = 'paragraph'; text = "🕒 $($now.ToString('yyyy-MM-dd HH:mm')) (محلي)" }
         @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $(Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · 📆 آخر 7 أيام: $(Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · متوسط $dailyAverage يوميًا" }
     )
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
     if ($ranked.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = 'لم تُستخدم أي قوالب بعد.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'tick.noTemplatesUsed') }
     }
     else {
         $cells = @(, @(
                 @{ text = '#'; is_header = $true }
-                @{ text = 'القالب'; is_header = $true }
-                @{ text = 'مرات'; is_header = $true }
-                @{ text = 'آخر مرة'; is_header = $true }
+                @{ text = (T 'tick.col.template'); is_header = $true }
+                @{ text = (T 'tick.col.times'); is_header = $true }
+                @{ text = (T 'tick.col.lastTime'); is_header = $true }
             ))
         $rank = 0
         foreach ($item in $ranked) {
@@ -1423,18 +1423,18 @@ function Get-UsageDigestBlocks {
     }
 
     $blocks += @{ type = 'table'; cells = @(
-            , @(@{ text = 'النتيجة'; is_header = $true }, @{ text = 'العدد'; is_header = $true })
-            , @(@{ text = '✅ ناجحة' }, @{ text = [string]$counters.Success })
-            , @(@{ text = '❌ فاشلة' }, @{ text = [string]$counters.Failed })
-            , @(@{ text = '⛔ مرفوضة' }, @{ text = [string]$counters.Blocked })
+            , @(@{ text = (T 'tick.col.result'); is_header = $true }, @{ text = (T 'tick.col.count'); is_header = $true })
+            , @(@{ text = (T 'tick.successful') }, @{ text = [string]$counters.Success })
+            , @(@{ text = (T 'tick.failed') }, @{ text = [string]$counters.Failed })
+            , @(@{ text = (T 'tick.refused') }, @{ text = [string]$counters.Blocked })
         )
     }
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
-        $blocks += @{ type = 'paragraph'; text = 'راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'tick.checkAudit') }
     }
 
     if ($script:CancelReasons.Count -gt 0) {
-        $reasonCells = @(, @(@{ text = 'سبب التراجع'; is_header = $true }, @{ text = 'مرات'; is_header = $true }))
+        $reasonCells = @(, @(@{ text = (T 'tick.undoReason'); is_header = $true }, @{ text = (T 'tick.col.times'); is_header = $true }))
         foreach ($reason in ($script:CancelReasons.Keys | Sort-Object)) {
             $reasonCells += , @(
                 @{ text = [string](Get-CancelReasonLabel -Reason $reason) }
@@ -1496,7 +1496,7 @@ function Get-WeeklyNoticesText {
                         if ([datetime]$script:TemplateLastUsed[$name] -ge $cutoff) { continue }
                         $when = ([datetime]$script:TemplateLastUsed[$name]).ToLocalTime().ToString('MM-dd')
                     }
-                    else { $when = 'أبدًا' }
+                    else { $when = (T 'tick.never') }
                     "$name — $when"
                 })
             if (@($idle).Count -gt 0) {
@@ -1520,7 +1520,7 @@ function Get-WeeklyNoticesText {
         }
         $repeats = @($foundCauses | Sort-Object Count -Descending | Select-Object -First 5)
         if ($repeats.Count -gt 0) {
-            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')" }) }
+            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')" }) }
             $found.Add("🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')")
         }
     }
@@ -1556,7 +1556,7 @@ function Get-WeeklyNoticesText {
     catch { Write-BridgeLog "Weekly notices: changed-settings signal failed: $($_.Exception.Message)" }
 
     if ($found.Count -eq 0) { return '' }
-    $head = if ($AsPlain) { '👁 ما لاحظه الجسر' } else { '<b>👁 ما لاحظه الجسر</b>' }
+    $head = if ($AsPlain) { (T 'tick.whatBridgeNoticed') } else { (T 'tick.whatBridgeNoticedHtml') }
     return ("$head`n" + ($found -join "`n"))
 }
 
@@ -1569,24 +1569,24 @@ function Get-UsageDigestText {
     # parse_mode=HTML. Template names are typed by an administrator, so each
     # one is escaped; the ranking sits in a blockquote because it is a list
     # inside a summary rather than the summary itself.
-    $lines.Add('<b>📊 ملخص الاستخدام</b>')
+    $lines.Add((T 'tick.usageDigestHtml'))
     $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code> (محلي)")
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
-    if ($ranked.Count -eq 0) { $lines.Add('<i>لم تُستخدم أي قوالب بعد.</i>') }
+    if ($ranked.Count -eq 0) { $lines.Add((T 'tick.noTemplatesUsedHtml')) }
     else {
         # Cumulative since counting began, not this week's: UsageCounts is
         # persisted across restarts, so its leader can outnumber the weekly
         # operations below without anything being broken. Labelled as such.
         $lines.Add('')
-        $lines.Add('<b>🏆 الأكثر استخدامًا</b> (تراكمي)')
+        $lines.Add((T 'tick.mostUsed'))
         # The reports screens' own vocabulary: the name in bold and the
         # figures after a "·", at full size - where a <pre> ranking would be
         # aligned and small.
         $rank = 0
         $rankLines = @(foreach ($item in $ranked) {
                 $rank++
-                $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+                $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة'
                 $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $uses"
                 if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
                     $line += " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
@@ -1621,14 +1621,14 @@ function Get-UsageDigestText {
 ❌ فاشلة — $($counters.Failed)
 ⛔ مرفوضة — $($counters.Blocked)</blockquote>")
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
-        $lines.Add('<i>راجع 📜 السجل لمعرفة سبب الفشل أو الرفض.</i>')
+        $lines.Add((T 'tick.checkAuditHtml'))
     }
     $weekOps = Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
     $lines.Add("📆 <b>آخر 7 أيام</b> — $weekOps · متوسط $dailyAverage يوميًا")
     $lines.Add('')
     if ($script:CancelReasons.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('<b>↩️ أسباب التراجع المسجّلة</b>')
+        $lines.Add((T 'tick.undoReasonsHtml'))
         $reasonLines = @(@($script:CancelReasons.Keys | Sort-Object) | ForEach-Object {
                 "$(ConvertTo-TelegramHtmlText (Get-CancelReasonLabel -Reason $_)) — $($script:CancelReasons[$_])"
             })
@@ -1666,7 +1666,7 @@ function Get-FlowTimingText {
     if ($slow.Count -gt 0) {
         $parts = @($slow | ForEach-Object {
                 $name = if ($AsPlain) { $_.Key } else { "<b>$(ConvertTo-TelegramHtmlText $_.Key)</b>" }
-                $times = Get-ArabicCountNoun -Count ([int]$_.Count) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+                $times = Get-ArabicCountNoun -Count ([int]$_.Count) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة'
                 "$name — متوسط $($_.Average) ث ($times)"
             })
         $found.Add("🐢 الأبطأ وصولًا للهواء: $($parts -join ' · ')")
@@ -1675,12 +1675,12 @@ function Get-FlowTimingText {
     if ($dropped.Count -gt 0) {
         $parts = @($dropped | ForEach-Object {
                 $name = if ($AsPlain) { [string]$_.Key } else { ConvertTo-TelegramHtmlText ([string]$_.Key) }
-                "$name — $(Get-ArabicCountNoun -Count ([int]$_.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')"
+                "$name — $(Get-ArabicCountNoun -Count ([int]$_.Value) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')"
             })
         $found.Add("🗑 مسودات مهجورة: $($parts -join ' · ')")
     }
     if ($found.Count -eq 0) { return '' }
-    $head = if ($AsPlain) { '⏱ زمن النشر والمسودات' } else { '<b>⏱ زمن النشر والمسودات</b>' }
+    $head = if ($AsPlain) { (T 'tick.publishTiming') } else { (T 'tick.publishTimingHtml') }
     return ("$head`n" + ($found -join "`n"))
 }
 
@@ -1797,7 +1797,7 @@ function Update-MaterialProxyWatchdog {
             # Nothing at all reads differently from a copy that stopped part
             # way: the second is a transfer that may still finish, or may be
             # stuck.
-            $state = if ([int]$_.ProxyProgress -le 0) { 'بلا نسخة محلية' } else { "النسخ متوقف عند $([int]$_.ProxyProgress)%" }
+            $state = if ([int]$_.ProxyProgress -le 0) { (T 'tick.noLocalCopy') } else { "النسخ متوقف عند $([int]$_.ProxyProgress)%" }
             "• $($_.ScheduledAt.ToLocalTime().ToString('HH:mm')) · $(ConvertTo-TelegramHtmlText ([string]$_.Name)) — $state"
         })
     Write-BridgeLog "Material due within $lead minute(s) without a complete local copy: $(@($missing | ForEach-Object { $_.Name }) -join ' | ')" 'WARN'
@@ -1867,13 +1867,13 @@ function Update-StaleOnAirWatchdog {
     # system can act on should carry the action.
     $keyboard = @{ inline_keyboard = @(@(foreach ($item in $stale) {
                     , @((New-Button "🙈 أخفِ طبقة $($item.Layer) · $($item.Key)" "hide:$($item.Layer)" -Style danger))
-                }) + @(, @((New-Button 'ℹ️ الحالة' 'menu:status')))) }
+                }) + @(, @((New-Button (T 'tick.status') 'menu:status')))) }
 
     $repeat = @($stale | Where-Object { [int]$script:StaleOnAirAlerted[[int]$_.Layer].Count -gt 1 })
     $head = if ($repeat.Count -eq $stale.Count -and $stale.Count -gt 0) {
-        "⚠️ <b>ما زال على الهواء</b> — تنبيه متكرّر:"
+        (T 'tick.stillOnAirRepeat')
     }
-    else { '⚠️ سجلات على الهواء منذ وقت طويل — تحقّق من الشاشة:' }
+    else { (T 'tick.longOnAir') }
     $body = "$head`n" + ($lines -join "`n") + "`nإن كانت الشاشة خالية فالإخفاء يصفّي السجل."
 
     Send-AdminBroadcast -Urgent -Text $body -ReplyMarkup $keyboard
@@ -2121,7 +2121,7 @@ function Update-CinegyHealthWatchdog {
     $issues = @(@(Get-JsonProp $telemetry 'Issues') | Where-Object { $_ })
     $why = if ($reading -eq 'unreachable') {
         $err = [string](Get-JsonProp $telemetry 'Error')
-        if ($err) { "تعذّر الوصول: $(Protect-SensitiveText $err)" } else { 'تعذّر الوصول' }
+        if ($err) { "تعذّر الوصول: $(Protect-SensitiveText $err)" } else { (T 'tick.unreachable') }
     }
     elseif ($issues.Count -gt 0) { "قياسات غير سليمة: $($issues -join '، ')" }
     else {
@@ -2141,7 +2141,7 @@ function Update-CinegyHealthWatchdog {
         # Recovery is announced whenever the state was not healthy before, not
         # only when a warning had already gone out. The warning waits for
         # HealthFailureAlertThreshold consecutive failures, so a dip that
-        # cleared just under it left the screens saying "غير سليم" for minutes
+        # cleared just under it left the screens saying (T 'tick.unhealthy') for minutes
         # and then went quiet - and an operator who had looked in the middle of
         # it was never told it was over.
         $wasDown = $oldState -ne 'healthy' -and $oldState -ne 'unknown'
@@ -2159,7 +2159,7 @@ function Update-CinegyHealthWatchdog {
             # queue keeps only the text, so a message that needed a parse mode
             # would lose it on the way out hours later.
             $lines = [System.Collections.Generic.List[string]]::new()
-            $lines.Add('💚 تعافت صحة Cinegy')
+            $lines.Add((T 'tick.cinegyRecovered'))
             if ($downSince) {
                 $seconds = [int]($now - [datetime]$downSince).TotalSeconds
                 $lines.Add("استمر الخلل $(Format-DurationSeconds -Seconds $seconds) — من $(([datetime]$downSince).ToString('HH:mm:ss')) إلى $($now.ToString('HH:mm:ss'))")
@@ -2170,7 +2170,7 @@ function Update-CinegyHealthWatchdog {
             if (-not $wasAlerted) {
                 # Said plainly, or an operator wonders why they are being told
                 # something ended that they were never told had begun.
-                $lines.Add('لم يبلغ الخلل حدّ التنبيه، فلم يُرسل تحذير عند بدايته.')
+                $lines.Add((T 'tick.belowThreshold'))
             }
             Send-AdminBroadcast -Text ($lines -join "`n")
         }
@@ -2178,14 +2178,14 @@ function Update-CinegyHealthWatchdog {
     }
     if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
     $history.FailureCount = [int]$history.FailureCount + 1; $history.LastErrorAt = $now
-    # The measured reason, not the category. "قياسات غير سليمة" told the
+    # The measured reason, not the category. (T 'tick.unhealthyReadings') told the
     # ⚠️ آخر الأخطاء row exactly what its own colour already said.
     $history.LastError = $why
     $threshold = [Math]::Max(1, (Get-SettingInt 'HealthFailureAlertThreshold' 1))
     if ([int]$history.FailureCount -ge $threshold -and -not [bool]$history.AlertSent -and (Get-Setting 'NotifyAdminsOnCinegyHealth')) {
         $history.AlertSent = $true
         $started = ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss')
-        $detail = if ($newState -eq 'unhealthy') { Format-CinegyTelemetryStatus -Telemetry $telemetry } else { 'تعذّر الوصول إلى قياسات صحة Cinegy. تحقق من Air والاتصال بالشبكة.' }
+        $detail = if ($newState -eq 'unhealthy') { Format-CinegyTelemetryStatus -Telemetry $telemetry } else { (T 'tick.cinegyUnreachable') }
         Send-AdminBroadcast -Text "🔴 تحذير صحة Cinegy بعد $($history.FailureCount) حالات فشل متتالية`nبداية الانقطاع: $started`n$detail"
     }
 }
@@ -2199,7 +2199,7 @@ function Set-TelegramConnectionState {
     if ($Connected) {
         $shouldRecover = [bool]$history.AlertSent
         $history.LastSuccess = $now; $history.FailureCount = 0; $history.OutageStartedAt = $null; $history.AlertSent = $false
-        if ($shouldRecover) { Send-AdminBroadcast -Text "✅ استعاد البوت اتصال Telegram وعادت دورة التحديث للعمل." }
+        if ($shouldRecover) { Send-AdminBroadcast -Text (T 'tick.telegramRecovered') }
         return
     }
     if ([int]$history.FailureCount -eq 0) { $history.OutageStartedAt = $now }
@@ -2274,7 +2274,7 @@ function Update-NewsSheetSync {
     }
     elseif (-not $result.Unchanged -and -not $result.Skipped) {
         Write-BridgeLog "News sheet sync did not publish: $($result.Error)" 'WARN'
-        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label 'مزامنة الشيت' -ErrorText ([string]$result.Error) | Out-Null
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label (T 'tick.sheetSync') -ErrorText ([string]$result.Error) | Out-Null
     }
     # A sheet that has stopped answering is the one failure nobody sees: this
     # sync publishes to air on its own clock, so an editor whose sheet is
@@ -2316,14 +2316,14 @@ function Update-NewsSheetHealthNotice {
     $since = if ($script:NewsSheetLastSuccessAt) {
         "آخر نشر ناجح منذ $(Format-Duration -Seconds ([int]((Get-Date) - $script:NewsSheetLastSuccessAt).TotalSeconds))."
     }
-    else { 'ولم تنجح ولا مرة منذ إقلاع الجسر.' }
+    else { (T 'tick.neverSucceeded') }
     $reason = [string]$Result.Error
     if ($reason.Length -gt 140) { $reason = $reason.Substring(0, 139) + '…' }
     Send-NewsSheetNotice -Cause 'news-sheet-sync-failing' -Text (
         "⚠️ مزامنة الشيت فشلت $spell متتالية.`n" +
         "السبب: $reason`n" +
         "$since`n" +
-        "الشريط على الهواء ما زال على آخر نص نُشر — تعديلات الشيت لا تصل.")
+        (T 'tick.tickerStale'))
 }
 
 function Invoke-BridgeTick {

@@ -376,6 +376,30 @@ function Update-UrgentBoardRun {
     if (-not $script:UrgentBoardRun) { return }
     $run = $script:UrgentBoardRun
     if ([bool](Get-JsonProp $run 'Paused')) { return }
+    # A blank gap the station asked for, carried out here so the wait costs the
+    # control loop nothing. Held before the step logic below, because during
+    # the gap the next line's moment has usually already passed and the normal
+    # path would step again over a layer that is deliberately empty.
+    $pending = Get-JsonProp $run 'PendingShow'
+    if ($pending) {
+        if ((Get-UrgentElapsedSeconds) -lt [double]$pending.DueAt) { return }
+        $run.PendingShow = $null
+        $template = Get-UrgentTemplate
+        if (-not $template) {
+            Write-BridgeLog 'Urgent board: the scene vanished during the gap between lines.' 'WARN'
+            Stop-UrgentBoardRun -Reason 'failed' -Quiet | Out-Null
+            return
+        }
+        $shown = Show-UrgentBoardScene -Template $template -Values $pending.Values
+        if (-not $shown.Success) {
+            Write-BridgeLog "Urgent board could not return after the gap: $([string](Get-JsonProp $shown 'Error'))" 'WARN'
+            Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text "❌ توقّف جدول العواجل: تعذّر إعادة المشهد بعد الفاصل."
+            Stop-UrgentBoardRun -Reason 'failed' -Quiet | Out-Null
+            return
+        }
+        Save-UrgentRunState | Out-Null
+        return
+    }
     $steps = @($run.Steps)
     $index = [int]$run.Step
     $isLast = ($index -ge ($steps.Count - 1))
@@ -448,10 +472,52 @@ function Send-UrgentBoardStep {
     $outro = 0.0
     $timing = Get-UrgentSceneTiming
     if ($timing) { $outro = [math]::Max(0.0, [double](Get-JsonProp $timing 'OutroSeconds')) }
+    # A deliberate blank gap between stories, when the station asked for one.
+    # Waited by the tick rather than here: an operator may set this to a
+    # minute, and Start-Sleep would hold the whole control loop for it - the
+    # auto-hide timers, the schedule, the heartbeat and every button press.
+    $gap = [double](Get-SettingInt 'UrgentExitGapSeconds' 0)
+    if ($gap -gt 0 -and $script:UrgentBoardRun) {
+        $script:UrgentBoardRun.PendingShow = @{
+            DueAt = (Get-UrgentElapsedSeconds) + $outro + $gap
+            Values = $values
+        }
+        return [pscustomobject]@{ Success = $true; Error = ''; Deferred = $true }
+    }
     if ($outro -gt 0) { Start-Sleep -Milliseconds ([int]($outro * 1000)) }
+    return (Show-UrgentBoardScene -Template $template -Values $values)
+}
+
+function Show-UrgentBoardScene {
+    <#
+        Puts the breaking scene back up with this line's values.
+
+        The HIDE first is the whole point, and its absence was the bug: a scene
+        already loaded on the layer keeps running with the values it was
+        started with, so showing it again re-ran the entrance and left the
+        PREVIOUS line's text on screen. Every story after the first was the
+        first story again, with an exit animation between them - which is
+        exactly what an operator reported.
+
+        EXIT_SCENE_LOOP is not enough on its own: it tells the scene to leave
+        its loop and play the outro, but the item stays loaded on the layer.
+        Invoke-ShowTemplateResult has cleared the layer before a re-show since
+        ReshowClearsLayer was written, and says why in its own comment; this
+        path bypasses that funnel deliberately and so never inherited it.
+    #>
+    param([Parameter(Mandatory)]$Template, [Parameter(Mandatory)]$Values)
+    $layer = [int]$Template.Layer
+    $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $layer -TimeoutSec (Get-AirTimeout)
+    # Reported, not fatal: a failed clear is the exact condition under which
+    # the show below puts the previous line back on air, so it has to be
+    # findable in the log when somebody asks why a story repeated.
+    if (-not $clear.Success) {
+        Write-BridgeLog "Urgent board: could not clear layer $layer before the next line; the scene may keep its previous text: $([string]$clear.Error)" 'WARN'
+    }
     return (Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Layer $layer -TemplatePath ([string]$template.Path) -Variables $values -TimeoutSec (Get-AirTimeout) `
-            -Device ([string](Get-JsonProp $template 'Device')))
+            -Layer $layer -TemplatePath ([string]$Template.Path) -Variables $Values -TimeoutSec (Get-AirTimeout) `
+            -Device ([string](Get-JsonProp $Template 'Device')))
 }
 
 function Restore-UrgentBoardRun {

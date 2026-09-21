@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.51.0'
+$script:BridgeVersion = '8.52.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -275,6 +275,7 @@ $script:DefaultSettings = [ordered]@{
     UrgentBoardTotalSeconds    = 0       # ceiling on the whole run; 0 means the repeats alone decide
     UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
     UrgentMinIntervalSeconds   = 4       # floor used only when the scene cannot be read; the scene's own timing wins
+    UrgentExitGapSeconds       = 0       # deliberate blank gap between stories in exit mode; 0 leaves only the scene's own outro
     UrgentSyncLeadMs           = 120     # sent this early, so it arrives on the moment rather than after it
     UrgentBoardNotifyOnFinish  = $true   # tell the chat when a board run ends by itself, minutes after the operator looked away
     UrgentBoardMaxTextLength   = 300     # longest breaking line the board will store
@@ -528,6 +529,7 @@ $script:SettingDisplayMetadata = @{
     UrgentBoardTotalSeconds = @{ Unit = 'ثانية'; Description = 'سقف زمني للتشغيل كلّه، يقصّ التكرارات إن لزم. صفر يعني بلا سقف' }
     UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
     UrgentMinIntervalSeconds = @{ Unit = 'ثانية'; Description = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج' }
+    UrgentExitGapSeconds = @{ Unit = 'ثانية'; Description = 'فاصل شاشة فارغة بين خبر وآخر في وضع حركة الخروج (0 = حركة المشهد وحدها). يرفع أقصر فاصل مسموح بالقدر نفسه' }
     UrgentSyncLeadMs = @{ Unit = 'مللي ثانية'; Description = 'يُرسل الأمر مبكرًا بهذا القدر ليعوّض زمن الشبكة، فيصل في لحظته' }
     UrgentBoardNotifyOnFinish = @{ Unit = ''; Description = 'إشعار في المحادثة حين ينتهي تشغيل جدول العواجل وحده' }
     UrgentBoardMaxTextLength = @{ Unit = 'حرف'; Description = 'أطول نصّ عاجل يقبله الجدول' }
@@ -1322,7 +1324,7 @@ foreach ($entry in @(
                 'AllowOperatorsSheetPull',
                 'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
                 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
-                'UrgentMinIntervalSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
+                'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
                 'UrgentBoardMaxTextLength'
             ) },
         @{ Category = 'schedule'; Names = @(
@@ -1483,6 +1485,7 @@ $script:SettingNavigationLabels = @{
     UrgentBoardTotalSeconds = 'المدة الكلية للعواجل'
     UrgentBoardMaxItems = 'حدّ عدد العواجل'
     UrgentMinIntervalSeconds = 'أقصر فاصل للعواجل'
+    UrgentExitGapSeconds = 'الفاصل بين الأخبار'
     UrgentSyncLeadMs = 'تعويض زمن الشبكة للعواجل'
     UrgentBoardNotifyOnFinish = 'إشعار انتهاء العواجل'
     UrgentBoardMaxTextLength = 'أطول نصّ عاجل'
@@ -1649,6 +1652,7 @@ $script:SettingConstraints = @{
     UrgentBoardTotalSeconds       = @{ Minimum = 0; Maximum = 3600 }
     UrgentBoardMaxItems           = @{ Minimum = 1; Maximum = 40 }
     UrgentMinIntervalSeconds      = @{ Minimum = 1; Maximum = 60 }
+    UrgentExitGapSeconds          = @{ Minimum = 0; Maximum = 300 }
     UrgentSyncLeadMs              = @{ Minimum = 0; Maximum = 5000 }
     UrgentBoardMaxTextLength      = @{ Minimum = 10; Maximum = 1000 }
     # Sizes two restore screens - the configuration one and the template

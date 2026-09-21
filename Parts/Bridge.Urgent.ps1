@@ -69,12 +69,19 @@ function Test-UrgentSceneLoop {
 }
 
 function Get-UrgentTransitionSeconds {
-    <# What an exit-mode line costs before it is visible: the outro plays, then
-       the entrance. Read from the scene, so re-cutting it in Titler re-times
-       the board with nothing to update here. #>
+    <# What an exit-mode line costs before it is visible: the outro plays, the
+       station's chosen blank gap passes, then the entrance. The scene part is
+       read from the scene, so re-cutting it in Titler re-times the board with
+       nothing to update here; the gap is the one part a person chooses.
+
+       The gap belongs in this number and not only in the engine: the plan
+       measures every line's moment from it, and the floor under an interval
+       comes from it. A gap the arithmetic did not know about would put the
+       next line's moment inside its own blank period. #>
+    $gap = [math]::Max(0.0, [double](Get-SettingInt 'UrgentExitGapSeconds' 0))
     $timing = Get-UrgentSceneTiming
-    if (-not $timing) { return 0.0 }
-    return [math]::Round([double](Get-JsonProp $timing 'OutroSeconds') + [double](Get-JsonProp $timing 'IntroSeconds'), 3)
+    if (-not $timing) { return [math]::Round($gap, 3) }
+    return [math]::Round([double](Get-JsonProp $timing 'OutroSeconds') + [double](Get-JsonProp $timing 'IntroSeconds') + $gap, 3)
 }
 
 function Get-UrgentFloorSeconds {

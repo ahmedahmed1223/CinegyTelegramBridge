@@ -203,3 +203,86 @@ Describe 'Urgent board rendered operator screens' {
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
     }
 }
+
+Describe 'Each breaking story replaces the one before it on screen' {
+    <#
+        Reported from air: with exit motion on, the board plays its exit
+        animation between stories and then shows the FIRST story again, over
+        and over. The log agreed the engine was stepping - "run ended
+        (finished) after 2 step(s)" - so the fault was on the screen, not in
+        the arithmetic.
+
+        Cause: EXIT_SCENE_LOOP tells a scene to leave its loop and play the
+        outro, but the item stays LOADED on the layer. Showing it again
+        re-runs the entrance with the values it was loaded with. That is the
+        trap Invoke-ShowTemplateResult documents and clears the layer to
+        avoid; this path bypasses that funnel deliberately and so never
+        inherited the clear.
+    #>
+    BeforeEach {
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Path = 'C:\urgent.cintitle'; Layer = 7; Device = '' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = '{x}'; Xml = '' } }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'clears the layer before showing the next story, so the scene reloads with its new text' {
+        Show-UrgentBoardScene -Template (Get-UrgentTemplate) -Values @{ 'Ajel.center' = 'الخبر الثاني' } | Out-Null
+
+        # Without this the scene keeps the values it was loaded with and the
+        # first story plays again behind a fresh entrance animation.
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 }
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'still shows the story when the clear fails, but says so in the log' {
+        # A failed clear is the exact condition under which the previous line
+        # goes back on air, so it has to be findable when somebody asks why a
+        # story repeated.
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $false; Error = 'no route' } }
+
+        Show-UrgentBoardScene -Template (Get-UrgentTemplate) -Values @{ 'Ajel.center' = 'خبر' } | Out-Null
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Message -match 'could not clear layer 7' }
+    }
+}
+
+Describe 'A chosen blank gap between breaking stories' {
+    <#
+        Asked for from the gallery: a pause between one story leaving and the
+        next arriving, in seconds or as long as a minute.
+
+        It is never waited out with Start-Sleep. The engine runs on the poll
+        thread that also carries the auto-hide timers, the schedule and every
+        button press, and a one-minute sleep there would freeze the bridge for
+        a minute. The gap is booked as a moment and the tick carries it out.
+    #>
+    BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 0 -Force
+        Mock Get-UrgentSceneTiming { @{ OutroSeconds = 2.0; IntroSeconds = 4.0; LoopSeconds = 6.0 } }
+    }
+
+    It 'adds nothing to the transition when no gap is asked for' {
+        Get-UrgentTransitionSeconds | Should -Be 6.0
+    }
+
+    It 'counts the gap in the transition, so the next story is not timed inside its own blank' {
+        $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 60 -Force
+
+        Get-UrgentTransitionSeconds | Should -Be 66.0
+    }
+
+    It 'raises the shortest allowed interval with it, since a line cannot be held for less than its own transition' {
+        $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 30 -Force
+
+        Get-UrgentFloorSeconds | Should -Be 36.0
+    }
+
+    It 'still gives a gap when the scene itself cannot be read' {
+        Mock Get-UrgentSceneTiming { $null }
+        $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 45 -Force
+
+        Get-UrgentTransitionSeconds | Should -Be 45.0
+    }
+}

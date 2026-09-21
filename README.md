@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.52.0
+
+**Every breaking story now shows its own text, and the gap between them is yours to choose:**
+- Reported from air: with exit motion on, the urgent board played its exit animation between stories and then showed the *first* story again, every time. The log insisted the engine was stepping, so the fault was on the screen rather than in the arithmetic. `EXIT_SCENE_LOOP` tells a scene to leave its loop and play its outro, but the item stays loaded on the layer, so the next show re-ran the entrance with the values it was loaded with. `Invoke-ShowTemplateResult` clears the layer before a re-show for exactly this reason; the board's playback path bypasses that funnel deliberately and never inherited the clear. It now clears the layer, and logs a warning when the clear fails — that being the one condition under which the previous line goes back on air.
+- New `UrgentExitGapSeconds` setting: a deliberate blank gap between stories in exit mode, from 0 to 300 seconds. It is never waited out with `Start-Sleep` — the engine shares the poll thread with the auto-hide timers, the schedule and every button press — so the gap is booked as a moment and carried out by the tick. It is also counted in the transition the plan is built from, so the next story's moment cannot fall inside its own blank period.
+
 ## Version 8.51.0
 
 **Monitoring that reports degradation, not only collapse — everything here came out of reading a month of `logs/bridge.log`:**

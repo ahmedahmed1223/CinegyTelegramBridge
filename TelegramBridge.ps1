@@ -108,6 +108,7 @@ foreach ($part in @(
         'Bridge.Keyboards'
         'Bridge.WhatsNew'
         'Bridge.Help'
+        'Bridge.Help.En'
         'Bridge.AirOperation'
         'Bridge.ShowFlow'
         'Bridge.Admin'

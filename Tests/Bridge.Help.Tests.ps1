@@ -423,3 +423,70 @@ Describe 'The manual carries only what the station has' {
         (ConvertTo-RichMessagePayload -Blocks (Get-HelpRichBlocks -ChatId 1 -UserId 1)).Length | Should -BeLessThan 12000
     }
 }
+
+Describe 'The manual exists in both languages, chapter for chapter' {
+    <#
+        The manual is the one thing that is NOT in the catalogue: a chapter is
+        forty lines of prose with live settings interpolated mid-sentence, and
+        the number lands in a different clause in English than in Arabic.
+        Bridge.Help.En.ps1 duplicates the structure deliberately.
+
+        That trade is only safe with this guard. A chapter added to one
+        language and not the other, or renamed in one, fails here by name -
+        which is the whole reason the duplication is allowed to exist.
+    #>
+    BeforeEach {
+        $script:OriginalHelpLanguage = Get-Setting 'Language'
+        Mock Test-Admin { $true }
+        Mock Test-StatusViewer { $true }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-BoardsAvailable { $true }
+    }
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $script:OriginalHelpLanguage -Force
+    }
+
+    It 'defines exactly the same chapter keys, in the same order' {
+        $arabic = @((Get-HelpChaptersAr -ChatId 101 -UserId 101).Key)
+        $english = @((Get-HelpChaptersEn -ChatId 101 -UserId 101).Key)
+
+        $english | Should -Be $arabic -Because "a chapter in one language only is a chapter half the station cannot read"
+    }
+
+    It 'keeps AdminOnly identical, so a language cannot leak an admin chapter' {
+        $arabic = @(Get-HelpChaptersAr -ChatId 101 -UserId 101)
+        $english = @(Get-HelpChaptersEn -ChatId 101 -UserId 101)
+
+        for ($i = 0; $i -lt $arabic.Count; $i++) {
+            [bool]$english[$i].AdminOnly | Should -Be ([bool]$arabic[$i].AdminOnly) -Because "chapter '$($arabic[$i].Key)' must be for the same audience in both"
+        }
+    }
+
+    It 'gives every English chapter a title and a body' {
+        foreach ($chapter in @(Get-HelpChaptersEn -ChatId 101 -UserId 101)) {
+            [string]$chapter.Title | Should -Not -BeNullOrEmpty
+            @($chapter.Body).Count | Should -BeGreaterThan 0 -Because "chapter '$($chapter.Key)' would open as a blank screen"
+        }
+    }
+
+    It 'writes the English chapters in English' {
+        # A chapter copied across and not translated is the failure this
+        # duplication invites, and it looks fine until somebody reads it.
+        $arabicLetters = [regex]'[\u0600-\u06FF]'
+        foreach ($chapter in @(Get-HelpChaptersEn -ChatId 101 -UserId 101)) {
+            $arabicLetters.IsMatch([string]$chapter.Title) | Should -BeFalse -Because "the English title of '$($chapter.Key)' still carries Arabic"
+            $arabicLetters.IsMatch((@($chapter.Body) -join ' ')) | Should -BeFalse -Because "the English body of '$($chapter.Key)' still carries Arabic"
+        }
+    }
+
+    It 'serves the English manual when the bridge is set to English' {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+        @(Get-HelpChapters -ChatId 101 -UserId 101)[0].Title | Should -Be '▶️ Putting a template on air'
+        Get-QuickStartText -ChatId 101 -UserId 101 | Should -Match 'Quick start'
+
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+        @(Get-HelpChapters -ChatId 101 -UserId 101)[0].Title | Should -Be '▶️ نشر قالب'
+        Get-QuickStartText -ChatId 101 -UserId 101 | Should -Match 'بداية سريعة'
+    }
+}

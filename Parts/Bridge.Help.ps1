@@ -13,6 +13,13 @@
 #>
 
 function Get-QuickStartText {
+    <# Routed by language before anything else: the whole body below is the
+       Arabic manual, and Bridge.Help.En.ps1 holds its English twin. #>
+    if ((Get-BridgeLanguage) -eq 'en') { return (Get-HelpQuickStartTextEn) }
+    return (Get-QuickStartTextAr @args)
+}
+
+function Get-QuickStartTextAr {
     <# The shortest path from "I was handed this bot" to "a graphic is on
        air". Deliberately not a feature list: a new operator on shift needs
        the six presses that work, and can find everything else in the index. #>
@@ -42,6 +49,12 @@ function Get-QuickStartText {
 }
 
 function Get-HelpChapters {
+    param([long]$ChatId = 0, [long]$UserId = 0)
+    if ((Get-BridgeLanguage) -eq 'en') { return @(Get-HelpChaptersEn -ChatId $ChatId -UserId $UserId) }
+    return @(Get-HelpChaptersAr -ChatId $ChatId -UserId $UserId)
+}
+
+function Get-HelpChaptersAr {
     <# The manual as chapters instead of one long screen. An operator asking
        "how do I hide this" wants that answer, not to scroll past scheduling
        to reach it. Each chapter is a screen; the index is the map.

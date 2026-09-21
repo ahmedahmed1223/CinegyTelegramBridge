@@ -241,3 +241,78 @@ Describe 'An unnamed item is not a claim that a scene is showing' {
             Should -Be 'keep'
     }
 }
+
+Describe 'Telling an operator WHY their graphic left the layer' {
+    <#
+        Reported from the field, verbatim:
+
+            ⚠️ تغيير خارجي في Cinegy
+            طبقة الخبر العاجل · طبقة 7: استُبدل خارجيًا
+            العنصر الحالي: عنصر غير مسمّى | المعرّف: {B092DCC7-...}
+
+        The bridge's own log line for that same decision said "Cinegy confirmed
+        hidden". Two stories from one decision, and the alarming one was wrong:
+        an urgent graphic had simply ended, and the spent playlist item stayed
+        Active on layer 7 with its Id intact and no name - the exact shape the
+        discovery path has refused to treat as a scene for years.
+
+        "Replaced" was derived from "ActualActiveId is not empty", which an
+        ended scene satisfies. The operator was told a stranger had taken the
+        layer.
+    #>
+    BeforeAll {
+        function global:New-TestSpentItemStatus {
+            <# What Cinegy reports on a layer whose graphic has just ended: off
+               air, id intact, nothing named. #>
+            param([string]$ActiveName = '')
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $false
+                ActiveId = '{B092DCC7-B5D0-11F1-96C5-C85EA97266A8}'
+                ActiveName = $ActiveName; ActiveTemplateName = ''; ActiveDescription = ''
+                OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''
+                Error = ''
+            }
+        }
+        $script:TestUrgentRecord = @{
+            Key = 'Urgent'; At = (Get-Date); UserId = 7275359265L
+            ActiveId = '{AA74CB64-B5D0-11F1-96C5-C85EA97266A8}'; Source = 'bridge'
+        }
+    }
+
+    It 'does not call an ended graphic an external replacement' {
+        $decision = Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $script:TestUrgentRecord -Status (New-TestSpentItemStatus)
+
+        $decision.Action | Should -Be 'remove'
+        $decision.Change.Replaced | Should -BeFalse -Because 'an id outlives the scene that owned it; only a NAME is evidence a stranger took the layer'
+    }
+
+    It 'treats the placeholder name Item as no name at all' {
+        # Cinegy reports "Item" for a spent entry and for an empty layer alike.
+        (Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $script:TestUrgentRecord -Status (New-TestSpentItemStatus -ActiveName 'Item')).Change.Replaced |
+            Should -BeFalse
+    }
+
+    It 'still reports a real replacement, which is the whole point of the notice' {
+        # A genuine external take-over must not be softened away by this fix.
+        $taken = New-TestSpentItemStatus
+        $taken.ActiveName = 'Show L band - New.CinTitle on Layer 7'
+
+        $decision = Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $script:TestUrgentRecord -Status $taken
+
+        $decision.Change.Replaced | Should -BeTrue
+        $decision.Change.ActualActiveName | Should -Be 'Show L band - New.CinTitle on Layer 7'
+    }
+
+    It 'keeps the id in the change either way, because diagnosis still wants it' {
+        (Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $script:TestUrgentRecord -Status (New-TestSpentItemStatus)).Change.ActualActiveId |
+            Should -Be '{B092DCC7-B5D0-11F1-96C5-C85EA97266A8}'
+    }
+
+    It 'asks one rule, so discovery and removal cannot disagree' {
+        # The two paths answered the same question differently for years: this
+        # is the rule both now call.
+        Test-BridgeCinegyNamedScene -Status (New-TestSpentItemStatus) | Should -BeFalse
+        Test-BridgeCinegyNamedScene -Status (New-TestSpentItemStatus -ActiveName 'Item') | Should -BeFalse
+        Test-BridgeCinegyNamedScene -Status (New-TestSpentItemStatus -ActiveName 'Lower third.CinTitle on Layer 4') | Should -BeTrue
+    }
+}

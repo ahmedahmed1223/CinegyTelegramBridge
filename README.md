@@ -15,6 +15,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.64.0
+
+**Fixed: "external change in Cinegy" accused somebody who was never there.** Reported from the field, on layer 7: *"استُبدل خارجيًا · العنصر الحالي: عنصر غير مسمّى · المصدر: مصدر خارجي غير معرّف"* — while the bridge's own log line for that same decision read `Cinegy state sync (watchdog) removed on-air record for layer 7 after Cinegy confirmed hidden`.
+
+- When a graphic ends, Cinegy leaves the spent playlist item **Active on the layer with its Id intact and no name**. `Resolve-BridgeCinegyLayerState` derived "replaced" from `ActualActiveId` being non-empty — which an ended scene satisfies — so an operator whose urgent banner had simply run out was told a stranger had taken the layer.
+- **The rule already existed, one branch away.** The discovery path has refused to treat an unnamed or `"Item"`-named entry as a scene for years, with a long comment about the phantom scene that taught it. The removal path asked a different question about the same status. Now both call one `Test-BridgeCinegyNamedScene`, and the decision carries `Replaced` rather than leaving the notice to re-derive it from an id.
+- **The notice says what happened:** "لم يعد على الهواء" instead of "استُبدل خارجيًا", plus one line stating that no other item holds the layer and nobody took it. No "source" is named for an empty layer — naming one sent an operator hunting an intruder who was never there.
+- **A genuine take-over is unchanged:** a named scene on the layer still reports as a replacement, with its name and its source. Restoring the old derivation turns the two new tests red on the exact reported shape.
+
 ## Version 8.63.0
 
 **The main menu and the settings doors now speak both languages.** Every button on the menu - the live rows, the rollback, favourites, the four content systems, the admin row - and the eleven settings doors with their summaries are drawn from the catalogue.

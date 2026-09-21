@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -384,8 +384,12 @@ function Format-ExternalCinegyChangeAlert {
     $lines.Add('⚠️ تغيير خارجي في Cinegy')
     $lines.Add("خادم Air: $($config.AirServerAddress) | القناة: $($config.AirChannelNumber)")
     foreach ($change in @($Changes)) {
-        $replaced = -not [string]::IsNullOrWhiteSpace([string]$change.ActualActiveId)
-        $state = if ($replaced) { 'استُبدل خارجيًا' } else { 'أُخفي' }
+        # Asked of the decision, not re-derived from the id. An id survives a
+        # scene that has simply ended, so "has an id" meant "a stranger took
+        # the layer" - the alarming half of a story whose own log line said
+        # the layer was confirmed hidden.
+        $replaced = [bool](Get-JsonProp $change 'Replaced')
+        $state = if ($replaced) { 'استُبدل خارجيًا' } else { 'لم يعد على الهواء' }
         $lines.Add('')
         $lines.Add("$(Get-LayerDisplayName -Layer ([int]$change.Layer)): $state")
         $lines.Add("القالب الذي كان يعرضه البوت: $($change.TemplateKey)")
@@ -396,8 +400,15 @@ function Format-ExternalCinegyChangeAlert {
             $lines.Add("العنصر الحالي: $name | المعرّف: $($change.ActualActiveId)")
         }
         if ($change.OutputState) { $lines.Add("حالة الخرج: $($change.OutputState)") }
-        $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { 'مصدر خارجي غير معرّف' }
-        $lines.Add("المصدر: $source")
+        if ($replaced) {
+            $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { 'مصدر خارجي غير معرّف' }
+            $lines.Add("المصدر: $source")
+        }
+        else {
+            # Naming a "source" for a graphic that simply ran out sent an
+            # operator looking for an intruder who was never there.
+            $lines.Add('لا عنصر آخر على الطبقة — المشهد انتهى أو أُخفي من خارج البوت، ولم يأخذها أحد.')
+        }
     }
     $lines.Add('تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط.')
     return ($lines -join "`n")

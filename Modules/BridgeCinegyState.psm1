@@ -16,6 +16,31 @@ function Copy-CinegyTrackedRecord {
     return $copy
 }
 
+function Test-BridgeCinegyNamedScene {
+    <#
+        Does this status NAME a scene, or is it merely an item id?
+
+        A spent or just-ended item stays Active on its layer with its Id
+        intact and reports either no name at all or the placeholder "Item" -
+        which is exactly what a genuinely empty layer reports. An Id on its
+        own is therefore not evidence that anything is showing.
+
+        Discovery has always known this (see the long note below it, and the
+        phantom scene it was written for). The removal path did not: it called
+        any non-empty ActiveId "externally replaced", so an operator whose own
+        graphic had simply ended was told an unnamed stranger had taken the
+        layer - while the log line for the very same decision said "Cinegy
+        confirmed hidden". Two stories from one decision, and the alarming one
+        was the wrong one.
+
+        One rule, asked in both places.
+    #>
+    param([Parameter(Mandatory)]$Status)
+    $name = [string](Get-CinegyStateProperty $Status ActiveTemplateName)
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = [string](Get-CinegyStateProperty $Status ActiveName) }
+    return (-not [string]::IsNullOrWhiteSpace($name) -and $name -ne 'Item')
+}
+
 function Resolve-BridgeCinegyLayerState {
     [CmdletBinding()]
     param(
@@ -40,6 +65,9 @@ function Resolve-BridgeCinegyLayerState {
                 OutputState=[string](Get-CinegyStateProperty $Status OutputState)
                 ClientConnected=[bool](Get-CinegyStateProperty $Status ClientConnected)
                 ClientIdentity=[string](Get-CinegyStateProperty $Status ClientIdentity)
+                # Decided here, where the status is, rather than re-derived
+                # from ActualActiveId by whoever writes the notice.
+                Replaced=(Test-BridgeCinegyNamedScene -Status $Status)
             }
             return [pscustomobject]@{Action='remove';Record=$null;Change=$change}
         }
@@ -105,7 +133,7 @@ function Resolve-BridgeCinegyLayerState {
     # The layers screen reads Cinegy live and already offers the hide button
     # for any layer the engine reports on air, so an operator loses no control
     # by this silence - only a claim that was not true.
-    if([string]::IsNullOrWhiteSpace($name) -or $name -eq 'Item'){
+    if(-not (Test-BridgeCinegyNamedScene -Status $Status)){
         return [pscustomobject]@{Action='ignore';Record=$null;Change=$null}
     }
     $record=@{Key=$name;At=$Now;UserId=0L;ActiveId=[string](Get-CinegyStateProperty $Status ActiveId);Source='cinegy'}
@@ -181,4 +209,4 @@ function Get-BridgeStaleOnAirLayers {
     }
     return @($stale)
 }
-Export-ModuleMember -Function Resolve-BridgeCinegyLayerState, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff
+Export-ModuleMember -Function Test-BridgeCinegyNamedScene, Resolve-BridgeCinegyLayerState, Get-BridgeStaleOnAirLayers, Get-BridgeCinegyStateBackoff

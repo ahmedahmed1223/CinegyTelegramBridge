@@ -1208,6 +1208,7 @@ Describe 'Update-OnAirStateFromCinegy' {
             Layer = 4; TemplateKey = 'lower-third'; ShowUserId = 10; ShownAt = [datetime]'2026-08-21T10:00:00'
             ExpectedActiveId = '{OLD}'; ActualActiveId = '{NEW}'; ActualActiveName = 'External Item'
             OutputState = 'Normal'; ClientConnected = $true; ClientIdentity = 'Air UI'
+            Replaced = $true
         }
 
         $text = Format-ExternalCinegyChangeAlert -Changes @($change)
@@ -1218,6 +1219,36 @@ Describe 'Update-OnAirStateFromCinegy' {
         $text | Should -Not -Match 'عنوان IP'
     }
 
+
+    It 'does not report a source, or a replacement, for a graphic that simply ended' {
+        <#
+            Reported from the field: an urgent graphic ended on layer 7 and the
+            operator was told it had been replaced externally by an
+            unidentified source, with an unnamed item's id offered as proof -
+            while the log line for the very same decision said Cinegy had
+            confirmed the layer hidden.
+
+            Nobody took the layer. Naming a source for an empty one sends an
+            operator hunting an intruder who was never there.
+        #>
+        $change = [pscustomobject]@{
+            Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 7275359265; ShownAt = [datetime]'2026-09-21T18:25:25'
+            ExpectedActiveId = '{AA74CB64-B5D0-11F1-96C5-C85EA97266A8}'
+            ActualActiveId = '{B092DCC7-B5D0-11F1-96C5-C85EA97266A8}'; ActualActiveName = ''
+            OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''
+            Replaced = $false
+        }
+
+        $text = Format-ExternalCinegyChangeAlert -Changes @($change)
+
+        $text | Should -Match 'لم يعد على الهواء'
+        $text | Should -Not -Match 'استُبدل خارجيًا'
+        $text | Should -Not -Match 'عنصر غير مسمّى'
+        $text | Should -Not -Match 'مصدر خارجي غير معرّف'
+        # The template and the operator still have to be there: this is still
+        # the notice that says a graphic left the air.
+        $text | Should -Match 'Urgent'
+    }
     It 'keeps a tracked layer that has no correlatable event id but is on air' {
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{

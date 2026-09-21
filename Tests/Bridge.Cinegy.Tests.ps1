@@ -473,6 +473,9 @@ Describe 'Cinegy monitoring watchdogs' {
                     Layer = 4; TemplateKey = 'lower-third'; ShowUserId = 10; ShownAt = Get-Date
                     ExpectedActiveId = '{OLD}'; ActualActiveId = '{NEW}'; ActualActiveName = 'External Item'
                     OutputState = 'Normal'; ClientConnected = $true; ClientIdentity = 'Air UI'
+                    # A named item really did take the layer, which is
+                    # what makes this a replacement rather than an end.
+                    Replaced = $true
                 })
             }
         }

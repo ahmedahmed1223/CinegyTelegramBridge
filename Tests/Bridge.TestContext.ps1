@@ -22,6 +22,20 @@ BeforeAll {
     $script:onAirFile = $onAirFile
     $script:ConfigPath = $ConfigPath
 
+    # The registry the tests read is the one this repository ships, never the
+    # station's own. config.example.json points TemplateRegistryPath at
+    # .\templates.json, which is git-ignored because it holds the real scene
+    # paths - so on a developer's machine the suite read a file the gate can
+    # never see, and in CI it read nothing at all.
+    #
+    # That is not theoretical: four help-chapter tests asserted the bulletin
+    # chapter exists, the chapter is gated on a 'Mojaz' entry in the registry,
+    # and templates.example.json has no Mojaz. They passed on every desk and
+    # failed on every push for weeks. A test whose answer depends on which
+    # machine it runs on is not a test.
+    $script:ExampleTemplatesPath = Join-Path $script:Root 'templates.example.json'
+    $config.TemplateRegistryPath = $script:ExampleTemplatesPath
+
     function New-TempTemplateFile {
         <# Unique name per call: Get-TemplateStore caches on path + write time,
            so a fresh path guarantees a fresh parse. Keep it in Pester's

@@ -169,6 +169,16 @@ internal static class SelfTest
         Check("a real token is not a reference", SettingsForm.LooksLikeDpapiReference("123456:AAErandomlookingtokentext") == false);
         Check("null is not a reference", !SettingsForm.LooksLikeDpapiReference(null));
 
+        // --- starting the bridge by itself is opt-in ------------------------
+        // A bridge that comes up on its own is a decision about the air. It is
+        // made once, deliberately, and must never be inherited from a default -
+        // which is also why the toggles beside it were moved into the settings
+        // file in the first place, after auto-restart kept turning itself back on.
+        Check("the bridge does not start itself unless asked", new ManagerSettings().StartBridgeOnOpen == false);
+        Check("the choice survives a round trip through the settings file",
+            System.Text.Json.JsonSerializer.Deserialize<ManagerSettings>(
+                System.Text.Json.JsonSerializer.Serialize(new ManagerSettings { StartBridgeOnOpen = true }))!.StartBridgeOnOpen);
+
         // --- the bridge-managed list guard ---------------------------------
         Check("managed edit while running needs a restart",
             SettingsForm.NeedsRestartToPersist(true, new[] { "AdminUserIds" }));
@@ -463,10 +473,25 @@ internal static class SelfTest
         Check("highlights the error-bearing result",
             MainForm.GetLogHighlights("2026-09-05 [ERROR] AIR_OP result=failed error=timeout")
                 .Any(h => h.Kind == LogHighlightKind.Failure));
-        Check("keeps queued warnings when a long burst must be reduced",
-            MainForm.GetPendingDrainPlan(pendingCount: 9000, warningCount: 3, errorCount: 2).KeepWarningAndError);
         Check("caps one UI drain so a log burst cannot monopolise the message loop",
-            MainForm.GetPendingDrainPlan(pendingCount: 9000, warningCount: 0, errorCount: 0).ProcessNow < 9000);
+            MainForm.GetPendingDrainPlan(pendingCount: 9000).ProcessNow < 9000);
+        // The alarms this program raises about itself are Manager lines, and
+        // the errors-only filter hid every one of them: a failed launch, the
+        // give-up after five crashes, the hang restart. A launch that fails
+        // before pwsh writes anything produces no [ERROR] line either, so the
+        // pane said "لا أخطاء ولا تحذيرات - وهذا هو المطلوب" while the bridge
+        // was dead and auto-restart was off. These fail before the fix.
+        Check("shows the give-up notice under errors-only",
+            MainForm.ShouldShow("--- توقف 5 مرات متتالية خلال ثوانٍ - تم إيقاف إعادة التشغيل التلقائي. ---", "", true));
+        Check("shows a failed launch under errors-only",
+            MainForm.ShouldShow("--- فشل بدء التشغيل: pwsh غير موجود ---", "", true));
+        Check("shows the hang restart under errors-only",
+            MainForm.ShouldShow("--- الجسر يعمل لكنه توقف عن النبض منذ 7 دقيقة - يُعاد تشغيله. ---", "", true));
+        Check("still hides ordinary bridge chatter under errors-only",
+            MainForm.ShouldShow("2026-09-21 10:00:00 [INFO] Bridge starting", "", true) == false);
+        Check("keeps errors and warnings visible under errors-only",
+            MainForm.ShouldShow("2026-09-21 10:00:00 [ERROR] boom", "", true)
+            && MainForm.ShouldShow("2026-09-21 10:00:00 [WARN] careful", "", true));
         Check("shortens a pathological log line before it reaches the UI buffer",
             MainForm.LimitDisplayedLogLine(new string('x', 9000)).Contains("bridge.log", StringComparison.Ordinal));
         Check("does not classify a token-shaped setting as a colourable log field",

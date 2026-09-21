@@ -13,6 +13,21 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.55.0
+
+**The control app: alarms that appear, a dialog that does not stop the bridge in order to fail, and start-on-open:**
+- New `StartBridgeOnOpen` option. Auto-start hung entirely on the `--autostart` argument, which is only passed when Windows launches the manager from the Run key — so opening the app by hand still cost a press between a reboot and the graphics being controllable. Off by default: a bridge that starts itself is a decision about the air, made once and deliberately rather than inherited from a default. Adoption still runs first, so an already-running bridge is adopted rather than duplicated.
+- "Errors and warnings only" hid the alarms this program raises about itself. `AppendLine` ranks `LogLineKind.Manager` as priority for *retention* while `ShouldShow` excluded it from *display* — so "فشل بدء التشغيل", "توقف 5 مرات متتالية - تم إيقاف إعادة التشغيل التلقائي" and the hang restart all vanished under the filter. A launch that fails before pwsh writes anything produces no `[ERROR]` line either, so the pane read "no errors or warnings — which is what you want" while the bridge was dead and auto-restart was off.
+- A failed config read left `SettingsForm` unsavable, and Save reached `VerifyStoppedForSave` — killing the bridge — before throwing `KeyNotFoundException` on the first missing key. The bridge ended up off air with nothing written and every further Save failing identically. The refusal now happens before the bridge is stopped.
+- A failed `Kill` was swallowed after `SetButtonsBusy` had blanked all three buttons, leaving a running bridge, a "running" header and three dead buttons with nothing in the pane or in `manager.log`.
+- `PendingDrainPlan.KeepWarningAndError` removed: nothing in the app ever read it, so its SelfTest check ran and proved nothing. Five checks that drive `ShouldShow` replace it.
+- `PumpBridgeLogTail` took its offset from a length measured before the read, so lines appended in between were displayed twice — and counted twice in the recent-errors strip and the Reports screen. It now uses `stream.Position`.
+- Clearing the pane left it blank, and a healthy bridge is silent for 10–18 hours a night, which reads as "it stopped logging".
+
+SelfTest: 181 checks, up from 175. The three new alarm checks were seen failing before the fix.
+
+**GitHub CI had been red for weeks because the tests read a file it cannot see.** Twelve consecutive failing runs while `Run-Checks.ps1` was green on every desk. Four help-chapter tests assert the bulletin chapter exists; the chapter is gated on a `Mojaz` entry in the template registry; and `config.example.json` points `TemplateRegistryPath` at `.\templates.json`, which is git-ignored because it holds the station's real scene paths. On a station machine the entry was there, in CI the file was absent entirely, and `templates.example.json` has no Mojaz. `Bridge.TestContext.ps1` now pins the registry to `templates.example.json` for every test, so the suite reads what the repository ships rather than what happens to be on one machine — a test whose answer depends on where it runs is not a test. The workflow also gained `permissions: contents: read`, `concurrency` with `cancel-in-progress` (a release is several pushes in minutes, each previously starting a seven-minute run while the last was still going), and a 30-minute job timeout.
+
 ## Version 8.54.0
 
 **Telegram limits that were dropping whole screens in silence, and an updated manual:**

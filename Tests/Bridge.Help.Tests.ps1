@@ -239,7 +239,20 @@ Describe 'The settings chapter' {
 }
 
 Describe 'The manual covers what the bridge actually grew' {
-    BeforeEach { Mock Test-Admin { $true } }
+    BeforeEach {
+        Mock Test-Admin { $true }
+        # The bulletin chapter is gated on Test-MojazAvailable, which asks the
+        # template registry for a 'Mojaz' entry. On a station's own machine
+        # templates.json has one and these passed; in CI only
+        # templates.example.json exists - and it has no Mojaz - so the chapter
+        # was absent and these four failed on EVERY push for weeks while the
+        # same command was green on every developer's desk.
+        #
+        # templates.json is git-ignored on purpose (it holds the station's real
+        # scene paths), so a test that reads it is a test that reads a file the
+        # gate can never see. The registry is supplied here instead.
+        Mock Test-MojazAvailable { $true }
+    }
 
     It 'gives the bulletin a chapter of its own, open to every operator' {
         $chapters = @(Get-HelpChapters -ChatId 100 -UserId 202)

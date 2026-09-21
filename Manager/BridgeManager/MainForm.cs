@@ -17,6 +17,16 @@ internal sealed class ManagerSettings
     // auto-restart off to work on the Air engine found it back on after simply
     // closing the window, and the bridge restarting under their hands.
     public bool AutoRestart { get; set; } = true;
+
+    // Start the bridge as soon as this window opens, however it was opened.
+    // The --autostart argument covered only the Windows-startup case, so an
+    // operator who opened the manager by hand still had to press تشغيل - which
+    // is one press between a reboot and the graphics being controllable, at
+    // the moment nobody is thinking about this program. Off by default: a
+    // bridge that starts itself is a decision about the air, and it is made
+    // once, deliberately, rather than inherited from a default.
+    public bool StartBridgeOnOpen { get; set; }
+
     public bool AutoClearDaily { get; set; }
     public bool WordWrap { get; set; } = true;
     // Pinned scrollback follows new lines, as it always did. Turned off, the
@@ -78,7 +88,7 @@ internal enum LogLineKind { Manager, Error, Warning, Debug, Normal }
 /// <summary>Semantic pieces of a bridge log line that deserve a separate colour.</summary>
 internal enum LogHighlightKind { Timestamp, Level, OperationId, Layer, Success, Failure }
 internal readonly record struct LogHighlight(int Start, int Length, LogHighlightKind Kind, string Text);
-internal readonly record struct PendingDrainPlan(int ProcessNow, bool KeepWarningAndError);
+internal readonly record struct PendingDrainPlan(int ProcessNow);
 
 public sealed class MainForm : Form
 {
@@ -99,6 +109,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _autoRestartCheck;
     private readonly CheckBox _autoClearCheck;
     private readonly CheckBox _startWithWindowsCheck;
+    private readonly CheckBox _startBridgeOnOpenCheck;
     private readonly CheckBox _wordWrapCheck;
     private readonly CheckBox _watchdogCheck;
     private readonly CheckBox _errorsOnlyCheck;
@@ -357,6 +368,9 @@ public sealed class MainForm : Form
         _watchdogCheck.Checked = _settings.HangWatchdog;
         _startWithWindowsCheck = Theme.ToggleChip("🪟  مع بدء ويندوز", "يعود المدير إلى شريط النظام بعد إعادة تشغيل الجهاز، ويشغّل الجسر بنفسه.", _tips);
         _startWithWindowsCheck.Checked = IsStartWithWindowsEnabled();
+        _startBridgeOnOpenCheck = Theme.ToggleChip("▶  تشغيل الجسر عند فتح البرنامج",
+            "يبدأ الجسر بنفسه كلما فُتح هذا البرنامج، لا عند بدء ويندوز وحده. وإن كان الجسر يعمل أصلًا فيُتبنّى كما هو ولا يُعاد تشغيله.", _tips);
+        _startBridgeOnOpenCheck.Checked = _settings.StartBridgeOnOpen;
         _autoClearCheck = Theme.ToggleChip("🧹  مسح كل 24 ساعة", "يمسح المعروض هنا كل يوم — لا يمسّ logs\\bridge.log.", _tips);
         _autoClearCheck.Checked = _settings.AutoClearDaily;
         _wordWrapCheck = Theme.ToggleChip("↩  التفاف الأسطر", "يلفّ السطر الطويل بدل التمرير الأفقي.", _tips);
@@ -546,6 +560,12 @@ public sealed class MainForm : Form
             SetStartWithWindows(_startWithWindowsCheck.Checked);
             LogEvent($"تشغيل تلقائي مع بدء ويندوز: {(_startWithWindowsCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
+        _startBridgeOnOpenCheck.CheckedChanged += (_, _) =>
+        {
+            _settings.StartBridgeOnOpen = _startBridgeOnOpenCheck.Checked;
+            _settings.Save();
+            LogEvent($"تشغيل الجسر عند فتح البرنامج: {(_startBridgeOnOpenCheck.Checked ? "مفعّل" : "معطّل")}.");
+        };
 
         // One coalescing pump instead of a BeginInvoke per line: the bridge can
         // emit hundreds of lines in a burst (startup, a template dump, a stack
@@ -661,15 +681,19 @@ public sealed class MainForm : Form
         UpdateStatusBar();
         // An empty black pane tells a new operator nothing. One muted line
         // costs nothing and answers "what now?".
-        if (!_autoStartBridge) AppendLine("--- جاهز. اضغط تشغيل لبدء الجسر. ---");
+        // --autostart covers only the Windows-startup launch; the switch covers
+        // every other way this window is opened. Either one means the operator
+        // has already said the bridge should come up by itself.
+        var startOnOpen = _autoStartBridge || _settings.StartBridgeOnOpen;
+        if (!startOnOpen) AppendLine("--- جاهز. اضغط تشغيل لبدء الجسر. ---");
         if (!EnsureBridgeScriptResolved()) return;
         UpdateStatusBar();
-        LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : "")}.");
+        LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : _settings.StartBridgeOnOpen ? " - تشغيل الجسر عند الفتح" : "")}.");
         // Adopt before starting: a bridge left running by a previous manager is
         // already on air, and launching a second one would take the graphics
         // down for the seconds -StopExisting needs to kill the first.
         if (TryAdoptRunningBridge()) return;
-        if (_autoStartBridge) StartBridge();
+        if (startOnOpen) StartBridge();
     }
 
     /// <summary>
@@ -898,7 +922,7 @@ public sealed class MainForm : Form
             Padding = new Padding(4, 6, 4, 6)
         };
         menu.Items.Add(MakeSwitchGroupLabel("🔴  ما يحدث للقناة"));
-        foreach (var box in new[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck })
+        foreach (var box in new[] { _autoRestartCheck, _watchdogCheck, _startWithWindowsCheck, _startBridgeOnOpenCheck })
         {
             box.MinimumSize = new Size(MenuSwitchWidth, 0);
             menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
@@ -1126,7 +1150,14 @@ public sealed class MainForm : Form
             stream.Seek(_tailOffset, SeekOrigin.Begin);
             using var reader = new StreamReader(stream);
             var chunk = _tailRemainder + reader.ReadToEnd();
-            _tailOffset = length;
+            // Taken from the stream AFTER reading, not from the length measured
+            // before it. The bridge writes this file continuously, so anything
+            // appended between the FileInfo call and ReadToEnd was displayed and
+            // then read again on the next tick - a duplicated line in the pane,
+            // and a duplicated count everywhere DrainPending feeds: the recent
+            // errors strip and the Reports screen's "أخطاء الساعة الأخيرة" both
+            // counted one failure twice.
+            _tailOffset = stream.Position;
 
             var lines = SplitCompleteLines(chunk, out var remainder);
             foreach (var line in lines) AppendLine(line);
@@ -1508,7 +1539,23 @@ public sealed class MainForm : Form
         if (_bridgeProcess is not { HasExited: false } process) { SetStatus(running: false); return; }
         if (manual) LogEvent("طلب المستخدم إيقاف الجسر يدويًا.");
         _stoppingIntentionally = manual;
-        try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
+        try { process.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { /* already exited between the check and the call */ }
+        catch (Exception ex)
+        {
+            // Reported, and the buttons come back. SetButtonsBusy has already
+            // blanked all three, so swallowing this left the operator with a
+            // running bridge, a header still reading "يعمل", and three dead
+            // buttons in the middle of an incident - with nothing in the pane
+            // or in manager.log to say why. A child that cannot be terminated
+            // (an ffmpeg being shut down by something else) is exactly when
+            // that happens.
+            AppendLine($"--- تعذّر إيقاف الجسر: {ex.Message} ---");
+            LogEvent($"فشل إيقاف الجسر: {ex.Message}");
+            _stoppingIntentionally = false;
+            _restartAfterExit = false;
+            SetStatus(running: true);
+        }
     }
 
     private void RestartBridge(string reason)
@@ -1768,8 +1815,15 @@ public sealed class MainForm : Form
         }
     }
 
-    internal static PendingDrainPlan GetPendingDrainPlan(int pendingCount, int warningCount, int errorCount) =>
-        new(Math.Min(Math.Max(0, pendingCount), MaxLinesPerUiDrain), warningCount > 0 || errorCount > 0);
+    // KeepWarningAndError is gone. Nothing in the app ever read it: retention
+    // under a burst is implemented by the two separate bounded queues in
+    // AppendLine, and the flag only ever travelled from here to a SelfTest that
+    // asserted it was true. A check that exercises no production path is green
+    // about a policy it never ran - the subtler half of "a check that does not
+    // run does not exist", because this one ran and still proved nothing. The
+    // real retention policy now has a check of its own in Program.cs.
+    internal static PendingDrainPlan GetPendingDrainPlan(int pendingCount) =>
+        new(Math.Min(Math.Max(0, pendingCount), MaxLinesPerUiDrain));
 
     internal static string LimitDisplayedLogLine(string line) =>
         line.Length <= MaxDisplayedLineLength
@@ -1819,7 +1873,16 @@ public sealed class MainForm : Form
         if (errorsOnly)
         {
             var kind = ClassifyLine(line);
-            if (kind != LogLineKind.Error && kind != LogLineKind.Warning) return false;
+            // Manager lines too. AppendLine already ranks them as priority for
+            // retention, and display disagreeing with retention is how the
+            // filter came to hide the alarms this program raises itself: "فشل
+            // بدء التشغيل", "توقف N مرات متتالية - تم إيقاف إعادة التشغيل
+            // التلقائي", "توقف عن النبض - يُعاد تشغيله". An operator who turns
+            // the filter on to watch for trouble was shown "لا أخطاء ولا
+            // تحذيرات - وهذا هو المطلوب" while the bridge was dead and
+            // auto-restart was off, because a launch that fails before pwsh
+            // writes anything produces no [ERROR] line either.
+            if (kind is not (LogLineKind.Error or LogLineKind.Warning or LogLineKind.Manager)) return false;
         }
         if (string.IsNullOrWhiteSpace(filter)) return true;
         return line.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
@@ -1866,7 +1929,7 @@ public sealed class MainForm : Form
             pendingCount = _pendingPriorityCount + _pendingInformationalCount;
             priorityCount = _pendingPriorityCount;
         }
-        var plan = GetPendingDrainPlan(pendingCount, warningCount: priorityCount, errorCount: 0);
+        var plan = GetPendingDrainPlan(pendingCount);
         var processed = 0;
         while (processed < plan.ProcessNow && TryDequeuePending(out var line))
         {
@@ -2021,7 +2084,14 @@ public sealed class MainForm : Form
             _droppedPriorityLines = 0;
             _droppedInformationalLines = 0;
         }
-        UpdateStatusBar();
+        // RenderAll, not UpdateStatusBar: it recomputes the empty-state
+        // sentence and sets _showingEmptyState with it. Clearing at the start
+        // of a night shift used to leave a wholly blank pane, and a healthy
+        // bridge then says nothing for ten to eighteen hours - which reads as
+        // "it stopped logging", the exact conclusion EmptyStateMessage was
+        // written to prevent. It also left _showingEmptyState stale when the
+        // clear happened under a non-matching filter.
+        RenderAll();
     }
 
     /// <summary>

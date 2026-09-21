@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -147,6 +147,11 @@ public sealed class SettingsForm : Form
     private bool _dirty;
     private readonly Dictionary<string, string> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _loadedScalars = new(StringComparer.Ordinal);
+    /// <summary>Set when LoadValues could not read config.json, which leaves every remembered
+    /// value missing. Save must refuse BEFORE it stops the bridge: the lookups below would throw
+    /// KeyNotFoundException after VerifyStoppedForSave had already killed it, leaving the bridge
+    /// off air with nothing written and every further Save failing the same way.</summary>
+    private bool _loadFailed;
 
     public bool RestartRequested { get; private set; }
 
@@ -605,7 +610,8 @@ public sealed class SettingsForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"تعذّرت قراءة config.json:\n{ex.Message}", "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _loadFailed = true;
+            MessageBox.Show(this, $"تعذّرت قراءة config.json:\n{ex.Message}\n\nأغلق النافذة وافتحها من جديد؛ لن يُحفظ شيء من هذه النافذة.", "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -663,6 +669,14 @@ public sealed class SettingsForm : Form
                 "التعديل قد لا يثبت", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
             if (answer == DialogResult.Cancel) return false;
             if (answer == DialogResult.Yes) restarting = true;
+        }
+
+        if (_loadFailed)
+        {
+            // Before VerifyStoppedForSave, which is the whole point: a dialog
+            // that cannot save must not be allowed to stop the bridge first.
+            MessageBox.Show(this, "تعذّرت قراءة الإعدادات عند الفتح، فلا يمكن الحفظ من هذه النافذة.\n\nأغلقها وافتحها من جديد.", "لا يمكن الحفظ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
         }
 
         try

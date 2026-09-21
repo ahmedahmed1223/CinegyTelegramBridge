@@ -4,9 +4,25 @@ on:
   push:
   pull_request:
 
+# Read-only by default. The job checks out, tests and builds; it publishes
+# nothing and comments nowhere, so the token it is handed should not be able to.
+permissions:
+  contents: read
+
+# A release here is often several pushes in a few minutes, and each one used to
+# start a seven-minute run while the previous one was still going. Only the
+# newest commit on a branch is worth verifying; the older runs are answering a
+# question nobody is asking any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: windows-latest
+    # A hung Pester run or a wedged dotnet restore should not hold a runner for
+    # the six-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install analysis and test modules

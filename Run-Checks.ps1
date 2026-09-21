@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Run-Checks.ps1
 
@@ -35,12 +35,12 @@ function Write-Section {
 # ---------------------------------------------------------- files and JSON
 Write-Section "1/4  Required files and JSON"
 $files = @(
-    'Parts\Bridge.Core.ps1', 'Parts\Bridge.Telegram.ps1', 'Parts\Bridge.News.ps1', 'Parts\Bridge.Mojaz.ps1', 'Parts\Bridge.Mojaz.Design.ps1', 'Parts\Bridge.Mojaz.Screens.ps1', 'Parts\Bridge.Mojaz.Playback.ps1', 'Parts\Bridge.Urgent.ps1', 'Parts\Bridge.Urgent.Playback.ps1', 'Parts\Bridge.Users.ps1', 'Parts\Bridge.Templates.ps1', 'Parts\Bridge.OnAir.ps1', 'Parts\Bridge.Schedule.ps1', 'Parts\Bridge.Keyboards.ps1', 'Parts\Bridge.ShowFlow.ps1', 'Parts\Bridge.WhatsNew.ps1', 'Parts\Bridge.Help.ps1', 'Parts\Bridge.AirOperation.ps1', 'Parts\Bridge.Admin.ps1', 'Parts\Bridge.Admin.Templates.ps1', 'Parts\Bridge.Admin.Health.ps1', 'Parts\Bridge.Admin.Config.ps1', 'Parts\Bridge.Admin.Diagnostics.ps1', 'Parts\Bridge.Media.ps1', 'Parts\Bridge.Commands.ps1', 'Parts\Bridge.Callbacks.ps1', 'Parts\Bridge.Tick.ps1', 'Parts\Bridge.Reports.ps1', 'Parts\Bridge.Announcements.ps1',
+    'Parts\Bridge.Core.ps1', 'Parts\Bridge.Telegram.ps1', 'Parts\Bridge.News.ps1', 'Parts\Bridge.Mojaz.ps1', 'Parts\Bridge.Mojaz.Design.ps1', 'Parts\Bridge.Mojaz.Screens.ps1', 'Parts\Bridge.Mojaz.Playback.ps1', 'Parts\Bridge.Urgent.ps1', 'Parts\Bridge.Urgent.Playback.ps1', 'Parts\Bridge.Users.ps1', 'Parts\Bridge.Templates.ps1', 'Parts\Bridge.OnAir.ps1', 'Parts\Bridge.Schedule.ps1', 'Parts\Bridge.Keyboards.ps1', 'Parts\Bridge.ShowFlow.ps1', 'Parts\Bridge.WhatsNew.ps1', 'Parts\Bridge.Help.ps1', 'Parts\Bridge.AirOperation.ps1', 'Parts\Bridge.Admin.ps1', 'Parts\Bridge.Admin.Templates.ps1', 'Parts\Bridge.Admin.Health.ps1', 'Parts\Bridge.Admin.Config.ps1', 'Parts\Bridge.Admin.Diagnostics.ps1', 'Parts\Bridge.Media.ps1', 'Parts\Bridge.Commands.ps1', 'Parts\Bridge.Callbacks.ps1', 'Parts\Bridge.Tick.ps1', 'Parts\Bridge.Reports.ps1', 'Parts\Bridge.Announcements.ps1', 'Parts\Bridge.Weekly.ps1',
     'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1', 'Modules\BridgeTelegram.psm1', 'Modules\BridgeAuthorization.psm1', 'Modules\BridgeFlowState.psm1', 'Modules\BridgeCinegyState.psm1', 'Modules\BridgeSchedulePolicy.psm1', 'Modules\BridgeMedia.psm1', 'Modules\BridgeRelayPolicy.psm1', 'Modules\BridgeRuntimeState.psm1', 'Modules\BridgeNewsTicker.psm1', 'Modules\BridgeMojaz.psm1', 'Modules\BridgeUrgent.psm1', 'Modules\BridgeOperationPolicy.psm1', 'Modules\BridgeOperationLifecycle.psm1', 'Modules\BridgeSettingsSchema.psm1', 'Modules\BridgeUiPaging.psm1', 'Modules\BridgeLiveScenes.psm1',
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
     'config.example.json', 'templates.example.json',
-    'Tests\Bridge.Tests.ps1', 'Tests\Bridge.TestContext.ps1', 'Tests\Bridge.Templates.Tests.ps1', 'Tests\Bridge.Users.Tests.ps1', 'Tests\Bridge.SettingsScreens.Tests.ps1', 'Tests\Bridge.OnAir.Tests.ps1', 'Tests\Bridge.Cinegy.Tests.ps1', 'Tests\Bridge.NewsScreens.Tests.ps1', 'Tests\Bridge.Admin.Tests.ps1', 'Tests\Bridge.Schedule.Tests.ps1', 'Tests\Bridge.RuntimeHealth.Tests.ps1', 'Tests\Bridge.NewsSheet.Tests.ps1', 'Tests\Bridge.Help.Tests.ps1', 'Tests\Bridge.Access.Tests.ps1', 'Tests\BridgeNewsTicker.Tests.ps1', 'Tests\BridgeMojaz.Tests.ps1', 'Tests\BridgeUrgent.Tests.ps1', 'Tests\Bridge.Urgent.Tests.ps1', 'Tests\Bridge.UrgentRecovery.Tests.ps1', 'Tests\Bridge.TemplateMaxAir.Tests.ps1', 'Tests\Bridge.AutoHideExtension.Tests.ps1', 'Tests\Bridge.TemplateAirPolicy.Tests.ps1', 'Tests\Bridge.UrgentManual.Tests.ps1', 'Tests\Bridge.Weekly.Tests.ps1', 'Tests\BridgeSettings.Tests.ps1', 'Tests\BridgeStorage.Tests.ps1', 'Tests\BridgeTelegram.Tests.ps1', 'Tests\BridgeAuthorization.Tests.ps1', 'Tests\BridgeFlowState.Tests.ps1', 'Tests\BridgeCinegyState.Tests.ps1', 'Tests\BridgeSchedulePolicy.Tests.ps1', 'Tests\BridgeMedia.Tests.ps1', 'Tests\BridgeRelayPolicy.Tests.ps1', 'Tests\BridgeRuntimeState.Tests.ps1', 'Tests\BridgeOperationPolicy.Tests.ps1', 'Tests\BridgeOperationLifecycle.Tests.ps1', 'Tests\BridgeSettingsSchema.Tests.ps1', 'Tests\BridgeUiPaging.Tests.ps1', 'Tests\BridgeReports.Tests.ps1', 'Tests\BridgeLiveScenes.Tests.ps1', 'Tests\BridgeVersion6Load.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1', 'Tests\BridgeInstall.Tests.ps1',
+    'Tests\Bridge.Tests.ps1', 'Tests\Bridge.TestContext.ps1', 'Tests\Bridge.Templates.Tests.ps1', 'Tests\Bridge.Users.Tests.ps1', 'Tests\Bridge.SettingsScreens.Tests.ps1', 'Tests\Bridge.OnAir.Tests.ps1', 'Tests\Bridge.Cinegy.Tests.ps1', 'Tests\Bridge.NewsScreens.Tests.ps1', 'Tests\Bridge.Admin.Tests.ps1', 'Tests\Bridge.Schedule.Tests.ps1', 'Tests\Bridge.RuntimeHealth.Tests.ps1', 'Tests\Bridge.NewsSheet.Tests.ps1', 'Tests\Bridge.Help.Tests.ps1', 'Tests\Bridge.Access.Tests.ps1', 'Tests\BridgeNewsTicker.Tests.ps1', 'Tests\BridgeMojaz.Tests.ps1', 'Tests\BridgeUrgent.Tests.ps1', 'Tests\Bridge.Urgent.Tests.ps1', 'Tests\Bridge.UrgentRecovery.Tests.ps1', 'Tests\Bridge.TemplateMaxAir.Tests.ps1', 'Tests\Bridge.AutoHideExtension.Tests.ps1', 'Tests\Bridge.TemplateAirPolicy.Tests.ps1', 'Tests\Bridge.UrgentManual.Tests.ps1', 'Tests\Bridge.Weekly.Tests.ps1', 'Tests\Bridge.Mojaz.Tests.ps1', 'Tests\Bridge.UrgentUx.Tests.ps1', 'Tests\BridgeSettings.Tests.ps1', 'Tests\BridgeStorage.Tests.ps1', 'Tests\BridgeTelegram.Tests.ps1', 'Tests\BridgeAuthorization.Tests.ps1', 'Tests\BridgeFlowState.Tests.ps1', 'Tests\BridgeCinegyState.Tests.ps1', 'Tests\BridgeSchedulePolicy.Tests.ps1', 'Tests\BridgeMedia.Tests.ps1', 'Tests\BridgeRelayPolicy.Tests.ps1', 'Tests\BridgeRuntimeState.Tests.ps1', 'Tests\BridgeOperationPolicy.Tests.ps1', 'Tests\BridgeOperationLifecycle.Tests.ps1', 'Tests\BridgeSettingsSchema.Tests.ps1', 'Tests\BridgeUiPaging.Tests.ps1', 'Tests\BridgeReports.Tests.ps1', 'Tests\BridgeLiveScenes.Tests.ps1', 'Tests\BridgeVersion6Load.Tests.ps1', 'Tests\Smoke-OnAir.Tests.ps1', 'Tests\Release.Tests.ps1', 'Tests\Security.Tests.ps1', 'Tests\BridgeInstall.Tests.ps1',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'docs\VERSION-6.md', 'docs\news-sheet-writeback.gs',
     'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1', 'RELEASE.md', '.github\workflows\windows-ci.yml'
 )
@@ -51,6 +51,28 @@ foreach ($file in $files) {
         Write-Host "  FAIL  missing $file" -ForegroundColor Red
     }
     else { Write-Host "  ok    $file" -ForegroundColor Green }
+}
+
+# The list above is hand-maintained, and three files had already drifted off
+# it - Bridge.Mojaz.Tests.ps1 (156 tests), Bridge.UrgentUx.Tests.ps1 and
+# Bridge.Weekly.ps1. Deleting any listed file fails this gate on its first
+# line; those three could vanish in silence, which is the exact
+# silent-coverage-loss the list exists to prevent. Comparing the directory to
+# the manifest makes the drift impossible rather than asking the next person
+# to remember.
+foreach ($pair in @(
+        @{ Folder = 'Tests'; Filter = '*.Tests.ps1' },
+        @{ Folder = 'Parts'; Filter = '*.ps1' },
+        @{ Folder = 'Modules'; Filter = '*.psm1' })) {
+    $folder = Join-Path $root $pair.Folder
+    if (-not (Test-Path -LiteralPath $folder)) { continue }
+    foreach ($onDisk in @(Get-ChildItem -LiteralPath $folder -Filter $pair.Filter -File)) {
+        $relative = Join-Path $pair.Folder $onDisk.Name
+        if ($files -notcontains $relative) {
+            $failed = $true
+            Write-Host "  FAIL  $relative exists but is not in the required-files list; add it so its removal cannot pass silently" -ForegroundColor Red
+        }
+    }
 }
 
 $jsonFiles = @('config.example.json', 'templates.example.json')
@@ -77,7 +99,21 @@ $powerShellFiles = @(
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
     'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1', 'Run-Checks.ps1'
 )
-foreach ($file in $powerShellFiles) {
+# Parts/ and Tests/ were in no list this stage read, so 32000 lines of the
+# bridge and 26000 lines of its tests were never parse-checked here at all -
+# and under -SkipAnalyzer, which AGENTS.md documents as a normal way to run
+# this, they were not syntax-checked by anything. AGENTS.md told the next agent
+# that registering a test file bought it a syntax check; this is what makes
+# that sentence true rather than correcting it into a smaller promise.
+$parseTargets = @($powerShellFiles) + @(
+    foreach ($folder in @('Parts', 'Tests')) {
+        $dir = Join-Path $root $folder
+        if (Test-Path -LiteralPath $dir) {
+            Get-ChildItem -LiteralPath $dir -Filter '*.ps1' -File | ForEach-Object { Join-Path $folder $_.Name }
+        }
+    }
+)
+foreach ($file in $parseTargets) {
     $path = Join-Path $root $file
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $errors = $null

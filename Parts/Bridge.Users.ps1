@@ -376,13 +376,34 @@ function Update-AccessGuardSweep {
         if (-not [datetime]::TryParse([string](Get-JsonProp $script:AccessGuard.Blocked[$id] 'At'), [ref]$stamp)) { continue }
         if ($stamp -lt $cutoff) { $removed += $id }
     }
-    if ($removed.Count -eq 0) { return }
+    # Attempts is swept on its own evidence, not on Blocked's. Every chat that
+    # ever knocked gets an Attempts entry - written before the rate limit is
+    # even tested - while only the ones an administrator rejected reach Blocked.
+    # So the loop above could never reach the common case: a stranger who is
+    # never blocked had no removal path at all, and the docstring's own
+    # complaint ("one entry per stranger for the life of the installation") was
+    # fixed for the smaller half of the problem.
+    #
+    # Get-AccessAttempt already treats an entry older than its 24h window as
+    # spent, so anything past the cutoff is carrying no decision.
+    $staleAttempts = @()
+    foreach ($id in @($script:AccessGuard.Attempts.Keys)) {
+        if ($script:AccessGuard.Blocked.Contains($id)) { continue }
+        $firstAt = [datetime]::MinValue
+        if (-not [datetime]::TryParse([string](Get-JsonProp $script:AccessGuard.Attempts[$id] 'FirstAt'), [ref]$firstAt)) { continue }
+        if ($firstAt -lt $cutoff) { $staleAttempts += $id }
+    }
+    if ($removed.Count -eq 0 -and $staleAttempts.Count -eq 0) { return }
     foreach ($id in $removed) {
         $script:AccessGuard.Blocked.Remove($id)
         $script:AccessGuard.Attempts.Remove($id)
     }
+    foreach ($id in $staleAttempts) { $script:AccessGuard.Attempts.Remove($id) }
     if (Save-AccessGuard) {
-        Write-BridgeLog "Forgot $($removed.Count) access block(s) older than $days day(s)."
+        $parts = @()
+        if ($removed.Count -gt 0) { $parts += "$($removed.Count) access block(s)" }
+        if ($staleAttempts.Count -gt 0) { $parts += "$($staleAttempts.Count) spent attempt record(s)" }
+        Write-BridgeLog "Forgot $($parts -join ' and ') older than $days day(s)."
     }
 }
 

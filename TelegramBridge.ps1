@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.52.0'
+$script:BridgeVersion = '8.53.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -2058,7 +2058,7 @@ try {
                 $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { $chatId }
                 # Before anything is done with the message: whatever this
                 # operation writes to the audit log should carry a name.
-                Update-UserNameFromTelegram -From $fromObj -UserId $userId | Out-Null
+                Update-UserNameFromTelegram -From $fromObj -UserId $userId -ChatId $chatId | Out-Null
                 # A picture for a Mojaz row can arrive either way: as a photo
                 # (Telegram recompresses it) or as a file. Both land in the same
                 # place, and neither is accepted unless a row is being written.

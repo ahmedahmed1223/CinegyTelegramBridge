@@ -230,6 +230,32 @@ function Restore-ConfigBackup {
     }
 }
 
+function Protect-SettingDisplayValue {
+    <#
+        A setting's value, safe to put on a screen that persists.
+
+        Format-ConfigDiffValue below applies this rule to the restore diff and
+        the audit line, and AGENTS.md states it as a rule about settings in
+        general - but the settings SCREENS never called it, so any string
+        setting was rendered with its value inline. A button reading
+        "🔤 رمز الانضمام · <the code>" puts that code in the chat transcript,
+        in Telegram's cloud, on every device the account is signed into, and in
+        any screenshot sent to support.
+
+        Narrower than Format-ConfigDiffValue on purpose: it masks by name and
+        otherwise returns the value untouched, so ordinary settings keep the
+        formatting their screens already had. The point is not the join code
+        specifically - it is that the NEXT credential added to Settings is
+        masked by default instead of by whoever remembers.
+    #>
+    param([string]$Name, $Value)
+    if ($Name -match '(?i)token|secret|password|apikey') {
+        $text = [string]$Value
+        return $(if ($text) { "•••• ($($text.Length) حرفًا)" } else { '(فارغ)' })
+    }
+    return $Value
+}
+
 function Format-ConfigDiffValue {
     <#
         A configuration value, safe to put in a chat message.

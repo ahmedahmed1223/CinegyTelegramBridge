@@ -296,8 +296,23 @@ Describe 'Running the breaking-news board' {
         # template key this SHOW carries. Without the starting flag the board
         # would kill itself the instant it reached air - and only after it was
         # already on air, leaving a line up with no engine behind it.
+        #
+        # The mock re-enters the way the real SHOW funnel does. Asserting only
+        # on the flag's value after the run made this pass with the guard
+        # deleted: Invoke-ShowTemplateResult is mocked for this Describe, so
+        # Stop-UrgentBoardForManualUrgent was never reached and the flag was
+        # never read. That is the 8.27.0 pattern AGENTS.md names - a guard
+        # tested on a state, just not the one it was written for.
+        Mock Invoke-ShowTemplateResult {
+            $script:SelfStopAnswer = Stop-UrgentBoardForManualUrgent -ChatId 100 -UserId 101
+            [pscustomobject]@{ Success = $true }
+        }
+        $script:SelfStopAnswer = $null
+
         Start-UrgentBoardRun -ChatId 100 -UserId 101 | Should -BeTrue
 
+        # The opening SHOW asked the board to stand down and was refused.
+        $script:SelfStopAnswer | Should -BeFalse
         $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
         $script:UrgentBoardStarting | Should -BeFalse
     }

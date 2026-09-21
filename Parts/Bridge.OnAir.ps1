@@ -501,8 +501,21 @@ function Update-UserNameFromTelegram {
         An administrator's own alias always wins - this only fills a blank -
         and the write happens once per person, when the blank is first filled.
     #>
-    param($From, [long]$UserId)
+    param($From, [long]$UserId, [long]$ChatId = 0)
     if ($UserId -le 0 -or -not $From) { return $false }
+    # Only for people the bridge actually works for. This ran before any
+    # authorization check on both call sites, so every stranger who found the
+    # bot - and a bot's @username is public and searchable - had their name
+    # stored and the WHOLE alias map re-serialised, with a .bak copy, on the
+    # single poll thread that also drives the tick and the auto-hide timers.
+    # That is O(n) of disk work per new stranger and O(n²) over a campaign,
+    # for names belonging to nobody this bridge will ever name in an audit line.
+    #
+    # Nothing is lost by waiting: a stranger who matters becomes an access
+    # request, and Request-Approval captures their name there through
+    # Get-TelegramActorName, bounded by MaxPendingApprovals.
+    $actorChat = if ($ChatId -ne 0) { $ChatId } else { $UserId }
+    if (-not (Test-Authorized -ChatId $actorChat -UserId $UserId)) { return $false }
     $id = [string]$UserId
     if ($script:UserAliases.ContainsKey($id) -and -not [string]::IsNullOrWhiteSpace([string]$script:UserAliases[$id])) { return $false }
     $name = Get-TelegramActorName -From $From

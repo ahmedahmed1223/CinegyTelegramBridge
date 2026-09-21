@@ -21,6 +21,14 @@ jobs:
       - name: Verify managed service lifecycle
         shell: pwsh
         run: .\scripts\Test-ServiceLifecycle.ps1
+      # The control app was never compiled here, so a C# build error - or a
+      # broken SelfTest - reached main with the gate green, and the only thing
+      # standing between the two was a developer remembering to run
+      # Build-BridgeManager.ps1 by hand. The publish also runs --selftest and
+      # throws on a non-zero exit, which is the only test framework this app has.
+      - name: Build and self-test the control app
+        shell: pwsh
+        run: .\scripts\Build-BridgeManager.ps1 -OutputDirectory .\artifacts\BridgeManager
       - name: Build allow-listed release package
         shell: pwsh
         run: .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release

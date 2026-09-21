@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.53.0
+
+**One mask for secrets, a gate that cannot drift, and no work done for strangers:**
+- New `Protect-SettingDisplayValue`, called from the settings lists and the import preview. AGENTS.md rule 2 says any setting whose name matches `token|secret|password|apikey` is shown as its length, never its content — `Format-ConfigDiffValue` applied that to the restore diff and the audit line, but the settings screens never called it, so a button read "🔤 رمز الانضمام · \<the code\>" and put it in the chat transcript and any screenshot. The single-setting edit screen deliberately still shows the value, with the reason written down: a join code is something the administrator must be able to read in order to hand it out. The point is that the *next* credential added to Settings is masked by default.
+- `Update-AccessGuardSweep` now prunes `Attempts` on its own evidence. Every chat that knocks gets an entry — written before the rate limit is even tested — while only rejected ones reach `Blocked`, so a stranger who was never blocked had no removal path at all.
+- `Update-UserNameFromTelegram` learns a name only for authorized senders. It ran before any authorization check on both call sites, and a bot's username is public, so every stranger's name was stored along with a full re-serialisation of the alias map on the poll thread that also drives the air timers.
+- `[math]::Max(0, <double>)` in `Get-UrgentRelativeTime` — the last site of a trap the AGENTS.md table documents.
+- The `UrgentBoardStarting` guard test now exercises the guard; it previously passed with the guard deleted, because the mock replaced the whole SHOW funnel and the flag was never read.
+- CI now builds and self-tests the C# control app, which it never compiled at all.
+- `Run-Checks.ps1` compares the source directories against its required-files manifest and fails on anything missing from it; three files had already drifted off. The syntax stage now enumerates `Parts/` and `Tests/` rather than relying on that list, so 58000 lines that were never parse-checked there now are.
+
 ## Version 8.52.0
 
 **Every breaking story now shows its own text, and the gap between them is yours to choose:**

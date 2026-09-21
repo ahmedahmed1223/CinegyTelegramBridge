@@ -30,6 +30,25 @@ Describe 'A name learned from the update itself' {
     BeforeEach {
         $script:UserAliases = @{}
         $script:userAliasesFile = Join-Path $TestDrive 'user-aliases.json'
+        # The name is learned only for people the bridge works for. These cases
+        # are about WHAT is learned, so the sender is authorized; the case
+        # below covers the stranger who is not.
+        Mock Test-Authorized { $true }
+    }
+
+    It 'learns nothing from a stranger, who has not been let in yet' {
+        # A bot's @username is public and searchable. This ran before any
+        # authorization check, so every stranger who ever messaged the bot was
+        # stored - and Save-UserAlias re-serialises the WHOLE map plus a .bak
+        # copy on the poll thread that also drives the auto-hide timers. That
+        # is O(n) of disk per new stranger and O(n²) over a campaign, for names
+        # belonging to nobody this bridge will ever put in an audit line.
+        Mock Test-Authorized { $false }
+
+        Update-UserNameFromTelegram -UserId 909 -From ([pscustomobject]@{ first_name = 'غريب' }) | Should -BeFalse
+
+        $script:UserAliases.ContainsKey('909') | Should -BeFalse
+        Get-UserDisplayName -UserId 909 | Should -Be '909'
     }
 
     It 'names an operator the audit log would otherwise record as a number' {

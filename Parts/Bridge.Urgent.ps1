@@ -425,7 +425,12 @@ function Get-UrgentRelativeTime {
     param([object]$Value)
     $when = [datetimeoffset]::MinValue
     if (-not $Value -or -not [datetimeoffset]::TryParse([string]$Value, [ref]$when)) { return 'وقت التحديث غير معروف' }
-    $seconds = [math]::Max(0, ([datetimeoffset]::Now - $when).TotalSeconds)
+    # 0.0, not 0: [math]::Max(0, <double>) binds the Int32 overload, which
+    # rounds the seconds instead of clamping them - and throws outright on an
+    # UpdatedAt far enough from now to overflow an Int32, taking the whole
+    # board screen with it. The trap is in the AGENTS.md table and this was its
+    # last site in the tree.
+    $seconds = [math]::Max(0.0, ([datetimeoffset]::Now - $when).TotalSeconds)
     if ($seconds -lt 60) { return 'منذ أقل من دقيقة' }
     if ($seconds -lt 3600) { return "منذ $([int][math]::Floor($seconds / 60)) د" }
     if ($seconds -lt 86400) { return "منذ $([int][math]::Floor($seconds / 3600)) س" }

@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -81,9 +81,6 @@ function Invoke-CallbackQuery {
     # still have it, so it cannot be dereferenced blindly under StrictMode.
     $fromObj = Get-JsonProp $CallbackQuery 'from'
     $userId = if ($fromObj) { [long](Get-JsonProp $fromObj 'id') } else { 0 }
-    # Button presses too, not messages only: an operator who works entirely
-    # from the keyboards would otherwise never be named.
-    Update-UserNameFromTelegram -From $fromObj -UserId $userId | Out-Null
     $msgObj = Get-JsonProp $CallbackQuery 'message'
     $chatId = if ($msgObj) { [long]$msgObj.chat.id } else { $userId }
     $data = [string](Get-JsonProp $CallbackQuery 'data')
@@ -122,6 +119,13 @@ function Invoke-CallbackQuery {
         else { Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id }
         return
     }
+
+    # Button presses too, not messages only: an operator who works entirely
+    # from the keyboards would otherwise never be named. Placed after the
+    # private-chat and authorization gates rather than at the top, because a
+    # name is learned only for people this bridge works for - and a group
+    # press should cost nothing at all before it is turned away.
+    Update-UserNameFromTelegram -From $fromObj -UserId $userId -ChatId $chatId | Out-Null
 
     $refusal = Get-CallbackRefusal -Data $data -ChatId $chatId -UserId $userId
     if ($refusal) {

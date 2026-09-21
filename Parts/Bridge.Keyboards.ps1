@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -1900,7 +1900,7 @@ function Get-SettingsListKeyboard {
             $name = [string]$record.Name
             $value = Get-Setting $name
             $action = if ($script:DefaultSettings[$name] -is [bool]) { "cfg:t:$name" } elseif ($name -eq 'TemplateMaxAirSeconds' -or $script:DefaultSettings[$name] -is [string]) { "cfg:s:$name" } else { "cfg:v:$name" }
-            $rows += , @((New-Button "$($record.Label) = $value" $action), (New-Button '↩️' "cfgr:$name"))
+            $rows += , @((New-Button "$($record.Label) = $(Protect-SettingDisplayValue -Name $name -Value $value)" $action), (New-Button '↩️' "cfgr:$name"))
         }
     }
     if ($window.PageCount -gt 1) {
@@ -1961,7 +1961,7 @@ function Get-SettingsCategoryKeyboard {
             }
             elseif ($script:DefaultSettings[$name] -is [string]) {
                 $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
-                $rows += , @( (New-Button "$prefix · $value" "cfg:s:$name" -MaxTextLength 64) )
+                $rows += , @( (New-Button "$prefix · $(Protect-SettingDisplayValue -Name $name -Value $value)" "cfg:s:$name" -MaxTextLength 64) )
             }
             else {
                 $display = Format-SettingDisplay -Name $name -Value $value
@@ -2941,6 +2941,13 @@ function Show-SettingChoices {
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_text'; Name = $Name; UserId = $UserId }
+    # Deliberately NOT masked here, unlike the settings lists and the import
+    # preview. This prompt is reached only by opening that one setting on
+    # purpose, and a join code is a value the administrator has to be able to
+    # read in order to hand it to the person they are letting in - masking it
+    # everywhere would leave no way to recover it but to overwrite it. The
+    # lists are a different case: there the value is shown to somebody who came
+    # to look at something else, and it stays in the transcript afterwards.
     $prompt = if ($Name -eq 'NewsFilePath') {
         "أرسل المسار المطلق لملف الأخبار بصيغة TXT.`nالحالي: $(Get-Setting $Name)`nالافتراضي: $($script:DefaultSettings[$Name])`nلن يتم إنشاء الملف أو تعديله في هذه الخطوة."
     }

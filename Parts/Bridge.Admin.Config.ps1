@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -152,7 +152,7 @@ function Receive-SettingsImport {
             return
         }
         $script:PendingSettingsImport = @{ Path = $staged; UserId = $UserId; Changes = @($validation.Changes) }
-        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $($_.From) ← $($_.To)" })
+        # Masked by name like every other settings screen. Today nothing in`r`n        # Settings is a real credential, so this is a latch for the next one`r`n        # rather than a leak being closed - the single-setting change screen`r`n        # already masks and this one did not, and a rule enforced in one of two`r`n        # equivalent places is the rule that drifts.`r`n        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $(Protect-SettingDisplayValue -Name $_.Name -Value $_.From) ← $(Protect-SettingDisplayValue -Name $_.Name -Value $_.To)" })
         $more = if (@($validation.Changes).Count -gt 20) { "`n… و$(@($validation.Changes).Count - 20) خيارًا آخر." } else { '' }
         Send-TelegramMessage -ChatId $ChatId -Text ("⚠️ مراجعة استيراد الإعدادات — $(@($validation.Changes).Count) تغييرًا:`n" + ($preview -join "`n") + $more) `
             -ReplyMarkup @{ inline_keyboard = @(, @(

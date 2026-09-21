@@ -13,6 +13,17 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.56.0
+
+**The urgent board's title button was writing into nothing.** An operator's question — "what is the title button in the breaking item details?" — turned out to have the answer "nothing, here". `Get-UrgentItemVariables` maps values by position: the scene's first declared field carries the line, the second carries the title, and this station's `Urgent` template declares one field, so `if ($fields.Count -gt 1)` dropped the title at the moment the values were built. Everything else worked — it was stored, survived restarts, appeared on the card with its 🏷 and counted as a change — so only the part that matters was missing, and no screen said so.
+
+- New `Test-UrgentTitleSupported`, asked when the screen is drawn like `Test-UrgentSceneLoop` beside it, so the operator learns before typing rather than after wondering.
+- The button is not offered on a scene that cannot carry a title. A control that cannot do what it names is worse than a missing one.
+- It stays if the item already has a title, so one written before the scene was simplified can still be cleared.
+- The card says why, exactly where the title is shown.
+
+The engine is unchanged: a two-field scene carries its title as it always did. What changed is that the screen now says what it does.
+
 ## Version 8.55.0
 
 **The control app: alarms that appear, a dialog that does not stop the bridge in order to fail, and start-on-open:**

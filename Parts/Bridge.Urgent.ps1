@@ -49,6 +49,28 @@ function Get-UrgentSceneTiming {
     return (Get-MojazSceneTiming -Path ([string]$template.Path))
 }
 
+function Test-UrgentTitleSupported {
+    <#
+        Whether this scene has anywhere to put a title.
+
+        Get-UrgentItemVariables maps values by POSITION, not by name: the
+        scene's first declared field carries the line and the second carries
+        the title. A scene that declares one field - which is how a plain
+        breaking strap is usually built - therefore drops the title on the
+        floor, silently, at the moment the values are built.
+
+        Everything else about the title worked: it was stored, it survived a
+        restart, it appeared on the item card with its 🏷, and it counted as a
+        change. Only the part that matters was missing, and nothing said so.
+        Asked when the screen is drawn, like Test-UrgentSceneLoop below, so the
+        operator learns it before typing a title rather than after wondering
+        why it never showed.
+    #>
+    $template = Get-UrgentTemplate
+    if (-not $template) { return $false }
+    return (@(Get-JsonProp $template 'Fields').Count -gt 1)
+}
+
 function Test-UrgentSceneLoop {
     <#
         Whether this scene can hide a text change at all.
@@ -737,7 +759,15 @@ function Get-UrgentItemKeyboard {
     else {
         $rows += , @( (New-Button '🚨 تشغيل على الهواء' "urgsingle:$itemId" -Style success) )
     }
-    $rows += , @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId"), (New-Button '🏷 العنوان' "urgentb:title:$itemId") )
+    # The title button is offered only where the scene can carry one - or where
+    # a title is already stored, so one written before the scene was simplified
+    # can still be cleared. A control that cannot do the thing it names is
+    # worse than a missing one: it is a promise the screen does not keep.
+    $textRow = @( (New-Button '✏️ تعديل النص' "urgentb:text:$itemId") )
+    if ((Test-UrgentTitleSupported) -or [string](Get-UrgentProperty $item 'Title' '')) {
+        $textRow += (New-Button '🏷 العنوان' "urgentb:title:$itemId")
+    }
+    $rows += , $textRow
     $modeRow = @( (New-Button '🎬 نمط العرض' "urgentb:mode:$itemId") )
     if (-not $timing.ModeInherited) { $modeRow += (New-Button '↩️ من الجدول' "urgentb:modereset:$itemId") }
     $rows += , $modeRow
@@ -928,7 +958,14 @@ function Show-UrgentItemScreen {
     $lines = @("$(Get-UrgentItemStateLabel -Item $item -Selected @(Get-UrgentSelectedIds -ChatId $ChatId)) · <b>الخبر $($Position + 1) من $itemCount</b>")
     $lines += (ConvertTo-TelegramHtmlText -Text ([string](Get-UrgentProperty $item 'Text' '')))
     $title = [string](Get-UrgentProperty $item 'Title' '')
-    if ($title) { $lines += "🏷 $(ConvertTo-TelegramHtmlText -Text $title)" }
+    if ($title) {
+        $lines += "🏷 $(ConvertTo-TelegramHtmlText -Text $title)"
+        # Said where the title is shown, not somewhere else: this line is the
+        # only place an operator sees a title they believe is going on air.
+        if (-not (Test-UrgentTitleSupported)) {
+            $lines += '⚠️ هذا المشهد يحمل حقلًا واحدًا، فالعنوان لا يظهر على الهواء — النصّ وحده هو ما يُعرض.'
+        }
+    }
     $lines += ''
     $lines += "العرض: $(Get-UrgentModeLabel -Mode $timing.Mode)$(if ($timing.ModeInherited) { ' (من الجدول)' } else { '' })"
     $lines += "الفاصل: $($timing.HoldSeconds) ث$(if ($timing.IntervalInherited) { ' (من الجدول)' } else { '' })"

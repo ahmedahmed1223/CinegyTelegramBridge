@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
@@ -284,5 +284,64 @@ Describe 'A chosen blank gap between breaking stories' {
         $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 45 -Force
 
         Get-UrgentTransitionSeconds | Should -Be 45.0
+    }
+}
+
+Describe 'A title the scene cannot carry is not offered in silence' {
+    <#
+        Get-UrgentItemVariables maps values by POSITION: the scene's first
+        declared field takes the line, the second takes the title. A scene
+        declaring one field - which is how a plain breaking strap is built, and
+        how this station's is - drops the title at the moment the values are
+        built.
+
+        Everything else about it worked. It was stored, it survived restarts,
+        it appeared on the card with its 🏷, it counted as a change. Only the
+        part that matters was missing, and no screen said so. An operator
+        typing a title was writing into nothing.
+    #>
+    BeforeEach {
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Path = 'C:\urgent.cintitle'; Layer = 7; Fields = @('Ajel.center') } }
+    }
+
+    It 'knows a one-field scene has nowhere to put a title' {
+        Test-UrgentTitleSupported | Should -BeFalse
+    }
+
+    It 'knows a two-field scene can carry one' {
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Path = 'C:\urgent.cintitle'; Layer = 7; Fields = @('Ajel.center', 'Ajel.kicker') } }
+
+        Test-UrgentTitleSupported | Should -BeTrue
+    }
+
+    It 'says so on the card where the title is shown' {
+        # The one place an operator sees a title they believe is on air.
+        Mock Send-TelegramMessage {}
+        Mock Get-UrgentItemByPosition { @{ Id = 'i1'; Text = 'خبر'; Title = 'اقتصاد'; Enabled = $true } }
+
+        Show-UrgentItemScreen -ChatId 100 -Position 0
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'لا يظهر على الهواء' }
+    }
+
+    It 'stays quiet when the scene can carry the title' {
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Path = 'C:\urgent.cintitle'; Layer = 7; Fields = @('Ajel.center', 'Ajel.kicker') } }
+        Mock Send-TelegramMessage {}
+        Mock Get-UrgentItemByPosition { @{ Id = 'i1'; Text = 'خبر'; Title = 'اقتصاد'; Enabled = $true } }
+
+        Show-UrgentItemScreen -ChatId 100 -Position 0
+
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -notmatch 'لا يظهر على الهواء' }
+    }
+
+    It 'drops the title into the second field only when there is one' {
+        $item = @{ Id = 'i1'; Text = 'خبر'; Title = 'اقتصاد' }
+        $one = Get-UrgentItemVariables -Item $item
+        $one.Keys.Count | Should -Be 1
+        $one['Ajel.center'] | Should -Be 'خبر'
+
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Path = 'C:\urgent.cintitle'; Layer = 7; Fields = @('Ajel.center', 'Ajel.kicker') } }
+        $two = Get-UrgentItemVariables -Item $item
+        $two['Ajel.kicker'] | Should -Be 'اقتصاد'
     }
 }

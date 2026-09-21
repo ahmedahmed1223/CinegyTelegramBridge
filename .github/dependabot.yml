@@ -1,0 +1,11 @@
+# Only the GitHub Actions this workflow pins. There is no package manifest to
+# watch: the bridge is PowerShell with no package.json or .csproj dependencies
+# beyond the .NET SDK, and Pester/PSScriptAnalyzer are installed by version
+# range inside the workflow rather than locked in a file.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3

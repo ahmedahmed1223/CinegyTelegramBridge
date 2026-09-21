@@ -1,0 +1,31 @@
+# Normalise on commit, check out native. Without this, every file touched on
+# this Windows workstation prints "LF will be replaced by CRLF" on `git add`
+# and a Linux clone can end up with a mixed-ending working tree.
+* text=auto
+
+# PowerShell reads either ending, but Windows tooling and the signed release
+# package are happier with CRLF, and this is a Windows-only product.
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.psd1  text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+
+# LF regardless of platform: consumed by GitHub Actions and by editors.
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.gs    text eol=lf
+
+# C# sources for the manager app.
+*.cs      text eol=crlf
+*.csproj  text eol=crlf
+*.sln     text eol=crlf
+
+# Never touched: binary.
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+*.exe binary

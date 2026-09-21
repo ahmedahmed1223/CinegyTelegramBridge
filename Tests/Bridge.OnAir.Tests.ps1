@@ -888,6 +888,56 @@ Describe 'Configurable hide-all layers' {
         Should -Invoke Invoke-HideLayer -Times 0 -Exactly -ParameterFilter { $Layer -in @(6, 8) }
     }
 
+    <#
+        Hide-all used to pass -System for every caller, so the one control that
+        an operator reaches in a panic was also the one that skipped the
+        per-layer owner/admin question. A protected graphic could be taken off
+        air through it by someone the ordinary hide button had just refused.
+    #>
+    It 'does not let an operator clear a protected layer through the emergency button' {
+        Mock Test-Admin { $false }
+        Mock Test-TemplateAccess {
+            if ($Layer -eq 4) { return [pscustomobject]@{ Allowed = $false; Reason = 'الطبقة 4 لمالك الجسر وحده.'; Level = 'owner' } }
+            return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = 'all' }
+        }
+
+        Invoke-HideAllLayers -ChatId 70 -UserId 80
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly -ParameterFilter { $Layer -eq 4 }
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 2 }
+    }
+
+    It 'names the refused layer and its reason rather than filing it under failed' {
+        # "فشلت: 4" beside a Cinegy timeout is the wrong news: nothing failed,
+        # the operator is not allowed, and only one of those is worth retrying.
+        Mock Test-Admin { $false }
+        Mock Test-TemplateAccess {
+            if ($Layer -eq 4) { return [pscustomobject]@{ Allowed = $false; Reason = 'الطبقة 4 لمالك الجسر وحده.'; Level = 'owner' } }
+            return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = 'all' }
+        }
+        $script:HideAllTextForTest = ''
+        Mock Send-TelegramMessage { $script:HideAllTextForTest = $Text }
+
+        Invoke-HideAllLayers -ChatId 70 -UserId 80
+
+        $script:HideAllTextForTest | Should -Match 'لمالك الجسر وحده'
+        $script:HideAllTextForTest | Should -Not -Match 'فشلت'
+    }
+
+    It 'still clears the logo and the ticker for an administrator, who is who the button is for' {
+        # A permanent graphic - a station logo, a clock, a ticker - is exactly
+        # what an administrator presses this to get rid of. Asking them for
+        # permission to do it would empty the button of its purpose. The owner
+        # inherits the administrator role, so this covers both.
+        Mock Test-Admin { $true }
+        Mock Test-TemplateAccess { throw 'an administrator must not be asked' }
+
+        Invoke-HideAllLayers -ChatId 70 -UserId 80
+
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 2 }
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 4 }
+    }
+
     It 'uses every known layer when the setting is all' {
         $config.Settings | Add-Member -NotePropertyName 'HideAllLayers' -NotePropertyValue 'all' -Force
 

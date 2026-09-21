@@ -761,21 +761,33 @@ function Invoke-HideAllLayers {
         Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $ok = @(); $failed = @()
+    # The emergency button honours per-layer protection for an ordinary
+    # operator and not for an administrator. An operator pressing it gets every
+    # layer they are allowed to touch cleared and is TOLD which ones were not,
+    # rather than quietly taking a protected graphic off air through the one
+    # control that skipped the question. An administrator - and the owner, who
+    # inherits the role - still clears everything, logo and ticker included:
+    # those are exactly what the button exists to get rid of, and an emergency
+    # a protection rule can veto is not an emergency control.
+    $ok = @(); $failed = @(); $blocked = @()
     foreach ($l in $layers) {
-        # -System keeps the emergency button behaving exactly as it always has:
-        # it clears the layers the administrator selected, without asking the
-        # per-layer owner/admin question of each one. Whether the emergency
-        # control SHOULD honour that question is a policy decision, not a bug
-        # fix - if it should, drop -System here and nothing else changes.
+        if (-not $maintenanceOverride) {
+            $outgoingKey = if ($script:OnAir.ContainsKey($l)) { [string](Get-JsonProp $script:OnAir[$l] 'Key') } else { '' }
+            $access = Test-TemplateAccess -Key $outgoingKey -Layer $l -ChatId $ChatId -UserId $UserId
+            # Asked here rather than left to Invoke-HideLayer's own gate so the
+            # screen can say "refused, and why" instead of filing it under
+            # "failed" beside a Cinegy timeout. The two are not the same news.
+            if (-not $access.Allowed) { $blocked += [pscustomobject]@{ Layer = $l; Reason = [string]$access.Reason }; continue }
+        }
         if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -System -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
     }
     $script:AutoHideQueue.Clear()
     $actor = Format-UserAuditActor -UserId $UserId
-    Write-BridgeLog "User $actor triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','))" "WARN"
+    Write-BridgeLog "User $actor triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','); blocked: $(@($blocked | ForEach-Object { $_.Layer }) -join ','))" "WARN"
     Add-AuditEntry "🚨 إخفاء الكل - بواسطة $actor"
-    $text = "🚨 تم إخفاء الطبقات: $($ok -join ', ')"
+    $text = if ($ok.Count -gt 0) { "🚨 تم إخفاء الطبقات: $($ok -join ', ')" } else { '🚨 لم تُخفَ أي طبقة.' }
     if ($failed.Count -gt 0) { $text += "`n❌ فشلت: $($failed -join ', ')" }
+    foreach ($item in $blocked) { $text += "`n⛔ الطبقة $($item.Layer): $($item.Reason)" }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

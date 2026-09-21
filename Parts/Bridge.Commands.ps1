@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -24,7 +24,7 @@ function Resolve-TemplateShortcut {
 function Show-SettingsScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚙️ الإعدادات`nاختر قسمًا. تظهر الخيارات الشائعة أولًا، وتبقى الإعدادات التقنية في «خيارات متقدمة»." -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "$(T 'settings.title')`n$(T 'settings.intro')" -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Get-SettingsExplainedLines {

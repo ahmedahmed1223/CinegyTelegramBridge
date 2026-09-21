@@ -84,9 +84,9 @@ function Get-MainMenuKeyboard {
             $onAirKey = $script:OnAir[$layer].Key
             $onAirCopy = [string](Get-JsonProp $script:OnAir[$layer] 'AirCopy')
             $hideLabel = if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
-                "🔴 إخفاء $layer · $onAirKey — $onAirCopy"
+                T 'menu.hideLive.copy' $layer $onAirKey $onAirCopy
             } else {
-                "🔴 إخفاء $layer · $onAirKey"
+                T 'menu.hideLive' $layer $onAirKey
             }
             $liveRow += (New-Button $hideLabel "hide:$layer" -Style danger)
             # Quick +30s extension button for live layers
@@ -94,9 +94,9 @@ function Get-MainMenuKeyboard {
                 $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
                 $timerLabel = if ($pending.Count -gt 0) {
                     $remaining = [int](($pending[0].At - (Get-Date)).TotalSeconds)
-                    "⏱ +30ث ($remaining ث)"
+                    T 'menu.timerExtend' $remaining
                 } else {
-                    "⏱ مؤقت"
+                    T 'menu.timer'
                 }
                 $liveRow += (New-Button $timerLabel "timer:$layer")
             }
@@ -107,11 +107,11 @@ function Get-MainMenuKeyboard {
         $onAirTools = @()
         if ($script:LastShow.ContainsKey($ChatId)) {
             $lastKey = [string](Get-JsonProp $script:LastShow[$ChatId] 'Key')
-            $onAirTools += (New-Button "↩️ إعادة عرض $lastKey" "menu:repeat")
+            $onAirTools += (New-Button (T 'menu.reshow' $lastKey) "menu:repeat")
         }
-        if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger) }
-        if (Get-Setting 'EnableSnapshot') { $onAirTools += (New-Button "📷 لقطة الآن" "menu:snapshot") }
-        $onAirTools += (New-Button "📋 نسخ الحالة" "menu:sharestatus")
+        if (Get-Setting 'EnableHideAll') { $onAirTools += (New-Button (T 'menu.hideAll') "menu:hideall" -Style danger) }
+        if (Get-Setting 'EnableSnapshot') { $onAirTools += (New-Button (T 'menu.snapshotNow') "menu:snapshot") }
+        $onAirTools += (New-Button (T 'menu.copyStatus') "menu:sharestatus")
         $rows += , $onAirTools
     }
 
@@ -124,14 +124,14 @@ function Get-MainMenuKeyboard {
     # - but a button offering to hide something when nothing is on air reads as
     # a claim that something is, which is the confusion it was meant to end.
     if ((Test-MojazAvailable) -and (Test-MojazOnAirLayer)) {
-        $rows += , @( (New-Button "⏹ إخفاء الموجز" "mojaz:hide" -Style danger) )
+        $rows += , @( (New-Button (T 'menu.hideMojaz') "mojaz:hide" -Style danger) )
     }
 
     # Same reasoning for a breaking-news board that is walking its table: the
     # plain hide above would cut the scene and leave the run writing lines into
     # something nobody can see. Only while a run is actually up.
     if ($script:UrgentBoardRun) {
-        $rows += , @( (New-Button "⏹ إيقاف العواجل" "urgentb:stop" -Style danger) )
+        $rows += , @( (New-Button (T 'menu.stopUrgent') "urgentb:stop" -Style danger) )
     }
 
     # A rollback used to be reachable only from the message that offered it,
@@ -143,15 +143,15 @@ function Get-MainMenuKeyboard {
         if (-not $candidate) { continue }
         $secondsLeft = [int](([datetime]$candidate.ExpiresAt) - (Get-Date)).TotalSeconds
         if ($secondsLeft -le 0) { continue }
-        $rows += , @( (New-Button "↩️ تراجع طبقة $layer ($secondsLeft ث)" "rollback:$layer") )
+        $rows += , @( (New-Button (T 'menu.rollback' $layer $secondsLeft) "rollback:$layer") )
     }
 
-    $templateRow = @( (New-Button "📋 القوالب" "menu:templates") )
+    $templateRow = @( (New-Button (T 'menu.templates') "menu:templates") )
     # Layers are the raw controls - hide, exit, push to a bare layer number -
     # and a newsroom may want them kept to whoever owns the rundown.
     if (Test-LayersScreenAccess -ChatId $ChatId -UserId $UserId) {
         $layerStatus = if ($script:OnAir.Count -gt 0) { '🔴' } else { '🟢' }
-        $templateRow += (New-Button "🎚 الطبقات $layerStatus" "menu:layers")
+        $templateRow += (New-Button (T 'menu.layers' $layerStatus) "menu:layers")
     }
     $rows += , $templateRow
     # Paired rather than stacked, and paired by meaning rather than to save
@@ -159,17 +159,17 @@ function Get-MainMenuKeyboard {
     # for an administrator is a wall on a phone, and every row above the live
     # controls is a row to scroll past while a wrong graphic is on air.
     # OneHandMode splits every pair back apart for a thumb, as before.
-    $statusRow = @( (New-Button "ℹ️ الحالة" "menu:status") )
+    $statusRow = @( (New-Button (T 'menu.status') "menu:status") )
     if (Test-StatusViewer -ChatId $ChatId -UserId $UserId) {
-        $statusRow += (New-Button "📊 الحالة الكاملة" "menu:fullstatus")
+        $statusRow += (New-Button (T 'menu.fullStatus') "menu:fullstatus")
     }
     $rows += , $statusRow
 
     # The channel's own material and the shift change, both optional because a
     # station that does neither should not carry the buttons.
     $shiftRow = @()
-    if (Get-Setting 'EnableMaterialSchedule') { $shiftRow += (New-Button '🎞 جدول المواد' 'menu:material') }
-    if (Get-Setting 'EnableShiftHandover') { $shiftRow += (New-Button '🤝 تسليم' 'menu:handover') }
+    if (Get-Setting 'EnableMaterialSchedule') { $shiftRow += (New-Button (T 'menu.material') 'menu:material') }
+    if (Get-Setting 'EnableShiftHandover') { $shiftRow += (New-Button (T 'menu.handover') 'menu:handover') }
     if ($shiftRow.Count -gt 0) { $rows += , $shiftRow }
 
     if (Get-Setting 'EnableFavorites') {
@@ -182,56 +182,56 @@ function Get-MainMenuKeyboard {
             $favRow = @()
             foreach ($key in $favs) {
                 $idx = Get-TemplateIndex -Key $key
-                if ($idx -ge 0) { $favRow += (New-Button "⭐ $key" "tpl:$idx") }
+                if ($idx -ge 0) { $favRow += (New-Button (T 'menu.favourite' $key) "tpl:$idx") }
             }
             if ($favRow.Count -gt 0) { $rows += , $favRow }
         }
-        $rows += , @( (New-Button "⭐ إدارة المفضلة" "menu:favorites") )
+        $rows += , @( (New-Button (T 'menu.favourites') "menu:favorites") )
     }
 
-    $rows += , @( (New-Button "🙈 اخفاء طبقة" "menu:hide"), (New-Button "🚪 خروج من المشهد" "menu:exit") )
+    $rows += , @( (New-Button (T 'menu.hideLayer') "menu:hide"), (New-Button (T 'menu.exitScene') "menu:exit") )
 
     # Live layers and the emergency hide are rendered at the top of this
     # keyboard instead of here; see the on-air block above.
     $thirdRow = @()
     if ((Get-Setting 'EnableHideAll') -and $script:OnAir.Count -eq 0) {
-        $thirdRow += (New-Button "🚨 إخفاء الكل" "menu:hideall" -Style danger)
+        $thirdRow += (New-Button (T 'menu.hideAll') "menu:hideall" -Style danger)
     }
     if ($script:OnAir.Count -eq 0 -and $script:LastShow.ContainsKey($ChatId)) {
-        $thirdRow += (New-Button "🔁 تكرار مع تعديل" "menu:repeat")
+        $thirdRow += (New-Button (T 'menu.repeatEdit') "menu:repeat")
     }
     if ($thirdRow.Count -gt 0) { $rows += , $thirdRow }
 
-    $fourthRow = @( (New-Button "✏️ تحديث نص" "menu:update") )
-    if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button "⏱ عرض مؤقّت" "menu:timed") }
+    $fourthRow = @( (New-Button (T 'menu.updateText') "menu:update") )
+    if (Get-Setting 'EnableTimedShow') { $fourthRow += (New-Button (T 'menu.timedShow') "menu:timed") }
     $rows += , $fourthRow
-    $rows += , @( (New-Button "📅 الجدولة" 'menu:schedule'), (New-Button "📊 تقارير" 'menu:reports') )
-    $rows += , @( (New-Button "🧾 عملياتي" 'menu:myops'), (New-Button "🕘 ماذا فاتني" 'menu:digest') )
+    $rows += , @( (New-Button (T 'menu.schedule') 'menu:schedule'), (New-Button (T 'menu.reports') 'menu:reports') )
+    $rows += , @( (New-Button (T 'menu.myOps') 'menu:myops'), (New-Button (T 'menu.digest') 'menu:digest') )
     # Each management button on its own row: one tap, no crowding.
     # Order: News Ticker first (daily driver), then Mojaz (bulletin), then Urgent (breaking news).
-    if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button "📰 شريط الأخبار" 'menu:news') ) }
-    if (Test-MojazAvailable) { $rows += , @( (New-Button '📑 إدارة الموجز' 'menu:mojaz') ) }
-    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button '🚨 إدارة العواجل' 'urgentb:open') ) }
+    if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button (T 'menu.news') 'menu:news') ) }
+    if (Test-MojazAvailable) { $rows += , @( (New-Button (T 'menu.mojaz') 'menu:mojaz') ) }
+    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button (T 'menu.urgent') 'urgentb:open') ) }
     # One door however many programmes there are. A button per board would
     # grow this menu without a bound, and the menu is already sixteen rows.
-    if (Test-BoardsAvailable) { $rows += , @( (New-Button '🗂 محتوى البرامج' 'boards:open') ) }
+    if (Test-BoardsAvailable) { $rows += , @( (New-Button (T 'menu.boards') 'boards:open') ) }
 
     if (Get-Setting 'EnableSnapshot') {
-        $rows += , @( (New-Button "📸 صورة من البث" "menu:snapshot"), (New-Button "❓ مساعدة" "menu:help") )
-        $rows += , @( (New-Button "🆕 ما الجديد" "menu:whatsnew") )
+        $rows += , @( (New-Button (T 'menu.snapshot') "menu:snapshot"), (New-Button (T 'menu.help') "menu:help") )
+        $rows += , @( (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
     }
     else {
-        $rows += , @( (New-Button "❓ مساعدة" "menu:help"), (New-Button "🆕 ما الجديد" "menu:whatsnew") )
+        $rows += , @( (New-Button (T 'menu.help') "menu:help"), (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
     }
 
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $pendingCount = $script:PendingApprovals.Count
-        $pendingLabel = if ($pendingCount -gt 0) { "👤 طلبات الوصول ($pendingCount)" } else { "👤 طلبات الوصول" }
+        $pendingLabel = if ($pendingCount -gt 0) { T 'menu.pending.count' $pendingCount } else { T 'menu.pending' }
         # Settings and access requests stay one tap away because they are used
         # during a shift. The rest is configuration an operator opens rarely,
         # and five permanent rows of it pushed the live controls off screen.
-        $rows += , @( (New-Button "⚙️ الإعدادات" "menu:settings"), (New-Button $pendingLabel "menu:pending") )
-        $rows += , @( (New-Button "🗂 أدوات الإدارة" "menu:admintools") )
+        $rows += , @( (New-Button (T 'menu.settings') "menu:settings"), (New-Button $pendingLabel "menu:pending") )
+        $rows += , @( (New-Button (T 'menu.adminTools') "menu:admintools") )
     }
     return @{ inline_keyboard = $rows }
 }
@@ -1825,14 +1825,41 @@ function Get-BlockedChatsKeyboard {
 }
 
 function Get-SettingCategoryDefinitions {
-    return @($script:SettingCategoryDefinitions)
+    <# Translated at read time for the same reason the setting labels are: the
+       definitions are built at load and the language changes while the bridge
+       runs. Untranslated entries keep their Arabic. #>
+    return @(foreach ($definition in $script:SettingCategoryDefinitions) {
+            [pscustomobject]@{
+                Key = $definition.Key
+                Label = (TF "settingCategory.$($definition.Key).label" ([string]$definition.Label))
+                Icon = $definition.Icon
+                Summary = (TF "settingCategory.$($definition.Key).summary" ([string]$definition.Summary))
+            }
+        })
 }
 
 function Get-SettingNavigationMetadata {
+    <#
+        The label is translated HERE, at read time, not in the schema.
+
+        $script:SettingSchema is built once when the bridge loads, and the
+        language is changed from a button while it runs - so a label baked in
+        at load would stay in whichever language the bridge started in. The key
+        is derived from the setting's own name, and the schema's Arabic label is
+        the fallback, so a setting nobody has translated yet reads exactly as it
+        always did rather than showing a bare key.
+    #>
     param([Parameter(Mandatory)][string]$Name)
     $record = @($script:SettingSchema | Where-Object Name -eq $Name)
-    if ($record.Count -eq 1) { return $record[0] }
-    return [pscustomobject]@{ Name = $Name; Category = 'advanced'; Label = $Name }
+    if ($record.Count -ne 1) { return [pscustomobject]@{ Name = $Name; Category = 'advanced'; Label = $Name } }
+    $translated = TF "setting.$Name.label" ([string]$record[0].Label)
+    if ($translated -eq [string]$record[0].Label) { return $record[0] }
+    # A copy, never the schema record itself: mutating it would leave the
+    # bridge stuck in whatever language was asked for first.
+    $copy = [pscustomobject]@{}
+    foreach ($property in $record[0].PSObject.Properties) { $copy | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force }
+    $copy.Label = $translated
+    return $copy
 }
 
 function Get-SettingsInCategory {
@@ -1880,19 +1907,19 @@ function Get-SettingsKeyboard {
     }
     if ($categoryRow.Count -gt 0) { $rows += , $categoryRow }
 
-    $rows += , @((New-Button '🔎 بحث' 'cfg:search'), (New-Button '📝 المعدّل فقط' 'cfglist:modified:0'))
-    $rows += , @((New-Button '🧭 مبسّط' 'cfglist:simple:0'), (New-Button '🛠 متقدم' 'cfglist:advanced:0'))
+    $rows += , @((New-Button (T 'settings.search') 'cfg:search'), (New-Button (T 'settings.modifiedOnly') 'cfglist:modified:0'))
+    $rows += , @((New-Button (T 'settings.simple') 'cfglist:simple:0'), (New-Button (T 'settings.advanced') 'cfglist:advanced:0'))
 
     $scope = [string](Get-Setting 'HideAllLayers')
-    $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
-    $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
-    $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
+    $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { T 'settings.hideAllScope.all' } elseif ($scope.Trim()) { T 'settings.hideAllScope.some' $scope } else { T 'settings.hideAllScope.none' }
+    $rows += , @( (New-Button (T 'settings.hideAllScope' $scopeLabel) 'menu:hideallsettings') )
+    $rows += , @( (New-Button (T 'settings.layerNames') 'menu:layernames') )
     # The language row sits here rather than only inside 🛠 خيارات متقدمة,
     # because the first thing somebody who cannot read the screen needs is the
     # control that changes the screen - and they cannot read their way to it.
     # The button names the language it switches TO, not the one in force.
     $rows += , @( (New-Button (T 'lang.button') 'cfg:lang') )
-    $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset" -Style danger) )
+    $rows += , @( (New-Button (T 'settings.backups') "menu:backups"), (New-Button (T 'settings.reset') "cfg:reset" -Style danger) )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }
 }

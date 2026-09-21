@@ -86,6 +86,91 @@ function New-BridgeTextCatalogue {
     $catalogue['common.seconds'] = @{ ar = '{0} ثانية'; en = '{0}s' }
     $catalogue['common.notAllowed'] = @{ ar = '⛔ غير مسموح.'; en = '⛔ Not allowed.' }
 
+    # --- The eleven settings doors --------------------------------------
+    $catalogue['settingCategory.security.label'] = @{ ar = 'الأمان والصلاحيات'; en = 'Security and permissions' }
+    $catalogue['settingCategory.onair.label'] = @{ ar = 'التشغيل على الهواء'; en = 'On air' }
+    $catalogue['settingCategory.templates.label'] = @{ ar = 'القوالب والطبقات'; en = 'Templates and layers' }
+    $catalogue['settingCategory.news.label'] = @{ ar = 'شريط الأخبار'; en = 'News ticker' }
+    $catalogue['settingCategory.urgent.label'] = @{ ar = 'جدول العواجل'; en = 'The urgent board' }
+    $catalogue['settingCategory.boards.label'] = @{ ar = 'محتوى البرامج'; en = 'Programme content' }
+    $catalogue['settingCategory.schedule.label'] = @{ ar = 'الجدولة'; en = 'Scheduling' }
+    $catalogue['settingCategory.monitoring.label'] = @{ ar = 'المراقبة والتنبيهات'; en = 'Monitoring and alerts' }
+    $catalogue['settingCategory.storage.label'] = @{ ar = 'الملفات والاحتفاظ'; en = 'Files and retention' }
+    $catalogue['settingCategory.notifications.label'] = @{ ar = 'الإشعارات والتنبيهات'; en = 'Notifications' }
+    $catalogue['settingCategory.advanced.label'] = @{ ar = 'خيارات متقدمة'; en = 'Advanced' }
+    $catalogue['settingCategory.security.summary'] = @{ ar = 'من يستطيع التحكم بالهواء، وكيف يُتحقق منه، وأي أبواب إدارية مفتوحة.'; en = 'Who may control the air, how they are verified, and which administrative doors are open.' }
+    $catalogue['settingCategory.onair.summary'] = @{ ar = 'ما يظهر ويختفي على الشاشة: أزرار العرض والإخفاء والطوارئ، وكيف يتعامل الجسر مع Cinegy.'; en = 'What appears and disappears on screen: the show, hide and emergency buttons, and how the bridge deals with Cinegy.' }
+    $catalogue['settingCategory.templates.summary'] = @{ ar = 'أي قالب متاح، وعلى أي طبقة، وبأي اسم يراه المشغّل.'; en = 'Which template is available, on which layer, and under what name the operator sees it.' }
+    $catalogue['settingCategory.news.summary'] = @{ ar = 'الشريط وملفه وحدوده، والربط مع Google Sheets، وما يُسمح به للمشغّل.'; en = 'The ticker, its file and limits, the Google Sheets link, and what an operator is allowed to do with it.' }
+    $catalogue['settingCategory.urgent.summary'] = @{ ar = 'الجدول الذي يتقدّم وحده: توقيته وتكراره ونمطه وحدود نصّه، والفاصل بين خبر وآخر.'; en = 'The board that advances by itself: its timing, repeats, mode and text limits, and the gap between stories.' }
+    $catalogue['settingCategory.boards.summary'] = @{ ar = 'جداول النصوص المجهَّزة لقوالب البرامج: كم جدولًا، وكم صفًّا في الجدول الواحد.'; en = 'The prepared text tables for programme templates: how many boards, and how many rows in each.' }
+    $catalogue['settingCategory.schedule.summary'] = @{ ar = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.'; en = 'Deferred events: when they run, when a clash is flagged, and what happens if one fails.' }
+    $catalogue['settingCategory.monitoring.summary'] = @{ ar = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.'; en = 'What the bridge watches by itself and when it wakes an administrator: the output, Cinegy health, forgotten templates.' }
+    $catalogue['settingCategory.storage.summary'] = @{ ar = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.'; en = 'How long logs, snapshots and backups are kept, and when a full disk is flagged.' }
+    $catalogue['settingCategory.notifications.summary'] = @{ ar = 'ما الذي يوقظك ومتى: تنبيهات الهواء والصحة والجدولة، وساعات الهدوء، والملخصات الدورية.'; en = 'What wakes you and when: air, health and schedule alerts, quiet hours, and the periodic digests.' }
+    $catalogue['settingCategory.advanced.summary'] = @{ ar = 'تفاصيل التشخيص والسلوك الداخلي؛ لا يحتاجها التشغيل اليومي.'; en = 'Diagnostic detail and internal behaviour; daily operation does not need these.' }
+
+    # --- The main menu --------------------------------------------------
+    # The live rows first, because this menu is what an operator opens when a
+    # wrong graphic is on air and every row above the fix is one to scroll past.
+    $catalogue['menu.hideLive'] = @{ ar = '🔴 إخفاء {0} · {1}'; en = '🔴 Hide {0} · {1}' }
+    $catalogue['menu.hideLive.copy'] = @{ ar = '🔴 إخفاء {0} · {1} — {2}'; en = '🔴 Hide {0} · {1} — {2}' }
+    $catalogue['menu.timerExtend'] = @{ ar = '⏱ +30ث ({0} ث)'; en = '⏱ +30s ({0}s)' }
+    $catalogue['menu.timer'] = @{ ar = '⏱ مؤقت'; en = '⏱ Timer' }
+    $catalogue['menu.reshow'] = @{ ar = '↩️ إعادة عرض {0}'; en = '↩️ Show {0} again' }
+    $catalogue['menu.hideAll'] = @{ ar = '🚨 إخفاء الكل'; en = '🚨 Hide everything' }
+    $catalogue['menu.snapshotNow'] = @{ ar = '📷 لقطة الآن'; en = '📷 Grab a frame' }
+    $catalogue['menu.copyStatus'] = @{ ar = '📋 نسخ الحالة'; en = '📋 Copy status' }
+    $catalogue['menu.hideMojaz'] = @{ ar = '⏹ إخفاء الموجز'; en = '⏹ Stop the bulletin' }
+    $catalogue['menu.stopUrgent'] = @{ ar = '⏹ إيقاف العواجل'; en = '⏹ Stop the urgent board' }
+    $catalogue['menu.rollback'] = @{ ar = '↩️ تراجع طبقة {0} ({1} ث)'; en = '↩️ Undo layer {0} ({1}s)' }
+    $catalogue['menu.templates'] = @{ ar = '📋 القوالب'; en = '📋 Templates' }
+    $catalogue['menu.layers'] = @{ ar = '🎚 الطبقات {0}'; en = '🎚 Layers {0}' }
+    $catalogue['menu.status'] = @{ ar = 'ℹ️ الحالة'; en = 'ℹ️ Status' }
+    $catalogue['menu.fullStatus'] = @{ ar = '📊 الحالة الكاملة'; en = '📊 Full status' }
+    $catalogue['menu.material'] = @{ ar = '🎞 جدول المواد'; en = '🎞 Material schedule' }
+    $catalogue['menu.handover'] = @{ ar = '🤝 تسليم'; en = '🤝 Handover' }
+    $catalogue['menu.favourite'] = @{ ar = '⭐ {0}'; en = '⭐ {0}' }
+    $catalogue['menu.favourites'] = @{ ar = '⭐ إدارة المفضلة'; en = '⭐ Manage favourites' }
+    $catalogue['menu.hideLayer'] = @{ ar = '🙈 اخفاء طبقة'; en = '🙈 Hide a layer' }
+    $catalogue['menu.exitScene'] = @{ ar = '🚪 خروج من المشهد'; en = '🚪 Exit the scene' }
+    $catalogue['menu.repeatEdit'] = @{ ar = '🔁 تكرار مع تعديل'; en = '🔁 Repeat with edits' }
+    $catalogue['menu.updateText'] = @{ ar = '✏️ تحديث نص'; en = '✏️ Update text' }
+    $catalogue['menu.timedShow'] = @{ ar = '⏱ عرض مؤقّت'; en = '⏱ Timed show' }
+    $catalogue['menu.schedule'] = @{ ar = '📅 الجدولة'; en = '📅 Scheduling' }
+    $catalogue['menu.reports'] = @{ ar = '📊 تقارير'; en = '📊 Reports' }
+    $catalogue['menu.myOps'] = @{ ar = '🧾 عملياتي'; en = '🧾 My operations' }
+    $catalogue['menu.digest'] = @{ ar = '🕘 ماذا فاتني'; en = '🕘 What did I miss' }
+    $catalogue['menu.news'] = @{ ar = '📰 شريط الأخبار'; en = '📰 News ticker' }
+    $catalogue['menu.mojaz'] = @{ ar = '📑 إدارة الموجز'; en = '📑 The bulletin' }
+    $catalogue['menu.urgent'] = @{ ar = '🚨 إدارة العواجل'; en = '🚨 The urgent board' }
+    $catalogue['menu.boards'] = @{ ar = '🗂 محتوى البرامج'; en = '🗂 Programme content' }
+    $catalogue['menu.snapshot'] = @{ ar = '📸 صورة من البث'; en = '📸 Frame from air' }
+    $catalogue['menu.help'] = @{ ar = '❓ مساعدة'; en = '❓ Help' }
+    $catalogue['menu.whatsNew'] = @{ ar = '🆕 ما الجديد'; en = '🆕 What''s new' }
+    $catalogue['menu.pending'] = @{ ar = '👤 طلبات الوصول'; en = '👤 Access requests' }
+    $catalogue['menu.pending.count'] = @{ ar = '👤 طلبات الوصول ({0})'; en = '👤 Access requests ({0})' }
+    $catalogue['menu.settings'] = @{ ar = '⚙️ الإعدادات'; en = '⚙️ Settings' }
+    $catalogue['menu.adminTools'] = @{ ar = '🗂 أدوات الإدارة'; en = '🗂 Admin tools' }
+
+    # --- The settings home screen ---------------------------------------
+    $catalogue['settings.title'] = @{ ar = '⚙️ الإعدادات'; en = '⚙️ Settings' }
+    $catalogue['settings.intro'] = @{
+        ar = 'اختر قسمًا. تظهر الخيارات الشائعة أولًا، وتبقى الإعدادات التقنية في «خيارات متقدمة».'
+        en = 'Choose a section. The common choices come first; the technical ones stay in Advanced.'
+    }
+    $catalogue['settings.search'] = @{ ar = '🔎 بحث'; en = '🔎 Search' }
+    $catalogue['settings.modifiedOnly'] = @{ ar = '📝 المعدّل فقط'; en = '📝 Changed only' }
+    $catalogue['settings.simple'] = @{ ar = '🧭 مبسّط'; en = '🧭 Simple' }
+    $catalogue['settings.advanced'] = @{ ar = '🛠 متقدم'; en = '🛠 Advanced' }
+    $catalogue['settings.hideAllScope'] = @{ ar = '🚨 طبقات إخفاء الكل: {0}'; en = '🚨 Hide-all layers: {0}' }
+    $catalogue['settings.hideAllScope.all'] = @{ ar = 'كل الطبقات المعروفة'; en = 'every known layer' }
+    $catalogue['settings.hideAllScope.some'] = @{ ar = 'طبقات: {0}'; en = 'layers: {0}' }
+    $catalogue['settings.hideAllScope.none'] = @{ ar = 'لا توجد طبقات محددة'; en = 'none selected' }
+    $catalogue['settings.layerNames'] = @{ ar = '🏷️ أسماء الطبقات'; en = '🏷️ Layer names' }
+    $catalogue['settings.backups'] = @{ ar = '🗄 نسخ الإعدادات'; en = '🗄 Settings backups' }
+    $catalogue['settings.reset'] = @{ ar = '♻️ استعادة الافتراضي'; en = '♻️ Restore defaults' }
+
     # --- Emergency hide-all --------------------------------------------
     $catalogue['hideAll.none'] = @{
         ar = '⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات.'
@@ -219,11 +304,23 @@ function Get-BridgeText {
     param(
         [Parameter(Mandatory)][string]$Key,
         [string]$Language = '',
-        [object[]]$Arguments = @()
+        [object[]]$Arguments = @(),
+        [AllowEmptyString()][string]$Fallback = $null
     )
     $entry = Get-BridgeTextEntry -Key $Key
     if (-not $entry) {
         [void]$script:BridgeTextMissing.Add($Key)
+        # -Fallback is for text that ALREADY exists in Arabic somewhere else:
+        # the setting labels and descriptions built at load, which are several
+        # hundred strings that can only be translated a few at a time. Without
+        # it every untranslated one would render as its key; with it, the
+        # screen keeps saying exactly what it said before this feature existed.
+        #
+        # Asked of the bound parameters, not of the value: [string]$Fallback
+        # coerces an unpassed $null to '', so "$null -ne $Fallback" is true
+        # even when no fallback was given - and every unknown key came back as
+        # an empty string instead of as its own name.
+        if ($PSBoundParameters.ContainsKey('Fallback')) { return (Format-BridgeText -Template $Fallback -Arguments $Arguments) }
         return $Key
     }
     $code = ([string]$Language).ToLowerInvariant()

@@ -15,6 +15,18 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.63.0
+
+**The main menu and the settings doors now speak both languages.** Every button on the menu - the live rows, the rollback, favourites, the four content systems, the admin row - and the eleven settings doors with their summaries are drawn from the catalogue.
+
+- A test renders the menu in both languages and requires **the same number of buttons**: a translation changes what a control says, never which controls exist. It also fails on any label that is blank or that looks like an untranslated catalogue key.
+- **Translation resolves at read time, not at load.** `$script:SettingSchema` and `$script:SettingCategoryDefinitions` are built once when the bridge starts, and the language is changed from a button while it runs - a label baked in at load would stay in whichever language the bridge booted into. `Get-SettingNavigationMetadata` and `Get-SettingCategoryDefinitions` now translate on the way out, returning a copy rather than mutating the schema record, which would pin the bridge to whichever language asked first.
+- **`-Fallback`, so several hundred strings can be translated a few at a time.** A setting whose label nobody has translated renders exactly as it always did instead of as a bare key.
+
+**A defect found while building it:** `[string]$Fallback = $null` coerces an unpassed argument to the empty string, so `$null -ne $Fallback` was true even when no fallback was given - and *every* unknown key came back empty rather than as its own name. It now asks `$PSBoundParameters`, with a test for each of the four cases.
+
+**Progress: 134 catalogue keys.** Converted: the main menu, the settings home and its doors, hide-all, permission refusals, and all of the programme content boards. **Roughly 4,200 Arabic lines remain** across the other files - chiefly the release notes, the in-bot manual, and the per-setting labels. They render Arabic in both modes until converted.
+
 ## Version 8.62.0
 
 **Fixed: programme content boards failed on the first press.** Reported from the field; the log said `The variable '$script:MojazDesignCache' cannot be retrieved because it has not been set`.

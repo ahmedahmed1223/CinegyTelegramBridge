@@ -2594,3 +2594,65 @@ Describe 'Shared bridge state is declared where it is loaded' {
         $undeclared | Should -BeNullOrEmpty -Because "shared state must be declared at load or the first reader can precede the first writer: $detail"
     }
 }
+
+Describe 'The bridge speaks the language it is set to' {
+    <#
+        The catalogue tests prove the words exist in both languages. Nothing
+        proved a SCREEN changes when the setting does - which is the only
+        claim an operator cares about, and the one a call site that forgot to
+        go through T would silently break.
+    #>
+    BeforeEach {
+        $script:OriginalLanguageForTest = Get-Setting 'Language'
+        $script:OnAir.Clear()
+        Mock Test-Admin { $false }
+        Mock Test-LayersScreenAccess { $true }
+        Mock Test-StatusViewer { $true }
+    }
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $script:OriginalLanguageForTest -Force
+        $script:OnAir.Clear()
+    }
+
+    It 'draws the main menu in English and in Arabic from the same code' {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+        $english = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_.text })
+
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+        $arabic = @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_.text })
+
+        @($english | Where-Object { $_ -like '*Templates*' }) | Should -Not -BeNullOrEmpty
+        @($english | Where-Object { $_ -like '*Hide a layer*' }) | Should -Not -BeNullOrEmpty
+        @($arabic | Where-Object { $_ -like '*القوالب*' }) | Should -Not -BeNullOrEmpty
+        # The same number of buttons either way: a translation must not add or
+        # drop a control, only change what it says.
+        @($english).Count | Should -Be @($arabic).Count
+    }
+
+    It 'falls back to Arabic rather than blanking when the setting is nonsense' {
+        # A hand-edited config, an import from an older version, a typo. None
+        # of those should leave an operator looking at empty buttons.
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'klingon' -Force
+
+        Get-BridgeLanguage | Should -Be 'ar'
+        @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+            ForEach-Object { @($_) } | ForEach-Object { [string]$_.text } |
+            Where-Object { [string]::IsNullOrWhiteSpace($_) }) | Should -BeNullOrEmpty
+    }
+
+    It 'never leaves a button empty or showing a raw key in either language' {
+        # A key that reaches a screen without a catalogue entry renders as the
+        # key itself - deliberately visible, and exactly the thing this catches
+        # before an operator does.
+        foreach ($language in @('ar', 'en')) {
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $language -Force
+            foreach ($label in @((Get-MainMenuKeyboard -ChatId 100 -UserId 100).inline_keyboard |
+                    ForEach-Object { @($_) } | ForEach-Object { [string]$_.text })) {
+                $label | Should -Not -BeNullOrEmpty
+                $label | Should -Not -Match '^[a-z]+\.[a-zA-Z.]+$' -Because "'$label' looks like an untranslated catalogue key in '$language'"
+            }
+        }
+    }
+}

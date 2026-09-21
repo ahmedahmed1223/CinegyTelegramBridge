@@ -416,6 +416,21 @@ function T {
     return (Get-BridgeText -Key $Key -Language (Get-BridgeLanguage) -Arguments @($Arguments))
 }
 
+function TF {
+    <#
+        Like T, but for text that already exists in Arabic somewhere else and
+        is being translated a piece at a time.
+
+        The setting labels and descriptions are several hundred strings built
+        into $script:SettingSchema at load. Translating them all before any of
+        them works would be the kind of all-or-nothing change that never lands;
+        this lets the catalogue fill up one setting at a time while every
+        untranslated one keeps saying exactly what it said before.
+    #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][AllowEmptyString()][string]$Fallback)
+    return (Get-BridgeText -Key $Key -Language (Get-BridgeLanguage) -Fallback $Fallback)
+}
+
 function Get-LayerName {
     param([Parameter(Mandatory)][int]$Layer)
     foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {

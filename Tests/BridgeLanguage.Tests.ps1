@@ -96,3 +96,28 @@ Describe 'Which languages exist' {
         Get-BridgeLanguages | Should -Contain 'en'
     }
 }
+
+Describe 'Text that is being translated a piece at a time' {
+    <#
+        The setting labels and descriptions are several hundred strings built
+        into the schema at load. -Fallback lets the catalogue fill up one at a
+        time while every untranslated one keeps saying what it always said.
+    #>
+    It 'prefers the catalogue when the key is there' {
+        Get-BridgeText -Key 'common.home' -Language 'en' -Fallback 'الأصل' | Should -Be '🏠 Menu'
+    }
+
+    It 'returns the existing Arabic for a key nobody has written yet' {
+        Get-BridgeText -Key 'setting.NotTranslatedYet.label' -Language 'en' -Fallback 'حدّ طول النص' | Should -Be 'حدّ طول النص'
+    }
+
+    It 'still returns the key when no fallback was offered' {
+        # [string]$Fallback = $null coerces an unpassed argument to '', so a
+        # naive "$null -ne $Fallback" made every unknown key render blank.
+        Get-BridgeText -Key 'setting.NotTranslatedYet.label' -Language 'en' | Should -Be 'setting.NotTranslatedYet.label'
+    }
+
+    It 'honours an empty fallback that was actually passed' {
+        Get-BridgeText -Key 'setting.Nothing.label' -Language 'en' -Fallback '' | Should -Be ''
+    }
+}

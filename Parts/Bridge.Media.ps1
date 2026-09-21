@@ -430,6 +430,42 @@ function Get-OutputMonitorStatus {
     }
 }
 
+function Test-OutputMonitorFlapping {
+    <#
+        Reports a source that keeps failing and recovering.
+
+        The consecutive counter beside this one answers "is the source down
+        right now". It cannot answer "is the source dying", because every
+        success resets it - so a stream that fails one capture in two is fifty
+        percent blind and never alerts. That is not hypothetical: the station's
+        stream failed on isolated days through September, each failure followed
+        by a success, and the first warning anybody could have acted on would
+        have been the day it started failing hourly.
+
+        Six hours, fixed: long enough that two unlucky grabs do not raise it,
+        short enough that a degrading evening is reported the same evening.
+        Reported once per window, because a repeated warning about a source
+        that is still half working is how a channel learns to ignore warnings.
+    #>
+    param([datetime]$Now = (Get-Date))
+    $threshold = Get-SettingInt 'OutputMonitorFlapAlertCount' 0
+    if ($threshold -le 0) { return $false }
+    $windowStart = $Now.AddHours(-6)
+    # Pruned here rather than on a timer: this is the only reader, so the list
+    # cannot grow unbounded between calls that care about its size.
+    while ($script:OutputMonitorFailureMoments.Count -gt 0 -and $script:OutputMonitorFailureMoments[0] -lt $windowStart) {
+        $script:OutputMonitorFailureMoments.RemoveAt(0)
+    }
+    $recent = $script:OutputMonitorFailureMoments.Count
+    if ($recent -lt $threshold) { return $false }
+    if ($script:OutputMonitorFlapAlertedAt -gt $windowStart) { return $false }
+    $script:OutputMonitorFlapAlertedAt = $Now
+    Write-BridgeLog "Output monitor source is flapping: $recent failed capture(s) in the last six hours, each followed by a success." 'WARN'
+    Add-AuditEntry "⚠️ مصدر البث متذبذب - فشل الالتقاط $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة') خلال ست ساعات"
+    Send-AdminBroadcast -Text "⚠️ مصدر البث يتذبذب: فشل التقاط المخرج $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة') خلال الساعات الست الماضية، وفي كل مرة عاد بعدها.`nالمراقبة تعمل، لكنها لا ترى المخرج جزءًا من الوقت. يستحسن فحص الخادم قبل أن يتوقف كليًا." | Out-Null
+    return $true
+}
+
 function Update-OutputBlackWatchdog {
     <#
         Looks at the actual picture on a timer and reports a black output.
@@ -473,6 +509,15 @@ function Update-OutputBlackWatchdog {
     }
     if (-not $firstPath) {
         $script:OutputMonitorFailureCount++
+        # Recorded on its own clock, because the consecutive counter below is
+        # reset by the very next success and cannot describe a source that
+        # alternates. Thirty-six captures failed over one month here and the
+        # consecutive alert fired only for the one burst that happened to land
+        # back to back; the twelve days of isolated failures that preceded the
+        # source's collapse produced no warning at all, because each one was
+        # followed by a success that zeroed the count.
+        $script:OutputMonitorFailureMoments.Add($now)
+        Test-OutputMonitorFlapping -Now $now | Out-Null
         $failureThreshold = [math]::Max(1, (Get-SettingInt 'OutputMonitorFailureAlertThreshold' 2))
         $backup = Get-BackupLiveStreamConfig
         # A configured standby is actionable immediately. Waiting for the

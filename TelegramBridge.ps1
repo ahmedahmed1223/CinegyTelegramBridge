@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     TelegramBridge.ps1
 
@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.50.0'
+$script:BridgeVersion = '8.51.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -331,6 +331,7 @@ $script:DefaultSettings = [ordered]@{
     MaterialEndAlertMinutes    = 0       # warn this many minutes before the active material ends (0 disables)
     EnableEngineHealth         = $false  # engine-health screen from /metrics; measures the box, off unless asked
     OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
+    OutputMonitorFlapAlertCount = 4      # failed captures within six hours before reporting a flapping source (0 disables)
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
     OutputBlackConfirmSeconds  = 5       # wait this long before the confirming second capture
     NotifyOperatorsOnBlackOutput = $false # admins always hear; operators only if this is on
@@ -447,6 +448,7 @@ $script:SettingDisplayMetadata = @{
     MaterialEndAlertMinutes = @{ Unit = 'دقيقة'; Description = 'التنبيه قبل نهاية المادة الجارية بهذه الدقائق لتجهيز غرافيك الختام (0 للتعطيل)' }
     EnableEngineHealth = @{ Unit = ''; Description = 'شاشة صحة المحرك من عدادات Cinegy (إطارات مسقطة وترخيص) — معطلة افتراضيًا ويفعّلها المشرف' }
     OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
+    OutputMonitorFlapAlertCount = @{ Unit = 'مرة'; Description = 'عدد مرات فشل الالتقاط خلال ست ساعات قبل الإبلاغ عن مصدر متذبذب (0 للتعطيل)' }
     OutputBlackLuminance = @{ Unit = 'سطوع'; Description = 'حد السطوع الذي يُعتبر تحته المخرج أسود' }
     OutputBlackConfirmSeconds = @{ Unit = 'ثانية'; Description = 'الانتظار قبل اللقطة المؤكِّدة الثانية' }
     NotifyOperatorsOnBlackOutput = @{ Unit = ''; Description = 'إشعار المشغّلين أيضًا عند تأكيد الشاشة السوداء' }
@@ -1014,6 +1016,13 @@ $script:OutputMonitorFirstLuma = 0.0
 $script:OutputMonitorFailureCount = 0
 $script:OutputMonitorFailureAlerted = $false
 $script:OutputMonitorFallbackActive = $false
+# Capture failures with their moments, kept across the successes that reset the
+# consecutive counter. A source that fails every other capture is half blind and
+# never reaches a consecutive threshold - which is exactly what the station's
+# stream did for twelve days before it degraded to hourly failures, with no
+# warning at any point because every failure was followed by a success.
+$script:OutputMonitorFailureMoments = [System.Collections.Generic.List[datetime]]::new()
+$script:OutputMonitorFlapAlertedAt = [datetime]::MinValue
 # Last ffmpeg stderr detail from any capture attempt (monitor or snapshot).
 # Powers the server link of Get-OutputFailureDiagnosis: without it the bridge
 # could name the channel, the relay and the configured source, but not the
@@ -1351,7 +1360,7 @@ foreach ($entry in @(
                 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds',
                 'NewsSheetNotifyScope', 'NewsSheetFailureAlertAfter', 'TemplateReminderFollowUpMinutes',
                 'StaleOnAirAlertHours', 'HealthFailureAlertThreshold',
-                'OutputMonitorFailureAlertThreshold', 'MissedEventsHours',
+                'OutputMonitorFailureAlertThreshold', 'OutputMonitorFlapAlertCount', 'MissedEventsHours',
                 'StartupStormThreshold',
                 'HeartbeatEnabled', 'HeartbeatHour',
                 'UsageDigestEnabled', 'UsageDigestDayOfWeek'
@@ -1535,6 +1544,7 @@ $script:SettingNavigationLabels = @{
     OutputBlackConfirmSeconds = 'انتظار اللقطة المؤكِّدة'
     OutputBlackLuminance = 'حد سطوع السواد'
     OutputMonitorFailureAlertThreshold = 'حد تنبيه فشل الالتقاط'
+    OutputMonitorFlapAlertCount = 'حد تنبيه تذبذب المصدر'
     OutputMonitorMinutes = 'فاصل مراقبة المخرج'
     EnableTextChecks = 'التنبيهات الإملائية'
     EnableMaterialSchedule = 'شاشة جدول المواد'

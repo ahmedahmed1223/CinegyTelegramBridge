@@ -149,7 +149,22 @@ function ConvertTo-ValidInlineKeyboard {
         foreach ($item in @($row)) {
             if (Test-TelegramButtonObject -Value $item) { continue }
             $what = if ($null -eq $item) { 'null' } else { $item.GetType().Name }
-            $notes.Add("row $index held $what where a button belongs")
+            # What was NESTED, not just that something was. "row 0 held Object[]"
+            # appeared thirteen times over a month and named no screen: every
+            # keyboard builder can produce an Object[], so the note narrowed
+            # nothing and the fault survived a full re-read of the SHOW path.
+            # The callback_data inside identifies the screen on the first
+            # occurrence, because no two screens share a prefix.
+            $inner = ''
+            if ($null -ne $item -and $item -isnot [System.Collections.IDictionary]) {
+                $datas = @(@($item) | ForEach-Object {
+                        if ($_ -is [System.Collections.IDictionary] -and $_.Contains('callback_data')) { [string]$_['callback_data'] }
+                        elseif ($null -eq $_) { '<null>' }
+                        else { "<$($_.GetType().Name)>" }
+                    } | Select-Object -First 4)
+                if ($datas.Count -gt 0) { $inner = " containing [$($datas -join ', ')]" }
+            }
+            $notes.Add("row $index held $what where a button belongs$inner")
             break
         }
         if ($cells.Count -eq 0) { $notes.Add("row $index had no buttons at all and was dropped") }
@@ -162,10 +177,16 @@ function ConvertTo-ValidInlineKeyboard {
         # frame reported is the screen that built the keyboard.
         $plumbing = @('ConvertTo-ValidInlineKeyboard', 'ConvertTo-TelegramReplyMarkupJson', 'ConvertTo-OneHandLayout',
             'Send-TelegramMessage', 'Send-TelegramPagedText', 'Edit-TelegramMessageText', 'Send-TelegramPhoto', 'Send-TelegramDocument')
-        $caller = @(Get-PSCallStack | Select-Object -Skip 1 |
+        # The chain, not the first frame. The keyboard BUILDER has already
+        # returned by the time its rows are sent, so the nearest frame is only
+        # ever the screen that sent it - which is how thirteen warnings all said
+        # "from Invoke-ShowTemplateResult" while the malformed row was built
+        # somewhere that function merely called and never appeared in the note.
+        # Four frames reach past the sender to whatever assembled the screen.
+        $chain = @(Get-PSCallStack | Select-Object -Skip 1 |
                 Where-Object { $_.Command -and $_.Command -notin $plumbing -and $_.Command -notlike '*.ps1' } |
-                Select-Object -First 1).Command
-        if (-not $caller) { $caller = 'unknown' }
+                Select-Object -First 4 | ForEach-Object { $_.Command })
+        $caller = if ($chain.Count -gt 0) { $chain -join ' <- ' } else { 'unknown' }
         Write-BridgeLog "Repaired $($notes.Count) malformed inline keyboard row(s) from $caller before sending ($($notes -join '; ')); a row must be an array of button objects (see the @() flattening trap in AGENTS.md)." 'WARN'
     }
     return , $fixed
@@ -1585,10 +1606,25 @@ function Import-UserProfiles {
     try {
         $raw = Get-Content -LiteralPath $script:userProfilesFile -Raw | ConvertFrom-Json
         foreach ($prop in $raw.PSObject.Properties) {
-            $script:UserProfiles[$prop.Name] = @{
-                AddedAt = [string](Get-JsonProp $prop.Value 'AddedAt'); AddedByUserId = [long](Get-JsonProp $prop.Value 'AddedByUserId')
-                LastActivityAt = [string](Get-JsonProp $prop.Value 'LastActivityAt')
-            }
+            # Every stored field is carried, not a chosen three. The reader used
+            # to whitelist AddedAt/AddedByUserId/LastActivityAt while Save-UserProfiles
+            # serialised the whole map - so MutedAirNotices and RequestedAt were
+            # written, saved, and then silently dropped on the next start. An
+            # operator who muted air notices was un-muted by any restart, the
+            # mute screen still showed them as muted, and the first
+            # Update-UserLastActivity wrote the truncated map back over the file.
+            # The .bak is a copy of that same truncated content, so nothing could
+            # recover it. AGENTS.md says the mute is kept in the user's file and
+            # survives; this is what makes that true.
+            $entry = @{}
+            foreach ($field in $prop.Value.PSObject.Properties) { $entry[$field.Name] = $field.Value }
+            # The three the bridge reads with a type still get their type, so a
+            # value that came back from JSON as something else cannot surprise a
+            # caller that assumes [long] or [string].
+            $entry['AddedAt'] = [string](Get-JsonProp $prop.Value 'AddedAt')
+            $entry['AddedByUserId'] = [long](Get-JsonProp $prop.Value 'AddedByUserId')
+            $entry['LastActivityAt'] = [string](Get-JsonProp $prop.Value 'LastActivityAt')
+            $script:UserProfiles[$prop.Name] = $entry
         }
     }
     catch { Write-BridgeLog "Could not read user-profiles.json: $($_.Exception.Message)" 'WARN' }

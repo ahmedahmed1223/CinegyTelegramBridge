@@ -13,6 +13,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.51.0
+
+**Monitoring that reports degradation, not only collapse — everything here came out of reading a month of `logs/bridge.log`:**
+- The output monitor counted only *consecutive* capture failures, and the next success reset the count. The log shows 36 failed captures over a month, mostly isolated days apart, and the threshold fired only for one back-to-back burst; by the time the source was failing hourly there had still been no early warning. A flapping source is now reported once per six-hour window, via the new `OutputMonitorFlapAlertCount` setting.
+- `Stop-MojazPlayback` discarded `Invoke-ExitLayer`'s result and deleted its state file before the attempt, so an unreachable Cinegy left a scene looping for ever while the bridge recorded `completed` and told the operator it had left air. It now freezes the run, keeps it stoppable, and announces only a confirmed ending.
+- The promise to restore the news ticker is persisted, so a restart mid-bulletin no longer leaves a permanent graphic off air with nothing to return it.
+- Two time-sensitive engines were registered in the tick but missing from `Get-EffectivePollTimeout`, delaying the ticker's return and scheduled bulletins by up to 15 and 50 seconds.
+- `Import-UserProfiles` read three fields while the writer serialised the whole map, silently destroying `MutedAirNotices` and `RequestedAt` on every restart.
+- The inline-keyboard repair guard now logs the call chain and the `callback_data` nested inside the malformed row. It has fired 13 times in production naming only the sender, which is never the builder — the defect is not fixed, but what prevented finding it is.
+
 ## Version 8.50.0
 
 **One guard at the shared door, instead of four copies at the mouths:**

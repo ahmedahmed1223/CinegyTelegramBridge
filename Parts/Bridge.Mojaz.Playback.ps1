@@ -172,21 +172,65 @@ function Write-MojazRunEnd {
         -DurationMs $ranMs -Values $(if ([string](Get-JsonProp $Playback 'ScheduleId')) { 'scheduled' } else { 'manual' })
 }
 
+function Set-MojazPlaybackStopFailed {
+    <#
+        Freezes a bulletin whose exit could not be confirmed, and keeps it
+        stoppable.
+
+        The same shape as Set-UrgentRunStopFailed, and for the same reason: a
+        false answer, a thrown one, and a vanished template all leave the
+        scene's state unknown, so the engine may not write again - but erasing
+        the run would strand the bulletin on air with no engine and no retry.
+
+        This is what the code used to do. Invoke-ExitLayer's result went to
+        Out-Null and the state file was deleted BEFORE the attempt, so an
+        unreachable Cinegy left the scene looping its last headline for ever,
+        unrecoverable even by restarting the bridge, while the schedule record
+        said `completed` and the operator was told it had left air. One second
+        later the news strip came back on top of it - the overlap the whole
+        stand-down exists to prevent.
+    #>
+    param([Parameter(Mandatory)]$Playback, [long]$ChatId = 0)
+    $Playback.StopFailed = $true
+    if ($Playback.Clock) { $Playback.Clock.Stop() }
+    $script:MojazPlayback = $Playback
+    Save-MojazPlaybackState | Out-Null
+    Write-BridgeLog "Bulletin exit could not be confirmed; the run is frozen and still stoppable." 'WARN'
+    if ($ChatId -gt 0) {
+        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر تأكيد خروج الموجز. جُمّد التشغيل؛ أعد محاولة الإيقاف وتحقّق من الطبقة.'
+    }
+    return $false
+}
+
 function Stop-MojazPlayback {
     <# Ends the bulletin the way it ends itself: EXIT, so the scene plays its
-       outro instead of being cut. #>
+       outro instead of being cut.
+
+       Returns $false without settling the run when the exit is not confirmed -
+       see Set-MojazPlaybackStopFailed. Callers that announce an ending must
+       check the answer before announcing it. #>
     param([long]$ChatId = 0, [long]$UserId = 0, [switch]$Quiet)
     if (-not $script:MojazPlayback) { return $false }
     $playback = $script:MojazPlayback
+    # Detach only in memory, so the exit below cannot recurse back into here
+    # through Stop-MojazForLayer. The durable snapshot stays on disk until the
+    # exit has actually succeeded, which is what makes recovery possible.
     $script:MojazPlayback = $null
-    Clear-MojazPlaybackState
     $template = Get-MojazTemplate
     if ($template) {
         $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$playback.ChatId }
         $user = if ($UserId -gt 0) { $UserId } else { [long]$playback.UserId }
-        # -System: bulletin teardown, not an operator asking to leave.
-        Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user -System | Out-Null
+        $exited = $false
+        try {
+            # -System: bulletin teardown, not an operator asking to leave.
+            $exited = Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user -System
+        }
+        catch {
+            Write-BridgeLog "Bulletin exit attempt failed: $($_.Exception.Message)" 'WARN'
+        }
+        if (-not $exited) { return (Set-MojazPlaybackStopFailed -Playback $playback -ChatId $chat) }
     }
+    Clear-MojazPlaybackState
     Write-MojazRunEnd -Playback $playback -UserId $UserId -ChatId $ChatId
     if ([string]$playback.ScheduleId) {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
@@ -559,6 +603,19 @@ function Save-MojazPlaybackState {
             UserId = [long]$playback.UserId
             ExitAtSeconds = [double]$playback.ExitAtSeconds
             SyncToLoop = [bool]$playback.SyncToLoop
+            # A run whose exit could not be confirmed is frozen, not finished.
+            # The flag has to outlive the process with the run it describes, or
+            # a restart would pick the bulletin back up and start writing rows
+            # into a scene whose state nobody established.
+            StopFailed = [bool](Get-JsonProp $playback 'StopFailed')
+            # The promise to put the news strip back. It lived only in memory,
+            # so a restart mid-bulletin lost it: the bulletin resumed correctly
+            # and ended correctly, then Request-MojazTickerReturn found nothing
+            # to arm - and the strip, a permanent graphic, stayed off air with
+            # nothing left that would ever return it. The bridge believed it had
+            # ended the bulletin cleanly and said so.
+            TickerReturnChatId = [long]$(if ($script:MojazTickerReturn) { Get-JsonProp $script:MojazTickerReturn 'ChatId' } else { 0 })
+            TickerReturnUserId = [long]$(if ($script:MojazTickerReturn) { Get-JsonProp $script:MojazTickerReturn 'UserId' } else { 0 })
             Rows = @($playback.Rows)
             Plan = @($playback.Plan)
         }
@@ -596,6 +653,18 @@ function Restore-MojazPlayback {
         return $false
     }
     Clear-MojazPlaybackState
+    # Rearmed before any of the three endings below, because two of them end
+    # the bulletin and both must be able to put the news strip back. Without
+    # this the promise died with the process: the bulletin resumed correctly,
+    # ended correctly, and Request-MojazTickerReturn then found nothing to arm
+    # - leaving a permanent graphic off air with nothing that would ever
+    # return it, while the bridge reported a clean ending.
+    $tickerChat = [long](Get-JsonProp $state 'TickerReturnChatId')
+    if ($tickerChat -gt 0) {
+        $script:MojazTickerReturn = @{
+            At = $null; ChatId = $tickerChat; UserId = [long](Get-JsonProp $state 'TickerReturnUserId')
+        }
+    }
     $startedAt = [datetime]::MinValue
     if (-not [datetime]::TryParse([string](Get-JsonProp $state 'StartedAt'), [ref]$startedAt)) { return $false }
     $template = Get-MojazTemplate
@@ -665,6 +734,10 @@ function Restore-MojazPlayback {
         TemplateImage = [string](Get-JsonProp $state 'TemplateImage')
         ActiveId = [string](Get-JsonProp $state 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $state 'ActiveIdConfirmed')
+        # Carried across the restart with the run it describes: a bulletin
+        # frozen by an unconfirmed exit must not start writing rows again just
+        # because the process came back.
+        StopFailed = [bool](Get-JsonProp $state 'StopFailed')
     }
     $currentValues = Get-MojazRowVariables -Row $script:MojazPlayback.Rows[$index] `
         -TemplateImage ([string]$script:MojazPlayback.TemplateImage)
@@ -696,6 +769,10 @@ function Update-MojazPlayback {
         row, which is the price of landing inside the window.
     #>
     if (-not $script:MojazPlayback) { return }
+    # A run whose exit was never confirmed may not write again: the scene's
+    # state is unknown, and writing into it would be guessing. It stays here so
+    # its stop button still works and a restart still finds it.
+    if ([bool](Get-JsonProp $script:MojazPlayback 'StopFailed')) { return }
     $rows = @($script:MojazPlayback.Rows)
     $index = [int]$script:MojazPlayback.Index
     $isLast = ($index -ge ($rows.Count - 1))
@@ -710,14 +787,20 @@ function Update-MojazPlayback {
     }
     if ($isLast) {
         Write-BridgeLog "Mojaz playback finished after $($rows.Count) row(s)"
+        # Read before the stop, which clears the state it lives in.
+        $finishedName = [string]$script:MojazPlayback.BulletinName
+        $finishedChat = [long]$script:MojazPlayback.ChatId
+        # Announced AFTER the stop and only if the stop succeeded. It used to be
+        # sent first, so a failed exit told the operator "خرج عن الهواء" about a
+        # scene still looping on air - the bridge's own message arguing against
+        # the screen. Set-MojazPlaybackStopFailed sends its own warning instead.
+        $stopped = Stop-MojazPlayback -Quiet
         # Every other way a bulletin ends says so already - a button press, an
         # urgent taking over, a failed row. This is the one that finishes on
         # its own minutes after the operator stopped watching.
-        if (Get-Setting 'MojazNotifyOnFinish') {
-            $finishedName = [string]$script:MojazPlayback.BulletinName
-            Send-TelegramMessage -ChatId ([long]$script:MojazPlayback.ChatId) -Text "⏹ انتهى «$finishedName» وخرج عن الهواء."
+        if ($stopped -and (Get-Setting 'MojazNotifyOnFinish')) {
+            Send-TelegramMessage -ChatId $finishedChat -Text "⏹ انتهى «$finishedName» وخرج عن الهواء."
         }
-        Stop-MojazPlayback -Quiet | Out-Null
         return
     }
     $index++

@@ -2358,7 +2358,16 @@ function Test-AirRunActive {
         a copy that will be updated when a third engine arrives, or will not.
     #>
     if ($script:MojazPlayback) { return $true }
-    return ($null -ne $script:UrgentBoardRun)
+    if ($null -ne $script:UrgentBoardRun) { return $true }
+    # The third engine, and the one that proved the warning above right: the
+    # news strip's return is booked for a moment about a second after the
+    # bulletin ends, and nothing was shortening the poll for it. The strip came
+    # back up to a full poll interval late - fifteen seconds of bare screen on
+    # the exact cut where a bulletin hands back to programming.
+    #
+    # Self-limiting: Request-MojazTickerReturn sets .At, and the tick clears
+    # $script:MojazTickerReturn the moment the strip is back.
+    return ($null -ne $script:MojazTickerReturn -and $null -ne $script:MojazTickerReturn.At)
 }
 
 function Get-EffectivePollTimeout {
@@ -2383,6 +2392,23 @@ function Get-EffectivePollTimeout {
     if ($upcoming.Count -gt 0) {
         $secondsToEvent = [int][Math]::Ceiling((([datetimeoffset]$upcoming[0].ScheduledAt) - [datetimeoffset]::Now).TotalSeconds)
         $base = [Math]::Min($base, [Math]::Max(1, $secondsToEvent))
+    }
+    # The bulletin scheduler, for the same reason and in the same shape. Its
+    # step was registered in Invoke-BridgeTick and this line was forgotten, so
+    # a bulletin booked for 20:00:00 went to air when the next poll happened to
+    # return - thirteen seconds into its slot on the default timeout, and up to
+    # fifty with CinegyStateCheckSeconds at its maximum. Every test passed:
+    # the arithmetic was right and only the moment it ran was wrong.
+    #
+    # The same status filter Get-MojazDueQueue uses, so "due soon" and "due"
+    # cannot disagree about which appointments count.
+    $mojazPending = @($script:MojazSchedules | Where-Object {
+            [string](Get-JsonProp $_ 'Status') -in @('scheduled', 'queued')
+        })
+    if ($mojazPending.Count -gt 0) {
+        $soonest = ($mojazPending | ForEach-Object { [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') } | Sort-Object)[0]
+        $secondsToBulletin = [int][Math]::Ceiling(($soonest - [datetimeoffset]::Now).TotalSeconds)
+        $base = [Math]::Min($base, [Math]::Max(1, $secondsToBulletin))
     }
     if ($script:RelayState.ShouldRun) { return [Math]::Min($base, (Get-SettingInt 'RelayWatchdogSeconds' 5)) }
     # Follows the widened interval while Air is unreachable, so a dead engine

@@ -2322,3 +2322,116 @@ Describe 'A replacing SHOW takes the layer from the engine walking it' {
         Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
     }
 }
+
+Describe 'A bulletin whose exit was never confirmed is frozen, not finished' {
+    <#
+        Stop-MojazPlayback sent its EXIT to Out-Null and deleted the state file
+        BEFORE the attempt. So an unreachable Cinegy left the scene looping its
+        last headline for ever - no engine behind it, no retry, and no file for
+        a restart to recover from. The schedule said `completed`, the operator
+        was told "خرج عن الهواء", and a second later the news strip came back on
+        top of the frozen bulletin: the overlap the stand-down exists to avoid.
+
+        The urgent board had solved this already (Set-UrgentRunStopFailed); the
+        bulletin is the sibling that never got the fix.
+    #>
+    BeforeEach {
+        $script:MojazPlayback = $null
+        $script:MojazTickerReturn = $null
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Write-MojazRunEnd { }
+        Mock Request-MojazTickerReturn { $false }
+        Mock Show-MojazScreen { }
+        Mock Update-MojazPendingUrgent { $true }
+        Mock Write-BridgeValidatedJson { $true }
+        Mock Get-MojazTemplate { @{ Key = 'Mojaz'; Path = 'C:\mojaz.cintitle'; Layer = 5 } }
+        Mock Clear-MojazPlaybackState { $script:ClearedState = $true }
+        $script:ClearedState = $false
+    }
+    AfterEach { $script:MojazPlayback = $null; $script:MojazTickerReturn = $null }
+
+    It 'keeps the run and its state file when the exit is refused' {
+        Mock Invoke-ExitLayer { $false }
+        $script:MojazPlayback = @{ Index = 2; Rows = @(); Plan = @(); ExitAtSeconds = 60; ChatId = 100; UserId = 101; ScheduleId = ''; Clock = [System.Diagnostics.Stopwatch]::StartNew() }
+
+        Stop-MojazPlayback -Quiet | Should -BeFalse
+
+        # Erasing the run would strand the bulletin on air with nothing to retry.
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+        [bool]$script:MojazPlayback.StopFailed | Should -BeTrue
+        $script:ClearedState | Should -BeFalse
+    }
+
+    It 'does not recall the news strip over a scene that never left' {
+        Mock Invoke-ExitLayer { $false }
+        $script:MojazPlayback = @{ Index = 2; Rows = @(); Plan = @(); ExitAtSeconds = 60; ChatId = 100; UserId = 101; ScheduleId = ''; Clock = [System.Diagnostics.Stopwatch]::StartNew() }
+
+        Stop-MojazPlayback -Quiet | Out-Null
+
+        Should -Invoke Request-MojazTickerReturn -Times 0 -Exactly
+    }
+
+    It 'writes no completed schedule record for a run that did not end' {
+        Mock Invoke-ExitLayer { $false }
+        Mock Set-MojazScheduleStatus { $true }
+        $script:MojazPlayback = @{ Index = 2; Rows = @(); Plan = @(); ExitAtSeconds = 60; ChatId = 100; UserId = 101; ScheduleId = 'sched-1'; Clock = [System.Diagnostics.Stopwatch]::StartNew() }
+
+        Stop-MojazPlayback -Quiet | Out-Null
+
+        Should -Invoke Set-MojazScheduleStatus -Times 0 -Exactly
+    }
+
+    It 'stops writing rows into a scene whose state nobody established' {
+        # The frozen run stays in memory so its stop button still works, but the
+        # engine may not guess at the scene by writing to it.
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        $script:MojazPlayback = @{
+            Index = 0; Rows = @(1, 2); Plan = @(@{ AtSeconds = 0 }, @{ AtSeconds = 0 })
+            ExitAtSeconds = 0; ChatId = 100; UserId = 101; ScheduleId = ''; StopFailed = $true
+            Clock = [System.Diagnostics.Stopwatch]::StartNew(); ClockOffset = 999
+        }
+
+        Update-MojazPlayback
+
+        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+    }
+
+    It 'settles the run normally when the exit is confirmed' {
+        Mock Invoke-ExitLayer { $true }
+        $script:MojazPlayback = @{ Index = 2; Rows = @(); Plan = @(); ExitAtSeconds = 60; ChatId = 100; UserId = 101; ScheduleId = ''; Clock = [System.Diagnostics.Stopwatch]::StartNew() }
+
+        Stop-MojazPlayback -Quiet | Should -BeTrue
+
+        $script:MojazPlayback | Should -BeNullOrEmpty
+        $script:ClearedState | Should -BeTrue
+        Should -Invoke Request-MojazTickerReturn -Times 1 -Exactly
+    }
+}
+
+Describe 'The promise to put the news strip back survives a restart' {
+    <#
+        Hide-MojazTicker recorded the promise in memory only. A restart during a
+        bulletin resumed the run correctly and ended it correctly - and then
+        Request-MojazTickerReturn found nothing to arm, so the strip, a
+        permanent graphic the channel carries all day, stayed off air with
+        nothing that would ever return it. The bridge reported a clean ending.
+    #>
+    It 'writes the ticker-return promise into the run state' {
+        $script:MojazTickerReturn = @{ At = $null; ChatId = 100; UserId = 101 }
+        $script:MojazPlayback = @{
+            StartedAt = (Get-Date).ToString('o'); BulletinId = 'b1'; BulletinName = 'n'
+            ChatId = 100; UserId = 101; ExitAtSeconds = 60; SyncToLoop = $false
+            Rows = @(); Plan = @()
+        }
+        $captured = ''
+        Mock Write-BridgeValidatedJson { $script:CapturedJson = $Json; $true }
+        try {
+            Save-MojazPlaybackState | Out-Null
+            $captured = $script:CapturedJson
+        }
+        finally { $script:MojazPlayback = $null; $script:MojazTickerReturn = $null }
+
+        ($captured | ConvertFrom-Json).TickerReturnChatId | Should -Be 100
+    }
+}

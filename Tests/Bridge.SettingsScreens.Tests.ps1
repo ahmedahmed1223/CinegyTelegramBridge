@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.SettingsScreens.Tests.ps1 - Settings screens, backups, presets, and import/export.
 
@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.50.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.50.0'
+        $script:BridgeVersion | Should -Be '8.51.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.51.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

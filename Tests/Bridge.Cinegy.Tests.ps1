@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Cinegy.Tests.ps1 - Cinegy transport, telemetry, and watchdogs.
 
@@ -715,6 +715,10 @@ Describe 'Black output watchdog' {
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'OutputBlackConfirmSeconds' }
         Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+        # The flap window is a separate question with its own tests; these cover
+        # the consecutive path, so it is switched off rather than left to a
+        # mock that would have to be kept in step with it.
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
         # The failure notice now names which link looks broken, and that check
         # reads a timeout of its own.
         Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'CinegyMonitorTimeoutSeconds' }
@@ -841,6 +845,10 @@ Describe 'Black output watchdog' {
         # a stopped source must produce one actionable administrator alert.
         Mock Get-MonitorFrame { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+        # The flap window is a separate question with its own tests; these cover
+        # the consecutive path, so it is switched off rather than left to a
+        # mock that would have to be kept in step with it.
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
         Update-OutputBlackWatchdog
         $script:LastOutputMonitorAt = [datetime]::MinValue
@@ -854,6 +862,10 @@ Describe 'Black output watchdog' {
         $config.LiveStream.BackupSourceUrl = ''
         Mock Get-MonitorFrame { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+        # The flap window is a separate question with its own tests; these cover
+        # the consecutive path, so it is switched off rather than left to a
+        # mock that would have to be kept in step with it.
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
         Update-OutputBlackWatchdog
         $script:LastOutputMonitorAt = [datetime]::MinValue
@@ -882,6 +894,10 @@ Describe 'Black output watchdog' {
         # primary source, so this must fail when that state transition is lost.
         Mock Get-MonitorFrame { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
+        # The flap window is a separate question with its own tests; these cover
+        # the consecutive path, so it is switched off rather than left to a
+        # mock that would have to be kept in step with it.
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
         Update-OutputBlackWatchdog
         $script:LastOutputMonitorAt = [datetime]::MinValue

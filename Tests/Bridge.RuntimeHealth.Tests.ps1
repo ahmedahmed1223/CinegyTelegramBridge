@@ -510,3 +510,67 @@ Describe 'Naming the gap between installed Cinegy and the reference docs' {
         Get-CinegyVersionAwarenessNote -LayerStatuses @() | Should -BeNullOrEmpty
     }
 }
+
+Describe 'A broadcast source that keeps failing and recovering is reported' {
+    <#
+        The consecutive-failure counter answers "is the source down now". It
+        cannot answer "is the source dying", because the next success resets
+        it. The station's stream proved the gap: isolated capture failures on
+        eight separate days through September, each followed by a success, so
+        the consecutive alert never fired - and the first thing anybody could
+        have acted on was the evening it began failing hourly.
+    #>
+    BeforeEach {
+        $script:OutputMonitorFailureMoments = [System.Collections.Generic.List[datetime]]::new()
+        $script:OutputMonitorFlapAlertedAt = [datetime]::MinValue
+        $config.Settings | Add-Member -NotePropertyName 'OutputMonitorFlapAlertCount' -NotePropertyValue 4 -Force
+        Mock Send-AdminBroadcast { $true }
+        Mock Add-AuditEntry {}
+    }
+
+    It 'says nothing while failures stay below the window threshold' {
+        $now = Get-Date
+        foreach ($back in @(1, 2, 3)) { $script:OutputMonitorFailureMoments.Add($now.AddHours(-$back)) }
+
+        Test-OutputMonitorFlapping -Now $now | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
+    }
+
+    It 'reports a source that failed four times in six hours despite recovering each time' {
+        # The broken shape: every one of these was followed by a success, so
+        # the consecutive counter was zero at every single moment.
+        $now = Get-Date
+        foreach ($back in @(1, 2, 4, 5)) { $script:OutputMonitorFailureMoments.Add($now.AddHours(-$back)) }
+
+        Test-OutputMonitorFlapping -Now $now | Should -BeTrue
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'forgets failures that fall out of the six-hour window' {
+        $now = Get-Date
+        foreach ($back in @(7, 8, 9, 10)) { $script:OutputMonitorFailureMoments.Add($now.AddHours(-$back)) }
+
+        Test-OutputMonitorFlapping -Now $now | Should -BeFalse
+        $script:OutputMonitorFailureMoments.Count | Should -Be 0
+    }
+
+    It 'reports once per window rather than on every further failure' {
+        # A warning repeated about a source that is still half working is how a
+        # gallery learns to ignore warnings.
+        $now = Get-Date
+        foreach ($back in @(1, 2, 4, 5)) { $script:OutputMonitorFailureMoments.Add($now.AddHours(-$back)) }
+        Test-OutputMonitorFlapping -Now $now | Should -BeTrue
+
+        $script:OutputMonitorFailureMoments.Add($now)
+        Test-OutputMonitorFlapping -Now $now | Should -BeFalse
+        Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
+    }
+
+    It 'is off entirely when the count is zero' {
+        $config.Settings | Add-Member -NotePropertyName 'OutputMonitorFlapAlertCount' -NotePropertyValue 0 -Force
+        $now = Get-Date
+        foreach ($back in @(1, 2, 3, 4, 5)) { $script:OutputMonitorFailureMoments.Add($now.AddHours(-$back)) }
+
+        Test-OutputMonitorFlapping -Now $now | Should -BeFalse
+    }
+}

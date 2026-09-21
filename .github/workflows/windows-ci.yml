@@ -28,9 +28,29 @@ jobs:
       - name: Install analysis and test modules
         shell: pwsh
         run: |
-          Set-PSRepository PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
-          Install-Module Pester -MinimumVersion 5.0 -MaximumVersion 5.9.9 -Scope CurrentUser -Force -SkipPublisherCheck
+          $ErrorActionPreference = 'Stop'
+          # The runner image decides which package system is present, and it
+          # changed underneath this workflow: newer Windows images ship
+          # PSResourceGet, and PowerShellGet v2's repository list can come up
+          # empty - so "Set-PSRepository PSGallery" died with "No repository
+          # with the name 'PSGallery' was found" before a single test ran.
+          # Whichever is there is used, and PSGallery is registered rather than
+          # assumed.
+          if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+            Install-PSResource PSScriptAnalyzer -Scope CurrentUser -TrustRepository
+            Install-PSResource Pester -Version '[5.0,5.9.9]' -Scope CurrentUser -TrustRepository -SkipDependencyCheck
+          }
+          else {
+            if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+            Install-Module Pester -MinimumVersion 5.0 -MaximumVersion 5.9.9 -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+          # Said out loud: a gate that cannot name the versions it ran is a gate
+          # whose failures cannot be reproduced.
+          Get-Module -ListAvailable Pester, PSScriptAnalyzer |
+            Sort-Object Name, Version |
+            ForEach-Object { "installed: $($_.Name) $($_.Version)" }
       - name: Run parser, analyzer, and tests
         shell: pwsh
         run: .\Run-Checks.ps1 -TestResultPath .\artifacts\pester-results.xml

@@ -295,7 +295,8 @@ function Stop-UrgentBoardRun {
         try {
             $template = Get-UrgentTemplate
             if ($template) {
-                $exited = Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user
+                # -System: board teardown, not an operator asking to leave.
+                $exited = Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user -System
             }
         }
         catch {

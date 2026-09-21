@@ -683,6 +683,29 @@ function Invoke-ShowTemplateResult {
         # be stopped by the command that starts it.
         Stop-UrgentBoardForManualUrgent -ChatId $ChatId -UserId $UserId | Out-Null
     }
+    else {
+        # Any OTHER template claiming this layer takes it from whatever engine
+        # was walking it. Hide and exit have called these two since they were
+        # written; SHOW never did - so a replacing graphic left the bulletin
+        # engine running. It kept writing rows into a scene it no longer owned
+        # (Send-PostboxValues is channel-wide, it takes no layer at all), and
+        # at its planned end it sent EXIT_SCENE_LOOP to that layer and pulled
+        # the REPLACING graphic off air minutes later, logged against the
+        # bulletin's operator, with nothing on any screen saying why.
+        #
+        # The two helpers' own docstrings list their callers - "the hide
+        # button, an exit, hide-all" - and a replacing SHOW is not among them.
+        # That is the door this closes.
+        #
+        # Both are no-ops when no run owns this layer (they return $false on a
+        # layer mismatch) and both stop without sending an air command of their
+        # own, so the SHOW below is still the only thing here that touches
+        # Cinegy. Kept in the else branch so the urgent key keeps the older,
+        # narrower handling above: its opening SHOW carries the board's own
+        # key, and Stop-UrgentBoardForLayer must never see it.
+        Stop-MojazForLayer -Layer ([int]$template.Layer) | Out-Null
+        Stop-UrgentBoardForLayer -Layer ([int]$template.Layer) | Out-Null
+    }
 
     # A scene that is already loaded on the layer keeps running with the values
     # it was started with, so a second SHOW can leave the PREVIOUS text on air.

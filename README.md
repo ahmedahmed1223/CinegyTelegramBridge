@@ -13,6 +13,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.50.0
+
+**One guard at the shared door, instead of four copies at the mouths:**
+- Per-layer and per-template permission is now checked inside `Invoke-HideLayer` and `Invoke-ExitLayer`, the single door every hide and exit passes through. It previously lived only in the four callback branches, so a typed `/اخفاء 9` reached Cinegy on a layer whose button had just refused it — and the audit recorded that HIDE as a success rather than a refusal. A new `-System` switch exempts the callers that are not a person asking: the auto-hide timer, bulletin and board teardown, and hide-all, whose behaviour is unchanged.
+- A replacing SHOW now stops whichever engine was walking that layer. `Stop-MojazForLayer` and `Stop-UrgentBoardForLayer` were called only from hide and exit, so showing another template on the bulletin's layer left the bulletin engine running: it kept writing rows through the channel-wide postbox into a scene it no longer owned, then sent `EXIT_SCENE_LOOP` to that layer at its planned end and pulled the replacing graphic off air minutes later, logged against the bulletin's operator.
+
 ## Version 8.49.11
 
 **Manual news-publish notifications:**

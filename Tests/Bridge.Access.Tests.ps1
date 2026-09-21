@@ -990,3 +990,89 @@ Describe 'A flow says it is about to end' {
         $script:Answer | Should -Match 'مُدِّدت'
     }
 }
+
+Describe 'The typed command passes the same door as the button' {
+    <#
+        The four button branches in Parts/Bridge.Callbacks.ps1 have always
+        asked Test-TemplateAccess. Invoke-HideLayer and Invoke-ExitLayer never
+        did - so `/اخفاء 9` typed by an operator whose BUTTON had just refused
+        layer 9 reached Cinegy anyway, and the audit recorded that HIDE as a
+        success rather than a refusal. SHOW had asked at its own door since it
+        was written; hide and exit had the guard written four times downstream
+        and zero times at the door they share.
+
+        These drive the typed path, which is the shape that was broken. They
+        assert on Hide-TitlerTemplate / Exit-TitlerScene - the real Cinegy
+        boundary - because "was it refused politely" is not the question. The
+        question is whether anything reached air.
+    #>
+    BeforeEach {
+        foreach ($name in @('AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers')) {
+            $config.Settings | Add-Member -NotePropertyName $name -NotePropertyValue '' -Force
+        }
+        Mock Test-Admin { $false }
+        Mock Test-Owner { $false }
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Sync-LayerAfterOperatorAction { }
+        Mock Remove-OnAirRecord { }
+        Mock Send-TemplateAirNotice { }
+    }
+
+    It 'sends no HIDE to Cinegy when a typed /اخفاء names an owner-only layer' {
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '9' -Force
+
+        Invoke-HideCommand -ArgText '9' -ChatId 100 -UserId 101
+
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'مالك الجسر' }
+    }
+
+    It 'sends no EXIT to Cinegy when a typed /خروج names an owner-only layer' {
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '9' -Force
+
+        Invoke-ExitCommand -ArgText '9' -ChatId 100 -UserId 101 | Out-Null
+
+        Should -Invoke Exit-TitlerScene -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -match 'مالك الجسر' }
+    }
+
+    It 'refuses an admin-only layer to an operator and admits the administrator' {
+        $config.Settings | Add-Member -NotePropertyName 'AdminOnlyLayers' -NotePropertyValue '9' -Force
+
+        Invoke-HideCommand -ArgText '9' -ChatId 100 -UserId 101
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+
+        Mock Test-Admin { $true }
+        Invoke-HideCommand -ArgText '9' -ChatId 100 -UserId 101
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'leaves an unprotected layer alone, so the guard costs the ordinary hide nothing' {
+        Invoke-HideCommand -ArgText '8' -ChatId 100 -UserId 101
+
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'never refuses the auto-hide timer, which is not a person asking' {
+        # -System. A timer armed by an operator who may not hide that layer by
+        # hand must still fire, or the guard strands a graphic on air - a hide
+        # that fails closed is worse than the hole it was written to close.
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '9' -Force
+
+        Invoke-HideLayer -Layer 9 -ChatId 100 -UserId 101 -Quiet -System | Should -BeTrue
+
+        Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly
+    }
+
+    It 'never refuses engine teardown, which is not a person asking either' {
+        $config.Settings | Add-Member -NotePropertyName 'OwnerOnlyLayers' -NotePropertyValue '9' -Force
+
+        Invoke-ExitLayer -Layer 9 -ChatId 100 -UserId 101 -System | Should -BeTrue
+
+        Should -Invoke Exit-TitlerScene -Times 1 -Exactly
+    }
+}

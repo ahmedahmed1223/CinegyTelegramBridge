@@ -447,7 +447,11 @@ function Update-AutoHideQueue {
                 Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text "⚠️ لم يُنفَّذ المؤقت للطبقة $($item.Layer): $($decision.Reason)"
             }
             if ($decision.ShouldHide) {
-                if (-not (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet)) {
+                # -System: the timer is not a person asking. It fires on behalf
+                # of whoever armed it, minutes later, and a per-layer owner rule
+                # must not strand a graphic on air because the operator who set
+                # the timer may not hide that layer by hand.
+                if (-not (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet -System)) {
                     throw 'Hide not confirmed'
                 }
             }

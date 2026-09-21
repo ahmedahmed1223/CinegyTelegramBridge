@@ -2248,3 +2248,77 @@ Describe 'A paged rundown keeps the operators place' {
         Get-MojazRowPage -Rows $script:PagedRows -RowId '' -FallbackIndex 999 | Should -Be 2
     }
 }
+
+Describe 'A replacing SHOW takes the layer from the engine walking it' {
+    <#
+        Stop-MojazForLayer and Stop-UrgentBoardForLayer had exactly two callers
+        in the whole tree - Invoke-HideLayer and Invoke-ExitLayer. Their own
+        docstrings list "the hide button, an exit, hide-all" and a replacing
+        SHOW is not among them, so the SHOW funnel stopped nothing unless the
+        key was the urgent one.
+
+        The cost was not the stale engine itself. The bulletin kept writing
+        rows through the postbox - which is channel-wide and carries no layer -
+        into a scene it no longer owned, and then at its planned end sent
+        EXIT_SCENE_LOOP to that layer and pulled the REPLACING graphic off air
+        minutes later, logged against the bulletin's operator, with nothing on
+        any screen saying why.
+
+        This drives the broken shape: a bulletin on layer 5, then a different
+        template shown on layer 5.
+    #>
+    BeforeEach {
+        $script:MojazPlayback = $null
+        $registry = New-TempTemplateFile -Json @'
+{
+  "Mojaz": { "path": "C:\\mojaz.cintitle", "layer": 5, "order": 1 },
+  "Guest": { "path": "C:\\guest.cintitle", "layer": 5, "order": 2 },
+  "Other": { "path": "C:\\other.cintitle", "layer": 6, "order": 3 }
+}
+'@
+        $script:TestRegistry = $registry
+        Mock Send-TelegramMessage {}
+        Mock Add-AuditEntry {}
+        Mock Test-Admin { $true }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Update-OnAirStateFromCinegy { }
+        Mock Get-CorrelatedLayerSnapshot { $null }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = '{guid}'; Xml = '' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        # The run-end bookkeeping is not what is under test here; Stop-MojazForLayer itself is.
+        Mock Write-MojazRunEnd { }
+        Mock Request-MojazTickerReturn { $false }
+        Mock Send-TemplateAirNotice { }
+    }
+    AfterEach {
+        $script:MojazPlayback = $null
+        if ($script:TestRegistry) { Remove-Item $script:TestRegistry -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'stops the bulletin when another template claims its layer' {
+        $script:MojazPlayback = @{ Index = 0; Plan = @(); ExitAtSeconds = 600; StartedAt = (Get-Date); ChatId = 100; UserId = 101; ScheduleId = '' }
+
+        Invoke-ShowTemplateResult -Key 'Guest' -ChatId 100 -UserId 101 | Out-Null
+
+        # Without the stop, this engine would still be armed - and would send
+        # EXIT_SCENE_LOOP to layer 5 at its planned end, taking 'Guest' off air.
+        $script:MojazPlayback | Should -BeNullOrEmpty
+    }
+
+    It 'leaves a bulletin on another layer running' {
+        # The guard must answer "who owns THIS layer", not "is anything running".
+        $script:MojazPlayback = @{ Index = 0; Plan = @(); ExitAtSeconds = 600; StartedAt = (Get-Date); ChatId = 100; UserId = 101; ScheduleId = '' }
+
+        Invoke-ShowTemplateResult -Key 'Other' -ChatId 100 -UserId 101 | Out-Null
+
+        $script:MojazPlayback | Should -Not -BeNullOrEmpty
+    }
+
+    It 'sends the replacing graphic anyway - the stop is not a refusal' {
+        $script:MojazPlayback = @{ Index = 0; Plan = @(); ExitAtSeconds = 600; StartedAt = (Get-Date); ChatId = 100; UserId = 101; ScheduleId = '' }
+
+        Invoke-ShowTemplateResult -Key 'Guest' -ChatId 100 -UserId 101 | Out-Null
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+    }
+}

@@ -508,7 +508,8 @@ function Invoke-HideLayer {
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
         [switch]$Quiet,
-        [switch]$MaintenanceOverride
+        [switch]$MaintenanceOverride,
+        [switch]$System
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
@@ -517,6 +518,26 @@ function Invoke-HideLayer {
     $outgoing = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $outgoingKey = if ($outgoing) { [string](Get-JsonProp $outgoing 'Key') } else { '' }
     $outgoingCopy = if ($outgoing) { [string](Get-JsonProp $outgoing 'AirCopy') } else { '' }
+    # The same question the buttons ask, asked once at the door they all pass
+    # through. It lived only in the four callback branches
+    # (Parts/Bridge.Callbacks.ps1) and never here, so `/اخفاء 9` typed by an
+    # operator the BUTTON had just refused reached Cinegy anyway - and the
+    # audit recorded that HIDE as a success, not as a refusal. SHOW has always
+    # asked at its own door (Invoke-ShowTemplateResult); hide and exit did not.
+    #
+    # -System is for the callers that are not a person asking: the auto-hide
+    # timer, bulletin and board teardown, and hide-all. They must not be
+    # refused by a per-layer rule aimed at operators.
+    if (-not $System) {
+        $access = Test-TemplateAccess -Key $outgoingKey -Layer $Layer -ChatId $ChatId -UserId $UserId
+        if (-not $access.Allowed) {
+            if (-not $Quiet) {
+                Send-TelegramMessage -ChatId $ChatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            }
+            Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$access.Reason)
+            return $false
+        }
+    }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
@@ -577,7 +598,7 @@ function Invoke-HideLayer {
 }
 
 function Invoke-ExitLayer {
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$System)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
@@ -585,6 +606,17 @@ function Invoke-ExitLayer {
     $outgoing = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $outgoingKey = if ($outgoing) { [string](Get-JsonProp $outgoing 'Key') } else { '' }
     $outgoingCopy = if ($outgoing) { [string](Get-JsonProp $outgoing 'AirCopy') } else { '' }
+    # The same door, the same question - see Invoke-HideLayer above. EXIT was
+    # the other half of the hole: `/خروج 9` left an owner-only scene the same
+    # way `/اخفاء 9` did.
+    if (-not $System) {
+        $access = Test-TemplateAccess -Key $outgoingKey -Layer $Layer -ChatId $ChatId -UserId $UserId
+        if (-not $access.Allowed) {
+            Send-TelegramMessage -ChatId $ChatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$access.Reason)
+            return $false
+        }
+    }
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
@@ -731,7 +763,12 @@ function Invoke-HideAllLayers {
     }
     $ok = @(); $failed = @()
     foreach ($l in $layers) {
-        if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
+        # -System keeps the emergency button behaving exactly as it always has:
+        # it clears the layers the administrator selected, without asking the
+        # per-layer owner/admin question of each one. Whether the emergency
+        # control SHOULD honour that question is a policy decision, not a bug
+        # fix - if it should, drop -System here and nothing else changes.
+        if (Invoke-HideLayer -Layer $l -ChatId $ChatId -UserId $UserId -Quiet -System -MaintenanceOverride:$maintenanceOverride) { $ok += $l } else { $failed += $l }
     }
     $script:AutoHideQueue.Clear()
     $actor = Format-UserAuditActor -UserId $UserId

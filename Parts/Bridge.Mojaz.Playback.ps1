@@ -184,7 +184,8 @@ function Stop-MojazPlayback {
     if ($template) {
         $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$playback.ChatId }
         $user = if ($UserId -gt 0) { $UserId } else { [long]$playback.UserId }
-        Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user | Out-Null
+        # -System: bulletin teardown, not an operator asking to leave.
+        Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user -System | Out-Null
     }
     Write-MojazRunEnd -Playback $playback -UserId $UserId -ChatId $ChatId
     if ([string]$playback.ScheduleId) {
@@ -310,7 +311,9 @@ function Hide-MojazTicker {
     $chat = if ($ChatId -gt 0) { $ChatId } else { [long](Get-JsonProp $script:OnAir[$layer] 'ChatId') }
     if ($chat -le 0) { return $false }
     Write-BridgeLog "Mojaz starting: standing the news strip down from layer $layer."
-    if (-not (Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $UserId)) { return $false }
+    # -System: standing the strip down to make room for the bulletin is the
+    # bulletin engine's own move, not a hide the operator asked for.
+    if (-not (Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $UserId -System)) { return $false }
     $script:MojazTickerReturn = @{ At = $null; ChatId = $chat; UserId = $UserId }
     return $true
 }
@@ -634,7 +637,8 @@ function Restore-MojazPlayback {
     }
     if ($elapsed -ge $exitAt) {
         Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
-        Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user | Out-Null
+        # -System: restart recovery, with no operator in the loop at all.
+        Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user -System | Out-Null
         Request-MojazTickerReturn | Out-Null
         Send-AdminBroadcast -Text "⏹ كان الموجز «$name» على الهواء لحظة إعادة التشغيل وقد تجاوز وقت خروجه، فأُخرج الآن." | Out-Null
         return $true

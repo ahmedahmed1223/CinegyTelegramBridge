@@ -398,7 +398,20 @@ function Get-BridgeLanguage {
         setting is changed from a button and the very next screen drawn must
         already be in the new language.
     #>
-    $language = [string](Get-Setting 'Language')
+    # Read straight off the config rather than through Get-Setting, for two
+    # reasons. T is called dozens of times to draw one screen, and the full
+    # setting resolver on every call is work nobody asked for. And Get-Setting
+    # is the most heavily mocked function in the suite: making every screen
+    # depend on it turned "this test draws a keyboard" into "this test must
+    # also know the bridge has a language", which is a coupling the language
+    # feature has no business creating in three hundred tests.
+    $language = ''
+    if ($config -and $config.PSObject.Properties.Match('Settings').Count -gt 0) {
+        $language = [string](Get-JsonProp $config.Settings 'Language')
+    }
+    if ([string]::IsNullOrWhiteSpace($language) -and $script:DefaultSettings.Contains('Language')) {
+        $language = [string]$script:DefaultSettings['Language']
+    }
     if (Test-BridgeLanguage -Language $language) { return $language.ToLowerInvariant() }
     return (Get-BridgeDefaultLanguage)
 }

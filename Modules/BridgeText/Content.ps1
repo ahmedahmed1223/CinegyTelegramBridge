@@ -197,5 +197,86 @@ function Add-BridgeTextContent {
     $catalogue['urgent.num.doneBack'] = @{ ar = '✅ تمّ / رجوع'; en = '✅ Done / back' }
     $catalogue['urgent.num.expired'] = @{ ar = '⚠️ انتهت صلاحية هذه الأزرار. افتح شاشة الرقم من جديد.'; en = '⚠️ These buttons have expired. Open the number screen again.' }
     $catalogue['urgent.manualSingle'] = @{ ar = '🚨 عرض خبر واحد فقط — دون انتقال تلقائي.'; en = '🚨 Showing one story only — with no automatic advance.' }
-    $catalogue['urgent.manualRules'] = @{ ar = 'تظل قواعد الإخفاء والتمديد سارية.'; en = 'The hide and extension rules still apply.' }
+    $catalogue['urgent.manualRules'] = @{ ar = 'تظل قواعد الإخفاء والتمديد سارية.'; en = 'The hide and extension rules still apply.' }
+    # --- The news ticker ------------------------------------------------
+    $catalogue['news.noResumableDraft'] = @{ ar = 'لا مسودة منتهية قابلة للاستئناف.'; en = 'There is no expired draft to resume.' }
+    $catalogue['news.draftActive'] = @{ ar = 'توجد مسودة نشطة الآن — انشرها أو أغلقها أولًا.'; en = 'A draft is open right now — publish or close it first.' }
+    $catalogue['news.noDraftOfYours'] = @{ ar = 'لا توجد مسودة مملوكة لك.'; en = 'You do not hold a draft.' }
+    $catalogue['news.noDraftOfYoursShort'] = @{ ar = 'لا توجد مسودة مملوكة لك'; en = 'You do not hold a draft' }
+    $catalogue['news.writeUrlHttps'] = @{ ar = 'يجب أن يبدأ رابط الكتابة بـ https.'; en = 'The write-back link must start with https.' }
+    $catalogue['news.publishTicker'] = @{ ar = 'نشر شريط الأخبار'; en = 'publishing the news ticker' }
+    $catalogue['news.draftAlreadyOpen'] = @{ ar = '🤝 المسودة مفتوحة أصلًا — اضغط ✏️ لتتابعها.'; en = '🤝 The draft is already open — press ✏️ to continue it.' }
+    $catalogue['news.handLock'] = @{ ar = '✅ سلّم القفل'; en = '✅ Hand over the lock' }
+    $catalogue['news.stillWorking'] = @{ ar = '⛔ ما زلت أعمل'; en = '⛔ I am still working' }
+    $catalogue['news.requestNotSaved'] = @{ ar = '⚠️ تعذّر حفظ الطلب على القرص؛ إعادة تشغيل الجسر قبل الردّ ستُلغيه.'; en = '⚠️ The request could not be saved to disk; a restart before an answer will cancel it.' }
+    $catalogue['news.ownerChanged'] = @{ ar = 'ℹ️ تغيّر مالك المسودة أثناء انتظار طلبك؛ أرسل طلب فكّ قفل جديدًا إن كنت ما زلت بحاجة إليها.'; en = 'ℹ️ The draft changed hands while your request was waiting; send a new unlock request if you still need it.' }
+    $catalogue['news.lockHandedOver'] = @{ ar = '🔓 سُلّم قفل شريط الأخبار وأُلغيت مسودتك.'; en = '🔓 The ticker lock was handed over and your draft was discarded.' }
+    $catalogue['news.draftTextBeforeDelete'] = @{ ar = '📄 نصّ مسودتك قبل حذفها، انسخه إن أردت:'; en = '📄 Your draft text before it is deleted; copy it if you want it:' }
+    $catalogue['news.confirmSheetPublish'] = @{ ar = '⚠️ سحب الشيت ونشره على الهواء مباشرة؟'; en = '⚠️ Pull the sheet and publish it straight to air?' }
+    $catalogue['news.confirmSheetDraft'] = @{ ar = '⚠️ تحميل الشيت في المسودة للمراجعة؟'; en = '⚠️ Load the sheet into the draft for review?' }
+    $catalogue['news.nothingUntilPublish'] = @{ ar = 'لن يصل الهواء شيء قبل أن تضغط «مراجعة ونشر».'; en = 'Nothing reaches air until you press "review and publish".' }
+    $catalogue['news.yesPublish'] = @{ ar = '✅ نعم، انشر'; en = '✅ Yes, publish' }
+    $catalogue['news.yesLoadDraft'] = @{ ar = '✅ نعم، حمّل المسودة'; en = '✅ Yes, load the draft' }
+    $catalogue['news.sheetNeedsLock'] = @{ ar = 'السحب من الشيت يحتاج قفل المسودة. اضغط ✏️ بدء التحرير أولًا.'; en = 'Pulling from the sheet needs the draft lock. Press ✏️ start editing first.' }
+    $catalogue['news.draftUnowned'] = @{ ar = 'المسودة مفتوحة ولا مالك لها. اضغط ✏️ تابِع المسودة لتتبنّاها أولًا.'; en = 'The draft is open and unowned. Press ✏️ continue the draft to adopt it first.' }
+    $catalogue['news.sheetUrlUnset'] = @{ ar = 'لم يُضبط رابط الشيت.'; en = 'The sheet link is not set.' }
+    $catalogue['news.sheetUrlHttps'] = @{ ar = 'يجب أن يبدأ رابط الشيت بـ https.'; en = 'The sheet link must start with https.' }
+    $catalogue['news.automatically'] = @{ ar = 'تلقائيًا'; en = 'automatically' }
+    $catalogue['news.orderOnly'] = @{ ar = 'تغيّر الترتيب فقط'; en = 'only the order changed' }
+    $catalogue['news.sheetUpdatedToo'] = @{ ar = '📄 وحُدِّث الشيت بالنص نفسه.'; en = '📄 And the sheet was updated with the same text.' }
+    $catalogue['news.airAlreadyPublished'] = @{ ar = 'ما على الهواء منشور فعلًا؛ الشيت وحده متأخّر عنه.'; en = 'What is on air is already published; only the sheet is behind it.' }
+    $catalogue['news.draftNeedsUser'] = @{ ar = 'السحب إلى المسودة يحتاج مستخدمًا معروفًا.'; en = 'Pulling into the draft needs a known user.' }
+    $catalogue['news.sheetNotConfigured'] = @{ ar = 'لم يُضبط رابط Google Sheets في الإعدادات.'; en = 'The Google Sheets link is not set in Settings.' }
+    $catalogue['news.syncSkipped'] = @{ ar = 'مسودة الأخبار قيد التحرير؛ تُخطّيت هذه الدورة.'; en = 'A news draft is being edited; this cycle was skipped.' }
+    $catalogue['news.openDraftWarning'] = @{ ar = '🤝 توجد مسودة مفتوحة للجميع. التأكيد يستبدل محتواها بمحتوى الشيت.'; en = '🤝 There is a draft open to everyone. Confirming replaces its content with the sheet.' }
+    $catalogue['news.sheetEmpty'] = @{ ar = 'الشيت فارغ؛ لن يُمسح الشريط تلقائيًا. امسحه يدويًا إن كان هذا مقصودًا.'; en = 'The sheet is empty; the ticker will not be cleared automatically. Clear it by hand if that is what you meant.' }
+    $catalogue['news.autoSync'] = @{ ar = 'المزامنة التلقائية'; en = 'the automatic sync' }
+    $catalogue['news.importTxt'] = @{ ar = '📥 استيراد TXT'; en = '📥 Import TXT' }
+    $catalogue['news.startEditing'] = @{ ar = '✏️ بدء التحرير'; en = '✏️ Start editing' }
+    $catalogue['news.addItem'] = @{ ar = '➕ إضافة خبر'; en = '➕ Add a headline' }
+    $catalogue['news.editOrder'] = @{ ar = '📝 تعديل وترتيب'; en = '📝 Edit and reorder' }
+    $catalogue['news.preview'] = @{ ar = '👁 معاينة'; en = '👁 Preview' }
+    $catalogue['news.clearAll'] = @{ ar = '🧹 مسح الكل'; en = '🧹 Clear everything' }
+    $catalogue['news.handOverDraft'] = @{ ar = '🤝 سلّم المسودة للتالي'; en = '🤝 Hand the draft to the next person' }
+    $catalogue['news.reviewPublish'] = @{ ar = '✅ مراجعة ونشر'; en = '✅ Review and publish' }
+    $catalogue['news.discardDraft'] = @{ ar = '🗑 إلغاء المسودة'; en = '🗑 Discard the draft' }
+    $catalogue['news.requestUnlock'] = @{ ar = '🔓 طلب فكّ القفل'; en = '🔓 Request the lock' }
+    $catalogue['news.forceUnlock'] = @{ ar = '🔓 إلغاء القفل (مشرف)'; en = '🔓 Force the lock open (administrator)' }
+    $catalogue['news.backups'] = @{ ar = '🕘 النسخ والاستعادة'; en = '🕘 Backups and restore' }
+    $catalogue['news.pullPublish'] = @{ ar = '⬇️ سحب ونشر'; en = '⬇️ Pull and publish' }
+    $catalogue['news.pullDraft'] = @{ ar = '📝 سحب إلى المسودة'; en = '📝 Pull into the draft' }
+    $catalogue['news.executionLog'] = @{ ar = '🧾 سجل التنفيذ'; en = '🧾 Execution log' }
+    $catalogue['news.home'] = @{ ar = '⬅️ الرئيسية'; en = '⬅️ Main menu' }
+    $catalogue['news.yesDelete'] = @{ ar = '🗑 نعم، احذف'; en = '🗑 Yes, delete' }
+    $catalogue['news.moveUp'] = @{ ar = '⬆️ تحريك لأعلى'; en = '⬆️ Move up' }
+    $catalogue['news.moveDown'] = @{ ar = '⬇️ تحريك لأسفل'; en = '⬇️ Move down' }
+    $catalogue['news.backToOrder'] = @{ ar = '⬅️ رجوع للترتيب'; en = '⬅️ Back to the ordering' }
+    $catalogue['news.backToManage'] = @{ ar = '⬅️ إدارة الأخبار'; en = '⬅️ News management' }
+    $catalogue['news.prev'] = @{ ar = '◀️ السابق'; en = '◀️ Previous' }
+    $catalogue['news.next'] = @{ ar = 'التالي ▶️'; en = 'Next ▶️' }
+    $catalogue['news.orderTitle'] = @{ ar = '<b>📝 ترتيب المسودة</b>'; en = '<b>📝 Ordering the draft</b>' }
+    $catalogue['news.orderHintStacked'] = @{ ar = 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'; en = 'Each headlines buttons are under it: ⬆️ ⬇️ order · ✏️ edit · 🗑 delete' }
+    $catalogue['news.orderHintInline'] = @{ ar = '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف'; en = '⬆️ ⬇️ to reorder · press the text to edit · 🗑 to delete' }
+    $catalogue['news.orderHintCompact'] = @{ ar = 'اضغط رقم الخبر: الترتيب والتعديل والحذف في شاشته'; en = 'Press the headline number: ordering, editing and deleting are on its screen' }
+    $catalogue['news.orderHintNumbers'] = @{ ar = 'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف'; en = 'The number opens the headline to edit · ⬆️ ⬇️ to reorder · 🗑 to delete' }
+    $catalogue['news.orderHeading'] = @{ ar = '📝 الترتيب والتعديل'; en = '📝 Ordering and editing' }
+    $catalogue['news.noDraftWarning'] = @{ ar = '⚠️ لا توجد مسودة مملوكة لك.'; en = '⚠️ You do not hold a draft.' }
+    $catalogue['news.col.item'] = @{ ar = 'الخبر'; en = 'Headline' }
+    $catalogue['news.chars'] = @{ ar = 'أحرف'; en = 'characters' }
+    $catalogue['news.noDifference'] = @{ ar = 'لا فرق بين المسودة وما على الهواء.'; en = 'There is no difference between the draft and what is on air.' }
+    $catalogue['news.reviewPublishButton'] = @{ ar = '✅ مراجعة النشر'; en = '✅ Review the publish' }
+    $catalogue['news.noChangeOnPublish'] = @{ ar = 'لا فرق: النشر لن يغيّر ما على الهواء.'; en = 'No difference: publishing will not change what is on air.' }
+    $catalogue['news.pickBackup'] = @{ ar = 'اختر نسخة لمراجعة استعادتها:'; en = 'Choose a backup to review restoring:' }
+    $catalogue['news.backupsTitle'] = @{ ar = '<b>🕘 نسخ شريط الأخبار</b>'; en = '<b>🕘 News ticker backups</b>' }
+    $catalogue['news.noBackups'] = @{ ar = '<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل نشر.</i>'; en = '<i>No backups yet. One is kept with every publish.</i>' }
+    $catalogue['news.backupUnreadable'] = @{ ar = ' · تعذّرت قراءتها'; en = ' · could not be read' }
+    $catalogue['news.restoreNote'] = @{ ar = '<i>الاستعادة تعرض النسخة للمراجعة قبل أن يصل شيء إلى الهواء.</i>'; en = '<i>Restoring shows the backup for review before anything reaches air.</i>' }
+    $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
+    $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.addFailed'] = @{ ar = '❌ لم تتم الإضافة؛ تحقق من النص والحدود.'; en = '❌ It was not added; check the text and the limits.' }
+    $catalogue['news.itemUpdated'] = @{ ar = '✅ حُدّث الخبر في المسودة.'; en = '✅ The headline was updated in the draft.' }
+    $catalogue['news.editFailed'] = @{ ar = '❌ تعذر تعديل الخبر.'; en = '❌ The headline could not be edited.' }
+    $catalogue['news.startImportFirst'] = @{ ar = 'ابدأ الاستيراد من إدارة شريط الأخبار أولًا.'; en = 'Start the import from news management first.' }
+    $catalogue['news.txtOnly'] = @{ ar = 'يُقبل ملف TXT فقط.'; en = 'Only a TXT file is accepted.' }
+    $catalogue['news.orderNoDraft'] = @{ ar = '📝 الترتيب والتعديل'; en = '📝 Ordering and editing' }
 }

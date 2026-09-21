@@ -285,17 +285,17 @@ function Get-MainMenuIntroBlocks {
     $age = switch ($freshness.State) {
         'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
         'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
-        'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
-        default { 'لم يتم التحقّق بعد' }
+        'unavailable' { (T 'onair.checkFailed') }
+        default { (T 'onair.notChecked') }
     }
-    $verdict = if ($freshness.State -ne 'connected') { '🟠 تعذّر تأكيد الحالة من Cinegy' }
-    elseif ($script:OnAir.Count -gt 0) { '🟠 طبقات على الهواء' }
-    else { '🟢 كل شيء سليم' }
+    $verdict = if ($freshness.State -ne 'connected') { (T 'onair.unconfirmed') }
+    elseif ($script:OnAir.Count -gt 0) { (T 'onair.layersUp') }
+    else { (T 'onair.allWell') }
 
     $blocks = @(@{ type = 'heading'; text = $verdict; size = 3 })
 
     if ($script:OnAir.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = '⚫️ لا شيء على الهواء' }
+        $blocks += @{ type = 'paragraph'; text = (T 'onair.none') }
     }
     else {
         $cells = @(, @(
@@ -344,7 +344,7 @@ function Get-MainMenuIntro {
     <#
         The screen above the main menu, built as parse_mode=HTML.
 
-        It used to read "اختر من القائمة:", which tells the operator nothing
+        It used to read (T 'menu.pickFromList'), which tells the operator nothing
         they cannot already see, and then as flat text - one undifferentiated
         column an operator had to read line by line to find the one fact they
         opened the menu for.
@@ -370,8 +370,8 @@ function Get-MainMenuIntro {
     $age = switch ($freshness.State) {
         'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
         'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
-        'unavailable' { '⚠️ تعذّر التحقّق من Cinegy' }
-        default { 'لم يتم التحقّق بعد' }
+        'unavailable' { (T 'onair.checkFailed') }
+        default { (T 'onair.notChecked') }
     }
     # The air block is a <blockquote>, not two drawn lines around it.
     #
@@ -395,12 +395,12 @@ function Get-MainMenuIntro {
     # unreachable, or never checked at all - is an unknown, and a bridge that
     # has not yet reached Cinegy once saying "all clear" is the same false
     # comfort as a stale "on air" that reads like a fresh one.
-    $verdict = if ($freshness.State -ne 'connected') { '🟠 تعذّر تأكيد الحالة من Cinegy' }
-    elseif ($script:OnAir.Count -gt 0) { '🟠 طبقات على الهواء' }
-    else { '🟢 كل شيء سليم' }
+    $verdict = if ($freshness.State -ne 'connected') { (T 'onair.unconfirmed') }
+    elseif ($script:OnAir.Count -gt 0) { (T 'onair.layersUp') }
+    else { (T 'onair.allWell') }
 
     $air = [System.Collections.Generic.List[string]]::new()
-    if ($script:OnAir.Count -eq 0) { $air.Add('⚫️ لا شيء على الهواء') }
+    if ($script:OnAir.Count -eq 0) { $air.Add((T 'onair.none')) }
     else {
         $air.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>")
         # One layer per line, and under each the two facts an operator asks
@@ -428,8 +428,8 @@ function Get-MainMenuIntro {
             }
             $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
             $detail.Add($(switch ($source) {
-                        'cinegy' { 'Cinegy (خارج الجسر)' }
-                        'BotTest' { 'اختبار قالب' }
+                        'cinegy' { (T 'onair.external') }
+                        'BotTest' { (T 'onair.templateTest') }
                         default {
                             $who = if ($record.ContainsKey('UserId')) { Get-UserDisplayName -UserId ([long]$record.UserId) } else { '' }
                             if ($who) { $who } else { 'غير معروف' }
@@ -472,7 +472,7 @@ function Get-LayerRemovalSummary {
        against the screen under pressure; a template name is. #>
     param([Parameter(Mandatory)][int]$Layer)
     if (-not $script:OnAir.ContainsKey([int]$Layer)) {
-        return "الطبقة $Layer — لا يوجد سجل لدى الجسر"
+        return (T 'onair.noRecord' $Layer)
     }
     $record = $script:OnAir[[int]$Layer]
     $parts = [System.Collections.Generic.List[string]]::new()
@@ -485,13 +485,13 @@ function Get-LayerRemovalSummary {
     # an operator whether this is the strap they meant to take off.
     if (Get-Setting 'ShowOnAirTextOnRemoval') {
         $copy = [string](Get-JsonProp $record 'ScreenCopy')
-        if ($copy) { $parts.Add("النص: $copy") }
-        else { $parts.Add('النص: غير مسجّل (عُرض قبل تفعيل الخيار أو من خارج الجسر)') }
+        if ($copy) { $parts.Add((T 'onair.text' $copy)) }
+        else { $parts.Add((T 'onair.textUnknown')) }
     }
     $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
     $parts.Add($(switch ($source) {
-                'cinegy' { 'المصدر: Cinegy (خارج الجسر)' }
-                'BotTest' { 'المصدر: اختبار قالب' }
+                'cinegy' { (T 'onair.sourceExternal') }
+                'BotTest' { (T 'onair.sourceTest') }
                 default { "أرسله: $(Get-UserDisplayName -UserId ([long]$record.UserId))" }
             }))
     return ($parts -join "`n")
@@ -499,7 +499,7 @@ function Get-LayerRemovalSummary {
 
 function Get-LayerRemovalConfirmKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][ValidateSet('hide', 'exit')][string]$Action)
-    $label = if ($Action -eq 'hide') { '✅ نعم، أخفِ' } else { '✅ نعم، اخرج' }
+    $label = if ($Action -eq 'hide') { (T 'confirm.hideYes') } else { (T 'confirm.exitYes') }
     return @{ inline_keyboard = @(
             # Red here too, or turning ConfirmLayerRemoval ON - the safer
             # setting - would hand the operator the weaker screen.
@@ -580,7 +580,7 @@ function Get-AdminToolsCategoryKeyboard {
 
 function Get-HealthCenterKeyboard {
     $rows = @(
-        , @((New-Button '🔄 تحديث' 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
+        , @((New-Button (T 'common.refresh') 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
         , @((New-Button '🧪 التشخيص' 'menu:diagnostics'), (New-Button '🗂 ملفات التشغيل' 'health:files'))
     )
     # F9: the button exists only when the screen does. An opt-in feature
@@ -617,7 +617,7 @@ function Get-TemplatesKeyboard {
     $store = Get-TemplateStore
     $rows = @()
     if ($BrowseControls -and $Prefix -eq 'tpl') {
-        $rows += , @((New-Button '🔎 بحث' 'menu:templatesearch'), (New-Button '🗂 التصنيفات' 'menu:templatecategories'))
+        $rows += , @((New-Button (T 'common.search') 'menu:templatesearch'), (New-Button (T 'templates.categories') 'menu:templatecategories'))
     }
     # Which templates qualify, gathered before any button is built: this list
     # is what the page window measures, and it is the registry - it grows with
@@ -667,7 +667,7 @@ function Get-TemplatesKeyboard {
         }
     }
     if ($matched -eq 0) {
-        $rows += , @( (New-Button $(if ($Query -or $Category) { 'لا توجد نتائج مطابقة' } else { 'لا توجد قوالب معرّفة' }) "menu:templates") )
+        $rows += , @( (New-Button $(if ($Query -or $Category) { (T 'templates.noMatch') } else { (T 'templates.noneDefined') }) "menu:templates") )
     }
     elseif ($Query) {
         $hiddenResults = $matched - @($pageIndexes).Count
@@ -702,27 +702,27 @@ function Get-TemplateCategoriesKeyboard {
     }
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'tplcatpage')
     if ($pager.Count -gt 0) { $rows += , $pager }
-    if ($categories.Count -eq 0) { $rows += , @((New-Button 'لا توجد تصنيفات معرّفة' 'menu:templates')) }
-    $rows += , @((New-Button '📋 كل القوالب' 'menu:templates'), (New-Button '⬅️ رجوع' 'menu'))
+    if ($categories.Count -eq 0) { $rows += , @((New-Button (T 'templates.noCategories') 'menu:templates')) }
+    $rows += , @((New-Button (T 'templates.all') 'menu:templates'), (New-Button '⬅️ رجوع' 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
 function Get-TemplatePreviewText {
     param([Parameter(Mandatory)]$Template)
-    $category = if ([string]::IsNullOrWhiteSpace([string]$Template.Category)) { 'غير مصنف' } else { [string]$Template.Category }
-    $description = if ([string]::IsNullOrWhiteSpace([string]$Template.Description)) { 'لا يوجد وصف.' } else { [string]$Template.Description }
-    $fields = if (@($Template.Fields).Count -eq 0) { 'بلا حقول تحريرية' } else { @($Template.Fields) -join '، ' }
+    $category = if ([string]::IsNullOrWhiteSpace([string]$Template.Category)) { (T 'templates.uncategorised') } else { [string]$Template.Category }
+    $description = if ([string]::IsNullOrWhiteSpace([string]$Template.Description)) { (T 'templates.noDescription') } else { [string]$Template.Description }
+    $fields = if (@($Template.Fields).Count -eq 0) { (T 'templates.noFields') } else { @($Template.Fields) -join '، ' }
     $lastUsed = if ($script:TemplateLastUsed.ContainsKey([string]$Template.Key)) {
         ([datetime]$script:TemplateLastUsed[[string]$Template.Key]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
     }
-    else { 'لم يُستخدم بعد' }
+    else { (T 'templates.neverUsed') }
     $device = [string](Get-JsonProp $Template 'Device')
     # A device-backed template has no meaningful layer number - the number is
     # only the bridge's internal key - so showing it would be the same noise
     # the button just lost.
-    $where = if ($device) { "طبقة الجهاز: $device" } else { "الطبقة: $($Template.Layer)" }
-    $uses = if ($script:UsageCounts.ContainsKey([string]$Template.Key)) { Get-ArabicCountNoun -Count ([int]$script:UsageCounts[[string]$Template.Key]) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' } else { 'لم يُستخدم' }
-    $live = if ($script:OnAir.ContainsKey([int]$Template.Layer)) { '🔴 على الهواء الآن' } else { '⚫️ غير معروض' }
+    $where = if ($device) { (T 'templates.deviceLayer' $device) } else { (T 'templates.layerOf' $Template.Layer) }
+    $uses = if ($script:UsageCounts.ContainsKey([string]$Template.Key)) { Get-ArabicCountNoun -Count ([int]$script:UsageCounts[[string]$Template.Key]) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' } else { (T 'templates.neverUsedShort') }
+    $live = if ($script:OnAir.ContainsKey([int]$Template.Layer)) { (T 'templates.liveNow') } else { (T 'templates.notShowing') }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     # parse_mode=HTML. This screen is read just before something goes to air,
@@ -744,15 +744,15 @@ function Get-TemplatePreviewText {
 function Get-TemplatePreviewKeyboard {
     param([Parameter(Mandatory)][int]$TemplateIndex)
     return @{ inline_keyboard = @(
-        , @((New-Button '▶️ اختيار هذا القالب' "tpl:$TemplateIndex"))
-        , @((New-Button '⬅️ القوالب' 'menu:templates'))
+        , @((New-Button (T 'templates.choose') "tpl:$TemplateIndex"))
+        , @((New-Button (T 'templates.back') 'menu:templates'))
     ) }
 }
 
 function Start-TemplateSearch {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_search'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text '🔎 أرسل جزءًا من اسم القالب أو وصفه أو تصنيفه:' -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'templates.searchPrompt') -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-TemplateSearch {
@@ -762,7 +762,7 @@ function Complete-TemplateSearch {
     Clear-PendingState -ChatId $ChatId
     $query = $Value.Trim()
     if ([string]::IsNullOrWhiteSpace($query)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لم تُدخل عبارة بحث.' -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'templates.searchEmpty') -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
         return
     }
     Send-TelegramMessage -ChatId $ChatId -Text "🔎 نتائج البحث عن '$query':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Query $query -BrowseControls)
@@ -1181,8 +1181,8 @@ function Get-PresetAdminKeyboard {
 function Get-PresetActionKeyboard {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex)
     return @{ inline_keyboard = @(
-            , @( (New-Button "✏️ تعديل القيم" "pae:$TemplateIndex`:$PresetIndex"), (New-Button "🏷 إعادة تسمية" "par:$TemplateIndex`:$PresetIndex") )
-            , @( (New-Button "🗑 حذف" "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
+            , @( (New-Button "✏️ تعديل القيم" "pae:$TemplateIndex`:$PresetIndex"), (New-Button (T 'common.rename') "par:$TemplateIndex`:$PresetIndex") )
+            , @( (New-Button (T 'common.delete') "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
         ) }
 }
 
@@ -1336,7 +1336,7 @@ function Get-LayerDashboardKeyboard {
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
-    $rows += , @( (New-Button "🔎 فحص ومقارنة مع Cinegy" 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
+    $rows += , @( (New-Button (T 'layer.compare') 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1361,13 +1361,13 @@ function Get-AfterShowKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
-    $first = @( (New-Button "🙈 إخفاء هذا (طبقة $Layer)" "hide:$Layer" -Style danger), (New-Button "🚪 خروج" "exit:$Layer" -Style danger) )
+    $first = @( (New-Button (T 'layer.hideThis' $Layer) "hide:$Layer" -Style danger), (New-Button (T 'layer.exit') "exit:$Layer" -Style danger) )
     # Quick timer adjustment buttons: +30s, +1m, -30s, -1m
     $timerAdjust = @(
-        (New-Button "⏱ +30ث" "timeradd:${Layer}:30"),
-        (New-Button "⏱ +1د" "timeradd:${Layer}:60"),
-        (New-Button "⏱ -30ث" "timeradd:${Layer}:-30"),
-        (New-Button "⏱ -1د" "timeradd:${Layer}:-60")
+        (New-Button (T 'timer.plus30') "timeradd:${Layer}:30"),
+        (New-Button (T 'timer.plus1m') "timeradd:${Layer}:60"),
+        (New-Button (T 'timer.minus30') "timeradd:${Layer}:-30"),
+        (New-Button (T 'timer.minus1m') "timeradd:${Layer}:-60")
     )
     # Keep each button collection as one keyboard row. A comma inside the
     # array literal lets PowerShell unwrap the collections and produces the
@@ -1375,7 +1375,7 @@ function Get-AfterShowKeyboard {
     $rows = @()
     $rows += , $first
     $rows += , $timerAdjust
-    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ تراجع آمن' "rollback:$Layer")) }
+    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button (T 'layer.rollbackSafe') "rollback:$Layer")) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard = $rows }
 }
@@ -1384,7 +1384,7 @@ function Get-AfterLayerRemovalKeyboard {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     $rows = @()
-    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button '↩️ استعادة المشهد السابق' "rollback:$Layer" -Style danger)) }
+    if (Get-RollbackCandidate -Layer $Layer -UserId $UserId) { $rows += , @((New-Button (T 'layer.rollbackRestore') "rollback:$Layer" -Style danger)) }
     $rows += $menu.inline_keyboard
     return @{ inline_keyboard=$rows }
 }
@@ -1392,7 +1392,7 @@ function Get-AfterLayerRemovalKeyboard {
 function Get-RollbackReviewKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
     return @{ inline_keyboard=@(
-        , @((New-Button '✅ تأكيد التراجع' "rollbackconfirm:$Layer" -Style success), (New-Button '❌ إلغاء' 'menu'))
+        , @((New-Button (T 'layer.rollbackConfirm') "rollbackconfirm:$Layer" -Style success), (New-Button '❌ إلغاء' 'menu'))
     ) }
 }
 
@@ -1436,8 +1436,8 @@ function Get-FieldPromptKeyboard {
     }
     $row = @()
     if ($State -and [int]$State.Index -gt 0) { $row += (New-Button "⬅️ السابق" "show:back") }
-    if ($State -and $State.Values.Count -gt 0) { $row += (New-Button "🔎 معاينة" "show:preview") }
-    $row += (New-Button "⏭ تخطي" "skip")
+    if ($State -and $State.Values.Count -gt 0) { $row += (New-Button (T 'confirm.preview') "show:preview") }
+    $row += (New-Button (T 'confirm.skip') "skip")
     $row += (New-Button "❌ إلغاء" "cancel")
     $rows += , $row
     return @{ inline_keyboard = $rows }
@@ -1445,14 +1445,14 @@ function Get-FieldPromptKeyboard {
 
 function Get-ShowReviewKeyboard {
     param([switch]$HasFields)
-    $row = @( (New-Button "✅ تأكيد الإرسال" "show:confirm" -Style success) )
-    if ($HasFields) { $row += (New-Button "✏️ تعديل" "show:edit") }
+    $row = @( (New-Button (T 'confirm.send') "show:confirm" -Style success) )
+    if ($HasFields) { $row += (New-Button (T 'confirm.edit') "show:edit") }
     return @{ inline_keyboard = @( , $row; , @( (New-Button "❌ إلغاء" "cancel") ) ) }
 }
 
 function Get-HideAllConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "🚨 نعم، إخفاء الكل" "hideall:confirm" -Style danger), (New-Button "❌ إلغاء" "cancel") )
+            , @( (New-Button (T 'confirm.hideAllYes') "hideall:confirm" -Style danger), (New-Button "❌ إلغاء" "cancel") )
         ) }
 }
 
@@ -1469,7 +1469,7 @@ function Get-ApprovalKeyboard {
     #>
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
-            , @( (New-Button "✅ موافقة" "approve:confirm:$TargetChatId" -Style success), (New-Button "❌ رفض" "reject:$TargetChatId") )
+            , @( (New-Button (T 'confirm.approve') "approve:confirm:$TargetChatId" -Style success), (New-Button (T 'confirm.reject') "reject:$TargetChatId") )
             , @( (New-Button "⬅️ الرئيسية" "menu") )
         ) }
 }
@@ -1480,8 +1480,8 @@ function Get-AccessGrantConfirmKeyboard {
        something else afterwards. #>
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
-            , @( (New-Button '✅ نعم، امنح الوصول' "approve:$TargetChatId" -Style danger) )
-            , @( (New-Button '❌ تراجع' 'menu:pending') )
+            , @( (New-Button (T 'confirm.grantYes') "approve:$TargetChatId" -Style danger) )
+            , @( (New-Button (T 'confirm.undo') 'menu:pending') )
         ) }
 }
 
@@ -1725,7 +1725,7 @@ function Get-PendingApprovalsText {
         $info = $script:PendingApprovals[$id]
         $name = [string](Get-JsonProp $info 'Name')
         if ($name.Length -gt 40) { $name = $name.Substring(0, 39) + '…' }
-        $shown = if ($name) { ConvertTo-TelegramHtmlText -Text $name } else { 'بلا اسم' }
+        $shown = if ($name) { ConvertTo-TelegramHtmlText -Text $name } else { (T 'common.noName') }
         $lines.Add("$($index + 1). <b>$shown</b>")
         $lines.Add("   المستخدم <code>$([long](Get-JsonProp $info 'UserId'))</code> · المحادثة <code>$([long]$id)</code>")
         $requestedAt = Get-JsonProp $info 'RequestedAt'
@@ -1873,7 +1873,7 @@ function Get-SettingsResetConfirmKeyboard {
     <# The affirming half is coloured, the cancel is not: colouring both
        leaves the thumb with no signal. #>
     return @{ inline_keyboard = @(
-            , @((New-Button '♻️ نعم، استعد الافتراضي' 'cfg:resetconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))
+            , @((New-Button (T 'confirm.resetYes') 'cfg:resetconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))
         ) }
 }
 
@@ -1944,7 +1944,7 @@ function Get-SettingsListKeyboard {
         if ($window.HasNext) { $pager += (New-Button '➡️' "cfglist:${Mode}:$($window.Page + 1)") }
         $rows += , $pager
     }
-    if ($items.Count -eq 0) { $rows += , @((New-Button 'لا توجد نتائج' 'menu:settings')) }
+    if ($items.Count -eq 0) { $rows += , @((New-Button (T 'common.noResults') 'menu:settings')) }
     $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
     return @{ inline_keyboard = $rows }
 }
@@ -2098,7 +2098,7 @@ function Get-TemplateAdminCatalogueKeyboard {
         if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "tadmpage:$($window.Page + 1)") }
         $rows += , $pager
     }
-    if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد قوالب صالحة' 'menu') ) }
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button (T 'templates.noValid') 'menu') ) }
     $rows += , @( (New-Button '⬅️ القائمة' 'menu') )
     return @{ inline_keyboard = $rows }
 }
@@ -2117,13 +2117,13 @@ function Get-TemplateAdminDetailKeyboard {
         $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex" -Style danger) )
         if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button '🧪 اختبار على طبقة التجربة' "tadm:test:$TemplateIndex")) }
     }
-    $rows += , @( (New-Button '⬅️ القوالب' 'menu:templatesadmin') )
+    $rows += , @( (New-Button (T 'templates.back') 'menu:templatesadmin') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-TemplateDefinitionReviewKeyboard {
     return @{ inline_keyboard = @(
-        , @( (New-Button '✅ حفظ التغيير' 'tadm:confirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
+        , @( (New-Button (T 'common.saveChange') 'tadm:confirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
     ) }
 }
 
@@ -2483,7 +2483,7 @@ function Show-TemplateMaxAirEditor {
             foreach ($index in $window.StartIndex..$window.EndIndex) {
                 $key = [string]$state.Keys[$index]
                 $maximum = [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $key)
-                $label = if ($maximum -gt 0) { "$maximum ث" } else { 'غير مضبوط' }
+                $label = if ($maximum -gt 0) { "$maximum ث" } else { (T 'common.notSet') }
                 $rows += , @((New-Button "$key — $label" "${prefix}:item:$index"))
             }
         }
@@ -2507,7 +2507,7 @@ function Show-TemplateMaxAirEditor {
             $rows += , @((New-Button 'نعم، إزالة الحد' "${prefix}:disable:yes" -Style danger))
         }
         else { $rows += , @((New-Button 'إزالة الحد…' "${prefix}:disable:ask")) }
-        $rows += , @((New-Button '⬅️ القوالب' "${prefix}:page:0"), (New-Button '⚖️ طبّق الآن' "${prefix}:now:yes"))
+        $rows += , @((New-Button (T 'templates.back') "${prefix}:page:0"), (New-Button '⚖️ طبّق الآن' "${prefix}:now:yes"))
         $text += "`n⚖️ «طبّق الآن» يقصّر بقاء العرض الحالي إلى الحد إذا كان أطول منه؛ لا يطيل ولا يخفي فورًا."
         $text += "`n⌨️ «مقدار مخصص» لكتابة Duration مثل 2:30 أو 90."
     }
@@ -2659,7 +2659,7 @@ function Get-SettingStepperKeyboard {
         if ($index + 1 -lt $presets.Count) { $pair += $presets[$index + 1] }
         $rows += , @($pair)
     }
-    $rows += , @((New-Button '⌨️ اكتب رقمًا' "num:${Name}:type"), (New-Button '⬅️ رجوع' 'menu:settings'))
+    $rows += , @((New-Button (T 'common.typeNumber') "num:${Name}:type"), (New-Button '⬅️ رجوع' 'menu:settings'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -2668,7 +2668,7 @@ function Get-SettingRangeLabel {
        name, an hour as a clock time, anything else as itself. #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][int]$Value)
     if ($Name -match 'DayOfWeek') {
-        $days = @('الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت')
+        $days = @((T 'day.sunday'), (T 'day.monday'), (T 'day.tuesday'), (T 'day.wednesday'), (T 'day.thursday'), (T 'day.friday'), (T 'day.saturday'))
         if ($Value -ge 0 -and $Value -lt $days.Count) { return $days[$Value] }
     }
     if ($Name -match 'Hour') { return ('{0:00}:00' -f $Value) }
@@ -2884,7 +2884,7 @@ function Get-SettingPickKeyboard {
         $keyboard += , $pager
     }
     if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgpickclear:$Name" -Style danger)) }
-    $keyboard += , @((New-Button '✅ تم' 'cfgcat:templates'))
+    $keyboard += , @((New-Button (T 'common.done') 'cfgcat:templates'))
     return @{ inline_keyboard = $keyboard }
 }
 
@@ -2996,7 +2996,7 @@ function Complete-SettingText {
     if (-not $state) { return }
     $trimmed = $Value.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ القيمة فارغة، لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'common.valueEmpty') -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return
     }
@@ -3025,7 +3025,7 @@ function Set-SettingChoice {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $choices = @($script:SettingChoices[$Name])
     if ($Index -lt 0 -or $Index -ge $choices.Count) {
-        Send-TelegramMessage -ChatId $ChatId -Text "خيار غير صالح." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'common.badChoice') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     if ($Name -eq 'SceneMode' -and [string]$choices[$Index] -eq 'Multi') {

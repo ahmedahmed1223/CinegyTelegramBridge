@@ -405,12 +405,21 @@ function Get-BridgeLanguage {
     # depend on it turned "this test draws a keyboard" into "this test must
     # also know the bridge has a language", which is a coupling the language
     # feature has no business creating in three hundred tests.
+    # Get-Variable, not a bare $config: this is reached from pure-module code
+    # (Get-ArabicCountNoun, called by the reports module's own tests) where no
+    # config exists at all, and under Set-StrictMode reading an unset variable
+    # THROWS. A language lookup that can throw would take a report down over a
+    # question whose answer is simply "Arabic".
     $language = ''
-    if ($config -and $config.PSObject.Properties.Match('Settings').Count -gt 0) {
-        $language = [string](Get-JsonProp $config.Settings 'Language')
+    $configVariable = Get-Variable -Name 'config' -Scope Script -ErrorAction SilentlyContinue
+    if (-not $configVariable) { $configVariable = Get-Variable -Name 'config' -ErrorAction SilentlyContinue }
+    $configValue = if ($configVariable) { $configVariable.Value } else { $null }
+    if ($configValue -and $configValue.PSObject.Properties.Match('Settings').Count -gt 0) {
+        $language = [string](Get-JsonProp $configValue.Settings 'Language')
     }
-    if ([string]::IsNullOrWhiteSpace($language) -and $script:DefaultSettings.Contains('Language')) {
-        $language = [string]$script:DefaultSettings['Language']
+    $defaults = Get-Variable -Name 'DefaultSettings' -Scope Script -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($language) -and $defaults -and $defaults.Value.Contains('Language')) {
+        $language = [string]$defaults.Value['Language']
     }
     if (Test-BridgeLanguage -Language $language) { return $language.ToLowerInvariant() }
     return (Get-BridgeDefaultLanguage)
@@ -834,7 +843,23 @@ function Get-ArabicCountNoun {
         ranked list), 2 takes the bare dual ("مرتين"), 3-10 the plural
         ("8 مرات"), and 0 and 11+ the singular ("0 مرة"، "359 مرة").
     #>
-    param([int]$Count, [Parameter(Mandatory)][string]$One, [Parameter(Mandatory)][string]$Two, [Parameter(Mandatory)][string]$Few, [Parameter(Mandatory)][string]$Many)
+    param(
+        [int]$Count,
+        [Parameter(Mandatory)][string]$One,
+        [Parameter(Mandatory)][string]$Two,
+        [Parameter(Mandatory)][string]$Few,
+        [Parameter(Mandatory)][string]$Many,
+        # English has no dual and no 3-10 form, so the four Arabic cases
+        # collapse to two. Callers pass the English pair where they have one;
+        # where they do not, the Arabic is used and reads as it always did
+        # rather than as a bare key.
+        [string]$EnglishOne = '',
+        [string]$EnglishMany = ''
+    )
+    if ((Get-BridgeLanguage) -eq 'en' -and -not [string]::IsNullOrWhiteSpace($EnglishOne)) {
+        $word = if ($Count -eq 1) { $EnglishOne } else { if ([string]::IsNullOrWhiteSpace($EnglishMany)) { $EnglishOne } else { $EnglishMany } }
+        return "$Count $word"
+    }
     switch ($Count) {
         1 { return "1 $One" }
         2 { return $Two }
@@ -976,7 +1001,7 @@ function Register-BridgeStartup {
         $dayCount = @($stamps | Where-Object { $_ -gt $now.AddHours(-24) }).Count
         if ($threshold -gt 0 -and $dayCount -eq $threshold) {
             Write-BridgeLog "$threshold bridge startups inside 24 hours - notifying administrators once" 'WARN'
-            $timesText = Get-ArabicCountNoun -Count $threshold -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'
+            $timesText = Get-ArabicCountNoun -Count $threshold -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
             Add-AuditEntry "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة — عمل إصدارات أم حلقة عطل؟"
             Send-AdminBroadcast -Text "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة. إن كان عمل إصدارات مخططًا فتجاهل هذا — وإلا راجع آخر أسطر bridge.log."
         }

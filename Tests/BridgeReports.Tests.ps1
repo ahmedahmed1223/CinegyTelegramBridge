@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 BeforeAll {
     # The bridge runs under StrictMode, and without it here these tests pass
     # on code that throws in production: reading .Sum off an empty
@@ -6,6 +6,11 @@ BeforeAll {
     Set-StrictMode -Version Latest
 
     $script:Root = Split-Path -Parent $PSScriptRoot
+    # The report screens draw their column headings through T, so the text
+    # catalogue has to be here for the same reason Bridge.Core.ps1 is: these
+    # tests measure what production prints, and a missing catalogue would have
+    # them measuring an exception instead.
+    Import-Module (Join-Path $script:Root 'Modules\BridgeLanguage.psm1') -Force
     # Bridge.Core.ps1 first: it is declarations only, and the report screens
     # read elapsed time through Format-DurationMinutes. Loading the real one
     # rather than stubbing it keeps these tests measuring what production

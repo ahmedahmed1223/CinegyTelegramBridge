@@ -642,11 +642,11 @@ function Update-TemplateReminderQueue {
             if ($pending.Count -gt 0) {
                 $remainingSec = [int](($pending[0].At - (Get-Date)).TotalSeconds)
                 if ($remainingSec -gt 0) {
-                    $remainingText = "`n⏱ يتبقى $(Get-ArabicCountNoun -Count $remainingSec -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')"
+                    $remainingText = "`n⏱ يتبقى $(Get-ArabicCountNoun -Count $remainingSec -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')"
                 }
             }
         }
-        $reminderText = "⏰ تنبيه: مرّ $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا.$remainingText"
+        $reminderText = "⏰ تنبيه: مرّ $(Get-ArabicCountNoun -Count $item.Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') منذ إظهار '$($item.TemplateKey)' على الطبقة $($item.Layer)، وما زال ظاهرًا.$remainingText"
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += "`n📝 النص: $onAirCopy"
         }
@@ -1391,7 +1391,7 @@ function Get-UsageDigestBlocks {
     $blocks = @(
         @{ type = 'heading'; text = (T 'tick.usageDigest'); size = 3 }
         @{ type = 'paragraph'; text = "🕒 $($now.ToString('yyyy-MM-dd HH:mm')) (محلي)" }
-        @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $(Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · 📆 آخر 7 أيام: $(Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · متوسط $dailyAverage يوميًا" }
+        @{ type = 'paragraph'; text = "🎬 منذ آخر تشغيل: $(Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · 📆 آخر 7 أيام: $(Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · متوسط $dailyAverage يوميًا" }
     )
 
     $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
@@ -1615,7 +1615,7 @@ function Get-UsageDigestText {
     # earlier layout placed it after the weekly figure, where 200 weekly
     # operations against "✅ ناجحة — 8" read as a broken week.
     $lines.Add('')
-    $sinceRestart = Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $sinceRestart = Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
     $lines.Add("🎬 <b>منذ آخر تشغيل</b> — $sinceRestart")
     $lines.Add("<blockquote>✅ ناجحة — $($counters.Success)
 ❌ فاشلة — $($counters.Failed)
@@ -1623,7 +1623,7 @@ function Get-UsageDigestText {
     if ([int]$counters.Failed -gt 0 -or [int]$counters.Blocked -gt 0) {
         $lines.Add((T 'tick.checkAuditHtml'))
     }
-    $weekOps = Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
+    $weekOps = Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
     $lines.Add("📆 <b>آخر 7 أيام</b> — $weekOps · متوسط $dailyAverage يوميًا")
     $lines.Add('')
     if ($script:CancelReasons.Count -gt 0) {
@@ -1745,7 +1745,7 @@ function Update-MaterialEndWatchdog {
     $script:LastMaterialEndAlertId = $bareId
     $name = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $active 'Name'))
     $minutes = [math]::Max(1, [int][math]::Ceiling($left.TotalMinutes))
-    Send-AdminBroadcast -Text "⏳ المادة «$name» تنتهي بعد نحو $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') ($($end.ToLocalTime().ToString('HH:mm'))). جهّز غرافيك الختام." -Urgent
+    Send-AdminBroadcast -Text "⏳ المادة «$name» تنتهي بعد نحو $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') ($($end.ToLocalTime().ToString('HH:mm'))). جهّز غرافيك الختام." -Urgent
     Write-BridgeLog "Material end alert: '$([string](Get-JsonProp $active 'Name'))' ends in $([int]$left.TotalMinutes)m"
 }
 
@@ -1859,7 +1859,7 @@ function Update-StaleOnAirWatchdog {
         $seen = if ($script:StaleOnAirAlerted.ContainsKey($layer)) { $script:StaleOnAirAlerted[$layer] } else { @{ Count = 0; LastAt = $now } }
         $script:StaleOnAirAlerted[$layer] = @{ Count = [int]$seen.Count + 1; LastAt = $now }
     }
-    $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $(Get-ArabicCountNoun -Count $_.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة')" })
+    $lines = @($stale | ForEach-Object { "• طبقة $($_.Layer) · $($_.Key) — منذ $(Get-ArabicCountNoun -Count $_.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة' -EnglishOne 'hour' -EnglishMany 'hours')" })
     Write-BridgeLog "Stale on-air record(s) reported: $(@($stale | ForEach-Object { $_.Layer }) -join ', ')" 'WARN'
 
     # A button on the notice, not an instruction to go and find the layer. The
@@ -1890,7 +1890,7 @@ function Update-StaleOnAirWatchdog {
         if ($target -le 0) { $target = [long](Get-JsonProp $record 'UserId') }
         if ($target -le 0 -or $adminIds -contains $target) { continue }
         Send-TelegramMessage -ChatId $target -ParseMode HTML -Cause 'stale-on-air-owner-notice' `
-            -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $(Get-ArabicCountNoun -Count $item.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة').`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
+            -Text ("⚠️ <b>ما زال على الهواء</b>`n$(ConvertTo-TelegramHtmlText ([string]$item.Key)) على الطبقة $($item.Layer) منذ $(Get-ArabicCountNoun -Count $item.Hours -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة' -EnglishOne 'hour' -EnglishMany 'hours').`nإن لم يعد مطلوبًا فأخفِه من الزرّ أدناه.") `
             -ReplyMarkup @{ inline_keyboard = @(, @((New-Button "🙈 أخفِ طبقة $($item.Layer)" "hide:$($item.Layer)" -Style danger))) }
     }
 }
@@ -2270,7 +2270,7 @@ function Update-NewsSheetSync {
         $count = @($result.Items).Count
         Write-BridgeLog "News sheet sync published $count item(s)"
         Write-BridgeExecutionRecord -Kind 'news' -Result 'success' `
-            -Label "مزامنة الشيت · $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا')" | Out-Null
+            -Label "مزامنة الشيت · $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')" | Out-Null
     }
     elseif (-not $result.Unchanged -and -not $result.Skipped) {
         Write-BridgeLog "News sheet sync did not publish: $($result.Error)" 'WARN'
@@ -2298,7 +2298,7 @@ function Update-NewsSheetHealthNotice {
         $script:NewsSheetFailureStreak = 0
         $script:NewsSheetLastSuccessAt = Get-Date
         if ($failed -ge (Get-SettingInt 'NewsSheetFailureAlertAfter')) {
-            $spell = Get-ArabicCountNoun -Count $failed -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة'
+            $spell = Get-ArabicCountNoun -Count $failed -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة' -EnglishOne 'attempt' -EnglishMany 'attempts'
             Write-BridgeLog "News sheet sync recovered after $failed consecutive failure(s)"
             Send-NewsSheetNotice -Text "✅ عادت مزامنة الشيت بعد فشل $spell متتالية."
         }
@@ -2312,7 +2312,7 @@ function Update-NewsSheetHealthNotice {
     if ($after -le 0) { return }
     if (($script:NewsSheetFailureStreak % $after) -ne 0) { return }
 
-    $spell = Get-ArabicCountNoun -Count ([int]$script:NewsSheetFailureStreak) -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة'
+    $spell = Get-ArabicCountNoun -Count ([int]$script:NewsSheetFailureStreak) -One 'محاولة' -Two 'محاولتين' -Few 'محاولات' -Many 'محاولة' -EnglishOne 'attempt' -EnglishMany 'attempts'
     $since = if ($script:NewsSheetLastSuccessAt) {
         "آخر نشر ناجح منذ $(Format-Duration -Seconds ([int]((Get-Date) - $script:NewsSheetLastSuccessAt).TotalSeconds))."
     }

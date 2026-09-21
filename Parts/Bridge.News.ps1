@@ -96,7 +96,7 @@ function Start-NewsTickerDraft {
     $reservation = Get-NewsLockReservation
     if ($reservation -and [long]$reservation.UserId -ne $UserId) {
         $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية') بعد تسليم القفل له."}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds') بعد تسليم القفل له."}
     }
     if ($reservation) { Clear-NewsLockReservation }
     if ($existing) {
@@ -115,7 +115,7 @@ function Start-NewsTickerDraft {
         if (-not (Save-NewsTickerDraft)) {
             Write-BridgeLog 'Adopted news draft could not be saved; it may revert to open on the next start.' 'ERROR'
         }
-        Add-AuditEntry "🤝 تبنّى $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار المفتوحة ($(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا'))"
+        Add-AuditEntry "🤝 تبنّى $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار المفتوحة ($(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))"
         return [pscustomobject]@{Success=$true;Draft=$existing;Error=''}
     }
     $snapshot = Get-NewsTickerConfiguredSnapshot
@@ -459,7 +459,7 @@ function Request-NewsLockRelease {
         # owner collected a new ping each time. A repeat tap now only reports
         # how long is left.
         $secondsLeft = [math]::Max(0, [int]([math]::Ceiling(($minutes * 60) - ((Get-Date) - [datetime]$existing.RequestedAt).TotalSeconds)))
-        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية') قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds') قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
 
@@ -477,13 +477,13 @@ function Request-NewsLockRelease {
 
     if ([long]$draft.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
-            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
+            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
             -ReplyMarkup @{inline_keyboard=@(,@(
                     @{text=(T 'news.handLock');callback_data='news:lockgrant'},
                     @{text=(T 'news.stillWorking');callback_data='news:lockdeny'}))}
     }
     $persistNote = if ($requestPersisted) { '' } else { "`n$(T news.requestNotSaved)" }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة') سيُمنح لك تلقائيًا.$persistNote" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') سيُمنح لك تلقائيًا.$persistNote" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 
@@ -538,7 +538,7 @@ function Complete-NewsLockRelease {
         Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text (T 'news.lockHandedOver')
     }
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
-    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')." } else { '' }
+    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')." } else { '' }
     Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.$holdNote" `
         -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
     return $true
@@ -565,7 +565,7 @@ function Resolve-NewsLockRequestOnRelease {
     $requester = [long]$request.RequesterUserId
     Set-NewsLockReservation -UserId $requester | Out-Null
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
-    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')." } else { '' }
+    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')." } else { '' }
     Write-BridgeLog "News lock request from $requester settled by the owner's own release"
     Add-AuditEntry "🔓 سُوّي طلب فكّ قفل شريط الأخبار لصالح $(Get-UserDisplayName -UserId $requester) بعد تسليم المالك طوعًا"
     if ([long]$request.RequesterChatId -gt 0) {
@@ -627,7 +627,7 @@ function Open-NewsTickerDraftToAll {
         Write-BridgeLog 'Opened news draft could not be saved; it may revert to its owner on the next start.' 'ERROR'
     }
     Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
-    Add-AuditEntry "🤝 فتح $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار للجميع ($(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا'))"
+    Add-AuditEntry "🤝 فتح $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار للجميع ($(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))"
     Resolve-NewsLockRequestOnRelease -OwnerUserId $UserId `
         -Text "🤝 فتح $(Get-UserDisplayName -UserId $UserId) المسودة للتحرير بما فيها. اضغط ✏️ لمتابعة نفس القائمة." | Out-Null
     return $true
@@ -1558,12 +1558,12 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
     $snapshot=Get-NewsTickerConfiguredSnapshot
     $text=if($snapshot.Success){
         $items = @($snapshot.Items)
-        $header = "📰 إدارة شريط الأخبار`nالحالي: $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') على الهواء."
+        $header = "📰 إدارة شريط الأخبار`nالحالي: $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') على الهواء."
         if ($items.Count -gt 0) {
             $shown = $items | Select-Object -First 8
             $n = 0
             $body = ($shown | ForEach-Object { "$(++$n). $_" }) -join "`n"
-            $tail = if ($items.Count -gt 8) { "`n… و$(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') آخر" } else { "" }
+            $tail = if ($items.Count -gt 8) { "`n… و$(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') آخر" } else { "" }
             "$header`n`n$body$tail"
         } else { "$header`nالشريط فارغ." }
     }else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}

@@ -1156,7 +1156,7 @@ function Update-AlertSuppressionSweep {
         $script:AlertSuppression.Remove($key)
         if ($held -le 0) { continue }
         $chat = [long]$record.ChatId
-        $text = "🔇 كُتم $(Get-ArabicCountNoun -Count $held -One 'تنبيه' -Two 'تنبيهان' -Few 'تنبيهات' -Many 'تنبيهًا') من نفس السبب خلال الساعة الماضية بعد بلوغ السقف.`n" +
+        $text = "🔇 كُتم $(Get-ArabicCountNoun -Count $held -One 'تنبيه' -Two 'تنبيهان' -Few 'تنبيهات' -Many 'تنبيهًا' -EnglishOne 'alert' -EnglishMany 'alerts') من نفس السبب خلال الساعة الماضية بعد بلوغ السقف.`n" +
         "السبب: $(ConvertTo-TelegramHtmlText $([string]$record.Cause))"
         Write-BridgeLog "Held $held alert(s) for cause '$($record.Cause)' (chat $chat) after the hourly cap" 'WARN'
         if ($chat -gt 0) { Send-TelegramMessage -ChatId $chat -Text $text -ParseMode HTML }

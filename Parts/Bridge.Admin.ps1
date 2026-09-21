@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -207,7 +207,7 @@ function Get-HandoverAutoSummary {
         }
     }
     if ($topCause -and $found.Count -lt 3) {
-        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($(Get-ArabicCountNoun -Count $topCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة'))"
+        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($(Get-ArabicCountNoun -Count $topCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))"
     }
     return @($found | Select-Object -First 3)
 }

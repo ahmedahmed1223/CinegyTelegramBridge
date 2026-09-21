@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -158,7 +158,7 @@ function Register-TelegramSendFailure {
     $name = Get-UserDisplayName -UserId $ChatId
     $isAdmin = Test-Admin -ChatId $ChatId -UserId $ChatId
     Write-BridgeLog "Chat $ChatId quarantined as dead after $strikes delivery failures ($StatusCode)" 'WARN'
-    Add-AuditEntry "💀 محادثة ميتة: $name ($ChatId) — أُوقف الإرسال لها بعد $(Get-ArabicCountNoun -Count $strikes -One 'إخفاق' -Two 'إخفاقان' -Few 'إخفاقات' -Many 'إخفاقًا')"
+    Add-AuditEntry "💀 محادثة ميتة: $name ($ChatId) — أُوقف الإرسال لها بعد $(Get-ArabicCountNoun -Count $strikes -One 'إخفاق' -Two 'إخفاقان' -Few 'إخفاقات' -Many 'إخفاقًا' -EnglishOne 'failure' -EnglishMany 'failures')"
     # An admin that stops receiving is itself an outage: everyone else hears
     # urgently, because a held quiet-hours digest about missing alerts is how
     # a dead admin stays dead unnoticed.

@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -327,7 +327,7 @@ function Get-MonitorFrame {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $script:LastCaptureErrorDetail = "انتهت مهلة الالتقاط بعد $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')"
+            $script:LastCaptureErrorDetail = "انتهت مهلة الالتقاط بعد $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')"
             & $note "Output monitor capture timed out after ${TimeoutSeconds}s"
             return $null
         }
@@ -408,7 +408,7 @@ function Get-OutputMonitorStatus {
         ([datetime]$script:LastOutputMonitorAt).ToString('yyyy-MM-dd HH:mm:ss')
     }
     else { 'لم يبدأ بعد' }
-    $periodic = if ($intervalMinutes -gt 0) { "كل $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة')" } else { 'معطلة' }
+    $periodic = if ($intervalMinutes -gt 0) { "كل $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')" } else { 'معطلة' }
     $text = @(
         '📡 مراقب المصدر',
         "🖥️ سيرفر المتابعة: $serverState · $serverName",
@@ -461,8 +461,8 @@ function Test-OutputMonitorFlapping {
     if ($script:OutputMonitorFlapAlertedAt -gt $windowStart) { return $false }
     $script:OutputMonitorFlapAlertedAt = $Now
     Write-BridgeLog "Output monitor source is flapping: $recent failed capture(s) in the last six hours, each followed by a success." 'WARN'
-    Add-AuditEntry "⚠️ مصدر البث متذبذب - فشل الالتقاط $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة') خلال ست ساعات"
-    Send-AdminBroadcast -Text "⚠️ مصدر البث يتذبذب: فشل التقاط المخرج $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة') خلال الساعات الست الماضية، وفي كل مرة عاد بعدها.`nالمراقبة تعمل، لكنها لا ترى المخرج جزءًا من الوقت. يستحسن فحص الخادم قبل أن يتوقف كليًا." | Out-Null
+    Add-AuditEntry "⚠️ مصدر البث متذبذب - فشل الالتقاط $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') خلال ست ساعات"
+    Send-AdminBroadcast -Text "⚠️ مصدر البث يتذبذب: فشل التقاط المخرج $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') خلال الساعات الست الماضية، وفي كل مرة عاد بعدها.`nالمراقبة تعمل، لكنها لا ترى المخرج جزءًا من الوقت. يستحسن فحص الخادم قبل أن يتوقف كليًا." | Out-Null
     return $true
 }
 
@@ -528,7 +528,7 @@ function Update-OutputBlackWatchdog {
         if ($shouldSwitch -or $shouldAlert) {
             $script:OutputMonitorFailureAlerted = $true
             Write-BridgeLog "Output monitor source unavailable for $($script:OutputMonitorFailureCount) consecutive capture(s)" 'WARN'
-            Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $(Get-ArabicCountNoun -Count $script:OutputMonitorFailureCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة') متتالية"
+            Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $(Get-ArabicCountNoun -Count $script:OutputMonitorFailureCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') متتالية"
             if ($shouldSwitch -and (Set-OutputMonitorFallbackActive -Active $true)) {
                 # Checked again in minutes, not at the next hourly turn. The
                 # switch is the moment the primary matters most, and leaving

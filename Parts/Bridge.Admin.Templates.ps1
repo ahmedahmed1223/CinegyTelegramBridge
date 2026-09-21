@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -31,7 +31,7 @@ function Complete-TemplateReminderMinutes {
     $result = Save-TemplateReminderMinutes -TemplateKey ([string]$state.TemplateKey) -Minutes $minutes
     Clear-PendingState -ChatId $ChatId
     if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ تنبيه القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
-    $minutesText = Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة'
+    $minutesText = Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes'
     Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutesText - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     $message = if ($minutes -eq 0) { '✅ تم إيقاف تنبيه الظهور لهذا القالب.' } else { "✅ تم ضبط تنبيه الظهور بعد $minutesText." }
     Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)

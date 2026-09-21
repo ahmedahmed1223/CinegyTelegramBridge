@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -466,7 +466,7 @@ function Format-TemplateLastAir {
     $age = (Get-Date).ToUniversalTime() - $at.ToUniversalTime()
     if ($age.TotalMinutes -lt 60) { return "قبل $([math]::Max(1, [int]$age.TotalMinutes)) د" }
     if ($age.TotalHours -lt 24) { return "قبل $([int]$age.TotalHours) س" }
-    if ($age.TotalDays -lt 7) { return "قبل $(Get-ArabicCountNoun -Count ([int]$age.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا')" }
+    if ($age.TotalDays -lt 7) { return "قبل $(Get-ArabicCountNoun -Count ([int]$age.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا' -EnglishOne 'day' -EnglishMany 'days')" }
     return $at.ToLocalTime().ToString('yyyy-MM-dd')
 }
 

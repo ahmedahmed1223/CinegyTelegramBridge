@@ -158,7 +158,7 @@ function Get-WeeklyReportBlocks {
     }
     else {
         $parts = @($repeats | ForEach-Object {
-                "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')"
+                "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')"
             })
         $blocks += @{ type = 'paragraph'; text = "🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')" }
     }
@@ -181,11 +181,11 @@ function Get-WeeklyReportBlocks {
     }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
-        $blocks += @{ type = 'paragraph'; text = "📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا') · آخر نشرة $lastAt" }
+        $blocks += @{ type = 'paragraph'; text = "📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') · آخر نشرة $lastAt" }
     }
 
     # Urgent board activity.
-    $blocks += @{ type = 'paragraph'; text = "🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') بُثّت" }
+    $blocks += @{ type = 'paragraph'; text = "🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') بُثّت" }
 
     if ($data.Truncated) {
         $blocks += @{ type = 'paragraph'; text = "⚠️ بلغ السجل حدّ القراءة ($script:ReportMaxRecords سجلًّا)؛ قد تكون هناك عمليات أقدم داخل المدة." }
@@ -219,7 +219,7 @@ function Get-WeeklyReportText {
     $repeats = @($data.Repeats)
     if ($repeats.Count -eq 0) { $lines.Add('🔁 لا فشل متكرر بنفس السبب.') }
     else {
-        $parts = @($repeats | ForEach-Object { "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة')" })
+        $parts = @($repeats | ForEach-Object { "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')" })
         $lines.Add("🔁 فشل متكرر: $($parts -join ' · ')")
     }
 
@@ -235,10 +235,10 @@ function Get-WeeklyReportText {
     if ($data.TickerPublishes -eq 0) { $lines.Add('📰 لم يُنشر شريط أخبار هذا الأسبوع.') }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
-        $lines.Add("📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا') · آخر نشرة $lastAt")
+        $lines.Add("📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') · آخر نشرة $lastAt")
     }
 
-    $lines.Add("🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا') بُثّت")
+    $lines.Add("🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') بُثّت")
 
     if ($data.Truncated) { $lines.Add("<i>⚠️ بلغ السجل حدّ القراءة؛ قد تكون هناك عمليات أقدم داخل المدة.</i>") }
     return ($lines -join "`n")

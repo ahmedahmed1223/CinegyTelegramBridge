@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -466,8 +466,8 @@ function Get-ScheduleExecutionBlocks {
         return $blocks + @(@{ type = 'paragraph'; text = 'لم يُنفَّذ شيء بعد.' })
     }
     $failed = @($rows | Where-Object { $_.Mark -eq '❌' }).Count
-    $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا')، كلّها ناجحة" }
-    else { "🟠 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا') · ❌ $failed" }
+    $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions')، كلّها ناجحة" }
+    else { "🟠 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions') · ❌ $failed" }
     $blocks += @{ type = 'paragraph'; text = $verdict }
 
     $trimmed = Select-RichTableRows -Items $rows
@@ -793,7 +793,7 @@ function Update-ScheduleQueue {
         if ($notifyMinutes -gt 0 -and $minutesUntil -gt 0 -and $minutesUntil -le $notifyMinutes -and
             [string](Get-JsonProp $scheduleEntry 'NotificationExecutionKey') -ne $occurrenceKey) {
             $roundedMinutes = [math]::Max(1, [math]::Ceiling($minutesUntil))
-            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $(Get-ArabicCountNoun -Count $roundedMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة').`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $(Get-ArabicCountNoun -Count $roundedMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes').`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
             $scheduleEntry.NotificationExecutionKey = $occurrenceKey
             Save-ScheduleEvents | Out-Null
         }

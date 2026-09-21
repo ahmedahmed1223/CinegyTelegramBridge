@@ -655,7 +655,7 @@ function Get-MyOperationsBlocks {
     $failed = @($history | Where-Object { [string]$_.Result -eq 'failed' }).Count
     $blockedCount = @($history | Where-Object { [string]$_.Result -eq 'blocked' }).Count
     $succeeded = $history.Count - $failed - $blockedCount
-    $tally = "$(Get-ArabicCountNoun -Count $history.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية') · ✅ $succeeded"
+    $tally = "$(Get-ArabicCountNoun -Count $history.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · ✅ $succeeded"
     if ($failed -gt 0) { $tally += " · ❌ $failed" }
     if ($blockedCount -gt 0) { $tally += " · ⛔ $blockedCount" }
     $blocks += @{ type = 'paragraph'; text = $tally }

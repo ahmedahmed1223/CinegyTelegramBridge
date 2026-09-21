@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -506,11 +506,11 @@ function Get-BridgeHealthRows {
     else { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
 
     $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
-    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا')" } }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا' -EnglishOne 'warning' -EnglishMany 'warnings')" } }
     else { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
 
     $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
-    $upcomingText = Get-ArabicCountNoun -Count $upcomingCount -One 'حدث' -Two 'حدثان' -Few 'أحداث' -Many 'حدثًا'
+    $upcomingText = Get-ArabicCountNoun -Count $upcomingCount -One 'حدث' -Two 'حدثان' -Few 'أحداث' -Many 'حدثًا' -EnglishOne 'event' -EnglishMany 'events'
     $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
     else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
 
@@ -519,7 +519,7 @@ function Get-BridgeHealthRows {
     # is the cheapest way to put that count somewhere the desk actually looks.
     $deadChatsCount = $script:DeadChats.Count
     $rows += if ($deadChatsCount -eq 0) { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟢'; Detail = 'لا شيء' } }
-    else { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟠'; Detail = Get-ArabicCountNoun -Count $deadChatsCount -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' } }
+    else { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟠'; Detail = Get-ArabicCountNoun -Count $deadChatsCount -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' -EnglishOne 'chat' -EnglishMany 'chats' } }
 
     $recentErrors = @()
     foreach ($service in @('Telegram', 'Cinegy')) {
@@ -605,8 +605,8 @@ function Get-BridgeHealthCenterBlocks {
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
 
     $usage = Get-BridgeUsageMetrics
-    $operationsText = Get-ArabicCountNoun -Count $usage.OperationsToday -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية'
-    $operatorsText = Get-ArabicCountNoun -Count $usage.ActiveOperators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا'
+    $operationsText = Get-ArabicCountNoun -Count $usage.OperationsToday -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
+    $operatorsText = Get-ArabicCountNoun -Count $usage.ActiveOperators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا' -EnglishOne 'operator' -EnglishMany 'operators'
     $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $operationsText اليوم · $operatorsText · $($usage.OnAirCount) على الهواء" }
     return $blocks
 }
@@ -761,7 +761,7 @@ function Start-TemplateTestReview {
     }
     $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_test_review'; UserId=$UserId; TemplateIndex=$TemplateIndex; TestLayer=$testLayer; AutoHideSeconds=$seconds }
-    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية')`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
 function Get-BridgeSupervisor {

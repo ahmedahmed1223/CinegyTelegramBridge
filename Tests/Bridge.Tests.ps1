@@ -2656,3 +2656,62 @@ Describe 'The bridge speaks the language it is set to' {
         }
     }
 }
+
+Describe 'Every setting has a name in both languages' {
+    <#
+        The catalogue holds the Arabic beside the English so the coverage test
+        can see a half-finished entry. That only works while the Arabic here
+        matches the Arabic the bridge actually ships in
+        $script:SettingNavigationLabels - otherwise an operator reading Arabic
+        sees one label and the catalogue test approves a different one.
+
+        Editing the shipped label without editing the catalogue is the exact
+        drift this catches, and it is the likeliest one: the shipped table is
+        where somebody goes to reword a label.
+    #>
+    It 'carries an English label for every setting the bridge declares' {
+        $untranslated = @(@($script:DefaultSettings.Keys) | Where-Object {
+                $null -eq (Get-BridgeTextEntry -Key "setting.$_.label")
+            } | Sort-Object)
+
+        $untranslated | Should -BeNullOrEmpty -Because "these settings would show a bare Arabic label on an English screen: $($untranslated -join ', ')"
+    }
+
+    It 'keeps the catalogue Arabic identical to the label the bridge ships' {
+        $drifted = @(foreach ($name in @($script:SettingNavigationLabels.Keys)) {
+                $entry = Get-BridgeTextEntry -Key "setting.$name.label"
+                if (-not $entry) { continue }
+                if ([string]$entry['ar'] -ne [string]$script:SettingNavigationLabels[$name]) {
+                    "$name ('$($script:SettingNavigationLabels[$name])' vs '$($entry['ar'])')"
+                }
+            })
+
+        $drifted | Should -BeNullOrEmpty -Because "the catalogue's Arabic must be the shipped Arabic: $($drifted -join '; ')"
+    }
+
+    It 'shows an English label on an English screen and the Arabic one otherwise' {
+        $original = Get-Setting 'Language'
+        try {
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+            (Get-SettingNavigationMetadata -Name 'MaxFieldLength').Label | Should -Be 'Field text length'
+
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+            (Get-SettingNavigationMetadata -Name 'MaxFieldLength').Label | Should -Be 'طول نص الحقل'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $original -Force }
+    }
+
+    It 'does not let one language leak into the other by mutating the schema' {
+        # Get-SettingNavigationMetadata returns a copy. Mutating the schema
+        # record would pin the bridge to whichever language asked first.
+        $original = Get-Setting 'Language'
+        try {
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+            Get-SettingNavigationMetadata -Name 'MaxFieldLength' | Out-Null
+
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+            (Get-SettingNavigationMetadata -Name 'MaxFieldLength').Label | Should -Be 'طول نص الحقل'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $original -Force }
+    }
+}

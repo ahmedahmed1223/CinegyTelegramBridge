@@ -15,6 +15,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.65.0
+
+**All 208 setting labels now exist in both languages**, along with the eleven doors and their summaries. An English settings screen no longer shows a lone Arabic label in the middle of it.
+
+- The catalogue holds the Arabic beside the English, and **a test requires the catalogue's Arabic to be identical to the label the bridge actually ships** in `$script:SettingNavigationLabels`. Rewording a label in the shipped table without touching the catalogue is the likeliest drift there is - that table is where somebody goes to reword one - and it now fails the gate by name instead of quietly approving a label no operator sees.
+- A second test requires every declared setting to have a catalogue entry at all, so a new setting cannot arrive English-only or Arabic-only.
+- A third checks that asking for one language does not pin the bridge to it: `Get-SettingNavigationMetadata` returns a copy, and mutating the schema record would have made the first language asked for the last one available.
+
+**Progress: 342 catalogue keys.** Converted: the main menu, the whole settings area including every label, hide-all, permission refusals, and the programme content boards.
+
 ## Version 8.64.0
 
 **Fixed: "external change in Cinegy" accused somebody who was never there.** Reported from the field, on layer 7: *"استُبدل خارجيًا · العنصر الحالي: عنصر غير مسمّى · المصدر: مصدر خارجي غير معرّف"* — while the bridge's own log line for that same decision read `Cinegy state sync (watchdog) removed on-air record for layer 7 after Cinegy confirmed hidden`.

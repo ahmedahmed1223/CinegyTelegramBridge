@@ -259,6 +259,219 @@ function New-BridgeTextCatalogue {
     }
     $catalogue['boards.autoHide'] = @{ ar = '⏱ هذا القالب يُخفى تلقائيًا بعد {0} ث.'; en = '⏱ This template auto-hides after {0}s.' }
 
+    # --- Every setting label, resolved through TF at read time ----------
+    # The Arabic here is the same text $script:SettingNavigationLabels has
+    # shipped all along; holding both together is what lets the catalogue
+    # test see a label that has gained an English half and lost its Arabic.
+    $catalogue['setting.EnableSnapshot.label'] = @{ ar = 'التقاط لقطات البث'; en = 'Output snapshots' }
+    $catalogue['setting.EnableLiveRelay.label'] = @{ ar = 'ترحيل البث المباشر'; en = 'Live relay' }
+    $catalogue['setting.EnableTimedShow.label'] = @{ ar = 'العرض المؤقت'; en = 'Timed show' }
+    $catalogue['setting.EnableHideAll.label'] = @{ ar = 'تفعيل إخفاء الكل'; en = 'Hide-all button' }
+    $catalogue['setting.HideAllLayers.label'] = @{ ar = 'طبقات إخفاء الكل'; en = 'Hide-all layers' }
+    $catalogue['setting.ReservedLayers.label'] = @{ ar = 'الطبقات المحجوزة'; en = 'Reserved layers' }
+    $catalogue['setting.AdminOnlyTemplateKeys.label'] = @{ ar = 'قوالب للمشرفين'; en = 'Administrator-only templates' }
+    $catalogue['setting.OwnerOnlyTemplateKeys.label'] = @{ ar = 'قوالب للمالك'; en = 'Owner-only templates' }
+    $catalogue['setting.AdminOnlyLayers.label'] = @{ ar = 'طبقات للمشرفين'; en = 'Administrator-only layers' }
+    $catalogue['setting.OwnerOnlyLayers.label'] = @{ ar = 'طبقات للمالك'; en = 'Owner-only layers' }
+    $catalogue['setting.LayersScreenAccess.label'] = @{ ar = 'من يرى زر الطبقات'; en = 'Who sees the layers button' }
+    $catalogue['setting.DisabledTemplateKeys.label'] = @{ ar = 'القوالب المعطّلة'; en = 'Disabled templates' }
+    $catalogue['setting.SensitiveTemplateKeys.label'] = @{ ar = 'القوالب الحساسة'; en = 'Sensitive templates' }
+    $catalogue['setting.TemplateMaxAirSeconds.label'] = @{ ar = 'أقصى مدة لكل قالب'; en = 'Maximum air time per template' }
+    $catalogue['setting.TemplateAirExtensionEnabled.label'] = @{ ar = 'تمديد واحد للمشغّل'; en = 'One operator extension' }
+    $catalogue['setting.TemplateAirExtensionResponseSeconds.label'] = @{ ar = 'مهلة الرد على التمديد'; en = 'Extension reply window' }
+    $catalogue['setting.TemplateAirExtensionMaxSeconds.label'] = @{ ar = 'أقصى مدة للتمديد'; en = 'Maximum extension' }
+    $catalogue['setting.LayerNames.label'] = @{ ar = 'أسماء الطبقات'; en = 'Layer names' }
+    $catalogue['setting.EnableFavorites.label'] = @{ ar = 'المفضلة'; en = 'Favourites' }
+    $catalogue['setting.MaintenanceMode.label'] = @{ ar = 'وضع الصيانة'; en = 'Maintenance mode' }
+    $catalogue['setting.EnablePersistentMenuButton.label'] = @{ ar = 'زر القائمة الثابت'; en = 'Persistent menu button' }
+    $catalogue['setting.EnableNewsTickerManagement.label'] = @{ ar = 'إدارة شريط الأخبار'; en = 'News ticker management' }
+    $catalogue['setting.NewsFilePath.label'] = @{ ar = 'ملف الأخبار'; en = 'News file' }
+    $catalogue['setting.NewsItemSeparator.label'] = @{ ar = 'فاصل الأخبار'; en = 'News separator' }
+    $catalogue['setting.NewsSheetCsvUrl.label'] = @{ ar = 'رابط Google Sheets (CSV)'; en = 'Google Sheets link (CSV)' }
+    $catalogue['setting.NewsSheetSyncMode.label'] = @{ ar = 'وضع مزامنة الشيت'; en = 'Sheet sync mode' }
+    $catalogue['setting.NewsSheetSyncMinutes.label'] = @{ ar = 'كل كم دقيقة تُزامن الشيت'; en = 'Sheet sync interval' }
+    $catalogue['setting.NewsSheetTimeoutSeconds.label'] = @{ ar = 'مهلة تنزيل الشيت'; en = 'Sheet download timeout' }
+    $catalogue['setting.NewsSheetNotifyScope.label'] = @{ ar = 'من يُنبَّه بعد مزامنة الشيت'; en = 'Who is told after a sheet sync' }
+    $catalogue['setting.NewsPublishNotifyScope.label'] = @{ ar = 'من يُنبَّه بعد النشر اليدوي'; en = 'Who is told after a manual publish' }
+    $catalogue['setting.NewsSheetFailureAlertAfter.label'] = @{ ar = 'تنبيه فشل مزامنة الشيت'; en = 'Sheet sync failure alert' }
+    $catalogue['setting.AllowOperatorsSheetPull.label'] = @{ ar = 'سماح المشغّلين بسحب الشيت'; en = 'Operators may pull the sheet' }
+    $catalogue['setting.NewsMaxItemLength.label'] = @{ ar = 'الحد الأقصى لطول الخبر'; en = 'Maximum headline length' }
+    $catalogue['setting.NewsMaxItems.label'] = @{ ar = 'الحد الأقصى لعدد الأخبار'; en = 'Maximum number of headlines' }
+    $catalogue['setting.NewsImportMaxBytes.label'] = @{ ar = 'حد استيراد الأخبار'; en = 'News import size limit' }
+    $catalogue['setting.NewsBackupKeepFiles.label'] = @{ ar = 'نسخ الأخبار المحفوظة'; en = 'News backups kept' }
+    $catalogue['setting.NewsLockRequestMinutes.label'] = @{ ar = 'مهلة قفل مسودة الأخبار'; en = 'News draft lock timeout' }
+    $catalogue['setting.NewsLockGrantHoldSeconds.label'] = @{ ar = 'حجز قفل الأخبار بعد التسليم'; en = 'Lock hold after handover' }
+    $catalogue['setting.AllowOperatorsDeleteNews.label'] = @{ ar = 'السماح للمشغل بحذف الأخبار'; en = 'Operators may delete headlines' }
+    $catalogue['setting.AllowOperatorsRestoreNews.label'] = @{ ar = 'السماح للمشغل باستعادة الأخبار'; en = 'Operators may restore headlines' }
+    $catalogue['setting.AllowOperatorsClearAllNews.label'] = @{ ar = 'السماح للمشغل بمسح كل الأخبار'; en = 'Operators may clear all headlines' }
+    $catalogue['setting.DropPendingUpdatesOnStart.label'] = @{ ar = 'إسقاط التحديثات عند البدء'; en = 'Drop pending updates at start' }
+    $catalogue['setting.LogAirXml.label'] = @{ ar = 'تسجيل XML الخاص بـ Cinegy'; en = 'Log Cinegy XML' }
+    $catalogue['setting.ReshowClearsLayer.label'] = @{ ar = 'مسح الطبقة قبل إعادة العرض'; en = 'Clear the layer before re-showing' }
+    $catalogue['setting.AirVariableType.label'] = @{ ar = 'نوع متغيرات Cinegy'; en = 'Cinegy variable type' }
+    $catalogue['setting.SetValuesAfterShow.label'] = @{ ar = 'تحديث القيم بعد العرض'; en = 'Set values after show' }
+    $catalogue['setting.AutoHidePresetSeconds.label'] = @{ ar = 'مدد الإخفاء الجاهزة'; en = 'Auto-hide presets' }
+    $catalogue['setting.RelayAutoRestart.label'] = @{ ar = 'إعادة تشغيل الترحيل تلقائيًا'; en = 'Restart the relay automatically' }
+    $catalogue['setting.CinegyStateStaleSeconds.label'] = @{ ar = 'حد قِدم حالة Cinegy'; en = 'Cinegy state staleness limit' }
+    $catalogue['setting.ScheduleConflictWindowMinutes.label'] = @{ ar = 'نافذة تعارض الجدولة'; en = 'Schedule clash window' }
+    $catalogue['setting.SchedulePaused.label'] = @{ ar = 'إيقاف الجدولة مؤقتًا'; en = 'Pause scheduling' }
+    $catalogue['setting.ScheduleMaxRetries.label'] = @{ ar = 'أقصى محاولات الجدولة'; en = 'Maximum schedule retries' }
+    $catalogue['setting.ScheduleRetryDelaySeconds.label'] = @{ ar = 'تأخير إعادة محاولة الجدولة'; en = 'Schedule retry delay' }
+    $catalogue['setting.ScheduleRetryBackoffFactor.label'] = @{ ar = 'معامل تراجع إعادة المحاولة'; en = 'Retry backoff factor' }
+    $catalogue['setting.ScheduleRetryMaxDelaySeconds.label'] = @{ ar = 'أقصى تأخير لإعادة المحاولة'; en = 'Maximum retry delay' }
+    $catalogue['setting.HeartbeatEnabled.label'] = @{ ar = 'نبض الجسر'; en = 'Bridge heartbeat' }
+    $catalogue['setting.NotifyAdminsOnRelayFailure.label'] = @{ ar = 'إشعار المشرفين بفشل الترحيل'; en = 'Tell admins about relay failures' }
+    $catalogue['setting.NotifyAdminsOnExternalChange.label'] = @{ ar = 'إشعار المشرفين بالتغيير الخارجي'; en = 'Tell admins about external changes' }
+    $catalogue['setting.NotifyAdminsOnCinegyHealth.label'] = @{ ar = 'إشعار المشرفين بصحة Cinegy'; en = 'Tell admins about Cinegy health' }
+    $catalogue['setting.SceneMode.label'] = @{ ar = 'وضع المشاهد'; en = 'Scene mode' }
+    $catalogue['setting.RequireUserLevelAuth.label'] = @{ ar = 'التحقق من هوية المستخدم'; en = 'Verify the user identity' }
+    $catalogue['setting.EnableSelfServiceRequests.label'] = @{ ar = 'طلبات الوصول الذاتية'; en = 'Self-service access requests' }
+    $catalogue['setting.EnableAnnouncements.label'] = @{ ar = 'تنويهات المشرفين'; en = 'Administrator announcements' }
+    $catalogue['setting.AnnouncementMaxLength.label'] = @{ ar = 'طول التنويه'; en = 'Announcement length' }
+    $catalogue['setting.AnnouncementDefaultExpiryHours.label'] = @{ ar = 'مدة التنويه الافتراضية'; en = 'Default announcement lifetime' }
+    $catalogue['setting.NotifyAdminsOnAccessRequest.label'] = @{ ar = 'إشعار طلبات الوصول'; en = 'Access request alerts' }
+    $catalogue['setting.NotifyAdminsOnBlockedChat.label'] = @{ ar = 'إشعار الحظر التلقائي'; en = 'Automatic block alerts' }
+    $catalogue['setting.NotifyAdminsOnMissingGraphic.label'] = @{ ar = 'تنبيه غياب قالب دائم'; en = 'Missing permanent graphic alert' }
+    $catalogue['setting.MissingGraphicConfirmChecks.label'] = @{ ar = 'فحوص تأكيد الغياب'; en = 'Checks confirming it is missing' }
+    $catalogue['setting.BlockRejectedRequesters.label'] = @{ ar = 'حظر من رُفض طلبه'; en = 'Block a rejected requester' }
+    $catalogue['setting.JoinSecret.label'] = @{ ar = 'رمز الانضمام'; en = 'Join code' }
+    $catalogue['setting.JoinSecretMaxAttempts.label'] = @{ ar = 'محاولات رمز الانضمام'; en = 'Join code attempts' }
+    $catalogue['setting.MaxAccessRequestsPerDay.label'] = @{ ar = 'طلبات الوصول يوميًا'; en = 'Access requests per day' }
+    $catalogue['setting.DormantUserDays.label'] = @{ ar = 'أيام خمول المستخدم'; en = 'Days before a user is dormant' }
+    $catalogue['setting.AutoDisableDormantUsers.label'] = @{ ar = 'تعطيل الخامل تلقائيًا'; en = 'Disable dormant users automatically' }
+    $catalogue['setting.LeaveUnknownGroups.label'] = @{ ar = 'مغادرة المجموعات المجهولة'; en = 'Leave unknown groups' }
+    $catalogue['setting.EnableRawCommand.label'] = @{ ar = 'الأوامر الخام للمشرف'; en = 'Raw administrator commands' }
+    $catalogue['setting.EnableFullTemplateManagement.label'] = @{ ar = 'الإدارة الكاملة للقوالب'; en = 'Full template management' }
+    $catalogue['setting.UserActivityRecentMinutes.label'] = @{ ar = 'نافذة النشاط الحديث للمستخدم'; en = 'Recent-activity window' }
+    $catalogue['setting.TemplateReminderFollowUpMinutes.label'] = @{ ar = 'مهلة متابعة تنبيه القالب'; en = 'Template reminder follow-up' }
+    $catalogue['setting.EnableDpapiSecrets.label'] = @{ ar = 'حماية الأسرار عبر Windows'; en = 'Protect secrets with Windows DPAPI' }
+    $catalogue['setting.MojazMultiDesign.label'] = @{ ar = 'موجز متعدد التصاميم'; en = 'Multi-design bulletin' }
+    $catalogue['setting.MojazAnchorToAirClock.label'] = @{ ar = 'ضبط الزمن من Cinegy'; en = 'Take timing from Cinegy' }
+    $catalogue['setting.MojazRowFrames.label'] = @{ ar = 'إطارات صف الموجز'; en = 'Bulletin row frames' }
+    $catalogue['setting.MojazImageKeepHours.label'] = @{ ar = 'الاحتفاظ بصور الموجز'; en = 'Keep bulletin images' }
+    $catalogue['setting.BroadcastFps.label'] = @{ ar = 'معدل إطارات القناة'; en = 'Channel frame rate' }
+    $catalogue['setting.MojazIntroExtraFrames.label'] = @{ ar = 'إطارات الصف الأول'; en = 'First row frames' }
+    $catalogue['setting.MojazLastRowFrames.label'] = @{ ar = 'إطارات الصف الأخير'; en = 'Last row frames' }
+    $catalogue['setting.MojazSyncOffsetMs.label'] = @{ ar = 'لحظة الكتابة داخل الظهور'; en = 'Write moment inside the reveal' }
+    $catalogue['setting.MojazSyncLeadMs.label'] = @{ ar = 'تعويض زمن الشبكة'; en = 'Network latency compensation' }
+    $catalogue['setting.MojazNotifyOnFinish.label'] = @{ ar = 'إشعار انتهاء الموجز'; en = 'Tell me when the bulletin ends' }
+    $catalogue['setting.MojazScheduleNoticeSeconds.label'] = @{ ar = 'تنبيه قبل الموعد'; en = 'Warning before a scheduled run' }
+    $catalogue['setting.MojazHidesTicker.label'] = @{ ar = 'إخفاء الشريط أثناء الموجز'; en = 'Hide the ticker during a bulletin' }
+    $catalogue['setting.EnableUrgentBoard.label'] = @{ ar = 'إدارة العواجل'; en = 'Urgent board' }
+    $catalogue['setting.UrgentBoardIntervalSeconds.label'] = @{ ar = 'فاصل العواجل'; en = 'Urgent interval' }
+    $catalogue['setting.UrgentBoardRepeats.label'] = @{ ar = 'تكرار العواجل'; en = 'Urgent repeats' }
+    $catalogue['setting.UrgentBoardMode.label'] = @{ ar = 'نمط عرض العواجل'; en = 'Urgent display mode' }
+    $catalogue['setting.UrgentBoardRepeatMode.label'] = @{ ar = 'ترتيب التكرار'; en = 'Repeat order' }
+    $catalogue['setting.UrgentBoardTotalSeconds.label'] = @{ ar = 'المدة الكلية للعواجل'; en = 'Total urgent run time' }
+    $catalogue['setting.UrgentBoardMaxItems.label'] = @{ ar = 'حدّ عدد العواجل'; en = 'Maximum urgent items' }
+    $catalogue['setting.UrgentMinIntervalSeconds.label'] = @{ ar = 'أقصر فاصل للعواجل'; en = 'Shortest urgent interval' }
+    $catalogue['setting.UrgentExitGapSeconds.label'] = @{ ar = 'الفاصل بين الأخبار'; en = 'Gap between stories' }
+    $catalogue['setting.Language.label'] = @{ ar = 'لغة الجسر'; en = 'Bridge language' }
+    $catalogue['setting.EnableContentBoards.label'] = @{ ar = 'محتوى البرامج'; en = 'Programme content boards' }
+    $catalogue['setting.MaxContentBoards.label'] = @{ ar = 'أقصى عدد الجداول'; en = 'Maximum boards' }
+    $catalogue['setting.BoardMaxItems.label'] = @{ ar = 'أقصى صفوف الجدول'; en = 'Maximum rows per board' }
+    $catalogue['setting.UrgentSyncLeadMs.label'] = @{ ar = 'تعويض زمن الشبكة للعواجل'; en = 'Urgent network latency compensation' }
+    $catalogue['setting.UrgentBoardNotifyOnFinish.label'] = @{ ar = 'إشعار انتهاء العواجل'; en = 'Tell me when the urgent run ends' }
+    $catalogue['setting.UrgentBoardMaxTextLength.label'] = @{ ar = 'أطول نصّ عاجل'; en = 'Longest urgent text' }
+    $catalogue['setting.MojazImageWidth.label'] = @{ ar = 'عرض صورة الصف'; en = 'Row image width' }
+    $catalogue['setting.MojazImageHeight.label'] = @{ ar = 'ارتفاع صورة الصف'; en = 'Row image height' }
+    $catalogue['setting.AirCommandTimeoutSeconds.label'] = @{ ar = 'مهلة أمر Cinegy'; en = 'Cinegy command timeout' }
+    $catalogue['setting.AllowRemoteRestart.label'] = @{ ar = 'إعادة التشغيل من البوت'; en = 'Restart from the bot' }
+    $catalogue['setting.AuditArchiveKeepFiles.label'] = @{ ar = 'أرشيفات التدقيق المحفوظة'; en = 'Audit archives kept' }
+    $catalogue['setting.AuditMaxSizeMB.label'] = @{ ar = 'حجم سجل التدقيق'; en = 'Audit log size' }
+    $catalogue['setting.AuditTemplateValues.label'] = @{ ar = 'تسجيل نص القالب'; en = 'Record template text' }
+    $catalogue['setting.AuditTemplateValuesMaxChars.label'] = @{ ar = 'طول النص المسجَّل'; en = 'Recorded text length' }
+    $catalogue['setting.AuditTrailSize.label'] = @{ ar = 'حجم سجل العمليات'; en = 'Operation log size' }
+    $catalogue['setting.AutoHideDefaultSeconds.label'] = @{ ar = 'مدة الإخفاء الافتراضية'; en = 'Default auto-hide time' }
+    $catalogue['setting.BackupStorageWarningMB.label'] = @{ ar = 'تنبيه حجم النسخ'; en = 'Backup size warning' }
+    $catalogue['setting.ButtonTextMaxLength.label'] = @{ ar = 'طول نص الأزرار'; en = 'Button text length' }
+    $catalogue['setting.CinegyFrameLossTolerance.label'] = @{ ar = 'الإطارات المفقودة المسموحة'; en = 'Dropped frames allowed' }
+    $catalogue['setting.CinegyFrameLossTolerancePercent.label'] = @{ ar = 'نسبة الإطارات المفقودة'; en = 'Dropped frame percentage' }
+    $catalogue['setting.CinegyHealthCheckSeconds.label'] = @{ ar = 'فاصل فحص صحة Cinegy'; en = 'Cinegy health check interval' }
+    $catalogue['setting.CinegyHealthConfirmChecks.label'] = @{ ar = 'فحوص تأكيد الحالة'; en = 'Checks confirming the state' }
+    $catalogue['setting.CinegyMonitorTimeoutSeconds.label'] = @{ ar = 'مهلة فحص Cinegy'; en = 'Cinegy check timeout' }
+    $catalogue['setting.CinegyReadErrorRateTolerance.label'] = @{ ar = 'نسبة أخطاء القراءة'; en = 'Read error rate allowed' }
+    $catalogue['setting.CinegyStateBackoffMaxSeconds.label'] = @{ ar = 'أقصى تباعد عند التعذّر'; en = 'Maximum backoff when unreachable' }
+    $catalogue['setting.CinegyStateCheckSeconds.label'] = @{ ar = 'فاصل فحص الطبقات'; en = 'Layer check interval' }
+    $catalogue['setting.DiscoverExternalLayers.label'] = @{ ar = 'تبنّي الطبقات الخارجية'; en = 'Adopt external layers' }
+    $catalogue['setting.TelegramPollMarginSeconds.label'] = @{ ar = 'مهلة الاستطلاع الإضافية'; en = 'Extra poll timeout' }
+    $catalogue['setting.TelegramPollTimeoutTolerance.label'] = @{ ar = 'تأخر الاستطلاع المحتمل'; en = 'Tolerated poll delays' }
+    $catalogue['setting.ConfigBackupKeepFiles.label'] = @{ ar = 'نسخ الإعدادات المحفوظة'; en = 'Settings backups kept' }
+    $catalogue['setting.AskRequesterName.label'] = @{ ar = 'سؤال طالب الوصول عن اسمه'; en = 'Ask a requester for their name' }
+    $catalogue['setting.ConfirmLayerRemoval.label'] = @{ ar = 'تأكيد قبل الإخفاء'; en = 'Confirm before hiding' }
+    $catalogue['setting.ShowOnAirTextOnRemoval.label'] = @{ ar = 'عرض النص قبل الإخفاء'; en = 'Show the text before hiding' }
+    $catalogue['setting.DiskFreeWarningGB.label'] = @{ ar = 'تنبيه مساحة القرص'; en = 'Free disk warning' }
+    $catalogue['setting.EnableButtonStyles.label'] = @{ ar = 'تلوين الأزرار'; en = 'Colour the buttons' }
+    $catalogue['setting.EnableSafeRollback.label'] = @{ ar = 'التراجع الآمن'; en = 'Safe rollback' }
+    $catalogue['setting.EnableTextShortcuts.label'] = @{ ar = 'اختصارات الكتابة'; en = 'Typing shortcuts' }
+    $catalogue['setting.FavoritesCount.label'] = @{ ar = 'عدد المفضلة المعروضة'; en = 'Favourites shown' }
+    $catalogue['setting.HealthFailureAlertThreshold.label'] = @{ ar = 'حد تنبيه الفشل'; en = 'Failure alert threshold' }
+    $catalogue['setting.HeartbeatHour.label'] = @{ ar = 'ساعة النبض اليومي'; en = 'Daily heartbeat hour' }
+    $catalogue['setting.LogKeepFiles.label'] = @{ ar = 'ملفات السجل المحفوظة'; en = 'Log files kept' }
+    $catalogue['setting.LogMaxSizeMB.label'] = @{ ar = 'حجم ملف السجل'; en = 'Log file size' }
+    $catalogue['setting.ExecutionLogKeepRecords.label'] = @{ ar = 'سجلات التنفيذ المحفوظة'; en = 'Execution records kept' }
+    $catalogue['setting.ScheduleHistoryKeepDays.label'] = @{ ar = 'تاريخ الجدولة المحفوظ'; en = 'Schedule history kept' }
+    $catalogue['setting.AccessGuardKeepDays.label'] = @{ ar = 'مدة تذكّر المحظورين'; en = 'How long blocks are remembered' }
+    $catalogue['setting.MaintenanceWindowEnd.label'] = @{ ar = 'نهاية نافذة الصيانة'; en = 'Maintenance window end' }
+    $catalogue['setting.MaintenanceWindowStart.label'] = @{ ar = 'بداية نافذة الصيانة'; en = 'Maintenance window start' }
+    $catalogue['setting.MaxFieldLength.label'] = @{ ar = 'طول نص الحقل'; en = 'Field text length' }
+    $catalogue['setting.MaxPendingApprovals.label'] = @{ ar = 'طلبات الوصول المعلّقة'; en = 'Pending access requests' }
+    $catalogue['setting.MissedEventsHours.label'] = @{ ar = 'مدة «ماذا فاتني»'; en = 'What-did-I-miss window' }
+    $catalogue['setting.NewNewsItemAtTop.label'] = @{ ar = 'مكان الخبر الجديد'; en = 'Where a new headline goes' }
+    $catalogue['setting.NewsDraftTimeoutMinutes.label'] = @{ ar = 'مهلة مسودة الأخبار'; en = 'News draft timeout' }
+    $catalogue['setting.NewsListLabelLength.label'] = @{ ar = 'طول الخبر في القائمة'; en = 'Headline length in the list' }
+    $catalogue['setting.NewsListLayout.label'] = @{ ar = 'شكل قائمة الأخبار'; en = 'News list layout' }
+    $catalogue['setting.NewsListPaged.label'] = @{ ar = 'تقسيم القائمة لصفحات'; en = 'Page the list' }
+    $catalogue['setting.NewsListPageSize.label'] = @{ ar = 'أخبار كل صفحة'; en = 'Headlines per page' }
+    $catalogue['setting.NewsListStackedLabelLength.label'] = @{ ar = 'طول الخبر في سطره'; en = 'Headline length on its own line' }
+    $catalogue['setting.NotifyOnScheduleOverwrite.label'] = @{ ar = 'تنبيه استبدال مشهد'; en = 'Warn when a scene is replaced' }
+    $catalogue['setting.NotifyOperatorsOnBlackOutput.label'] = @{ ar = 'إشعار المشغّلين بالسواد'; en = 'Tell operators about black output' }
+    $catalogue['setting.TemplateNotifyRules.label'] = @{ ar = 'إشعار العرض حسب القالب'; en = 'Show notices per template' }
+    $catalogue['setting.OneHandMode.label'] = @{ ar = 'وضع اليد الواحدة'; en = 'One-hand mode' }
+    $catalogue['setting.OutputBlackConfirmSeconds.label'] = @{ ar = 'انتظار اللقطة المؤكِّدة'; en = 'Wait for the confirming frame' }
+    $catalogue['setting.OutputBlackLuminance.label'] = @{ ar = 'حد سطوع السواد'; en = 'Black luminance threshold' }
+    $catalogue['setting.OutputMonitorFailureAlertThreshold.label'] = @{ ar = 'حد تنبيه فشل الالتقاط'; en = 'Capture failure alert threshold' }
+    $catalogue['setting.OutputMonitorFlapAlertCount.label'] = @{ ar = 'حد تنبيه تذبذب المصدر'; en = 'Source flapping alert threshold' }
+    $catalogue['setting.OutputMonitorMinutes.label'] = @{ ar = 'فاصل مراقبة المخرج'; en = 'Output monitoring interval' }
+    $catalogue['setting.EnableTextChecks.label'] = @{ ar = 'التنبيهات الإملائية'; en = 'Spelling warnings' }
+    $catalogue['setting.EnableMaterialSchedule.label'] = @{ ar = 'شاشة جدول المواد'; en = 'Material schedule screen' }
+    $catalogue['setting.EnableShiftHandover.label'] = @{ ar = 'شاشة تسليم المناوبة'; en = 'Shift handover screen' }
+    $catalogue['setting.NotifyAdminsOnMissingProxy.label'] = @{ ar = 'تنبيه المادة بلا نسخة محلية'; en = 'Alert on material with no local copy' }
+    $catalogue['setting.RepeatAlertWindowHours.label'] = @{ ar = 'نافذة تكرار التنبيه'; en = 'Repeat alert window' }
+    $catalogue['setting.AlertMaxPerCausePerHour.label'] = @{ ar = 'سقف تنبيهات السبب الواحد'; en = 'Alerts per cause per hour' }
+    $catalogue['setting.MaterialProxyLeadMinutes.label'] = @{ ar = 'مهلة فحص النسخة المحلية'; en = 'Local copy check lead time' }
+    $catalogue['setting.PendingApprovalExpiryHours.label'] = @{ ar = 'صلاحية طلب الوصول'; en = 'Access request lifetime' }
+    $catalogue['setting.PendingStateTimeoutMinutes.label'] = @{ ar = 'مهلة الإدخال غير المكتمل'; en = 'Unfinished input timeout' }
+    $catalogue['setting.PostShowDelayMs.label'] = @{ ar = 'تأخير النص بعد العرض'; en = 'Text delay after show' }
+    $catalogue['setting.QuietHoursEnabled.label'] = @{ ar = 'فترة الهدوء'; en = 'Quiet hours' }
+    $catalogue['setting.QuietHoursEnd.label'] = @{ ar = 'نهاية فترة الهدوء'; en = 'Quiet hours end' }
+    $catalogue['setting.QuietHoursStart.label'] = @{ ar = 'بداية فترة الهدوء'; en = 'Quiet hours start' }
+    $catalogue['setting.RecentValuesPerField.label'] = @{ ar = 'القيم الحديثة لكل حقل'; en = 'Recent values per field' }
+    $catalogue['setting.RelayMaxRestarts.label'] = @{ ar = 'محاولات إعادة البث'; en = 'Relay restart attempts' }
+    $catalogue['setting.RelayWatchdogSeconds.label'] = @{ ar = 'فاصل فحص البث'; en = 'Relay check interval' }
+    $catalogue['setting.RepeatWarningCount.label'] = @{ ar = 'حد تنبيه التكرار'; en = 'Repeat warning threshold' }
+    $catalogue['setting.RepeatWarningWindowMinutes.label'] = @{ ar = 'نافذة قياس التكرار'; en = 'Repeat measurement window' }
+    $catalogue['setting.RespectCinegyItemDuration.label'] = @{ ar = 'احترام مدة Cinegy'; en = 'Respect the Cinegy duration' }
+    $catalogue['setting.RollbackWindowSeconds.label'] = @{ ar = 'مدة التراجع الآمن'; en = 'Safe rollback window' }
+    $catalogue['setting.RuntimeStorageWarningMB.label'] = @{ ar = 'تنبيه حجم ملفات التشغيل'; en = 'Runtime file size warning' }
+    $catalogue['setting.SchedulePreNotifyMinutes.label'] = @{ ar = 'الإشعار المسبق للحدث'; en = 'Advance notice for an event' }
+    $catalogue['setting.SensitiveTemplateAutoHideSeconds.label'] = @{ ar = 'إخفاء القالب الحساس'; en = 'Sensitive template auto-hide' }
+    $catalogue['setting.ShowLayerLockBadge.label'] = @{ ar = 'شارة قفل الطبقة'; en = 'Layer lock badge' }
+    $catalogue['setting.SnapshotCooldownSeconds.label'] = @{ ar = 'فاصل بين اللقطات'; en = 'Gap between snapshots' }
+    $catalogue['setting.SnapshotRetentionMinutes.label'] = @{ ar = 'الاحتفاظ بصور البث'; en = 'Keep output stills' }
+    $catalogue['setting.SnapshotTimeoutSeconds.label'] = @{ ar = 'مهلة التقاط الصورة'; en = 'Snapshot timeout' }
+    $catalogue['setting.StaleOnAirAlertHours.label'] = @{ ar = 'تنبيه القالب المنسي'; en = 'Forgotten template alert' }
+    $catalogue['setting.StartupStormThreshold.label'] = @{ ar = 'تنبيه عاصفة الإقلاع'; en = 'Startup storm threshold' }
+    $catalogue['setting.TelegramRequestTimeoutSeconds.label'] = @{ ar = 'مهلة طلبات Telegram'; en = 'Telegram request timeout' }
+    $catalogue['setting.TemplateBasePath.label'] = @{ ar = 'مجلد المشاهد'; en = 'Scenes folder' }
+    $catalogue['setting.TemplateRegistryImportMaxTemplates.label'] = @{ ar = 'حد استيراد القوالب'; en = 'Template import limit' }
+    $catalogue['setting.TemplateTestAutoHideSeconds.label'] = @{ ar = 'إخفاء اختبار القالب'; en = 'Template test auto-hide' }
+    $catalogue['setting.TemplateTestLayer.label'] = @{ ar = 'طبقة تجربة القوالب'; en = 'Template test layer' }
+    $catalogue['setting.UploadRetentionMinutes.label'] = @{ ar = 'الاحتفاظ بالملفات المرفوعة'; en = 'Keep uploaded files' }
+    $catalogue['setting.UsageDigestDayOfWeek.label'] = @{ ar = 'يوم الملخص الأسبوعي'; en = 'Weekly digest day' }
+    $catalogue['setting.UsageDigestEnabled.label'] = @{ ar = 'الملخص الأسبوعي'; en = 'Weekly digest' }
+    $catalogue['setting.MaterialEndAlertMinutes.label'] = @{ ar = 'تنبيه نهاية المادة'; en = 'Material ending alert' }
+    $catalogue['setting.EnableEngineHealth.label'] = @{ ar = 'صحة المحرك'; en = 'Engine health' }
+
     return $catalogue
 }
 

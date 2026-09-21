@@ -345,3 +345,46 @@ Describe 'A title the scene cannot carry is not offered in silence' {
         $two['Ajel.kicker'] | Should -Be 'اقتصاد'
     }
 }
+
+Describe 'The gap between stories is set where the board timings are' {
+    <#
+        Reported by an operator: "I cannot find the gap option in إدارة
+        العواجل." They were right - UrgentExitGapSeconds was registered in the
+        general settings screen only, which is a long way from the table it
+        governs. Every other board timing lives on ⚙️ توقيتات الجدول, and a
+        setting reachable only from somewhere else is a setting nobody finds.
+    #>
+    It 'offers the gap beside the interval, the repeats and the total' {
+        $data = @((Get-UrgentTimingKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
+
+        $data | Should -Contain 'urgentb:dgap'
+        # Still with its siblings, not instead of them.
+        $data | Should -Contain 'urgentb:dinterval'
+        $data | Should -Contain 'urgentb:dtotal'
+    }
+
+    It 'reads its bounds from the registered setting rather than a second copy' {
+        # A range written twice drifts; this one is declared once in
+        # $script:SettingConstraints and read from there.
+        $spec = Get-UrgentNumberSpec -Kind dgap
+
+        $spec.Setting | Should -Be 'UrgentExitGapSeconds'
+        $spec.Minimum | Should -Be 0
+        $spec.Maximum | Should -Be 300
+    }
+
+    It 'names zero as the scene motion rather than as nothing' {
+        # "0 ث" reads as "no gap at all", which is wrong: the scene's own outro
+        # and entrance still play. The label has to say which gap is zero.
+        (Get-UrgentNumberSpec -Kind dgap).Zero | Should -Be 'حركة المشهد وحدها'
+    }
+
+    It 'shows the configured gap on the button' {
+        $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 45 -Force
+        try {
+            $labels = @((Get-UrgentTimingKeyboard).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object text)
+            ($labels -join ' ') | Should -Match '45 ث'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'UrgentExitGapSeconds' -NotePropertyValue 0 -Force }
+    }
+}

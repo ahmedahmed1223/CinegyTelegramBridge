@@ -13,6 +13,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.57.0
+
+**The gap between stories is now where an operator looks for it.** Reported: "I cannot find the gap option in إدارة العواجل." `UrgentExitGapSeconds` was registered on the general settings screen only, while every other board timing — interval, repeats, order, total, default mode — lives on ⚙️ توقيتات الجدول inside the urgent board. A setting reachable only from somewhere else is a setting nobody finds.
+
+- The button now sits with its siblings on that screen, and remains in the general settings too.
+- Set by pressing, not typing, through the same `Start-UrgentNumberPicker` the other timings use, so its 0–300 range is read from `$script:SettingConstraints` rather than copied into a second place that would drift.
+- Zero reads as "the scene's motion alone" rather than "zero seconds": the outro and entrance still play, so calling it "no gap" would be a small lie.
+- The screen now states that the gap applies to exit mode only, and that it raises the shortest allowed interval by the same amount — a line cannot be held for less than its own transition.
+
 ## Version 8.56.0
 
 **The urgent board's title button was writing into nothing.** An operator's question — "what is the title button in the breaking item details?" — turned out to have the answer "nothing, here". `Get-UrgentItemVariables` maps values by position: the scene's first declared field carries the line, the second carries the title, and this station's `Urgent` template declares one field, so `if ($fields.Count -gt 1)` dropped the title at the moment the values were built. Everything else worked — it was stored, survived restarts, appeared on the card with its 🏷 and counted as a change — so only the part that matters was missing, and no screen said so.

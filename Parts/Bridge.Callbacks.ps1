@@ -605,6 +605,10 @@ function Invoke-CallbackQuery {
             Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind drepeats -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
+        'urgentb:dgap' {
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dgap -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
         'urgentb:dtotal' {
             Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dtotal -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break

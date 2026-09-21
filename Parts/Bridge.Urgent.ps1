@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -996,6 +996,12 @@ function Get-UrgentTimingKeyboard {
     $rows += , @( (New-Button $orderLabel 'urgentb:dorder') )
     $rows += , @( (New-Button $totalLabel 'urgentb:dtotal') )
     $rows += , @( (New-Button "🎬 النمط الافتراضي: $(Get-UrgentModeLabel -Mode ([string](Get-UrgentProperty $defaults 'Mode' 'text')))" 'urgentb:dmode') )
+    # Beside the timings it belongs with. It governs only exit mode, so the
+    # label says which gap it is rather than leaving an operator in text mode
+    # wondering why nothing changed.
+    $gap = Get-SettingInt 'UrgentExitGapSeconds' 0
+    $gapLabel = if ($gap -gt 0) { "⏳ الفاصل بين الأخبار: $gap ث" } else { '⏳ الفاصل بين الأخبار: حركة المشهد وحدها' }
+    $rows += , @( (New-Button $gapLabel 'urgentb:dgap') )
     $rows += , @( (New-Button '⬅️ العواجل' 'urgentb:open') )
     return @{ inline_keyboard = $rows }
 }
@@ -1006,6 +1012,7 @@ function Show-UrgentTimingScreen {
     $lines += 'هذه قيم الجدول. كل عاجل يستطيع تجاوزها من شاشته، وما لم يتجاوزها يأخذها من هنا.'
     $lines += ''
     $lines += 'الترتيب: «الجدول كاملًا» يعيد الجدول من أوّله (١ ٢ ٣ · ١ ٢ ٣)، و«كل عاجل مرّات» يكرّر العاجل ثم ينتقل (١ ١ · ٢ ٢).'
+    $lines += 'الفاصل بين الأخبار يخصّ نمط «حركة الخروج» وحده: شاشة فارغة بين خبر وآخر. وهو يرفع أقصر فاصل مسموح بالقدر نفسه، لأن السطر لا يُعرض أقصر من انتقاله.'
     $floor = Get-UrgentFloorSeconds
     $lines += "أقصر فاصل يسمح به هذا المشهد: $([math]::Round($floor, 1)) ث."
     $keyboard = Get-UrgentTimingKeyboard
@@ -1265,13 +1272,18 @@ function Invoke-UrgentDefaultSwitch {
 # ------------------------------------------------------------- numeric input
 
 function Get-UrgentNumberSpec {
-    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal')][string]$Kind)
+    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind)
     $spec = @{ Field = 'IntervalSeconds'; Setting = ''; Label = 'فاصل هذا العاجل (ثانية)'; Minimum = 0; Maximum = 3600; Zero = 'من الجدول' }
     switch ($Kind) {
         'repeats' { $spec.Field = 'Repeats'; $spec.Label = 'تكرار هذا العاجل'; $spec.Maximum = 99 }
         'dinterval' { $spec.Setting = 'UrgentBoardIntervalSeconds'; $spec.Label = 'فاصل الجدول (ثانية)'; $spec.Minimum = 1 }
         'drepeats' { $spec.Setting = 'UrgentBoardRepeats'; $spec.Field = 'Repeats'; $spec.Label = 'تكرار الجدول'; $spec.Minimum = 1 }
         'dtotal' { $spec.Setting = 'UrgentBoardTotalSeconds'; $spec.Field = 'TotalSeconds'; $spec.Label = 'المدة الكلية (ثانية)'; $spec.Zero = 'بلا سقف' }
+        # A board timing, so it is set where the board's timings are. It was
+        # registered only under the general settings screen, which is a long
+        # way from the table it governs - and an operator looking for it in
+        # إدارة العواجل did not find it, which is how this was reported.
+        'dgap' { $spec.Setting = 'UrgentExitGapSeconds'; $spec.Field = ''; $spec.Label = 'الفاصل بين الأخبار (ثانية)'; $spec.Zero = 'حركة المشهد وحدها' }
     }
     if ($spec.Setting) {
         $bounds = Get-SettingBounds -Name $spec.Setting
@@ -1316,7 +1328,7 @@ function Show-UrgentNumberPicker {
 
 function Start-UrgentNumberPicker {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind,
         [int]$Position = -1, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId

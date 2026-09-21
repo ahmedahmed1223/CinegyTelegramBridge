@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -33,7 +33,6 @@ function Get-MojazDesignFields {
     if (-not $path -or -not (Test-Path -LiteralPath $path)) { return @() }
     try { $stamp = (Get-Item -LiteralPath $path).LastWriteTimeUtc.Ticks } catch { return @() }
     $key = "$path|$stamp"
-    if ($null -eq $script:MojazDesignCache) { $script:MojazDesignCache = @{} }
     if ($script:MojazDesignCache.ContainsKey($key)) { return @($script:MojazDesignCache[$key]) }
     try { $fields = @(Get-BridgeSceneFields -Xml (Get-Content -LiteralPath $path -Raw)) }
     catch {

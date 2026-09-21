@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.61.0'
+$script:BridgeVersion = '8.62.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -82,6 +82,7 @@ Import-Module (Join-Path $moduleRoot "BridgeSettingsSchema.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeLiveScenes.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationLifecycle.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeLanguage.psm1") -Force
 
 $script:ProcessedUpdateLedger = New-BridgeUpdateLedger -Capacity 4096
 
@@ -278,6 +279,7 @@ $script:DefaultSettings = [ordered]@{
     UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
     UrgentMinIntervalSeconds   = 4       # floor used only when the scene cannot be read; the scene's own timing wins
     UrgentExitGapSeconds       = 0       # deliberate blank gap between stories in exit mode; 0 leaves only the scene's own outro
+    Language                   = 'ar'    # every screen, button and message; one choice for the whole bridge
     EnableContentBoards        = $false  # programme content boards; off until a station asks, like every other new door
     MaxContentBoards           = 20      # named boards allowed at once
     BoardMaxItems              = 100     # prepared rows per board
@@ -535,6 +537,7 @@ $script:SettingDisplayMetadata = @{
     UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
     UrgentMinIntervalSeconds = @{ Unit = 'ثانية'; Description = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج' }
     UrgentExitGapSeconds = @{ Unit = 'ثانية'; Description = 'فاصل شاشة فارغة بين خبر وآخر في وضع حركة الخروج (0 = حركة المشهد وحدها). يرفع أقصر فاصل مسموح بالقدر نفسه' }
+    Language = @{ Unit = ''; Description = 'لغة كل شاشات البوت وأزراره ورسائله. التغيير يسري فورًا على الجميع' }
     EnableContentBoards = @{ Unit = ''; Description = 'جداول محتوى البرامج: يجهّز المعدّ نصوص البرنامج مسبقًا ويعرضها المنفّذ صفًّا صفًّا' }
     MaxContentBoards = @{ Unit = 'جدولًا'; Description = 'أقصى عدد جداول محتوى في وقت واحد' }
     BoardMaxItems = @{ Unit = 'صفًّا'; Description = 'أقصى عدد صفوف في الجدول الواحد' }
@@ -1132,6 +1135,17 @@ $script:UrgentBoard = New-UrgentBoard
 # saved board so a second operator opening the screen never finds - and never
 # plays - somebody else's ticks.
 $script:UrgentSelections = @{}
+# Scene fields by path+write-time, so a screen that redraws does not reopen the
+# .cintitle every time. Declared HERE rather than lazily inside
+# Get-MojazDesignFields: under Set-StrictMode -Version Latest, "if ($null -eq
+# $script:MojazDesignCache)" THROWS on the read before it can assign, so the
+# lazy guard could never run. Nothing else assigned it, so the first caller on
+# a station with the bulletin disabled - the programme boards - died with
+# "the variable cannot be retrieved because it has not been set".
+$script:MojazDesignCache = @{}
+# Raised by the self-test and read by the screen that reports it. Assigned
+# before it is read today, but declared here so it cannot stop being so.
+$script:BridgeSelfTestFailed = $false
 $script:UrgentManualMode = @{}
 $script:UrgentManualLive = @{}
 $script:UrgentBoardFilters = @{}
@@ -1273,6 +1287,9 @@ $script:SettingChoices = @{
     # own screens, and a typo would silently fall back to the first of them.
     UrgentBoardMode = @('text', 'exit', 'auto_hide')
     UrgentBoardRepeatMode = @('cycle', 'item')
+    # Read by name in Get-BridgeText; a free-text typo would silently serve
+    # every screen in the fallback language and look like a translation gap.
+    Language = @('ar', 'en')
 }
 
 # Version 6 settings navigation. Defaults remain the authoritative setting
@@ -1401,7 +1418,12 @@ foreach ($entry in @(
         @{ Category = 'advanced'; Names = @(
                 'LogAirXml', 'AirVariableType', 'PendingStateTimeoutMinutes',
                 'RepeatWarningCount', 'RepeatWarningWindowMinutes', 'MaintenanceWindowStart',
-                'MaintenanceWindowEnd', 'OneHandMode', 'EnableTextShortcuts'
+                'MaintenanceWindowEnd', 'OneHandMode', 'EnableTextShortcuts',
+                # Beside OneHandMode, which is the other presentation choice a
+                # station makes once and then stops thinking about. The button
+                # an operator actually uses is on the Settings home screen; this
+                # row is what a search for "language" finds.
+                'Language'
             ) }
     )) {
     foreach ($name in $entry.Names) { $script:SettingCategoryByName[$name] = $entry.Category }
@@ -1510,6 +1532,7 @@ $script:SettingNavigationLabels = @{
     UrgentBoardMaxItems = 'حدّ عدد العواجل'
     UrgentMinIntervalSeconds = 'أقصر فاصل للعواجل'
     UrgentExitGapSeconds = 'الفاصل بين الأخبار'
+    Language = 'لغة الجسر'
     EnableContentBoards = 'محتوى البرامج'
     MaxContentBoards = 'أقصى عدد الجداول'
     BoardMaxItems = 'أقصى صفوف الجدول'

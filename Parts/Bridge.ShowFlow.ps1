@@ -758,7 +758,7 @@ function Invoke-HideAllLayers {
     $maintenanceOverride = Test-Admin -ChatId $ChatId -UserId $UserId
     $layers = @(Get-HideAllTargetLayers)
     if ($layers.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hideAll.none') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     # The emergency button honours per-layer protection for an ordinary
@@ -785,9 +785,9 @@ function Invoke-HideAllLayers {
     $actor = Format-UserAuditActor -UserId $UserId
     Write-BridgeLog "User $actor triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','); blocked: $(@($blocked | ForEach-Object { $_.Layer }) -join ','))" "WARN"
     Add-AuditEntry "🚨 إخفاء الكل - بواسطة $actor"
-    $text = if ($ok.Count -gt 0) { "🚨 تم إخفاء الطبقات: $($ok -join ', ')" } else { '🚨 لم تُخفَ أي طبقة.' }
-    if ($failed.Count -gt 0) { $text += "`n❌ فشلت: $($failed -join ', ')" }
-    foreach ($item in $blocked) { $text += "`n⛔ الطبقة $($item.Layer): $($item.Reason)" }
+    $text = if ($ok.Count -gt 0) { T 'hideAll.hidden' ($ok -join ', ') } else { T 'hideAll.nothing' }
+    if ($failed.Count -gt 0) { $text += "`n$(T 'hideAll.failed' ($failed -join ', '))" }
+    foreach ($item in $blocked) { $text += "`n$(T 'hideAll.blocked' $item.Layer $item.Reason)" }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 

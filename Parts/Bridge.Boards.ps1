@@ -306,9 +306,9 @@ function Get-BoardsKeyboard {
         $rows += , $navigation
     }
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
-        $rows += , @( (New-Button '➕ جدول جديد' 'boards:new' -Style success) )
+        $rows += , @( (New-Button (T 'boards.new') 'boards:new' -Style success) )
     }
-    $rows += , @( (New-Button '🏠 القائمة' 'menu:main') )
+    $rows += , @( (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -316,16 +316,16 @@ function Show-BoardsScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $boards = @(Get-ContentBoards)
-    $lines = @('🗂 <b>محتوى البرامج</b>', '')
+    $lines = @("<b>$(T 'boards.title')</b>", '')
     if ($boards.Count -eq 0) {
-        $lines += 'لا جدول بعد.'
+        $lines += (T 'boards.empty')
         $lines += ''
-        $lines += '<b>كل جدول مبنيّ على قالب تختاره أنت</b>، والقالب هو الذي يقرّر حقول كل صفّ والطبقة.'
-        $lines += 'الإنشاء خطوتان: «➕ جدول جديد» ← اختر القالب ← سمِّ الجدول.'
-        $lines += 'ثم يكتب المعدّ نصوص الحلقة صفًّا صفًّا أو بلصقة واحدة، ويعرضها المنفّذ بضغطة.'
+        $lines += (T 'boards.empty.bound')
+        $lines += (T 'boards.empty.steps')
+        $lines += (T 'boards.empty.then')
     }
     else {
-        $lines += "$($boards.Count) جدولًا. اضغط جدولًا لفتح صفوفه."
+        $lines += (T 'boards.count' $boards.Count)
     }
     $text = $lines -join "`n"
     $keyboard = Get-BoardsKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
@@ -356,18 +356,18 @@ function Get-BoardScreenKeyboard {
         $rows += , $navigation
     }
     if (Test-BoardEditAllowed -Board $Board -ChatId $ChatId -UserId $UserId) {
-        $rows += , @( (New-Button '➕ إضافة صفّ' "boards:add:$boardId"), (New-Button '📋 لصق دفعة' "boards:paste:$boardId") )
+        $rows += , @( (New-Button (T 'boards.addRow') "boards:add:$boardId"), (New-Button (T 'boards.paste') "boards:paste:$boardId") )
     }
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $roleLabel = switch ([string](Get-BoardProperty $Board 'EditRole' 'all')) {
-            'owner' { 'المالك' }
-            'admin' { 'المشرفون' }
-            default { 'الجميع' }
+            'owner' { T 'boards.role.owner' }
+            'admin' { T 'boards.role.admin' }
+            default { T 'boards.role.all' }
         }
-        $rows += , @( (New-Button "🛡 من يملأ الجدول: $roleLabel" "boards:role:$boardId") )
-        $rows += , @( (New-Button '🗑 حذف الجدول' "boards:del:$boardId" -Style danger) )
+        $rows += , @( (New-Button (T 'boards.role.button' $roleLabel) "boards:role:$boardId") )
+        $rows += , @( (New-Button (T 'boards.delete') "boards:del:$boardId" -Style danger) )
     }
-    $rows += , @( (New-Button '⬅️ الجداول' 'boards:open'), (New-Button '🏠 القائمة' 'menu:main') )
+    $rows += , @( (New-Button (T 'boards.list') 'boards:open'), (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -383,7 +383,7 @@ function Show-BoardScreen {
     if (-not $template) {
         # The board is kept, not deleted: a producer's texts are not thrown away
         # because somebody edited the template registry.
-        $lines += "⛔ قالب هذا الجدول ('$(ConvertTo-TelegramHtmlText $key)') لم يعد في السجلّ، فلا يمكن عرض صفوفه. صفوفه محفوظة كما هي."
+        $lines += (T 'boards.templateGone' (ConvertTo-TelegramHtmlText $key))
     }
     else {
         $fields = @(Get-BoardTextFields -TemplateKey $key)
@@ -391,12 +391,12 @@ function Show-BoardScreen {
         # fields a row has and which layer the row goes out on. Naming the
         # fields - not just counting them - is what tells a producer what they
         # are being asked to write before they write it.
-        $lines += "📐 القالب: <b>$(ConvertTo-TelegramHtmlText $key)</b> · طبقة $([int]$template.Layer)"
+        $lines += (T 'boards.template' (ConvertTo-TelegramHtmlText $key) ([int]$template.Layer))
         if ($fields.Count -gt 0) {
-            $lines += "حقول كل صفّ ($($fields.Count)): $(ConvertTo-TelegramHtmlText ($fields -join ' · '))"
+            $lines += (T 'boards.fields' $fields.Count (ConvertTo-TelegramHtmlText ($fields -join ' · ')))
         }
-        $lines += 'القالب يُختار عند الإنشاء ولا يتغيّر — لجدولٍ بقالبٍ آخر أنشئ جدولًا آخر.'
-        $lines += "الصفوف: $($items.Count) من $(Get-SettingInt 'BoardMaxItems' 1)"
+        $lines += (T 'boards.templateFixed')
+        $lines += (T 'boards.rows' $items.Count (Get-SettingInt 'BoardMaxItems' 1))
     }
     $text = $lines -join "`n"
     $keyboard = Get-BoardScreenKeyboard -Board $board -ChatId $ChatId -UserId $UserId -Page $Page
@@ -415,7 +415,7 @@ function Get-BoardItemKeyboard {
     $rows = @()
     if ($template) {
         if ($layer -gt 0 -and (Test-BoardItemLive -Layer $layer -BoardId $boardId -ItemId $itemId)) {
-            $rows += , @( (New-Button '🔴 على الهواء الآن' 'boards:noop' -Style primary), (New-Button '⏹ إخفاء' "boards:hide:$boardId`:$itemId" -Style danger) )
+            $rows += , @( (New-Button (T 'boards.live') 'boards:noop' -Style primary), (New-Button (T 'boards.hide') "boards:hide:$boardId`:$itemId" -Style danger) )
         }
         else {
             $rows += , @( (New-Button '▶️ اعرض الآن' "boards:show:$boardId`:$itemId" -Style success) )
@@ -471,12 +471,12 @@ function Show-BoardItemScreen {
     $orphans = @(Get-BoardOrphanFields -Item $item -TextFields @(Get-BoardTextFields -TemplateKey $key))
     if ($orphans.Count -gt 0) {
         $lines += ''
-        $lines += "⚠️ $(ConvertTo-TelegramHtmlText ($orphans -join '، ')) لم تعد في المشهد، فقيمتها محفوظة ولا تُرسل."
+        $lines += (T 'boards.orphan' (ConvertTo-TelegramHtmlText ($orphans -join '، ')))
     }
     $ceiling = Get-EffectiveAutoHideSeconds -Key $key -RequestedSeconds 0
     if ($ceiling -gt 0) {
         $lines += ''
-        $lines += "⏱ هذا القالب يُخفى تلقائيًا بعد $ceiling ث."
+        $lines += (T 'boards.autoHide' $ceiling)
     }
     $text = $lines -join "`n"
     $keyboard = Get-BoardItemKeyboard -Board $board -Item $item -ChatId $ChatId -UserId $UserId
@@ -494,7 +494,7 @@ function Get-BoardTemplatePickerKeyboard {
             $candidate = $candidates[$index]
             # By absolute index, not by key: a template key is free text and an
             # Arabic one is two bytes a character against a 64-byte cap.
-            $label = if ($candidate.Usable) { "✅ $($candidate.Key) · $(@($candidate.TextFields).Count) حقلًا" } else { "⛔ $($candidate.Key)" }
+            $label = if ($candidate.Usable) { T 'boards.picker.usable' $candidate.Key @($candidate.TextFields).Count } else { T 'boards.picker.unusable' $candidate.Key }
             $rows += , @( (New-Button $label "boards:pick:$index" -MaxTextLength 64) )
         }
     }
@@ -504,17 +504,17 @@ function Get-BoardTemplatePickerKeyboard {
         if ($window.HasNext) { $navigation += (New-Button 'التالي ➡️' "boards:pickp:$($window.Page + 1)") }
         $rows += , $navigation
     }
-    $rows += , @( (New-Button '❌ إلغاء' 'boards:open') )
+    $rows += , @( (New-Button (T 'common.cancel') 'boards:open') )
     return @{ inline_keyboard = $rows }
 }
 
 function Show-BoardTemplatePicker {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0, [int]$MessageId = 0)
     $candidates = @(Get-BoardEligibleTemplates)
-    $lines = @('🗂 <b>الخطوة 1 من 2: اختر قالب البرنامج</b>', '')
-    $lines += 'القالب الذي تختاره هو الذي يقرّر <b>حقول كل صفّ</b> و<b>الطبقة</b> التي يخرج عليها.'
-    $lines += 'الحقول تُقرأ من المشهد نفسه، فلا تُكتب ولا تُخترع — والرقم بجوار كل قالب هو عددها.'
-    $lines += 'ولا يتغيّر القالب بعد الإنشاء؛ لبرنامجٍ آخر أنشئ جدولًا آخر.'
+    $lines = @((T 'boards.picker.title'), '')
+    $lines += (T 'boards.picker.decides')
+    $lines += (T 'boards.picker.fields')
+    $lines += (T 'boards.picker.fixed')
     if (@($candidates | Where-Object { -not $_.Usable }).Count -gt 0) { $lines += '' }
     foreach ($candidate in @($candidates | Where-Object { -not $_.Usable })) {
         $lines += "⛔ $(ConvertTo-TelegramHtmlText $candidate.Key): $(ConvertTo-TelegramHtmlText $candidate.Reason)"

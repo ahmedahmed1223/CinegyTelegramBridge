@@ -1887,6 +1887,11 @@ function Get-SettingsKeyboard {
     $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { 'كل الطبقات المعروفة' } elseif ($scope.Trim()) { "طبقات: $scope" } else { 'لا توجد طبقات محددة' }
     $rows += , @( (New-Button "🚨 طبقات إخفاء الكل: $scopeLabel" 'menu:hideallsettings') )
     $rows += , @( (New-Button '🏷️ أسماء الطبقات' 'menu:layernames') )
+    # The language row sits here rather than only inside 🛠 خيارات متقدمة,
+    # because the first thing somebody who cannot read the screen needs is the
+    # control that changes the screen - and they cannot read their way to it.
+    # The button names the language it switches TO, not the one in force.
+    $rows += , @( (New-Button (T 'lang.button') 'cfg:lang') )
     $rows += , @( (New-Button "🗄 نسخ الإعدادات" "menu:backups"), (New-Button "♻️ استعادة الافتراضي" "cfg:reset" -Style danger) )
     $rows += , @( (New-Button "⬅️ رجوع" "menu") )
     return @{ inline_keyboard = $rows }

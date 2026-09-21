@@ -15,6 +15,23 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.62.0
+
+**Fixed: programme content boards failed on the first press.** Reported from the field; the log said `The variable '$script:MojazDesignCache' cannot be retrieved because it has not been set`.
+
+- The cache was created by `if ($null -eq $script:MojazDesignCache) { $script:MojazDesignCache = @{} }` **inside** `Get-MojazDesignFields` — which under `Set-StrictMode -Version Latest` throws on the *read*, before it can assign. The guard was unreachable, so the function could not run at all on a station whose bulletin screens had never been opened. The boards were its first caller and its first casualty. Now declared at load.
+- **Why 2078 green tests said nothing.** `Tests/Bridge.TestContext.ps1` dot-sources the bridge inside `BeforeAll`, which leaves `It` blocks in a sibling scope — so every test called the bridge's code *less strictly than production runs it*. `Set-StrictMode -Version Latest` now applies at container level. (It cost zero failures, and it still does not reproduce this particular bug: under Pester the function's `$script:` scope is not the one that trips.)
+- **So the guard is structural, and it is red-proofed against the real defect.** A new test asserts that every `$script:` name is declared at load, at column 0 — not created by whichever function happens to be called first. A conditional assignment inside a function is not a declaration; it is a race between the first reader and the first writer. Recreating the original code makes it fail and name `MojazDesignCache`. It also found `BridgeSelfTestFailed`, same shape, not yet bitten.
+
+**English language support: the foundation.** One setting for the whole bridge (**⚙️ الإعدادات → 🌐 English**), applied to everyone immediately, no restart.
+
+- `Modules/BridgeLanguage.psm1` holds both languages side by side, keyed. A test asserts every key carries both, non-empty, with the same `{0}` placeholders in each — a translation that drops the layer number is a silent hole.
+- An unknown key renders as the key itself: visible, greppable, impossible to mistake for a sentence. A key with no translation falls back to Arabic rather than blanking a screen. `Get-BridgeTextMisses` reports what was asked for at runtime and not found.
+- One choice for the bridge, not one per operator: a gallery reads one language, and per-user would mean the same layer described two ways in the same audit trail.
+- **Converted so far:** the settings home screen, hide-all, permission refusals, and all of 🗂 محتوى البرامج. **Everything else still renders Arabic in both modes** — roughly 4,300 lines across thirty files remain. Conversion continues.
+
+**New: [`docs/GUIDE.md`](docs/GUIDE.md)** — a full English operator and administrator guide: install, configure, templates, roles, the four content systems, scheduling, settings, diagnostics, and the house rules for working on the code.
+
 ## Version 8.61.0
 
 **A content board is bound to a template you choose, and now the screens say so.** Asked what the feature is built on, the answer was in the code and not on any screen: the board's whole contract is its template — it decides which fields a row has and which layer the row goes out on — and the screens reported "الحقول: 2" without naming them.

@@ -631,7 +631,7 @@ function Invoke-CallbackQuery {
                 break
             }
             if (@(Get-ContentBoards).Count -ge (Get-SettingInt 'MaxContentBoards' 1)) {
-                Send-TelegramMessage -ChatId $chatId -Text "⛔ بلغت الجداول سقفها ($(Get-SettingInt 'MaxContentBoards' 1))."
+                Send-TelegramMessage -ChatId $chatId -Text (T 'boards.full' (Get-SettingInt 'MaxContentBoards' 1))
                 break
             }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'board_new_name'; UserId = $userId; TemplateKey = [string]$picked.Key; StartedAt = (Get-Date) }
@@ -639,11 +639,11 @@ function Invoke-CallbackQuery {
             # and the chosen template is confirmed back here because this is the
             # last screen before it is fixed for good.
             $pickLines = @(
-                "✅ القالب: <b>$(ConvertTo-TelegramHtmlText ([string]$picked.Key))</b>"
-                "حقول كل صفّ: $(ConvertTo-TelegramHtmlText (@($picked.TextFields) -join ' · '))"
+                (T 'boards.picked' (ConvertTo-TelegramHtmlText ([string]$picked.Key)))
+                (T 'boards.picked.fields' (ConvertTo-TelegramHtmlText (@($picked.TextFields) -join ' · ')))
                 ''
-                '<b>الخطوة 2 من 2:</b> أرسل اسم الجدول كما تريد أن يراه المشغّل'
-                '(مثلًا: بنر برنامج الاقتصاد).'
+                (T 'boards.name.prompt')
+                (T 'boards.name.example')
             )
             Send-TelegramMessage -ChatId $chatId -Text ($pickLines -join "`n") -ParseMode 'HTML' -ReplyMarkup (Get-CancelKeyboard)
             break
@@ -674,8 +674,8 @@ function Invoke-CallbackQuery {
             if ($delBoard) {
                 # Confirmed, because this is a producer's prepared work and not a
                 # setting that can be typed again in a moment.
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ حذف «$(ConvertTo-TelegramHtmlText ([string](Get-BoardProperty $delBoard 'Name' '')))» ومعه $(@(Get-BoardProperty $delBoard 'Items' @()).Count) صفًّا. لا تراجع." `
-                    -ParseMode 'HTML' -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '🗑 نعم، احذف' "boards:delgo:$delId" -Style danger), (New-Button '↩️ إلغاء' "boards:b:$delId"))) }
+                Send-TelegramMessage -ChatId $chatId -Text (T 'boards.deleteConfirm' (ConvertTo-TelegramHtmlText ([string](Get-BoardProperty $delBoard 'Name' ''))) @(Get-BoardProperty $delBoard 'Items' @()).Count) `
+                    -ParseMode 'HTML' -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'boards.deleteYes') "boards:delgo:$delId" -Style danger), (New-Button (T 'common.back') "boards:b:$delId"))) }
             }
             break
         }
@@ -1429,6 +1429,22 @@ function Invoke-CallbackQuery {
         }
         'cfg:search' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) { Start-SettingsSearch -ChatId $chatId -UserId $userId }
+            break
+        }
+        'cfg:lang' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            # Two languages, so a toggle rather than a screen. Written through
+            # Set-Setting like any other setting, so it is validated against
+            # $script:SettingChoices, saved, and audited by the one path that
+            # already does all three.
+            $nextLanguage = if ((Get-BridgeLanguage) -eq 'ar') { 'en' } else { 'ar' }
+            Set-Setting -Name 'Language' -Value $nextLanguage
+            Write-BridgeLog "User $userId set Language = $nextLanguage"
+            Add-AuditEntry "🌐 Language = $nextLanguage - بواسطة $(Format-UserAuditActor -UserId $userId)"
+            # Announced in the NEW language, which is the only way an operator
+            # who pressed it by mistake can tell that it worked.
+            Send-TelegramMessage -ChatId $chatId -Text (T 'lang.changed')
+            Show-SettingsScreen -ChatId $chatId -UserId $userId
             break
         }
         'cfglist:*' {

@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -433,14 +433,14 @@ function Test-TemplateAccess {
     param([string]$Key = '', [int]$Layer = 0, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $level = Get-TemplateAccessLevel -Key $Key -Layer $Layer
-    $what = if ($Key) { "القالب '$Key'" } else { "الطبقة $Layer" }
+    $what = if ($Key) { T 'access.template' $Key } else { T 'access.layer' $Layer }
     if ($level -eq 'owner') {
         if (Test-Owner -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
-        return [pscustomobject]@{ Allowed = $false; Reason = "$what لمالك الجسر وحده."; Level = $level }
+        return [pscustomobject]@{ Allowed = $false; Reason = (T 'access.ownerOnly' $what); Level = $level }
     }
     if ($level -eq 'admin') {
         if (Test-Admin -ChatId $ChatId -UserId $UserId) { return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level } }
-        return [pscustomobject]@{ Allowed = $false; Reason = "$what للمشرفين وحدهم."; Level = $level }
+        return [pscustomobject]@{ Allowed = $false; Reason = (T 'access.adminOnly' $what); Level = $level }
     }
     return [pscustomobject]@{ Allowed = $true; Reason = ''; Level = $level }
 }

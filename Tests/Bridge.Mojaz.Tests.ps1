@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Mojaz.Tests.ps1 - the bulletin library: the tables, what is saved,
     and the playback that walks one of them.
@@ -2433,5 +2433,47 @@ Describe 'The promise to put the news strip back survives a restart' {
         finally { $script:MojazPlayback = $null; $script:MojazTickerReturn = $null }
 
         ($captured | ConvertFrom-Json).TickerReturnChatId | Should -Be 100
+    }
+}
+
+Describe 'Reading a scene''s fields for real' {
+    <#
+        Every other test that touches Get-MojazDesignFields mocks it, so its
+        own body was covered by nothing - which is how it shipped unable to run
+        at all (see the $script: declaration guard in Bridge.Tests.ps1). These
+        two call it for real.
+
+        They do NOT reproduce the original crash: under Pester the function's
+        $script: scope is not the one StrictMode trips on, so the bug is
+        invisible here however it is written. The structural guard is what
+        catches that; this is coverage of the path itself.
+    #>
+    It 'answers for a scene whose file exists' {
+        $scene = Join-Path $TestDrive 'design.cintitle'
+        Set-Content -LiteralPath $scene -Value '<scene />' -Encoding UTF8
+        # A pscustomobject, which is what ConvertFrom-Json gives the real
+        # registry - a hashtable here makes Get-JsonProp answer empty and the
+        # function returns before it reaches anything worth testing.
+        Mock Get-TemplateStore { @{ Order = @('Design'); Map = @{ 'Design' = [pscustomobject]@{ Key = 'Design'; Path = $scene; Layer = 6 } } } }
+
+        { Get-MojazDesignFields -TemplateKey 'Design' } | Should -Not -Throw
+    }
+
+    It 'answers the same on the second call, which is the cache doing its job' {
+        $scene = Join-Path $TestDrive 'cached.cintitle'
+        Set-Content -LiteralPath $scene -Value '<scene />' -Encoding UTF8
+        Mock Get-TemplateStore { @{ Order = @('Design'); Map = @{ 'Design' = [pscustomobject]@{ Key = 'Design'; Path = $scene; Layer = 6 } } } }
+
+        $first = @(Get-MojazDesignFields -TemplateKey 'Design')
+        $second = @(Get-MojazDesignFields -TemplateKey 'Design')
+
+        @($second).Count | Should -Be @($first).Count
+    }
+
+    It 'answers empty for a template whose scene file is not there' {
+        Mock Get-TemplateStore { @{ Order = @('Gone'); Map = @{ 'Gone' = [pscustomobject]@{ Key = 'Gone'; Path = 'Z:
+owhere\gone.cintitle'; Layer = 6 } } } }
+
+        @(Get-MojazDesignFields -TemplateKey 'Gone') | Should -BeNullOrEmpty
     }
 }

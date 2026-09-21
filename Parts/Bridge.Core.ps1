@@ -387,6 +387,35 @@ function Get-SettingInt {
     return Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum
 }
 
+function Get-BridgeLanguage {
+    <#
+        The language every screen is drawn in. One choice for the whole
+        bridge, not one per operator: a station's gallery reads one language,
+        and a per-user setting would mean the same layer described two ways in
+        the same audit trail.
+
+        Read from the setting on every call rather than cached, because the
+        setting is changed from a button and the very next screen drawn must
+        already be in the new language.
+    #>
+    $language = [string](Get-Setting 'Language')
+    if (Test-BridgeLanguage -Language $language) { return $language.ToLowerInvariant() }
+    return (Get-BridgeDefaultLanguage)
+}
+
+function T {
+    <#
+        The text for a key, in the bridge's language.
+
+        Deliberately one letter: it appears on nearly every line that builds a
+        screen, and a longer name would push those lines past the width where
+        they stay readable. It is the only abbreviation in this codebase and it
+        earns it by frequency.
+    #>
+    param([Parameter(Mandatory)][string]$Key, [Parameter(ValueFromRemainingArguments)][object[]]$Arguments = @())
+    return (Get-BridgeText -Key $Key -Language (Get-BridgeLanguage) -Arguments @($Arguments))
+}
+
 function Get-LayerName {
     param([Parameter(Mandatory)][int]$Layer)
     foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {

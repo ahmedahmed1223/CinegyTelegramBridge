@@ -2547,3 +2547,50 @@ Describe 'A copy button that Telegram would refuse is not drawn' {
         }
     }
 }
+
+Describe 'Shared bridge state is declared where it is loaded' {
+    <#
+        Reported from the field: the first press of a programme content board
+        died with "The variable '$script:MojazDesignCache' cannot be retrieved
+        because it has not been set".
+
+        Its only assignments were INSIDE Get-MojazDesignFields, one of them the
+        lazy guard
+        `if ($null -eq $script:MojazDesignCache) { $script:MojazDesignCache = @{} }`
+        - which under Set-StrictMode -Version Latest throws on the READ before
+        it can assign. The guard could never run. The bulletin screens had
+        simply never been opened on that station, so the boards were the first
+        caller and the first casualty.
+
+        The rule this enforces: every piece of shared $script: state is
+        declared at LOAD time, at column 0, not created by whichever function
+        happens to be called first. A conditional assignment inside a function
+        is not a declaration - it is a race between the first reader and the
+        first writer, and the reader wins about as often as not.
+    #>
+    It 'declares every $script: name at load rather than inside a function' {
+        $root = Split-Path -Parent $PSScriptRoot
+        $files = @(Get-ChildItem -LiteralPath (Join-Path $root 'Parts') -Filter '*.ps1' -File | ForEach-Object { $_.FullName })
+        $files += (Join-Path $root 'TelegramBridge.ps1')
+
+        $used = @{}
+        $declared = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($file in $files) {
+            foreach ($line in @(Get-Content -LiteralPath $file)) {
+                foreach ($match in [regex]::Matches($line, '\$script:([A-Za-z_]\w*)')) {
+                    $name = $match.Groups[1].Value
+                    if (-not $used.ContainsKey($name)) { $used[$name] = (Split-Path -Leaf $file) }
+                }
+                # Column 0: a top-level declaration that runs when the file
+                # loads, not one buried in a branch inside a function.
+                $top = [regex]::Match($line, '^\$script:([A-Za-z_]\w*)\s*=')
+                if ($top.Success) { [void]$declared.Add($top.Groups[1].Value) }
+            }
+        }
+
+        $undeclared = @(@($used.Keys) | Where-Object { -not $declared.Contains($_) } | Sort-Object)
+        $detail = @($undeclared | ForEach-Object { "$_ (first seen in $($used[$_]))" }) -join '; '
+
+        $undeclared | Should -BeNullOrEmpty -Because "shared state must be declared at load or the first reader can precede the first writer: $detail"
+    }
+}

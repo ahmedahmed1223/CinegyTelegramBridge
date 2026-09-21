@@ -1,9 +1,19 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.TestContext.ps1 - shared Pester setup for the Bridge.*.Tests.ps1
     files. Dot-sourced at the top of each one so the bridge loads the same
     way everywhere and the setup lives in a single place.
 #>
+
+# The bridge runs under Set-StrictMode -Version Latest (TelegramBridge.ps1),
+# but dot-sourcing it inside BeforeAll only puts the It blocks' SIBLING scope
+# under that mode - a function body inherits the mode of whoever CALLS it, so
+# every test called the bridge's code less strictly than production runs it.
+# A whole class of production error was therefore invisible to 2078 green
+# tests, and one of them shipped: Get-MojazDesignFields read
+# $script:MojazDesignCache before anything assigned it, which throws under
+# StrictMode and did - in the field, on the first press of a programme board.
+Set-StrictMode -Version Latest
 
 BeforeDiscovery {
     $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules\CinegyAirTitler.psm1'

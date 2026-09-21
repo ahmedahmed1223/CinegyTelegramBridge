@@ -39,7 +39,7 @@ function Get-SettingsExplainedLines {
     param([AllowEmptyCollection()][string[]]$Names = @())
     return @(foreach ($name in @($Names)) {
             $metadata = Get-SettingNavigationMetadata -Name $name
-            $description = [string](Get-JsonProp (Get-JsonProp $script:SettingDisplayMetadata $name) 'Description')
+            $description = Get-SettingDescription -Name $name
             $line = "• <b>$(ConvertTo-TelegramHtmlText -Text ([string]$metadata.Label))</b>"
             # A setting without a short name of its own falls back to its
             # description; printing it twice says nothing twice.

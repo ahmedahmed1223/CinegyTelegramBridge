@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -854,10 +854,29 @@ function Format-SettingDisplay {
     return [string]$Value
 }
 
-function Get-SettingPromptText {
+function Get-SettingDescription {
+    <#
+        One setting's Arabic-or-English description.
+
+        Three screens read this - the category list, the value prompt and the
+        search haystack - and each used to reach into
+        $script:SettingDisplayMetadata itself. Three readers of one fact is
+        three places for a translation to be applied twice and forgotten once.
+
+        Translated at read time, with the shipped Arabic as the fallback, for
+        the same reason the labels are: the metadata is built at load and the
+        language changes while the bridge runs.
+    #>
     param([Parameter(Mandatory)][string]$Name)
     $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name
-    $description = if ($metadata) { [string](Get-JsonProp $metadata 'Description') } else { 'قيمة الإعداد' }
+    $arabic = if ($metadata) { [string](Get-JsonProp $metadata 'Description') } else { '' }
+    if ([string]::IsNullOrWhiteSpace($arabic)) { $arabic = (T 'setting.noDescription') }
+    return (TF "setting.$Name.description" $arabic)
+}
+
+function Get-SettingPromptText {
+    param([Parameter(Mandatory)][string]$Name)
+    $description = Get-SettingDescription -Name $Name
     $current = Format-SettingDisplay -Name $Name -Value (Get-Setting $Name)
     $default = Format-SettingDisplay -Name $Name -Value $script:DefaultSettings[$Name]
     # parse_mode=HTML. The two values are what the operator is comparing, so

@@ -2689,6 +2689,39 @@ Describe 'Every setting has a name in both languages' {
         $drifted | Should -BeNullOrEmpty -Because "the catalogue's Arabic must be the shipped Arabic: $($drifted -join '; ')"
     }
 
+
+    It 'carries an English description for every setting that ships one' {
+        $untranslated = @(@(foreach ($name in @($script:SettingDisplayMetadata.Keys)) {
+                $shipped = [string](Get-JsonProp $script:SettingDisplayMetadata[$name] 'Description')
+                if ([string]::IsNullOrWhiteSpace($shipped)) { continue }
+                if ($null -eq (Get-BridgeTextEntry -Key "setting.$name.description")) { $name }
+            }) | Sort-Object)
+
+        $untranslated | Should -BeNullOrEmpty -Because "these would show an Arabic description on an English screen: $($untranslated -join ', ')"
+    }
+
+    It 'keeps the catalogue Arabic description identical to the shipped one' {
+        $drifted = @(@(foreach ($name in @($script:SettingDisplayMetadata.Keys)) {
+                $entry = Get-BridgeTextEntry -Key "setting.$name.description"
+                if (-not $entry) { continue }
+                $shipped = [string](Get-JsonProp $script:SettingDisplayMetadata[$name] 'Description')
+                if ([string]$entry['ar'] -ne $shipped) { $name }
+            }) | Sort-Object)
+
+        $drifted | Should -BeNullOrEmpty -Because "the catalogue's Arabic must be the shipped Arabic: $($drifted -join ', ')"
+    }
+
+    It 'reads a description in the language in force' {
+        $original = Get-Setting 'Language'
+        try {
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+            Get-SettingDescription -Name 'MaxFieldLength' | Should -Be 'Maximum length of a field value'
+
+            $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+            Get-SettingDescription -Name 'MaxFieldLength' | Should -Be 'الحد الأقصى لطول نص الحقل'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $original -Force }
+    }
     It 'shows an English label on an English screen and the Arabic one otherwise' {
         $original = Get-Setting 'Language'
         try {

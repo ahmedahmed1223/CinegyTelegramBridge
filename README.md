@@ -15,6 +15,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.61.0
+
+**A content board is bound to a template you choose, and now the screens say so.** Asked what the feature is built on, the answer was in the code and not on any screen: the board's whole contract is its template — it decides which fields a row has and which layer the row goes out on — and the screens reported "الحقول: 2" without naming them.
+
+- The template picker is now **step 1 of 2** and states what the choice decides, before it is made. The name prompt is step 2 and confirms the chosen template and its field names back, because that is the last screen before the binding is fixed.
+- The board header names the template, its layer and **its fields by name**, and says plainly that the template does not change after creation — another programme means another board.
+- **The edit-role button now exists.** `EditRole` was stored, defaulted to `all` and honoured by `Test-BoardEditAllowed`, but no screen could set it, so a board created open stayed open forever — and the manual described a control that was not there. New `Set-BoardEditRole` in the domain, and a cycling button (الجميع → المشرفون → المالك) that shows the current role on its face and writes the change to the audit trail.
+- The empty-state screen explains the two steps rather than only reporting that there are no boards.
+
 ## Version 8.60.0
 
 **The urgent board and the programme boards each have their own settings door.** Both were born out of the news ticker and were filed with it, so 📰 شريط الأخبار had grown to carry three unrelated systems and thirty-four settings. Nobody looking for the urgent board's interval opens a door named after the ticker — which is exactly how `UrgentExitGapSeconds` stayed unfound until 8.57.0 moved its button, and the underlying filing was never corrected.

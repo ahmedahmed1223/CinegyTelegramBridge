@@ -98,6 +98,34 @@ Describe 'Every board button fits in a Telegram callback' {
         }
     }
 
+    It 'offers the edit-role button the manual promises, showing the role it is on' {
+        # The role existed in the domain and was honoured by
+        # Test-BoardEditAllowed, but no screen could set it - so the manual
+        # described a control that was not there. A documented button that does
+        # not exist is worse than an undocumented one.
+        $labels = @((Get-BoardScreenKeyboard -Board $script:TestBoard -ChatId 100 -UserId 101).inline_keyboard |
+                ForEach-Object { @($_) } | ForEach-Object { [string]$_.text })
+
+        @($labels | Where-Object { $_ -like '*من يملأ الجدول*' }) | Should -Not -BeNullOrEmpty
+        @($labels | Where-Object { $_ -like '*الجميع*' }) | Should -Not -BeNullOrEmpty
+    }
+
+    It 'names the template, its layer and its fields on the board screen' {
+        # "الحقول: 2" tells a producer how many boxes to expect, not what they
+        # are. The board IS its template - it decides the fields and the layer -
+        # so the screen that opens the board says which template it is bound to.
+        $script:BoardScreenTextForTest = ''
+        Mock Send-TelegramMessage { $script:BoardScreenTextForTest = $Text }
+        Mock Edit-TelegramMessageText { $false }
+
+        Show-BoardScreen -BoardId $script:TestBoard.Id -ChatId 100 -UserId 101
+
+        $script:BoardScreenTextForTest | Should -Match 'Econ'
+        $script:BoardScreenTextForTest | Should -Match 'طبقة 6'
+        $script:BoardScreenTextForTest | Should -Match 'title\.Text'
+        $script:BoardScreenTextForTest | Should -Match 'لا يتغيّر'
+    }
+
     It 'keeps every callback on the row card under the cap, fields included' {
         $item = $script:TestBoard.Items[0]
         foreach ($button in @((Get-BoardItemKeyboard -Board $script:TestBoard -Item $item -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) })) {

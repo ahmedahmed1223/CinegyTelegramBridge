@@ -152,6 +152,20 @@ Describe 'Editing and ordering' {
         @($result.Value.Items | Where-Object { $_.Values.'title.Text' -eq 'ضيف الحلقة' }).Count | Should -Be 1
     }
 
+    It 'changes who may fill the board, and refuses a role that is not one of the three' {
+        # New-ContentBoard took the role at birth and nothing could change it
+        # afterwards: a board created open stayed open forever, and no screen
+        # could say otherwise. A role you can set once and never correct is a
+        # role nobody dares set in the first place.
+        $board = New-TestContentBoard
+
+        $result = Set-BoardEditRole -Board $board -Role 'admin'
+
+        $result.Value.EditRole | Should -Be 'admin'
+        $board.EditRole | Should -Be 'all'
+        (Set-BoardEditRole -Board $board -Role 'producer').ErrorCode | Should -Be 'invalid_role'
+    }
+
     It 'bumps the revision once per accepted change and not at all for a refused one' {
         $board = New-TestContentBoard
         $before = [int]$board.Revision

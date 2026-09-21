@@ -154,6 +154,24 @@ function Update-ContentBoard {
     return (New-BoardResult $true $copy)
 }
 
+function Set-BoardEditRole {
+    <#
+        Who may fill this board: 'all', 'admin' or 'owner'.
+
+        New-ContentBoard took this at birth and nothing could change it
+        afterwards, so a board created open stayed open forever - and the
+        screen had no way to say otherwise. A role you can set once and never
+        correct is a role nobody dares set.
+    #>
+    param([Parameter(Mandatory)]$Board, [Parameter(Mandatory)][string]$Role, [long]$UserId = 0)
+    if (-not (Test-BoardEditRole -Role $Role)) { return (New-BoardResult $false $null 'invalid_role') }
+    $roleValue = ([string]$Role).ToLowerInvariant()
+    return (Update-ContentBoard -Board $Board -UserId $UserId -Change {
+            param($copy)
+            $copy | Add-Member -NotePropertyName EditRole -NotePropertyValue $roleValue -Force
+        })
+}
+
 function Add-BoardItem {
     <#
         One prepared row.
@@ -364,5 +382,5 @@ function ConvertFrom-BoardPasteText {
 
 Export-ModuleMember -Function New-BoardResult, Get-BoardProperty, Copy-BoardValue, New-BoardId,
 New-BoardItemId, ConvertTo-BoardText, Test-BoardEditRole, New-ContentBoard, Get-BoardItem,
-Get-BoardItemPosition, Update-ContentBoard, Add-BoardItem, Set-BoardItemField, Set-BoardItemEnabled,
+Get-BoardItemPosition, Update-ContentBoard, Set-BoardEditRole, Add-BoardItem, Set-BoardItemField, Set-BoardItemEnabled,
 Move-BoardItem, Remove-BoardItem, Get-BoardItemValues, Get-BoardOrphanFields, ConvertFrom-BoardPasteText

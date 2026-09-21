@@ -318,7 +318,11 @@ function Show-BoardsScreen {
     $boards = @(Get-ContentBoards)
     $lines = @('🗂 <b>محتوى البرامج</b>', '')
     if ($boards.Count -eq 0) {
-        $lines += 'لا جدول بعد. المشرف ينشئ جدولًا لكل برنامج، ويجهّز المعدّ نصوصه مسبقًا.'
+        $lines += 'لا جدول بعد.'
+        $lines += ''
+        $lines += '<b>كل جدول مبنيّ على قالب تختاره أنت</b>، والقالب هو الذي يقرّر حقول كل صفّ والطبقة.'
+        $lines += 'الإنشاء خطوتان: «➕ جدول جديد» ← اختر القالب ← سمِّ الجدول.'
+        $lines += 'ثم يكتب المعدّ نصوص الحلقة صفًّا صفًّا أو بلصقة واحدة، ويعرضها المنفّذ بضغطة.'
     }
     else {
         $lines += "$($boards.Count) جدولًا. اضغط جدولًا لفتح صفوفه."
@@ -355,6 +359,12 @@ function Get-BoardScreenKeyboard {
         $rows += , @( (New-Button '➕ إضافة صفّ' "boards:add:$boardId"), (New-Button '📋 لصق دفعة' "boards:paste:$boardId") )
     }
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
+        $roleLabel = switch ([string](Get-BoardProperty $Board 'EditRole' 'all')) {
+            'owner' { 'المالك' }
+            'admin' { 'المشرفون' }
+            default { 'الجميع' }
+        }
+        $rows += , @( (New-Button "🛡 من يملأ الجدول: $roleLabel" "boards:role:$boardId") )
         $rows += , @( (New-Button '🗑 حذف الجدول' "boards:del:$boardId" -Style danger) )
     }
     $rows += , @( (New-Button '⬅️ الجداول' 'boards:open'), (New-Button '🏠 القائمة' 'menu:main') )
@@ -377,7 +387,15 @@ function Show-BoardScreen {
     }
     else {
         $fields = @(Get-BoardTextFields -TemplateKey $key)
-        $lines += "القالب: $(ConvertTo-TelegramHtmlText $key) · طبقة $([int]$template.Layer) · الحقول: $($fields.Count)"
+        # The template is the whole contract of the board: it decides which
+        # fields a row has and which layer the row goes out on. Naming the
+        # fields - not just counting them - is what tells a producer what they
+        # are being asked to write before they write it.
+        $lines += "📐 القالب: <b>$(ConvertTo-TelegramHtmlText $key)</b> · طبقة $([int]$template.Layer)"
+        if ($fields.Count -gt 0) {
+            $lines += "حقول كل صفّ ($($fields.Count)): $(ConvertTo-TelegramHtmlText ($fields -join ' · '))"
+        }
+        $lines += 'القالب يُختار عند الإنشاء ولا يتغيّر — لجدولٍ بقالبٍ آخر أنشئ جدولًا آخر.'
         $lines += "الصفوف: $($items.Count) من $(Get-SettingInt 'BoardMaxItems' 1)"
     }
     $text = $lines -join "`n"
@@ -493,8 +511,11 @@ function Get-BoardTemplatePickerKeyboard {
 function Show-BoardTemplatePicker {
     param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0, [int]$MessageId = 0)
     $candidates = @(Get-BoardEligibleTemplates)
-    $lines = @('🗂 <b>اختر قالب البرنامج</b>', '')
-    $lines += 'الجدول يُملأ بحقول المشهد النصّية.'
+    $lines = @('🗂 <b>الخطوة 1 من 2: اختر قالب البرنامج</b>', '')
+    $lines += 'القالب الذي تختاره هو الذي يقرّر <b>حقول كل صفّ</b> و<b>الطبقة</b> التي يخرج عليها.'
+    $lines += 'الحقول تُقرأ من المشهد نفسه، فلا تُكتب ولا تُخترع — والرقم بجوار كل قالب هو عددها.'
+    $lines += 'ولا يتغيّر القالب بعد الإنشاء؛ لبرنامجٍ آخر أنشئ جدولًا آخر.'
+    if (@($candidates | Where-Object { -not $_.Usable }).Count -gt 0) { $lines += '' }
     foreach ($candidate in @($candidates | Where-Object { -not $_.Usable })) {
         $lines += "⛔ $(ConvertTo-TelegramHtmlText $candidate.Key): $(ConvertTo-TelegramHtmlText $candidate.Reason)"
     }

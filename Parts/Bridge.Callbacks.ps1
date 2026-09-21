@@ -635,7 +635,36 @@ function Invoke-CallbackQuery {
                 break
             }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'board_new_name'; UserId = $userId; TemplateKey = [string]$picked.Key; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text "أرسل اسم الجدول (مثلًا: بنر برنامج الاقتصاد)." -ReplyMarkup (Get-CancelKeyboard)
+            # The name is what every operator sees on the button forever after,
+            # and the chosen template is confirmed back here because this is the
+            # last screen before it is fixed for good.
+            $pickLines = @(
+                "✅ القالب: <b>$(ConvertTo-TelegramHtmlText ([string]$picked.Key))</b>"
+                "حقول كل صفّ: $(ConvertTo-TelegramHtmlText (@($picked.TextFields) -join ' · '))"
+                ''
+                '<b>الخطوة 2 من 2:</b> أرسل اسم الجدول كما تريد أن يراه المشغّل'
+                '(مثلًا: بنر برنامج الاقتصاد).'
+            )
+            Send-TelegramMessage -ChatId $chatId -Text ($pickLines -join "`n") -ParseMode 'HTML' -ReplyMarkup (Get-CancelKeyboard)
+            break
+        }
+        'boards:role:*' {
+            if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
+            $roleId = [string](Get-CallbackArg $data 'boards:role:')
+            $roleBoard = Get-ContentBoard -BoardId $roleId
+            if (-not $roleBoard) { break }
+            # Cycles rather than opening a screen: three values, and the button
+            # already shows which one is current.
+            $nextRole = switch ([string](Get-BoardProperty $roleBoard 'EditRole' 'all')) {
+                'all' { 'admin' }
+                'admin' { 'owner' }
+                default { 'all' }
+            }
+            $roleResult = Set-BoardEditRole -Board $roleBoard -Role $nextRole -UserId $userId
+            if ($roleResult.Success -and (Save-ContentBoard -Board $roleResult.Value)) {
+                Add-AuditEntry "🛡 صلاحية تعبئة «$([string](Get-BoardProperty $roleBoard 'Name' ''))» = $nextRole - بواسطة $(Format-UserAuditActor -UserId $userId)"
+            }
+            Show-BoardScreen -BoardId $roleId -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'boards:del:*' {

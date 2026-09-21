@@ -15,6 +15,19 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.66.0
+
+**The operator manual now exists in English, chapter for chapter**, in `Parts/Bridge.Help.En.ps1`.
+
+- This is the one surface deliberately **not** in the catalogue, and the file says why: a chapter is forty lines of prose with live settings interpolated mid-sentence, and the number lands in a different clause in English than in Arabic. A `{0}` can move; the clauses around it cannot follow by substitution.
+- The duplication is **guarded rather than avoided**. A test requires both languages to define exactly the same chapter keys in the same order, with identical `AdminOnly` flags, a non-empty title and body for each, and **no Arabic left in an English chapter** — which is the failure this shape invites.
+
+**All 208 setting descriptions** joined the labels, so the settings area is complete: doors, summaries, labels and descriptions. One new `Get-SettingDescription` resolver replaced three separate readers of `$script:SettingDisplayMetadata` — three readers of one fact is three places for a translation to be applied twice and forgotten once.
+
+**Operator-facing keyboard screens**: the confirmations (hide, exit, hide-all, send, approve, reject, undo, restore defaults), the layer controls and timer steps, the on-air status lines, the template list, detail and search screens, and the weekday names.
+
+**Still to convert**, rendering Arabic in both modes until then: the administrator screens, the reports, the alert texts, and the screens of the three content systems. None of them render blank or as a bare key.
+
 ## Version 8.65.0
 
 **All 208 setting labels now exist in both languages**, along with the eleven doors and their summaries. An English settings screen no longer shows a lone Arabic label in the middle of it.

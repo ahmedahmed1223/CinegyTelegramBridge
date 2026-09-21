@@ -22,7 +22,7 @@ function Get-OnAirSummary {
        hidden outside the bridge is removed by Update-OnAirStateFromCinegy. #>
     if ($script:OnAir.Count -eq 0) { return "📺 المشاهد النشطة`n• لا توجد مشاهد على الهواء حسب آخر فحص." }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📺 المشاهد النشطة')
+    $lines.Add((T 'adm.activeScenes'))
     foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         $info = $script:OnAir[$layer]
         # A ticker up since yesterday used to read "1560 دقيقة".
@@ -37,7 +37,7 @@ function Get-OnAirSummary {
             $lines.Add($detail)
         }
         else {
-            $operator = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { Get-UserDisplayName -UserId ([long]$info.UserId) } else { 'غير معروف' }
+            $operator = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { Get-UserDisplayName -UserId ([long]$info.UserId) } else { (T 'adm.unknown') }
             $lines.Add("🔵 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
             $lines.Add("   المصدر: Bot · المستخدم: $operator · منذ $ageText")
         }
@@ -56,13 +56,13 @@ function Get-OnAirTableBlocks {
     #>
     param([datetime]$Now = (Get-Date))
     if ($script:OnAir.Count -eq 0) {
-        return @(@{ type = 'paragraph'; text = '⚫️ لا شيء على الهواء' })
+        return @(@{ type = 'paragraph'; text = (T 'adm.nothingOnAir') })
     }
     $cells = @(, @(
-            @{ text = 'الطبقة'; is_header = $true }
-            @{ text = 'القالب'; is_header = $true }
-            @{ text = 'منذ'; is_header = $true }
-            @{ text = 'المشغّل'; is_header = $true }
+            @{ text = (T 'adm.col.layer'); is_header = $true }
+            @{ text = (T 'adm.col.template'); is_header = $true }
+            @{ text = (T 'adm.col.since'); is_header = $true }
+            @{ text = (T 'adm.col.operator'); is_header = $true }
         ))
     foreach ($layer in @($script:OnAir.Keys | Sort-Object)) {
         $record = $script:OnAir[$layer]
@@ -71,7 +71,7 @@ function Get-OnAirTableBlocks {
             $at = [datetime]$atValue
             $seconds = [math]::Max(0, [int]($Now - $at).TotalSeconds)
             # "منذ 0 ثانية" is a strange way to say it just went up.
-            if ($seconds -lt 5) { 'الآن' } else { Format-DurationSeconds -Seconds $seconds }
+            if ($seconds -lt 5) { (T 'adm.now') } else { Format-DurationSeconds -Seconds $seconds }
         }
         else { '—' }
         $who = Get-AuditOperatorName -UserId ([string](Get-JsonProp $record 'UserId'))
@@ -113,7 +113,7 @@ function Get-AirMaterialNowNext {
     $describe = {
         param([string]$Id, [switch]$WithRemaining)
         if (-not $Id) { return '' }
-        if (-not $byId.ContainsKey($Id)) { return 'مادة غير مدرجة في الجدول' }
+        if (-not $byId.ContainsKey($Id)) { return (T 'adm.materialNotScheduled') }
         $item = $byId[$Id]
         $text = ConvertTo-TelegramHtmlText ([string]$item.Name)
         if ($WithRemaining -and $item.Duration -gt [timespan]::Zero) {
@@ -153,14 +153,14 @@ function Show-MaterialScheduleScreen {
     $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
     $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
-    $keyboard = @{ inline_keyboard = @(, @((New-Button '🔄 تحديث' 'menu:material'), (New-Button '⬅️ القائمة' 'menu'))) }
+    $keyboard = @{ inline_keyboard = @(, @((New-Button (T 'adm.refresh') 'menu:material'), (New-Button (T 'adm.menu') 'menu'))) }
     if (-not $schedule.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ تعذّر قراءة جدول المواد من القناة.' -ReplyMarkup $keyboard
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.materialUnreadable') -ReplyMarkup $keyboard
         return
     }
     $items = @($schedule.Items)
     if ($items.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا توجد مواد مجدولة على القناة.' -ReplyMarkup $keyboard
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.noMaterial') -ReplyMarkup $keyboard
         return
     }
     $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
@@ -168,7 +168,7 @@ function Show-MaterialScheduleScreen {
 
     $trimmed = Select-RichTableRows -Items $items
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🎞 جدول المواد</b>')
+    $lines.Add((T 'adm.materialTitle'))
     foreach ($item in @($trimmed.Rows)) {
         $bare = ([string]$item.Id).Trim('{', '}')
         $mark = if ($bare -eq $activeId) { '▶️' } else { '•' }
@@ -241,17 +241,17 @@ function Get-DisabledGuardLines {
     #>
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($guard in @(
-            @{ Name = 'MaintenanceMode'; WeakWhen = $true; Text = 'وضع الصيانة مفعّل — لا عرض ولا إخفاء حتى يُطفأ.' }
-            @{ Name = 'SchedulePaused'; WeakWhen = $true; Text = 'الجدولة موقوفة — المواعيد المؤجلة تبقى معلّقة ولا تُنفَّذ.' }
-            @{ Name = 'EnableSafeRollback'; WeakWhen = $false; Text = 'لا تراجع بعد عرض خاطئ — الإصلاح الوحيد إخفاء ثم إعادة عرض.' }
-            @{ Name = 'ConfirmLayerRemoval'; WeakWhen = $false; Text = 'الإخفاء ينفَّذ بلا تأكيد — ضغطة واحدة تُنزل ما على الهواء.' }
-            @{ Name = 'RequireUserLevelAuth'; WeakWhen = $false; Text = 'الصلاحية بالمحادثة لا بالشخص — كل عضو في مجموعة مصرّح لها يتحكّم بالهواء.' }
-            @{ Name = 'EnableFullTemplateManagement'; WeakWhen = $true; Text = 'تعديل بنية القوالب مفتوح من تيليجرام.' }
-            @{ Name = 'BlockRejectedRequesters'; WeakWhen = $false; Text = 'المرفوض يستطيع إعادة طلب الوصول بلا حدّ.' }
-            @{ Name = 'LeaveUnknownGroups'; WeakWhen = $false; Text = 'البوت يبقى في أي مجموعة يُضاف إليها.' }
-            @{ Name = 'EnableDpapiSecrets'; WeakWhen = $false; Text = 'التوكن مكتوب نصًّا في config.json.' }
-            @{ Name = 'NotifyAdminsOnMissingGraphic'; WeakWhen = $false; Text = 'لا تنبيه حين يغيب اللوغو أو الشريط عن الهواء.' }
-            @{ Name = 'EnableTextChecks'; WeakWhen = $false; Text = 'لا تنبيهات إملائية في شاشة المراجعة قبل النشر.' }
+            @{ Name = 'MaintenanceMode'; WeakWhen = $true; Text = (T 'adm.maintenanceOn') }
+            @{ Name = 'SchedulePaused'; WeakWhen = $true; Text = (T 'adm.schedulePaused') }
+            @{ Name = 'EnableSafeRollback'; WeakWhen = $false; Text = (T 'adm.noRollback') }
+            @{ Name = 'ConfirmLayerRemoval'; WeakWhen = $false; Text = (T 'adm.hideNoConfirm') }
+            @{ Name = 'RequireUserLevelAuth'; WeakWhen = $false; Text = (T 'adm.chatLevelAuth') }
+            @{ Name = 'EnableFullTemplateManagement'; WeakWhen = $true; Text = (T 'adm.templateEditOpen') }
+            @{ Name = 'BlockRejectedRequesters'; WeakWhen = $false; Text = (T 'adm.rejectedCanRetry') }
+            @{ Name = 'LeaveUnknownGroups'; WeakWhen = $false; Text = (T 'adm.staysInGroups') }
+            @{ Name = 'EnableDpapiSecrets'; WeakWhen = $false; Text = (T 'adm.tokenPlaintext') }
+            @{ Name = 'NotifyAdminsOnMissingGraphic'; WeakWhen = $false; Text = (T 'adm.noMissingGraphicAlert') }
+            @{ Name = 'EnableTextChecks'; WeakWhen = $false; Text = (T 'adm.noSpellWarnings') }
         )) {
         if ([bool](Get-Setting $guard.Name) -eq [bool]$guard.WeakWhen) {
             $lines.Add("• $($guard.Text) <code>$($guard.Name)</code>")
@@ -260,7 +260,7 @@ function Get-DisabledGuardLines {
     # The one number in the list: 0 disables template testing entirely, so
     # there is nowhere to try a template outside the programme.
     if ((Get-SettingInt 'TemplateTestLayer') -le 0) {
-        $lines.Add('• لا طبقة تجربة — لا مكان لتجربة قالب خارج البرنامج. <code>TemplateTestLayer</code>')
+        $lines.Add((T 'adm.noTestLayer'))
     }
     return $lines.ToArray()
 }
@@ -276,23 +276,23 @@ function Show-ShiftReadinessScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>✅ جاهزية المناوبة</b>')
+    $lines.Add((T 'adm.readinessTitle'))
     $onAir = @($script:OnAir.Keys).Count
-    $lines.Add($(if ($onAir -gt 0) { "🟠 طبقات على الهواء الآن: <code>$onAir</code> — راجعها قبل أن تلمس شيئًا." } else { '🟢 لا شيء على الهواء.' }))
+    $lines.Add($(if ($onAir -gt 0) { "🟠 طبقات على الهواء الآن: <code>$onAir</code> — راجعها قبل أن تلمس شيئًا." } else { (T 'adm.nothingOnAirGreen') }))
     $pending = @($script:PendingState.Keys).Count
-    $lines.Add($(if ($pending -gt 0) { "⏳ عمليات معلقة بانتظار أصحابها: <code>$pending</code>." } else { '✅ لا عمليات معلقة.' }))
+    $lines.Add($(if ($pending -gt 0) { "⏳ عمليات معلقة بانتظار أصحابها: <code>$pending</code>." } else { (T 'adm.noPending') }))
     $lines.Add($(
-            if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) { "🤝 مسودة شريط مسلّمة بلا مالك — من يتابعها؟" }
+            if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) { (T 'adm.draftUnowned') }
             elseif ($script:NewsTickerDraft) { "📰 مسودة شريط مفتوحة ($(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId'))))." }
-            else { '✅ لا مسودة شريط.' }))
+            else { (T 'adm.noDraft') }))
     $dead = @($script:DeadChats.Keys).Count
-    $lines.Add($(if ($dead -gt 0) { "💀 محادثات محجورة بانتظار قرار: <code>$dead</code>." } else { '✅ لا محادثات محجورة.' }))
+    $lines.Add($(if ($dead -gt 0) { "💀 محادثات محجورة بانتظار قرار: <code>$dead</code>." } else { (T 'adm.noQuarantined') }))
     $pins = @($script:PinnedRecurrences.Keys).Count
-    $lines.Add($(if ($pins -gt 0) { "📌 أعطال مثبّتة لم تُحل: <code>$pins</code>." } else { '✅ لا أعطال مثبّتة.' }))
-    $lines.Add($(if (Test-QuietHoursActive) { '🔇 الهدوء مفعّل — غير العاجل يُجمَّع.' } else { '🔊 التنبيهات تصل مباشرة.' }))
+    $lines.Add($(if ($pins -gt 0) { "📌 أعطال مثبّتة لم تُحل: <code>$pins</code>." } else { (T 'adm.noStandingFaults') }))
+    $lines.Add($(if (Test-QuietHoursActive) { (T 'adm.quietOn') } else { (T 'adm.alertsDirect') }))
     $ready = ($onAir -eq 0 -and $pending -eq 0 -and -not $script:NewsTickerDraft -and $dead -eq 0 -and $pins -eq 0)
     $lines.Add('')
-    $lines.Add($(if ($ready) { '<b>جاهز ✅ — ابدأ بالفحص الحي للتأكد من المسار.</b>' } else { '<b>ليست نظيفة — صفِّ ما فوق ثم افحص المسار الحي.</b>' }))
+    $lines.Add($(if ($ready) { (T 'adm.readyVerdict') } else { (T 'adm.notCleanVerdict') }))
     # Kept out of $ready on purpose: a switched-off guard is a standing
     # choice about how this station is configured, not dirt left by the
     # outgoing shift. Folding it into the verdict would mean a bridge running
@@ -303,12 +303,12 @@ function Show-ShiftReadinessScreen {
     if ($guards.Count -gt 0) {
         $lines.Add("🛡 <b>حمايات معطّلة</b> (<code>$($guards.Count)</code>) — اختيار إعداد، لا عطل:")
         foreach ($guard in $guards) { $lines.Add($guard) }
-        $lines.Add('تُبدَّل من ⚙️ الإعدادات.')
+        $lines.Add((T 'adm.changedInSettings'))
     }
-    else { $lines.Add('🛡 لا حماية معطّلة.') }
+    else { $lines.Add((T 'adm.noProtectionOff')) }
     $keyboard = @{ inline_keyboard = @(
-        , @((New-Button '🧪 فحص المسار الحي' 'menu:selftest'), (New-Button '📋 التسليم' 'menu:handover'))
-        , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
+        , @((New-Button (T 'adm.livePathCheck') 'menu:selftest'), (New-Button (T 'adm.handover') 'menu:handover'))
+        , @((New-Button (T 'adm.backToTools') 'menu:admintools'))
     ) }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard
 }
@@ -325,16 +325,16 @@ function Show-ShiftHandoverScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🤝 تسليم المناوبة</b>')
+    $lines.Add((T 'adm.handoverTitle'))
     $lines.Add("🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm'))</code>")
 
     $material = Get-AirMaterialNowNext
     if ($material) { $lines.Add(''); $lines.Add($material) }
 
     $lines.Add('')
-    if ($script:OnAir.Count -eq 0) { $lines.Add('🟢 لا شيء من الجسر على الهواء.') }
+    if ($script:OnAir.Count -eq 0) { $lines.Add((T 'adm.nothingFromBridge')) }
     else {
-        $lines.Add('<b>🔴 على الهواء الآن</b>')
+        $lines.Add((T 'adm.onAirNow'))
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
             $record = $script:OnAir[$layer]
             $since = ''
@@ -353,9 +353,9 @@ function Show-ShiftHandoverScreen {
 
     $upcoming = @(Get-UpcomingScheduleEvents | Select-Object -First 5)
     $lines.Add('')
-    if ($upcoming.Count -eq 0) { $lines.Add('📅 لا مواعيد قادمة.') }
+    if ($upcoming.Count -eq 0) { $lines.Add((T 'adm.noUpcoming')) }
     else {
-        $lines.Add('<b>📅 المواعيد القادمة</b>')
+        $lines.Add((T 'adm.upcomingTitle'))
         foreach ($entry in $upcoming) {
             $at = [datetimeoffset]$entry.ScheduledAt
             $lines.Add("• <code>$($at.ToLocalTime().ToString('MM-dd HH:mm'))</code> $(ConvertTo-TelegramHtmlText ([string]$entry.TemplateKey))")
@@ -372,10 +372,10 @@ function Show-ShiftHandoverScreen {
         })
     $lines.Add('')
     if ($drafts.Count -gt 0) {
-        $lines.Add('<b>✍️ مسودات مفتوحة</b>')
+        $lines.Add((T 'adm.openDraftsTitle'))
         foreach ($draft in $drafts) { $lines.Add($draft) }
     }
-    else { $lines.Add('✍️ لا مسودات مفتوحة.') }
+    else { $lines.Add((T 'adm.noOpenDrafts')) }
 
     # F7: the handover writes itself. The receiver reads what is on air, what
     # is coming and what is half-written above; what they would otherwise
@@ -384,15 +384,15 @@ function Show-ShiftHandoverScreen {
     $autoSummary = @(Get-HandoverAutoSummary)
     if ($autoSummary.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('<b>📌 الأهم تلقائيًا</b>')
+        $lines.Add((T 'adm.autoImportant'))
         foreach ($line in $autoSummary) { $lines.Add($line) }
     }
 
     $lines.Add('')
-    $lines.Add('<i>راجع القائمة مع من يستلم، ثم اضغط «سلّمت» ليُسجَّل.</i>')
+    $lines.Add((T 'adm.handoverNote'))
     $keyboard = @{ inline_keyboard = @(
-            , @((New-Button '✅ سلّمت المناوبة' 'handover:done' -Style success))
-            , @((New-Button '🔄 تحديث' 'menu:handover'), (New-Button '⬅️ القائمة' 'menu'))
+            , @((New-Button (T 'adm.handedOver') 'handover:done' -Style success))
+            , @((New-Button (T 'adm.refresh') 'menu:handover'), (New-Button (T 'adm.menu') 'menu'))
         ) }
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
 }
@@ -478,13 +478,13 @@ function Invoke-StatusCommand {
 
     # Quick overall line so a non-admin glance shows whether anything is off.
     if ($sync.Failed.Count -gt 0) {
-        $overall = "🟠 تعذّر فحص بعض الطبقات"
+        $overall = (T 'adm.someLayersUnchecked')
     }
     elseif ($script:OnAir.Count -gt 0) {
-        $overall = "🟠 طبقات على الهواء"
+        $overall = (T 'adm.layersOnAir')
     }
     else {
-        $overall = "🟢 كل شيء سليم"
+        $overall = (T 'adm.allWell')
     }
 
     $sep = '━━━━━━━━━━━━━━━━━'
@@ -512,7 +512,7 @@ function Invoke-StatusCommand {
     $lines.Add($sep)
     # Named sections rather than one column: the same grammar the full status
     # uses, so an operator moving between the two screens reads one layout.
-    $lines.Add('<b>🎛 القناة والمادة</b>')
+    $lines.Add((T 'adm.channelAndMaterial'))
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     # The programme under the graphics. Placed with the channel line because
     # it answers the same question - what is this channel doing right now -
@@ -538,13 +538,13 @@ function Invoke-StatusCommand {
         $checkedAt = [datetime]$lastSuccessfulAt
         $agoSeconds = [math]::Max(0, [int]($now - $checkedAt).TotalSeconds)
         # "منذ 0 ثانية" is a strange way to say "just now".
-        $ago = if ($agoSeconds -lt 5) { 'الآن' } else { "منذ $(Format-DurationSeconds -Seconds $agoSeconds)" }
+        $ago = if ($agoSeconds -lt 5) { (T 'adm.now') } else { "منذ $(Format-DurationSeconds -Seconds $agoSeconds)" }
         $lines.Add("🔄 آخر فحص ناجح: <i>$ago</i> (<code>$($checkedAt.ToString('HH:mm:ss'))</code>)")
     }
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>🔄 التزامن</b>')
+    $lines.Add((T 'adm.syncTitle'))
     if ($sync.Failed.Count -gt 0) {
         $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
     }
@@ -552,7 +552,7 @@ function Invoke-StatusCommand {
         $lines.Add("🔄 تم تحديث الحالة وأُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
     }
     else {
-        $lines.Add("✅ الحالة متزامنة مع Cinegy.")
+        $lines.Add((T 'adm.syncedWithCinegy'))
     }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
@@ -565,7 +565,7 @@ function Invoke-StatusCommand {
     # The block renderer lays text out itself and has no tag syntax, so the
     # HTML is stripped back on the way in rather than kept as a second
     # parallel copy that would drift from the one operators actually read.
-    $statusBlocks = Get-StatusRichBlocks -Title 'ℹ️ الحالة' -Overall $overall `
+    $statusBlocks = Get-StatusRichBlocks -Title (T 'adm.status') -Overall $overall `
         -Identity (ConvertFrom-TelegramHtmlText $identityLine) -Clock $clockLine -Highlights @($material) `
         -DetailLines @($lines | Select-Object -Skip 4)
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
@@ -578,7 +578,7 @@ function Request-HideAllConfirmation {
     Clear-PendingState -ChatId $ChatId
     $layers = @(Get-HideAllTargetLayers)
     if ($layers.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا توجد طبقات محددة لإخفاء الكل. يضبطها المشرف من الإعدادات." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.noHideAllLayers') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     Set-PendingState -ChatId $ChatId -State @{
@@ -595,7 +595,7 @@ function Get-HealthStatusReport {
     try {
         $probe = Invoke-RestMethod -Uri "$apiBase/getMe" -Method Get -TimeoutSec 3
         $telegramOk = [bool](Get-JsonProp $probe 'ok')
-        if (-not $telegramOk) { $telegramError = 'رد غير صالح' }
+        if (-not $telegramOk) { $telegramError = (T 'adm.invalidReply') }
     }
     catch { $telegramError = $_.Exception.Message }
     $telegramWatch.Stop()
@@ -614,7 +614,7 @@ function Get-HealthStatusReport {
     if ($telemetry.Success) { $script:HealthHistory.Cinegy.LastSuccess = $checkedAt }
     else {
         $script:HealthHistory.Cinegy.LastError = [string](Get-JsonProp $telemetry 'Error')
-        if ([string]::IsNullOrWhiteSpace($script:HealthHistory.Cinegy.LastError)) { $script:HealthHistory.Cinegy.LastError = 'تعذّر الوصول' }
+        if ([string]::IsNullOrWhiteSpace($script:HealthHistory.Cinegy.LastError)) { $script:HealthHistory.Cinegy.LastError = (T 'adm.unreachable') }
         $script:HealthHistory.Cinegy.LastErrorAt = $checkedAt
     }
 
@@ -624,18 +624,18 @@ function Get-HealthStatusReport {
     else { "❌ Cinegy: $($cinegyWatch.ElapsedMilliseconds)ms — تعذّر الوصول" }
     $historyLines = foreach ($service in @('Telegram', 'Cinegy')) {
         $history = $script:HealthHistory[$service]
-        $lastSuccess = if ($history.LastSuccess) { ([datetime]$history.LastSuccess).ToString('yyyy-MM-dd HH:mm:ss') } else { 'لا يوجد' }
+        $lastSuccess = if ($history.LastSuccess) { ([datetime]$history.LastSuccess).ToString('yyyy-MM-dd HH:mm:ss') } else { (T 'adm.none') }
         $lastError = if ($history.LastErrorAt) {
             "$($history.LastError) — $(([datetime]$history.LastErrorAt).ToString('yyyy-MM-dd HH:mm:ss'))"
         }
-        else { 'لا يوجد' }
+        else { (T 'adm.none') }
         $failureCount = [int]$history.FailureCount
-        $outage = if ($history.OutageStartedAt) { ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss') } else { 'لا يوجد' }
+        $outage = if ($history.OutageStartedAt) { ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss') } else { (T 'adm.none') }
         "$service — آخر نجاح: $lastSuccess | آخر خطأ: $lastError | فشل متتالٍ: $failureCount | بداية الانقطاع: $outage"
     }
     $historyText = $historyLines -join "`n"
     $text = @(
-        "💚 صحة الخدمات",
+        (T 'adm.serviceHealth'),
         $telegramLine,
         $cinegyLine,
         "",
@@ -651,7 +651,7 @@ function Show-TemplateAdminDetail {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $lines = @(
@@ -664,18 +664,18 @@ function Show-TemplateAdminDetail {
         "النصوص الجاهزة: $(@($template.Presets).Count)"
     )
     $reminderText = if ([bool](Get-JsonProp $template 'LongRunning')) {
-        'معطّل للقالب Long run (يعمل 24/7).'
+        (T 'adm.disabledLongRun')
     }
     elseif ([int](Get-JsonProp $template 'ReminderMinutes') -gt 0) {
         "بعد $([int](Get-JsonProp $template 'ReminderMinutes')) دقيقة للشخص الذي أظهر القالب."
     }
-    else { 'معطّل.' }
+    else { (T 'adm.disabledDot') }
     $lines += "🔔 تنبيه الظهور: $reminderText"
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and (Get-Setting 'EnableFullTemplateManagement')) {
-        $lines += '✅ التحكم الكامل بالقوالب مفعّل. اختر عملية التعديل من الأزرار.'
+        $lines += (T 'adm.fullTemplateControl')
     }
     else {
-        $lines += '🔒 تعديل تعريف القالب مخصص للمشرف. يمكنك قراءة التعريف وإدارة تنبيه الظهور.'
+        $lines += (T 'adm.templateEditAdminOnly')
     }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
 }
@@ -683,11 +683,11 @@ function Show-TemplateAdminDetail {
 function Start-TemplateReminderMinutesPrompt {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-TemplateReminderManager -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'فقدت صلاحية إدارة تنبيه القالب.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.lostNoticeRight') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $template = Get-TemplateByIndex -Index $TemplateIndex
-    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId); return }
+    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId); return }
     if ([bool](Get-JsonProp $template 'LongRunning')) {
         Send-TelegramMessage -ChatId $ChatId -Text "🔔 '$($template.Key)' قالب Long run يعمل 24/7، لذلك تنبيه الظهور الشخصي معطّل." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
         return

@@ -38,7 +38,7 @@ function Get-CinegyExposureWarning {
         ($octet[0] -eq 169 -and $octet[1] -eq 254) -or
         ($octet[0] -eq 172 -and $octet[1] -ge 16 -and $octet[1] -le 31)
     if ($isPrivate) { return '' }
-    return '🔓 عنوان Cinegy خارج النطاقات الخاصة. واجهة Cinegy بلا مصادقة: من يصل إلى المنفذ يتحكم بالهواء. أبقِ المنفذ داخل شبكة البثّ.'
+    return (T 'hl.cinegyPublic')
 }
 
 function Get-CinegyVersionAwarenessNote {
@@ -75,7 +75,7 @@ function Invoke-FullStatusCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-StatusViewer -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "هذا الفحص متاح للمشرف والمالك فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.adminOwnerOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -88,10 +88,10 @@ function Invoke-FullStatusCommand {
     # Overall status line derived from the live signals so a quick glance at
     # the top of the message tells the operator whether anything needs attention.
     if ($sync.Failed.Count -gt 0) {
-        $overall = "🔴 لا يمكن فحص بعض الطبقات"
+        $overall = (T 'hl.someLayersUncheckable')
     }
     elseif (-not $health.Telemetry.Success) {
-        $overall = "🟠 Cinegy غير متاح"
+        $overall = (T 'hl.cinegyUnavailable')
     }
     elseif ($script:OnAir.Count -gt 0) {
         $overall = "🟠 طبقات على الهواء"
@@ -122,12 +122,12 @@ function Invoke-FullStatusCommand {
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>🎛 اتصال Cinegy</b>')
+    $lines.Add((T 'hl.cinegyConnection'))
     $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
     $configuredSceneMode = [string](Get-Setting 'SceneMode')
     $sceneCapabilities = Get-CinegySceneCapabilities -SceneItems $layerStatuses -LayerTargetSupported $true
     $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
-    $verification = if ($sceneMode.Verified) { 'تم التحقق' } elseif ($configuredSceneMode -eq 'Multi') { 'بانتظار تحقق Cinegy' } else { 'وضع متوافق' }
+    $verification = if ($sceneMode.Verified) { (T 'hl.verified') } elseif ($configuredSceneMode -eq 'Multi') { (T 'hl.awaitingCinegy') } else { (T 'hl.compatibilityMode') }
     $exposure = Get-CinegyExposureWarning -Address ([string]$config.AirServerAddress)
     if ($exposure) { $lines.Add($exposure) }
     $versionNote = Get-CinegyVersionAwarenessNote -LayerStatuses $layerStatuses
@@ -142,19 +142,19 @@ function Invoke-FullStatusCommand {
     $lines.Add((ConvertTo-TelegramHtmlText (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)))
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>🩺 صحة الخدمات</b>')
+    $lines.Add((T 'hl.serviceHealthTitle'))
     $lines.Add((ConvertTo-TelegramHtmlText ([string]$health.Text)))
     $lines.Add('')
     $lines.Add((ConvertTo-TelegramHtmlText ([string]$outputMonitor.Text)))
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>⚙️ التشغيل والجدولة</b>')
+    $lines.Add((T 'hl.runAndSchedule'))
     $lines.Add("📡 البث المباشر: $(ConvertTo-TelegramHtmlText (Get-LiveRelayStatusText))")
     $lines.Add("🖼 الصور المعلّقة: <code>$($script:SnapshotJobs.Count)</code> · مؤقتات الإخفاء: <code>$($script:AutoHideQueue.Count)</code> · تنبيهات الظهور: <code>$($script:TemplateReminderQueue.Count)</code>")
     $lines.Add("🗓 الأحداث المجدولة القادمة: <code>$(@(Get-UpcomingScheduleEvents).Count)</code>")
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>👥 الوصول</b>')
+    $lines.Add((T 'hl.access'))
     $lines.Add("🔐 المستخدمون المصرح لهم: <code>$(@(Get-JsonProp $config 'AllowedChatIds').Count)</code> محادثة / <code>$(@(Get-JsonProp $config 'AllowedUserIds').Count)</code> مستخدم")
     $lines.Add("🔔 طلبات الوصول المعلّقة: <code>$($script:PendingApprovals.Count)</code>")
     $lines.Add('')
@@ -166,7 +166,7 @@ function Invoke-FullStatusCommand {
     elseif ($sync.Removed.Count -gt 0) {
         $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
     }
-    else { $lines.Add("✅ حالة Cinegy متزامنة.") }
+    else { $lines.Add((T 'hl.cinegySynced')) }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
     # The same lines, reshaped: the verdict and the identity as the header,
@@ -175,7 +175,7 @@ function Invoke-FullStatusCommand {
     # when something is wrong.
     # Skip 6 rather than 5: the identity line joined the header block, so the
     # count of lines the blocks already carry moved with it.
-    $statusBlocks = Get-StatusRichBlocks -Title '📊 الحالة الكاملة' -Overall $overall `
+    $statusBlocks = Get-StatusRichBlocks -Title (T 'hl.fullStatus') -Overall $overall `
         -Identity (ConvertFrom-TelegramHtmlText $identityLine) -Clock $clockLine -Highlights @($material) `
         -DetailLines @($lines | Select-Object -Skip 6)
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $statusBlocks -ReplyMarkup $statusMenu) { return }
@@ -312,18 +312,18 @@ function Get-RuntimeFileHealthBlocks {
     $Records = @($Records)
 
     $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
-    $verdict = if ($faults.Count -eq 0) { '🟢 كل ملفات التشغيل سليمة.' } else { "🔴 ملفات تحتاج انتباهك: $($faults.Count)" }
+    $verdict = if ($faults.Count -eq 0) { (T 'hl.runtimeFilesHealthy') } else { "🔴 ملفات تحتاج انتباهك: $($faults.Count)" }
 
     $blocks = @(
-        @{ type = 'heading'; text = '🗂 صحة ملفات التشغيل'; size = 3 }
+        @{ type = 'heading'; text = (T 'hl.runtimeFiles'); size = 3 }
         @{ type = 'paragraph'; text = $verdict }
     )
     if ($Records.Count -eq 0) { return $blocks }
 
     $cells = @(, @(
-            @{ text = 'الملف'; is_header = $true }
-            @{ text = 'الحالة'; is_header = $true }
-            @{ text = 'التفصيل'; is_header = $true }
+            @{ text = (T 'hl.col.file'); is_header = $true }
+            @{ text = (T 'hl.col.state'); is_header = $true }
+            @{ text = (T 'hl.col.detail'); is_header = $true }
         ))
     # Faults first, for the reason the health centre puts them first: on a
     # screen opened because something is wrong, the wrong thing should not be
@@ -338,15 +338,15 @@ function Get-RuntimeFileHealthBlocks {
         }
         $detail = switch ([string]$record.State) {
             'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
-            'absent' { 'لم يُكتب بعد — لا شيء لاستعادته' }
-            'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
-            default { 'تالف ولا توجد نسخة احتياطية' }
+            'absent' { (T 'hl.notWrittenNothing') }
+            'recoverable' { (T 'hl.corruptWithBackup') }
+            default { (T 'hl.corruptNoBackup') }
         }
         $cells += , @(@{ text = [string]$record.Name }, @{ text = $icon }, @{ text = $detail })
     }
     $blocks += @{ type = 'table'; cells = $cells }
     if ($faults.Count -gt 0) {
-        $blocks += @{ type = 'paragraph'; text = 'الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل؛ والتالف بلا نسخة يبدأ فارغًا.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'hl.corruptNote') }
     }
     return $blocks
 }
@@ -359,11 +359,11 @@ function Get-RuntimeFileHealthText {
     # parse_mode=HTML. The verdict is the only line that has to be read here -
     # everything under it is the evidence for it - so it is bold, and the file
     # list becomes a blockquote instead of a row of "━━━" drawn above it.
-    $lines.Add('<b>🗂 صحة ملفات التشغيل</b>')
+    $lines.Add((T 'hl.runtimeFilesTitle'))
 
     $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
     if ($faults.Count -eq 0) {
-        $lines.Add('<b>🟢 كل ملفات التشغيل سليمة.</b>')
+        $lines.Add((T 'hl.allSoundHtml'))
     }
     else {
         # Side by side, not one inside the other: bold, italic, underline,
@@ -386,15 +386,15 @@ function Get-RuntimeFileHealthText {
         }
         $detail = switch ([string]$record.State) {
             'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
-            'absent' { 'لم يُكتب بعد — لا شيء لاستعادته' }
-            'recoverable' { 'تالف، لكن توجد نسخة احتياطية يستعيدها الجسر عند الإقلاع' }
-            default { 'تالف ولا توجد نسخة احتياطية' }
+            'absent' { (T 'hl.notWrittenNothing') }
+            'recoverable' { (T 'hl.corruptWithBackup') }
+            default { (T 'hl.corruptNoBackup') }
         }
         # A file that is fine, or has simply never been written, costs one
         # line and no explanation. Only the ones needing something get the
         # second line saying what.
         #
-        # Sixteen lines of "لم يُكتب بعد" gave a healthy install the same weight
+        # Sixteen lines of (T 'hl.notWrittenYet') gave a healthy install the same weight
         # on screen as a broken one, which is the opposite of what a health
         # screen is for.
         if ([string]$record.State -in @('healthy', 'absent')) {
@@ -422,8 +422,8 @@ function Get-RuntimeFileHealthText {
 
     if ($faults.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('<i>↳ الملف التالف بنسخة احتياطية يُستعاد تلقائيًا عند إعادة التشغيل.</i>')
-        $lines.Add('<i>↳ التالف بلا نسخة يبدأ فارغًا؛ خذ نسخة من المجلد قبل إعادة التشغيل إن كان محتواه مهمًا.</i>')
+        $lines.Add((T 'hl.corruptNote1'))
+        $lines.Add((T 'hl.corruptNote2'))
     }
     return ($lines -join "`n")
 }
@@ -482,44 +482,44 @@ function Get-BridgeHealthRows {
 
     $telegramState = [string]$script:RuntimeState.Monitoring.TelegramConnectionState
     $rows += switch ($telegramState) {
-        'connected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟢'; Detail = 'متصل' } }
-        'disconnected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🔴'; Detail = 'غير متصل' } }
-        default { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟠'; Detail = 'لم تُحسم الحالة' } }
+        'connected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟢'; Detail = (T 'hl.connected') } }
+        'disconnected' { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🔴'; Detail = (T 'hl.disconnected') } }
+        default { @{ Name = 'Telegram'; Glyph = '📡'; Icon = '🟠'; Detail = (T 'hl.undecided') } }
     }
 
     $cinegyState = [string]$script:RuntimeState.Monitoring.CinegyHealthState
     $rows += switch ($cinegyState) {
-        'healthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟢'; Detail = 'سليم' } }
-        'unhealthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🔴'; Detail = 'غير سليم' } }
-        default { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟠'; Detail = 'الحالة غير معروفة' } }
+        'healthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟢'; Detail = (T 'hl.healthy') } }
+        'unhealthy' { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🔴'; Detail = (T 'hl.unhealthy') } }
+        default { @{ Name = 'Cinegy'; Glyph = '🎛'; Icon = '🟠'; Detail = (T 'hl.stateUnknown') } }
     }
 
     $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
     $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
-    $rows += if ($monitorDisabled) { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🟢'; Detail = 'معطلة باختيار المشرف' } }
-    elseif ($monitorFault) { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
-    else { @{ Name = 'مراقبة المخرج'; Glyph = '👁'; Icon = '🟢'; Detail = 'سليمة' } }
+    $rows += if ($monitorDisabled) { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🟢'; Detail = (T 'hl.disabledByAdmin') } }
+    elseif ($monitorFault) { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
+    else { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🟢'; Detail = (T 'hl.sound') } }
 
     $relay = $script:RuntimeState.Relay
-    $rows += if (-not [bool]$relay.ShouldRun) { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🟢'; Detail = 'غير مطلوب' } }
-    elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🟢'; Detail = 'يعمل' } }
-    else { @{ Name = 'البث المرحّل'; Glyph = '📶'; Icon = '🔴'; Detail = 'مطلوب لكنه متوقف' } }
+    $rows += if (-not [bool]$relay.ShouldRun) { @{ Name = (T 'hl.relayedStream'); Glyph = '📶'; Icon = '🟢'; Detail = (T 'hl.notRequired') } }
+    elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = (T 'hl.relayedStream'); Glyph = '📶'; Icon = '🟢'; Detail = (T 'hl.running') } }
+    else { @{ Name = (T 'hl.relayedStream'); Glyph = '📶'; Icon = '🔴'; Detail = (T 'hl.requiredButStopped') } }
 
-    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { 'المساحة غير معروفة' }
-    $rows += if (@($Warnings).Count -gt 0) { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا' -EnglishOne 'warning' -EnglishMany 'warnings')" } }
-    else { @{ Name = 'التخزين'; Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
+    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { (T 'hl.spaceUnknown') }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = (T 'hl.storage'); Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا' -EnglishOne 'warning' -EnglishMany 'warnings')" } }
+    else { @{ Name = (T 'hl.storage'); Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
 
     $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
     $upcomingText = Get-ArabicCountNoun -Count $upcomingCount -One 'حدث' -Two 'حدثان' -Few 'أحداث' -Many 'حدثًا' -EnglishOne 'event' -EnglishMany 'events'
-    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
-    else { @{ Name = 'الجدولة'; Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
+    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
+    else { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
 
     # D1: quarantined chats are invisible everywhere except 👥 المستخدمون -
     # BridgeManager mirrors this same row list (Save-HealthSnapshot), so this
     # is the cheapest way to put that count somewhere the desk actually looks.
     $deadChatsCount = $script:DeadChats.Count
-    $rows += if ($deadChatsCount -eq 0) { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟢'; Detail = 'لا شيء' } }
-    else { @{ Name = 'محادثات محجورة'; Glyph = '💀'; Icon = '🟠'; Detail = Get-ArabicCountNoun -Count $deadChatsCount -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' -EnglishOne 'chat' -EnglishMany 'chats' } }
+    $rows += if ($deadChatsCount -eq 0) { @{ Name = (T 'hl.quarantinedChats'); Glyph = '💀'; Icon = '🟢'; Detail = (T 'hl.nothing') } }
+    else { @{ Name = (T 'hl.quarantinedChats'); Glyph = '💀'; Icon = '🟠'; Detail = Get-ArabicCountNoun -Count $deadChatsCount -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' -EnglishOne 'chat' -EnglishMany 'chats' } }
 
     $recentErrors = @()
     foreach ($service in @('Telegram', 'Cinegy')) {
@@ -528,8 +528,8 @@ function Get-BridgeHealthRows {
             $recentErrors += "${service}: $(Protect-SensitiveText ([string]$history.LastError))"
         }
     }
-    $rows += if ($recentErrors.Count -gt 0) { @{ Name = 'آخر الأخطاء'; Glyph = '⚠️'; Icon = '🟠'; Detail = ($recentErrors -join ' | ') } }
-    else { @{ Name = 'آخر الأخطاء'; Glyph = '⚠️'; Icon = '🟢'; Detail = 'لا شيء' } }
+    $rows += if ($recentErrors.Count -gt 0) { @{ Name = (T 'hl.recentErrors'); Glyph = '⚠️'; Icon = '🟠'; Detail = ($recentErrors -join ' | ') } }
+    else { @{ Name = (T 'hl.recentErrors'); Glyph = '⚠️'; Icon = '🟢'; Detail = (T 'hl.nothing') } }
 
     return $rows
 }
@@ -587,7 +587,7 @@ function Get-BridgeHealthCenterBlocks {
     }
     $rows = @(Get-BridgeHealthRows -DiagnosticsSnapshot $DiagnosticsSnapshot -Warnings @($Warnings))
 
-    $blocks = @(@{ type = 'heading'; text = '🩺 مركز صحة النظام'; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'hl.healthCentre'); size = 3 })
     $blocks += @{ type = 'paragraph'; text = "Bridge v$script:BridgeVersion" }
 
     # Faults first. On a screen opened because something is wrong, the wrong
@@ -595,9 +595,9 @@ function Get-BridgeHealthCenterBlocks {
     $faults = @($rows | Where-Object { $_.Icon -ne '🟢' })
     $healthy = @($rows | Where-Object { $_.Icon -eq '🟢' })
     $cells = @(, @(
-            @{ text = 'النظام'; is_header = $true }
-            @{ text = 'الحالة'; is_header = $true }
-            @{ text = 'التفصيل'; is_header = $true }
+            @{ text = (T 'hl.system'); is_header = $true }
+            @{ text = (T 'hl.col.state'); is_header = $true }
+            @{ text = (T 'hl.col.detail'); is_header = $true }
         ))
     foreach ($row in ($faults + $healthy)) {
         $cells += , @(@{ text = [string]$row.Name }, @{ text = [string]$row.Icon }, @{ text = [string]$row.Detail })
@@ -666,12 +666,12 @@ function Get-BridgeHealthCenterText {
     # Read off the icons the rows carry rather than recomputed, so the heading
     # and the rows can never disagree about the same reading.
     $icons = @($rows | ForEach-Object { [string]$_.Icon })
-    $verdict = if ($icons -contains '🔴') { '🔴 عطلٌ يحتاج تدخلًا' }
-    elseif ($icons -contains '🟠') { '🟠 يحتاج مراجعة' }
+    $verdict = if ($icons -contains '🔴') { (T 'hl.faultNeedsAction') }
+    elseif ($icons -contains '🟠') { (T 'hl.needsReview') }
     else { '🟢 كل شيء سليم' }
 
     return @(
-        '<b>🩺 مركز صحة النظام</b>'
+        (T 'hl.healthCentreTitle')
         "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
         "<b>$verdict</b>"
         ''
@@ -699,7 +699,7 @@ function Show-EngineHealthScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Get-Setting 'EnableEngineHealth')) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'شاشة صحة المحرك معطلة افتراضيًا. يفعّلها المشرف من الإعدادات (صحة المحرك) إن أرادها.' -ReplyMarkup (Get-HealthCenterKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.engineHealthOff') -ReplyMarkup (Get-HealthCenterKeyboard)
         return
     }
     $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
@@ -708,9 +708,9 @@ function Show-EngineHealthScreen {
     $video = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🖥 صحة المحرك</b>')
+    $lines.Add((T 'hl.engineHealthTitle'))
     if (-not $telemetry.Success) {
-        $lines.Add('⚠️ تعذّر قراءة عدادات المحرك من القناة.')
+        $lines.Add((T 'hl.engineCountersUnreadable'))
     }
     else {
         $dropped = [long]$telemetry.DroppedCount
@@ -720,9 +720,9 @@ function Show-EngineHealthScreen {
             if ($delta -gt 0) { $deltaLine = " (+$delta منذ آخر فحص)" }
         }
         $script:LastEngineDropped = $dropped
-        $verdict = if ($telemetry.Healthy -eq $false) { '🔴 تحذير' }
-        elseif ([long]$telemetry.NoInputSignal -gt 0) { '🟠 بلا إشارة دخل' }
-        else { '🟢 سليم' }
+        $verdict = if ($telemetry.Healthy -eq $false) { (T 'hl.warning') }
+        elseif ([long]$telemetry.NoInputSignal -gt 0) { (T 'hl.noInputSignal') }
+        else { (T 'hl.healthyGreen') }
         $lines.Add("<b>$verdict</b>")
         $lines.Add("🎞 الإطارات — المخرَجة: $($telemetry.OutputCount) · الساقطة: $dropped$deltaLine")
         $lines.Add("⏱ متوسط القراءة: $($telemetry.AverageReadTime)ms · أخطاء القراءة: $($telemetry.MaxReadErrorRate)%")
@@ -754,7 +754,7 @@ function Start-TemplateTestReview {
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
     $testLayer = Get-SettingInt 'TemplateTestLayer' 0
-    if ($testLayer -le 0) { Send-TelegramMessage -ChatId $ChatId -Text 'طبقة تجربة القوالب معطلة. اضبط TemplateTestLayer أولاً.' -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex); return }
+    if ($testLayer -le 0) { Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.testLayerDisabled') -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex); return }
     if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $testLayer) {
         Send-TelegramMessage -ChatId $ChatId -Text "❌ طبقة التجربة $testLayer مستخدمة كطبقة إنتاج في سجل القوالب. اختر طبقة مستقلة." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
         return
@@ -917,12 +917,12 @@ function Request-BridgeRestart {
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا توجد وسيلة لإعادة تشغيل الجسر (العملية الأصل: $($supervisor.Name))، ولا يمكن إعادة بناء أمر التشغيل.`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
-    $who = if ($supervisor.Supervised) { $supervisor.Name } else { 'الجسر نفسه' }
+    $who = if ($supervisor.Supervised) { $supervisor.Name } else { (T 'hl.bridgeItself') }
     $live = if ($script:OnAir.Count -gt 0) { "`n⚠️ يوجد $($script:OnAir.Count) مشهدًا مسجّلًا على الهواء. إعادة التشغيل لا تغيّر ما هو على الشاشة، لكن البوت لن يستجيب لثوانٍ." } else { '' }
     Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $who تلقائيًا.$live") `
         -ReplyMarkup @{ inline_keyboard = @(, @(
-                @{ text = '✅ نعم، أعد التشغيل'; callback_data = 'restart:confirm'; style = 'danger' },
-                @{ text = '❌ إلغاء'; callback_data = 'menu:admintools' })) }
+                @{ text = (T 'hl.yesRestart'); callback_data = 'restart:confirm'; style = 'danger' },
+                @{ text = (T 'hl.cancel'); callback_data = 'menu:admintools' })) }
     return $true
 }
 
@@ -937,7 +937,7 @@ function Confirm-BridgeRestart {
     if (-not (Get-Setting 'AllowRemoteRestart')) { return $false }
     Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
     Add-AuditEntry "♻️ إعادة تشغيل الجسر - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text '♻️ يُعاد التشغيل الآن… أرسل /بدء بعد قليل للتأكد من عودته.'
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.restarting')
     # Decided here rather than at exit. Under a supervisor the bridge must NOT
     # start its own replacement: the supervisor starts one too, and two bridges
     # long-polling one bot token means button presses vanish into whichever

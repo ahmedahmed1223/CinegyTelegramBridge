@@ -15,6 +15,29 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.68.0
+
+A new **feed watch** screen under Administration tools: whether the feed is
+arriving and since when, the source in use and the cycle behind it, the last
+day's outages with their lengths, and a snapshot button. Refresh grabs one
+frame to measure — read-only, and nothing is sent to Cinegy.
+
+It is backed by `Modules/BridgeStreamOutages.psm1`, an outage ledger that
+survives a restart. The bridge previously had nothing to answer "how long was
+the feed gone last night" with: a consecutive counter that the next success
+resets, and a six-hour list of failure moments that is pruned, both in memory
+alone. The module is pure — no config, no clock, no disk — so its two rules
+are tested: opening an outage is idempotent, because the watchdog runs once
+per failed capture and a source that is down stays down, and an outage still
+open is never trimmed away however old, because that is the row an operator
+opens the screen for.
+
+And a fix that had been hiding in plain sight: the operator was never told
+their own graphic had left the air. The external-change alert went to
+`Send-AdminBroadcast`, so the administrators were told and the one person
+mid-task with that graphic was not. They now get their own line, and it is
+deliberately not behind the administrator notice setting.
+
 ## Version 8.67.0
 
 The translation sweep is finished: every screen the bot draws is bilingual.

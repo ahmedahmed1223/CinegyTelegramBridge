@@ -423,6 +423,8 @@ function Get-HelpChaptersEn {
                 '🗂 Admin tools holds the rest:'
                 '↳ 👥 Users, ⚡ ready-made texts, 📚 templates.'
                 '↳ ▶️ The live relay and 🔗 the stream link.'
+                '↳ 📡 The feed watch: arriving or not and since when, the source'
+                '   and the cycle, and the last day''s outages with their lengths.'
                 '↳ 📜 The audit, 🧪 diagnostics and 🛠 the raw command.'
                 '↳ ✅ Shift readiness: layers on air, pending operations, a ticker draft,'
                 '   quarantined chats and standing faults, then a verdict or a list.'

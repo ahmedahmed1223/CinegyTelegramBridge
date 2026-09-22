@@ -87,7 +87,7 @@ function Start-NewsTickerDraft {
     $existing = $script:NewsTickerDraft
     if ($existing -and [long]$existing.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$existing;Error=''} }
     if ($existing -and -not (Test-NewsTickerDraftOpen -Draft $existing)) {
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="المسودة مقفلة حاليًا لدى $(Format-UserAuditActor -UserId ([long]$existing.OwnerUserId))."}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockedBy' $(Format-UserAuditActor -UserId ([long]$existing.OwnerUserId)))}
     }
     # Past here the slot is this caller's to take: either it is empty, or it
     # holds a draft its owner opened to whoever comes next. The reservation is
@@ -96,7 +96,7 @@ function Start-NewsTickerDraft {
     $reservation = Get-NewsLockReservation
     if ($reservation -and [long]$reservation.UserId -ne $UserId) {
         $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
-        return [pscustomobject]@{Success=$false;Draft=$null;Error="القفل محجوز لـ $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) لمدة $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds') بعد تسليم القفل له."}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockHeldFor' $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))}
     }
     if ($reservation) { Clear-NewsLockReservation }
     if ($existing) {
@@ -115,7 +115,7 @@ function Start-NewsTickerDraft {
         if (-not (Save-NewsTickerDraft)) {
             Write-BridgeLog 'Adopted news draft could not be saved; it may revert to open on the next start.' 'ERROR'
         }
-        Add-AuditEntry "🤝 تبنّى $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار المفتوحة ($(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))"
+        Add-AuditEntry (T 'news.adoptedOpenDraft' $(Format-UserAuditActor -UserId $UserId) $(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
         return [pscustomobject]@{Success=$true;Draft=$existing;Error=''}
     }
     $snapshot = Get-NewsTickerConfiguredSnapshot
@@ -147,7 +147,7 @@ function Resume-ExpiredNewsDraft {
     }
     $snapshot = Get-NewsTickerConfiguredSnapshot
     if (-not $snapshot.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر الاستئناف: $($snapshot.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'news.resumeFailed' $($snapshot.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $script:ExpiredNewsDraft = $null
@@ -157,7 +157,7 @@ function Resume-ExpiredNewsDraft {
         BaseHash = $snapshot.Hash; Items = @(@($saved.Items) | ForEach-Object { [string]$_ })
     }
     Save-NewsTickerDraft | Out-Null
-    Add-AuditEntry "↩️ استئناف مسودة أخبار منتهية ($(@($saved.Items).Count) خبرًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'news.resumedExpiredAudit' $(@($saved.Items).Count) $(Format-UserAuditActor -UserId $UserId))
     Show-NewsTickerManagementScreen -ChatId $ChatId -UserId $UserId
 }
 
@@ -269,7 +269,7 @@ function Save-NewsSheetItems {
         # only honest signal that the write actually happened.
         $body = [string]$response.Content
         if ($body -notmatch '"ok"\s*:\s*true') {
-            return [pscustomobject]@{ Success = $false; Attempted = $true; Error = "رفض الشيت الكتابة: $(Protect-SensitiveText $body)" }
+            return [pscustomobject]@{ Success = $false; Attempted = $true; Error = (T 'news.sheetRefusedWrite' $(Protect-SensitiveText $body)) }
         }
         return [pscustomobject]@{ Success = $true; Attempted = $true; Error = '' }
     }
@@ -285,7 +285,7 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error=(T 'news.noDraftOfYours')} }
     $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
-        Add-AuditEntry "📰 نشر شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $UserId): $(@($draft.Items).Count) خبرًا"
+        Add-AuditEntry (T 'news.publishedAudit' $(Format-UserAuditActor -UserId $UserId) $(@($draft.Items).Count))
         Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count)
         # Mirror to the sheet after the ticker is safely on air, never before.
         # A sheet that refuses the write must not undo a publish that already
@@ -323,7 +323,7 @@ function Get-NewsPublishNoticeAudience {
 function Send-NewsPublishNotice {
     param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount)
     $actor = Get-UserDisplayName -UserId $UserId
-    $text = "📰 نُشر شريط الأخبار يدويًا بواسطة ${actor}: $ItemCount خبرًا."
+    $text = (T 'news.publishedByHand' ${actor} $ItemCount)
     foreach ($chat in @(Get-NewsPublishNoticeAudience -PublisherUserId $UserId)) {
         # The publisher already receives the detailed success result; avoid
         # sending the same event twice while retaining the setting's audience.
@@ -450,7 +450,7 @@ function Request-NewsLockRelease {
     $existing = $script:NewsLockRequest
     if ($existing) {
         if ([long]$existing.RequesterUserId -ne $UserId) {
-            Send-TelegramMessage -ChatId $ChatId -Text "⏳ يوجد طلب فكّ قفل قيد الانتظار من $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId)). انتظر نتيجته." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'news.unlockPending' $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId))) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
             return $false
         }
         # The same requester tapping again used to overwrite the record with a
@@ -459,7 +459,7 @@ function Request-NewsLockRelease {
         # owner collected a new ping each time. A repeat tap now only reports
         # how long is left.
         $secondsLeft = [math]::Max(0, [int]([math]::Ceiling(($minutes * 60) - ((Get-Date) - [datetime]$existing.RequestedAt).TotalSeconds)))
-        Send-TelegramMessage -ChatId $ChatId -Text "⏳ طلبك قيد الانتظار بالفعل. متبقٍّ $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds') قبل المنح التلقائي." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'news.yourRequestPending' $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
 
@@ -473,17 +473,17 @@ function Request-NewsLockRelease {
     # failed, say so rather than promising something the disk did not accept.
     $requestPersisted = [bool](Save-NewsLockRequest)
     Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
-    Add-AuditEntry "🔓 طلب فكّ قفل شريط الأخبار من $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'news.unlockRequestAudit' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Format-UserAuditActor -UserId $UserId))
 
     if ([long]$draft.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
-            -Text "🔓 يطلب $(Get-UserDisplayName -UserId $UserId) تحرير شريط الأخبار.`nلديك $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') للرد؛ بلا رد سيُمنح تلقائيًا وستُلغى مسودتك (سنرسل لك نصّها)." `
+            -Text (T 'news.unlockAsk' $(Get-UserDisplayName -UserId $UserId) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')) `
             -ReplyMarkup @{inline_keyboard=@(,@(
                     @{text=(T 'news.handLock');callback_data='news:lockgrant'},
                     @{text=(T 'news.stillWorking');callback_data='news:lockdeny'}))}
     }
     $persistNote = if ($requestPersisted) { '' } else { "`n$(T news.requestNotSaved)" }
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ أُرسل الطلب إلى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)). إن لم يردّ خلال $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') سيُمنح لك تلقائيًا.$persistNote" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'news.requestSent' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') $persistNote) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 
@@ -503,7 +503,7 @@ function Complete-NewsLockRelease {
     }
 
     if ($Denied) {
-        Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "⛔ رفض $(Get-UserDisplayName -UserId ([long]$request.OwnerUserId)) تسليم القفل؛ ما زال يعمل على المسودة."
+        Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text (T 'news.handoverRefused' $(Get-UserDisplayName -UserId ([long]$request.OwnerUserId)))
         Write-BridgeLog "News lock request from $($request.RequesterUserId) was denied by $($request.OwnerUserId)"
         return $false
     }
@@ -523,7 +523,7 @@ function Complete-NewsLockRelease {
     if ($draft -and [long]$request.OwnerChatId -gt 0 -and $items.Count -gt 0) {
         $position = 0
         $body = @($items | ForEach-Object { $position++; "$position. $_" }) -join "`n"
-        Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text "📄 نصّ مسودتك قبل تسليم القفل ($($items.Count) خبرًا):`n$body"
+        Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text (T 'news.yourDraftText' $($items.Count) $body)
     }
     if ($draft) { Remove-NewsTickerDraft }
 
@@ -533,13 +533,13 @@ function Complete-NewsLockRelease {
     Set-NewsLockReservation -UserId ([long]$request.RequesterUserId) | Out-Null
 
     Write-BridgeLog "News lock handed to $($request.RequesterUserId) ($Reason)" 'WARN'
-    Add-AuditEntry "🔓 سُلّم قفل شريط الأخبار إلى $(Get-UserDisplayName -UserId ([long]$request.RequesterUserId)) ($Reason)"
+    Add-AuditEntry (T 'news.lockHandedAudit' $(Get-UserDisplayName -UserId ([long]$request.RequesterUserId)) $Reason)
     if ([long]$request.OwnerChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$request.OwnerChatId) -Text (T 'news.lockHandedOver')
     }
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
-    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')." } else { '' }
-    Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "🔓 صار بإمكانك التحرير. اضغط ✏️ بدء التحرير للعمل على النص الحالي.$holdNote" `
+    $holdNote = if ($hold -gt 0) { (T 'news.lockYoursFor' $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) } else { '' }
+    Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text (T 'news.youMayEdit' $holdNote) `
         -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
     return $true
 }
@@ -565,9 +565,9 @@ function Resolve-NewsLockRequestOnRelease {
     $requester = [long]$request.RequesterUserId
     Set-NewsLockReservation -UserId $requester | Out-Null
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
-    $holdNote = if ($hold -gt 0) { " القفل محجوز لك وحدك لمدة $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')." } else { '' }
+    $holdNote = if ($hold -gt 0) { (T 'news.lockYoursFor' $(Get-ArabicCountNoun -Count $hold -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) } else { '' }
     Write-BridgeLog "News lock request from $requester settled by the owner's own release"
-    Add-AuditEntry "🔓 سُوّي طلب فكّ قفل شريط الأخبار لصالح $(Get-UserDisplayName -UserId $requester) بعد تسليم المالك طوعًا"
+    Add-AuditEntry (T 'news.unlockSettledAudit' $(Get-UserDisplayName -UserId $requester))
     if ([long]$request.RequesterChatId -gt 0) {
         Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text "$Text$holdNote" `
             -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId $requester)
@@ -627,9 +627,9 @@ function Open-NewsTickerDraftToAll {
         Write-BridgeLog 'Opened news draft could not be saved; it may revert to its owner on the next start.' 'ERROR'
     }
     Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
-    Add-AuditEntry "🤝 فتح $(Format-UserAuditActor -UserId $UserId) مسودة شريط الأخبار للجميع ($(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))"
+    Add-AuditEntry (T 'news.draftOpenedAudit' $(Format-UserAuditActor -UserId $UserId) $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
     Resolve-NewsLockRequestOnRelease -OwnerUserId $UserId `
-        -Text "🤝 فتح $(Get-UserDisplayName -UserId $UserId) المسودة للتحرير بما فيها. اضغط ✏️ لمتابعة نفس القائمة." | Out-Null
+        -Text (T 'news.draftOpened' $(Get-UserDisplayName -UserId $UserId)) | Out-Null
     return $true
 }
 
@@ -654,15 +654,15 @@ function Get-NewsSheetConfirmPrompt {
     if ($Target -eq 'air') {
         $lines.Add((T 'news.confirmSheetPublish'))
         $snapshot = Get-NewsTickerConfiguredSnapshot
-        if ($snapshot.Success) { $lines.Add("سيستبدل $(@($snapshot.Items).Count) خبرًا على الشريط الآن.") }
+        if ($snapshot.Success) { $lines.Add((T 'news.willReplace' $(@($snapshot.Items).Count))) }
     }
     else {
         $lines.Add((T 'news.confirmSheetDraft'))
         $lines.Add((T 'news.nothingUntilPublish'))
     }
     $draft = Get-NewsTickerDraft
-    if (Test-NewsTickerDraftOpen -Draft $draft) { $lines.Add("🤝 توجد مسودة مفتوحة للجميع ($(@($draft.Items).Count))، وسيُستبدل محتواها.") }
-    elseif ($draft) { $lines.Add("🔒 المسودة الحالية بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))، وسيُستبدل محتواها.") }
+    if (Test-NewsTickerDraftOpen -Draft $draft) { $lines.Add((T 'news.openDraftWillBeReplaced' $(@($draft.Items).Count))) }
+    elseif ($draft) { $lines.Add((T 'news.draftHeldWillBeReplaced' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)))) }
     return ($lines -join "`n")
 }
 
@@ -697,7 +697,7 @@ function Get-NewsSheetPullLockDenial {
         return (T 'news.draftUnowned')
     }
     if ([long]$draft.OwnerUserId -ne $UserId) {
-        return "المسودة بيد $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))؛ السحب من الشيت لمن يحمل القفل وحده."
+        return (T 'news.pullNeedsLock' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)))
     }
     return ''
 }
@@ -736,7 +736,7 @@ function Get-NewsSheetCsvText {
         $bytes = $response.Content -as [byte[]]
         if ($null -eq $bytes) { $bytes = [Text.Encoding]::UTF8.GetBytes([string]$response.Content) }
         if ($bytes.Length -gt $MaxBytes) {
-            return [pscustomobject]@{ Success = $false; Csv = ''; Error = "حجم الشيت يتجاوز الحد المسموح ($MaxBytes بايت)." }
+            return [pscustomobject]@{ Success = $false; Csv = ''; Error = (T 'news.sheetTooBig' $MaxBytes) }
         }
         # Sheets serves UTF-8; decoding explicitly keeps Arabic intact whatever
         # the response headers claim.
@@ -764,13 +764,13 @@ function Get-NewsSheetChangeSummary {
 
 function Get-NewsSheetNoticeText {
     param($Summary, [string]$Trigger = 'auto', [long]$UserId = 0)
-    $source = if ($Trigger -eq 'manual' -and $UserId) { "يدويًا بواسطة $(Get-UserDisplayName -UserId $UserId)" } else { (T 'news.automatically') }
+    $source = if ($Trigger -eq 'manual' -and $UserId) { (T 'news.byHandBy' $(Get-UserDisplayName -UserId $UserId)) } else { (T 'news.automatically') }
     $lines = @(
-        "📰 حُدِّث الشريط من الشيت $source"
-        "الآن على الهواء: $($Summary.Total) خبرًا"
+        (T 'news.updatedFromSheetAudit' $source)
+        (T 'news.nowOnAir' $($Summary.Total))
     )
-    if ($Summary.Added -gt 0) { $lines += "جديد: $($Summary.Added)" }
-    if ($Summary.Removed -gt 0) { $lines += "أُزيل: $($Summary.Removed)" }
+    if ($Summary.Added -gt 0) { $lines += (T 'news.new' $($Summary.Added)) }
+    if ($Summary.Removed -gt 0) { $lines += (T 'news.removed' $($Summary.Removed)) }
     if ($Summary.Added -eq 0 -and $Summary.Removed -eq 0) { $lines += (T 'news.orderOnly') }
     return ($lines -join "`n")
 }
@@ -800,7 +800,7 @@ function Get-NewsPublishOutcomeText {
         if ($reason) {
             # Trimmed: this can carry a whole HTTP body from the Apps Script.
             if ($reason.Length -gt 140) { $reason = $reason.Substring(0, 139) + '…' }
-            $lines.Add("⚠️ لكن تعذّر تحديث الشيت: $reason")
+            $lines.Add((T 'news.sheetNotUpdated' $reason))
             $lines.Add((T 'news.airAlreadyPublished'))
         }
     }
@@ -875,10 +875,10 @@ function Invoke-NewsSheetSync {
             # that draft just as surely as 🔓 إلغاء القفل does. An operator is
             # pointed at the request instead, which the owner answers.
             if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-                return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). استخدم «🔓 طلب فكّ القفل» أو اطلب من مشرف.")
+                return (& $stop (T 'news.draftHeldUseUnlock' $(Get-UserDisplayName -UserId $owner)))
             }
             if (-not $Confirmed) {
-                return (& $stop "المسودة بيد $(Get-UserDisplayName -UserId $owner). التأكيد يستبدلها بمحتوى الشيت." $false $true)
+                return (& $stop (T 'news.draftHeldConfirmReplaces' $(Get-UserDisplayName -UserId $owner)) $false $true)
             }
         }
     }
@@ -888,7 +888,7 @@ function Invoke-NewsSheetSync {
         -MaxBytes (Get-SettingInt 'NewsImportMaxBytes' 1)
     if (-not $download.Success) {
         Write-BridgeLog "News sheet download failed: $($download.Error)" 'ERROR'
-        return (& $stop "تعذّر تنزيل الشيت: $($download.Error)")
+        return (& $stop (T 'news.sheetDownloadFailed' $($download.Error)))
     }
 
     $items = @(ConvertFrom-NewsSheetCsv -Csv $download.Csv)
@@ -910,7 +910,7 @@ function Invoke-NewsSheetSync {
         $text = ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))
         $validated = ConvertFrom-NewsTickerText -Text $text -Separator ([string](Get-Setting 'NewsItemSeparator')) `
             -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-        if (-not $validated.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($validated.Error)") }
+        if (-not $validated.Success) { return (& $stop (T 'news.sheetLoadFailed' $($validated.Error))) }
         # An open draft is adopted by Start-NewsTickerDraft below rather than
         # thrown away: its items are about to be replaced by the sheet either
         # way, but the draft itself is the thing somebody handed over.
@@ -920,7 +920,7 @@ function Invoke-NewsSheetSync {
             if (-not $started.Success) { return (& $stop $started.Error) }
         }
         $import = Import-NewsTickerTextToDraft -UserId $UserId -Text $text -Mode replace
-        if (-not $import.Success) { return (& $stop "تعذّر تحميل الشيت في المسودة: $($import.Error)") }
+        if (-not $import.Success) { return (& $stop (T 'news.sheetLoadFailed' $($import.Error))) }
         return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false; Drafted = $true
             NeedsConfirmation = $false; Items = $items; Summary = $summary; Error = '' }
     }
@@ -936,12 +936,12 @@ function Invoke-NewsSheetSync {
         -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if (-not $result.Success) {
         Write-BridgeLog "News sheet publish failed: $($result.Error)" 'ERROR'
-        return (& $stop "تعذّر نشر الشيت: $($result.Error)")
+        return (& $stop (T 'news.sheetPublishFailed' $($result.Error)))
     }
 
     if ($draft) { Remove-NewsTickerDraft }
     $who = if ($Trigger -eq 'manual' -and $UserId) { Get-UserDisplayName -UserId $UserId } else { (T 'news.autoSync') }
-    Add-AuditEntry "📰 نشر شريط الأخبار من الشيت ($who): $($items.Count) خبرًا"
+    Add-AuditEntry (T 'news.publishedFromSheetAudit' $who $($items.Count))
     Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count
     Send-NewsSheetNotice -Text (Get-NewsSheetNoticeText -Summary $summary -Trigger $Trigger -UserId $UserId)
 
@@ -958,12 +958,12 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         # Showing the start button here would be a lie: the reservation refuses
         # it for as long as it lasts. It covers an open draft too - the whole
         # point of reserving is that the person who asked gets first refusal.
-        $rows += , @(@{text="⏳ محجوز لـ $(Get-UserDisplayName -UserId ([long]$reservation.UserId))";callback_data='news:refresh'})
+        $rows += , @(@{text=(T 'news.heldFor' $(Get-UserDisplayName -UserId ([long]$reservation.UserId)));callback_data='news:refresh'})
     }
     elseif ($isOpen) {
         # Left open on purpose, with its items. Continuing it is the offer,
         # so the button says so rather than saying 'start'.
-        $rows += , @(@{text="✏️ تابِع المسودة ($(@($draft.Items).Count))";callback_data='news:start'}, @{text=(T 'news.importTxt');callback_data='news:import'})
+        $rows += , @(@{text=(T 'news.carryOnDraft' $(@($draft.Items).Count));callback_data='news:start'}, @{text=(T 'news.importTxt');callback_data='news:import'})
     }
     elseif (-not $draft) {
         $rows += , @(@{text=(T 'news.startEditing');callback_data='news:start'}, @{text=(T 'news.importTxt');callback_data='news:import'})
@@ -983,7 +983,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
             (New-BridgeButton -Text (T 'news.discardDraft') -CallbackData 'news:cancel' -Style 'danger'))
     }
     else {
-        $rows += , @(@{text="🔒 لدى $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId))";callback_data='news:refresh'})
+        $rows += , @(@{text=(T 'news.with' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)));callback_data='news:refresh'})
         $rows += , @(@{text=(T 'news.requestUnlock');callback_data='news:lockrequest'})
         if (Test-Admin -ChatId $ChatId -UserId $UserId) {
             $rows += , @(@{text=(T 'news.forceUnlock');callback_data='news:unlock'})
@@ -1034,7 +1034,7 @@ function Show-NewsTickerDeleteConfirm {
     if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
     $item = [string]$draft.Items[$Index]
     $preview = if ($item.Length -gt 200) { $item.Substring(0, 200) + '…' } else { $item }
-    $text = "🗑 تأكيد حذف الخبر $($Index + 1) من $(@($draft.Items).Count):`n`n$preview"
+    $text = (T 'news.confirmDelete' $($Index + 1) $(@($draft.Items).Count) $preview)
     $markup = @{inline_keyboard=@(
             , @((New-BridgeButton -Text (T 'news.yesDelete') -CallbackData "news:delete:$Index" -Style 'danger'),
                 (New-BridgeButton -Text (T 'common.cancel') -CallbackData "news:item:$Index")))}
@@ -1060,7 +1060,7 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $rows+=,@((New-BridgeButton -Text (T 'news.edit') -CallbackData "news:edit:$Index"),
         (New-BridgeButton -Text (T 'common.delete') -CallbackData "news:delask:$Index" -Style 'danger'))
     $rows+=,@(@{text=(T 'news.backToOrder');callback_data='news:list'})
-    $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
+    $text=(T 'news.headlineOf' $($Index+1) ${count} $($draft.Items[$Index]))
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{inline_keyboard=$rows}
 }
@@ -1215,7 +1215,7 @@ function Get-NewsTickerReorderKeyboard { param([long]$UserId, [int]$Page = 0)
     if ($pages -gt 1) {
         $nav = @()
         if ($Page -gt 0) { $nav += , @{text=(T 'news.prev'); callback_data="news:list:$($Page - 1)"} }
-        $nav += , @{text="صفحة $($Page + 1)/$pages"; callback_data="news:list:$Page"}
+        $nav += , @{text=(T 'news.page' $($Page + 1) $pages); callback_data="news:list:$Page"}
         if ($Page -lt ($pages - 1)) { $nav += , @{text=(T 'news.next'); callback_data="news:list:$($Page + 1)"} }
         $rows += , @($nav)
     }
@@ -1266,13 +1266,13 @@ function Get-NewsTickerReorderText { param([long]$UserId, [int]$Page = 0)
     # Sent with parse_mode=HTML, so every literal < > & below must already be
     # escaped and every headline must go through ConvertTo-TelegramHtmlText.
     $lines.Add((T 'news.orderTitle'))
-    $lines.Add("الأخبار: <b>$count</b>")
-    if ($pages -gt 1) { $lines.Add("المعروض: $first–$last  ·  صفحة $($Page + 1) من $pages") }
+    $lines.Add((T 'news.headlines' $count))
+    if ($pages -gt 1) { $lines.Add((T 'news.showing' $first $last $($Page + 1) $pages)) }
     # Said plainly, because the operator asked for one long list and is
     # getting pages anyway: the reason is Telegram's limit, not the setting
     # being ignored.
     if ($pages -gt 1 -and -not (Get-Setting 'NewsListPaged')) {
-        $lines.Add("القائمة الطويلة مفعّلة، لكن تيليجرام لا يقبل أكثر من $size خبرًا في شاشة واحدة.")
+        $lines.Add((T 'news.longListLimit' $size))
     }
     $layout = Get-NewsListLayout
     if ($layout -in @('text', 'compact')) {
@@ -1365,9 +1365,9 @@ function Get-NewsTickerReorderBlocks {
     $last = [math]::Min($count, $first + $size - 1)
     $max = Get-SettingInt 'NewsMaxItemLength' 1
 
-    $blocks = @(@{ type = 'heading'; text = "📝 ترتيب المسودة — $count خبرًا"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'news.draftOrder' $count); size = 3 })
     if ($pages -gt 1) {
-        $blocks += @{ type = 'paragraph'; text = "المعروض: $first–$last · صفحة $($Page + 1) من $pages" }
+        $blocks += @{ type = 'paragraph'; text = (T 'news.showing2' $first $last $($Page + 1) $pages) }
     }
 
     $lineMax = [math]::Max(40, (Get-SettingInt 'NewsListLabelLength' 8))
@@ -1393,7 +1393,7 @@ function Get-NewsTickerReorderBlocks {
     if ($snapshot.Success) {
         $live = @($snapshot.Items)
         $diff = Get-NewsDraftDiff -Draft $items -Live $live
-        $summary = "🔴 على الهواء الآن: $($live.Count) خبرًا · +$($diff.Added.Count) −$($diff.Removed.Count)"
+        $summary = (T 'news.onAirNowCount' $($live.Count) $($diff.Added.Count) $($diff.Removed.Count))
         $inner = @()
         foreach ($line in $diff.Added) { $inner += @{ type = 'paragraph'; text = "➕ $line" } }
         foreach ($line in $diff.Removed) { $inner += @{ type = 'paragraph'; text = "➖ $line" } }
@@ -1427,7 +1427,7 @@ function Get-NewsPublishReviewBlocks {
 
     $blocks = @(@{ type = 'heading'; text = (T 'news.reviewPublishButton'); size = 3 })
     $blocks += @{ type = 'paragraph'
-        text = "المسودة $(@($draft.Items).Count) خبرًا · على الهواء $(@($snapshot.Items).Count) — سيُضاف $($diff.Added.Count) ويُحذف $($diff.Removed.Count)" }
+        text = (T 'news.draftVsAir' $(@($draft.Items).Count) $(@($snapshot.Items).Count) $($diff.Added.Count) $($diff.Removed.Count)) }
     if ($diff.Added.Count -eq 0 -and $diff.Removed.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = (T 'news.noChangeOnPublish') }
         return $blocks
@@ -1451,7 +1451,7 @@ function Get-NewsPublishReviewBlocks {
     $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $shown.Count
     if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
     if ($diff.Kept.Count -gt 0) {
-        $blocks += @{ type = 'details'; summary = "بلا تغيير ($($diff.Kept.Count))"
+        $blocks += @{ type = 'details'; summary = (T 'news.noChange' $($diff.Kept.Count))
             blocks = @($diff.Kept | ForEach-Object { @{ type = 'paragraph'; text = "· $_" } }) }
     }
     return $blocks
@@ -1527,7 +1527,7 @@ function Get-NewsTickerBackupsText {
         $lines.Add((T 'news.noBackups'))
         return ($lines -join "`n")
     }
-    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add((T 'news.backupCount' $($files.Count)))
     $lines.Add('')
     $separator = [string](Get-Setting 'NewsItemSeparator')
     for ($i = 0; $i -lt $files.Count; $i++) {
@@ -1538,11 +1538,11 @@ function Get-NewsTickerBackupsText {
             $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
             $parsed = ConvertFrom-NewsTickerText -Text $text -Separator $separator `
                 -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-            $count = " · $(@($parsed.Items).Count) خبرًا"
+            $count = (T 'news.headlineCount' $(@($parsed.Items).Count))
         }
         catch { $count = (T 'news.backupUnreadable') }
         $lines.Add("$($i + 1). <code>$($file.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code>$count")
-        $lines.Add("   $(if ($age -lt 1) { (T 'news.savedNow') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add((T 'news.indented' $(if ($age -lt 1) { (T 'news.savedNow') } else { (T 'news.ago' $(Format-DurationMinutes -Minutes $age)) })))
     }
     $lines.Add('')
     $lines.Add((T 'news.restoreNote'))
@@ -1558,21 +1558,21 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
     $snapshot=Get-NewsTickerConfiguredSnapshot
     $text=if($snapshot.Success){
         $items = @($snapshot.Items)
-        $header = "📰 إدارة شريط الأخبار`nالحالي: $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') على الهواء."
+        $header = (T 'news.manage' $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
         if ($items.Count -gt 0) {
             $shown = $items | Select-Object -First 8
             $n = 0
             $body = ($shown | ForEach-Object { "$(++$n). $_" }) -join "`n"
-            $tail = if ($items.Count -gt 8) { "`n… و$(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') آخر" } else { "" }
+            $tail = if ($items.Count -gt 8) { (T 'news.andMore' $(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')) } else { "" }
             "$header`n`n$body$tail"
-        } else { "$header`nالشريط فارغ." }
-    }else{"⚠️ تعذر قراءة ملف الأخبار: $($snapshot.Error)"}
+        } else { (T 'news.tickerEmpty' $header) }
+    }else{(T 'news.fileUnreadable' $($snapshot.Error))}
     if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) {
         $by = [long](Get-JsonProp $script:NewsTickerDraft 'HandedOverBy')
-        $byText = if ($by -gt 0) { " سلّمها $(Get-UserDisplayName -UserId $by)" } else { '' }
-        $text += "`n🤝 مسودة مفتوحة للجميع$byText وفيها $(@($script:NewsTickerDraft.Items).Count) خبرًا — اضغط ✏️ لمتابعتها."
+        $byText = if ($by -gt 0) { (T 'news.handedOverBy' $(Get-UserDisplayName -UserId $by)) } else { '' }
+        $text += (T 'news.openDraftLine' $byText $(@($script:NewsTickerDraft.Items).Count))
     }
-    elseif($script:NewsTickerDraft){$text+="`nالمسودة مقفلة لدى $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) وتحتوي $(@($script:NewsTickerDraft.Items).Count) خبرًا."}
+    elseif($script:NewsTickerDraft){$text+=(T 'news.lockedDraftLine' $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) $(@($script:NewsTickerDraft.Items).Count))}
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
@@ -1581,7 +1581,7 @@ function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]
     $ok=Add-NewsTickerDraftItem -UserId $UserId -Text $Value
     # Says where it landed, so "first" is visible rather than assumed.
     $where = if (Get-Setting 'NewNewsItemAtTop') { (T 'news.atStart') } else { (T 'news.atEnd') }
-    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){"✅ أضيف الخبر $where - في المسودة فقط."}else{(T 'news.addFailed')}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){(T 'news.added' $where)}else{(T 'news.addFailed')}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Complete-NewsTickerEditText { param([long]$ChatId,[long]$UserId,[string]$Value)
@@ -1603,7 +1603,7 @@ function Receive-NewsTickerImport { param($Document,[long]$ChatId,[long]$UserId)
         $result=Import-NewsTickerTextToDraft -UserId $UserId -Text $text -Mode replace
         if(-not $result.Success){throw $result.Error}
         Clear-PendingState -ChatId $ChatId
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ استورد $($result.Count) خبرًا إلى المسودة فقط. راجعها قبل النشر." -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
-    } catch { Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الاستيراد: $(Protect-SensitiveText $_.Exception.Message)" }
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'news.imported' $($result.Count)) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    } catch { Send-TelegramMessage -ChatId $ChatId -Text (T 'news.importFailed' $(Protect-SensitiveText $_.Exception.Message)) }
     finally {Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue}
 }

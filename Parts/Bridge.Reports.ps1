@@ -73,7 +73,7 @@ function Get-OperationLogDayLabel {
     }
     $stamp = $date.ToString('yyyy-MM-dd')
     if ($name) { return "$name · $stamp" }
-    return "يوم $stamp"
+    return (T 'rep.day' $stamp)
 }
 
 function Get-OperationLogWindowLabel {
@@ -81,7 +81,7 @@ function Get-OperationLogWindowLabel {
        useless label: nobody asks for a hundred and sixty-eight hours. #>
     param([Parameter(Mandatory)][int]$Hours)
     if ($Hours -ge 168) { return (T 'rep.sevenDays') }
-    return "$Hours ساعة"
+    return (T 'rep.hours' $Hours)
 }
 
 function Get-OperationLogScopeLabel {
@@ -155,7 +155,7 @@ function Get-OperationLogData {
         Hours     = $Hours
         Day       = $Day
         IsDay     = $isDay
-        Label     = $(if ($isDay) { Get-OperationLogDayLabel -Day $Day } else { "آخر $(Get-OperationLogWindowLabel -Hours $Hours)" })
+        Label     = $(if ($isDay) { Get-OperationLogDayLabel -Day $Day } else { (T 'rep.last' $(Get-OperationLogWindowLabel -Hours $Hours)) })
         From      = $from
         To        = $to
         Failed    = $failed
@@ -214,7 +214,7 @@ function Get-OperationLogFilterOptions {
 function Get-OperationLogFilterText {
     param([Parameter(Mandatory)]$Options)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>🔎 تصفية سجل العمليات</b> — $(ConvertTo-HtmlText ([string]$Options.Label))")
+    $lines.Add((T 'rep.filterTitle' $(ConvertTo-HtmlText ([string]$Options.Label))))
     if (@($Options.Operators).Count -eq 0 -and @($Options.Targets).Count -eq 0) {
         $lines.Add((T 'rep.nothingToFilter'))
         return ($lines -join "`n")
@@ -222,8 +222,8 @@ function Get-OperationLogFilterText {
     $lines.Add((T 'rep.filterNote'))
     # Saying what was left out, not just showing what fits: a capped list
     # that is silent about the cap reads as the whole truth.
-    if ([int]$Options.HiddenOperators -gt 0) { $lines.Add("<i>وأُخفي $([int]$Options.HiddenOperators) مشغّلًا أقل نشاطًا.</i>") }
-    if ([int]$Options.HiddenTargets -gt 0) { $lines.Add("<i>وأُخفي $([int]$Options.HiddenTargets) قالبًا أقل نشاطًا.</i>") }
+    if ([int]$Options.HiddenOperators -gt 0) { $lines.Add((T 'rep.hiddenOperators' $([int]$Options.HiddenOperators))) }
+    if ([int]$Options.HiddenTargets -gt 0) { $lines.Add((T 'rep.hiddenTemplates' $([int]$Options.HiddenTargets))) }
     return ($lines -join "`n")
 }
 
@@ -261,7 +261,7 @@ function Get-OperationLogBlocks {
     param([ValidateSet(24, 48, 72, 168)][int]$Hours = 48, [long]$OnlyUserId = 0, [datetime]$Day = [datetime]::MinValue, [string]$OnlyTarget = '', [long]$ViewerUserId = 0)
     $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day -OnlyTarget $OnlyTarget
     $who = Get-OperationLogScopeLabel -Data $data -ViewerUserId $ViewerUserId
-    $blocks = @(@{ type = 'heading'; text = "🧾 سجل العمليات — $($data.Label) · $who"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'rep.logTitle' $($data.Label) $who); size = 3 })
 
     $all = @($data.Records)
     if ($all.Count -eq 0) {
@@ -269,7 +269,7 @@ function Get-OperationLogBlocks {
     }
 
     $operationsText = Get-ArabicCountNoun -Count $all.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
-    $verdict = if ($data.Failed -eq 0 -and $data.Blocked -eq 0) { "🟢 $operationsText، كلّها ناجحة" }
+    $verdict = if ($data.Failed -eq 0 -and $data.Blocked -eq 0) { (T 'rep.allPassed' $operationsText) }
     else { "🟠 $operationsText · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)" }
     $blocks += @{ type = 'paragraph'; text = $verdict }
 
@@ -299,7 +299,7 @@ function Get-OperationLogBlocks {
             default { '❌' }
         }
         $target = [string]$record.Target
-        if ([int]$record.Layer -gt 0) { $target += " · ط$([int]$record.Layer)" }
+        if ([int]$record.Layer -gt 0) { $target += (T 'rep.layerShort' $([int]$record.Layer)) }
         # Day and hour, not hour alone: over three days "21:40" is ambiguous
         # on the screen whose whole job is placing an event in time.
         $row = @(
@@ -319,7 +319,7 @@ function Get-OperationLogBlocks {
     $note = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown $rows.Count
     if ($note) { $blocks += @{ type = 'paragraph'; text = $note } }
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ بلغ السجل حدّ القراءة ($script:ReportMaxRecords سجلًّا)؛ قد تكون هناك عمليات أقدم داخل المدة." }
+        $blocks += @{ type = 'paragraph'; text = (T 'rep.readLimitCount' $script:ReportMaxRecords) }
     }
     return $blocks
 }
@@ -331,13 +331,13 @@ function Get-OperationLogText {
     $data = Get-OperationLogData -Hours $Hours -OnlyUserId $OnlyUserId -Day $Day -OnlyTarget $OnlyTarget
     $who = Get-OperationLogScopeLabel -Data $data -ViewerUserId $ViewerUserId
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>🧾 سجل العمليات</b> — $(ConvertTo-HtmlText $data.Label) · $who")
+    $lines.Add((T 'rep.logTitleHtml' $(ConvertTo-HtmlText $data.Label) $who))
     $all = @($data.Records)
     if ($all.Count -eq 0) {
         $lines.Add((T 'rep.noneRecordedHtml'))
         return ($lines -join "`n")
     }
-    $lines.Add("📊 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $all.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · ✅ $($data.Succeeded) · ❌ $($data.Failed) · ⛔ $($data.Blocked)")
+    $lines.Add((T 'rep.totals' $(Get-ArabicCountNoun -Count $all.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $($data.Succeeded) $($data.Failed) $($data.Blocked)))
     $lines.Add('')
     $entries = @(foreach ($record in $all) {
             $mark = switch ([string]$record.Result) { 'success' { '✅' } 'blocked' { '⛔' } default { '❌' } }
@@ -412,7 +412,7 @@ function Get-OperationLogKeyboard {
             $dayRow += New-Button "$($next.ToString('MM-dd')) ▶" "${prefix}:day:$($next.ToString('yyyy-MM-dd'))"
         }
         $rows += , @($dayRow)
-        $rows += , @((New-Button "⏱ آخر $(Get-OperationLogWindowLabel -Hours $Hours)" "${prefix}:$Hours"))
+        $rows += , @((New-Button (T 'rep.lastDuration' $(Get-OperationLogWindowLabel -Hours $Hours)) "${prefix}:$Hours"))
     }
     else {
         # Two to a row, like the report periods. Four windows across one row of
@@ -423,7 +423,7 @@ function Get-OperationLogKeyboard {
         }
         if (-not $filtered) {
             $yesterday = (Get-Date).Date.AddDays(-1)
-            $rows += , @((New-Button "📆 يوم أمس ($($yesterday.ToString('MM-dd')))" "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
+            $rows += , @((New-Button (T 'rep.yesterdayOn' $($yesterday.ToString('MM-dd'))) "${prefix}:day:$($yesterday.ToString('yyyy-MM-dd'))"))
         }
     }
     if (-not $isDay -and (Test-Admin -ChatId $ChatId -UserId $UserId)) {
@@ -545,7 +545,7 @@ function Export-OperationLogCsv {
     try {
         # WITH a BOM: see Get-OperationLogCsv. [Text.UTF8Encoding]::new($true).
         [IO.File]::WriteAllText($path, $csv, [Text.UTF8Encoding]::new($true))
-        $caption = "🧾 سجل العمليات — $($data.Label) · $(Get-OperationLogScopeLabel -Data $data -ViewerUserId $UserId)"
+        $caption = (T 'rep.logTitle' $($data.Label) $(Get-OperationLogScopeLabel -Data $data -ViewerUserId $UserId))
         # A partial export that does not say it is partial is worse than no
         # export: it becomes the archive nobody knows has a hole in it.
         if ($data.Truncated) { $caption += (T 'rep.readLimitFile') }
@@ -632,16 +632,7 @@ function Show-ReportsMenu {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $scope = if (Test-Admin -ChatId $ChatId -UserId $UserId) { (T 'rep.allOperators') } else { (T 'rep.yourOperations') }
-    Send-TelegramMessage -ChatId $ChatId -ReplyMarkup (Get-ReportsMenuKeyboard) -Text @"
-📊 التقارير
-━━━━━━━━━━━━━━
-النطاق: $scope
-
-🖼 البنرات — ماذا ظهر، بأي نص، ومتى اختفى
-📰 الأخبار — تعديلات الشريط اليومي وحجم كل تعديل
-📑 الموجزات — أي نشرة شُغّلت، بكم صفًّا، ومن شغّلها
-👥 تقرير العمل — حصيلة كل مشغّل من عمليات الهواء
-"@
+    Send-TelegramMessage -ChatId $ChatId -ReplyMarkup (Get-ReportsMenuKeyboard) -Text (T 'rep.screen' $scope)
 }
 
 function Show-Report {
@@ -793,8 +784,8 @@ function Get-WorkReportProblemSuffix {
        symbols that matter on the shift that is not clean. #>
     param([int]$Blocked = 0, [int]$Failed = 0)
     $parts = @()
-    if ($Blocked -gt 0) { $parts += "🚫 $Blocked مرفوضة" }
-    if ($Failed -gt 0) { $parts += "⚠️ $Failed فاشلة" }
+    if ($Blocked -gt 0) { $parts += (T 'rep.refusedCount' $Blocked) }
+    if ($Failed -gt 0) { $parts += (T 'rep.failedCount' $Failed) }
     if ($parts.Count -eq 0) { return '' }
     return ' · ' + ($parts -join ' · ')
 }
@@ -804,9 +795,9 @@ function Get-WorkReportDetailLine {
        what they worked on most, and when they were last active - the three
        questions a supervisor asks after "how many". #>
     param([int]$OnAir = 0, [string]$TopTarget = '', $LastAt = $null)
-    $parts = @("🔴 $OnAir على الهواء")
-    if ($TopTarget) { $parts += "الأكثر: $TopTarget" }
-    if ($LastAt -is [datetime]) { $parts += "آخر نشاط $($LastAt.ToString('HH:mm'))" }
+    $parts = @((T 'rep.onAirCount' $OnAir))
+    if ($TopTarget) { $parts += (T 'rep.most' $TopTarget) }
+    if ($LastAt -is [datetime]) { $parts += (T 'rep.lastActivityAt' $($LastAt.ToString('HH:mm'))) }
     return ($parts -join ' · ')
 }
 
@@ -818,21 +809,21 @@ function Get-WorkReportText {
     # answer the screen come first, the per-operator detail is quoted under
     # them. Operator and template names are typed by people, so every one is
     # escaped - this report is built out of almost nothing else.
-    $lines.Add("<b>👥 تقرير العمل</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
+    $lines.Add((T 'rep.workTitleHtml' $(ConvertTo-HtmlText ([string]$data.Label))))
     if ($data.People.Count -eq 0) { $lines.Add((T 'rep.noAirOpsHtml')); return ($lines -join "`n") }
 
     # The shift total above the people, not below. On a busy day it was the
     # line an operator had to scroll past eleven others to reach.
     if ($data.People.Count -gt 1) {
         $t = $data.Totals
-        $lines.Add("🎬 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $t.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · 🔴 $($t.OnAir) على الهواء · ✅ $($t.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed))")
-        $lines.Add("👥 <b>المشغّلون</b> — $($t.Operators)")
+        $lines.Add((T 'rep.workTotals' $(Get-ArabicCountNoun -Count $t.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $($t.OnAir) $($t.Success) $(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $t.Blocked -Failed $t.Failed))))
+        $lines.Add((T 'rep.operatorsHtml' $($t.Operators)))
         $lines.Add('')
     }
 
     $personLines = @(foreach ($person in $data.People) {
             $name = ConvertTo-HtmlText (Get-AuditOperatorName -UserId $person.UserId)
-            "👤 <b>$name</b> — $(Get-ArabicCountNoun -Count $person.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · ✅ $($person.Success)$(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed))"
+            (T 'rep.operatorRow' $name $(Get-ArabicCountNoun -Count $person.Total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $($person.Success) $(ConvertTo-HtmlText (Get-WorkReportProblemSuffix -Blocked $person.Blocked -Failed $person.Failed)))
             "     $(ConvertTo-HtmlText (Get-WorkReportDetailLine -OnAir $person.OnAir -TopTarget $person.TopTarget -LastAt $person.LastAt))"
         })
     $tag = if ($data.People.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
@@ -846,7 +837,7 @@ function Get-WorkReportText {
 function Get-WorkReportBlocks {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-WorkReportData -Period $Period -OnlyUserId $OnlyUserId
-    $blocks = @(@{ type = 'heading'; text = "👥 تقرير العمل — $($data.Label)"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'rep.workTitle' $($data.Label)); size = 3 })
     if ($data.People.Count -eq 0) { return $blocks + @(@{ type = 'paragraph'; text = (T 'rep.noAirOps') }) }
     $cells = @(, @(
             @{ text = (T 'rep.col.operator'); is_header = $true }
@@ -1060,7 +1051,7 @@ function Get-MojazReportBlocks {
     $trimmed = Select-RichTableRows -Items @($data.Runs)
     $runs = @($trimmed.Rows)
 
-    $blocks = @(@{ type = 'heading'; text = "📑 تقرير الموجزات — $($data.Label)"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'rep.bulletinTitle' $($data.Label)); size = 3 })
     if ($runs.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = (T 'rep.noBulletinRun') }
         return $blocks
@@ -1079,7 +1070,7 @@ function Get-MojazReportBlocks {
         # same bulletin apart, and it does not deserve a column of its own.
         $mark = if ($run.Kind -eq 'scheduled') { '🕒 ' } else { '' }
         $cells += , @(
-            @{ text = "$mark$([string]$run.Name) · $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows')" }
+            @{ text = (T 'rep.triple' $mark $([string]$run.Name) $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows')) }
             @{ text = $(if ($who) { $who } else { '—' }) }
             @{ text = $started }
             @{ text = (Get-MojazRunDuration -Run $run) }
@@ -1092,11 +1083,11 @@ function Get-MojazReportBlocks {
     # The total counts every run in the window, not just the rows shown: it is
     # the answer to "how much ran", and trimming it to the table would make
     # the report quietly understate the day.
-    $summary = "الإجمالي: $(Get-ArabicCountNoun -Count (@($data.Runs).Count) -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows') · $(Get-ArabicCountNoun -Count $data.Operators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا' -EnglishOne 'operator' -EnglishMany 'operators')"
-    if ([int]$data.Scheduled -gt 0) { $summary += " · $([int]$data.Scheduled) بالجدولة 🕒" }
+    $summary = (T 'rep.totalTriple' $(Get-ArabicCountNoun -Count (@($data.Runs).Count) -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows') $(Get-ArabicCountNoun -Count $data.Operators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا' -EnglishOne 'operator' -EnglishMany 'operators'))
+    if ([int]$data.Scheduled -gt 0) { $summary += (T 'rep.byScheduleCount' $([int]$data.Scheduled)) }
     $blocks += @{ type = 'paragraph'; text = $summary }
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $(Get-ArabicCountNoun -Count $script:ReportMaxRecords -One 'سجل' -Two 'سجلّان' -Few 'سجلّات' -Many 'سجلًّا' -EnglishOne 'record' -EnglishMany 'records') فقط؛ اختر مدة أقصر لتقرير كامل." }
+        $blocks += @{ type = 'paragraph'; text = (T 'rep.newestOnly' $(Get-ArabicCountNoun -Count $script:ReportMaxRecords -One 'سجل' -Two 'سجلّان' -Few 'سجلّات' -Many 'سجلًّا' -EnglishOne 'record' -EnglishMany 'records')) }
     }
     return $blocks
 }
@@ -1107,26 +1098,26 @@ function Get-MojazReportText {
     $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
     $runs = @($data.Runs)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>📑 تقرير الموجزات</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
+    $lines.Add((T 'rep.bulletinTitleHtml' $(ConvertTo-HtmlText ([string]$data.Label))))
     if ($runs.Count -eq 0) {
         $lines.Add((T 'rep.noBulletinRunHtml'))
         return ($lines -join "`n")
     }
     # Totals first, runs quoted under them. The two rows of "━━━" were a
     # drawing of the separation a blockquote actually makes.
-    $lines.Add("📊 <b>الإجمالي</b> — $(Get-ArabicCountNoun -Count $runs.Count -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows')")
+    $lines.Add((T 'rep.totalsPair' $(Get-ArabicCountNoun -Count $runs.Count -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') $(Get-ArabicCountNoun -Count ([int]$data.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows')))
     $lines.Add('')
 
     $runLines = @(foreach ($run in $runs) {
             $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('HH:mm') } else { '—' }
             $who = ConvertTo-HtmlText (Get-AuditOperatorName -UserId ([string]$run.UserId))
             $mark = if ($run.Kind -eq 'scheduled') { '🕒' } else { '▶️' }
-            "$mark $started · <b>$(ConvertTo-HtmlText ([string]$run.Name))</b> · $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows') · $(ConvertTo-HtmlText (Get-MojazRunDuration -Run $run))"
-            if ($who) { "     المشغّل: $who" }
+            (T 'rep.bulletinRow' $mark $started $(ConvertTo-HtmlText ([string]$run.Name)) $(Get-ArabicCountNoun -Count ([int]$run.Rows) -One 'صف' -Two 'صفّان' -Few 'صفوف' -Many 'صفًّا' -EnglishOne 'row' -EnglishMany 'rows') $(ConvertTo-HtmlText (Get-MojazRunDuration -Run $run)))
+            if ($who) { (T 'rep.operatorIndented' $who) }
         })
     $tag = if ($runs.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
     $lines.Add("$tag$($runLines -join "`n")</blockquote>")
-    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط.</i>") }
+    if ($data.Truncated) { $lines.Add((T 'rep.newestRecordsOnly' $script:ReportMaxRecords)) }
     return ($lines -join "`n")
 }
 
@@ -1196,7 +1187,7 @@ function Get-NewsReportBlocks {
     $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
     $days = @($data.Days)
 
-    $blocks = @(@{ type = 'heading'; text = "📰 تقرير الأخبار — $($data.Label)"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'rep.newsTitle' $($data.Label)); size = 3 })
     # Days are filled in for silent ones now, so the window always has rows;
     # what makes it empty is that none of them carried an edit.
     if ([int]$data.Publishes -eq 0) {
@@ -1227,7 +1218,7 @@ function Get-NewsReportBlocks {
     }
 
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
-    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا" }
+    $blocks += @{ type = 'paragraph'; text = (T 'rep.newsTotals' $($data.Publishes) $($data.Items)) }
     foreach ($line in @(Get-NewsReportHighlights -Data $data)) {
         $blocks += @{ type = 'paragraph'; text = $line }
     }
@@ -1236,7 +1227,7 @@ function Get-NewsReportBlocks {
         $blocks += @{ type = 'details'; summary = (T 'rep.dayDetail'); blocks = $detail }
     }
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+        $blocks += @{ type = 'paragraph'; text = (T 'rep.newestRecordsOnlyPlain' $script:ReportMaxRecords) }
     }
     return $blocks
 }
@@ -1288,11 +1279,11 @@ function Get-NewsReportHighlights {
         $since = if ($ago.TotalMinutes -lt 60) { Get-ArabicCountNoun -Count ([int]$ago.TotalMinutes) -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes' }
         elseif ($ago.TotalHours -lt 24) { Get-ArabicCountNoun -Count ([int]$ago.TotalHours) -One 'ساعة' -Two 'ساعتان' -Few 'ساعات' -Many 'ساعة' -EnglishOne 'hour' -EnglishMany 'hours' }
         else { Get-ArabicCountNoun -Count ([int]$ago.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا' -EnglishOne 'day' -EnglishMany 'days' }
-        $lines += "🕒 آخر نشرة: $(([datetime]$Data.LastPublishedAt).ToString('MM/dd HH:mm')) — منذ $since"
+        $lines += (T 'rep.lastBulletin' $(([datetime]$Data.LastPublishedAt).ToString('MM/dd HH:mm')) $since)
     }
     else { $lines += (T 'rep.noBulletinPublished') }
     if ([int]$Data.SilentDays -gt 0) {
-        $lines += "🔇 أيام بلا نشرة: $($Data.SilentDays)"
+        $lines += (T 'rep.daysWithout' $($Data.SilentDays))
     }
     return $lines
 }
@@ -1305,22 +1296,22 @@ function Get-NewsReportText {
     $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>📰 تقرير الأخبار</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
+    $lines.Add((T 'rep.newsTitleHtml' $(ConvertTo-HtmlText ([string]$data.Label))))
     if ([int]$data.Publishes -eq 0) {
         $lines.Add((T 'rep.noTickerPublishHtml'))
         return ($lines -join "`n")
     }
-    $lines.Add("📊 <b>الإجمالي</b> — $($data.Publishes) تعديلًا · على الهواء $($data.Items) خبرًا")
+    $lines.Add((T 'rep.newsTotalsHtml' $($data.Publishes) $($data.Items)))
     $lines.Add('')
 
     $dayLines = @(foreach ($day in @($data.Days)) {
-            "📆 <b>$($day.Date.ToString('yyyy/MM/dd'))</b> — $($day.Publishes) تعديلًا · على الهواء $($day.Items) · $(ConvertTo-HtmlText (Get-NewsEditTrail -Counts $day.Counts))"
+            (T 'rep.newsDayRow' $($day.Date.ToString('yyyy/MM/dd')) $($day.Publishes) $($day.Items) $(ConvertTo-HtmlText (Get-NewsEditTrail -Counts $day.Counts)))
             if ($day.Tally.Breakdown) { "     ↳ $(ConvertTo-HtmlText ([string]$day.Tally.Breakdown))" }
             elseif ($day.Tally.Single) { "     ↳ $(ConvertTo-HtmlText ([string]$day.Tally.Single))" }
         })
     $tag = if (@($data.Days).Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
     $lines.Add("$tag$($dayLines -join "`n")</blockquote>")
-    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.</i>") }
+    if ($data.Truncated) { $lines.Add((T 'rep.newestRecordsOnlyHtml' $script:ReportMaxRecords)) }
     return ($lines -join "`n")
 }
 
@@ -1387,13 +1378,13 @@ function Get-BannerReportBlocks {
     $trimmed = Select-RichTableRows -Items $all
     $sessions = @($trimmed.Rows)
 
-    $blocks = @(@{ type = 'heading'; text = "🖼 تقرير البنرات — $($data.Label)"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'rep.bannerTitle' $($data.Label)); size = 3 })
     if ($sessions.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = (T 'rep.noBanner') }
         return $blocks
     }
     if ($all.Count -gt $sessions.Count) {
-        $blocks += @{ type = 'paragraph'; text = "أحدث $($sessions.Count) من $($all.Count) بنرًا — اختر مدة أقصر لرؤية البقية في جدول." }
+        $blocks += @{ type = 'paragraph'; text = (T 'rep.newestBanners' $($sessions.Count) $($all.Count)) }
     }
 
     # Four columns, not five. Telegram splits a table's width evenly, so the
@@ -1415,7 +1406,7 @@ function Get-BannerReportBlocks {
         else { $span = (T 'rep.onAirMark') }
         $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
         $cells += , @(
-            @{ text = "$([string]$session.Target) · ط$([string]$session.Layer)" }
+            @{ text = (T 'rep.nameLayer' $([string]$session.Target) $([string]$session.Layer)) }
             @{ text = $(if ($who) { $who } else { '—' }) }
             @{ text = $start }
             @{ text = $span }
@@ -1423,7 +1414,7 @@ function Get-BannerReportBlocks {
     }
 
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
-    $blocks += @{ type = 'paragraph'; text = "الإجمالي: $($sessions.Count) بنرًا · $($data.Operators) مشغّلين" }
+    $blocks += @{ type = 'paragraph'; text = (T 'rep.bannerTotals' $($sessions.Count) $($data.Operators)) }
     # The copy that actually reached the screen is what an operator
     # recognises a banner by, and no column in a four-column table is wide
     # enough for a sentence. It goes underneath, where the width is the
@@ -1433,10 +1424,10 @@ function Get-BannerReportBlocks {
             @{ type = 'paragraph'; text = "$(([datetime]$session.StartedAt).ToString('HH:mm')) · $([string]$session.Target) — $([string]$session.Values)" }
         })
     if ($copy.Count -gt 0) {
-        $blocks += @{ type = 'details'; summary = "📝 نصوص البنرات ($($copy.Count))"; blocks = $copy }
+        $blocks += @{ type = 'details'; summary = (T 'rep.bannerTexts' $($copy.Count)); blocks = $copy }
     }
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل." }
+        $blocks += @{ type = 'paragraph'; text = (T 'rep.newestRecordsOnlyPlain' $script:ReportMaxRecords) }
     }
     return $blocks
 }
@@ -1449,7 +1440,7 @@ function Get-BannerReportText {
     $sessions = @($data.Sessions)
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>🖼 تقرير البنرات</b> — $(ConvertTo-HtmlText ([string]$data.Label))")
+    $lines.Add((T 'rep.bannerTitleHtml' $(ConvertTo-HtmlText ([string]$data.Label))))
     if ($sessions.Count -eq 0) {
         $lines.Add((T 'rep.noBannerHtml'))
         return ($lines -join "`n")
@@ -1457,7 +1448,7 @@ function Get-BannerReportText {
 
     # Totals first, sessions quoted under them - the grammar the health centre
     # and the other three reports now share.
-    $lines.Add("📊 <b>الإجمالي</b> — $($sessions.Count) بنرًا · $($data.Operators) مشغّلين")
+    $lines.Add((T 'rep.bannerTotalsHtml' $($sessions.Count) $($data.Operators)))
     $lines.Add('')
 
     # Every field here is operator input, the banner copy most of all, so all
@@ -1472,10 +1463,10 @@ function Get-BannerReportText {
                 $icon = '✅'
             }
             else {
-                $span = "$start ← ما زال على الهواء"
+                $span = (T 'rep.stillOnAirArrow' $start)
                 $icon = '🔴'
             }
-            $detail = "     «<b>$(ConvertTo-HtmlText ([string]$session.Target))</b>» على الطبقة $($session.Layer)"
+            $detail = (T 'rep.textOnLayer' $(ConvertTo-HtmlText ([string]$session.Target)) $($session.Layer))
             if ($who) { $detail += " — $who" }
             "$icon $span"
             $detail
@@ -1484,7 +1475,7 @@ function Get-BannerReportText {
         })
     $tag = if ($sessions.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
     $lines.Add("$tag$($sessionLines -join "`n")</blockquote>")
-    if ($data.Truncated) { $lines.Add("<i>⚠️ عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر لتقرير كامل.</i>") }
+    if ($data.Truncated) { $lines.Add((T 'rep.newestRecordsOnlyHtml' $script:ReportMaxRecords)) }
     return ($lines -join "`n")
 }
 
@@ -1499,7 +1490,7 @@ function ConvertTo-HtmlText {
 function Get-ReportTruncationNote {
     param([bool]$Truncated)
     if (-not $Truncated) { return '' }
-    return "عُرض أحدث $script:ReportMaxRecords سجل فقط؛ اختر مدة أقصر للحصول على تقرير كامل."
+    return (T 'rep.newestRecordsOnlyBare' $script:ReportMaxRecords)
 }
 
 function Get-ReportHtmlDocument {
@@ -1545,19 +1536,7 @@ function Get-ReportHtmlDocument {
 </style>
 '@
     $safeTitle = ConvertTo-HtmlText $Title
-    return @"
-$head<title>$safeTitle</title>
-</head>
-<body>
-<div class="sheet">
-<h1>$safeTitle</h1>
-<p class="meta">أُنشئ في $generated · جسر Cinegy Telegram $($script:BridgeVersion)</p>
-$noteHtml
-$Body
-</div>
-</body>
-</html>
-"@
+    return (T 'rep.page' $head $safeTitle $safeTitle $generated $($script:BridgeVersion) $noteHtml $Body)
 }
 
 function Get-BannerReportHtml {
@@ -1574,13 +1553,13 @@ function Get-BannerReportHtml {
             $span = "$start &#8592; $(([datetime]$session.EndedAt).ToString('HH:mm')) &middot; $(Format-DurationMinutes -Minutes $minutes)"
         }
         else { $span = '<span class="live">' + $start + (T 'rep.stillOnAirHtml') }
-        $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$session.Target)) + "&raquo; &middot; الطبقة $($session.Layer)"
+        $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$session.Target)) + (T 'rep.layerHtml' $($session.Layer))
         if ($who) { $sub += ' &middot; ' + (ConvertTo-HtmlText $who) }
         $copy = if ($session.Values) { ConvertTo-HtmlText ([string]$session.Values) } else { (T 'rep.textNotRecorded') }
         $body.Add('<div class="row"><div class="head">' + $span + '</div><div class="sub">' + $sub + '</div><div class="copy">' + $copy + '</div></div>')
     }
-    $body.Add('<p class="totals">' + "الإجمالي: $($sessions.Count) بنرًا &middot; $($data.Operators) مشغّلين" + '</p>')
-    return Get-ReportHtmlDocument -Title "تقرير البنرات — $($data.Label)" -Body ($body -join "`n") `
+    $body.Add('<p class="totals">' + (T 'rep.bannerTotalsPage' $($sessions.Count) $($data.Operators)) + '</p>')
+    return Get-ReportHtmlDocument -Title (T 'rep.bannerPageTitle' $($data.Label)) -Body ($body -join "`n") `
         -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
 }
 
@@ -1595,13 +1574,13 @@ function Get-MojazReportHtml {
         $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('yyyy/MM/dd HH:mm') } else { '&mdash;' }
         $head = if ($run.EndedAt) { "$started &#8592; $(([datetime]$run.EndedAt).ToString('HH:mm')) &middot; $(Get-MojazRunDuration -Run $run)" }
         else { '<span class="live">' + $started + (T 'rep.stillOnAirHtml') }
-        $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$run.Name)) + "&raquo; &middot; $([int]$run.Rows) صفًّا"
+        $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$run.Name)) + (T 'rep.rowsHtml' $([int]$run.Rows))
         if ($run.Kind -eq 'scheduled') { $sub += (T 'rep.bySchedule') }
         if ($who) { $sub += ' &middot; ' + (ConvertTo-HtmlText $who) }
         $body.Add('<div class="row"><div class="head">' + $head + '</div><div class="sub">' + $sub + '</div></div>')
     }
-    $body.Add('<p class="totals">' + "الإجمالي: $($runs.Count) تشغيلًا &middot; $([int]$data.Rows) صفًّا &middot; $($data.Operators) مشغّلين" + '</p>')
-    return Get-ReportHtmlDocument -Title "تقرير الموجزات — $($data.Label)" -Body ($body -join "`n") `
+    $body.Add('<p class="totals">' + (T 'rep.bulletinTotalsPage' $($runs.Count) $([int]$data.Rows) $($data.Operators)) + '</p>')
+    return Get-ReportHtmlDocument -Title (T 'rep.bulletinPageTitle' $($data.Label)) -Body ($body -join "`n") `
         -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
 }
 
@@ -1614,11 +1593,11 @@ function Get-NewsReportHtml {
     foreach ($day in $days) {
         $who = if ($day.Tally.Breakdown) { $day.Tally.Breakdown } else { $day.Tally.Single }
         $sub = if ($who) { ConvertTo-HtmlText $who } else { '&mdash;' }
-        $head = "$($day.Date.ToString('yyyy/MM/dd')) — $($day.Publishes) تعديلًا &middot; على الهواء $($day.Items) &middot; $(Get-NewsEditTrail -Counts $day.Counts)"
+        $head = (T 'rep.newsDayPage' $($day.Date.ToString('yyyy/MM/dd')) $($day.Publishes) $($day.Items) $(Get-NewsEditTrail -Counts $day.Counts))
         $body.Add('<div class="row"><div class="head">' + $head + '</div><div class="sub">' + $sub + '</div></div>')
     }
-    $body.Add('<p class="totals">' + "الإجمالي: $($data.Publishes) تعديلًا &middot; على الهواء $($data.Items) خبرًا" + '</p>')
-    return Get-ReportHtmlDocument -Title "تقرير الأخبار — $($data.Label)" -Body ($body -join "`n") `
+    $body.Add('<p class="totals">' + (T 'rep.newsTotalsPage' $($data.Publishes) $($data.Items)) + '</p>')
+    return Get-ReportHtmlDocument -Title (T 'rep.newsPageTitle' $($data.Label)) -Body ($body -join "`n") `
         -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
 }
 
@@ -1647,7 +1626,7 @@ function Export-BridgeReport {
             'mojaz' { (T 'rep.bulletinReport') }
             default { (T 'rep.bannerReport') }
         }
-        if (-not (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "$caption — افتحه في المتصفح، ويمكنك طباعته PDF من هناك.")) {
+        if (-not (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption (T 'rep.openInBrowser' $caption))) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'rep.sendReportFailed') -ReplyMarkup (Get-ReportPeriodKeyboard -Kind $Kind)
         }
     }

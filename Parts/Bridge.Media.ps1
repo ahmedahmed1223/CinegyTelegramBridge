@@ -380,7 +380,9 @@ function Get-OutputMonitorStatus {
             $probeState = (T 'media.failedNoUrl')
         }
         else {
-            $probePath = Get-MonitorFrame -TimeoutSeconds $timeout
+            # Someone pressed a button and is waiting for an answer, so a
+            # wrong answer costs more than a slow one.
+            $probePath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
             if (-not $probePath) {
                 $probeState = (T 'media.unavailable')
             }
@@ -503,9 +505,16 @@ function Update-OutputBlackWatchdog {
         # building something else, and the source was fine the whole time.
         # A second attempt costs eight seconds against an hour of being on the
         # wrong source.
+        # And the retry waits properly rather than repeating the same
+        # impatience. Measured against the station's own HLS source with its
+        # eight-second ceiling: 5.2s, 4.7s, 10.3s - every grab succeeded and a
+        # third took longer than the ceiling allowed. An HLS source fetches a
+        # playlist and a segment before it can decode anything, so a timeout
+        # here says "slow", not "down" - and two unlucky grabs in a row were
+        # raising the flapping alarm on a source that was working throughout.
         Start-Sleep -Milliseconds 1500
-        $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
-        if ($firstPath) { Write-BridgeLog 'Output monitor: the first grab failed and the retry succeeded; the source is up.' 'INFO' }
+        $firstPath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
+        if ($firstPath) { Write-BridgeLog 'Output monitor: the first grab failed and the patient retry succeeded; the source is up but slow to open.' 'INFO' }
     }
     if (-not $firstPath) {
         $script:OutputMonitorFailureCount++
@@ -602,7 +611,10 @@ function Complete-OutputBlackConfirmation {
     $first = [double]$script:OutputMonitorFirstLuma
     $script:OutputMonitorConfirmAt = [datetime]::MinValue
 
-    $secondPath = Get-MonitorFrame -TimeoutSeconds $timeout
+    # Patient, like the first look. A timeout here returns silently, so an
+    # impatient ceiling does not raise a false alarm - it loses a true one,
+    # which on a source that needs ten seconds to open is worse.
+    $secondPath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
     if (-not $secondPath) { return }
     $second = Get-BridgeFrameLuminance -Path $secondPath
     Remove-Item -LiteralPath $secondPath -Force -ErrorAction SilentlyContinue

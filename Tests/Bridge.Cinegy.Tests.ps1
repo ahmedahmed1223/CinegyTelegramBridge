@@ -1381,3 +1381,75 @@ Describe 'Failure diagnosis copy (P1)' {
         }
     }
 }
+
+Describe 'A slow source is not a dead one' {
+    <#
+        Measured against the station's own HLS source with its eight-second
+        ceiling: 5.2s, 4.7s, 10.3s. Every grab succeeded and a third took
+        longer than the ceiling allowed, because an HLS source fetches a
+        playlist and a segment before it can decode a frame.
+
+        So the log filled with "capture timed out after 8s" for a feed that
+        was working, two unlucky grabs in a row opened an outage, and four in
+        six hours raised the flapping alarm. The operator's answer was the
+        plain truth: the stream is fine.
+
+        The first grab stays quick — most succeed, and the fast path is worth
+        keeping. The retry is the one that decides whether to call the source
+        down, so it waits properly.
+    #>
+    BeforeEach {
+        Mock Write-BridgeLog { }
+        Mock Start-Sleep { }
+        # One mock for every setting this path reads. A filtered mock with
+        # nothing behind it fails the call rather than the feature, and the
+        # watchdog asks for four of them.
+        Mock Get-SettingInt { if ($Name -eq 'SnapshotTimeoutSeconds') { 8 } else { 30 } }
+        Mock Get-BridgeFrameLuminance { 120 }
+        Mock Remove-Item { }
+        Mock Send-AdminBroadcast { }
+        Mock Add-AuditEntry { }
+        Mock Start-StreamOutage { }
+        Mock Stop-StreamOutage { }
+        $script:OutputMonitorFailureCount = 0
+        $script:OutputMonitorFailureAlerted = $false
+        $script:OutputBlackAlerted = $false
+        # No second look is booked, and the interval has passed - otherwise
+        # the watchdog returns before it grabs anything and every assertion
+        # below passes by never running.
+        $script:OutputMonitorConfirmAt = [datetime]::MinValue
+        $script:LastOutputMonitorAt = (Get-Date).AddHours(-2)
+    }
+
+    It 'gives the retry three times as long as the first try' {
+        $script:Attempts = [System.Collections.Generic.List[int]]::new()
+        Mock Get-MonitorFrame {
+            $script:Attempts.Add([int]$TimeoutSeconds)
+            if ($script:Attempts.Count -eq 1) { return $null }
+            return 'frame.jpg'
+        }
+
+        Update-OutputBlackWatchdog
+
+        @($script:Attempts).Count | Should -Be 2
+        $script:Attempts[0] | Should -Be 8 -Because 'most grabs are quick and the fast path is worth keeping'
+        $script:Attempts[1] | Should -Be 24 -Because 'the retry is what decides the source is down, so it waits properly'
+    }
+
+    It 'records no failure when the patient retry gets the frame' {
+        Mock Get-MonitorFrame { if ($TimeoutSeconds -le 8) { $null } else { 'frame.jpg' } }
+
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFailureCount | Should -Be 0
+        Should -Invoke Start-StreamOutage -Times 0 -Because 'a source that answers in ten seconds is slow, not gone'
+    }
+
+    It 'still calls it down when even the patient try gets nothing' {
+        Mock Get-MonitorFrame { $null }
+
+        Update-OutputBlackWatchdog
+
+        $script:OutputMonitorFailureCount | Should -Be 1
+    }
+}

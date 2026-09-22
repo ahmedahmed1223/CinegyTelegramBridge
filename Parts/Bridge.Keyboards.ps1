@@ -258,7 +258,7 @@ function Get-BridgeReadinessSummary {
     $lastError = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('LastError')) { [string]$Snapshot['LastError'] } elseif ($Snapshot.PSObject.Properties['LastError']) { [string]$Snapshot.LastError } else { '' }
     $ready = $telegram -eq 'connected' -and $cinegy -eq 'healthy' -and $diskFree -gt 1 -and [string]::IsNullOrWhiteSpace($lastError)
     $label = if ($ready) { (T 'kb.readyToRun') } else { (T 'kb.needsReview') }
-    return [pscustomobject]@{ Ready = $ready; Text = "$label · Telegram: $telegram · Cinegy: $cinegy · القرص: $diskFree GB" }
+    return [pscustomobject]@{ Ready = $ready; Text = (T 'kb.readinessLine' $label $telegram $cinegy $diskFree) }
 }
 
 function Get-MainMenuIntroBlocks {
@@ -283,8 +283,8 @@ function Get-MainMenuIntroBlocks {
         -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
         -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
     $age = switch ($freshness.State) {
-        'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
-        'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'connected' { (T 'kb.checkedAgo' $($freshness.AgeSeconds)) }
+        'stale' { (T 'kb.lastCheckAgo' $($freshness.AgeSeconds)) }
         'unavailable' { (T 'onair.checkFailed') }
         default { (T 'onair.notChecked') }
     }
@@ -334,7 +334,7 @@ function Get-MainMenuIntroBlocks {
     }
 
     $blocks += @{ type = 'paragraph'; text = "🔄 $age" }
-    $blocks += @{ type = 'paragraph'; text = "🌐 $($config.AirServerAddress) · القناة $($config.AirChannelNumber)" }
+    $blocks += @{ type = 'paragraph'; text = (T 'kb.engineChannel' $($config.AirServerAddress) $($config.AirChannelNumber)) }
     if ($UserId -gt 0) { $blocks += @{ type = 'paragraph'; text = "👤 $(Format-UserAuditActor -UserId $UserId)" } }
     return $blocks
 }
@@ -368,8 +368,8 @@ function Get-MainMenuIntro {
     # How old the claim is matters as much as the claim: a stale 'on air' that
     # looks identical to a fresh one is what let an exited scene go unnoticed.
     $age = switch ($freshness.State) {
-        'connected' { "تحقّق قبل $($freshness.AgeSeconds) ث" }
-        'stale' { "⚠️ آخر تحقّق قبل $($freshness.AgeSeconds) ث" }
+        'connected' { (T 'kb.checkedAgo' $($freshness.AgeSeconds)) }
+        'stale' { (T 'kb.lastCheckAgo' $($freshness.AgeSeconds)) }
         'unavailable' { (T 'onair.checkFailed') }
         default { (T 'onair.notChecked') }
     }
@@ -402,7 +402,7 @@ function Get-MainMenuIntro {
     $air = [System.Collections.Generic.List[string]]::new()
     if ($script:OnAir.Count -eq 0) { $air.Add((T 'onair.none')) }
     else {
-        $air.Add("🔴 <b>على الهواء ($($script:OnAir.Count))</b>")
+        $air.Add((T 'kb.onAirCount' $($script:OnAir.Count)))
         # One layer per line, and under each the two facts an operator asks
         # about a graphic they did not put up themselves: how long it has been
         # there, and whose it is. Both were already recorded - the confirmation
@@ -416,7 +416,7 @@ function Get-MainMenuIntro {
         $shown = @($layers | Select-Object -First 4)
         foreach ($layer in $shown) {
             $record = $script:OnAir[$layer]
-            $air.Add(" • طبقة <code>$layer</code> · <b>$(ConvertTo-TelegramHtmlText ([string]$record.Key))</b>")
+            $air.Add((T 'kb.layerRow' $layer $(ConvertTo-TelegramHtmlText ([string]$record.Key))))
 
             $detail = [System.Collections.Generic.List[string]]::new()
             # Guarded: these records are written by a dozen call sites and
@@ -424,7 +424,7 @@ function Get-MainMenuIntro {
             # an absent key would take the menu down - the screen an operator
             # opens when something has already gone wrong.
             if ($record.ContainsKey('At') -and $record.At -is [datetime]) {
-                $detail.Add("منذ $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))")
+                $detail.Add((T 'kb.ago' $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))))
             }
             $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
             $detail.Add($(switch ($source) {
@@ -438,7 +438,7 @@ function Get-MainMenuIntro {
             $air.Add("   ↳ <i>$(ConvertTo-TelegramHtmlText ($detail -join ' · '))</i>")
         }
         if ($layers.Count -gt $shown.Count) {
-            $air.Add("   <i>و$($layers.Count - $shown.Count) أخرى - أزرار الإخفاء أدناه</i>")
+            $air.Add((T 'kb.andMoreHideBelow' $($layers.Count - $shown.Count)))
         }
     }
     $air.Add("🔄 <i>$age</i>")
@@ -457,7 +457,7 @@ function Get-MainMenuIntro {
     $lines.Add('')
     $lines.Add($air -join "`n")
     $lines.Add('')
-    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code>")
+    $lines.Add((T 'kb.engineChannelHtml' $(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress)) $($config.AirChannelNumber)))
     # Format-UserAuditActor, the same helper ℹ️ الحالة uses, so one operator is
     # written one way on both screens - and so the bracketed id stays pinned
     # LTR after an Arabic name instead of rendering as ")8201739556(".
@@ -476,9 +476,9 @@ function Get-LayerRemovalSummary {
     }
     $record = $script:OnAir[[int]$Layer]
     $parts = [System.Collections.Generic.List[string]]::new()
-    $parts.Add("الطبقة $Layer · $($record.Key)")
+    $parts.Add((T 'kb.layerPair' $Layer $($record.Key)))
     if ($record.At -is [datetime]) {
-        $parts.Add("على الهواء منذ $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))")
+        $parts.Add((T 'kb.onAirSince' $(Format-Duration -Seconds ([int]((Get-Date) - $record.At).TotalSeconds))))
     }
     # What it says, when the operator has asked to be shown it. A layer
     # number and a template name identify the graphic; the copy is what tells
@@ -492,7 +492,7 @@ function Get-LayerRemovalSummary {
     $parts.Add($(switch ($source) {
                 'cinegy' { (T 'onair.sourceExternal') }
                 'BotTest' { (T 'onair.sourceTest') }
-                default { "أرسله: $(Get-UserDisplayName -UserId ([long]$record.UserId))" }
+                default { (T 'kb.sentBy' $(Get-UserDisplayName -UserId ([long]$record.UserId))) }
             }))
     return ($parts -join "`n")
 }
@@ -672,7 +672,7 @@ function Get-TemplatesKeyboard {
     elseif ($Query) {
         $hiddenResults = $matched - @($pageIndexes).Count
         if ($hiddenResults -gt 0) {
-            $rows += , @( (New-Button "🔎 ضيّق البحث · $hiddenResults نتيجة أخرى" 'menu:templatesearch') )
+            $rows += , @( (New-Button (T 'kb.narrowSearch' $hiddenResults) 'menu:templatesearch') )
         }
     }
     else {
@@ -732,12 +732,10 @@ function Get-TemplatePreviewText {
     # administrator, so all of them are escaped.
     $lines.Add("ℹ️ <b>$(ConvertTo-TelegramHtmlText ([string]$Template.Key))</b>")
     $lines.Add("<b>$live</b>")
-    $lines.Add("<blockquote>$(ConvertTo-TelegramHtmlText $where)
-التصنيف: $(ConvertTo-TelegramHtmlText $category)
-الحقول: $(ConvertTo-TelegramHtmlText $fields)</blockquote>")
+    $lines.Add((T 'kb.templateQuote' $(ConvertTo-TelegramHtmlText $where) $(ConvertTo-TelegramHtmlText $category) $(ConvertTo-TelegramHtmlText $fields)))
     $lines.Add((ConvertTo-TelegramHtmlText $description))
     $lines.Add('')
-    $lines.Add("الاستخدام: <code>$(ConvertTo-TelegramHtmlText $uses)</code> · آخر مرة: <code>$(ConvertTo-TelegramHtmlText $lastUsed)</code>")
+    $lines.Add((T 'kb.usageLast' $(ConvertTo-TelegramHtmlText $uses) $(ConvertTo-TelegramHtmlText $lastUsed)))
     return ($lines -join "`n")
 }
 
@@ -765,7 +763,7 @@ function Complete-TemplateSearch {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'templates.searchEmpty') -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -BrowseControls)
         return
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "🔎 نتائج البحث عن '$query':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Query $query -BrowseControls)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.searchResults' $query) -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Query $query -BrowseControls)
 }
 
 function Get-RetryDelaySeconds {
@@ -843,9 +841,9 @@ function Get-AuthorizedUsersText {
     $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
     $admins = @($users | Where-Object { $_.Role -ne 'operator' }).Count
     $disabled = @($users | Where-Object { $_.Disabled }).Count
-    $tally = "$(Get-ArabicCountNoun -Count $users.Count -One 'مستخدم' -Two 'مستخدمان' -Few 'مستخدمين' -Many 'مستخدمًا' -EnglishOne 'user' -EnglishMany 'users') · $admins بصلاحية إشراف"
-    if ($disabled -gt 0) { $tally += " · $disabled معطّل" }
-    if ($window.PageCount -gt 1) { $tally += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
+    $tally = (T 'kb.withAdminRight' $(Get-ArabicCountNoun -Count $users.Count -One 'مستخدم' -Two 'مستخدمان' -Few 'مستخدمين' -Many 'مستخدمًا' -EnglishOne 'user' -EnglishMany 'users') $admins)
+    if ($disabled -gt 0) { $tally += (T 'kb.disabledCount' $disabled) }
+    if ($window.PageCount -gt 1) { $tally += (T 'kb.pageOf' $($window.Page + 1) $($window.PageCount)) }
     $lines.Add("<i>$tally</i>")
     $lines.Add('')
     $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
@@ -870,13 +868,13 @@ function Get-AuthorizedUsersText {
             try {
                 $mins = [int](((Get-Date).ToUniversalTime() - ([datetime]$lastOp[0].At).ToUniversalTime()).TotalMinutes)
                 if ($mins -lt 1) { $ago = (T 'kb.now') }
-                elseif ($mins -lt 60) { $ago = "قبل $mins د" }
-                elseif ($mins -lt 1440) { $ago = "قبل $([int]($mins / 60)) س" }
+                elseif ($mins -lt 60) { $ago = (T 'kb.minutesAgo' $mins) }
+                elseif ($mins -lt 1440) { $ago = (T 'kb.hoursAgo' $([int]($mins / 60))) }
                 else { $ago = ([datetime]$lastOp[0].At).ToLocalTime().ToString('MM-dd HH:mm') }
             }
             catch { $ago = '' }
             $what = "$([string]$lastOp[0].Action) $([string]$lastOp[0].Target)".Trim()
-            if ($what) { $lines.Add("   ⏺ آخر إجراء: $(ConvertTo-TelegramHtmlText -Text $what)$(if ($ago) { " · $ago" })") }
+            if ($what) { $lines.Add((T 'kb.lastAction' $(ConvertTo-TelegramHtmlText -Text $what) $(if ($ago) { " · $ago" }))) }
         }
     }
     return ($lines -join "`n")
@@ -921,7 +919,7 @@ function Get-UsersAdminKeyboard {
     # D1: the quarantine roster surfaces here rather than hiding in the log.
     $deadCount = @($script:DeadChats.Keys).Count
     if ($deadCount -gt 0) {
-        $rows += , @((New-Button "💀 محادثات ميتة ($deadCount)" 'menu:deadchats'))
+        $rows += , @((New-Button (T 'kb.deadChats' $deadCount) 'menu:deadchats'))
     }
     $rows += , @((New-Button (T 'kb.back') 'menu'))
     return @{ inline_keyboard = $rows }
@@ -936,7 +934,7 @@ function Show-UsersAdminScreen {
     else { '' }
     $text = (Get-AuthorizedUsersText -Page $Page) +
     (T 'kb.tapNameForCard') +
-    "`n<i>حالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>$roleLine"
+    (T 'kb.activityIsRough' $roleLine)
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML `
         -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
 }
@@ -966,11 +964,11 @@ function Get-UserCardText {
     $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
     $lines.Add("📈 $(ConvertTo-TelegramHtmlText -Text ([string]$activity.Label))")
     $idle = Get-UserIdleDays -User $user
-    if ($idle -ge 0) { $lines.Add("😴 بلا تفاعل منذ $idle يومًا") }
+    if ($idle -ge 0) { $lines.Add((T 'kb.noExchangeFor' $idle)) }
     $addedAt = [datetime]::MinValue
     if ([datetime]::TryParse([string]$user.AddedAt, [ref]$addedAt)) {
-        $by = if ([long]$user.AddedByUserId -gt 0) { " · بواسطة $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId ([long]$user.AddedByUserId)))" } else { '' }
-        $lines.Add("📅 أُضيف $($addedAt.ToString('yyyy-MM-dd'))$by")
+        $by = if ([long]$user.AddedByUserId -gt 0) { (T 'kb.by' $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId ([long]$user.AddedByUserId)))) } else { '' }
+        $lines.Add((T 'kb.addedOn' $($addedAt.ToString('yyyy-MM-dd')) $by))
     }
     return ($lines -join "`n")
 }
@@ -1026,7 +1024,7 @@ function Start-UserAliasEdit {
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode='user_alias_edit'; TargetUserId=$TargetUserId; UserId=$AdminUserId }
     $current = Get-UserDisplayName -UserId $TargetUserId
-    Send-TelegramMessage -ChatId $ChatId -Text "✏️ الاسم التشغيلي للمستخدم $TargetUserId`nالحالي: $current`n`nأرسل الاسم الجديد، أو أرسل - لحذف الـAlias." -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.workingNamePrompt' $TargetUserId $current) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-UserAliasEdit {
@@ -1046,9 +1044,9 @@ function Complete-UserAliasEdit {
         return $false
     }
     Clear-PendingState -ChatId $ChatId
-    $action = if ($alias) { "تعيين اسم بديل '$alias'" } else { (T 'kb.clearAlias') }
+    $action = if ($alias) { (T 'kb.aliasSet' $alias) } else { (T 'kb.clearAlias') }
     Write-BridgeLog "Admin $AdminUserId updated alias for user ${target}: $action"
-    Add-AuditEntry "👤 $action للمستخدم $(Format-UserAuditActor -UserId ([long]$target)) - بواسطة $(Format-UserAuditActor -UserId $AdminUserId)"
+    Add-AuditEntry (T 'kb.userAudit' $action $(Format-UserAuditActor -UserId ([long]$target)) $(Format-UserAuditActor -UserId $AdminUserId))
     Show-UsersAdminScreen -ChatId $ChatId
     return $true
 }
@@ -1074,10 +1072,10 @@ function Get-FavoritesManagementText {
         $lines.Add((T 'kb.favouritesZero'))
     }
     elseif ($selected.Count -eq 0) {
-        $lines.Add("<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $(Get-ArabicCountNoun -Count $count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates') استخدامًا تلقائيًا.</i>")
+        $lines.Add((T 'kb.noFavouritesYet' $(Get-ArabicCountNoun -Count $count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')))
     }
     elseif ($selected.Count -gt $count) {
-        $lines.Add("<i>⚠️ اخترت $(Get-ArabicCountNoun -Count $selected.Count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')، وتعرض القائمة أول $count منها فقط.</i>")
+        $lines.Add((T 'kb.tooManyFavourites' $(Get-ArabicCountNoun -Count $selected.Count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates') $count))
     }
     return ($lines -join "`n")
 }
@@ -1238,13 +1236,13 @@ function Get-UpcomingScheduleBlocks {
     #>
     param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 8)
     $events = @(Get-UpcomingScheduleEvents)
-    $blocks = @(@{ type = 'heading'; text = "📅 الأحداث القادمة ($($events.Count))"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'kb.upcomingCount' $($events.Count)); size = 3 })
     if ($events.Count -eq 0) {
         return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noUpcoming') })
     }
     $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
     if ($window.PageCount -gt 1) {
-        $blocks += @{ type = 'paragraph'; text = "صفحة $($window.Page + 1) من $($window.PageCount)" }
+        $blocks += @{ type = 'paragraph'; text = (T 'kb.page' $($window.Page + 1) $($window.PageCount)) }
     }
     $cells = @(, @(
             @{ text = (T 'kb.col.template'); is_header = $true }
@@ -1278,8 +1276,8 @@ function Get-UpcomingScheduleText {
     $events = @(Get-UpcomingScheduleEvents)
     if ($events.Count -eq 0) { return (T 'kb.noUpcoming') }
     $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
-    $heading = "📋 الأحداث القادمة ($($events.Count))"
-    if ($window.PageCount -gt 1) { $heading += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
+    $heading = (T 'kb.upcomingCount2' $($events.Count))
+    if ($window.PageCount -gt 1) { $heading += (T 'kb.pageOf' $($window.Page + 1) $($window.PageCount)) }
     $lines = @($heading)
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $lines += "• $(Format-ScheduleEventHtml -ScheduleEntry $events[$index])"
@@ -1324,13 +1322,13 @@ function Get-LayerDashboardKeyboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $button = New-Button "🔄 فحص ومقارنة · $(Get-LayerDisplayName -Layer $layer)" 'menu:layers'
+            $button = New-Button (T 'kb.checkAndCompare' $(Get-LayerDisplayName -Layer $layer)) 'menu:layers'
         }
         elseif ($status.IsOnAir) {
-            $button = New-Button "🙈 إخفاء $(Get-LayerDisplayName -Layer $layer)" "hide:$layer" -Style danger
+            $button = New-Button (T 'kb.hide' $(Get-LayerDisplayName -Layer $layer)) "hide:$layer" -Style danger
         }
         else {
-            $button = New-Button "🔄 تحديث · $(Get-LayerDisplayName -Layer $layer) مخفية" 'menu:layers'
+            $button = New-Button (T 'kb.refreshHidden' $(Get-LayerDisplayName -Layer $layer)) 'menu:layers'
         }
         $row += $button
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
@@ -1572,7 +1570,7 @@ function Get-AccessHistoryBlocks {
     <# The history as a table: who, what was decided, by whom, and when. #>
     param([int]$Days = 30)
     $rows = @(Get-AccessHistoryRows -Days $Days)
-    $blocks = @(@{ type = 'heading'; text = "📜 طلبات الوصول السابقة — آخر $Days يومًا"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'kb.pastRequestsDays' $Days); size = 3 })
     if ($rows.Count -eq 0) {
         return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noRequestsInPeriod') })
     }
@@ -1595,10 +1593,10 @@ function Get-AccessHistoryBlocks {
         # four-column table are unreadable, and the gap is the fact.
         if ($row.RequestedAt -and $row.DecidedAt) {
             $waited = [int]((([datetime]$row.DecidedAt) - ([datetime]$row.RequestedAt)).TotalMinutes)
-            if ($waited -ge 1) { $when += " (بعد $(Format-DurationMinutes -Minutes $waited))" }
+            if ($waited -ge 1) { $when += (T 'kb.after' $(Format-DurationMinutes -Minutes $waited)) }
         }
         elseif ($row.State -eq 'pending' -and $row.RequestedAt) {
-            $when = "طُلب منذ $(Format-DurationMinutes -Minutes ([int](((Get-Date) - ([datetime]$row.RequestedAt)).TotalMinutes)))"
+            $when = (T 'kb.askedAgo' $(Format-DurationMinutes -Minutes ([int](((Get-Date) - ([datetime]$row.RequestedAt)).TotalMinutes))))
         }
         $cells += , @(
             @{ text = $name }
@@ -1622,7 +1620,7 @@ function Get-AccessHistoryText {
     param([int]$Days = 30)
     $rows = @(Get-AccessHistoryRows -Days $Days)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>📜 طلبات الوصول السابقة</b> — آخر $Days يومًا")
+    $lines.Add((T 'kb.pastRequestsDaysHtml' $Days))
     if ($rows.Count -eq 0) {
         $lines.Add((T 'kb.noRequestsInPeriodHtml'))
         return ($lines -join "`n")
@@ -1631,7 +1629,7 @@ function Get-AccessHistoryText {
     $entries = @(foreach ($row in $rows) {
             $name = if ($row.Name) { ConvertTo-TelegramHtmlText ([string]$row.Name) } else { [string]$row.UserId }
             $when = if ($row.DecidedAt) { ([datetime]$row.DecidedAt).ToString('MM-dd HH:mm') } else { '—' }
-            $by = if ($row.DecidedBy) { " · بواسطة $(ConvertTo-TelegramHtmlText ([string]$row.DecidedBy))" } else { '' }
+            $by = if ($row.DecidedBy) { (T 'kb.by' $(ConvertTo-TelegramHtmlText ([string]$row.DecidedBy))) } else { '' }
             "$(Get-AccessHistoryStateLabel -State $row.State) $name <code>$($row.UserId)</code> · $when$by"
         })
     $tag = if ($entries.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
@@ -1667,7 +1665,7 @@ function Get-PendingApprovalsBlocks {
     #>
     param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
     $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
-    $blocks = @(@{ type = 'heading'; text = "👤 طلبات الوصول المعلّقة ($($ids.Count))"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'kb.pendingRequestsCount' $($ids.Count)); size = 3 })
     if ($ids.Count -eq 0) {
         return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noRequestsNow') })
     }
@@ -1718,7 +1716,7 @@ function Get-PendingApprovalsText {
     }
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
     $expiryHours = Get-SettingInt 'PendingApprovalExpiryHours' 1
-    $lines.Add("<i>$($ids.Count) طلبًا$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+    $lines.Add((T 'kb.requestCount' $($ids.Count) $(if ($window.PageCount -gt 1) { (T 'kb.pageOf' $($window.Page + 1) $($window.PageCount)) })))
     $lines.Add('')
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $id = $ids[$index]
@@ -1727,14 +1725,14 @@ function Get-PendingApprovalsText {
         if ($name.Length -gt 40) { $name = $name.Substring(0, 39) + '…' }
         $shown = if ($name) { ConvertTo-TelegramHtmlText -Text $name } else { (T 'common.noName') }
         $lines.Add("$($index + 1). <b>$shown</b>")
-        $lines.Add("   المستخدم <code>$([long](Get-JsonProp $info 'UserId'))</code> · المحادثة <code>$([long]$id)</code>")
+        $lines.Add((T 'kb.userChat' $([long](Get-JsonProp $info 'UserId')) $([long]$id)))
         $requestedAt = Get-JsonProp $info 'RequestedAt'
         if ($requestedAt) {
             $elapsed = [int]([math]::Max(0, ((Get-Date) - [datetime]$requestedAt).TotalMinutes))
-            $line = "   منذ $(Format-DurationMinutes -Minutes $elapsed)"
+            $line = (T 'kb.agoIndented' $(Format-DurationMinutes -Minutes $elapsed))
             if ($expiryHours -gt 0) {
                 $left = [int]([math]::Max(0, ($expiryHours * 60) - $elapsed))
-                $line += " · ينتهي تلقائيًا بعد $(Format-DurationMinutes -Minutes $left)"
+                $line += (T 'kb.expiresAfter' $(Format-DurationMinutes -Minutes $left))
             }
             $lines.Add($line)
         }
@@ -1796,7 +1794,7 @@ function Get-BlockedChatsText {
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
-    $lines.Add("<i>$(Get-ArabicCountNoun -Count $blocked.Count -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' -EnglishOne 'chat' -EnglishMany 'chats')$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+    $lines.Add((T 'kb.italicPair' $(Get-ArabicCountNoun -Count $blocked.Count -One 'محادثة' -Two 'محادثتان' -Few 'محادثات' -Many 'محادثة' -EnglishOne 'chat' -EnglishMany 'chats') $(if ($window.PageCount -gt 1) { (T 'kb.pageOf' $($window.Page + 1) $($window.PageCount)) })))
     $lines.Add('')
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $entry = $blocked[$index]
@@ -1804,7 +1802,7 @@ function Get-BlockedChatsText {
         $line = "   $(Get-BlockedAccessReasonText -Reason $entry.Reason)"
         $at = [datetime]::MinValue
         if ([datetime]::TryParse($entry.At, [ref]$at)) { $line += " · $($at.ToString('yyyy-MM-dd HH:mm'))" }
-        if ($entry.By -gt 0) { $line += " · بواسطة $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId $entry.By))" }
+        if ($entry.By -gt 0) { $line += (T 'kb.by' $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId $entry.By))) }
         $lines.Add($line)
     }
     return ($lines -join "`n")
@@ -1817,7 +1815,7 @@ function Get-BlockedChatsKeyboard {
     $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
     if ($window.EndIndex -ge $window.StartIndex) {
         foreach ($index in $window.StartIndex..$window.EndIndex) {
-            $rows += , @( (New-Button "♻️ رفع الحظر عن $($blocked[$index].ChatId)" "unblock:$($blocked[$index].ChatId)") )
+            $rows += , @( (New-Button (T 'kb.unblock' $($blocked[$index].ChatId)) "unblock:$($blocked[$index].ChatId)") )
         }
     }
     $rows += , @( (New-Button (T 'kb.pendingRequests') "menu:pending"), (New-Button (T 'kb.back') "menu") )
@@ -1977,13 +1975,13 @@ function Get-SettingsCategoryKeyboard {
                 $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) {
                     (T 'kb.allKnownLayers')
                 }
-                elseif ($scope.Trim()) { "طبقات: $scope" }
+                elseif ($scope.Trim()) { (T 'kb.layers' $scope) }
                 else { (T 'kb.noLayersChosen') }
                 $rows += , @( (New-Button "🚨 $($metadata.Label) · $scopeLabel" 'menu:hideallsettings' -MaxTextLength 64) )
             }
             elseif ($name -eq 'LayerNames') {
                 $namedLayers = @([string]$value -split ';' | Where-Object { $_.Trim() -match '^\d+\s*=\s*.+$' }).Count
-                $rows += , @( (New-Button "🏷️ $($metadata.Label) · $namedLayers تسمية" 'menu:layernames' -MaxTextLength 64) )
+                $rows += , @( (New-Button (T 'kb.namedLayers' $($metadata.Label) $namedLayers) 'menu:layernames' -MaxTextLength 64) )
             }
             elseif ($script:DefaultSettings[$name] -is [bool]) {
                 $mark = if ($value) { '✅' } else { '❌' }
@@ -2017,7 +2015,7 @@ function Get-SettingsCategoryKeyboard {
     # with the process fails loud.
     if ($Category -eq 'monitoring') {
         if ((Get-Date) -lt $script:ManualQuietUntil) {
-            $rows += , @((New-Button "🔇 هدوء حتى $($script:ManualQuietUntil.ToString('HH:mm')) — إلغاء" 'quiet:off'))
+            $rows += , @((New-Button (T 'kb.quietUntil' $($script:ManualQuietUntil.ToString('HH:mm'))) 'quiet:off'))
         }
         else {
             $rows += , @((New-Button (T 'kb.quietTwoHours') 'quiet:on'))
@@ -2044,7 +2042,7 @@ function Get-TemplateAdminCatalogueText {
         for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
             $key = [string]$store.Order[$i]
             $when = if ($lastAir.ContainsKey($key)) { Format-TemplateLastAir -Stamp $lastAir[$key] } else { (T 'tpl.neverAired') }
-            $lines.Add("• <b>$(ConvertTo-TelegramHtmlText $key)</b> — آخر بث: $when")
+            $lines.Add((T 'kb.lastAired' $(ConvertTo-TelegramHtmlText $key) $when))
         }
     }
     return ($lines -join "`n")
@@ -2065,7 +2063,7 @@ function Get-TemplateAdminCatalogueKeyboard {
     if ($window.EndIndex -ge $window.StartIndex) {
     for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
         $template = $store.Map[$store.Order[$i]]
-        $rows += , @( (New-Button "$($template.Key) (طبقة $($template.Layer))" "tadm:$i") )
+        $rows += , @( (New-Button (T 'kb.nameAndLayer' $($template.Key) $($template.Layer)) "tadm:$i") )
     }
     }
     if ($canAdminister) {
@@ -2078,7 +2076,7 @@ function Get-TemplateAdminCatalogueKeyboard {
         # emptiness.
         $backupCount = @(Get-TemplateBackupFiles).Count
         if ($backupCount -gt 0) {
-            $rows += , @( (New-Button "🗄 نسخ القوالب ($backupCount)" 'tplbak:list') )
+            $rows += , @( (New-Button (T 'kb.templateBackupsCount' $backupCount) 'tplbak:list') )
         }
     }
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
@@ -2088,7 +2086,7 @@ function Get-TemplateAdminCatalogueKeyboard {
         # create the entries it cleans up.
         $invalidCount = @(Get-InvalidTemplateEntries).Count
         if ($invalidCount -gt 0) {
-            $rows += , @( (New-Button "🧹 قوالب غير صالحة ($invalidCount)" 'tpladmin:invalid') )
+            $rows += , @( (New-Button (T 'kb.invalidTemplatesCount' $invalidCount) 'tpladmin:invalid') )
         }
     }
     if ($window.PageCount -gt 1) {
@@ -2133,7 +2131,7 @@ function Get-HideAllLayerSettingsKeyboard {
     $rows = @()
     foreach ($layer in @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique)) {
         $mark = if ($allMode -or $selected -contains $layer) { '✅' } else { '⬜' }
-        $rows += , @( (New-Button "$mark طبقة $layer" "hideallcfg:toggle:$layer") )
+        $rows += , @( (New-Button (T 'kb.countLayer' $mark $layer) "hideallcfg:toggle:$layer") )
     }
     $rows += , @( (New-Button (T 'kb.selectAllLayers') 'hideallcfg:all'), (New-Button (T 'kb.selectNoLayers') 'hideallcfg:none') )
     $rows += , @( (New-Button (T 'kb.backToSettings') 'menu:settings') )
@@ -2170,11 +2168,11 @@ function Get-TemplateBackupsText {
         $lines.Add((T 'kb.noTemplateBackups'))
         return ($lines -join "`n")
     }
-    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add((T 'kb.backupCount' $($files.Count)))
     $lines.Add('')
     for ($i = 0; $i -lt $files.Count; $i++) {
         $age = [int]([math]::Max(0.0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
-        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { (T 'kb.now') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add((T 'kb.backupRow' $($i + 1) $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm')) $(if ($age -lt 1) { (T 'kb.now') } else { (T 'kb.ago' $(Format-DurationMinutes -Minutes $age)) })))
     }
     $lines.Add('')
     $lines.Add((T 'kb.restoreShowsDiff'))
@@ -2212,7 +2210,7 @@ function Get-TemplateRestorePreviewText {
     param([Parameter(Mandatory)]$Comparison, [Parameter(Mandatory)][datetime]$BackupTime)
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'kb.confirmTemplateRestore'))
-    $lines.Add("النسخة: <code>$($BackupTime.ToString('yyyy-MM-dd HH:mm'))</code>")
+    $lines.Add((T 'kb.backupIs' $($BackupTime.ToString('yyyy-MM-dd HH:mm'))))
     $lines.Add('')
     foreach ($group in @(
             @{ Label = (T 'kb.willBeDeleted'); Keys = @($Comparison.Removed) }
@@ -2222,7 +2220,7 @@ function Get-TemplateRestorePreviewText {
         if (@($group.Keys).Count -eq 0) { continue }
         $shown = @(@($group.Keys) | Select-Object -First 10)
         $line = "$($group.Label) (<code>$(@($group.Keys).Count)</code>): $(ConvertTo-TelegramHtmlText ($shown -join (T 'common.comma')))"
-        if (@($group.Keys).Count -gt $shown.Count) { $line += " …و$(@($group.Keys).Count - $shown.Count) غيرها" }
+        if (@($group.Keys).Count -gt $shown.Count) { $line += (T 'kb.andOthers' $(@($group.Keys).Count - $shown.Count)) }
         $lines.Add($line)
     }
     if (@($Comparison.Removed).Count -eq 0 -and @($Comparison.Changed).Count -eq 0 -and @($Comparison.Added).Count -eq 0) {
@@ -2263,11 +2261,11 @@ function Get-ConfigBackupsText {
         $lines.Add((T 'kb.noSettingsBackups'))
         return ($lines -join "`n")
     }
-    $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
+    $lines.Add((T 'kb.backupCount' $($files.Count)))
     $lines.Add('')
     for ($i = 0; $i -lt $files.Count; $i++) {
         $age = [int]([math]::Max(0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
-        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { (T 'kb.now') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add((T 'kb.backupRow' $($i + 1) $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm')) $(if ($age -lt 1) { (T 'kb.now') } else { (T 'kb.ago' $(Format-DurationMinutes -Minutes $age)) })))
     }
     $lines.Add('')
     $lines.Add((T 'kb.settingsRestoreNote'))
@@ -2483,7 +2481,7 @@ function Show-TemplateMaxAirEditor {
             foreach ($index in $window.StartIndex..$window.EndIndex) {
                 $key = [string]$state.Keys[$index]
                 $maximum = [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $key)
-                $label = if ($maximum -gt 0) { "$maximum ث" } else { (T 'common.notSet') }
+                $label = if ($maximum -gt 0) { (T 'kb.seconds' $maximum) } else { (T 'common.notSet') }
                 $rows += , @((New-Button "$key — $label" "${prefix}:item:$index"))
             }
         }
@@ -2496,7 +2494,7 @@ function Show-TemplateMaxAirEditor {
         $current = [int](Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') ([string]$state.Key))
         $shownKey = [string]$state.Key
         if ($shownKey.Length -gt 100) { $shownKey = $shownKey.Substring(0,100) }
-        $text = "⏱ $shownKey`nالحد الحالي: $current ثانية (0 = بلا قاعدة خاصة).`nالمدى: 1–3600 ثانية. كل ضغطة تُحفظ. القالب الحسّاس يحتفظ بحدّه الأقصر."
+        $text = (T 'kb.ceilingScreen' $shownKey $current)
         $rows += , @((New-Button (T 'kb.thirtySeconds') "${prefix}:set:30"), (New-Button (T 'kb.oneMinute') "${prefix}:set:60"), (New-Button (T 'kb.twoMinutes') "${prefix}:set:120"))
         $rows += , @((New-Button (T 'kb.threeMinutes') "${prefix}:set:180"), (New-Button (T 'kb.fiveMinutes') "${prefix}:set:300"), (New-Button (T 'kb.tenMinutes') "${prefix}:set:600"))
         $rows += , @((New-Button (T 'kb.minusTenSeconds') "${prefix}:delta:-10"), (New-Button (T 'kb.plusTenSeconds') "${prefix}:delta:10"))
@@ -2548,7 +2546,7 @@ function Invoke-TemplateMaxAirPick {
         if ($action -eq 'now') {
             if ($value -ne 'yes') { return $false }
             if (Request-TemplateAirLimitNow -Key $key -ChatId $ChatId -UserId $UserId) {
-                Send-TelegramMessage -ChatId $ChatId -Text "⚖️ قُصِّر بقاء العرض الحالي لقالب $key إلى الحد المضبوط."
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.currentShowShortened' $key)
             }
             else { Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.noShowOverCeiling') }
         }
@@ -2649,10 +2647,10 @@ function Get-SettingStepperKeyboard {
     )
     $presets = @()
     $default = [int]$script:DefaultSettings[$Name]
-    if ($current -ne $default) { $presets += New-Button "↩️ الافتراضي ($default)" "num:${Name}:def" }
+    if ($current -ne $default) { $presets += New-Button (T 'kb.defaultIs' $default) "num:${Name}:def" }
     if ($script:SettingConstraints.ContainsKey($Name)) {
-        if ($current -ne $bounds.Minimum) { $presets += New-Button "الأدنى ($($bounds.Minimum))" "num:${Name}:min" }
-        if ($current -ne $bounds.Maximum -and $bounds.Maximum -lt [int]::MaxValue) { $presets += New-Button "الأعلى ($($bounds.Maximum))" "num:${Name}:max" }
+        if ($current -ne $bounds.Minimum) { $presets += New-Button (T 'kb.lowest' $($bounds.Minimum)) "num:${Name}:min" }
+        if ($current -ne $bounds.Maximum -and $bounds.Maximum -lt [int]::MaxValue) { $presets += New-Button (T 'kb.highest' $($bounds.Maximum)) "num:${Name}:max" }
     }
     for ($index = 0; $index -lt $presets.Count; $index += 2) {
         $pair = @($presets[$index])
@@ -2722,13 +2720,13 @@ function Show-SettingTimePicker {
         # Emptying it is a real answer: no window at all is how maintenance
         # mode is left off, and it had no button.
         $rows += , @((New-Button (T 'kb.noTiming') "tm:${Name}:clear"))
-        $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالحالي: <code>$shown</code>`nاختر الساعة:"
+        $text = (T 'kb.pickHour' $(ConvertTo-TelegramHtmlText $label) $shown)
     }
     else {
         $buttons = @(foreach ($minute in @(0, 15, 30, 45)) { New-Button ('{0:00}:{1:00}' -f $Hour, $minute) "tm:${Name}:${Hour}:$minute" })
         $rows += , @($buttons)
         $rows += , @((New-Button (T 'kb.anotherHour') "tm:${Name}:pick"))
-        $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالساعة $('{0:00}' -f $Hour) — اختر الدقيقة:"
+        $text = (T 'kb.pickMinute' $(ConvertTo-TelegramHtmlText $label) $('{0:00}' -f $Hour))
     }
     $rows += , @((New-Button (T 'kb.back') 'menu:settings'))
     $keyboard = @{ inline_keyboard = $rows; KeepRows = $true }
@@ -2743,7 +2741,7 @@ function Set-SettingTime {
     Set-Setting -Name $Name -Value $value
     Write-BridgeLog "User $UserId set $Name = $value"
     $shown = if ($value) { $value } else { (T 'kb.noTimingPlain') }
-    Add-AuditEntry "⚙️ $Name = $shown - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'kb.settingAudit' $Name $shown $(Format-UserAuditActor -UserId $UserId))
     return $value
 }
 
@@ -2766,12 +2764,12 @@ function Show-SettingStepper {
     $unit = if ($display -and $display.Contains('Unit')) { [string]$display['Unit'] } else { '' }
     $label = if ($script:SettingNavigationLabels.Contains($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
     $unitPart = if ($unit) { " $unit" } else { '' }
-    $rangePart = if ($script:SettingConstraints.ContainsKey($Name)) { " · المدى: $($bounds.Minimum)–$($bounds.Maximum)" } else { '' }
+    $rangePart = if ($script:SettingConstraints.ContainsKey($Name)) { (T 'kb.range' $($bounds.Minimum) $($bounds.Maximum)) } else { '' }
     $lines = @(
         "⚙️ <b>$(ConvertTo-TelegramHtmlText $label)</b>"
         "<code>$Name</code>"
-        "القيمة: <b>$(Get-Setting $Name)</b>$unitPart"
-        "الافتراضي: $($script:DefaultSettings[$Name])$rangePart"
+        (T 'kb.value' $(Get-Setting $Name) $unitPart)
+        (T 'kb.default' $($script:DefaultSettings[$Name]) $rangePart)
     )
     $text = $lines -join "`n"
     $keyboard = Get-SettingStepperKeyboard -Name $Name
@@ -2803,7 +2801,7 @@ function Set-SettingNumber {
     if ($target -eq $current) { return $current }
     Set-Setting -Name $Name -Value $target
     Write-BridgeLog "User $UserId set $Name = $target"
-    Add-AuditEntry "⚙️ $Name = $target - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'kb.settingAudit' $Name $target $(Format-UserAuditActor -UserId $UserId))
     return $target
 }
 
@@ -2898,9 +2896,9 @@ function Get-SettingPickText {
     $lines += if ($chosen.Count -eq 0) {
         (T 'kb.nothingChosen')
     }
-    else { "<i>المحدد ($($chosen.Count)): $(ConvertTo-TelegramHtmlText -Text ($chosen -join (T 'common.comma')))</i>" }
+    else { (T 'kb.chosen' $($chosen.Count) $(ConvertTo-TelegramHtmlText -Text ($chosen -join (T 'common.comma')))) }
     $window = Get-BridgePageWindow -ItemCount (@(Get-SettingPickItems -Name $Name)).Count -Page $Page -PageSize $PageSize
-    if ($window.PageCount -gt 1) { $lines += "<i>صفحة $($window.Page + 1) من $($window.PageCount)</i>" }
+    if ($window.PageCount -gt 1) { $lines += (T 'kb.pageHtml' $($window.Page + 1) $($window.PageCount)) }
     $lines += ''
     $lines += (T 'kb.tapToToggle')
     return ($lines -join "`n")
@@ -2932,7 +2930,7 @@ function Switch-SettingPick {
     $stored = ($chosen -join ', ')
     Set-Setting -Name $Name -Value $stored
     Write-BridgeLog "User $UserId set $Name = $stored"
-    Add-AuditEntry "⚙️ $Name = $stored - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'kb.settingAudit' $Name $stored $(Format-UserAuditActor -UserId $UserId))
     Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId -Page $Page
 }
 
@@ -2941,7 +2939,7 @@ function Clear-SettingPick {
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-Setting -Name $Name -Value ''
     Write-BridgeLog "User $UserId cleared $Name"
-    Add-AuditEntry "⚙️ إفراغ $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'kb.emptiedAudit' $Name $(Format-UserAuditActor -UserId $UserId))
     Show-SettingPicker -Name $Name -ChatId $ChatId -UserId $UserId
 }
 
@@ -2972,7 +2970,7 @@ function Show-SettingChoices {
         return
     }
     if ($script:SettingChoices.ContainsKey($Name)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "اختر قيمة $Name`:" -ReplyMarkup (Get-SettingChoiceKeyboard -Name $Name)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.chooseValueFor' $Name) -ReplyMarkup (Get-SettingChoiceKeyboard -Name $Name)
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'setting_text'; Name = $Name; UserId = $UserId }
@@ -2984,9 +2982,9 @@ function Show-SettingChoices {
     # lists are a different case: there the value is shown to somebody who came
     # to look at something else, and it stays in the transcript afterwards.
     $prompt = if ($Name -eq 'NewsFilePath') {
-        "أرسل المسار المطلق لملف الأخبار بصيغة TXT.`nالحالي: $(Get-Setting $Name)`nالافتراضي: $($script:DefaultSettings[$Name])`nلن يتم إنشاء الملف أو تعديله في هذه الخطوة."
+        (T 'kb.sendNewsPath' $(Get-Setting $Name) $($script:DefaultSettings[$Name]))
     }
-    else { "أرسل القيمة الجديدة لـ $Name (الحالية: $(Get-Setting $Name)، الافتراضية: $($script:DefaultSettings[$Name])):" }
+    else { (T 'kb.sendNewValue' $Name $(Get-Setting $Name) $($script:DefaultSettings[$Name])) }
     Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -3016,7 +3014,7 @@ function Complete-SettingText {
     $shownFrom = Format-ConfigDiffValue -Name ([string]$state.Name) -Value $previous
     $shownTo = Format-ConfigDiffValue -Name ([string]$state.Name) -Value $trimmed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $shownTo"
-    Add-AuditEntry "⚙️ $($state.Name) = $shownTo - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
+    Add-AuditEntry (T 'kb.settingAudit' $($state.Name) $shownTo $(Format-UserAuditActor -UserId ([long]$state.UserId)))
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $shownFrom -To $shownTo) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -3046,6 +3044,6 @@ function Set-SettingChoice {
     $previous = Get-Setting $Name
     Set-Setting -Name $Name -Value $choices[$Index]
     Write-BridgeLog "User $UserId set $Name = $($choices[$Index])"
-    Add-AuditEntry "⚙️ $Name = $($choices[$Index]) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'kb.settingAudit' $Name $($choices[$Index]) $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From $previous -To $choices[$Index]) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }

@@ -83,10 +83,10 @@ function Complete-OperationReferenceLookup {
     # the [string] that produced is what threw in production.
     $lines = @(Find-OperationByReference -Reference $Value)
     $text = if ($lines.Count -eq 0) {
-        "🔎 لا سجل بالمرجع $($Value.Trim()).`nقد يكون السجل دُوِّر أو مُسح."
+        (T 'diag.noRecord' $($Value.Trim()))
     }
     else {
-        "🔎 المرجع $($Value.Trim()) — $($lines.Count) سطرًا:`n`n" + ($lines -join "`n")
+        (T 'diag.referenceLines' $($Value.Trim()) $($lines.Count)) + ($lines -join "`n")
     }
     # A log line is columns held together by spaces, so it is the one thing on
     # these screens a proportional font actively breaks: id=, action= and
@@ -95,7 +95,7 @@ function Complete-OperationReferenceLookup {
     $lookupKeyboard = Get-DiagnosticsKeyboard
     if ($lines.Count -gt 0) {
         $lookupBlocks = @(
-            @{ type = 'heading'; text = "🔎 المرجع $($Value.Trim()) — $($lines.Count) سطرًا"; size = 3 }
+            @{ type = 'heading'; text = (T 'diag.referenceLinesShort' $($Value.Trim()) $($lines.Count)); size = 3 }
             @{ type = 'pre'; text = ($lines -join "`n") }
         )
         if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $lookupBlocks -ReplyMarkup $lookupKeyboard) { return }
@@ -165,7 +165,7 @@ function Invoke-DiagnosticBundleCommand {
     try {
         $bundlePath = New-DiagnosticBundle
         if (Send-TelegramDocument -ChatId $ChatId -FilePath $bundlePath -Caption (T 'diag.bundleNote')) {
-            Add-AuditEntry "📦 تنزيل حزمة تشخيص منقحة - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+            Add-AuditEntry (T 'diag.bundleAudit' $(Format-UserAuditActor -UserId $UserId))
         }
         else {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.bundleSendFailed') -ReplyMarkup (Get-DiagnosticsKeyboard)
@@ -188,7 +188,7 @@ function Request-DiagnosticLogClear {
     )
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'diagnostic_log_clear'; Kind = $Kind; UserId = $UserId }
     $label = if ($Kind -eq 'runtime') { (T 'diag.currentRunLog') } else { (T 'diag.permanentAuditLog') }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ هل تريد مسح $label؟`nلا يؤثر هذا على onair.json أو القوالب الموجودة على الهواء." -ReplyMarkup @{
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.confirmClear' $label) -ReplyMarkup @{
         inline_keyboard = @(
             , @((New-Button (T 'diag.yesClear') 'diag:clearconfirm' -Style danger), (New-Button (T 'common.cancel') 'menu:diagnostics'))
         )
@@ -244,19 +244,19 @@ function Invoke-DiagnosticsCommand {
     $text = @(
         (T 'diag.title'),
         "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
-        "وقت البناء: $buildText | مدة التشغيل: $(Format-DurationSeconds -Seconds ([int]$uptime.TotalSeconds))",
-        "المعالج: $($diagnostics.Processor)",
-        "الذاكرة: Working $($diagnostics.WorkingSetMB) MB | Private $($diagnostics.PrivateMemoryMB) MB",
-        "مساحة القرص الحرة: $diskText",
-        "أحجام الملفات: $fileText",
-        "عمليات الهواء: نجاح $($diagnostics.AirOperations.Success) | فشل $($diagnostics.AirOperations.Failed) | محظور $($diagnostics.AirOperations.Blocked)",
-        "Cinegy: $($config.AirServerAddress) / قناة $($config.AirChannelNumber)",
-        "القوالب: $(@($store.Order).Count) | تحذيرات القوالب: $(@($store.Errors).Count)",
-        "المحادثات المعلقة: $($script:PendingState.Count) | أقفال الطبقات: $($script:LayerLocks.Count)",
-        "طابور postbox: $($script:PostShowQueue.Count) | مؤقتات الإخفاء: $($script:AutoHideQueue.Count)",
-        "الأحداث المجدولة القادمة: $(@(Get-UpcomingScheduleEvents).Count) | ملف الجدولة: $script:scheduleFile",
-        "لقطات قيد التنفيذ: $($script:SnapshotJobs.Count) | relay: $relayState",
-        "حالة Cinegy المحلية: $($script:RuntimeState.Monitoring.CinegyHealthState)",
+        (T 'diag.builtAt' $buildText $(Format-DurationSeconds -Seconds ([int]$uptime.TotalSeconds))),
+        (T 'diag.cpu' $($diagnostics.Processor)),
+        (T 'diag.memory' $($diagnostics.WorkingSetMB) $($diagnostics.PrivateMemoryMB)),
+        (T 'diag.freeDisc' $diskText),
+        (T 'diag.fileSizes' $fileText),
+        (T 'diag.airOps' $($diagnostics.AirOperations.Success) $($diagnostics.AirOperations.Failed) $($diagnostics.AirOperations.Blocked)),
+        (T 'diag.cinegy' $($config.AirServerAddress) $($config.AirChannelNumber)),
+        (T 'diag.templates' $(@($store.Order).Count) $(@($store.Errors).Count)),
+        (T 'diag.pendingChats' $($script:PendingState.Count) $($script:LayerLocks.Count)),
+        (T 'diag.postbox' $($script:PostShowQueue.Count) $($script:AutoHideQueue.Count)),
+        (T 'diag.upcoming' $(@(Get-UpcomingScheduleEvents).Count) $script:scheduleFile),
+        (T 'diag.snapshots' $($script:SnapshotJobs.Count) $relayState),
+        (T 'diag.localCinegyState' $($script:RuntimeState.Monitoring.CinegyHealthState)),
         "",
         (Format-CinegyTelemetryStatus -Telemetry $telemetry)
     ) -join "`n"
@@ -304,8 +304,8 @@ function Invoke-AuditCommand {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'diag.latestOps'))
     $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("الفترة: $(Get-AuditTrailStamp -Line @($shown)[0]) ← $(Get-AuditTrailStamp -Line @($shown)[-1])")
-    $lines.Add("المعروض: $($shown.Count) من $($script:AuditTrail.Count) سطرًا محفوظة")
+    $lines.Add((T 'diag.period' $(Get-AuditTrailStamp -Line @($shown)[0]) $(Get-AuditTrailStamp -Line @($shown)[-1])))
+    $lines.Add((T 'diag.shown' $($shown.Count) $($script:AuditTrail.Count)))
     $lines.Add('')
     $lines.AddRange([string[]]$shown)
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-AuditScreenKeyboard)
@@ -345,11 +345,11 @@ function Request-Approval {
         Write-BridgeLog "Access request from $ChatId but no AdminChatIds configured to notify" "WARN"
         return $true
     }
-    $nameLine = if ($name) { "الاسم: $name`n" } else { "" }
+    $nameLine = if ($name) { (T 'diag.name' $name) } else { "" }
     # The request is queued either way; this decides only whether it also
     # interrupts somebody. A busy public bot can leave them to 👤 طلبات الوصول.
     if (Get-Setting 'NotifyAdminsOnAccessRequest') {
-        Send-AdminBroadcast -Text "🔔 طلب وصول جديد للبوت`n$($nameLine)رقم المحادثة: $ChatId`nرقم المستخدم: $UserId" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
+        Send-AdminBroadcast -Text (T 'diag.newRequest' $($nameLine) $ChatId $UserId) -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
     }
     Write-BridgeLog "Access request from chat $ChatId / user $UserId ($name) sent to admins"
     # When it was asked, as data: the decision rows are only half an answer
@@ -438,8 +438,8 @@ function Complete-AccessRequestName {
     Clear-PendingState -ChatId $ChatId
     $script:PendingApprovals[$ChatId].Name = $clean
     Write-BridgeLog "Access requester $ChatId gave the name '$clean'"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ وصل اسمك: $clean`nطلبك عند المشرفين، وستصلك رسالة فور الموافقة."
-    Send-AdminBroadcast -Text "📝 طلب الوصول من $ChatId باسم: $clean" -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.nameReceived' $clean)
+    Send-AdminBroadcast -Text (T 'diag.requestAudit' $ChatId $clean) -ReplyMarkup (Get-ApprovalKeyboard -TargetChatId $ChatId)
     return $true
 }
 
@@ -459,7 +459,7 @@ function Grant-UserAccess {
     # and two admins (or one double-tap) previously re-ran the whole flow and
     # re-notified the new user.
     if ((Test-Authorized -ChatId $TargetChatId -UserId $targetUserId) -and -not $script:PendingApprovals.ContainsKey($TargetChatId)) {
-        Send-TelegramMessage -ChatId $ApprovedBy -Text "ℹ️ $TargetChatId مصرّح له بالفعل." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
+        Send-TelegramMessage -ChatId $ApprovedBy -Text (T 'diag.alreadyAuthorised' $TargetChatId) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
         return
     }
 
@@ -485,7 +485,7 @@ function Grant-UserAccess {
     # wait for the quiet-hours digest.
     $approverName = Format-UserAuditActor -UserId $ApproverUserId
     $grantedName = if ($requestedName) { "$requestedName ‎($targetUserId)‎" } else { [string]$targetUserId }
-    Send-AdminBroadcast -Text "👤 مُنح الوصول: $grantedName — بواسطة $approverName" 
+    Send-AdminBroadcast -Text (T 'diag.accessGranted' $grantedName $approverName) 
     # The name the person gave for themselves becomes their alias here, which
     # is the whole reason for asking: the roster and every audit line read it
     # from the first minute, with no administrator typing it in. An alias
@@ -495,7 +495,7 @@ function Grant-UserAccess {
             Write-BridgeLog "Adopted '$requestedName' as the alias for user $targetUserId from their access request"
         }
     }
-    Add-AuditEntry "👤 موافقة على $(Format-UserAuditActor -UserId ([long]$targetUserId)) - بواسطة $(Format-UserAuditActor -UserId $ApproverUserId)"
+    Add-AuditEntry (T 'diag.approvedAudit' $(Format-UserAuditActor -UserId ([long]$targetUserId)) $(Format-UserAuditActor -UserId $ApproverUserId))
     # And as data, not only as an Arabic sentence. The screen that answers
     # "who let this person in, and when" cannot be built by parsing prose:
     # every audit line here carried the whole decision inside one message
@@ -503,7 +503,7 @@ function Grant-UserAccess {
     Write-AuditRecord -OperationId "access-$([guid]::NewGuid().ToString('N'))" -EventName 'access' `
         -Result 'approved' -UserId $ApproverUserId -ChatId $TargetChatId -Action 'approve' `
         -Target ([string]$targetUserId) -Message ([string]$requestedName)
-    Send-TelegramMessage -ChatId $ApprovedBy -Text "✅ تمت الموافقة على $TargetChatId وأُضيف إلى المستخدمين المصرح لهم.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
+    Send-TelegramMessage -ChatId $ApprovedBy -Text (T 'diag.approvedAdded' $TargetChatId $(Get-ConfigSaveWarning)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text (T 'diag.approved') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)
 }
 
@@ -516,7 +516,7 @@ function Deny-UserAccess {
     # could ask again a second later, for ever.
     $blocked = [bool](Get-Setting 'BlockRejectedRequesters') -and (Block-AccessChat -ChatId $TargetChatId -Reason 'rejected' -ByUserId $RejecterUserId)
     Write-BridgeLog "User $RejecterUserId rejected access request from $TargetChatId (blocked=$blocked)"
-    Add-AuditEntry "👤 رفض طلب $TargetChatId - بواسطة $(Format-UserAuditActor -UserId $RejecterUserId)"
+    Add-AuditEntry (T 'diag.refusedAudit' $TargetChatId $(Format-UserAuditActor -UserId $RejecterUserId))
     # A rejection leaves nothing behind anywhere else - no profile, no roster
     # entry - so without this row the screen would show only the people who
     # were let in, which is the half of the history nobody needs to ask about.
@@ -524,6 +524,6 @@ function Deny-UserAccess {
         -Result 'rejected' -UserId $RejecterUserId -ChatId $TargetChatId -Action 'reject' `
         -Target ([string]$TargetChatId) -Message $(if ($blocked) { 'blocked' } else { '' })
     $note = if ($blocked) { (T 'diag.chatBlockedToo') } else { "" }
-    Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId.$note" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
+    Send-TelegramMessage -ChatId $RejectedBy -Text (T 'diag.refused' $TargetChatId $note) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
     Send-TelegramMessage -ChatId $TargetChatId -Text (T 'diag.requestRefused')
 }

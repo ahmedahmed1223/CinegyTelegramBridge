@@ -30,10 +30,10 @@ function Complete-TemplateReminderMinutes {
     if ([bool](Get-JsonProp $template 'LongRunning')) { Clear-PendingState -ChatId $ChatId; Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.nowLongRun') -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
     $result = Save-TemplateReminderMinutes -TemplateKey ([string]$state.TemplateKey) -Minutes $minutes
     Clear-PendingState -ChatId $ChatId
-    if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ تنبيه القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
+    if (-not $result.Success) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.alertNotSaved' $($result.Error)) -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId); return }
     $minutesText = Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes'
-    Add-AuditEntry "🔔 ضبط تنبيه ظهور $($state.TemplateKey) على $minutesText - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    $message = if ($minutes -eq 0) { (T 'atpl.alertStopped') } else { "✅ تم ضبط تنبيه الظهور بعد $minutesText." }
+    Add-AuditEntry (T 'atpl.alertSetAudit' $($state.TemplateKey) $minutesText $(Format-UserAuditActor -UserId $UserId))
+    $message = if ($minutes -eq 0) { (T 'atpl.alertStopped') } else { (T 'atpl.alertSet' $minutesText) }
     Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex ([int]$state.TemplateIndex) -ChatId $ChatId -UserId $UserId)
 }
 
@@ -57,12 +57,12 @@ function Show-InvalidTemplatesScreen {
     # it live, so a page turn between taps still lands on the right entry.
     $window = Get-BridgePageWindow -ItemCount $entries.Count -Page $Page -PageSize 5
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>🧹 قوالب غير صالحة ($($entries.Count))</b>")
+    $lines.Add((T 'atpl.invalidTemplates' $($entries.Count)))
     $lines.Add((T 'atpl.skippedNote'))
     $rows = @()
     foreach ($i in $window.StartIndex..$window.EndIndex) {
         $lines.Add("• <b>$(ConvertTo-TelegramHtmlText $entries[$i].Key)</b> — $(ConvertTo-TelegramHtmlText $entries[$i].Reason)")
-        $rows += , @((New-Button "🗑 حذف $($entries[$i].Key)" "tplinv:ask:$i"))
+        $rows += , @((New-Button (T 'atpl.delete' $($entries[$i].Key)) "tplinv:ask:$i"))
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
@@ -84,12 +84,12 @@ function Start-TemplateDefinitionPrompt {
     if ($Action -ne 'create' -and -not $template) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
     if ($Action -eq 'delete') {
         Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_review'; Action='delete'; TemplateKey=$template.Key; Definition=@{}; UserId=$UserId }
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ مراجعة حذف القالب '$($template.Key)'. لن يُحذف إذا كان على الهواء أو ضمن جدولة قادمة." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.deleteReview' $($template.Key)) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
         return
     }
     $example = if ($Action -eq 'create') { '{"key":"new-template","path":"titles/new.cintitle","layer":4,"fields":["Headline.Text"]}' } else { "{`"path`":`"$($template.Path)`",`"layer`":$($template.Layer),`"fields`":[]}" }
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_json'; Action=$Action; TemplateKey=if ($template) { $template.Key } else { '' }; UserId=$UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل تعريف القالب بصيغة JSON في رسالة واحدة.`nمثال:`n$example" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.sendJson' $example) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-TemplateCreateWizard {
@@ -130,19 +130,19 @@ function Get-TemplateWizardReviewText {
         if ($Definition.ContainsKey($Name) -and "$($Definition[$Name])".Trim()) { [string]$Definition[$Name] } else { $Fallback } }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("🔎 مراجعة القالب الجديد '$(& $read 'key' '?')'")
+    $lines.Add((T 'atpl.reviewNew' $(& $read 'key' '?')))
     $lines.Add('━━━━━━━━━━━━━━')
-    $lines.Add("المسار: $(& $read 'path' '?')")
+    $lines.Add((T 'atpl.path' $(& $read 'path' '?')))
     $resolved = Resolve-TemplateScenePath -Path ([string]$Definition['path'])
-    if ($resolved -ne [string]$Definition['path']) { $lines.Add("يُقرأ من: $resolved") }
+    if ($resolved -ne [string]$Definition['path']) { $lines.Add((T 'atpl.readFrom' $resolved)) }
     $lines.Add($(if ($Definition.ContainsKey('device') -and [string]$Definition['device']) {
-                "الجهاز: gfx_$($Definition['device'])"
+                (T 'atpl.device' $($Definition['device']))
             }
-            else { "الطبقة: $(& $read 'layer' '?')" }))
+            else { (T 'atpl.layer' $(& $read 'layer' '?')) }))
     $fields = @($Definition['fields'])
-    $lines.Add("الحقول: $(if ($fields.Count -gt 0) { $fields -join (T 'common.comma') } else { (T 'atpl.noFields') })")
-    $lines.Add("الوصف: $(& $read 'description' (T 'atpl.noDescription'))")
-    $lines.Add("التصنيف: $(& $read 'category' (T 'atpl.uncategorised'))")
+    $lines.Add((T 'atpl.fields' $(if ($fields.Count -gt 0) { $fields -join (T 'common.comma') } else { (T 'atpl.noFields') })))
+    $lines.Add((T 'atpl.description' $(& $read 'description' (T 'atpl.noDescription'))))
+    $lines.Add((T 'atpl.category' $(& $read 'category' (T 'atpl.uncategorised'))))
     $lines.Add('')
     $lines.Add((T 'atpl.nothingSavedYet'))
     return ($lines -join "`n")
@@ -160,11 +160,11 @@ function Complete-TemplateCreateWizardStep {
                 Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.badKey') -ReplyMarkup (Get-CancelKeyboard); return
             }
             $existing = Get-JsonProp (Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json) $trimmed
-            if ($existing) { Send-TelegramMessage -ChatId $ChatId -Text "❌ يوجد قالب بالمفتاح '$trimmed' بالفعل. أرسل مفتاحًا آخر:" -ReplyMarkup (Get-CancelKeyboard); return }
+            if ($existing) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.keyTaken' $trimmed) -ReplyMarkup (Get-CancelKeyboard); return }
             $definition['key'] = $trimmed
             $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-            $baseHint = if ([string](Get-Setting 'TemplateBasePath')) { "`nأو اسم الملف وحده، فمجلد المشاهد مضبوط: $(Get-Setting 'TemplateBasePath')" } else { '' }
-            Send-TelegramMessage -ChatId $ChatId -Text ("(2/5) أرسل مسار ملف المشهد كاملًا، مثل:`nC:\Cinegy\Titler\Scenes\Lower3rd.cintitle`nويُقبل أيضًا مسار الشبكة \\nas01\scenes\... و%PROGRAMDATA%\...$baseHint") -ReplyMarkup (Get-CancelKeyboard)
+            $baseHint = if ([string](Get-Setting 'TemplateBasePath')) { (T 'atpl.orFileNameAlone' $(Get-Setting 'TemplateBasePath')) } else { '' }
+            Send-TelegramMessage -ChatId $ChatId -Text ((T 'atpl.add2' $baseHint)) -ReplyMarkup (Get-CancelKeyboard)
         }
         'template_create_path' {
             $trimmed = $Value.Trim()
@@ -201,12 +201,12 @@ function Complete-TemplateCreateWizardStep {
                 # may simply not see it from where it runs.
                 $definition['pendingPath'] = $trimmed
                 $state.Mode = 'template_create_path'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-                Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا أرى الملف على هذا المسار:`n$resolved`n`nللمتابعة به رغم ذلك أرسل: تم`nأو أرسل مسارًا آخر." -ReplyMarkup (Get-CancelKeyboard); return
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.fileNotSeen' $resolved) -ReplyMarkup (Get-CancelKeyboard); return
             }
             $definition.Remove('pendingPath')
             $definition['path'] = $trimmed
             $state.Mode = 'template_create_layer'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text "✅ الملف موجود.`n$(Get-TemplateWizardLayerPrompt)" -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.fileThere' $(Get-TemplateWizardLayerPrompt)) -ReplyMarkup (Get-CancelKeyboard)
         }
         'template_create_layer' {
             # A layer number, or a Cinegy device name for the layers that do
@@ -217,7 +217,7 @@ function Complete-TemplateCreateWizardStep {
             if ([int]::TryParse($trimmed, [ref]$layer) -and $layer -gt 0) {
                 $definition['layer'] = $layer
                 $used = @(Get-TemplateLayerUsage -Layer $layer)
-                $warning = if ($used.Count -gt 0) { "`n⚠️ الطبقة $layer يستخدمها أيضًا: $($used -join (T 'common.comma'))" } else { '' }
+                $warning = if ($used.Count -gt 0) { (T 'atpl.layerShared' $layer $($used -join (T 'common.comma'))) } else { '' }
                 $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
                 Send-TelegramMessage -ChatId $ChatId -Text ((Get-TemplateWizardFieldsPrompt) + $warning) -ReplyMarkup (Get-CancelKeyboard)
                 return
@@ -226,7 +226,7 @@ function Complete-TemplateCreateWizardStep {
                 $definition['device'] = $trimmed.ToLowerInvariant()
                 $definition['layer'] = 0
                 $state.Mode = 'template_create_fields'; $state.Definition = $definition; Set-PendingState -ChatId $ChatId -State $state
-                Send-TelegramMessage -ChatId $ChatId -Text "✅ سيُستخدم الجهاز gfx_$($definition['device']).`n$(Get-TemplateWizardFieldsPrompt)" -ReplyMarkup (Get-CancelKeyboard)
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.deviceWillBeUsed' $($definition['device']) $(Get-TemplateWizardFieldsPrompt)) -ReplyMarkup (Get-CancelKeyboard)
                 return
             }
             Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.needLayerOrDevice') -ReplyMarkup (Get-CancelKeyboard)
@@ -278,11 +278,11 @@ function Get-TemplateDefinitionComparisonText {
         if ($oldJson -ne $newJson) {
             $oldDisplay = if ($oldJson.Length -gt 120) { $oldJson.Substring(0,117) + '...' } else { $oldJson }
             $newDisplay = if ($newJson.Length -gt 120) { $newJson.Substring(0,117) + '...' } else { $newJson }
-            $lines.Add("• $name`n  قبل: $oldDisplay`n  بعد: $newDisplay")
+            $lines.Add((T 'atpl.diffRow' $name $oldDisplay $newDisplay))
         }
     }
     if ($lines.Count -eq 0) { return (T 'atpl.noRealChanges') }
-    return "الاختلافات:`n$($lines -join "`n")"
+    return (T 'atpl.differences' $($lines -join "`n"))
 }
 
 function Complete-TemplateDefinitionJson {
@@ -298,7 +298,7 @@ function Complete-TemplateDefinitionJson {
     Set-PendingState -ChatId $ChatId -State $state
     $existing = if ($state.Action -eq 'edit') { Get-JsonProp (Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json) $key } else { $null }
     $comparison = Get-TemplateDefinitionComparisonText -Existing $existing -Definition $definition
-    Send-TelegramMessage -ChatId $ChatId -Text "🔎 مراجعة $($state.Action) للقالب '$key'`nالمسار: $($definition.path)`nالطبقة: $($definition.layer)`n`n$comparison`n`nلن يُحفظ شيء قبل التأكيد، وستُنشأ نسخة احتياطية من التعريفات الحالية." -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.reviewChange' $($state.Action) $key $($definition.path) $($definition.layer) $comparison) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
 }
 
 function Confirm-TemplateDefinitionChange {
@@ -307,6 +307,6 @@ function Confirm-TemplateDefinitionChange {
     if (-not $state -or $state.Mode -ne 'template_definition_review' -or [long]$state.UserId -ne $UserId) { return }
     Clear-PendingState -ChatId $ChatId
     $result = Save-TemplateDefinitionChange -TemplateKey ([string]$state.TemplateKey) -Action ([string]$state.Action) -Definition ([hashtable]$state.Definition)
-    if ($result.Success) { Add-AuditEntry "📚 $($state.Action) قالب $($state.TemplateKey) - بواسطة $(Format-UserAuditActor -UserId $UserId)"; Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.savedWithBackup') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
-    else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
+    if ($result.Success) { Add-AuditEntry (T 'atpl.savedAudit' $($state.Action) $($state.TemplateKey) $(Format-UserAuditActor -UserId $UserId)); Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.savedWithBackup') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
+    else { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.saveFailed' $($result.Error)) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }

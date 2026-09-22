@@ -41,12 +41,12 @@ function Invoke-SettingsExport {
         Set-Content -LiteralPath $path -Value ($document | ConvertTo-Json -Depth 8) -Encoding utf8 -ErrorAction Stop
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر تجهيز ملف الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.exportFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
-    $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption "📤 نسخة الإعدادات ($($payload.Count) خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين."
+    $sent = Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption (T 'cfg.exportNote2' $($payload.Count))
     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-    if ($sent) { Add-AuditEntry "📤 تصدير الإعدادات - بواسطة $(Format-UserAuditActor -UserId $UserId)" }
+    if ($sent) { Add-AuditEntry (T 'cfg.exportAudit' $(Format-UserAuditActor -UserId $UserId)) }
     return [bool]$sent
 }
 
@@ -56,21 +56,21 @@ function ConvertTo-ImportedSettingValue {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)]$Value)
     $default = $script:DefaultSettings[$Name]
     if ($default -is [bool]) {
-        if ($Value -isnot [bool]) { throw "الخيار $Name يجب أن يكون true أو false." }
+        if ($Value -isnot [bool]) { throw (T 'cfg.mustBeBool' $Name) }
         return [bool]$Value
     }
     if ($default -is [int]) {
-        if ($Value -isnot [int] -and $Value -isnot [long]) { throw "الخيار $Name يجب أن يكون رقمًا صحيحًا." }
-        if ([long]$Value -lt 0 -or [long]$Value -gt [int]::MaxValue) { throw "قيمة الخيار $Name خارج الحدود المسموحة." }
+        if ($Value -isnot [int] -and $Value -isnot [long]) { throw (T 'cfg.mustBeInt' $Name) }
+        if ([long]$Value -lt 0 -or [long]$Value -gt [int]::MaxValue) { throw (T 'cfg.outOfRange' $Name) }
         return [int]$Value
     }
     if ($default -is [double]) {
-        if ($Value -isnot [int] -and $Value -isnot [long] -and $Value -isnot [double] -and $Value -isnot [decimal]) { throw "الخيار $Name يجب أن يكون رقمًا." }
-        if ([double]$Value -lt 0) { throw "قيمة الخيار $Name خارج الحدود المسموحة." }
+        if ($Value -isnot [int] -and $Value -isnot [long] -and $Value -isnot [double] -and $Value -isnot [decimal]) { throw (T 'cfg.mustBeNumber' $Name) }
+        if ([double]$Value -lt 0) { throw (T 'cfg.outOfRange' $Name) }
         return [double]$Value
     }
-    if ($Value -isnot [string]) { throw "الخيار $Name يجب أن يكون نصًا." }
-    if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw "قيمة الخيار $Name غير مسموحة." }
+    if ($Value -isnot [string]) { throw (T 'cfg.mustBeText' $Name) }
+    if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw (T 'cfg.valueNotAllowed' $Name) }
     # Refused here rather than at the screen: a setting can be changed by an
     # import, by a restore, and by two screens, and a rule enforced at one
     # door is a rule with three ways round it.
@@ -79,10 +79,10 @@ function ConvertTo-ImportedSettingValue {
         $number = 0
         if ([int]::TryParse([string]$Value, [ref]$number)) {
             if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) {
-                throw "$Name لا يقلّ عن $($bounds.Minimum)."
+                throw (T 'cfg.atLeast' $Name $($bounds.Minimum))
             }
             if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) {
-                throw "$Name لا يزيد عن $($bounds.Maximum)."
+                throw (T 'cfg.atMost' $Name $($bounds.Maximum))
             }
         }
     }
@@ -126,7 +126,7 @@ function Test-SettingsImport {
     $changes = [System.Collections.Generic.List[object]]::new()
     foreach ($property in $incoming.PSObject.Properties) {
         if (-not $script:DefaultSettings.Contains($property.Name)) {
-            return [pscustomobject]@{ Success = $false; Error = "خيار غير معروف في الملف: $($property.Name)"; Changes = @() }
+            return [pscustomobject]@{ Success = $false; Error = (T 'cfg.unknownOption' $($property.Name)); Changes = @() }
         }
         try { $value = ConvertTo-ImportedSettingValue -Name $property.Name -Value $property.Value }
         catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; Changes = @() } }
@@ -153,15 +153,15 @@ function Receive-SettingsImport {
         }
         $script:PendingSettingsImport = @{ Path = $staged; UserId = $UserId; Changes = @($validation.Changes) }
         # Masked by name like every other settings screen. Today nothing in`r`n        # Settings is a real credential, so this is a latch for the next one`r`n        # rather than a leak being closed - the single-setting change screen`r`n        # already masks and this one did not, and a rule enforced in one of two`r`n        # equivalent places is the rule that drifts.`r`n        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $(Protect-SettingDisplayValue -Name $_.Name -Value $_.From) ← $(Protect-SettingDisplayValue -Name $_.Name -Value $_.To)" })
-        $more = if (@($validation.Changes).Count -gt 20) { "`n… و$(@($validation.Changes).Count - 20) خيارًا آخر." } else { '' }
-        Send-TelegramMessage -ChatId $ChatId -Text ("⚠️ مراجعة استيراد الإعدادات — $(@($validation.Changes).Count) تغييرًا:`n" + ($preview -join "`n") + $more) `
+        $more = if (@($validation.Changes).Count -gt 20) { (T 'cfg.andMoreOptions' $(@($validation.Changes).Count - 20)) } else { '' }
+        Send-TelegramMessage -ChatId $ChatId -Text ((T 'cfg.importReview' $(@($validation.Changes).Count)) + ($preview -join "`n") + $more) `
             -ReplyMarkup @{ inline_keyboard = @(, @(
                     @{ text = (T 'cfg.apply'); callback_data = 'cfgimport:apply'; style = 'success' },
                     @{ text = (T 'common.cancel'); callback_data = 'cfgimport:cancel' })) }
     }
     catch {
         Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل استيراد الإعدادات: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-AdminToolsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.importFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-AdminToolsKeyboard)
     }
 }
 
@@ -185,8 +185,8 @@ function Confirm-SettingsImport {
     $script:PendingSettingsImport = $null
     Remove-Item -LiteralPath ([string]$pending.Path) -Force -ErrorAction SilentlyContinue
     Write-BridgeLog "Admin $UserId imported $(@($pending.Changes).Count) setting(s)" 'WARN'
-    Add-AuditEntry "📥 استيراد الإعدادات ($(@($pending.Changes).Count) تغييرًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ طُبِّق $(@($pending.Changes).Count) تغييرًا.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-AdminToolsKeyboard)
+    Add-AuditEntry (T 'cfg.importAudit' $(@($pending.Changes).Count) $(Format-UserAuditActor -UserId $UserId))
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.applied' $(@($pending.Changes).Count) $(Get-ConfigSaveWarning)) -ReplyMarkup (Get-AdminToolsKeyboard)
     return $true
 }
 
@@ -214,7 +214,7 @@ function Invoke-BridgeSelfTest {
     }
     $conflict = @(Get-TemplateTestLayerConflict -Layer $layer)
     if ($conflict.Count -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $layer مستخدمة في قوالب الإنتاج: $($conflict -join (T 'common.comma'))" -ReplyMarkup (Get-AdminToolsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.trialLayerInUse' $layer $($conflict -join (T 'common.comma'))) -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $store = Get-TemplateStore
@@ -236,7 +236,7 @@ function Invoke-BridgeSelfTest {
     $script:BridgeSelfTestFailed = $false
 
     $before = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec $monitorTimeout
-    & $record "قراءة حالة الطبقة $layer" ([bool]$before.Success) $(if ($before.Success) { '' } else { [string]$before.Error })
+    & $record (T 'cfg.readingLayer' $layer) ([bool]$before.Success) $(if ($before.Success) { '' } else { [string]$before.Error })
     if (-not $before.Success -or [bool]$before.IsOnAir) {
         & $record (T 'cfg.layerReady') $false (T 'cfg.layerBusy')
         Send-TelegramMessage -ChatId $ChatId -Text ((T 'cfg.pathCheckFailedNl') + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard)
@@ -272,7 +272,7 @@ function Invoke-BridgeSelfTest {
     $failed = [bool]$script:BridgeSelfTestFailed
     $header = if ($failed) { (T 'cfg.pathCheckFailed') } else { (T 'cfg.pathCheckPassed') }
     Write-BridgeLog "Live self-test on layer $layer by user ${UserId}: $(if ($failed) { 'FAILED' } else { 'passed' })" $(if ($failed) { 'WARN' } else { 'INFO' })
-    Add-AuditEntry "🧪 فحص المسار الحي على طبقة $layer - $(if ($failed) { (T 'cfg.failed') } else { (T 'cfg.passed') }) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'cfg.pathCheckAudit' $layer $(if ($failed) { (T 'cfg.failed') } else { (T 'cfg.passed') }) $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text ("$header`n" + ($steps -join "`n")) -ReplyMarkup (Get-AdminToolsKeyboard)
     return (-not $failed)
 }
@@ -293,11 +293,11 @@ function Confirm-TemplateTest {
     $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $testLayer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not $status.Success -or $null -eq $status.IsOnAir) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ تعذر التأكد من فراغ طبقة التجربة $testLayer؛ لم يُرسل شيء." -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.trialLayerUnsure' $testLayer) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
         return
     }
     if ([bool]$status.IsOnAir) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ طبقة التجربة $testLayer مشغولة حاليًا؛ أخفها أو اختر طبقة أخرى." -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.trialLayerBusy' $testLayer) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
         return
     }
     $variables = @{}
@@ -308,7 +308,7 @@ function Confirm-TemplateTest {
         -Layer $testLayer -TemplatePath ([string]$template.Path) -Variables $variables -Types $types `
         -DefaultType ([string](Get-Setting 'AirVariableType')) -TimeoutSec (Get-AirTimeout)
     if (-not $result.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل اختبار القالب: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.templateTestFailed' $($result.Error)) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
         return
     }
     $script:OnAir[$testLayer] = @{ Key="[TEST] $($template.Key)"; At=(Get-Date); UserId=$UserId; ActiveId=[string]$result.EventId; Source='BotTest' }
@@ -316,8 +316,8 @@ function Confirm-TemplateTest {
     $seconds = [math]::Max(3, [math]::Min(300, [int]$state.AutoHideSeconds))
     $script:AutoHideQueue.Add(@{ Layer=$testLayer; At=(Get-Date).AddSeconds($seconds); ChatId=$ChatId; UserId=$UserId })
     Write-BridgeLog "Admin $UserId tested template '$($template.Key)' on isolated layer $testLayer for $seconds seconds" 'WARN'
-    Add-AuditEntry "🧪 اختبار قالب $($template.Key) على طبقة $testLayer - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ بدأ اختبار '$($template.Key)' على طبقة التجربة $testLayer وسيُخفى خلال $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')." -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
+    Add-AuditEntry (T 'cfg.templateTestAudit' $($template.Key) $testLayer $(Format-UserAuditActor -UserId $UserId))
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.templateTestStarted' $($template.Key) $testLayer $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
 }
 
 function Test-TemplateRegistryImport {
@@ -328,22 +328,22 @@ function Test-TemplateRegistryImport {
         $document = $rawText | ConvertFrom-Json -ErrorAction Stop
         $properties = @($document.PSObject.Properties)
         $maximumTemplates = Get-SettingInt 'TemplateRegistryImportMaxTemplates' 1
-        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw "يجب أن يحتوي السجل بين قالب واحد و$(Get-ArabicCountNoun -Count $maximumTemplates -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')." }
+        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw (T 'cfg.registerSize' $(Get-ArabicCountNoun -Count $maximumTemplates -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')) }
         foreach ($property in $properties) {
-            if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw "مفتاح القالب '$($property.Name)' غير صالح." }
+            if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw (T 'cfg.badTemplateKey' $($property.Name)) }
             $entry = $property.Value
             $templatePath = [string](Get-JsonProp $entry 'path')
             if ([string]::IsNullOrWhiteSpace($templatePath) -or -not [IO.Path]::IsPathRooted($templatePath) -or
                 -not [IO.Path]::GetExtension($templatePath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
-                throw "القالب '$($property.Name)' يحتاج مسارًا مطلقًا لملف .cintitle."
+                throw (T 'cfg.needsAbsolutePath' $($property.Name))
             }
             $layer = 0
             if (-not [int]::TryParse([string](Get-JsonProp $entry 'layer'), [ref]$layer) -or $layer -le 0) {
-                throw "القالب '$($property.Name)' يحتاج رقم طبقة موجبًا."
+                throw (T 'cfg.needsLayer' $($property.Name))
             }
             foreach ($field in @(Get-JsonProp $entry 'fields' | Where-Object { $null -ne $_ })) {
                 $fieldName = if ($field -is [string]) { [string]$field } else { [string](Get-JsonProp $field 'name') }
-                if ([string]::IsNullOrWhiteSpace($fieldName)) { throw "القالب '$($property.Name)' يحتوي حقلاً بلا اسم." }
+                if ([string]::IsNullOrWhiteSpace($fieldName)) { throw (T 'cfg.hasUnnamedField' $($property.Name)) }
             }
         }
         return [pscustomobject]@{ Success=$true; Error=''; Document=$document; Count=$properties.Count }
@@ -381,7 +381,7 @@ function Invoke-TemplateRegistryExport {
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return }
     $path = Get-TemplateRegistryFilePath
     if (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption (T 'cfg.exportNote')) {
-        Add-AuditEntry "📤 تصدير تعريفات القوالب - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Add-AuditEntry (T 'cfg.templateExportAudit' $(Format-UserAuditActor -UserId $UserId))
     }
 }
 
@@ -406,14 +406,14 @@ function Receive-TemplateRegistryImport {
         $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $validation.Document
         $state = @{ Mode='template_import_review'; UserId=$UserId; ImportStagedPath=$stagedPath }
         Set-PendingState -ChatId $ChatId -State $state
-        $summary = "🔎 مراجعة استيراد القوالب`nالإجمالي: $($validation.Count)`nمضاف: $($comparison.Added.Count)`nمعدّل: $($comparison.Changed.Count)`nمحذوف: $($comparison.Removed.Count)`nبلا تغيير: $($comparison.Unchanged.Count)`n`nلن يُستبدل الملف حتى التأكيد."
+        $summary = (T 'cfg.templateImportReview' $($validation.Count) $($comparison.Added.Count) $($comparison.Changed.Count) $($comparison.Removed.Count) $($comparison.Unchanged.Count))
         Send-TelegramMessage -ChatId $ChatId -Text $summary -ReplyMarkup @{ inline_keyboard=@(
             , @((New-Button (T 'cfg.approveImport') 'timport:confirm' -Style success), (New-Button (T 'common.cancel') 'menu:templatesadmin'))
         ) }
     }
     catch {
         Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ رُفض ملف الاستيراد: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.importRefused' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
     }
 }
 
@@ -430,7 +430,7 @@ function Set-ImportedTemplateRegistry {
         $liveKeys = @($script:OnAir.Values | ForEach-Object { [string](Get-JsonProp $_ 'Key') })
         $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
         $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
-        if ($blocked.Count -gt 0) { throw "لا يمكن تغيير أو حذف قالب مستخدم على الهواء أو في جدولة قادمة: $($blocked -join (T 'common.comma'))" }
+        if ($blocked.Count -gt 0) { throw (T 'cfg.lockedOnAir' $($blocked -join (T 'common.comma'))) }
         $backupPath = Backup-TemplateRegistryFile -Path $path
         [IO.File]::WriteAllText($temporary, ($validation.Document | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
@@ -449,10 +449,10 @@ function Confirm-TemplateRegistryImport {
     $result = Set-ImportedTemplateRegistry -StagedPath $stagedPath
     Clear-PendingState -ChatId $ChatId
     if ($result.Success) {
-        Add-AuditEntry "📥 استيراد تعريفات القوالب مع نسخة احتياطية - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Add-AuditEntry (T 'cfg.templateImportAudit' $(Format-UserAuditActor -UserId $UserId))
         Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.importedTemplates') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
     }
-    else { Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر اعتماد الاستيراد: $($result.Error)" -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
+    else { Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.approveFailed' $($result.Error)) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }
 
 function Get-DiagnosticWarnings {
@@ -464,13 +464,13 @@ function Get-DiagnosticWarnings {
     )
     $warnings = [System.Collections.Generic.List[string]]::new()
     if ($null -ne $Snapshot.DiskFreeGB -and [double]$Snapshot.DiskFreeGB -lt [math]::Max(1, $DiskFreeWarningGB)) {
-        $warnings.Add("⚠️ مساحة القرص الحرة منخفضة: $($Snapshot.DiskFreeGB) GB")
+        $warnings.Add((T 'cfg.lowDisc' $($Snapshot.DiskFreeGB)))
     }
     if ([long]$Snapshot.RuntimeStorageBytes -gt ([math]::Max(1, $RuntimeStorageWarningMB) * 1MB)) {
-        $warnings.Add("⚠️ حجم السجلات وملفات التشغيل تجاوز $RuntimeStorageWarningMB MB")
+        $warnings.Add((T 'cfg.logsOverLimit' $RuntimeStorageWarningMB))
     }
     if ([long]$Snapshot.BackupStorageBytes -gt ([math]::Max(1, $BackupStorageWarningMB) * 1MB)) {
-        $warnings.Add("⚠️ حجم النسخ الاحتياطية تجاوز $BackupStorageWarningMB MB")
+        $warnings.Add((T 'cfg.backupsOverLimit' $BackupStorageWarningMB))
     }
     # Two lists that are meant to agree, and nothing checked that they did:
     # an administrator with authority and no notices approved nothing because
@@ -479,10 +479,10 @@ function Get-DiagnosticWarnings {
     # never reaches them - so the screen has to say it.
     $mismatch = Get-AdminListMismatch
     if (@($mismatch.Unnotified).Count -gt 0) {
-        $warnings.Add("⚠️ مشرفون بلا إشعارات (في AdminUserIds لا AdminChatIds): $(@($mismatch.Unnotified) -join (T 'common.comma'))")
+        $warnings.Add((T 'cfg.adminsWithoutNotices' $(@($mismatch.Unnotified) -join (T 'common.comma'))))
     }
     if (@($mismatch.Unauthorized).Count -gt 0) {
-        $warnings.Add("⚠️ يصلهم إشعار المشرفين بلا صلاحية مشرف: $(@($mismatch.Unauthorized) -join (T 'common.comma'))")
+        $warnings.Add((T 'cfg.noticesWithoutRight' $(@($mismatch.Unauthorized) -join (T 'common.comma'))))
     }
     return $warnings.ToArray()
 }

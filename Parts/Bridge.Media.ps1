@@ -618,7 +618,11 @@ function Complete-OutputBlackConfirmation {
     # Opened on the confirmation, never on the first dark frame: a cut or a
     # fade is legitimately black, and filing each one as an outage would
     # make the screen a list of transitions.
-    Start-StreamOutage -Kind 'black' -Cause (T 'media.blackConfirmedShort' $second)
+    # The cause is stored, so it is frozen in whatever language the bridge
+    # was set to when it happened - a record written in Arabic would read
+    # Arabic on an English screen for ever. The row already says "black";
+    # what it wants beside that is the measurement, which needs no language.
+    Start-StreamOutage -Kind 'black' -Cause "luma $second"
     Send-OutputBlackNotification -Luminance $second
 }
 

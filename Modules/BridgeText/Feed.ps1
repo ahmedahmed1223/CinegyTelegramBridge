@@ -42,5 +42,4 @@ function Add-BridgeTextFeed {
     $catalogue['feed.refresh'] = @{ ar = '🔄 تحديث'; en = '🔄 Refresh' }
     $catalogue['feed.watch'] = @{ ar = '📡 مراقبة البثّ'; en = '📡 The feed watch' }
     $catalogue['feed.probeNote'] = @{ ar = '<i>«تحديث» يلتقط إطارًا من الخرج ليقيس عليه — قراءة فقط.</i>'; en = '<i>"Refresh" grabs one frame from the output to measure — a read, nothing more.</i>' }
-    $catalogue['media.blackConfirmedShort'] = @{ ar = 'شاشة سوداء مؤكَّدة (سطوع {0})'; en = 'a black screen, confirmed (brightness {0})' }
 }

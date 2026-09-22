@@ -54,8 +54,6 @@ function Add-BridgeTextAir {
     $catalogue['board.disable'] = @{ ar = '🚫 تعطيل'; en = '🚫 Disable' }
     $catalogue['board.backToBoard'] = @{ ar = '⬅️ الجدول'; en = '⬅️ The board' }
     $catalogue['board.empty'] = @{ ar = '<i>(فارغ)</i>'; en = '<i>(empty)</i>' }
-    $catalogue['tpl.pathNotAbsolute'] = @{ ar = ' له مسار غير مطلق '; en = ' has a path that is not absolute ' }
-    $catalogue['tpl.badDeviceName'] = @{ ar = ' فيه اسم جهاز غير صالح '; en = ' contains an invalid device name ' }
     $catalogue['tpl.invalid'] = @{ ar = 'غير صالح'; en = 'invalid' }
     $catalogue['tpl.neverAired'] = @{ ar = 'لم يُبث بعد'; en = 'never aired yet' }
     $catalogue['tpl.cannotDeleteOnAir'] = @{ ar = 'لا يمكن حذف قالب على الهواء.'; en = 'A template that is on air cannot be deleted.' }

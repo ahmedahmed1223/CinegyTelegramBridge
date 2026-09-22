@@ -121,3 +121,48 @@ Describe 'Text that is being translated a piece at a time' {
         Get-BridgeText -Key 'setting.Nothing.label' -Language 'en' -Fallback '' | Should -Be ''
     }
 }
+
+Describe 'A catalogue call never ends up inside a sentence' {
+    <#
+        Substituting a literal is a text replacement, and text replacement
+        cannot tell a quote mark from an apostrophe. Two template warnings in
+        Bridge.Templates.ps1 read
+
+            "القالب '$key' له مسار غير مطلق '$tplPath' - ..."
+
+        and the run of text between the second and third apostrophe matched a
+        literal being translated, so the sentence became
+
+            "القالب '$key(T 'tpl.pathNotAbsolute')$tplPath' - ..."
+
+        which still parses, still passes every other test, and shows the
+        operator a call instead of a warning. Only the parser can tell the
+        difference: inside $( ) a call is code, and anywhere else in a string
+        it is the accident above.
+    #>
+    It 'appears as code, not as text an operator would read' {
+        $parts = Join-Path (Split-Path $PSScriptRoot -Parent) 'Parts'
+        $offenders = @(
+            foreach ($file in @(Get-ChildItem -LiteralPath $parts -Filter '*.ps1' -File)) {
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$null)
+                foreach ($node in $ast.FindAll({ param($x)
+                            $x -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+                            $x -is [System.Management.Automation.Language.ExpandableStringExpressionAst] }, $true)) {
+                    if ($node.Value -notlike "*(T '*") { continue }
+                    # everything the string says on its own, with the holes
+                    # its nested expressions fill cut back out
+                    $literal = $node.Extent.Text
+                    if ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                        foreach ($hole in @($node.NestedExpressions | Sort-Object { - $_.Extent.StartOffset })) {
+                            $from = $hole.Extent.StartOffset - $node.Extent.StartOffset
+                            $length = $hole.Extent.EndOffset - $hole.Extent.StartOffset
+                            $literal = $literal.Remove($from, $length)
+                        }
+                    }
+                    if ($literal -like "*(T '*") { "$($file.Name):$($node.Extent.StartLineNumber)" }
+                }
+            }
+        )
+        $offenders | Should -BeNullOrEmpty -Because 'a (T ...) written into a sentence is a failed substitution, not a translation'
+    }
+}

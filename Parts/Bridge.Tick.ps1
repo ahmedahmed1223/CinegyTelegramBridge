@@ -1520,7 +1520,7 @@ function Get-WeeklyNoticesText {
         }
         $repeats = @($foundCauses | Sort-Object Count -Descending | Select-Object -First 5)
         if ($repeats.Count -gt 0) {
-            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')" }) }
+            $parts = if ($AsPlain) { @($repeats | ForEach-Object { "$($_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')" }) } else { @($repeats | ForEach-Object { "$(ConvertTo-TelegramHtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')" }) }
             $found.Add("🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')")
         }
     }
@@ -1586,7 +1586,7 @@ function Get-UsageDigestText {
         $rank = 0
         $rankLines = @(foreach ($item in $ranked) {
                 $rank++
-                $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة'
+                $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
                 $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $uses"
                 if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
                     $line += " · آخر مرة $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm'))"
@@ -1666,7 +1666,7 @@ function Get-FlowTimingText {
     if ($slow.Count -gt 0) {
         $parts = @($slow | ForEach-Object {
                 $name = if ($AsPlain) { $_.Key } else { "<b>$(ConvertTo-TelegramHtmlText $_.Key)</b>" }
-                $times = Get-ArabicCountNoun -Count ([int]$_.Count) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة'
+                $times = Get-ArabicCountNoun -Count ([int]$_.Count) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
                 "$name — متوسط $($_.Average) ث ($times)"
             })
         $found.Add("🐢 الأبطأ وصولًا للهواء: $($parts -join ' · ')")
@@ -1675,7 +1675,7 @@ function Get-FlowTimingText {
     if ($dropped.Count -gt 0) {
         $parts = @($dropped | ForEach-Object {
                 $name = if ($AsPlain) { [string]$_.Key } else { ConvertTo-TelegramHtmlText ([string]$_.Key) }
-                "$name — $(Get-ArabicCountNoun -Count ([int]$_.Value) -One 'مرة' -Two 'مرتين' -Few (T 'tick.col.times') -Many 'مرة')"
+                "$name — $(Get-ArabicCountNoun -Count ([int]$_.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')"
             })
         $found.Add("🗑 مسودات مهجورة: $($parts -join ' · ')")
     }

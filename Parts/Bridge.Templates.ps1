@@ -250,7 +250,7 @@ function Get-TemplateStoreParsed {
         }
         $tplPath = Resolve-TemplateScenePath -Path ([string]$tplPath)
         if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
-            $errors.Add("القالب '$key(T 'tpl.pathNotAbsolute')$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
+            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
             $invalidKeys.Add($key)
             continue
         }
@@ -336,7 +336,7 @@ function Get-TemplateStoreParsed {
         # must stay unique even when a device name is given.
         $deviceName = [string](Get-JsonProp $entry 'device')
         if ($deviceName -and $deviceName -notmatch '^[A-Za-z0-9_]{1,32}$') {
-            $errors.Add("القالب '$key(T 'tpl.badDeviceName')$deviceName' - تم تجاهل الاسم.")
+            $errors.Add("القالب '$key' فيه اسم جهاز غير صالح '$deviceName' - تم تجاهل الاسم.")
             $deviceName = ''
         }
 

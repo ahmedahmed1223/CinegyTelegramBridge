@@ -34,7 +34,7 @@ function Set-ScheduleMoment {
         return
     }
     $State.Mode = 'schedule_recurrence'; Set-PendingState -ChatId $ChatId -State $State
-    Send-TelegramMessage -ChatId $ChatId -Text "فُهم الموعد: $($ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $TimeZoneId`nاختر التكرار:" -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.timeRead' $($ScheduledAt.ToString('yyyy-MM-dd HH:mm zzz')) $TimeZoneId) -ReplyMarkup (Get-ScheduleRecurrenceKeyboard)
 }
 
 function Get-ScheduleCalendarKeyboard {
@@ -88,7 +88,7 @@ function Get-ScheduleHourKeyboard {
     param([Parameter(Mandatory)][string]$Date, [datetimeoffset]$Now = [datetimeoffset]::Now)
     $day = [datetime]::ParseExact($Date, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
     $isToday = $day -eq $Now.DateTime.Date
-    $rows = @(, @((New-BridgeButton -Text "$Date — اختر الساعة" -Disabled)))
+    $rows = @(, @((New-BridgeButton -Text (T 'sch.pickHour' $Date) -Disabled)))
     $row = @()
     for ($hour = 0; $hour -lt 24; $hour++) {
         # An hour is still choosable while any of its minutes are ahead.
@@ -107,7 +107,7 @@ function Get-ScheduleMinuteKeyboard {
        buttons would be a wall nobody reads. Anything finer is still typed. #>
     param([Parameter(Mandatory)][string]$Date, [Parameter(Mandatory)][int]$Hour, [datetimeoffset]$Now = [datetimeoffset]::Now)
     $day = [datetime]::ParseExact($Date, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-    $rows = @(, @((New-BridgeButton -Text "$Date $('{0:00}' -f $Hour):— اختر الدقيقة" -Disabled)))
+    $rows = @(, @((New-BridgeButton -Text (T 'sch.pickMinute' $Date $('{0:00}' -f $Hour)) -Disabled)))
     $row = @()
     for ($minute = 0; $minute -lt 60; $minute += 5) {
         $moment = $day.AddHours($Hour).AddMinutes($minute)
@@ -218,13 +218,13 @@ function ConvertFrom-OperatorScheduleTime {
     elseif ($value -match '^(اليوم|غدا|غدًا|غداً|بكرة|بكره)\s+(\d{1,2}):(\d{2})$') {
         $day = if ($Matches[1] -eq (T 'sch.today')) { $today } else { $today.AddDays(1) }
         if (-not (Test-ScheduleClockParts -Hour $Matches[2] -Minute $Matches[3])) {
-            return [pscustomobject]@{ Success = $false; Error = "ساعة أو دقيقة خارج المدى.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+            return [pscustomobject]@{ Success = $false; Error = (T 'sch.outOfRange' $(Get-ScheduleTimeHint)); TimeZoneId = $clock.TimeZoneId }
         }
         $localTime = $day.AddHours([int]$Matches[2]).AddMinutes([int]$Matches[3])
     }
     elseif ($value -match '^(\d{1,2}):(\d{2})$') {
         if (-not (Test-ScheduleClockParts -Hour $Matches[1] -Minute $Matches[2])) {
-            return [pscustomobject]@{ Success = $false; Error = "ساعة أو دقيقة خارج المدى.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+            return [pscustomobject]@{ Success = $false; Error = (T 'sch.outOfRange' $(Get-ScheduleTimeHint)); TimeZoneId = $clock.TimeZoneId }
         }
         $localTime = $today.AddHours([int]$Matches[1]).AddMinutes([int]$Matches[2])
         if ($localTime -le $Now.DateTime) { $localTime = $localTime.AddDays(1) }
@@ -244,7 +244,7 @@ function ConvertFrom-OperatorScheduleTime {
             }
         }
         if (-not $parsedAny) {
-            return [pscustomobject]@{ Success = $false; Error = "لم أفهم الموعد.`n$(Get-ScheduleTimeHint)"; TimeZoneId = $clock.TimeZoneId }
+            return [pscustomobject]@{ Success = $false; Error = (T 'sch.notUnderstood' $(Get-ScheduleTimeHint)); TimeZoneId = $clock.TimeZoneId }
         }
     }
     $localTime = [datetime]::SpecifyKind($localTime, [System.DateTimeKind]::Unspecified)
@@ -430,8 +430,8 @@ function Get-ScheduleExecutionRows {
         $delay = Get-ScheduleExecutionDelaySeconds -Record $record
         $lateness = if ($null -eq $delay) { '—' }
         elseif ($delay -le 2) { (T 'sch.onTime') }
-        else { "متأخرة $(Format-DurationSeconds -Seconds $delay)" }
-        $attempt = if ([int]$record.Attempt -gt 1) { " · محاولة $($record.Attempt)" } else { '' }
+        else { (T 'sch.late' $(Format-DurationSeconds -Seconds $delay)) }
+        $attempt = if ([int]$record.Attempt -gt 1) { (T 'sch.attempt' $($record.Attempt)) } else { '' }
         # The kind glyph and the result glyph are different jobs: a column of
         # ✅ says nothing about which line is a bulletin and which a strap.
         $kindGlyph = switch ([string]$record.Kind) { 'mojaz' { '📑' } 'news' { '📰' } default { '▶️' } }
@@ -466,8 +466,8 @@ function Get-ScheduleExecutionBlocks {
         return $blocks + @(@{ type = 'paragraph'; text = (T 'sch.nothingRunYet') })
     }
     $failed = @($rows | Where-Object { $_.Mark -eq '❌' }).Count
-    $verdict = if ($failed -eq 0) { "🟢 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions')، كلّها ناجحة" }
-    else { "🟠 $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions') · ❌ $failed" }
+    $verdict = if ($failed -eq 0) { (T 'sch.allPassed' $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions')) }
+    else { (T 'sch.someFailed' $(Get-ArabicCountNoun -Count $rows.Count -One 'تنفيذ' -Two 'تنفيذان' -Few 'تنفيذات' -Many 'تنفيذًا' -EnglishOne 'execution' -EnglishMany 'executions') $failed) }
     $blocks += @{ type = 'paragraph'; text = $verdict }
 
     $trimmed = Select-RichTableRows -Items $rows
@@ -478,7 +478,7 @@ function Get-ScheduleExecutionBlocks {
             @{ text = (T 'sch.col.delay'); is_header = $true }
         ))
     foreach ($row in @($trimmed.Rows)) {
-        $what = if ([string]$row.Kind -eq 'show') { "$([string]$row.Template) · ط$($row.Layer)" }
+        $what = if ([string]$row.Kind -eq 'show') { (T 'sch.nameLayer' $([string]$row.Template) $($row.Layer)) }
         else { [string]$row.Template }
         $cells += , @(
             @{ text = [string]$row.When }
@@ -511,7 +511,7 @@ function Get-ScheduleExecutionText {
     }
     $trimmed = Select-RichTableRows -Items $rows
     foreach ($row in @($trimmed.Rows)) {
-        $what = if ([string]$row.Kind -eq 'show') { "$(ConvertTo-TelegramHtmlText ([string]$row.Template)) · ط$($row.Layer)" }
+        $what = if ([string]$row.Kind -eq 'show') { (T 'sch.nameLayer' $(ConvertTo-TelegramHtmlText ([string]$row.Template)) $($row.Layer)) }
         else { ConvertTo-TelegramHtmlText ([string]$row.Template) }
         $line = "$($row.Mark) <code>$($row.When)</code> · $($row.KindGlyph) $what · $(ConvertTo-TelegramHtmlText ([string]$row.Lateness))"
         $lines.Add($line)
@@ -726,8 +726,8 @@ function Get-ScheduleAnchorLabel {
     $match = @($Items | Where-Object { ([string](Get-JsonProp $_ 'Id')).Trim('{', '}') -eq $bare }) | Select-Object -First 1
     $name = if ($match) { [string](Get-JsonProp $match 'Name') } else { '' }
     if ([string]::IsNullOrWhiteSpace($name)) { $name = (T 'sch.materialGone') }
-    $after = if ($offset -eq 0) { (T 'sch.withStart') } elseif ($offset -lt 60) { "بعد بدء بـ $offset ث" } else { "بعد بدء بـ $([int]($offset / 60)) د" }
-    return "🎞 مربوط: $after «$name»"
+    $after = if ($offset -eq 0) { (T 'sch.withStart') } elseif ($offset -lt 60) { (T 'sch.secondsAfterStart' $offset) } else { (T 'sch.minutesAfterStart' $([int]($offset / 60))) }
+    return (T 'sch.linkedTo' $after $name)
 }
 
 function Get-ScheduledTemplateStatus {
@@ -747,12 +747,12 @@ function Get-ScheduledTemplateStatus {
             if (@($invalidKeys | Where-Object { [string]$_ -eq $key }).Count -gt 0) {
                 return [pscustomobject]@{
                     Success = $false; State = 'invalid'; Key = $key; Layer = 0; Path = ''
-                    Error = "القالب '$key' غير صالح عند وقت التنفيذ."
+                    Error = (T 'sch.templateInvalidAtRun' $key)
                 }
             }
             return [pscustomobject]@{
                 Success = $false; State = 'missing'; Key = $key; Layer = 0; Path = ''
-                Error = "القالب '$key' غير موجود عند وقت التنفيذ."
+                Error = (T 'sch.templateMissingAtRun' $key)
             }
         }
         $template = $map[$key]
@@ -762,7 +762,7 @@ function Get-ScheduledTemplateStatus {
         if ($layer -le 0 -or [string]::IsNullOrWhiteSpace($path)) {
             return [pscustomobject]@{
                 Success = $false; State = 'invalid'; Key = $key; Layer = $layer; Path = $path
-                Error = "القالب '$key' غير صالح عند وقت التنفيذ (المسار أو الطبقة غير مكتملة)."
+                Error = (T 'sch.templateIncompleteAtRun' $key)
             }
         }
         return [pscustomobject]@{ Success = $true; State = 'ready'; Key = $key; Layer = $layer; Path = $path; Error = '' }
@@ -770,7 +770,7 @@ function Get-ScheduledTemplateStatus {
     catch {
         return [pscustomobject]@{
             Success = $false; State = 'error'; Key = $key; Layer = 0; Path = ''
-            Error = "تعذّر فحص القالب '$key' عند وقت التنفيذ: $($_.Exception.Message)"
+            Error = (T 'sch.templateCheckFailed' $key $($_.Exception.Message))
         }
     }
 }
@@ -793,7 +793,7 @@ function Update-ScheduleQueue {
         if ($notifyMinutes -gt 0 -and $minutesUntil -gt 0 -and $minutesUntil -le $notifyMinutes -and
             [string](Get-JsonProp $scheduleEntry 'NotificationExecutionKey') -ne $occurrenceKey) {
             $roundedMinutes = [math]::Max(1, [math]::Ceiling($minutesUntil))
-            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⏰ الحدث المجدول '$($scheduleEntry.TemplateKey)' سيُعرض بعد نحو $(Get-ArabicCountNoun -Count $roundedMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes').`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)"
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text (T 'sch.eventSoon' $($scheduleEntry.TemplateKey) $(Get-ArabicCountNoun -Count $roundedMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') $(Format-ScheduleEvent -ScheduleEntry $scheduleEntry))
             $scheduleEntry.NotificationExecutionKey = $occurrenceKey
             Save-ScheduleEvents | Out-Null
         }
@@ -818,7 +818,7 @@ function Update-ScheduleQueue {
         if ($targetLayer -gt 0 -and $script:OnAir.ContainsKey($targetLayer) -and (Get-Setting 'NotifyOnScheduleOverwrite')) {
             $displaced = $script:OnAir[$targetLayer]
             Send-AdminBroadcast -Text ((T 'sch.replacesOnAir') +
-                "الطبقة ${targetLayer}: '$($displaced.Key)' ← '$($scheduleEntry.TemplateKey)'")
+                (T 'sch.layerSwap' ${targetLayer} $($displaced.Key) $($scheduleEntry.TemplateKey)))
             Write-BridgeLog "Scheduled '$($scheduleEntry.TemplateKey)' is overwriting live '$($displaced.Key)' on layer $targetLayer" 'WARN'
         }
 
@@ -831,7 +831,7 @@ function Update-ScheduleQueue {
         }
         else {
             Write-BridgeLog "Scheduled template check failed for '$($scheduleEntry.TemplateKey)': $($templateStatus.Error)" 'WARN'
-            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text "⛔ لم يتم تشغيل الموعد: $($templateStatus.Error)"
+            Send-TelegramMessage -ChatId ([long]$scheduleEntry.ChatId) -Text (T 'sch.didNotRun' $($templateStatus.Error))
             $result = [pscustomobject]@{ Success = $false; Error = $templateStatus.Error }
         }
         $executionTimer.Stop()
@@ -986,7 +986,7 @@ function Start-ScheduleMutationFlow {
     }
     Set-PendingState -ChatId $ChatId -State $state
     $verb = if ($Action -eq 'copy') { (T 'sch.copyEvent') } else { (T 'sch.editEventTime') }
-    Send-TelegramMessage -ChatId $ChatId -Text "📅 $verb`nالموعد الحالي: $(([datetimeoffset]$entry.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $($entry.TimeZoneId)`nأرسل الموعد الجديد بصيغة YYYY-MM-DD HH:mm" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.sendNewTime' $verb $(([datetimeoffset]$entry.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz')) $($entry.TimeZoneId)) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-ScheduleShowFlow {
@@ -1003,11 +1003,11 @@ function Start-ScheduleShowFlow {
     }
     if ($state.Fields.Count -eq 0) {
         $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "⏰ متى يُعرض؟`n$(Get-ScheduleTimeHint)`n`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.whenToShow' $(Get-ScheduleTimeHint) $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz')) $([System.TimeZoneInfo]::Local.Id)) -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
         return
     }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text "📅 قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.firstField' $($state.Fields.Count) $($state.Fields[0])) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-ScheduleText {
@@ -1040,11 +1040,11 @@ function Complete-ScheduleText {
         $state.Index = [int]$state.Index + 1
         if ($state.Index -lt $state.Fields.Count) {
             Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text "📅 قيمة الحقل ($($state.Index + 1)/$($state.Fields.Count)):`n$($state.Fields[$state.Index])" -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.field' $($state.Index + 1) $($state.Fields.Count) $($state.Fields[$state.Index])) -ReplyMarkup (Get-CancelKeyboard)
             return
         }
         $state.Mode = 'schedule_time'; Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "⏰ متى يُعرض؟`n$(Get-ScheduleTimeHint)`n`nالوقت الحالي: $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz'))`nالمنطقة: $([System.TimeZoneInfo]::Local.Id)" -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.whenToShow' $(Get-ScheduleTimeHint) $([datetimeoffset]::Now.ToString('yyyy-MM-dd HH:mm zzz')) $([System.TimeZoneInfo]::Local.Id)) -ReplyMarkup (Get-ScheduleTimePromptKeyboard)
         return
     }
     if ($state.Mode -eq 'schedule_time') {
@@ -1064,21 +1064,21 @@ function Show-ScheduleReview {
         if ([string]$State.MutationAction -eq 'copy') { (T 'sch.reviewCopy') } else { (T 'sch.reviewEdit') }
     } else { (T 'sch.review') }
     $lines = @(
-        $reviewTitle, "القالب: $($State.TemplateKey)",
-        "الموعد: $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))", "المنطقة: $($State.TimeZoneId)", "التكرار: $recurrence"
+        $reviewTitle, (T 'sch.template' $($State.TemplateKey)),
+        (T 'sch.time' $(([datetimeoffset]$State.ScheduledAt).ToString('yyyy-MM-dd HH:mm zzz'))), (T 'sch.zone' $($State.TimeZoneId)), (T 'sch.repeat' $recurrence)
     )
     $anchorLine = Get-ScheduleAnchorLabel -ScheduleEntry $State -Items (Get-CachedMaterialSchedule)
     if ($anchorLine) { $lines += $anchorLine }
     if ([string]$State.Recurrence -ne 'once') {
         $until = [string](Get-JsonProp $State 'RecurrenceUntil')
-        $lines += "نهاية التكرار: $(if ($until) { $until } else { (T 'sch.noEndDate') })"
+        $lines += (T 'sch.repeatEnds' $(if ($until) { $until } else { (T 'sch.noEndDate') }))
     }
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
     $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt ([datetimeoffset]$State.ScheduledAt) `
         -WindowMinutes (Get-SettingInt 'ScheduleConflictWindowMinutes' 2))
     if ($conflicts.Count -gt 0) {
         $lines += ''
-        $lines += "⚠️ تعارض محتمل على الطبقة $($State.Layer):"
+        $lines += (T 'sch.possibleClash' $($State.Layer))
         foreach ($conflict in $conflicts) { $lines += "• $(Format-ScheduleEvent -ScheduleEntry $conflict)" }
     }
     $lines += ''; $lines += (T 'sch.notSavedUntilConfirm')
@@ -1178,8 +1178,8 @@ function Confirm-ScheduledShow {
     if ($saved) {
         $auditAction = if ($state.ContainsKey('MutationAction')) { [string]$state.MutationAction } else { 'created' }
         $auditLabel = switch ($auditAction) { 'updated' { (T 'sch.edit') } 'deleted' { (T 'sch.delete') } default { (T 'sch.create') } }
-        Add-AuditEntry "📅 جدولة: $auditLabel $($scheduleEntry.TemplateKey) / $($scheduleEntry.Recurrence) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ الجدولة.`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup (Get-ScheduleMenuKeyboard)
+        Add-AuditEntry (T 'sch.scheduledAudit' $auditLabel $($scheduleEntry.TemplateKey) $($scheduleEntry.Recurrence) $(Format-UserAuditActor -UserId $UserId))
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.saved' $(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)) -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }
     else {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.saveFailed') -ReplyMarkup (Get-ScheduleMenuKeyboard)
@@ -1284,7 +1284,7 @@ function Import-DraftStates {
             # which during a shift is nobody.
             $restoredKey = ConvertTo-TelegramHtmlText ([string]$state.Key)
             Send-TelegramMessage -ChatId $chatId `
-                -Text "↩️ أُعيد تشغيل الجسر، ومسودتك لم تضِع: <b>$restoredKey</b> ما تزال مفتوحة وتنتظر نصّك.`nأكمل من حيث توقفت، أو ألغِها إن لم تعد تريدها." `
+                -Text (T 'sch.draftSurvivedRestart' $restoredKey) `
                 -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
         }
         if ($script:PendingState.Count -gt 0) {

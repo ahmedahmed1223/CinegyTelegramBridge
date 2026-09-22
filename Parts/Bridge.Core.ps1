@@ -251,7 +251,7 @@ function Protect-SettingDisplayValue {
     param([string]$Name, $Value)
     if ($Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
-        return $(if ($text) { "•••• ($($text.Length) حرفًا)" } else { '(فارغ)' })
+        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { '(فارغ)' })
     }
     return $Value
 }
@@ -273,9 +273,9 @@ function Format-ConfigDiffValue {
     param([string]$Name, $Value)
     if ($Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
-        return $(if ($text) { "•••• ($($text.Length) حرفًا)" } else { '(فارغ)' })
+        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { '(فارغ)' })
     }
-    if ($Value -is [array]) { return "$(@($Value).Count) عنصرًا" }
+    if ($Value -is [array]) { return (T 'core.items' $(@($Value).Count)) }
     if ($null -eq $Value) { return '(غير موجود)' }
     $text = ([string]$Value -replace '[\r\n]+', ' ').Trim()
     if ([string]::IsNullOrEmpty($text)) { return '(فارغ)' }
@@ -330,12 +330,12 @@ function Get-ConfigRestoreBlocks {
     param([Parameter(Mandatory)][string]$CurrentPath, [Parameter(Mandatory)][string]$BackupPath, [Parameter(Mandatory)][string]$BackupName)
     $rows = Get-ConfigDifferenceRows -CurrentPath $CurrentPath -BackupPath $BackupPath
     if ($null -eq $rows) { return @() }
-    $blocks = @(@{ type = 'heading'; text = "⚠️ استعادة النسخة $BackupName"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'core.restoreBackup' $BackupName); size = 3 })
     if ($rows.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = 'لا اختلافات ظاهرة: الاستعادة لن تغيّر شيئًا.' }
         return $blocks
     }
-    $blocks += @{ type = 'paragraph'; text = "$($rows.Count) إعدادًا سيتغيّر · تُحفظ الحالة الحالية أولًا" }
+    $blocks += @{ type = 'paragraph'; text = (T 'core.settingsWillChange' $($rows.Count)) }
     $cells = @(, @(
             @{ text = 'الإعداد'; is_header = $true }
             @{ text = 'الحالي'; is_header = $true }
@@ -365,9 +365,9 @@ function Get-ConfigDifferenceSummary {
             if ($currentJson -ne $backupJson) { $name }
         }
         if (@($changed).Count -eq 0) { return 'الاختلافات: لا توجد اختلافات ظاهرة.' }
-        return "الاختلافات: $(@($changed) -join '، ')"
+        return (T 'core.differences' $(@($changed) -join '، '))
     }
-    catch { return "الاختلافات: تعذّر حسابها ($($_.Exception.Message))." }
+    catch { return (T 'core.differencesFailed' $($_.Exception.Message)) }
 }
 
 function Get-ConfigSaveWarning {
@@ -482,8 +482,8 @@ function Get-LayerName {
 function Get-LayerDisplayName {
     param([Parameter(Mandatory)][int]$Layer)
     $name = Get-LayerName -Layer $Layer
-    if ([string]::IsNullOrWhiteSpace($name)) { return "طبقة $Layer" }
-    return "$name · طبقة $Layer"
+    if ([string]::IsNullOrWhiteSpace($name)) { return (T 'core.layer' $Layer) }
+    return (T 'core.nameLayer' $name $Layer)
 }
 
 # How many rows a rich table may carry, whatever is being tabled.
@@ -667,7 +667,7 @@ function Get-BridgeTextWarnings {
     $warnings = @()
     if ([string]::IsNullOrWhiteSpace($Text)) { return $warnings }
 
-    if ($Text -match '(\p{L})\1\1') { $warnings += "حرف مكرّر ثلاث مرات: «$($Matches[0])»" }
+    if ($Text -match '(\p{L})\1\1') { $warnings += (T 'core.tripledLetter' $($Matches[0])) }
     if ($Text -match '  ') { $warnings += 'مسافتان متتاليتان' }
     # A comma or full stop with no space after it is the commonest phone slip
     # in Arabic, and it closes up two words into one on screen.
@@ -706,7 +706,7 @@ function Get-BridgeTextWarnings {
     # naming twenty of them is a wall; naming one or two is a question.
     $unseen = @($unseen | Select-Object -Unique)
     if ($unseen.Count -gt 0 -and $unseen.Count -le 2) {
-        $warnings += "كلمة لم تكتبها المحطة من قبل: $($unseen -join '، ') — تأكّد من هجائها"
+        $warnings += (T 'core.unseenWord' $($unseen -join '، '))
     }
     return $warnings
 }
@@ -740,7 +740,7 @@ function Get-RichTableTrimNote {
        will be read as the whole story. #>
     param([Parameter(Mandatory)][int]$Hidden, [Parameter(Mandatory)][int]$Shown)
     if ($Hidden -le 0) { return '' }
-    return "⚠️ عُرض أحدث $Shown صفًّا فقط؛ $Hidden صفًّا أقدم غير معروضة."
+    return (T 'core.newestRowsOnly' $Shown $Hidden)
 }
 
 function Format-AuditTrailStamp {
@@ -823,7 +823,7 @@ function Format-DurationSeconds {
         switch ($Count) {
             1 { 'ثانية' }
             2 { 'ثانيتان' }
-            default { if ($Count -le 10) { "$Count ثوانٍ" } else { "$Count ثانية" } }
+            default { if ($Count -le 10) { (T 'core.secondsFew' $Count) } else { (T 'core.seconds' $Count) } }
         } }
 
     if ($Seconds -le 0) { return '0 ثانية' }
@@ -840,7 +840,7 @@ function Format-DurationSeconds {
     $minutes = [int][math]::Floor($Seconds / 60)
     $rest = $Seconds % 60
     $text = Format-DurationMinutes -Minutes $minutes
-    if ($rest -gt 0) { $text += " و$(& $second $rest)" }
+    if ($rest -gt 0) { $text += (T 'core.and' $(& $second $rest)) }
     return $text
 }
 
@@ -885,7 +885,7 @@ function Format-CappedTail {
        can append it blindly. The settings notice capped at ten names and
        dropped the rest silently. #>
     param([int]$Total, [int]$Shown)
-    if ($Total -gt $Shown) { return " (+$($Total - $Shown) أخرى)" }
+    if ($Total -gt $Shown) { return (T 'core.plusOthers' $($Total - $Shown)) }
     return ''
 }
 
@@ -931,7 +931,7 @@ function Get-SettingPromptText {
     # both are <code>: monospace lines them up under one another and keeps the
     # digits left-to-right beside the Arabic. Description and formatted values
     # come from the settings metadata, so all three are escaped.
-    return "$(ConvertTo-TelegramHtmlText $description).`nالقيمة الحالية: <code>$(ConvertTo-TelegramHtmlText ([string]$current))</code>`nالقيمة الافتراضية: <code>$(ConvertTo-TelegramHtmlText ([string]$default))</code>`nأرسل رقمًا صحيحًا غير سالب:"
+    return (T 'core.sendWholeNumber' $(ConvertTo-TelegramHtmlText $description) $(ConvertTo-TelegramHtmlText ([string]$current)) $(ConvertTo-TelegramHtmlText ([string]$default)))
 }
 
 function Set-Setting {
@@ -946,8 +946,8 @@ function Set-Setting {
         $bounds = $script:SettingConstraints[$Name]
         $number = 0
         if ([int]::TryParse([string]$Value, [ref]$number)) {
-            if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) { throw "$Name لا يقلّ عن $($bounds.Minimum)." }
-            if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) { throw "$Name لا يزيد عن $($bounds.Maximum)." }
+            if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) { throw (T 'core.atLeast' $Name $($bounds.Minimum)) }
+            if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) { throw (T 'core.atMost' $Name $($bounds.Maximum)) }
         }
     }
     $settings = Get-JsonProp $config 'Settings'
@@ -1012,8 +1012,8 @@ function Register-BridgeStartup {
         if ($threshold -gt 0 -and $dayCount -eq $threshold) {
             Write-BridgeLog "$threshold bridge startups inside 24 hours - notifying administrators once" 'WARN'
             $timesText = Get-ArabicCountNoun -Count $threshold -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
-            Add-AuditEntry "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة — عمل إصدارات أم حلقة عطل؟"
-            Send-AdminBroadcast -Text "🔁 الجسر أُعيد تشغيله $timesText خلال 24 ساعة. إن كان عمل إصدارات مخططًا فتجاهل هذا — وإلا راجع آخر أسطر bridge.log."
+            Add-AuditEntry (T 'core.restartLoopShort' $timesText)
+            Send-AdminBroadcast -Text (T 'core.restartLoop' $timesText)
         }
     }
     catch { Write-BridgeLog "Could not record bridge startup: $($_.Exception.Message)" 'WARN' }

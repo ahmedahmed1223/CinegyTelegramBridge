@@ -156,7 +156,7 @@ function Start-SnapshotJob {
     if ($cooldown -gt 0 -and $script:LastSnapshotFile -and (Test-Path $script:LastSnapshotFile) -and
         ((Get-Date) - $script:LastSnapshotAt).TotalSeconds -lt $cooldown) {
         Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
-            -Caption "📸 آخر لقطة ($([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) ثانية مضت)`n📡 المصدر: $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)" `
+            -Caption (T 'media.lastSnapshot' $([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)) `
             -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
@@ -198,7 +198,7 @@ function Start-SnapshotJob {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل تشغيل ffmpeg: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.ffmpegFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
 
@@ -233,8 +233,8 @@ function Update-SnapshotJobs {
             $script:LastCaptureErrorDetail = $detail
             $level = if (Test-MediaSourceUnreachable -Detail $detail) { 'WARN' } else { 'ERROR' }
             Write-BridgeLog "Snapshot ffmpeg failed (exit $($job.Proc.ExitCode)): $detail" $level
-            $msg = "❌ فشل التقاط الصورة (كود $($job.Proc.ExitCode))."
-            if ($detail) { $msg += "`nسبب ffmpeg: $detail" }
+            $msg = (T 'media.captureFailed' $($job.Proc.ExitCode))
+            if ($detail) { $msg += (T 'media.ffmpegReason' $detail) }
             # Clean up the partial/zero-byte output ffmpeg may have left behind.
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
             $failed = $true
@@ -264,9 +264,9 @@ function Update-SnapshotJobs {
             $script:LastSnapshotSourceIsPrimary = [bool]$job.SourceIsPrimary
             $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
             Write-BridgeLog "User $($job.UserId) captured a stream snapshot from $sourceLabel"
-            Add-AuditEntry "📸 لقطة - بواسطة $(Format-UserAuditActor -UserId ([long]$job.UserId))"
+            Add-AuditEntry (T 'media.snapshotAudit' $(Format-UserAuditActor -UserId ([long]$job.UserId)))
             Send-TelegramPhoto -ChatId $job.ChatId -FilePath $job.OutPath `
-                -Caption "📸 لقطة من الهواء - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n📡 المصدر: $sourceLabel" `
+                -Caption (T 'media.snapshotOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
                 -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
         }
         Remove-Item $job.ErrLog -Force -ErrorAction SilentlyContinue
@@ -327,7 +327,7 @@ function Get-MonitorFrame {
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $script:LastCaptureErrorDetail = "انتهت مهلة الالتقاط بعد $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')"
+            $script:LastCaptureErrorDetail = (T 'media.captureTimedOut' $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))
             & $note "Output monitor capture timed out after ${TimeoutSeconds}s"
             return $null
         }
@@ -392,10 +392,10 @@ function Get-OutputMonitorStatus {
                     $probeState = (T 'media.grabbedNoLuma')
                 }
                 elseif ($luminance -le (Get-SettingInt 'OutputBlackLuminance' 6)) {
-                    $probeState = "متاح لكن أسود (سطوع $luminance)"
+                    $probeState = (T 'media.blackButThere' $luminance)
                 }
                 else {
-                    $probeState = "متاح (سطوع $luminance)"
+                    $probeState = (T 'media.there' $luminance)
                 }
             }
         }
@@ -403,21 +403,21 @@ function Get-OutputMonitorStatus {
 
     $activeSource = if ($script:OutputMonitorFallbackActive -and $backup) { (T 'media.cinegyBackup') } else { (T 'media.primarySource') }
     $primaryType = if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $primary 'SourceType'))) { (T 'media.notSet') } else { [string](Get-JsonProp $primary 'SourceType') }
-    $backupText = if ($backup) { "مضبوط ($([string]$backup.SourceType))" } else { (T 'media.notSet') }
+    $backupText = if ($backup) { (T 'media.set' $([string]$backup.SourceType)) } else { (T 'media.notSet') }
     $lastCheck = if ($script:LastOutputMonitorAt -gt [datetime]::MinValue) {
         ([datetime]$script:LastOutputMonitorAt).ToString('yyyy-MM-dd HH:mm:ss')
     }
     else { (T 'media.notStarted') }
-    $periodic = if ($intervalMinutes -gt 0) { "كل $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')" } else { (T 'media.monitorDisabled') }
+    $periodic = if ($intervalMinutes -gt 0) { (T 'media.every' $(Get-ArabicCountNoun -Count $intervalMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')) } else { (T 'media.monitorDisabled') }
     $text = @(
         (T 'media.sourceMonitor'),
-        "🖥️ سيرفر المتابعة: $serverState · $serverName",
-        "🔎 الفحص اليدوي للمصدر الأساسي: $probeState",
-        "🎚 المصدر المستخدم حالياً: $activeSource",
-        "🔗 نوع المصدر الأساسي: $primaryType",
-        "🛟 المصدر الاحتياطي: $backupText",
-        "⏱ المراقبة الدورية: $periodic · آخر دورة: $lastCheck",
-        "⚠️ فشل التقاط متتالٍ: $([int]$script:OutputMonitorFailureCount)"
+        (T 'media.watchServer' $serverState $serverName),
+        (T 'media.manualCheck' $probeState),
+        (T 'media.sourceInUse' $activeSource),
+        (T 'media.mainSourceKind' $primaryType),
+        (T 'media.fallbackSource' $backupText),
+        (T 'media.watchCycle' $periodic $lastCheck),
+        (T 'media.capturesInARow' $([int]$script:OutputMonitorFailureCount))
     ) -join "`n"
     return [pscustomobject]@{
         Text = $text
@@ -461,8 +461,8 @@ function Test-OutputMonitorFlapping {
     if ($script:OutputMonitorFlapAlertedAt -gt $windowStart) { return $false }
     $script:OutputMonitorFlapAlertedAt = $Now
     Write-BridgeLog "Output monitor source is flapping: $recent failed capture(s) in the last six hours, each followed by a success." 'WARN'
-    Add-AuditEntry "⚠️ مصدر البث متذبذب - فشل الالتقاط $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') خلال ست ساعات"
-    Send-AdminBroadcast -Text "⚠️ مصدر البث يتذبذب: فشل التقاط المخرج $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') خلال الساعات الست الماضية، وفي كل مرة عاد بعدها.`nالمراقبة تعمل، لكنها لا ترى المخرج جزءًا من الوقت. يستحسن فحص الخادم قبل أن يتوقف كليًا." | Out-Null
+    Add-AuditEntry (T 'media.sourceFlappingShort' $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))
+    Send-AdminBroadcast -Text (T 'media.sourceFlapping' $(Get-ArabicCountNoun -Count $recent -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')) | Out-Null
     return $true
 }
 
@@ -528,14 +528,14 @@ function Update-OutputBlackWatchdog {
         if ($shouldSwitch -or $shouldAlert) {
             $script:OutputMonitorFailureAlerted = $true
             Write-BridgeLog "Output monitor source unavailable for $($script:OutputMonitorFailureCount) consecutive capture(s)" 'WARN'
-            Add-AuditEntry "⚠️ تعذّر الوصول إلى مخرج البث $(Get-ArabicCountNoun -Count $script:OutputMonitorFailureCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times') متتالية"
+            Add-AuditEntry (T 'media.outputUnreachableShort' $(Get-ArabicCountNoun -Count $script:OutputMonitorFailureCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))
             if ($shouldSwitch -and (Set-OutputMonitorFallbackActive -Active $true)) {
                 # Checked again in minutes, not at the next hourly turn. The
                 # switch is the moment the primary matters most, and leaving
                 # the answer an hour away is why nobody heard that it had come
                 # back - the check simply had not run yet.
                 $script:LastOutputMonitorAt = $now.AddMinutes(-([math]::Max(0, (Get-SettingInt 'OutputMonitorMinutes' 1) - 3)))
-                Send-AdminBroadcast -Text "⚠️ تعذّر الوصول إلى المصدر الأساسي بعد $($script:OutputMonitorFailureCount) محاولات متتالية.`nتم التحويل إلى مصدر Cinegy الاحتياطي.`nسيُعاد فحص المصدر الأساسي خلال دقائق." -Urgent
+                Send-AdminBroadcast -Text (T 'media.switchedToFallback' $($script:OutputMonitorFailureCount)) -Urgent
             }
             else {
                 Send-OutputMonitorFailureNotification -FailureCount $script:OutputMonitorFailureCount
@@ -609,7 +609,7 @@ function Complete-OutputBlackConfirmation {
     if ($script:OutputBlackAlerted) { return }
     $script:OutputBlackAlerted = $true
     Write-BridgeLog "Output confirmed black across two captures (luma $first then $second)" 'WARN'
-    Add-AuditEntry "🖤 تأكيد شاشة سوداء على المخرج (سطوع $second)"
+    Add-AuditEntry (T 'media.blackConfirmed' $second)
     Send-OutputBlackNotification -Luminance $second
 }
 
@@ -641,7 +641,7 @@ function Get-OutputFailureDiagnosis {
         $nextStep = (T 'media.nextOpenAir')
     }
     elseif ($status.OutputState -and $status.OutputState -ne 'Normal') {
-        $lines += "• القناة: تُجيب، ومخرجها مضبوط على <b>$(ConvertTo-TelegramHtmlText $status.OutputState)</b> — أي أنّ السواد مقصود لا عطل."
+        $lines += (T 'media.channelAnswers' $(ConvertTo-TelegramHtmlText $status.OutputState))
     }
     else {
         $lines += (T 'media.channelNormal')
@@ -666,11 +666,11 @@ function Get-OutputFailureDiagnosis {
         if ($short.Length -gt 180) { $short = $short.Substring(0, 180) + '…' }
         $safe = ConvertTo-TelegramHtmlText $short
         if (Test-MediaSourceUnreachable -Detail $serverDetail) {
-            $lines += "• سيرفر البث: آخر خطأ يشير إلى أن الخادم لا يجيب — $safe"
+            $lines += (T 'media.serverNotAnswering' $safe)
             if (-not $nextStep) { $nextStep = (T 'media.nextCheckServer') }
         }
         else {
-            $lines += "• سيرفر البث: آخر خطأ مسجّل — $safe"
+            $lines += (T 'media.lastRecordedError' $safe)
         }
     }
 
@@ -683,7 +683,7 @@ function Get-OutputFailureDiagnosis {
         $lines += (T 'media.sourceUnset')
     }
     else {
-        $lines += "• المصدر المستعمل: $label — تحقّق من خادمه وشبكته."
+        $lines += (T 'media.checkSource' $label)
     }
     if (-not $nextStep) { $nextStep = (T 'media.nextAskSnapshot') }
     $lines += $nextStep
@@ -700,7 +700,7 @@ function Send-OutputMonitorFailureNotification {
         return
     }
     $diagnosis = @(Get-OutputFailureDiagnosis)
-    $text = "⚠️ <b>تعذّر الوصول إلى مخرج البث</b> بعد $FailureCount محاولات متتالية.`n" +
+    $text = (T 'media.outputUnreachable' $FailureCount) +
         ($diagnosis -join "`n")
     # P1: the diagnosis names the server and the next step, and the operator
     # retypes it for the maintenance group. The copy keeps a plain-text
@@ -718,8 +718,8 @@ function Send-OutputBlackNotification {
        only if NotifyOperatorsOnBlackOutput is on, because during a planned
        break a broadcast to everyone is noise, not information. #>
     param([double]$Luminance = 0, [switch]$Recovered)
-    $text = if ($Recovered) { "💡 عاد المخرج إلى الإضاءة الطبيعية (سطوع $Luminance)." }
-    else { "🖤 المخرج أسود — تأكّد عبر لقطتين متتاليتين (سطوع $Luminance).`nتحقّق من المصدر وسلسلة البث." }
+    $text = if ($Recovered) { (T 'media.backToLight' $Luminance) }
+    else { (T 'media.outputBlack' $Luminance) }
     Send-AdminBroadcast -Text $text -Urgent
     if (-not (Get-Setting 'NotifyOperatorsOnBlackOutput')) { return }
     # The same audience Send-AdminBroadcast just used, or an administrator
@@ -822,7 +822,7 @@ function Get-RunningRelayProcess {
 
 function Get-LiveRelayStatusText {
     $proc = Get-RunningRelayProcess
-    if ($proc) { return "🟢 يعمل (PID $($proc.Id))" }
+    if ($proc) { return (T 'media.running' $($proc.Id)) }
     if ($script:RelayState.ShouldRun) { return (T 'media.stoppedRetrying') }
     return (T 'media.stopped')
 }
@@ -899,7 +899,7 @@ function Start-LiveRelay {
     $script:RelayState.NotifyChatId = $ChatId
     $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
     Write-BridgeLog "User $UserId started live relay (PID $($script:RelayState.Process.Id))"
-    Add-AuditEntry "▶️ بدء البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'media.feedStartedAudit' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'media.starting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
@@ -916,11 +916,11 @@ function Stop-LiveRelay {
     try {
         Stop-Process -Id $proc.Id -Force -ErrorAction Stop
         Write-BridgeLog "User $UserId stopped live relay (PID $($proc.Id))"
-        Add-AuditEntry "⏹ إيقاف البث - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Add-AuditEntry (T 'media.feedStoppedAudit' $(Format-UserAuditActor -UserId $UserId))
         Send-TelegramMessage -ChatId $ChatId -Text (T 'media.stoppedOk') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "فشل إيقاف البث: $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.stopFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     $script:RelayState.Process = $null
     Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
@@ -944,8 +944,8 @@ function Update-RelayWatchdog {
             $script:RelayState.Process = $null
             Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
             if ($notify) {
-                $msg = "❌ توقف البث فورًا بعد التشغيل (كود $exitCode)."
-                if ($detail) { $msg += "`nسبب ffmpeg: $detail" }
+                $msg = (T 'media.stoppedAtOnce' $exitCode)
+                if ($detail) { $msg += (T 'media.ffmpegReason' $detail) }
                 Send-TelegramMessage -ChatId $notify -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $notify)
             }
         }
@@ -981,7 +981,7 @@ function Update-RelayWatchdog {
     if ($decision.Action -eq 'give_up') {
         $script:RelayState.ShouldRun = $false
         Write-BridgeLog "Live relay exceeded RelayMaxRestarts ($maxRestarts) - giving up" "ERROR"
-        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "⚠️ توقف البث نهائيًا بعد $maxRestarts محاولة إعادة تشغيل. راجع logs\relay-stderr.log." }
+        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text (T 'media.gaveUp' $maxRestarts) }
         return
     }
 
@@ -991,7 +991,7 @@ function Update-RelayWatchdog {
         Start-RelayProcess | Out-Null
         $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
         $script:RelayState.NotifyChatId = 0
-        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text "🔄 انقطع البث وتمت إعادة تشغيله تلقائيًا (محاولة $($script:RelayState.Restarts))." }
+        if (Get-Setting 'NotifyAdminsOnRelayFailure') { Send-AdminBroadcast -Text (T 'media.restarted' $($script:RelayState.Restarts)) }
     }
     catch {
         Write-BridgeLog "Live relay auto-restart failed: $(Protect-SensitiveText $_.Exception.Message)" "ERROR"
@@ -1027,5 +1027,5 @@ function Complete-StreamUrl {
     $ls | Add-Member -NotePropertyName 'RtmpDestination' -NotePropertyValue $trimmed -Force
     Save-Config
     Write-BridgeLog "User $($state.UserId) updated LiveStream.RtmpDestination"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ تم حفظ رابط البث.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.linkSaved' $(Get-ConfigSaveWarning)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
 }

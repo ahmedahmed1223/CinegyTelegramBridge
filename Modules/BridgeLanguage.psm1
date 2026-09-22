@@ -40,7 +40,7 @@ Set-StrictMode -Version Latest
 # The catalogue lives in Modules/BridgeText/, one file per domain. Dot-sourced
 # rather than imported: these are partial definitions that fill one shared
 # dictionary, not modules with a surface of their own.
-foreach ($textFile in @('Common', 'Settings', 'Screens', 'Content', 'Alerts', 'Replies', 'Reports', 'Flow', 'Admin', 'Air', 'Keyboards', 'AdminTools', 'Screens2', 'Interp1', 'Interp2', 'Interp3', 'Interp4', 'Interp5', 'Interp6', 'Interp7', 'Interp8')) {
+foreach ($textFile in @('Common', 'Settings', 'Screens', 'Content', 'Alerts', 'Replies', 'Reports', 'Flow', 'Admin', 'Air', 'Keyboards', 'AdminTools', 'Screens2', 'Interp1', 'Interp2', 'Interp3', 'Interp4', 'Interp5', 'Interp6', 'Interp7', 'Interp8', 'Interp9')) {
     . (Join-Path $PSScriptRoot "BridgeText\$textFile.ps1")
 }
 
@@ -74,7 +74,7 @@ function New-BridgeTextCatalogue {
 
     # One call per domain file in Modules/BridgeText/. A fifth domain means a
     # file and its name in this list; nothing else in the mechanism counts them.
-    foreach ($section in @('Common', 'Settings', 'Screens', 'Content', 'Alerts', 'Replies', 'Reports', 'Flow', 'Admin', 'Air', 'Keyboards', 'AdminTools', 'Screens2', 'Interp1', 'Interp2', 'Interp3', 'Interp4', 'Interp5', 'Interp6', 'Interp7', 'Interp8')) {
+    foreach ($section in @('Common', 'Settings', 'Screens', 'Content', 'Alerts', 'Replies', 'Reports', 'Flow', 'Admin', 'Air', 'Keyboards', 'AdminTools', 'Screens2', 'Interp1', 'Interp2', 'Interp3', 'Interp4', 'Interp5', 'Interp6', 'Interp7', 'Interp8', 'Interp9')) {
         & "Add-BridgeText$section" -Catalogue $catalogue
     }
 

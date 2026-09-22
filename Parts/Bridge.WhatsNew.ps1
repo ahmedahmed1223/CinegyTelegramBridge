@@ -1159,7 +1159,7 @@ function Get-WhatsNewText {
     if ($Take -gt 0) { $sections = @($sections | Select-Object -First $Take) }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    if (-not $NoHeading) { $lines.Add("<b>🆕 ما الجديد</b> — الإصدار الحالي <code>$($script:BridgeVersion)</code>") }
+    if (-not $NoHeading) { $lines.Add((T 'whatsnew.title' $($script:BridgeVersion))) }
     else { $lines.Add('<b>🆕 ما الجديد</b> — <i>الإصدارات الأقدم</i>') }
     foreach ($section in $sections) {
         $lines.Add('')

@@ -193,7 +193,7 @@ function Start-UrgentBoardRun {
     }
     $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
     if (-not $planResult.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لم يبدأ التشغيل: $([string]$planResult.Error)" -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.didNotStart' $([string]$planResult.Error)) -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
         return $false
     }
     $plan = $planResult.Value
@@ -222,7 +222,7 @@ function Start-UrgentBoardRun {
     finally { $script:UrgentBoardStarting = $false }
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'urgp.showFailed') }
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ جدول العواجل: $reason" -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.boardDidNotStart' $reason) -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
         return $false
     }
 
@@ -247,7 +247,7 @@ function Start-UrgentBoardRun {
     Save-UrgentRunState | Out-Null
     Write-BridgeLog "Urgent board run started by $UserId - $summary"
     foreach ($note in @(Get-UrgentProperty $plan 'Notes' @())) { Write-BridgeLog "Urgent board plan: $note" 'WARN' }
-    Add-AuditEntry "🚨 تشغيل جدول العواجل ($($steps.Count) خطوة) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'urgp.boardStarted' $($steps.Count) $(Format-UserAuditActor -UserId $UserId))
     Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId
     return $true
 }
@@ -427,7 +427,7 @@ function Update-UrgentBoardRun {
     $sent = Send-UrgentBoardStep -Step $step -ForceExit:$hidePrevious
     if (-not $sent.Success) {
         Write-BridgeLog "Urgent board step $($index + 1) failed: $([string]$sent.Error)" 'WARN'
-        Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text "❌ توقّف جدول العواجل عند الخطوة $($index + 1): $([string]$sent.Error)"
+        Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text (T 'urgp.stoppedAtStep' $($index + 1) $([string]$sent.Error))
         Stop-UrgentBoardRun -Reason 'failed' -Quiet | Out-Null
         return
     }
@@ -602,7 +602,7 @@ function Restore-UrgentBoardRun {
     }
     Write-BridgeLog "An urgent board run resumed after a restart at step $($step + 1) of $($steps.Count)."
     $restoreStatus = if ($paused) { (T 'urgp.stayedPaused') } else { (T 'urgp.resumed') }
-    Send-AdminBroadcast -Text "🚨 جدول العواجل $restoreStatus بعد إعادة التشغيل عند الخطوة $($step + 1) من $($steps.Count)." | Out-Null
+    Send-AdminBroadcast -Text (T 'urgp.afterRestart' $restoreStatus $($step + 1) $($steps.Count)) | Out-Null
     return $true
 }
 
@@ -667,6 +667,6 @@ function Move-UrgentBoardNext {
     $run.ClockOffset = [double]$step.AtSeconds
     $run.Paused = $false
     Save-UrgentRunState | Out-Null
-    Add-AuditEntry "⏭ تخطي العاجل الحالي — بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'urgp.skipped' $(Format-UserAuditActor -UserId $UserId))
     return $true
 }

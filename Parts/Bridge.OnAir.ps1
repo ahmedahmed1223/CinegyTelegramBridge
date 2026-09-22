@@ -373,7 +373,7 @@ function Get-CinegyStateFreshness {
         # Seconds are the right unit for "45 seconds behind" and a useless one
         # for "372741 ثانية", which is four days nobody will divide out while
         # glancing at a status screen.
-        return [pscustomobject]@{ State = 'stale'; Label = "🟠 متأخر منذ $(Format-DurationSeconds -Seconds $ageSeconds)"; AgeSeconds = $ageSeconds }
+        return [pscustomobject]@{ State = 'stale'; Label = (T 'onair.lateSince' $(Format-DurationSeconds -Seconds $ageSeconds)); AgeSeconds = $ageSeconds }
     }
     return [pscustomobject]@{ State = 'connected'; Label = (T 'onair.connected'); AgeSeconds = $ageSeconds }
 }
@@ -382,7 +382,7 @@ function Format-ExternalCinegyChangeAlert {
     param([Parameter(Mandatory)][object[]]$Changes)
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'onair.externalChange'))
-    $lines.Add("خادم Air: $($config.AirServerAddress) | القناة: $($config.AirChannelNumber)")
+    $lines.Add((T 'onair.airServer' $($config.AirServerAddress) $($config.AirChannelNumber)))
     foreach ($change in @($Changes)) {
         # Asked of the decision, not re-derived from the id. An id survives a
         # scene that has simply ended, so "has an id" meant "a stranger took
@@ -392,17 +392,17 @@ function Format-ExternalCinegyChangeAlert {
         $state = if ($replaced) { (T 'onair.replacedExternally') } else { (T 'onair.noLongerOnAir') }
         $lines.Add('')
         $lines.Add("$(Get-LayerDisplayName -Layer ([int]$change.Layer)): $state")
-        $lines.Add("القالب الذي كان يعرضه البوت: $($change.TemplateKey)")
-        $lines.Add("المشغّل: $($change.ShowUserId) | بدأ: $($change.ShownAt)")
-        $lines.Add("المعرّف السابق: $($change.ExpectedActiveId)")
+        $lines.Add((T 'onair.botTemplate' $($change.TemplateKey)))
+        $lines.Add((T 'onair.operatorStarted' $($change.ShowUserId) $($change.ShownAt)))
+        $lines.Add((T 'onair.previousId' $($change.ExpectedActiveId)))
         if ($replaced) {
             $name = if ([string]::IsNullOrWhiteSpace([string]$change.ActualActiveName)) { (T 'onair.unnamedItem') } else { $change.ActualActiveName }
-            $lines.Add("العنصر الحالي: $name | المعرّف: $($change.ActualActiveId)")
+            $lines.Add((T 'onair.currentItem' $name $($change.ActualActiveId)))
         }
-        if ($change.OutputState) { $lines.Add("حالة الخرج: $($change.OutputState)") }
+        if ($change.OutputState) { $lines.Add((T 'onair.outputState' $($change.OutputState))) }
         if ($replaced) {
-            $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { (T 'onair.unknownExternalSource') }
-            $lines.Add("المصدر: $source")
+            $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { (T 'onair.cinegyClient' $($change.ClientIdentity)) } else { (T 'onair.unknownExternalSource') }
+            $lines.Add((T 'onair.source' $source))
         }
         else {
             # Naming a "source" for a graphic that simply ran out sent an

@@ -200,8 +200,8 @@ function Format-MojazDesignSummary {
     $media = @($Design.Fields | Where-Object { $_.Kind -eq 'media' }).Count
     $text = @($Design.Fields | Where-Object { $_.Kind -eq 'text' }).Count
     $parts = @()
-    if ($media -gt 0) { $parts += "$media وسائط" }
-    if ($text -gt 0) { $parts += "$text نص" }
+    if ($media -gt 0) { $parts += (T 'mjd.media' $media) }
+    if ($text -gt 0) { $parts += (T 'mjd.text' $text) }
     if ($parts.Count -eq 0) { $parts += (T 'mjd.noFields') }
     $parts += $(if ($Design.SupportsRows) { (T 'mjd.manyHeadlines') } else { (T 'mjd.oneHeadline') })
     return ($parts -join ' · ')
@@ -400,9 +400,9 @@ function Get-MojazLoopFitNote {
         if ($times -le 1) { return '' }
         $framesText = Get-ArabicCountNoun -Count $LoopFrames -One 'إطار' -Two 'إطاران' -Few 'إطارات' -Many 'إطارًا' -EnglishOne 'frame' -EnglishMany 'frames'
         $timesText = Get-ArabicCountNoun -Count $times -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
-        return "⚠️ المدة $times أضعاف طول اللوب ($framesText) — سيُعرض كل خبر $timesText. اجعلها $framesText أو فعّل «مزامنة الظهور»."
+        return (T 'mjd.durationMultiple' $times $framesText $timesText $framesText)
     }
-    return "⚠️ المدة لا توافق طول اللوب ($(Get-ArabicCountNoun -Count $LoopFrames -One 'إطار' -Two 'إطاران' -Few 'إطارات' -Many 'إطارًا' -EnglishOne 'frame' -EnglishMany 'frames')) — سيتبدّل الخبر في منتصف الحركة. اجعلها من مضاعفات $LoopFrames أو فعّل «مزامنة الظهور»."
+    return (T 'mjd.durationMismatch' $(Get-ArabicCountNoun -Count $LoopFrames -One 'إطار' -Two 'إطاران' -Few 'إطارات' -Many 'إطارًا' -EnglishOne 'frame' -EnglishMany 'frames') $LoopFrames)
 }
 
 function Get-MojazBulletinLoopFitNote {
@@ -514,9 +514,9 @@ function Get-MojazSyncText {
         return (T 'mjd.syncWantedNoLoop')
     }
     $loop = [double]$timing.LoopSeconds
-    $line = "<b>🎬 مزامنة مع حركة الظهور</b>: كل صف يبقى لوبًا كاملًا (<code>$loop</code> ث) ويتبدّل داخل ظهورٍ مدّته <code>$($timing.IntroSeconds)</code> ث."
+    $line = (T 'mjd.syncExplain' $loop $($timing.IntroSeconds))
     if ($loop -ge 30) {
-        $line += "`n⚠️ اللوب طويل، فالصف يبقى <code>$loop</code> ث. لتسريعه قصِّر <code>LoopEndFrame</code> في Titler."
+        $line += (T 'mjd.loopLong' $loop)
     }
     return $line
 }
@@ -533,16 +533,16 @@ function Get-MojazPlanText {
         # The loop owns the pace here, so quoting the dwell would be a lie.
         $plan = New-MojazLoopPlan -SceneTiming $timing -RowCount $rows.Count -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
         $total = [int][math]::Ceiling([double]$plan.ExitOffset + [double]$timing.OutroSeconds)
-        return "كل صف لوب واحد ($($timing.LoopSeconds) ث) · الإجمالي ≈ $(Format-DurationSeconds -Seconds $total)`n$(Get-MojazSyncText -Bulletin $Bulletin)"
+        return (T 'mjd.oneLoopPerRow' $($timing.LoopSeconds) $(Format-DurationSeconds -Seconds $total) $(Get-MojazSyncText -Bulletin $Bulletin))
     }
     $delay = Get-MojazDelaySeconds -Bulletin $Bulletin
     $intro = Get-MojazIntroSeconds -Bulletin $Bulletin
     $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
     $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
-    $line = "كل صف $(Get-MojazDelayFrames -Bulletin $Bulletin) إطار ($delay ث) · الأول +$(Get-MojazIntroFrames -Bulletin $Bulletin) إطار لحركة الدخول · الأخير $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار ثم خروج · الإجمالي ≈ $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total)))"
+    $line = (T 'mjd.framesPerRow' $(Get-MojazDelayFrames -Bulletin $Bulletin) $delay $(Get-MojazIntroFrames -Bulletin $Bulletin) $(Get-MojazLastRowFrames -Bulletin $Bulletin) $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total))))
     $timing = Get-MojazSceneTiming
     if ($timing) {
-        $line += "`nمن القالب: دخول $(Get-MojazSceneFrames -Which intro) إطار · لوب $([int](Get-JsonProp $timing 'LoopFrames')) إطار · خروج $(Get-MojazSceneFrames -Which outro) إطار (‏$(Get-MojazFps) إطارًا/ث)"
+        $line += (T 'mjd.fromTemplate' $(Get-MojazSceneFrames -Which intro) $([int](Get-JsonProp $timing 'LoopFrames')) $(Get-MojazSceneFrames -Which outro) $(Get-MojazFps))
         # Directly under the two figures it compares, because that is where an
         # operator was left to do the arithmetic themselves.
         $fit = Get-MojazBulletinLoopFitNote -Bulletin $Bulletin
@@ -552,7 +552,7 @@ function Get-MojazPlanText {
         $loopSeconds = if ($timing) { [double](Get-JsonProp $timing 'LoopSeconds') } else { 0 }
         $line += (T 'mjd.syncOn')
         if ($loopSeconds -gt 0) {
-            $line += "، والإيقاع يصير طول اللوب ($(Format-DurationSeconds -Seconds ([int][math]::Round($loopSeconds)))) لا المدة أعلاه"
+            $line += (T 'mjd.paceBecomesLoop' $(Format-DurationSeconds -Seconds ([int][math]::Round($loopSeconds))))
         }
         $line += '.'
     }

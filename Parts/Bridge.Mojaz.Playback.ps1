@@ -44,7 +44,7 @@ function Start-MojazPlayback {
     # holds it, and passes -Force once the air is clear.
     if (-not $Force -and (Test-MojazUrgentOnAir)) {
         Send-TelegramMessage -ChatId $ChatId `
-            -Text "🚨 العاجل على الهواء الآن.`nمتى يبدأ «$([string]$bulletin.Name)»؟" `
+            -Text (T 'mjp.urgentOnAirWhen' $([string]$bulletin.Name)) `
             -ReplyMarkup (Get-MojazUrgentWaitKeyboard)
         return $false
     }
@@ -80,7 +80,7 @@ function Start-MojazPlayback {
     $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) -ChatId $ChatId -UserId $UserId
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'mjp.showFailed') }
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.didNotStart' $reason) -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
     # Asked once, before the state is built: it is an HTTP round trip on the
@@ -145,7 +145,7 @@ function Start-MojazPlayback {
     # after the bulletin, when the screen that warned is long gone.
     $fitNote = Get-MojazBulletinLoopFitNote -Bulletin $bulletin
     if ($fitNote) { Write-BridgeLog "Mojaz row hold does not fit the scene loop: $fitNote" 'WARN' }
-    Add-AuditEntry "📑 تشغيل «$([string]$snapshot.BulletinName)» ($($rows.Count) صفًّا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'mjp.started' $([string]$snapshot.BulletinName) $($rows.Count) $(Format-UserAuditActor -UserId $UserId))
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true
 }
@@ -407,8 +407,8 @@ function Clear-MojazForUrgent {
     $name = [string]$script:MojazPlayback.BulletinName
     Stop-MojazPlayback -UserId $UserId -Quiet | Out-Null
     Write-BridgeLog 'Mojaz pulled: the urgent template takes the air.'
-    Add-AuditEntry "🚨 سُحب الموجز «$name» لصالح العاجل - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    if ($ChatId -gt 0) { Send-TelegramMessage -ChatId $ChatId -Text "🚨 خرج «$name» ليفسح المجال للعاجل." }
+    Add-AuditEntry (T 'mjp.pulledForUrgent' $name $(Format-UserAuditActor -UserId $UserId))
+    if ($ChatId -gt 0) { Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.leftForUrgent' $name) }
     return $true
 }
 
@@ -471,8 +471,8 @@ function Start-MojazAfterUrgent {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.slotNotHeld')
         return $false
     }
-    Add-AuditEntry "⏳ تأجيل «$([string]$bulletin.Name)» إلى ما بعد العاجل - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "⏳ سيبدأ «$([string]$bulletin.Name)» فور خروج العاجل."
+    Add-AuditEntry (T 'mjp.heldUntilAfterUrgent' $([string]$bulletin.Name) $(Format-UserAuditActor -UserId $UserId))
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.startsWhenUrgentLeaves' $([string]$bulletin.Name))
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
     return $true
 }
@@ -501,7 +501,7 @@ function Confirm-MojazPendingUrgent {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.noUrgentWaiting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    Add-AuditEntry "⏳ تأجيل العاجل إلى ما بعد الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'mjp.urgentHeld' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.urgentWaits') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
@@ -562,7 +562,7 @@ function Hide-MojazOnAir {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notOnAir') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    Add-AuditEntry "⏹ إخفاء الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'mjp.hidden' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.left') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
@@ -701,7 +701,7 @@ function Restore-MojazPlayback {
         -not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId -or
         -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
         Write-BridgeLog "Refused to restore bulletin '$name': live scene identity could not be matched." 'WARN'
-        Send-AdminBroadcast -Text "⚠️ لم يُستأنف الموجز «$name» أو يُخرج بعد إعادة التشغيل لأن هوية المشهد على الطبقة تغيّرت أو تعذّر التحقق منها." | Out-Null
+        Send-AdminBroadcast -Text (T 'mjp.notResumed' $name) | Out-Null
         return $false
     }
     if ($elapsed -ge $exitAt) {
@@ -709,7 +709,7 @@ function Restore-MojazPlayback {
         # -System: restart recovery, with no operator in the loop at all.
         Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user -System | Out-Null
         Request-MojazTickerReturn | Out-Null
-        Send-AdminBroadcast -Text "⏹ كان الموجز «$name» على الهواء لحظة إعادة التشغيل وقد تجاوز وقت خروجه، فأُخرج الآن." | Out-Null
+        Send-AdminBroadcast -Text (T 'mjp.pastItsTime' $name) | Out-Null
         return $true
     }
     $rows = @(Get-JsonProp $state 'Plan')
@@ -750,7 +750,7 @@ function Restore-MojazPlayback {
     }
     Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Resumed the bulletin '$name' after a restart at row $($index + 1) of $(@($script:MojazPlayback.Rows).Count), $([int]$elapsed)s in."
-    Send-AdminBroadcast -Text "▶️ استُؤنف الموجز «$name» بعد إعادة التشغيل عند الصف $($index + 1)." | Out-Null
+    Send-AdminBroadcast -Text (T 'mjp.resumed' $name $($index + 1)) | Out-Null
     return $true
 }
 
@@ -799,7 +799,7 @@ function Update-MojazPlayback {
         # urgent taking over, a failed row. This is the one that finishes on
         # its own minutes after the operator stopped watching.
         if ($stopped -and (Get-Setting 'MojazNotifyOnFinish')) {
-            Send-TelegramMessage -ChatId $finishedChat -Text "⏹ انتهى «$finishedName» وخرج عن الهواء."
+            Send-TelegramMessage -ChatId $finishedChat -Text (T 'mjp.endedAndLeft' $finishedName)
         }
         return
     }
@@ -810,7 +810,7 @@ function Update-MojazPlayback {
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Mojaz POSTBOX XML: $($result.Xml)" }
     if (-not $result.Success) {
         Write-BridgeLog "Mojaz row $($index + 1) failed: $($result.Error)" 'WARN'
-        Send-TelegramMessage -ChatId ([long]$script:MojazPlayback.ChatId) -Text "❌ توقّف الموجز عند الصف $($index + 1): $($result.Error)"
+        Send-TelegramMessage -ChatId ([long]$script:MojazPlayback.ChatId) -Text (T 'mjp.stoppedAtRow' $($index + 1) $($result.Error))
         Stop-MojazPlayback -Quiet | Out-Null
         return
     }

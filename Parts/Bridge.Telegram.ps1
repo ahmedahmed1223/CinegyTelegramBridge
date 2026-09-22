@@ -849,7 +849,7 @@ function Send-TelegramPhoto {
         }
         Write-BridgeLog "Failed to send Telegram photo to $ChatId : $($request.Error)" "ERROR"
         Register-TelegramSendFailure -ChatId $ChatId -StatusCode ([int](Get-JsonProp $request 'StatusCode')) -ErrorText ([string]$request.Error)
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إرسال الصورة: $($request.Error)"
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tg.photoFailed' $($request.Error))
     }
 }
 
@@ -1018,7 +1018,7 @@ function Add-BridgeAlertOccurrence {
     }
     if ($seen.Count -lt 3) { return '' }
     $span = Format-DurationSeconds -Seconds ([int]($Now - $seen[0]).TotalSeconds)
-    return "🔁 تكرار: هذه المرة رقم $($seen.Count) لنفس السبب خلال $span (الأولى $($seen[0].ToString('HH:mm'))). السبب واحد - عالجه، لا الحالة."
+    return (T 'tg.repeat' $($seen.Count) $span $($seen[0].ToString('HH:mm')))
 }
 
 function Sync-PinnedRecurrence {
@@ -1156,8 +1156,8 @@ function Update-AlertSuppressionSweep {
         $script:AlertSuppression.Remove($key)
         if ($held -le 0) { continue }
         $chat = [long]$record.ChatId
-        $text = "🔇 كُتم $(Get-ArabicCountNoun -Count $held -One 'تنبيه' -Two 'تنبيهان' -Few 'تنبيهات' -Many 'تنبيهًا' -EnglishOne 'alert' -EnglishMany 'alerts') من نفس السبب خلال الساعة الماضية بعد بلوغ السقف.`n" +
-        "السبب: $(ConvertTo-TelegramHtmlText $([string]$record.Cause))"
+        $text = (T 'tg.muted' $(Get-ArabicCountNoun -Count $held -One 'تنبيه' -Two 'تنبيهان' -Few 'تنبيهات' -Many 'تنبيهًا' -EnglishOne 'alert' -EnglishMany 'alerts')) +
+        (T 'tg.cause' $(ConvertTo-TelegramHtmlText $([string]$record.Cause)))
         Write-BridgeLog "Held $held alert(s) for cause '$($record.Cause)' (chat $chat) after the hourly cap" 'WARN'
         if ($chat -gt 0) { Send-TelegramMessage -ChatId $chat -Text $text -ParseMode HTML }
         else { Send-AdminBroadcast -Text $text }
@@ -1305,8 +1305,8 @@ function Update-QuietHoursQueue {
     Save-QuietHoursQueue | Out-Null
     $dropped = [int]$script:QuietHoursDropped
     $script:QuietHoursDropped = 0
-    $headline = if ($dropped -gt 0) { "🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count)، وسقط $dropped أقدم منها)" }
-    else { "🌅 تنبيهات مؤجّلة من فترة الهدوء ($($held.Count))" }
+    $headline = if ($dropped -gt 0) { (T 'tg.heldAlertsDropped' $($held.Count) $dropped) }
+    else { (T 'tg.heldAlerts' $($held.Count)) }
     $lines = @($headline) + @($held | ForEach-Object {
             "• $($_.At.ToString('HH:mm')) — $(($_.Text -split "`n")[0])"
         })
@@ -1430,7 +1430,7 @@ function Get-CopyButtonNotice {
         [Parameter(Mandatory)][string]$Label,
         [string]$Hint = (T 'tg.pasteWhereNeeded')
     )
-    return "📋 زر «$Label» ينسخ النص إلى حافظة جهازك فورًا — $Hint"
+    return (T 'tg.copyButton' $Label $Hint)
 }
 
 function Send-BridgeTextEditPrompt {
@@ -1553,7 +1553,7 @@ function Send-TelegramPagedChunk {
 
     $isLast = $index -eq ($chunks.Count - 1)
     $markup = if ($isLast) { $state.Markup }
-    else { @{ inline_keyboard = @(, @((New-Button "📄 المزيد ($($index + 2)/$($chunks.Count))" 'more:next'))) } }
+    else { @{ inline_keyboard = @(, @((New-Button (T 'tg.more' $($index + 2) $($chunks.Count)) 'more:next'))) } }
 
     $mode = if ($state.ContainsKey('ParseMode')) { [string]$state['ParseMode'] } else { '' }
     Send-TelegramMessage -ChatId $ChatId -Text ([string]$chunks[$index]) -ReplyMarkup $markup -ParseMode $mode

@@ -266,7 +266,7 @@ function Show-BoardItemOnAir {
     $key = [string](Get-BoardProperty $board 'TemplateKey' '')
     $template = (Get-TemplateStore).Map[$key]
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ قالب هذا الجدول ('$key') لم يعد في السجلّ."
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.templateGone' $key)
         return $false
     }
     $fields = @(Get-BoardTextFields -TemplateKey $key)
@@ -454,7 +454,7 @@ function Show-BoardItemScreen {
     $key = [string](Get-BoardProperty $board 'TemplateKey' '')
     $position = Get-BoardItemPosition -Board $board -ItemId $ItemId
     $total = @(Get-BoardProperty $board 'Items' @()).Count
-    $lines = @("$(if ([bool](Get-BoardProperty $item 'Enabled' $true)) { '✅' } else { '🚫' }) <b>الصفّ $($position + 1) من $total</b>", '')
+    $lines = @((T 'board.rowOf' $(if ([bool](Get-BoardProperty $item 'Enabled' $true)) { '✅' } else { '🚫' }) $($position + 1) $total), '')
     $values = Get-BoardProperty $item 'Values' $null
     foreach ($field in @(Get-BoardTextFields -TemplateKey $key)) {
         $value = [string](Get-BoardProperty $values $field '')
@@ -466,7 +466,7 @@ function Show-BoardItemScreen {
     $media = @(Get-BoardMediaFields -TemplateKey $key)
     if ($media.Count -gt 0) {
         $lines += ''
-        $lines += "🖼 $(ConvertTo-TelegramHtmlText ($media -join (T 'common.comma'))) — من المشهد، لا تُملأ من هنا."
+        $lines += (T 'board.fromScene' $(ConvertTo-TelegramHtmlText ($media -join (T 'common.comma'))))
     }
     $orphans = @(Get-BoardOrphanFields -Item $item -TextFields @(Get-BoardTextFields -TemplateKey $key))
     if ($orphans.Count -gt 0) {
@@ -556,7 +556,7 @@ function Complete-BoardText {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
             return $false
         }
-        Add-AuditEntry "🗂 إنشاء جدول محتوى «$([string]$result.Value.Name)» - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Add-AuditEntry (T 'board.created' $([string]$result.Value.Name) $(Format-UserAuditActor -UserId $UserId))
         Show-BoardScreen -BoardId ([string]$result.Value.Id) -ChatId $ChatId -UserId $UserId
         return $true
     }
@@ -612,9 +612,9 @@ function Complete-BoardText {
             }
             # Counted AND accounted for: "23 added" with no mention of the seven
             # that were not is the shape of a screen an operator stops believing.
-            $report = @("📋 أُضيف $added صفًّا.")
-            if (@($parsed.Skipped).Count -gt 0) { $report += "تُخطّي $(@($parsed.Skipped).Count): $(ConvertTo-TelegramHtmlText ($parsed.Skipped[0]))" }
-            if ($stopped) { $report += "⛔ توقّف: $(ConvertTo-TelegramHtmlText $stopped)" }
+            $report = @((T 'board.rowsAdded' $added))
+            if (@($parsed.Skipped).Count -gt 0) { $report += (T 'board.skipped' $(@($parsed.Skipped).Count) $(ConvertTo-TelegramHtmlText ($parsed.Skipped[0]))) }
+            if ($stopped) { $report += (T 'board.stopped' $(ConvertTo-TelegramHtmlText $stopped)) }
             Send-TelegramMessage -ChatId $ChatId -Text ($report -join "`n")
             Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
             return ($added -gt 0)

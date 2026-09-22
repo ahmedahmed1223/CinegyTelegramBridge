@@ -68,7 +68,7 @@ function Get-CinegyVersionAwarenessNote {
     if ($identity -notmatch '(?<Version>\d+\.\d+)(?:\.\d+){0,3}') { return '' }
     $installed = [string]$Matches.Version
     if ($installed -eq $ReferenceDocVersion) { return '' }
-    return "📄 توثيق Cinegy المرجعي مبنيّ على $ReferenceDocVersion، والمثبَّت هنا $installed ($(ConvertTo-TelegramHtmlText $identity)) — قِس أي قدرة جديدة على الجهاز قبل بنائها، فقد لا تكون موجودة بعد."
+    return (T 'hlth.docVersion' $ReferenceDocVersion $installed $(ConvertTo-TelegramHtmlText $identity))
 }
 
 function Invoke-FullStatusCommand {
@@ -112,18 +112,18 @@ function Invoke-FullStatusCommand {
     # tap-to-copy <code> span. Anything a person typed - a template name,
     # an alias, a store error - is escaped, because a single "<" in a
     # template name would cost the whole screen a 400.
-    $lines.Add("<b>📊 الحالة الكاملة</b> — <code>v$($script:BridgeVersion)</code>")
-    $clockLine = "🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)"
+    $lines.Add((T 'hlth.fullState' $($script:BridgeVersion)))
+    $clockLine = (T 'hlth.localTime' $($now.ToString('yyyy-MM-dd HH:mm:ss')))
     $lines.Add($clockLine)
     $lines.Add("<b>$overall</b>")
-    $identityLine = "👤 معرّفك: $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))"
+    $identityLine = (T 'hlth.yourId' $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId)))
     $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add((T 'hl.cinegyConnection'))
-    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
+    $lines.Add((T 'hlth.engine' $(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress)) $($config.AirChannelNumber) $($store.Order.Count)))
     $configuredSceneMode = [string](Get-Setting 'SceneMode')
     $sceneCapabilities = Get-CinegySceneCapabilities -SceneItems $layerStatuses -LayerTargetSupported $true
     $sceneMode = Test-BridgeSceneMode -RequestedMode $configuredSceneMode -Capabilities $sceneCapabilities
@@ -134,11 +134,11 @@ function Invoke-FullStatusCommand {
     if ($versionNote) { $lines.Add($versionNote) }
     $material = Get-AirMaterialNowNext
     if ($material) { $lines.Add($material) }
-    $lines.Add("🧩 وضع المشاهد المختار: <code>$(ConvertTo-TelegramHtmlText $configuredSceneMode)</code> · $verification")
+    $lines.Add((T 'hlth.sceneMode' $(ConvertTo-TelegramHtmlText $configuredSceneMode) $verification))
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
-    $lines.Add("📶 حالة بيانات Cinegy: <b>$(ConvertTo-TelegramHtmlText ([string]$freshness.Label))</b>")
+    $lines.Add((T 'hlth.dataState' $(ConvertTo-TelegramHtmlText ([string]$freshness.Label))))
     $lines.Add((ConvertTo-TelegramHtmlText (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)))
     $lines.Add('')
     $lines.Add($sep)
@@ -149,22 +149,22 @@ function Invoke-FullStatusCommand {
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add((T 'hl.runAndSchedule'))
-    $lines.Add("📡 البث المباشر: $(ConvertTo-TelegramHtmlText (Get-LiveRelayStatusText))")
-    $lines.Add("🖼 الصور المعلّقة: <code>$($script:SnapshotJobs.Count)</code> · مؤقتات الإخفاء: <code>$($script:AutoHideQueue.Count)</code> · تنبيهات الظهور: <code>$($script:TemplateReminderQueue.Count)</code>")
-    $lines.Add("🗓 الأحداث المجدولة القادمة: <code>$(@(Get-UpcomingScheduleEvents).Count)</code>")
+    $lines.Add((T 'hlth.liveFeed' $(ConvertTo-TelegramHtmlText (Get-LiveRelayStatusText))))
+    $lines.Add((T 'hlth.pending' $($script:SnapshotJobs.Count) $($script:AutoHideQueue.Count) $($script:TemplateReminderQueue.Count)))
+    $lines.Add((T 'hlth.upcoming' $(@(Get-UpcomingScheduleEvents).Count)))
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add((T 'hl.access'))
-    $lines.Add("🔐 المستخدمون المصرح لهم: <code>$(@(Get-JsonProp $config 'AllowedChatIds').Count)</code> محادثة / <code>$(@(Get-JsonProp $config 'AllowedUserIds').Count)</code> مستخدم")
-    $lines.Add("🔔 طلبات الوصول المعلّقة: <code>$($script:PendingApprovals.Count)</code>")
+    $lines.Add((T 'hlth.authorised' $(@(Get-JsonProp $config 'AllowedChatIds').Count) $(@(Get-JsonProp $config 'AllowedUserIds').Count)))
+    $lines.Add((T 'hlth.pendingRequests' $($script:PendingApprovals.Count)))
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add((T 'hlth.sync'))
     if ($sync.Failed.Count -gt 0) {
-        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join (T 'common.comma')) — تم الاحتفاظ بالحالة السابقة.")
+        $lines.Add((T 'hlth.layerCheckFailed' $($sync.Failed -join (T 'common.comma'))))
     }
     elseif ($sync.Removed.Count -gt 0) {
-        $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join (T 'common.comma'))")
+        $lines.Add((T 'hlth.removedHidden' $($sync.Removed -join (T 'common.comma'))))
     }
     else { $lines.Add((T 'hl.cinegySynced')) }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
@@ -271,7 +271,7 @@ function Get-RuntimeFileHealth {
             $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
             if ($item) {
                 $sizeKB = [math]::Round($item.Length / 1KB, 1)
-                $sizeText = if ($item.Length -lt 1KB) { "$($item.Length) بايت" } else { "$sizeKB KB" }
+                $sizeText = if ($item.Length -lt 1KB) { (T 'hlth.bytes' $($item.Length)) } else { "$sizeKB KB" }
                 $modified = $item.LastWriteTime
             }
             $raw = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
@@ -312,7 +312,7 @@ function Get-RuntimeFileHealthBlocks {
     $Records = @($Records)
 
     $faults = @($Records | Where-Object { $_.State -in @('broken', 'recoverable') })
-    $verdict = if ($faults.Count -eq 0) { (T 'hl.runtimeFilesHealthy') } else { "🔴 ملفات تحتاج انتباهك: $($faults.Count)" }
+    $verdict = if ($faults.Count -eq 0) { (T 'hl.runtimeFilesHealthy') } else { (T 'hlth.filesNeedYou' $($faults.Count)) }
 
     $blocks = @(
         @{ type = 'heading'; text = (T 'hl.runtimeFiles'); size = 3 }
@@ -337,7 +337,7 @@ function Get-RuntimeFileHealthBlocks {
             default { '🔴' }
         }
         $detail = switch ([string]$record.State) {
-            'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
+            'healthy' { (T 'hlth.lastWritten' $($record.SizeText) $(([datetime]$record.ModifiedAt).ToString('HH:mm'))) }
             'absent' { (T 'hl.notWrittenNothing') }
             'recoverable' { (T 'hl.corruptWithBackup') }
             default { (T 'hl.corruptNoBackup') }
@@ -371,7 +371,7 @@ function Get-RuntimeFileHealthText {
         # pre, so <b>…<code>n</code>…</b> is not a nesting Telegram will
         # accept - it is a message the API refuses outright, which reads on the
         # phone as the screen never arriving.
-        $lines.Add("<b>🔴 ملفات تحتاج انتباهك:</b> <code>$($faults.Count)</code>")
+        $lines.Add((T 'hlth.filesNeedYouHtml' $($faults.Count)))
     }
     $lines.Add('')
 
@@ -385,7 +385,7 @@ function Get-RuntimeFileHealthText {
             default { '🔴' }
         }
         $detail = switch ([string]$record.State) {
-            'healthy' { "$($record.SizeText) · آخر كتابة $(([datetime]$record.ModifiedAt).ToString('HH:mm'))" }
+            'healthy' { (T 'hlth.lastWritten' $($record.SizeText) $(([datetime]$record.ModifiedAt).ToString('HH:mm'))) }
             'absent' { (T 'hl.notWrittenNothing') }
             'recoverable' { (T 'hl.corruptWithBackup') }
             default { (T 'hl.corruptNoBackup') }
@@ -415,7 +415,7 @@ function Get-RuntimeFileHealthText {
     if ($fileLines.Count -gt 0) { $lines.Add($fileLines -join "`n") }
     if ($quietLines.Count -gt 0) {
         if ($fileLines.Count -gt 0) { $lines.Add('') }
-        $lines.Add("<b>سليمة أو لم تُكتب بعد ($($quietLines.Count)):</b>")
+        $lines.Add((T 'hlth.soundOrUnwritten' $($quietLines.Count)))
         $tag = if ($quietLines.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
         $lines.Add("$tag$($quietLines -join "`n")</blockquote>")
     }
@@ -497,7 +497,7 @@ function Get-BridgeHealthRows {
     $monitorDisabled = (Get-SettingInt 'OutputMonitorMinutes') -le 0
     $monitorFault = [bool]$script:OutputMonitorFailureAlerted -or [bool]$script:OutputBlackAlerted
     $rows += if ($monitorDisabled) { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🟢'; Detail = (T 'hl.disabledByAdmin') } }
-    elseif ($monitorFault) { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🔴'; Detail = "إنذار نشط (فشل متتالٍ: $script:OutputMonitorFailureCount)" } }
+    elseif ($monitorFault) { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🔴'; Detail = (T 'hlth.alarmOn' $script:OutputMonitorFailureCount) } }
     else { @{ Name = (T 'hl.outputMonitoring'); Glyph = '👁'; Icon = '🟢'; Detail = (T 'hl.sound') } }
 
     $relay = $script:RuntimeState.Relay
@@ -505,14 +505,14 @@ function Get-BridgeHealthRows {
     elseif ($relay.Process -and -not $relay.Process.HasExited) { @{ Name = (T 'hl.relayedStream'); Glyph = '📶'; Icon = '🟢'; Detail = (T 'hl.running') } }
     else { @{ Name = (T 'hl.relayedStream'); Glyph = '📶'; Icon = '🔴'; Detail = (T 'hl.requiredButStopped') } }
 
-    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { "$($DiagnosticsSnapshot.DiskFreeGB) GB متاح" } else { (T 'hl.spaceUnknown') }
-    $rows += if (@($Warnings).Count -gt 0) { @{ Name = (T 'hl.storage'); Glyph = '💾'; Icon = '🟠'; Detail = "$diskText — $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا' -EnglishOne 'warning' -EnglishMany 'warnings')" } }
+    $diskText = if ($null -ne $DiagnosticsSnapshot.DiskFreeGB) { (T 'hlth.gbFree' $($DiagnosticsSnapshot.DiskFreeGB)) } else { (T 'hl.spaceUnknown') }
+    $rows += if (@($Warnings).Count -gt 0) { @{ Name = (T 'hl.storage'); Glyph = '💾'; Icon = '🟠'; Detail = (T 'hlth.pair' $diskText $(Get-ArabicCountNoun -Count (@($Warnings).Count) -One 'تحذير' -Two 'تحذيران' -Few 'تحذيرات' -Many 'تحذيرًا' -EnglishOne 'warning' -EnglishMany 'warnings')) } }
     else { @{ Name = (T 'hl.storage'); Glyph = '💾'; Icon = '🟢'; Detail = $diskText } }
 
     $upcomingCount = @((Get-UpcomingScheduleEvents)).Count
     $upcomingText = Get-ArabicCountNoun -Count $upcomingCount -One 'حدث' -Two 'حدثان' -Few 'أحداث' -Many 'حدثًا' -EnglishOne 'event' -EnglishMany 'events'
-    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟠'; Detail = "متوقفة مؤقتًا — $upcomingText قادم" } }
-    else { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟢'; Detail = "$upcomingText قادم" } }
+    $rows += if (Get-Setting 'SchedulePaused') { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟠'; Detail = (T 'hlth.pausedNext' $upcomingText) } }
+    else { @{ Name = (T 'hl.scheduling'); Glyph = '📅'; Icon = '🟢'; Detail = (T 'hlth.next' $upcomingText) } }
 
     # D1: quarantined chats are invisible everywhere except 👥 المستخدمون -
     # BridgeManager mirrors this same row list (Save-HealthSnapshot), so this
@@ -607,7 +607,7 @@ function Get-BridgeHealthCenterBlocks {
     $usage = Get-BridgeUsageMetrics
     $operationsText = Get-ArabicCountNoun -Count $usage.OperationsToday -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
     $operatorsText = Get-ArabicCountNoun -Count $usage.ActiveOperators -One 'مشغّل' -Two 'مشغّلان' -Few 'مشغّلين' -Many 'مشغّلًا' -EnglishOne 'operator' -EnglishMany 'operators'
-    $blocks += @{ type = 'paragraph'; text = "📈 الاستخدام: $operationsText اليوم · $operatorsText · $($usage.OnAirCount) على الهواء" }
+    $blocks += @{ type = 'paragraph'; text = (T 'hlth.usage' $operationsText $operatorsText $($usage.OnAirCount)) }
     return $blocks
 }
 
@@ -675,13 +675,13 @@ function Get-BridgeHealthCenterText {
         "🕒 <code>$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))</code> · Bridge <code>v$script:BridgeVersion</code>"
         "<b>$verdict</b>"
         ''
-        $(if ($problemRows.Count -gt 0) { "<b>⚠️ يحتاج انتباهك ($($problemRows.Count))</b>`n$($problemRows -join "`n")`n" })
+        $(if ($problemRows.Count -gt 0) { (T 'hlth.needsYou' $($problemRows.Count) $($problemRows -join "`n")) })
         $(if ($healthyRows.Count -gt 0) {
                 $tag = if ($healthyRows.Count -gt 5) { '<blockquote expandable>' } else { '<blockquote>' }
-                "<b>✅ سليم ($($healthyRows.Count))</b>`n$tag$($healthyRows -join "`n")</blockquote>"
+                (T 'hlth.sound' $($healthyRows.Count) $tag $($healthyRows -join "`n"))
             })
         ''
-        "<b>📈 الاستخدام</b>: <code>$($usage.OperationsToday)</code> عملية اليوم · <code>$($usage.ActiveOperators)</code> مشغّل · <code>$($usage.OnAirCount)</code> على الهواء"
+        (T 'hlth.usageHtml' $($usage.OperationsToday) $($usage.ActiveOperators) $($usage.OnAirCount))
     ) -join "`n"
 }
 
@@ -717,20 +717,20 @@ function Show-EngineHealthScreen {
         $deltaLine = ''
         if ($script:LastEngineDropped -ge 0 -and $dropped -ge $script:LastEngineDropped) {
             $delta = $dropped - $script:LastEngineDropped
-            if ($delta -gt 0) { $deltaLine = " (+$delta منذ آخر فحص)" }
+            if ($delta -gt 0) { $deltaLine = (T 'hlth.sinceLastCheck' $delta) }
         }
         $script:LastEngineDropped = $dropped
         $verdict = if ($telemetry.Healthy -eq $false) { (T 'hl.warning') }
         elseif ([long]$telemetry.NoInputSignal -gt 0) { (T 'hl.noInputSignal') }
         else { (T 'hl.healthyGreen') }
         $lines.Add("<b>$verdict</b>")
-        $lines.Add("🎞 الإطارات — المخرَجة: $($telemetry.OutputCount) · الساقطة: $dropped$deltaLine")
-        $lines.Add("⏱ متوسط القراءة: $($telemetry.AverageReadTime)ms · أخطاء القراءة: $($telemetry.MaxReadErrorRate)%")
+        $lines.Add((T 'hlth.frames' $($telemetry.OutputCount) $dropped $deltaLine))
+        $lines.Add((T 'hlth.readTimes' $($telemetry.AverageReadTime) $($telemetry.MaxReadErrorRate)))
     }
     $license = [string](Get-JsonProp $video 'License')
     if (-not [string]::IsNullOrWhiteSpace($license)) {
         $safeLicense = ConvertTo-TelegramHtmlText $license
-        $licenseLine = if ($license -eq 'Licensed') { "📄 الترخيص: $safeLicense" } else { "📄 الترخيص: <b>$safeLicense</b> — تحقق من ترخيص المحرك" }
+        $licenseLine = if ($license -eq 'Licensed') { (T 'hlth.licence' $safeLicense) } else { (T 'hlth.licenceWarning' $safeLicense) }
         $lines.Add($licenseLine)
     }
     $material = Get-AirMaterialNowNext -TimeoutSec $timeout
@@ -756,12 +756,12 @@ function Start-TemplateTestReview {
     $testLayer = Get-SettingInt 'TemplateTestLayer' 0
     if ($testLayer -le 0) { Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.testLayerDisabled') -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex); return }
     if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $testLayer) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ طبقة التجربة $testLayer مستخدمة كطبقة إنتاج في سجل القوالب. اختر طبقة مستقلة." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.trialLayerInUse' $testLayer) -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex)
         return
     }
     $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
     Set-PendingState -ChatId $ChatId -State @{ Mode='template_test_review'; UserId=$UserId; TemplateIndex=$TemplateIndex; TestLayer=$testLayer; AutoHideSeconds=$seconds }
-    Send-TelegramMessage -ChatId $ChatId -Text "🧪 مراجعة اختبار القالب '$($template.Key)'`nطبقة التجربة المستقلة: $testLayer`nقيم الحقول: TEST`nالإخفاء التلقائي: $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')`n`nسيُفحص أن الطبقة فارغة مباشرة قبل الاختبار." -ReplyMarkup (Get-TemplateTestReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.testReview' $($template.Key) $testLayer $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) -ReplyMarkup (Get-TemplateTestReviewKeyboard)
 }
 
 function Get-BridgeSupervisor {
@@ -914,12 +914,12 @@ function Request-BridgeRestart {
     # an outage with no way back in through the bot that just stopped.
     $relaunch = if ($supervisor.Supervised) { $null } else { Get-BridgeRelaunchCommand }
     if (-not $supervisor.Supervised -and -not $relaunch) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا توجد وسيلة لإعادة تشغيل الجسر (العملية الأصل: $($supervisor.Name))، ولا يمكن إعادة بناء أمر التشغيل.`nالخروج الآن يعني توقف البوت نهائيًا بلا وسيلة لإعادته من هنا." -ReplyMarkup (Get-AdminToolsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.noRestartPath' $($supervisor.Name)) -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $who = if ($supervisor.Supervised) { $supervisor.Name } else { (T 'hl.bridgeItself') }
-    $live = if ($script:OnAir.Count -gt 0) { "`n⚠️ يوجد $($script:OnAir.Count) مشهدًا مسجّلًا على الهواء. إعادة التشغيل لا تغيّر ما هو على الشاشة، لكن البوت لن يستجيب لثوانٍ." } else { '' }
-    Send-TelegramMessage -ChatId $ChatId -Text ("♻️ تأكيد إعادة تشغيل الجسر`nستتوقف الاستجابة بضع ثوانٍ ثم يعيده $who تلقائيًا.$live") `
+    $live = if ($script:OnAir.Count -gt 0) { (T 'hlth.restartWithScenes' $($script:OnAir.Count)) } else { '' }
+    Send-TelegramMessage -ChatId $ChatId -Text ((T 'hlth.confirmRestart' $who $live)) `
         -ReplyMarkup @{ inline_keyboard = @(, @(
                 @{ text = (T 'hl.yesRestart'); callback_data = 'restart:confirm'; style = 'danger' },
                 @{ text = (T 'hl.cancel'); callback_data = 'menu:admintools' })) }
@@ -936,7 +936,7 @@ function Confirm-BridgeRestart {
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     if (-not (Get-Setting 'AllowRemoteRestart')) { return $false }
     Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
-    Add-AuditEntry "♻️ إعادة تشغيل الجسر - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'hlth.restartAudit' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.restarting')
     # Decided here rather than at exit. Under a supervisor the bridge must NOT
     # start its own replacement: the supervisor starts one too, and two bridges

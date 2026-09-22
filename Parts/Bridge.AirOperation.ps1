@@ -186,7 +186,7 @@ function Send-TemplateAirNotice {
     if (-not (Test-AirNoticeDue -Key $Key -Layer $Layer -Action $Action)) { return 0 }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $layerPart = if ($Layer -gt 0) { " · طبقة $Layer" } else { '' }
+    $layerPart = if ($Layer -gt 0) { (T 'air.layer' $Layer) } else { '' }
     $heading = if ($Action -eq 'hide') { (T 'air.takenOffTitle') } else { (T 'air.onAirNow') }
     $lines.Add("$heading — $(ConvertTo-TelegramHtmlText $Key)$layerPart")
     if (-not [string]::IsNullOrWhiteSpace($Copy)) {
@@ -199,11 +199,11 @@ function Send-TemplateAirNotice {
         # strap that ran four minutes was read; one that ran four seconds was
         # a mistake somebody has already corrected.
         if ($OnAirSince -is [datetime]) {
-            $lines.Add("⏱ بقي $(Format-DurationSeconds -Seconds ([int]((Get-Date) - $OnAirSince).TotalSeconds))")
+            $lines.Add((T 'air.left' $(Format-DurationSeconds -Seconds ([int]((Get-Date) - $OnAirSince).TotalSeconds))))
         }
     }
     else {
-        $lines.Add($(if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" } else { (T 'air.staysUntilHidden') }))
+        $lines.Add($(if ($AutoHideSeconds -gt 0) { (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $AutoHideSeconds)) } else { (T 'air.staysUntilHidden') }))
     }
     if ($ActorName) { $lines.Add("👤 $(ConvertTo-TelegramHtmlText $ActorName)") }
     $text = $lines -join "`n"
@@ -267,7 +267,7 @@ function Send-HeldAirNotices {
     $pending = @($script:AirNoticeHeld[$ChatId])
     $script:AirNoticeHeld.Remove($ChatId)
     if ($pending.Count -eq 0) { return 0 }
-    $header = if ($pending.Count -eq 1) { (T 'air.whileBusy') } else { "📣 <b>حدث أثناء انشغالك ($($pending.Count)):</b>" }
+    $header = if ($pending.Count -eq 1) { (T 'air.whileBusy') } else { (T 'air.whileBusyCount' $($pending.Count)) }
     $body = (@($header) + $pending) -join "`n`n"
     Send-TelegramMessage -ChatId $ChatId -Text $body -ParseMode HTML -ReplyMarkup (Get-AirNoticeMuteKeyboard)
     return $pending.Count
@@ -308,9 +308,9 @@ function Send-AirCollisionWarning {
         $sameLayer = $Layer -gt 0 -and $stateLayer -eq $Layer
         if (-not ($sameTemplate -or $sameLayer)) { continue }
         $verb = if ($Action -eq 'hide') { (T 'air.takenOff') } else { (T 'air.putOn') }
-        $who = if ($ActorName) { " بواسطة $(ConvertTo-TelegramHtmlText $ActorName)" } else { '' }
+        $who = if ($ActorName) { (T 'air.by' $(ConvertTo-TelegramHtmlText $ActorName)) } else { '' }
         Send-TelegramMessage -ChatId $chatId -ParseMode HTML `
-            -Text "⚠️ <b>$(ConvertTo-TelegramHtmlText $Key) $verb$who أثناء تجهيزك.</b>`nراجع ما أعددته قبل الإرسال — قد يكون ما على الشاشة قد تغيّر."
+            -Text (T 'air.changedWhileYouWorked' $(ConvertTo-TelegramHtmlText $Key) $verb $who)
         $warned++
     }
     if ($warned -gt 0) { Write-BridgeLog "Warned $warned operator(s) preparing '$Key' that it just changed on air" }
@@ -371,7 +371,7 @@ function Test-MaintenanceControl {
     # is wrongly on air.
     if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
     $reason = if ($scheduled -and -not $manual) {
-        "🛠 نافذة الصيانة المجدولة مفتوحة ($([string](Get-Setting 'MaintenanceWindowStart'))–$([string](Get-Setting 'MaintenanceWindowEnd')))؛ أوامر الهواء متوقفة حتى نهايتها."
+        (T 'air.maintenanceWindow' $([string](Get-Setting 'MaintenanceWindowStart')) $([string](Get-Setting 'MaintenanceWindowEnd')))
     }
     else { (T 'air.maintenanceOn') }
     Send-TelegramMessage -ChatId $ChatId -Text $reason -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
@@ -457,14 +457,14 @@ function Test-TemplateShowPolicy {
         if ([int]::TryParse($part.Trim(), [ref]$parsedLayer) -and $parsedLayer -gt 0) { $reserved += $parsedLayer }
     }
     if ($reserved -contains $Layer -and -not $IsAdmin) {
-        return [pscustomobject]@{ Allowed = $false; Reason = "الطبقة $Layer محجوزة إداريًا."; Warning = '' }
+        return [pscustomobject]@{ Allowed = $false; Reason = (T 'air.layerReserved' $Layer); Warning = '' }
     }
     if ($reserved -contains $Layer) {
-        return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = "⚠️ الطبقة $Layer محجوزة — تتجاوزها بصلاحية المشرف." }
+        return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = (T 'air.layerReservedOverride' $Layer) }
     }
     $disabled = @([string](Get-Setting 'DisabledTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if (@($disabled | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
-        return [pscustomobject]@{ Allowed = $false; Reason = "القالب '$Key' معطّل مؤقتًا."; Warning = '' }
+        return [pscustomobject]@{ Allowed = $false; Reason = (T 'air.templateDisabled' $Key); Warning = '' }
     }
     return [pscustomobject]@{ Allowed = $true; Reason = ''; Warning = '' }
 }
@@ -495,7 +495,7 @@ function Get-TemplateAirLimitExplanation {
     if ($RequestedSeconds -le 0 -or $effective -ge $RequestedSeconds -or $effective -le 0) { return '' }
     $sensitive = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() }) -contains $Key
     $reason = if ($sensitive -and (Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1) -eq $effective) { (T 'air.sensitiveCap') } else { (T 'air.templateLimit') }
-    return "⏱ المدة المطلوبة $RequestedSeconds ثانية؛ خُفّضت إلى $effective ثانية — $reason."
+    return (T 'air.durationLowered' $RequestedSeconds $effective $reason)
 }
 
 function Copy-ShowVariables {
@@ -600,7 +600,7 @@ function Get-VerifiedCinegyShowIdentity {
         $expected.Add([IO.Path]::GetFileNameWithoutExtension($TemplatePath).Trim()) | Out-Null
     }
     if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
-        return (& $failed "اسم المشهد الذي أعاده Cinegy لا يطابق '$Key'.")
+        return (& $failed (T 'air.sceneNameMismatch' $Key))
     }
     return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
 }
@@ -622,7 +622,7 @@ function Invoke-ShowTemplateResult {
     }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب '$Key' غير معروف." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.templateUnknown' $Key) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'unknown template'
         return
     }
@@ -634,13 +634,13 @@ function Invoke-ShowTemplateResult {
     }
     $access = Test-TemplateAccess -Key $Key -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
     if (-not $access.Allowed) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSent' $($access.Reason)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$access.Reason)
         return [pscustomobject]@{ Success = $false; Error = [string]$access.Reason }
     }
     $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSent' $($policy.Reason)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$policy.Reason)
         return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
     }
@@ -654,7 +654,7 @@ function Invoke-ShowTemplateResult {
     if (-not $layerStatus.Success) {
         $errorText = [string](Get-JsonProp $layerStatus 'Error')
         Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSentLayerUnsure' $($template.Layer)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText $errorText
         return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
@@ -813,7 +813,7 @@ function Invoke-ShowTemplateResult {
         # a double tap. Asked after the push, never before: blocking a repeat
         # that was deliberate would be worse than the mistake it prevents.
         if (Test-RepeatedShow -Key ([string]$Key)) {
-            Send-TelegramMessage -ChatId $ChatId -Text "🔁 تكرار غير معتاد: عُرض '$Key' عدة مرات خلال فترة قصيرة.`nهل هذا مقصود؟ إن لم يكن، اضغط ↩️ تراجع من القائمة."
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'air.unusualRepeat' $Key)
         }
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
@@ -838,7 +838,7 @@ function Invoke-ShowTemplateResult {
         Add-UsageCount -Key $Key
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor (chat $ChatId) pushed template '$Key' (layer $($template.Layer))"
-        Add-AuditEntry "▶ $Key (طبقة $($template.Layer)) - بواسطة $actor"
+        Add-AuditEntry (T 'air.showAudit' $Key $($template.Layer) $actor)
         # The room hears about the templates it asked to hear about, with what
         # they say and how long they stay.
         Send-TemplateAirNotice -Key $Key -Layer ([int]$template.Layer) -ActorChatId $ChatId `
@@ -867,7 +867,7 @@ function Invoke-ShowTemplateResult {
                 (T 'air.autoHideNotSet')
             }
             elseif ($timerSaved) {
-                " سيُخفى تلقائيًا بعد $(Get-ArabicCountNoun -Count $AutoHideSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')."
+                (T 'air.willAutoHide' $(Get-ArabicCountNoun -Count $AutoHideSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))
             }
             else {
                 (T 'air.hideTimerNotSaved')
@@ -878,7 +878,7 @@ function Invoke-ShowTemplateResult {
                 $suffix += (T 'air.appearAlertNotSet')
             }
             elseif (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId $activeId -ActiveIdConfirmed $true) {
-                $suffix += " سيصل إليك تنبيه شخصي بعد $(Get-ArabicCountNoun -Count $reminderMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') إذا بقي القالب ظاهرًا."
+                $suffix += (T 'air.personalAlertAfter' $(Get-ArabicCountNoun -Count $reminderMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes'))
             }
             else {
                 $suffix += (T 'air.appearAlertNotSaved')
@@ -892,7 +892,7 @@ function Invoke-ShowTemplateResult {
         # A one-tap hide right where the operator is looking: previously taking
         # something back off air meant going 🙈 -> pick layer, which is several
         # taps too many when a wrong graphic is live.
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم إظهار '$Key' على الهواء (طبقة $($template.Layer)).$suffix" -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.shown' $Key $($template.Layer) $suffix) -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables)
     }
     else {
@@ -916,7 +916,7 @@ function Invoke-ShowTemplateResult {
         if ($failureIndex -ge 0) {
             $failureMenu.inline_keyboard = @(, @( (New-Button (T 'air.whyNotShown') "whynot:$failureIndex") )) + @($failureMenu.inline_keyboard)
         }
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup $failureMenu
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.showFailed' $Key $($result.Error)) -ReplyMarkup $failureMenu
     }
     return $result
 }
@@ -951,7 +951,7 @@ function Get-ShowFailureDiagnosisLines {
     $lines = [System.Collections.Generic.List[string]]::new()
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
-        $lines.Add("❌ القالب <code>$(ConvertTo-TelegramHtmlText $Key)</code> لم يعد في سجل القوالب — حُذف أو أُعيدت تسميته.")
+        $lines.Add((T 'air.templateGone' $(ConvertTo-TelegramHtmlText $Key)))
         return $lines.ToArray()
     }
     $template = $store.Map[$Key]
@@ -963,7 +963,7 @@ function Get-ShowFailureDiagnosisLines {
         -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
     $lines.Add($(switch ([string]$freshness.State) {
                 'connected' { (T 'air.cinegyAnswers') }
-                'stale' { "⚠️ حالة Cinegy متأخرة ($(ConvertTo-TelegramHtmlText ([string]$freshness.Label))) — قد يكون المحرّك مشغولًا أو الشبكة بطيئة." }
+                'stale' { (T 'air.staleState' $(ConvertTo-TelegramHtmlText ([string]$freshness.Label))) }
                 default { (T 'air.noFreshState') }
             }))
 
@@ -977,19 +977,19 @@ function Get-ShowFailureDiagnosisLines {
         $lines.Add((T 'air.sceneFileThere'))
     }
     else {
-        $lines.Add("❌ ملف المشهد غير موجود: <code>$(ConvertTo-TelegramHtmlText $scenePath)</code> — نُقل أو أُعيدت تسميته أو تعذّر الوصول إلى المشاركة.")
+        $lines.Add((T 'air.sceneFileMissing' $(ConvertTo-TelegramHtmlText $scenePath)))
     }
 
     # 3. Who is holding the layer, and what is standing on it.
     if ($script:LayerLocks.ContainsKey($layer)) {
         $holder = [long](Get-JsonProp $script:LayerLocks[$layer] 'UserId')
-        $lines.Add("⚠️ الطبقة $layer محجوزة الآن لـ$(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $holder)) — انتظر أو اطلب منه الإنهاء.")
+        $lines.Add((T 'air.layerHeldBy' $layer $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $holder))))
     }
     elseif ($script:OnAir.ContainsKey($layer)) {
-        $lines.Add("ℹ️ الطبقة $layer عليها الآن <code>$(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $script:OnAir[$layer] 'Key')))</code> — العرض يستبدله لا يُضاف فوقه.")
+        $lines.Add((T 'air.layerOccupied' $layer $(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $script:OnAir[$layer] 'Key')))))
     }
     else {
-        $lines.Add("✅ الطبقة $layer خالية.")
+        $lines.Add((T 'air.layerEmpty' $layer))
     }
 
     # 4. Whether the bridge refused before Cinegy was ever asked. Access is
@@ -997,7 +997,7 @@ function Get-ShowFailureDiagnosisLines {
     # not about an administrator reading over their shoulder.
     if ($ChatId -gt 0) {
         $access = Test-TemplateAccess -Key $Key -Layer $layer -ChatId $ChatId -UserId $UserId
-        $lines.Add($(if ($access.Allowed) { (T 'air.templateAllowed') } else { "⛔ القالب ممنوع عليك: $(ConvertTo-TelegramHtmlText ([string]$access.Reason))" }))
+        $lines.Add($(if ($access.Allowed) { (T 'air.templateAllowed') } else { (T 'air.templateForbidden' $(ConvertTo-TelegramHtmlText ([string]$access.Reason))) }))
     }
 
     # 5. The two switches that stop everything, named rather than left to be
@@ -1011,7 +1011,7 @@ function Get-ShowFailureDiagnosisLines {
     if ($sharedLayers -and $sharedLayers.Contains([string]$layer)) {
         $siblings = @(@($sharedLayers[[string]$layer]) | Where-Object { $_ -ne $Key })
         if ($siblings.Count -gt 0) {
-            $lines.Add("ℹ️ يتشارك الطبقة $layer أيضًا: $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma'))) — لا يظهر اثنان منها معًا.")
+            $lines.Add((T 'air.layerAlsoShared' $layer $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma')))))
         }
     }
     return $lines.ToArray()
@@ -1025,7 +1025,7 @@ function Get-ShowFailureDiagnosisText {
         [datetime]$Now = (Get-Date)
     )
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>🔍 لماذا لم يظهر '$(ConvertTo-TelegramHtmlText $Key)'؟</b>")
+    $lines.Add((T 'air.whyNotShownTitle' $(ConvertTo-TelegramHtmlText $Key)))
     $lines.Add('')
     foreach ($line in @(Get-ShowFailureDiagnosisLines -Key $Key -ChatId $ChatId -UserId $UserId -Now $Now)) { $lines.Add($line) }
     $lines.Add('')

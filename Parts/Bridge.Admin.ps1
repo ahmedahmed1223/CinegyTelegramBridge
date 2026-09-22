@@ -31,15 +31,15 @@ function Get-OnAirSummary {
         $source = [string](Get-JsonProp $info 'Source')
         if ($source -eq 'cinegy') {
             $eventName = [string](Get-JsonProp $info 'CinegyEventName')
-            $detail = "   المصدر: Cinegy Air · منذ $ageText"
-            if ($eventName) { $detail += " · الحدث: $eventName" }
+            $detail = (T 'adm.sourceCinegy' $ageText)
+            if ($eventName) { $detail += (T 'adm.event' $eventName) }
             $lines.Add("🟣 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
             $lines.Add($detail)
         }
         else {
             $operator = if ($null -ne $info.UserId -and [long]$info.UserId -gt 0) { Get-UserDisplayName -UserId ([long]$info.UserId) } else { (T 'adm.unknown') }
             $lines.Add("🔵 $(Get-LayerDisplayName -Layer ([int]$layer)) · $($info.Key)")
-            $lines.Add("   المصدر: Bot · المستخدم: $operator · منذ $ageText")
+            $lines.Add((T 'adm.sourceBot' $operator $ageText))
         }
     }
     return ($lines -join "`n")
@@ -121,7 +121,7 @@ function Get-AirMaterialNowNext {
             # Only while it is plausible: a schedule that has drifted would
             # otherwise report a programme ending three hours ago.
             if ($left -gt [timespan]::Zero -and $left -lt $item.Duration) {
-                $text += " · تبقّى <code>$([int]$left.TotalMinutes) د</code>"
+                $text += (T 'adm.remaining' $([int]$left.TotalMinutes))
             }
         }
         return $text
@@ -130,8 +130,8 @@ function Get-AirMaterialNowNext {
     $now = [string](& $describe $status.ActiveId -WithRemaining)
     $next = [string](& $describe $status.CuedId)
     $parts = @()
-    if ($now) { $parts += "▶️ الجاري: $now" }
-    if ($next) { $parts += "⏭ التالي: $next" }
+    if ($now) { $parts += (T 'adm.running' $now) }
+    if ($next) { $parts += (T 'adm.nextUp' $next) }
     if ($parts.Count -eq 0) { return '' }
     return ($parts -join "`n")
 }
@@ -207,7 +207,7 @@ function Get-HandoverAutoSummary {
         }
     }
     if ($topCause -and $found.Count -lt 3) {
-        $found += "🔁 يتكرر: $(ConvertTo-TelegramHtmlText $topCause) ($(Get-ArabicCountNoun -Count $topCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))"
+        $found += (T 'adm.repeats' $(ConvertTo-TelegramHtmlText $topCause) $(Get-ArabicCountNoun -Count $topCount -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))
     }
     return @($found | Select-Object -First 3)
 }
@@ -278,17 +278,17 @@ function Show-ShiftReadinessScreen {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'adm.readinessTitle'))
     $onAir = @($script:OnAir.Keys).Count
-    $lines.Add($(if ($onAir -gt 0) { "🟠 طبقات على الهواء الآن: <code>$onAir</code> — راجعها قبل أن تلمس شيئًا." } else { (T 'adm.nothingOnAirGreen') }))
+    $lines.Add($(if ($onAir -gt 0) { (T 'adm.layersOnAirNow' $onAir) } else { (T 'adm.nothingOnAirGreen') }))
     $pending = @($script:PendingState.Keys).Count
-    $lines.Add($(if ($pending -gt 0) { "⏳ عمليات معلقة بانتظار أصحابها: <code>$pending</code>." } else { (T 'adm.noPending') }))
+    $lines.Add($(if ($pending -gt 0) { (T 'adm.pendingOps' $pending) } else { (T 'adm.noPending') }))
     $lines.Add($(
             if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) { (T 'adm.draftUnowned') }
-            elseif ($script:NewsTickerDraft) { "📰 مسودة شريط مفتوحة ($(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId'))))." }
+            elseif ($script:NewsTickerDraft) { (T 'adm.openDraft' $(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId')))) }
             else { (T 'adm.noDraft') }))
     $dead = @($script:DeadChats.Keys).Count
-    $lines.Add($(if ($dead -gt 0) { "💀 محادثات محجورة بانتظار قرار: <code>$dead</code>." } else { (T 'adm.noQuarantined') }))
+    $lines.Add($(if ($dead -gt 0) { (T 'adm.quarantined' $dead) } else { (T 'adm.noQuarantined') }))
     $pins = @($script:PinnedRecurrences.Keys).Count
-    $lines.Add($(if ($pins -gt 0) { "📌 أعطال مثبّتة لم تُحل: <code>$pins</code>." } else { (T 'adm.noStandingFaults') }))
+    $lines.Add($(if ($pins -gt 0) { (T 'adm.pinnedFaults' $pins) } else { (T 'adm.noStandingFaults') }))
     $lines.Add($(if (Test-QuietHoursActive) { (T 'adm.quietOn') } else { (T 'adm.alertsDirect') }))
     $ready = ($onAir -eq 0 -and $pending -eq 0 -and -not $script:NewsTickerDraft -and $dead -eq 0 -and $pins -eq 0)
     $lines.Add('')
@@ -301,7 +301,7 @@ function Show-ShiftReadinessScreen {
     $guards = @(Get-DisabledGuardLines)
     $lines.Add('')
     if ($guards.Count -gt 0) {
-        $lines.Add("🛡 <b>حمايات معطّلة</b> (<code>$($guards.Count)</code>) — اختيار إعداد، لا عطل:")
+        $lines.Add((T 'adm.protectionsOff' $($guards.Count)))
         foreach ($guard in $guards) { $lines.Add($guard) }
         $lines.Add((T 'adm.changedInSettings'))
     }
@@ -342,12 +342,12 @@ function Show-ShiftHandoverScreen {
             if ($at) {
                 $stamp = [datetime]::MinValue
                 if ([datetime]::TryParse([string]$at, [ref]$stamp)) {
-                    $since = " · منذ $(Format-Duration -Seconds ([int]((Get-Date) - $stamp).TotalSeconds))"
+                    $since = (T 'adm.since' $(Format-Duration -Seconds ([int]((Get-Date) - $stamp).TotalSeconds)))
                 }
             }
             $who = [long](Get-JsonProp $record 'UserId')
             $byText = if ($who -gt 0) { " · $(ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $who))" } else { '' }
-            $lines.Add("• طبقة $layer · $(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $record 'Key')))$since$byText")
+            $lines.Add((T 'adm.layerRow' $layer $(ConvertTo-TelegramHtmlText ([string](Get-JsonProp $record 'Key'))) $since $byText))
         }
     }
 
@@ -499,21 +499,21 @@ function Invoke-StatusCommand {
     # renders monospace and left-to-right, which stops digits reordering
     # against the Arabic around them, and Telegram makes each one tap-to-copy
     # for an operator quoting it in a fault report.
-    $lines.Add("<b>ℹ️ الحالة</b> — <code>v$($script:BridgeVersion)</code>")
-    $clockLine = "🕒 <code>$($now.ToString('yyyy-MM-dd HH:mm:ss'))</code> (محلي)"
+    $lines.Add((T 'adm.state' $($script:BridgeVersion)))
+    $clockLine = (T 'adm.localTime' $($now.ToString('yyyy-MM-dd HH:mm:ss')))
     $lines.Add($clockLine)
     $lines.Add("<b>$overall</b>")
     # Format-UserAuditActor, not a bare id: it resolves the alias when there is
     # one and pins the bracketed digits to LTR, so an Arabic name followed by
     # an id does not render as ")8201739556(".
-    $identityLine = "👤 معرّفك: $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId))"
+    $identityLine = (T 'adm.yourId' $(ConvertTo-TelegramHtmlText (Format-UserAuditActor -UserId $UserId)))
     $lines.Add($identityLine)
     $lines.Add('')
     $lines.Add($sep)
     # Named sections rather than one column: the same grammar the full status
     # uses, so an operator moving between the two screens reads one layout.
     $lines.Add((T 'adm.channelAndMaterial'))
-    $lines.Add("🌐 <code>$(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress))</code> · القناة <code>$($config.AirChannelNumber)</code> · القوالب: <code>$($store.Order.Count)</code>")
+    $lines.Add((T 'adm.engine' $(ConvertTo-TelegramHtmlText ([string]$config.AirServerAddress)) $($config.AirChannelNumber) $($store.Order.Count)))
     # The programme under the graphics. Placed with the channel line because
     # it answers the same question - what is this channel doing right now -
     # and above the layer detail, because it is the context the layers sit in.
@@ -521,16 +521,16 @@ function Invoke-StatusCommand {
     if ($material) { $lines.Add($material) }
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
-        $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join (T 'common.comma'))" }) -join ' | ')
+        $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { (T 'adm.layerPair' ${_} $(@($sharedLayers[$_]) -join (T 'common.comma'))) }) -join ' | ')
         # Not 'allowed' - a Cinegy GFX layer holds one scene, so templates
         # sharing a layer can never be on air together. Calling that harmless
         # is how a logo and a ticker end up silently evicting each other.
-        $lines.Add("⚠️ قوالب تتشارك الطبقة نفسها ولا يمكن عرضها معًا: $sharedText")
+        $lines.Add((T 'adm.sharedLayers' $sharedText))
     }
     $lastSuccessfulAt = Get-JsonProp $sync 'LastSuccessfulAt'
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccessfulAt -FailedCount @($sync.Failed).Count `
         -Now $now -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
-    $lines.Add("📶 حالة بيانات Cinegy: <b>$(ConvertTo-TelegramHtmlText ([string]$freshness.Label))</b>")
+    $lines.Add((T 'adm.dataState' $(ConvertTo-TelegramHtmlText ([string]$freshness.Label))))
     if ($lastSuccessfulAt) {
         # "منذ 12 ثانية" answers the question being asked - is this current? -
         # which a bare timestamp leaves the reader to work out against a clock.
@@ -538,18 +538,18 @@ function Invoke-StatusCommand {
         $checkedAt = [datetime]$lastSuccessfulAt
         $agoSeconds = [math]::Max(0, [int]($now - $checkedAt).TotalSeconds)
         # "منذ 0 ثانية" is a strange way to say "just now".
-        $ago = if ($agoSeconds -lt 5) { (T 'adm.now') } else { "منذ $(Format-DurationSeconds -Seconds $agoSeconds)" }
-        $lines.Add("🔄 آخر فحص ناجح: <i>$ago</i> (<code>$($checkedAt.ToString('HH:mm:ss'))</code>)")
+        $ago = if ($agoSeconds -lt 5) { (T 'adm.now') } else { (T 'adm.ago' $(Format-DurationSeconds -Seconds $agoSeconds)) }
+        $lines.Add((T 'adm.lastGoodCheck' $ago $($checkedAt.ToString('HH:mm:ss'))))
     }
     $lines.Add((ConvertTo-TelegramHtmlText (Get-OnAirSummary)))
     $lines.Add('')
     $lines.Add($sep)
     $lines.Add((T 'adm.syncTitle'))
     if ($sync.Failed.Count -gt 0) {
-        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join (T 'common.comma')) — تم الاحتفاظ بالحالة السابقة.")
+        $lines.Add((T 'adm.layerCheckFailed' $($sync.Failed -join (T 'common.comma'))))
     }
     elseif ($sync.Removed.Count -gt 0) {
-        $lines.Add("🔄 تم تحديث الحالة وأُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join (T 'common.comma'))")
+        $lines.Add((T 'adm.stateRefreshed' $($sync.Removed -join (T 'common.comma'))))
     }
     else {
         $lines.Add((T 'adm.syncedWithCinegy'))
@@ -585,7 +585,7 @@ function Request-HideAllConfirmation {
         Mode = 'hide_all_review'; UserId = $UserId; Layers = $layers
     }
     $labels = @($layers | ForEach-Object { Get-LayerDisplayName -Layer ([int]$_) })
-    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($labels -join (T 'common.comma')). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.confirmHideAll' $($labels -join (T 'common.comma'))) -ReplyMarkup (Get-HideAllConfirmKeyboard)
 }
 
 function Get-HealthStatusReport {
@@ -621,7 +621,7 @@ function Get-HealthStatusReport {
     $telegramLine = if ($telegramOk) { "✅ Telegram: $($telegramWatch.ElapsedMilliseconds)ms" }
     else { "❌ Telegram: $($telegramWatch.ElapsedMilliseconds)ms — $(Protect-SensitiveText $telegramError)" }
     $cinegyLine = if ($telemetry.Success) { "✅ Cinegy: $($cinegyWatch.ElapsedMilliseconds)ms" }
-    else { "❌ Cinegy: $($cinegyWatch.ElapsedMilliseconds)ms — تعذّر الوصول" }
+    else { (T 'adm.cinegyUnreachable' $($cinegyWatch.ElapsedMilliseconds)) }
     $historyLines = foreach ($service in @('Telegram', 'Cinegy')) {
         $history = $script:HealthHistory[$service]
         $lastSuccess = if ($history.LastSuccess) { ([datetime]$history.LastSuccess).ToString('yyyy-MM-dd HH:mm:ss') } else { (T 'adm.none') }
@@ -631,7 +631,7 @@ function Get-HealthStatusReport {
         else { (T 'adm.none') }
         $failureCount = [int]$history.FailureCount
         $outage = if ($history.OutageStartedAt) { ([datetime]$history.OutageStartedAt).ToString('yyyy-MM-dd HH:mm:ss') } else { (T 'adm.none') }
-        "$service — آخر نجاح: $lastSuccess | آخر خطأ: $lastError | فشل متتالٍ: $failureCount | بداية الانقطاع: $outage"
+        (T 'adm.healthDetail' $service $lastSuccess $lastError $failureCount $outage)
     }
     $historyText = $historyLines -join "`n"
     $text = @(
@@ -655,22 +655,22 @@ function Show-TemplateAdminDetail {
         return
     }
     $lines = @(
-        "📚 تفاصيل القالب: $($template.Key)",
-        "المسار: $($template.Path)",
-        "الطبقة: $($template.Layer)",
-        "الترتيب: $($template.Order)",
-        "الوصف: $($template.Description)",
-        "الحقول: $(if (@($template.Fields).Count -gt 0) { $template.Fields -join (T 'common.comma') } else { (T 'adm.none') })",
-        "النصوص الجاهزة: $(@($template.Presets).Count)"
+        (T 'adm.templateDetail' $($template.Key)),
+        (T 'adm.path' $($template.Path)),
+        (T 'adm.layer' $($template.Layer)),
+        (T 'adm.order' $($template.Order)),
+        (T 'adm.description' $($template.Description)),
+        (T 'adm.fields' $(if (@($template.Fields).Count -gt 0) { $template.Fields -join (T 'common.comma') } else { (T 'adm.none') })),
+        (T 'adm.readyTexts' $(@($template.Presets).Count))
     )
     $reminderText = if ([bool](Get-JsonProp $template 'LongRunning')) {
         (T 'adm.disabledLongRun')
     }
     elseif ([int](Get-JsonProp $template 'ReminderMinutes') -gt 0) {
-        "بعد $([int](Get-JsonProp $template 'ReminderMinutes')) دقيقة للشخص الذي أظهر القالب."
+        (T 'adm.alertAfter' $([int](Get-JsonProp $template 'ReminderMinutes')))
     }
     else { (T 'adm.disabledDot') }
-    $lines += "🔔 تنبيه الظهور: $reminderText"
+    $lines += (T 'adm.appearAlert' $reminderText)
     if ((Test-Admin -ChatId $ChatId -UserId $UserId) -and (Get-Setting 'EnableFullTemplateManagement')) {
         $lines += (T 'adm.fullTemplateControl')
     }
@@ -689,9 +689,9 @@ function Start-TemplateReminderMinutesPrompt {
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $ChatId -UserId $UserId); return }
     if ([bool](Get-JsonProp $template 'LongRunning')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "🔔 '$($template.Key)' قالب Long run يعمل 24/7، لذلك تنبيه الظهور الشخصي معطّل." -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.longRunNoAlert' $($template.Key)) -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId)
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_reminder_minutes'; TemplateIndex = $TemplateIndex; TemplateKey = [string]$template.Key; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "🔔 أرسل مدة التنبيه لقالب '$($template.Key)' بالدقائق من 0 إلى 1440.`nأرسل 0 لإيقاف التنبيه." -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'adm.sendAlertMinutes' $($template.Key)) -ReplyMarkup (Get-CancelKeyboard)
 }

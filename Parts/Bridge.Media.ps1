@@ -1229,7 +1229,10 @@ function Get-FeedWatchKeyboard {
         $rows += , @( (New-Button (T 'feed.snapshotNow') 'menu:snapshot'), (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') )
     }
     else { $rows += , @( (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') ) }
-    $rows += , @( (New-Button (T 'kb.backToAdminTools') 'menu:admintools') )
+    # Home, not the administration tools: the screen is opened from the main
+    # menu now, and a back button that lands somewhere the operator never
+    # was is worse than none.
+    $rows += , @( (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 

@@ -216,13 +216,19 @@ function Get-MainMenuKeyboard {
     # grow this menu without a bound, and the menu is already sixteen rows.
     if (Test-BoardsAvailable) { $rows += , @( (New-Button (T 'menu.boards') 'boards:open') ) }
 
+    # 📡 beside 📸: both answer "what is actually going out", and the watch
+    # is where that answer keeps its history. It moved here from the
+    # administration tools, where an operator watching a feed that keeps
+    # dropping had to go through a door meant for configuration.
+    #
+    # No row is added in the common case: help and what's-new pair up.
     if (Get-Setting 'EnableSnapshot') {
-        $rows += , @( (New-Button (T 'menu.snapshot') "menu:snapshot"), (New-Button (T 'menu.help') "menu:help") )
-        $rows += , @( (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
+        $rows += , @( (New-Button (T 'menu.snapshot') "menu:snapshot"), (New-Button (T 'feed.watch') 'menu:feedwatch') )
     }
     else {
-        $rows += , @( (New-Button (T 'menu.help') "menu:help"), (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
+        $rows += , @( (New-Button (T 'feed.watch') 'menu:feedwatch') )
     }
+    $rows += , @( (New-Button (T 'menu.help') "menu:help"), (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
 
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
         $pendingCount = $script:PendingApprovals.Count
@@ -570,10 +576,6 @@ function Get-AdminToolsCategoryKeyboard {
                 $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
                 $rows += , @( (New-Button $relayLabel $relayData), (New-Button (T 'kb.feedLink') "menu:stream:seturl") )
             }
-            # Beside the feed it describes, and shown whether or not the relay
-            # is enabled: the watch reads the channel's own output, which exists
-            # even when nothing is being republished from it.
-            $rows += , @( (New-Button (T 'feed.watch') "menu:feedwatch") )
             $rows += , @( (New-Button (T 'kb.exportSettings') "menu:cfgexport"), (New-Button (T 'kb.importSettings') "menu:cfgimport") )
             if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button (T 'kb.restartBridge') "menu:restart" -Style danger) ) }
         }

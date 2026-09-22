@@ -257,7 +257,7 @@ function Get-BridgeReadinessSummary {
     $diskFree = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('DiskFreeGB')) { [double]$Snapshot['DiskFreeGB'] } elseif ($Snapshot.PSObject.Properties['DiskFreeGB']) { [double]$Snapshot.DiskFreeGB } else { 0 }
     $lastError = if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains('LastError')) { [string]$Snapshot['LastError'] } elseif ($Snapshot.PSObject.Properties['LastError']) { [string]$Snapshot.LastError } else { '' }
     $ready = $telegram -eq 'connected' -and $cinegy -eq 'healthy' -and $diskFree -gt 1 -and [string]::IsNullOrWhiteSpace($lastError)
-    $label = if ($ready) { '🟢 جاهز للتشغيل' } else { '🟠 يحتاج مراجعة' }
+    $label = if ($ready) { (T 'kb.readyToRun') } else { (T 'kb.needsReview') }
     return [pscustomobject]@{ Ready = $ready; Text = "$label · Telegram: $telegram · Cinegy: $cinegy · القرص: $diskFree GB" }
 }
 
@@ -299,10 +299,10 @@ function Get-MainMenuIntroBlocks {
     }
     else {
         $cells = @(, @(
-                @{ text = 'الطبقة'; is_header = $true }
-                @{ text = 'القالب'; is_header = $true }
-                @{ text = 'منذ'; is_header = $true }
-                @{ text = 'المشغّل'; is_header = $true }
+                @{ text = (T 'kb.col.layer'); is_header = $true }
+                @{ text = (T 'kb.col.template'); is_header = $true }
+                @{ text = (T 'kb.col.since'); is_header = $true }
+                @{ text = (T 'kb.col.operator'); is_header = $true }
             ))
         foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
             $record = $script:OnAir[$layer]
@@ -317,7 +317,7 @@ function Get-MainMenuIntroBlocks {
             $source = if ($record.ContainsKey('Source')) { [string]$record.Source } else { 'bridge' }
             $who = switch ($source) {
                 'cinegy' { 'Cinegy' }
-                'BotTest' { 'اختبار' }
+                'BotTest' { (T 'kb.test') }
                 default {
                     $name = if ($record.ContainsKey('UserId')) { Get-UserDisplayName -UserId ([long]$record.UserId) } else { '' }
                     if ($name) { $name } else { '—' }
@@ -432,7 +432,7 @@ function Get-MainMenuIntro {
                         'BotTest' { (T 'onair.templateTest') }
                         default {
                             $who = if ($record.ContainsKey('UserId')) { Get-UserDisplayName -UserId ([long]$record.UserId) } else { '' }
-                            if ($who) { $who } else { 'غير معروف' }
+                            if ($who) { $who } else { (T 'adm.unknown') }
                         }
                     }))
             $air.Add("   ↳ <i>$(ConvertTo-TelegramHtmlText ($detail -join ' · '))</i>")
@@ -503,7 +503,7 @@ function Get-LayerRemovalConfirmKeyboard {
     return @{ inline_keyboard = @(
             # Red here too, or turning ConfirmLayerRemoval ON - the safer
             # setting - would hand the operator the weaker screen.
-            , @( (New-Button $label "${Action}go:$Layer" -Style danger), (New-Button '❌ إلغاء' 'menu') )
+            , @( (New-Button $label "${Action}go:$Layer" -Style danger), (New-Button (T 'common.cancel') 'menu') )
         ) }
 }
 
@@ -522,10 +522,10 @@ function Get-AdminToolsKeyboard {
         every administrator, so callers pass none (matches Get-SettingsKeyboard).
     #>
     $categories = @(
-        @{ Key = 'users'; Icon = '👥'; Label = 'المستخدمون والصلاحيات' }
-        @{ Key = 'content'; Icon = '📚'; Label = 'المحتوى والقوالب' }
-        @{ Key = 'health'; Icon = '🩺'; Label = 'الصحة والتشخيص' }
-        @{ Key = 'system'; Icon = '⚙️'; Label = 'النظام والبث' }
+        @{ Key = 'users'; Icon = '👥'; Label = (T 'kb.usersAndRights') }
+        @{ Key = 'content'; Icon = '📚'; Label = (T 'kb.contentAndTemplates') }
+        @{ Key = 'health'; Icon = '🩺'; Label = (T 'kb.healthAndDiagnostics') }
+        @{ Key = 'system'; Icon = '⚙️'; Label = (T 'kb.systemAndFeed') }
     )
     # Two to a row like the settings picker, not one per line: four stacked
     # rows plus a back row is five screens' worth of thumb travel for four
@@ -537,7 +537,7 @@ function Get-AdminToolsKeyboard {
         if ($pair.Count -eq 2) { $rows += , $pair; $pair = @() }
     }
     if ($pair.Count -gt 0) { $rows += , $pair }
-    $rows += , @( (New-Button "⬅️ الرئيسية" "menu") )
+    $rows += , @( (New-Button (T 'news.home') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -549,46 +549,46 @@ function Get-AdminToolsCategoryKeyboard {
     $rows = @()
     switch ($Category) {
         'users' {
-            $rows += , @( (New-Button "👥 إدارة المستخدمين" "menu:usersadmin"), (New-Button "🟢 نشاط المستخدمين" "menu:userpresence") )
+            $rows += , @( (New-Button (T 'kb.manageUsers') "menu:usersadmin"), (New-Button (T 'kb.userActivity') "menu:userpresence") )
         }
         'content' {
-            $rows += , @( (New-Button "📚 القوالب والإعدادات" "menu:templatesadmin"), (New-Button "⚡ النصوص الجاهزة" "menu:presetsadmin") )
-            if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button "📢 التنويهات" "menu:announcements") ) }
+            $rows += , @( (New-Button (T 'kb.templatesAndSettings') "menu:templatesadmin"), (New-Button (T 'kb.readyTexts') "menu:presetsadmin") )
+            if (Get-Setting 'EnableAnnouncements') { $rows += , @( (New-Button (T 'kb.notices') "menu:announcements") ) }
         }
         'health' {
-            $rows += , @( (New-Button "✅ جاهزية المناوبة" "menu:readiness") )
-            $rows += , @( (New-Button "🩺 صحة النظام" "menu:healthcenter"), (New-Button "📈 أرقام التشغيل" "menu:stats") )
-            $rows += , @( (New-Button "🧪 فحص المسار الحي" "menu:selftest"), (New-Button "📊 ملخص الاستخدام" "menu:usagedigest") )
-            $adminRow = @( (New-Button "📜 السجل" "menu:audit"), (New-Button "🧪 التشخيص" "menu:diagnostics") )
-            if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button "🛠 أمر خام" "menu:rawcmd") }
+            $rows += , @( (New-Button (T 'kb.shiftReadiness') "menu:readiness") )
+            $rows += , @( (New-Button (T 'kb.systemHealth') "menu:healthcenter"), (New-Button (T 'kb.runNumbers') "menu:stats") )
+            $rows += , @( (New-Button (T 'kb.livePathCheck') "menu:selftest"), (New-Button (T 'kb.usageSummary') "menu:usagedigest") )
+            $adminRow = @( (New-Button (T 'kb.log') "menu:audit"), (New-Button (T 'kb.diagnostics') "menu:diagnostics") )
+            if (Get-Setting 'EnableRawCommand') { $adminRow += (New-Button (T 'kb.rawCommand') "menu:rawcmd") }
             $rows += , $adminRow
         }
         'system' {
             if (Get-Setting 'EnableLiveRelay') {
                 $relayRunning = [bool](Get-RunningRelayProcess)
-                $relayLabel = if ($relayRunning) { "⏹ إيقاف البث" } else { "▶️ بدء البث" }
+                $relayLabel = if ($relayRunning) { (T 'kb.stopFeed') } else { (T 'kb.startFeed') }
                 $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
-                $rows += , @( (New-Button $relayLabel $relayData), (New-Button "🔗 رابط البث" "menu:stream:seturl") )
+                $rows += , @( (New-Button $relayLabel $relayData), (New-Button (T 'kb.feedLink') "menu:stream:seturl") )
             }
-            $rows += , @( (New-Button "📤 تصدير الإعدادات" "menu:cfgexport"), (New-Button "📥 استيراد الإعدادات" "menu:cfgimport") )
-            if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button "♻️ إعادة تشغيل الجسر" "menu:restart" -Style danger) ) }
+            $rows += , @( (New-Button (T 'kb.exportSettings') "menu:cfgexport"), (New-Button (T 'kb.importSettings') "menu:cfgimport") )
+            if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button (T 'kb.restartBridge') "menu:restart" -Style danger) ) }
         }
     }
-    $rows += , @( (New-Button "⬅️ أدوات الإدارة" "menu:admintools") )
+    $rows += , @( (New-Button (T 'kb.backToAdminTools') "menu:admintools") )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-HealthCenterKeyboard {
     $rows = @(
-        , @((New-Button (T 'common.refresh') 'menu:healthcenter'), (New-Button '📊 الحالة الكاملة' 'menu:fullstatus'))
-        , @((New-Button '🧪 التشخيص' 'menu:diagnostics'), (New-Button '🗂 ملفات التشغيل' 'health:files'))
+        , @((New-Button (T 'common.refresh') 'menu:healthcenter'), (New-Button (T 'kb.fullState') 'menu:fullstatus'))
+        , @((New-Button (T 'kb.diagnostics') 'menu:diagnostics'), (New-Button (T 'kb.runtimeFiles') 'health:files'))
     )
     # F9: the button exists only when the screen does. An opt-in feature
     # must not advertise itself to whoever never asked for it.
     if (Get-Setting 'EnableEngineHealth') {
-        $rows += , @((New-Button '🖥 صحة المحرك' 'menu:enginehealth'))
+        $rows += , @((New-Button (T 'kb.engineHealth') 'menu:enginehealth'))
     }
-    $rows += , @((New-Button '⬅️ أدوات الإدارة' 'menu:admintools'))
+    $rows += , @((New-Button (T 'kb.backToAdminTools') 'menu:admintools'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -688,7 +688,7 @@ function Get-TemplatesKeyboard {
             if ($pager.Count -gt 0) { $rows += , $pager }
         }
     }
-    $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    $rows += , @( (New-Button (T 'kb.back') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -703,7 +703,7 @@ function Get-TemplateCategoriesKeyboard {
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'tplcatpage')
     if ($pager.Count -gt 0) { $rows += , $pager }
     if ($categories.Count -eq 0) { $rows += , @((New-Button (T 'templates.noCategories') 'menu:templates')) }
-    $rows += , @((New-Button (T 'templates.all') 'menu:templates'), (New-Button '⬅️ رجوع' 'menu'))
+    $rows += , @((New-Button (T 'templates.all') 'menu:templates'), (New-Button (T 'kb.back') 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -711,7 +711,7 @@ function Get-TemplatePreviewText {
     param([Parameter(Mandatory)]$Template)
     $category = if ([string]::IsNullOrWhiteSpace([string]$Template.Category)) { (T 'templates.uncategorised') } else { [string]$Template.Category }
     $description = if ([string]::IsNullOrWhiteSpace([string]$Template.Description)) { (T 'templates.noDescription') } else { [string]$Template.Description }
-    $fields = if (@($Template.Fields).Count -eq 0) { (T 'templates.noFields') } else { @($Template.Fields) -join '، ' }
+    $fields = if (@($Template.Fields).Count -eq 0) { (T 'templates.noFields') } else { @($Template.Fields) -join (T 'common.comma') }
     $lastUsed = if ($script:TemplateLastUsed.ContainsKey([string]$Template.Key)) {
         ([datetime]$script:TemplateLastUsed[[string]$Template.Key]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
     }
@@ -835,9 +835,9 @@ function Get-AuthorizedUsersText {
     param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 10)
     $users = @(Get-AuthorizedUsers)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>👥 المستخدمون المصرح لهم</b>')
+    $lines.Add((T 'kb.authorisedUsers'))
     if ($users.Count -eq 0) {
-        $lines.Add('<i>لا أحد في القائمة بعد.</i>')
+        $lines.Add((T 'kb.nobodyYet'))
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $users.Count -Page $Page -PageSize $PageSize
@@ -851,12 +851,12 @@ function Get-AuthorizedUsersText {
     $activityWindow = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $user = $users[$index]
-        $role = switch ([string]$user.Role) { 'owner' { '👑 مالك' } 'admin' { '🛡️ مشرف' } default { 'مشغّل' } }
-        $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
+        $role = switch ([string]$user.Role) { 'owner' { (T 'kb.owner') } 'admin' { (T 'kb.admin') } default { (T 'kb.operator') } }
+        $state = if ($user.Disabled) { (T 'kb.disabled') } else { (T 'kb.enabled') }
         $alias = [string]$user.Alias
         # Get-UserDisplayName falls back to the id, and printing it twice on
         # two lines says nothing twice - and hides that nobody named them.
-        if ($alias -eq [string]$user.UserId) { $alias = 'بلا اسم تشغيلي' }
+        if ($alias -eq [string]$user.UserId) { $alias = (T 'kb.noWorkingName') }
         if ($alias.Length -gt 32) { $alias = $alias.Substring(0, 31) + '…' }
         $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text $alias)</b> · $role · $state")
         $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -ActiveWithinMinutes $activityWindow
@@ -869,7 +869,7 @@ function Get-AuthorizedUsersText {
             $ago = ''
             try {
                 $mins = [int](((Get-Date).ToUniversalTime() - ([datetime]$lastOp[0].At).ToUniversalTime()).TotalMinutes)
-                if ($mins -lt 1) { $ago = 'الآن' }
+                if ($mins -lt 1) { $ago = (T 'kb.now') }
                 elseif ($mins -lt 60) { $ago = "قبل $mins د" }
                 elseif ($mins -lt 1440) { $ago = "قبل $([int]($mins / 60)) س" }
                 else { $ago = ([datetime]$lastOp[0].At).ToLocalTime().ToString('MM-dd HH:mm') }
@@ -907,15 +907,15 @@ function Get-UsersAdminKeyboard {
             $state = if ($user.Disabled) { '⛔' } else { '✅' }
             # Their own row is marked: whoever is about to disable somebody
             # should be able to see when that somebody is them.
-            $you = if ($ViewerUserId -gt 0 -and [long]$user.UserId -eq $ViewerUserId) { ' (أنت)' } else { '' }
+            $you = if ($ViewerUserId -gt 0 -and [long]$user.UserId -eq $ViewerUserId) { (T 'kb.you') } else { '' }
             $rows += , @((New-Button "$($index + 1). $state $role $($user.Alias)$you" "usr:card:$($user.UserId):$($window.Page)"))
         }
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "userspage:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "userspage:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "userspage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "userspage:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "userspage:$($window.Page + 1)") }
         $rows += , $pager
     }
     # D1: the quarantine roster surfaces here rather than hiding in the log.
@@ -923,7 +923,7 @@ function Get-UsersAdminKeyboard {
     if ($deadCount -gt 0) {
         $rows += , @((New-Button "💀 محادثات ميتة ($deadCount)" 'menu:deadchats'))
     }
-    $rows += , @((New-Button '⬅️ رجوع' 'menu'))
+    $rows += , @((New-Button (T 'kb.back') 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -931,11 +931,11 @@ function Show-UsersAdminScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -le 0) { $UserId = $ChatId }
     $roleLine = if (Test-Owner -ChatId $ChatId -UserId $UserId) {
-        "`n👑 بصفتك المالك يمكنك ترقية مشغّل إلى مشرف أو خفضه."
+        (T 'kb.ownerMayPromote')
     }
     else { '' }
     $text = (Get-AuthorizedUsersText -Page $Page) +
-    "`n`nاضغط اسم المستخدم لفتح بطاقته: التعطيل والاسم والنشاط والسحب هناك." +
+    (T 'kb.tapNameForCard') +
     "`n<i>حالة النشاط تقريبية حسب آخر تفاعل؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>$roleLine"
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML `
         -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId -Page $Page)
@@ -951,12 +951,12 @@ function Get-UserCardText {
     #>
     param([Parameter(Mandatory)][long]$TargetUserId)
     $found = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
-    if ($found.Count -eq 0) { return '<i>المستخدم لم يعد ضمن قائمة المصرح لهم.</i>' }
+    if ($found.Count -eq 0) { return (T 'kb.userGoneHtml') }
     $user = $found[0]
-    $role = switch ([string]$user.Role) { 'owner' { '👑 مالك الجسر' } 'admin' { '🛡️ مشرف' } default { '👤 مشغّل' } }
-    $state = if ($user.Disabled) { '⛔ معطّل' } else { '✅ نشط' }
+    $role = switch ([string]$user.Role) { 'owner' { (T 'kb.bridgeOwner') } 'admin' { (T 'kb.admin') } default { (T 'kb.operatorTag') } }
+    $state = if ($user.Disabled) { (T 'kb.disabled') } else { (T 'kb.enabled') }
     $alias = [string]$user.Alias
-    if ($alias -eq [string]$user.UserId) { $alias = 'بلا اسم تشغيلي' }
+    if ($alias -eq [string]$user.UserId) { $alias = (T 'kb.noWorkingName') }
     if ($alias.Length -gt 40) { $alias = $alias.Substring(0, 39) + '…' }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $alias)</b>")
@@ -984,25 +984,25 @@ function Get-UserCardKeyboard {
     if ($found.Count -gt 0) {
         $user = $found[0]
         $rows += , @($(if ($user.Disabled) {
-                    (New-Button '✅ إعادة التفعيل' "usr:toggle:$TargetUserId" -Style success)
+                    (New-Button (T 'kb.reEnable') "usr:toggle:$TargetUserId" -Style success)
                 }
                 else {
-                    (New-Button '⛔ تعطيل مؤقت' "usr:toggle:$TargetUserId")
+                    (New-Button (T 'kb.disableTemporarily') "usr:toggle:$TargetUserId")
                 }))
-        $rows += , @( (New-Button '✏️ الاسم التشغيلي' "usr:alias:$TargetUserId"), (New-Button '📈 تفاصيل النشاط' "usr:activity:$TargetUserId") )
+        $rows += , @( (New-Button (T 'kb.workingName') "usr:alias:$TargetUserId"), (New-Button (T 'kb.activityDetail') "usr:activity:$TargetUserId") )
         # No role button on the owner's card: there is nothing to promote them
         # to, and demoting them is refused anyway.
         if ($ViewerUserId -gt 0 -and (Test-Owner -ChatId $ViewerUserId -UserId $ViewerUserId) -and [string]$user.Role -ne 'owner') {
             $rows += , @($(if ([string]$user.Role -eq 'admin') {
-                        (New-Button '⬇️ خفض إلى مشغّل' "usr:demote:$TargetUserId")
+                        (New-Button (T 'kb.demoteToOperator') "usr:demote:$TargetUserId")
                     }
                     else {
-                        (New-Button '⬆️ ترقية إلى مشرف' "usr:promote:$TargetUserId")
+                        (New-Button (T 'kb.promoteToAdmin') "usr:promote:$TargetUserId")
                     }))
         }
-        $rows += , @((New-Button '🗑 سحب الصلاحية' "usr:revoke:$TargetUserId" -Style danger))
+        $rows += , @((New-Button (T 'kb.revoke') "usr:revoke:$TargetUserId" -Style danger))
     }
-    $rows += , @((New-Button '⬅️ قائمة المستخدمين' "userspage:$Page"))
+    $rows += , @((New-Button (T 'kb.backToUserList') "userspage:$Page"))
     return @{ inline_keyboard = $rows }
 }
 
@@ -1021,7 +1021,7 @@ function Start-UserAliasEdit {
     )
     if (-not (Test-Admin -ChatId $ChatId -UserId $AdminUserId)) { return }
     if (@(Get-AuthorizedUsers | Where-Object UserId -eq $TargetUserId).Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'المستخدم لم يعد ضمن قائمة المصرح لهم.' -ReplyMarkup (Get-UsersAdminKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.userGone') -ReplyMarkup (Get-UsersAdminKeyboard)
         return
     }
     Set-PendingState -ChatId $ChatId -State @{ Mode='user_alias_edit'; TargetUserId=$TargetUserId; UserId=$AdminUserId }
@@ -1042,11 +1042,11 @@ function Complete-UserAliasEdit {
     if ($alias -eq '-') { $alias = '' }
     if ([string]::IsNullOrWhiteSpace($alias)) { $alias = '' }
     if (-not (Set-UserAlias -TargetUserId $target -Alias $alias)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر حفظ الاسم التشغيلي.' -ReplyMarkup (Get-UsersAdminKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.nameNotSaved') -ReplyMarkup (Get-UsersAdminKeyboard)
         return $false
     }
     Clear-PendingState -ChatId $ChatId
-    $action = if ($alias) { "تعيين اسم بديل '$alias'" } else { 'حذف الاسم البديل' }
+    $action = if ($alias) { "تعيين اسم بديل '$alias'" } else { (T 'kb.clearAlias') }
     Write-BridgeLog "Admin $AdminUserId updated alias for user ${target}: $action"
     Add-AuditEntry "👤 $action للمستخدم $(Format-UserAuditActor -UserId ([long]$target)) - بواسطة $(Format-UserAuditActor -UserId $AdminUserId)"
     Show-UsersAdminScreen -ChatId $ChatId
@@ -1069,9 +1069,9 @@ function Get-FavoritesManagementText {
     # The counts stay inside the italic as plain digits rather than <code>:
     # italic and code cannot be combined on the same characters, and breaking
     # the sentence into three spans to buy monospace would cost the sentence.
-    $lines.Add('<b>⭐ اختر القوالب التي تريد إظهارها في مفضلتك:</b>')
+    $lines.Add((T 'kb.pickFavourites'))
     if ($count -le 0) {
-        $lines.Add('<i>⚠️ عدد المفضلة المعروضة مضبوط على صفر، فلن يظهر أي قالب في القائمة.</i>')
+        $lines.Add((T 'kb.favouritesZero'))
     }
     elseif ($selected.Count -eq 0) {
         $lines.Add("<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر $(Get-ArabicCountNoun -Count $count -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates') استخدامًا تلقائيًا.</i>")
@@ -1095,9 +1095,9 @@ function Get-BridgePagerButtons {
     param([Parameter(Mandatory)]$Window, [Parameter(Mandatory)][string]$Prefix)
     if ([int]$Window.PageCount -le 1) { return @() }
     $pager = @()
-    if ($Window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "${Prefix}:$([int]$Window.Page - 1)") }
+    if ($Window.HasPrevious) { $pager += (New-Button (T 'common.previous') "${Prefix}:$([int]$Window.Page - 1)") }
     $pager += (New-Button "$([int]$Window.Page + 1)/$([int]$Window.PageCount)" "${Prefix}:$([int]$Window.Page)")
-    if ($Window.HasNext) { $pager += (New-Button 'التالي ➡️' "${Prefix}:$([int]$Window.Page + 1)") }
+    if ($Window.HasNext) { $pager += (New-Button (T 'common.next') "${Prefix}:$([int]$Window.Page + 1)") }
     return $pager
 }
 
@@ -1121,7 +1121,7 @@ function Get-FavoritesManagementKeyboard {
     }
     $rows += , @(Get-BridgePagerButtons -Window $window -Prefix 'favpage')
     $rows = @($rows | Where-Object { @($_).Count -gt 0 })
-    $rows += , @((New-Button '⬅️ رجوع' 'menu'))
+    $rows += , @((New-Button (T 'kb.back') 'menu'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -1134,7 +1134,7 @@ function Get-LayersKeyboard {
         if ($row.Count -eq 4) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
-    $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    $rows += , @( (New-Button (T 'kb.back') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1151,7 +1151,7 @@ function Get-PresetAdminTemplatesKeyboard {
     }
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'padmpage')
     if ($pager.Count -gt 0) { $rows += , $pager }
-    $rows += , @( (New-Button "⬅️ القائمة" 'menu') )
+    $rows += , @( (New-Button (T 'adm.menu') 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1172,37 +1172,37 @@ function Get-PresetAdminKeyboard {
         }
         $presetPager = @(Get-BridgePagerButtons -Window $presetWindow -Prefix "papage:$TemplateIndex")
         if ($presetPager.Count -gt 0) { $rows += , $presetPager }
-        $rows += , @( (New-Button "➕ إنشاء نص جاهز" "pac:$TemplateIndex") )
+        $rows += , @( (New-Button (T 'kb.newReadyText') "pac:$TemplateIndex") )
     }
-    $rows += , @( (New-Button "⬅️ القوالب" 'menu:presetsadmin') )
+    $rows += , @( (New-Button (T 'templates.back') 'menu:presetsadmin') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-PresetActionKeyboard {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex)
     return @{ inline_keyboard = @(
-            , @( (New-Button "✏️ تعديل القيم" "pae:$TemplateIndex`:$PresetIndex"), (New-Button (T 'common.rename') "par:$TemplateIndex`:$PresetIndex") )
-            , @( (New-Button (T 'common.delete') "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button "⬅️ رجوع" "padm:$TemplateIndex") )
+            , @( (New-Button (T 'kb.editValues') "pae:$TemplateIndex`:$PresetIndex"), (New-Button (T 'common.rename') "par:$TemplateIndex`:$PresetIndex") )
+            , @( (New-Button (T 'common.delete') "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button (T 'kb.back') "padm:$TemplateIndex") )
         ) }
 }
 
 function Get-PresetReviewKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "✅ حفظ التغيير" 'presetadmin:confirm' -Style success), (New-Button "❌ إلغاء" 'cancel') )
+            , @( (New-Button (T 'common.saveChange') 'presetadmin:confirm' -Style success), (New-Button (T 'common.cancel') 'cancel') )
         ) }
 }
 
 function Get-ScheduleMenuKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "➕ جدولة عرض" 'schedule:new'), (New-Button "📋 الأحداث القادمة" 'schedule:list') )
-            , @( (New-Button "🧾 سجل التنفيذ" 'schedule:execlog'), (New-Button "⬅️ القائمة" 'menu') )
+            , @( (New-Button (T 'kb.addSchedule') 'schedule:new'), (New-Button (T 'sch.upcoming') 'schedule:list') )
+            , @( (New-Button (T 'sch.execLog') 'schedule:execlog'), (New-Button (T 'adm.menu') 'menu') )
         ) }
 }
 
 function Get-ScheduleRecurrenceKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "مرة واحدة" 'schrec:once'), (New-Button "يومي" 'schrec:daily'), (New-Button "أسبوعي" 'schrec:weekly') )
-            , @( (New-Button "❌ إلغاء" 'cancel') )
+            , @( (New-Button (T 'sch.once') 'schrec:once'), (New-Button (T 'sch.daily') 'schrec:daily'), (New-Button (T 'sch.weekly') 'schrec:weekly') )
+            , @( (New-Button (T 'common.cancel') 'cancel') )
         ) }
 }
 
@@ -1210,19 +1210,19 @@ function Get-ScheduleReviewKeyboard {
     param([hashtable]$State)
     $rows = @()
     if ($State -and [string]$State.Recurrence -ne 'once') {
-        $rows += , @((New-Button '📆 تحديد نهاية التكرار' 'schedule:setend'), (New-Button '♾ بدون انتهاء' 'schedule:clearend'))
+        $rows += , @((New-Button (T 'kb.setRepeatEnd') 'schedule:setend'), (New-Button (T 'kb.noEnd') 'schedule:clearend'))
     }
     # T-52: anchoring only makes sense for a single firing. A daily anchor
     # to "today's 15:00 programme" is a wall-clock time wearing a costume.
     if ($State -and [string]$State.Recurrence -eq 'once') {
         if ([string](Get-JsonProp $State 'AnchorMaterialId')) {
-            $rows += , @((New-Button '🔗 إلغاء الربط بالمادة' 'schedule:unanchor'))
+            $rows += , @((New-Button (T 'kb.unlinkItem') 'schedule:unanchor'))
         }
         else {
-            $rows += , @((New-Button '🎞 اربط بمادة' 'schedule:anchor'))
+            $rows += , @((New-Button (T 'kb.linkItem') 'schedule:anchor'))
         }
     }
-    $rows += , @((New-Button "✅ تأكيد الجدولة" 'schedule:confirm' -Style success), (New-Button "❌ إلغاء" 'cancel'))
+    $rows += , @((New-Button (T 'kb.confirmSchedule') 'schedule:confirm' -Style success), (New-Button (T 'common.cancel') 'cancel'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -1240,21 +1240,21 @@ function Get-UpcomingScheduleBlocks {
     $events = @(Get-UpcomingScheduleEvents)
     $blocks = @(@{ type = 'heading'; text = "📅 الأحداث القادمة ($($events.Count))"; size = 3 })
     if ($events.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد أحداث قادمة.' })
+        return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noUpcoming') })
     }
     $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
     if ($window.PageCount -gt 1) {
         $blocks += @{ type = 'paragraph'; text = "صفحة $($window.Page + 1) من $($window.PageCount)" }
     }
     $cells = @(, @(
-            @{ text = 'القالب'; is_header = $true }
-            @{ text = 'الموعد'; is_header = $true }
-            @{ text = 'التكرار'; is_header = $true }
+            @{ text = (T 'kb.col.template'); is_header = $true }
+            @{ text = (T 'kb.col.when'); is_header = $true }
+            @{ text = (T 'kb.col.repeat'); is_header = $true }
         ))
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $entry = $events[$index]
         $at = [datetimeoffset]$entry.ScheduledAt
-        $recurrence = switch ([string]$entry.Recurrence) { 'daily' { 'يومي' }; 'weekly' { 'أسبوعي' }; default { 'مرة واحدة' } }
+        $recurrence = switch ([string]$entry.Recurrence) { 'daily' { (T 'sch.daily') }; 'weekly' { (T 'sch.weekly') }; default { (T 'sch.once') } }
         $cells += , @(
             @{ text = [string]$entry.TemplateKey }
             @{ text = $at.ToString('MM-dd HH:mm') }
@@ -1276,7 +1276,7 @@ function Get-UpcomingScheduleText {
     #>
     param([int]$Page = 0, [ValidateRange(1, 15)][int]$PageSize = 8)
     $events = @(Get-UpcomingScheduleEvents)
-    if ($events.Count -eq 0) { return 'لا توجد أحداث قادمة.' }
+    if ($events.Count -eq 0) { return (T 'kb.noUpcoming') }
     $window = Get-BridgePageWindow -ItemCount $events.Count -Page $Page -PageSize $PageSize
     $heading = "📋 الأحداث القادمة ($($events.Count))"
     if ($window.PageCount -gt 1) { $heading += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
@@ -1301,19 +1301,19 @@ function Get-UpcomingScheduleKeyboard {
             $at = [datetimeoffset]$scheduleEntry.ScheduledAt
             $rows += , @(
                 (New-Button "✏️ $($scheduleEntry.TemplateKey) $($at.ToString('MM-dd HH:mm'))" "schededit:$($scheduleEntry.Id)"),
-                (New-Button '📄 نسخ' "schedcopy:$($scheduleEntry.Id)"),
+                (New-Button (T 'kb.copy') "schedcopy:$($scheduleEntry.Id)"),
                 (New-Button '🗑' "schcancel:$($scheduleEntry.Id)")
             )
         }
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "schedupage:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "schedupage:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "schedupage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "schedupage:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "schedupage:$($window.Page + 1)") }
         $rows += , $pager
     }
-    $rows += , @( (New-Button "⬅️ الجدولة" 'menu:schedule') )
+    $rows += , @( (New-Button (T 'sch.backToScheduling') 'menu:schedule') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1336,7 +1336,7 @@ function Get-LayerDashboardKeyboard {
         if ($row.Count -eq 2) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
-    $rows += , @( (New-Button (T 'layer.compare') 'menu:layers'), (New-Button "⬅️ رجوع" 'menu') )
+    $rows += , @( (New-Button (T 'layer.compare') 'menu:layers'), (New-Button (T 'kb.back') 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1351,7 +1351,7 @@ function Get-FieldsKeyboard {
             $rows += , @( (New-Button $label "updf:$TemplateIndex`:$f") )
         }
     }
-    $rows += , @( (New-Button "⬅️ رجوع" "menu:update") )
+    $rows += , @( (New-Button (T 'kb.back') "menu:update") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1392,12 +1392,12 @@ function Get-AfterLayerRemovalKeyboard {
 function Get-RollbackReviewKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
     return @{ inline_keyboard=@(
-        , @((New-Button (T 'layer.rollbackConfirm') "rollbackconfirm:$Layer" -Style success), (New-Button '❌ إلغاء' 'menu'))
+        , @((New-Button (T 'layer.rollbackConfirm') "rollbackconfirm:$Layer" -Style success), (New-Button (T 'common.cancel') 'menu'))
     ) }
 }
 
 function Get-CancelKeyboard {
-    return @{ inline_keyboard = @( , @( (New-Button "❌ إلغاء" "cancel") ) ) }
+    return @{ inline_keyboard = @( , @( (New-Button (T 'common.cancel') "cancel") ) ) }
 }
 
 function Get-NoticeKeyboard {
@@ -1412,7 +1412,7 @@ function Get-NoticeKeyboard {
         the screen without burying the reason it appeared.
     #>
     param([string]$BackData = 'menu')
-    return @{ inline_keyboard = @( , @( (New-Button '⬅️ القائمة' $BackData) ) ) }
+    return @{ inline_keyboard = @( , @( (New-Button (T 'adm.menu') $BackData) ) ) }
 }
 
 function Get-FieldPromptKeyboard {
@@ -1435,10 +1435,10 @@ function Get-FieldPromptKeyboard {
         }
     }
     $row = @()
-    if ($State -and [int]$State.Index -gt 0) { $row += (New-Button "⬅️ السابق" "show:back") }
+    if ($State -and [int]$State.Index -gt 0) { $row += (New-Button (T 'common.previous') "show:back") }
     if ($State -and $State.Values.Count -gt 0) { $row += (New-Button (T 'confirm.preview') "show:preview") }
     $row += (New-Button (T 'confirm.skip') "skip")
-    $row += (New-Button "❌ إلغاء" "cancel")
+    $row += (New-Button (T 'common.cancel') "cancel")
     $rows += , $row
     return @{ inline_keyboard = $rows }
 }
@@ -1447,12 +1447,12 @@ function Get-ShowReviewKeyboard {
     param([switch]$HasFields)
     $row = @( (New-Button (T 'confirm.send') "show:confirm" -Style success) )
     if ($HasFields) { $row += (New-Button (T 'confirm.edit') "show:edit") }
-    return @{ inline_keyboard = @( , $row; , @( (New-Button "❌ إلغاء" "cancel") ) ) }
+    return @{ inline_keyboard = @( , $row; , @( (New-Button (T 'common.cancel') "cancel") ) ) }
 }
 
 function Get-HideAllConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button (T 'confirm.hideAllYes') "hideall:confirm" -Style danger), (New-Button "❌ إلغاء" "cancel") )
+            , @( (New-Button (T 'confirm.hideAllYes') "hideall:confirm" -Style danger), (New-Button (T 'common.cancel') "cancel") )
         ) }
 }
 
@@ -1470,7 +1470,7 @@ function Get-ApprovalKeyboard {
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
             , @( (New-Button (T 'confirm.approve') "approve:confirm:$TargetChatId" -Style success), (New-Button (T 'confirm.reject') "reject:$TargetChatId") )
-            , @( (New-Button "⬅️ الرئيسية" "menu") )
+            , @( (New-Button (T 'news.home') "menu") )
         ) }
 }
 
@@ -1562,9 +1562,9 @@ function Get-AccessHistoryStateLabel {
     <# The three states, named. #>
     param([Parameter(Mandatory)][string]$State)
     switch ($State) {
-        'approved' { return '✅ مقبول' }
-        'rejected' { return '❌ مرفوض' }
-        default { return '⏳ بانتظار القرار' }
+        'approved' { return (T 'kb.accepted') }
+        'rejected' { return (T 'kb.refused') }
+        default { return (T 'kb.awaitingDecision') }
     }
 }
 
@@ -1574,7 +1574,7 @@ function Get-AccessHistoryBlocks {
     $rows = @(Get-AccessHistoryRows -Days $Days)
     $blocks = @(@{ type = 'heading'; text = "📜 طلبات الوصول السابقة — آخر $Days يومًا"; size = 3 })
     if ($rows.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لا توجد طلبات مسجّلة في هذه المدة.' })
+        return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noRequestsInPeriod') })
     }
     $pending = @($rows | Where-Object { $_.State -eq 'pending' }).Count
     $approved = @($rows | Where-Object { $_.State -eq 'approved' }).Count
@@ -1583,10 +1583,10 @@ function Get-AccessHistoryBlocks {
 
     $trimmed = Select-RichTableRows -Items $rows
     $cells = @(, @(
-            @{ text = 'الطالب'; is_header = $true }
-            @{ text = 'الحالة'; is_header = $true }
-            @{ text = 'القرار'; is_header = $true }
-            @{ text = 'بواسطة'; is_header = $true }
+            @{ text = (T 'kb.col.requester'); is_header = $true }
+            @{ text = (T 'kb.col.status'); is_header = $true }
+            @{ text = (T 'kb.col.decision'); is_header = $true }
+            @{ text = (T 'kb.col.by'); is_header = $true }
         ))
     foreach ($row in @($trimmed.Rows)) {
         $name = if ($row.Name) { "$($row.Name) · $($row.UserId)" } else { [string]$row.UserId }
@@ -1613,7 +1613,7 @@ function Get-AccessHistoryBlocks {
     # Said plainly rather than left to be discovered: what predates this
     # screen comes from the roster, which records who was let in and never
     # who was turned away.
-    $blocks += @{ type = 'paragraph'; text = 'ℹ️ الطلبات المرفوضة قبل هذا الإصدار غير مسجّلة؛ الموافقات القديمة مأخوذة من سجل المستخدمين.' }
+    $blocks += @{ type = 'paragraph'; text = (T 'kb.oldRefusalsNote') }
     return $blocks
 }
 
@@ -1624,7 +1624,7 @@ function Get-AccessHistoryText {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>📜 طلبات الوصول السابقة</b> — آخر $Days يومًا")
     if ($rows.Count -eq 0) {
-        $lines.Add('<i>لا توجد طلبات مسجّلة في هذه المدة.</i>')
+        $lines.Add((T 'kb.noRequestsInPeriodHtml'))
         return ($lines -join "`n")
     }
     $lines.Add('')
@@ -1642,8 +1642,8 @@ function Get-AccessHistoryText {
 function Get-AccessHistoryKeyboard {
     param()
     return @{ inline_keyboard = @(
-            , @((New-Button '👤 الطلبات المعلّقة' 'menu:pending'))
-            , @((New-Button '🏠 القائمة' 'menu:main'))
+            , @((New-Button (T 'kb.pendingRequests') 'menu:pending'))
+            , @((New-Button (T 'common.home') 'menu:main'))
         ) }
 }
 
@@ -1669,13 +1669,13 @@ function Get-PendingApprovalsBlocks {
     $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
     $blocks = @(@{ type = 'heading'; text = "👤 طلبات الوصول المعلّقة ($($ids.Count))"; size = 3 })
     if ($ids.Count -eq 0) {
-        return $blocks + @(@{ type = 'paragraph'; text = 'لا طلبات الآن.' })
+        return $blocks + @(@{ type = 'paragraph'; text = (T 'kb.noRequestsNow') })
     }
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
     $cells = @(, @(
-            @{ text = 'المعرّف'; is_header = $true }
-            @{ text = 'الاسم'; is_header = $true }
-            @{ text = 'منذ'; is_header = $true }
+            @{ text = (T 'kb.col.id'); is_header = $true }
+            @{ text = (T 'kb.col.name'); is_header = $true }
+            @{ text = (T 'kb.col.since'); is_header = $true }
         ))
     foreach ($index in $window.StartIndex..$window.EndIndex) {
         $id = $ids[$index]
@@ -1711,9 +1711,9 @@ function Get-PendingApprovalsText {
     param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
     $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>👤 طلبات الوصول المعلّقة</b>')
+    $lines.Add((T 'kb.pendingRequestsTitle'))
     if ($ids.Count -eq 0) {
-        $lines.Add('<i>لا طلبات الآن.</i>')
+        $lines.Add((T 'kb.noRequestsNowHtml'))
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
@@ -1747,7 +1747,7 @@ function Get-PendingKeyboard {
     # The history sits on this screen because this is where the question is
     # asked: the administrator looking at who is waiting is the same person
     # who wants to know who was let in last week, and by whom.
-    $rows = @(, @((New-Button '📜 الطلبات السابقة' 'access:history')))
+    $rows = @(, @((New-Button (T 'kb.pastRequests') 'access:history')))
     $ids = @($script:PendingApprovals.Keys | Sort-Object { [long]$_ })
     $window = Get-BridgePageWindow -ItemCount $ids.Count -Page $Page -PageSize $PageSize
     if ($window.EndIndex -ge $window.StartIndex) {
@@ -1760,22 +1760,22 @@ function Get-PendingKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "pendingpage:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "pendingpage:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "pendingpage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "pendingpage:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "pendingpage:$($window.Page + 1)") }
         $rows += , $pager
     }
-    if ($rows.Count -eq 0) { $rows += , @( (New-Button "لا توجد طلبات معلّقة حاليًا" "menu") ) }
-    $rows += , @( (New-Button "🚫 المحظورون" "menu:blocked"), (New-Button "⬅️ رجوع" "menu") )
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button (T 'kb.noPendingNow') "menu") ) }
+    $rows += , @( (New-Button (T 'kb.blocked') "menu:blocked"), (New-Button (T 'kb.back') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-BlockedAccessReasonText {
     param([string]$Reason)
     switch ($Reason) {
-        'rejected' { return 'رفض المشرف الطلب' }
-        'join_secret' { return 'رمز انضمام خاطئ متكرر' }
-        default { return 'بلا سبب مسجّل' }
+        'rejected' { return (T 'kb.adminRefused') }
+        'join_secret' { return (T 'kb.repeatedBadCode') }
+        default { return (T 'kb.noReasonRecorded') }
     }
 }
 
@@ -1790,9 +1790,9 @@ function Get-BlockedChatsText {
     param([int]$Page = 0, [ValidateRange(1, 40)][int]$PageSize = 20)
     $blocked = @(Get-BlockedAccessChats)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🚫 المحادثات المحظورة</b>')
+    $lines.Add((T 'kb.blockedChats'))
     if ($blocked.Count -eq 0) {
-        $lines.Add('<i>لا محادثة محظورة.</i>')
+        $lines.Add((T 'kb.noBlockedChat'))
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $blocked.Count -Page $Page -PageSize $PageSize
@@ -1820,7 +1820,7 @@ function Get-BlockedChatsKeyboard {
             $rows += , @( (New-Button "♻️ رفع الحظر عن $($blocked[$index].ChatId)" "unblock:$($blocked[$index].ChatId)") )
         }
     }
-    $rows += , @( (New-Button "👤 الطلبات المعلّقة" "menu:pending"), (New-Button "⬅️ رجوع" "menu") )
+    $rows += , @( (New-Button (T 'kb.pendingRequests') "menu:pending"), (New-Button (T 'kb.back') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1873,7 +1873,7 @@ function Get-SettingsResetConfirmKeyboard {
     <# The affirming half is coloured, the cancel is not: colouring both
        leaves the thumb with no signal. #>
     return @{ inline_keyboard = @(
-            , @((New-Button (T 'confirm.resetYes') 'cfg:resetconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))
+            , @((New-Button (T 'confirm.resetYes') 'cfg:resetconfirm' -Style danger), (New-Button (T 'common.cancel') 'menu:settings'))
         ) }
 }
 
@@ -1920,7 +1920,7 @@ function Get-SettingsKeyboard {
     # The button names the language it switches TO, not the one in force.
     $rows += , @( (New-Button (T 'lang.button') 'cfg:lang') )
     $rows += , @( (New-Button (T 'settings.backups') "menu:backups"), (New-Button (T 'settings.reset') "cfg:reset" -Style danger) )
-    $rows += , @( (New-Button "⬅️ رجوع" "menu") )
+    $rows += , @( (New-Button (T 'kb.back') "menu") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1945,13 +1945,13 @@ function Get-SettingsListKeyboard {
         $rows += , $pager
     }
     if ($items.Count -eq 0) { $rows += , @((New-Button (T 'common.noResults') 'menu:settings')) }
-    $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
+    $rows += , @((New-Button (T 'kb.backToSettings') 'menu:settings'))
     return @{ inline_keyboard = $rows }
 }
 
 function Get-SingleSettingResetConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @(, @((New-Button '✅ إعادة هذا الإعداد' "cfgrgo:$Name" -Style danger), (New-Button '❌ إلغاء' 'menu:settings'))) }
+    return @{ inline_keyboard = @(, @((New-Button (T 'kb.resetThisSetting') "cfgrgo:$Name" -Style danger), (New-Button (T 'common.cancel') 'menu:settings'))) }
 }
 
 function Get-SettingsCategoryKeyboard {
@@ -1975,10 +1975,10 @@ function Get-SettingsCategoryKeyboard {
             if ($name -eq 'HideAllLayers') {
                 $scope = [string]$value
                 $scopeLabel = if ($scope.Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) {
-                    'كل الطبقات المعروفة'
+                    (T 'kb.allKnownLayers')
                 }
                 elseif ($scope.Trim()) { "طبقات: $scope" }
-                else { 'لا توجد طبقات محددة' }
+                else { (T 'kb.noLayersChosen') }
                 $rows += , @( (New-Button "🚨 $($metadata.Label) · $scopeLabel" 'menu:hideallsettings' -MaxTextLength 64) )
             }
             elseif ($name -eq 'LayerNames') {
@@ -1987,7 +1987,7 @@ function Get-SettingsCategoryKeyboard {
             }
             elseif ($script:DefaultSettings[$name] -is [bool]) {
                 $mark = if ($value) { '✅' } else { '❌' }
-                $state = if ($value) { 'مفعّل' } else { 'معطّل' }
+                $state = if ($value) { (T 'kb.on') } else { (T 'kb.off') }
                 $lock = if ($script:ProtectedSettings -contains $name) { '🔒 ' } else { '' }
                 $rows += , @( (New-Button "$mark $lock$($metadata.Label) · $state" "cfg:t:$name" -MaxTextLength 64) )
             }
@@ -1995,7 +1995,7 @@ function Get-SettingsCategoryKeyboard {
                 $rows += , @((New-Button "⏱ $($metadata.Label)" 'cfg:s:TemplateMaxAirSeconds'))
             }
             elseif ($script:DefaultSettings[$name] -is [string]) {
-                $prefix = if ($name -eq 'NewsFilePath') { '📰 ملف الأخبار' } else { "🔤 $($metadata.Label)" }
+                $prefix = if ($name -eq 'NewsFilePath') { (T 'kb.newsFile') } else { "🔤 $($metadata.Label)" }
                 $rows += , @( (New-Button "$prefix · $(Protect-SettingDisplayValue -Name $name -Value $value)" "cfg:s:$name" -MaxTextLength 64) )
             }
             else {
@@ -2007,9 +2007,9 @@ function Get-SettingsCategoryKeyboard {
 
     if ($pageCount -gt 1) {
         $navigation = @()
-        if ($safePage -gt 0) { $navigation += (New-Button '⬅️ السابق' "cfgcat:$Category`:$($safePage - 1)") }
+        if ($safePage -gt 0) { $navigation += (New-Button (T 'common.previous') "cfgcat:$Category`:$($safePage - 1)") }
         $navigation += (New-Button "$($safePage + 1)/$pageCount" "cfgcat:$Category`:$safePage")
-        if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button 'التالي ➡️' "cfgcat:$Category`:$($safePage + 1)") }
+        if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button (T 'common.next') "cfgcat:$Category`:$($safePage + 1)") }
         $rows += , $navigation
     }
     # P4: manual quiet lives with its scheduled sibling. A setting would
@@ -2020,10 +2020,10 @@ function Get-SettingsCategoryKeyboard {
             $rows += , @((New-Button "🔇 هدوء حتى $($script:ManualQuietUntil.ToString('HH:mm')) — إلغاء" 'quiet:off'))
         }
         else {
-            $rows += , @((New-Button '🔇 هدوء ساعتين (غير العاجل فقط)' 'quiet:on'))
+            $rows += , @((New-Button (T 'kb.quietTwoHours') 'quiet:on'))
         }
     }
-    $rows += , @( (New-Button '⬅️ أقسام الإعدادات' 'menu:settings') )
+    $rows += , @( (New-Button (T 'kb.backToSettingsSections') 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2038,12 +2038,12 @@ function Get-TemplateAdminCatalogueText {
     $store = Get-TemplateStore
     $window = Get-BridgePageWindow -ItemCount $store.Order.Count -Page $Page -PageSize $PageSize
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📚 القوالب والإعدادات — اختر قالبًا لقراءة تعريفه:')
+    $lines.Add((T 'kb.pickTemplateToRead'))
     if ($window.EndIndex -ge $window.StartIndex) {
         $lastAir = Get-TemplateLastAirMap
         for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
             $key = [string]$store.Order[$i]
-            $when = if ($lastAir.ContainsKey($key)) { Format-TemplateLastAir -Stamp $lastAir[$key] } else { 'لم يُبث بعد' }
+            $when = if ($lastAir.ContainsKey($key)) { Format-TemplateLastAir -Stamp $lastAir[$key] } else { (T 'tpl.neverAired') }
             $lines.Add("• <b>$(ConvertTo-TelegramHtmlText $key)</b> — آخر بث: $when")
         }
     }
@@ -2069,8 +2069,8 @@ function Get-TemplateAdminCatalogueKeyboard {
     }
     }
     if ($canAdminister) {
-        $transferRow = @((New-Button '📤 تصدير JSON' 'timport:export'))
-        if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button '📥 استيراد JSON' 'timport:start') }
+        $transferRow = @((New-Button (T 'kb.exportJson') 'timport:export'))
+        if (Get-Setting 'EnableFullTemplateManagement') { $transferRow += (New-Button (T 'kb.importJson') 'timport:start') }
         $rows += , $transferRow
         # Beside import/export because it undoes them, and every other writer
         # of the registry too. Shown only when there is something to restore:
@@ -2082,8 +2082,8 @@ function Get-TemplateAdminCatalogueKeyboard {
         }
     }
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
-        $rows += , @( (New-Button '➕ إضافة قالب' 'tadm:create') )
-        $rows += , @( (New-Button '📄 إضافة عبر JSON' 'tadm:createjson') )
+        $rows += , @( (New-Button (T 'kb.addTemplate') 'tadm:create') )
+        $rows += , @( (New-Button (T 'kb.addViaJson') 'tadm:createjson') )
         # D2: the "skipped" warning as a work list, beside the tools that
         # create the entries it cleans up.
         $invalidCount = @(Get-InvalidTemplateEntries).Count
@@ -2093,13 +2093,13 @@ function Get-TemplateAdminCatalogueKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "tadmpage:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "tadmpage:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "tadmpage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "tadmpage:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "tadmpage:$($window.Page + 1)") }
         $rows += , $pager
     }
     if ($rows.Count -eq 0) { $rows += , @( (New-Button (T 'templates.noValid') 'menu') ) }
-    $rows += , @( (New-Button '⬅️ القائمة' 'menu') )
+    $rows += , @( (New-Button (T 'adm.menu') 'menu') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2111,11 +2111,11 @@ function Get-TemplateAdminDetailKeyboard {
     $rows = @()
     $template = Get-TemplateByIndex -Index $TemplateIndex
     if ($canManageReminder -and $template -and -not [bool](Get-JsonProp $template 'LongRunning')) {
-        $rows += , @( (New-Button '🔔 تنبيه الظهور' "tadm:reminder:$TemplateIndex") )
+        $rows += , @( (New-Button (T 'kb.appearAlert') "tadm:reminder:$TemplateIndex") )
     }
     if ($canAdminister -and (Get-Setting 'EnableFullTemplateManagement')) {
-        $rows += , @( (New-Button '✏️ تعديل التعريف' "tadm:edit:$TemplateIndex"), (New-Button '🗑 حذف القالب' "tadm:delete:$TemplateIndex" -Style danger) )
-        if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button '🧪 اختبار على طبقة التجربة' "tadm:test:$TemplateIndex")) }
+        $rows += , @( (New-Button (T 'kb.editDefinition') "tadm:edit:$TemplateIndex"), (New-Button (T 'kb.deleteTemplate') "tadm:delete:$TemplateIndex" -Style danger) )
+        if ((Get-SettingInt 'TemplateTestLayer' 0) -gt 0) { $rows += , @((New-Button (T 'kb.testOnTrialLayer') "tadm:test:$TemplateIndex")) }
     }
     $rows += , @( (New-Button (T 'templates.back') 'menu:templatesadmin') )
     return @{ inline_keyboard = $rows }
@@ -2123,7 +2123,7 @@ function Get-TemplateAdminDetailKeyboard {
 
 function Get-TemplateDefinitionReviewKeyboard {
     return @{ inline_keyboard = @(
-        , @( (New-Button (T 'common.saveChange') 'tadm:confirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin') )
+        , @( (New-Button (T 'common.saveChange') 'tadm:confirm' -Style success), (New-Button (T 'common.cancel') 'menu:templatesadmin') )
     ) }
 }
 
@@ -2135,8 +2135,8 @@ function Get-HideAllLayerSettingsKeyboard {
         $mark = if ($allMode -or $selected -contains $layer) { '✅' } else { '⬜' }
         $rows += , @( (New-Button "$mark طبقة $layer" "hideallcfg:toggle:$layer") )
     }
-    $rows += , @( (New-Button "☑️ اختيار كل الطبقات" 'hideallcfg:all'), (New-Button "🚫 إلغاء اختيار الكل" 'hideallcfg:none') )
-    $rows += , @( (New-Button "⬅️ الإعدادات" 'menu:settings') )
+    $rows += , @( (New-Button (T 'kb.selectAllLayers') 'hideallcfg:all'), (New-Button (T 'kb.selectNoLayers') 'hideallcfg:none') )
+    $rows += , @( (New-Button (T 'kb.backToSettings') 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2145,16 +2145,16 @@ function Get-LayerNamesKeyboard {
     foreach ($layer in @(Get-KnownLayers | ForEach-Object { [int]$_ } | Sort-Object -Unique)) {
         $rows += , @( (New-Button "🏷️ $(Get-LayerDisplayName -Layer $layer)" "layername:$layer") )
     }
-    if ($rows.Count -eq 0) { $rows += , @( (New-Button 'لا توجد طبقات معرفة' 'menu:settings') ) }
-    $rows += , @( (New-Button '⬅️ الإعدادات' 'menu:settings') )
+    if ($rows.Count -eq 0) { $rows += , @( (New-Button (T 'kb.noLayersDefined') 'menu:settings') ) }
+    $rows += , @( (New-Button (T 'kb.backToSettings') 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-LayerNameEditKeyboard {
     param([Parameter(Mandatory)][int]$Layer)
     return @{ inline_keyboard = @(
-            , @( (New-Button '🗑️ مسح الاسم' "layername:clear:$Layer" -Style danger) )
-            , @( (New-Button '⬅️ أسماء الطبقات' 'menu:layernames'), (New-Button '❌ إلغاء' 'menu:settings') )
+            , @( (New-Button (T 'kb.clearName') "layername:clear:$Layer" -Style danger) )
+            , @( (New-Button (T 'kb.backToLayerNames') 'menu:layernames'), (New-Button (T 'common.cancel') 'menu:settings') )
         ) }
 }
 
@@ -2165,19 +2165,19 @@ function Get-TemplateBackupsText {
     param([string]$Path = (Get-TemplateRegistryFilePath))
     $files = @(Get-TemplateBackupFiles -Path $Path)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🗄 نسخ القوالب</b>')
+    $lines.Add((T 'kb.templateBackups'))
     if ($files.Count -eq 0) {
-        $lines.Add('<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل تعديل على القوالب.</i>')
+        $lines.Add((T 'kb.noTemplateBackups'))
         return ($lines -join "`n")
     }
     $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
     $lines.Add('')
     for ($i = 0; $i -lt $files.Count; $i++) {
         $age = [int]([math]::Max(0.0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
-        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { 'الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { (T 'kb.now') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
     }
     $lines.Add('')
-    $lines.Add('<i>الاستعادة تعرض ما سيتغيّر قبل الكتابة، وتُرفض إن مسّت قالبًا على الهواء أو في جدولة قادمة.</i>')
+    $lines.Add((T 'kb.restoreShowsDiff'))
     return ($lines -join "`n")
 }
 
@@ -2188,14 +2188,14 @@ function Get-TemplateBackupsKeyboard {
     for ($i = 0; $i -lt $files.Count; $i++) {
         $rows += , @( (New-Button "$($i + 1). 🗄 $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "tplbak:restore:$i" -Style danger) )
     }
-    if ($files.Count -eq 0) { $rows += , @( (New-Button 'لا توجد نسخ محفوظة' 'menu:templatesadmin') ) }
-    $rows += , @( (New-Button '⬅️ رجوع' 'menu:templatesadmin') )
+    if ($files.Count -eq 0) { $rows += , @( (New-Button (T 'kb.noBackupsKept') 'menu:templatesadmin') ) }
+    $rows += , @( (New-Button (T 'kb.back') 'menu:templatesadmin') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-TemplateRestoreConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button '⚠️ نعم، استعد هذه النسخة' 'tplbak:confirm' -Style danger), (New-Button '❌ إلغاء' 'tplbak:list') )
+            , @( (New-Button (T 'kb.yesRestoreThis') 'tplbak:confirm' -Style danger), (New-Button (T 'common.cancel') 'tplbak:list') )
         ) }
 }
 
@@ -2211,25 +2211,25 @@ function Get-TemplateRestorePreviewText {
     #>
     param([Parameter(Mandatory)]$Comparison, [Parameter(Mandatory)][datetime]$BackupTime)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>⚠️ تأكيد استعادة القوالب</b>')
+    $lines.Add((T 'kb.confirmTemplateRestore'))
     $lines.Add("النسخة: <code>$($BackupTime.ToString('yyyy-MM-dd HH:mm'))</code>")
     $lines.Add('')
     foreach ($group in @(
-            @{ Label = '🗑 ستُحذف'; Keys = @($Comparison.Removed) }
-            @{ Label = '✏️ ستتغيّر'; Keys = @($Comparison.Changed) }
-            @{ Label = '➕ ستُضاف'; Keys = @($Comparison.Added) }
+            @{ Label = (T 'kb.willBeDeleted'); Keys = @($Comparison.Removed) }
+            @{ Label = (T 'kb.willChange'); Keys = @($Comparison.Changed) }
+            @{ Label = (T 'kb.willBeAdded'); Keys = @($Comparison.Added) }
         )) {
         if (@($group.Keys).Count -eq 0) { continue }
         $shown = @(@($group.Keys) | Select-Object -First 10)
-        $line = "$($group.Label) (<code>$(@($group.Keys).Count)</code>): $(ConvertTo-TelegramHtmlText ($shown -join '، '))"
+        $line = "$($group.Label) (<code>$(@($group.Keys).Count)</code>): $(ConvertTo-TelegramHtmlText ($shown -join (T 'common.comma')))"
         if (@($group.Keys).Count -gt $shown.Count) { $line += " …و$(@($group.Keys).Count - $shown.Count) غيرها" }
         $lines.Add($line)
     }
     if (@($Comparison.Removed).Count -eq 0 -and @($Comparison.Changed).Count -eq 0 -and @($Comparison.Added).Count -eq 0) {
-        $lines.Add('<i>لا فرق بين هذه النسخة والقوالب الحالية.</i>')
+        $lines.Add((T 'kb.noDifference'))
     }
     $lines.Add('')
-    $lines.Add('<i>تُحفظ نسخة من القوالب الحالية قبل الكتابة، فالاستعادة نفسها قابلة للتراجع.</i>')
+    $lines.Add((T 'kb.restoreIsUndoable'))
     return ($lines -join "`n")
 }
 
@@ -2258,19 +2258,19 @@ function Get-ConfigBackupsText {
     param([string]$Path = $ConfigPath)
     $files = @(Get-ConfigBackupFiles -Path $Path)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>🗄 نسخ الإعدادات</b>')
+    $lines.Add((T 'kb.settingsBackups'))
     if ($files.Count -eq 0) {
-        $lines.Add('<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل تغيير.</i>')
+        $lines.Add((T 'kb.noSettingsBackups'))
         return ($lines -join "`n")
     }
     $lines.Add("<i>$($files.Count) نسخة · الأحدث أولًا</i>")
     $lines.Add('')
     for ($i = 0; $i -lt $files.Count; $i++) {
         $age = [int]([math]::Max(0, ((Get-Date) - $files[$i].LastWriteTime).TotalMinutes))
-        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { 'الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add("$($i + 1). <code>$($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code> · $(if ($age -lt 1) { (T 'kb.now') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
     }
     $lines.Add('')
-    $lines.Add('<i>الاستعادة تعرض جدول ما سيتغيّر قبل الكتابة، وتحتاج إعادة تشغيل بعدها.</i>')
+    $lines.Add((T 'kb.settingsRestoreNote'))
     return ($lines -join "`n")
 }
 
@@ -2282,20 +2282,20 @@ function Get-ConfigBackupsKeyboard {
         $label = $files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm')
         $rows += , @( (New-Button "$($i + 1). 🗄 $label" "cfg:restore:$i" -Style danger) )
     }
-    if ($files.Count -eq 0) { $rows += , @( (New-Button "لا توجد نسخ محفوظة" 'menu:settings') ) }
-    $rows += , @( (New-Button "⬅️ رجوع" 'menu:settings') )
+    if ($files.Count -eq 0) { $rows += , @( (New-Button (T 'kb.noBackupsKept') 'menu:settings') ) }
+    $rows += , @( (New-Button (T 'kb.back') 'menu:settings') )
     return @{ inline_keyboard = $rows }
 }
 
 function Get-ConfigRestoreConfirmKeyboard {
     return @{ inline_keyboard = @(
-            , @( (New-Button "⚠️ نعم، استعادة النسخة" 'cfg:restoreconfirm' -Style danger), (New-Button "❌ إلغاء" 'menu:backups') )
+            , @( (New-Button (T 'kb.yesRestoreBackup') 'cfg:restoreconfirm' -Style danger), (New-Button (T 'common.cancel') 'menu:backups') )
         ) }
 }
 
 function Get-SettingConfirmKeyboard {
     param([Parameter(Mandatory)][string]$Name)
-    return @{ inline_keyboard = @( , @( (New-Button "⚠️ نعم، عطّل الحماية" "cfgc:$Name" -Style danger), (New-Button "❌ إلغاء" "menu:settings") ) ) }
+    return @{ inline_keyboard = @( , @( (New-Button (T 'kb.yesDisableProtection') "cfgc:$Name" -Style danger), (New-Button (T 'common.cancel') "menu:settings") ) ) }
 }
 
 function Get-AutoHideChoices {
@@ -2338,8 +2338,8 @@ function Get-DurationKeyboard {
         if ($row.Count -eq 3) { $rows += , $row; $row = @() }
     }
     if ($row.Count -gt 0) { $rows += , $row }
-    $rows += , @( (New-Button "⌨️ مدة أخرى" "$Prefix`:$Token`:c") )
-    $rows += , @( (New-Button "⬅️ رجوع" $BackData) )
+    $rows += , @( (New-Button (T 'kb.anotherDuration') "$Prefix`:$Token`:c") )
+    $rows += , @( (New-Button (T 'kb.back') $BackData) )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2355,7 +2355,7 @@ function Get-SettingChoiceKeyboard {
         $mark = if ($choices[$i] -eq $current) { "✅ " } else { "" }
         $rows += , @( (New-Button "$mark$($choices[$i])" "cfgs:$Name`:$i") )
     }
-    $rows += , @( (New-Button "⬅️ رجوع" "menu:settings") )
+    $rows += , @( (New-Button (T 'kb.back') "menu:settings") )
     return @{ inline_keyboard = $rows }
 }
 
@@ -2363,9 +2363,9 @@ function Get-TemplateNotifyLabel {
     <# A scope as a person reads it. #>
     param([Parameter(Mandatory)][string]$Scope)
     switch ($Scope) {
-        'all' { return '📢 الجميع' }
-        'admins' { return '👮 المشرفون' }
-        default { return '🔕 لا أحد' }
+        'all' { return (T 'kb.everyone') }
+        'admins' { return (T 'kb.adminsOnly') }
+        default { return (T 'kb.nobody') }
     }
 }
 
@@ -2440,11 +2440,11 @@ function Get-TemplateNotifyKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.Page -gt 0) { $pager += New-Button '⬅️ السابق' "tnfy:p:$($window.Page - 1)" }
-        if ($window.Page -lt $window.PageCount - 1) { $pager += New-Button 'التالي ➡️' "tnfy:p:$($window.Page + 1)" }
+        if ($window.Page -gt 0) { $pager += New-Button (T 'common.previous') "tnfy:p:$($window.Page - 1)" }
+        if ($window.Page -lt $window.PageCount - 1) { $pager += New-Button (T 'common.next') "tnfy:p:$($window.Page + 1)" }
         if ($pager.Count -gt 0) { $rows += , @($pager) }
     }
-    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    $rows += , @((New-Button (T 'kb.back') 'menu:settings'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -2454,9 +2454,9 @@ function Show-TemplateNotifyEditor {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $lines = @(
-        '🔔 <b>إشعار العرض حسب القالب</b>'
-        'اضغط على القالب ليتنقّل بين: 🔕 لا أحد ← 👮 المشرفون ← 📢 الجميع.'
-        'الإشعار يحمل نصّ الخبر ومدّته ومن نشره، ولا يصل صاحبه.'
+        (T 'kb.showNoticeByTemplate')
+        (T 'kb.tapToCycle')
+        (T 'kb.noticeCarries')
     )
     $text = $lines -join "`n"
     $keyboard = Get-TemplateNotifyKeyboard -Page $Page
@@ -2476,7 +2476,7 @@ function Show-TemplateMaxAirEditor {
     }
     $prefix = "tmax:$($state.Token)"
     $rows = @()
-    $text = "⏱ أقصى مدة لكل قالب`nاختر القالب. القاعدة تُطبّق على العروض الجديدة للجميع؛ مدة أقصر مسموحة، ولا يمكن تمديدها فوق الحد. لا تغيّر ما على الهواء الآن."
+    $text = (T 'kb.perTemplateCeiling')
     if (-not $state.Key) {
         $window = Get-BridgePageWindow -ItemCount @($state.Keys).Count -Page $Page -PageSize 8
         if ($window.EndIndex -ge $window.StartIndex) {
@@ -2488,8 +2488,8 @@ function Show-TemplateMaxAirEditor {
             }
         }
         $nav = @()
-        if ($window.HasPrevious) { $nav += New-Button '⬅️ السابق' "${prefix}:page:$($window.Page - 1)" }
-        if ($window.HasNext) { $nav += New-Button 'التالي ➡️' "${prefix}:page:$($window.Page + 1)" }
+        if ($window.HasPrevious) { $nav += New-Button (T 'common.previous') "${prefix}:page:$($window.Page - 1)" }
+        if ($window.HasNext) { $nav += New-Button (T 'common.next') "${prefix}:page:$($window.Page + 1)" }
         if ($nav.Count) { $rows += , $nav }
     }
     else {
@@ -2497,21 +2497,21 @@ function Show-TemplateMaxAirEditor {
         $shownKey = [string]$state.Key
         if ($shownKey.Length -gt 100) { $shownKey = $shownKey.Substring(0,100) }
         $text = "⏱ $shownKey`nالحد الحالي: $current ثانية (0 = بلا قاعدة خاصة).`nالمدى: 1–3600 ثانية. كل ضغطة تُحفظ. القالب الحسّاس يحتفظ بحدّه الأقصر."
-        $rows += , @((New-Button '30 ث' "${prefix}:set:30"), (New-Button 'دقيقة' "${prefix}:set:60"), (New-Button 'دقيقتان' "${prefix}:set:120"))
-        $rows += , @((New-Button '3 دقائق' "${prefix}:set:180"), (New-Button '5 دقائق' "${prefix}:set:300"), (New-Button '10 دقائق' "${prefix}:set:600"))
-        $rows += , @((New-Button '−10 ث' "${prefix}:delta:-10"), (New-Button '+10 ث' "${prefix}:delta:10"))
-        $rows += , @((New-Button '−1 ث' "${prefix}:delta:-1"), (New-Button '+1 ث' "${prefix}:delta:1"))
-        $rows += , @((New-Button '⌨️ مقدار مخصص' "${prefix}:custom:ask"))
+        $rows += , @((New-Button (T 'kb.thirtySeconds') "${prefix}:set:30"), (New-Button (T 'kb.oneMinute') "${prefix}:set:60"), (New-Button (T 'kb.twoMinutes') "${prefix}:set:120"))
+        $rows += , @((New-Button (T 'kb.threeMinutes') "${prefix}:set:180"), (New-Button (T 'kb.fiveMinutes') "${prefix}:set:300"), (New-Button (T 'kb.tenMinutes') "${prefix}:set:600"))
+        $rows += , @((New-Button (T 'kb.minusTenSeconds') "${prefix}:delta:-10"), (New-Button (T 'kb.plusTenSeconds') "${prefix}:delta:10"))
+        $rows += , @((New-Button (T 'kb.minusOneSecond') "${prefix}:delta:-1"), (New-Button (T 'kb.plusOneSecond') "${prefix}:delta:1"))
+        $rows += , @((New-Button (T 'kb.customAmount') "${prefix}:custom:ask"))
         if ($state.ConfirmDisable) {
-            $text += "`n⚠️ تأكيد إزالة الحد الخاص؟ تبقى مؤقتات العروض الحالية كما هي."
-            $rows += , @((New-Button 'نعم، إزالة الحد' "${prefix}:disable:yes" -Style danger))
+            $text += (T 'kb.confirmCeilingRemoval')
+            $rows += , @((New-Button (T 'kb.yesRemoveCeiling') "${prefix}:disable:yes" -Style danger))
         }
-        else { $rows += , @((New-Button 'إزالة الحد…' "${prefix}:disable:ask")) }
-        $rows += , @((New-Button (T 'templates.back') "${prefix}:page:0"), (New-Button '⚖️ طبّق الآن' "${prefix}:now:yes"))
-        $text += "`n⚖️ «طبّق الآن» يقصّر بقاء العرض الحالي إلى الحد إذا كان أطول منه؛ لا يطيل ولا يخفي فورًا."
-        $text += "`n⌨️ «مقدار مخصص» لكتابة Duration مثل 2:30 أو 90."
+        else { $rows += , @((New-Button (T 'kb.removeCeiling') "${prefix}:disable:ask")) }
+        $rows += , @((New-Button (T 'templates.back') "${prefix}:page:0"), (New-Button (T 'kb.applyNow') "${prefix}:now:yes"))
+        $text += (T 'kb.applyNowExplain')
+        $text += (T 'kb.customAmountExplain')
     }
-    $rows += , @((New-Button '⬅️ الإعدادات' 'menu:settings'))
+    $rows += , @((New-Button (T 'kb.backToSettings') 'menu:settings'))
     $keyboard = @{ inline_keyboard = $rows }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard
@@ -2526,7 +2526,7 @@ function Invoke-TemplateMaxAirPick {
         [long](Get-JsonProp $state 'UserId') -ne $UserId -or
         $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable|now):(-?[0-9]{1,4}|ask|yes)$' -or
         $Matches[1] -cne [string](Get-JsonProp $state 'Token')) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ انتهت صلاحية الأزرار. افتح إعداد المدة من جديد.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.buttonsExpired')
         return $false
     }
     $action = $Matches[2]; $value = $Matches[3]; $page = 0
@@ -2550,12 +2550,12 @@ function Invoke-TemplateMaxAirPick {
             if (Request-TemplateAirLimitNow -Key $key -ChatId $ChatId -UserId $UserId) {
                 Send-TelegramMessage -ChatId $ChatId -Text "⚖️ قُصِّر بقاء العرض الحالي لقالب $key إلى الحد المضبوط."
             }
-            else { Send-TelegramMessage -ChatId $ChatId -Text 'لا عرض حالي لهذا القالب أطول من الحد، أو لا مؤقّت له.' }
+            else { Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.noShowOverCeiling') }
         }
         elseif ($action -eq 'custom') {
             if ($value -eq 'ask') {
                 Set-PendingState -ChatId $ChatId -State @{ Mode = 'template_max_air_custom'; UserId = $UserId; Key = $key; StartedAt = (Get-Date) }
-                Send-TelegramMessage -ChatId $ChatId -Text "⌨️ أرسل المدة بـ«دقائق:ثوانٍ» (مثل 2:30) أو ثوانٍ فقط (مثل 90).`nللإلغاء: /الغاء"
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.sendDuration')
             }
             return $false
         }
@@ -2582,7 +2582,7 @@ function Invoke-TemplateMaxAirPick {
             Set-Setting -Name TemplateMaxAirSeconds -Value $map
             if ($script:LastConfigSaveFailed) {
                 Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
-                Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر حفظ الحد؛ بقيت القاعدة السابقة.'
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.ceilingNotSaved')
                 return $false
             }
             $state.ConfirmDisable = $false
@@ -2659,7 +2659,7 @@ function Get-SettingStepperKeyboard {
         if ($index + 1 -lt $presets.Count) { $pair += $presets[$index + 1] }
         $rows += , @($pair)
     }
-    $rows += , @((New-Button (T 'common.typeNumber') "num:${Name}:type"), (New-Button '⬅️ رجوع' 'menu:settings'))
+    $rows += , @((New-Button (T 'common.typeNumber') "num:${Name}:type"), (New-Button (T 'kb.back') 'menu:settings'))
     return @{ inline_keyboard = $rows }
 }
 
@@ -2691,7 +2691,7 @@ function Get-SettingSmallRangeKeyboard {
     for ($index = 0; $index -lt $buttons.Count; $index += $perRow) {
         $rows += , @($buttons[$index..([math]::Min($index + $perRow - 1, $buttons.Count - 1))])
     }
-    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    $rows += , @((New-Button (T 'kb.back') 'menu:settings'))
     return @{ inline_keyboard = $rows; KeepRows = $true }
 }
 
@@ -2712,7 +2712,7 @@ function Show-SettingTimePicker {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $label = if ($script:SettingNavigationLabels.Contains($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
     $current = [string](Get-Setting $Name)
-    $shown = if ($current) { $current } else { 'غير محدّد' }
+    $shown = if ($current) { $current } else { (T 'kb.notSet') }
     $rows = @()
     if ($Hour -lt 0) {
         $buttons = @(foreach ($hour in 0..23) { New-Button ('{0:00}' -f $hour) "tm:${Name}:$hour" })
@@ -2721,16 +2721,16 @@ function Show-SettingTimePicker {
         }
         # Emptying it is a real answer: no window at all is how maintenance
         # mode is left off, and it had no button.
-        $rows += , @((New-Button '🚫 بلا توقيت' "tm:${Name}:clear"))
+        $rows += , @((New-Button (T 'kb.noTiming') "tm:${Name}:clear"))
         $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالحالي: <code>$shown</code>`nاختر الساعة:"
     }
     else {
         $buttons = @(foreach ($minute in @(0, 15, 30, 45)) { New-Button ('{0:00}:{1:00}' -f $Hour, $minute) "tm:${Name}:${Hour}:$minute" })
         $rows += , @($buttons)
-        $rows += , @((New-Button '⬅️ ساعة أخرى' "tm:${Name}:pick"))
+        $rows += , @((New-Button (T 'kb.anotherHour') "tm:${Name}:pick"))
         $text = "🕐 <b>$(ConvertTo-TelegramHtmlText $label)</b>`nالساعة $('{0:00}' -f $Hour) — اختر الدقيقة:"
     }
-    $rows += , @((New-Button '⬅️ رجوع' 'menu:settings'))
+    $rows += , @((New-Button (T 'kb.back') 'menu:settings'))
     $keyboard = @{ inline_keyboard = $rows; KeepRows = $true }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ParseMode HTML -ReplyMarkup $keyboard)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $keyboard
@@ -2742,7 +2742,7 @@ function Set-SettingTime {
     $value = if ($Hour -lt 0) { '' } else { '{0:00}:{1:00}' -f $Hour, $Minute }
     Set-Setting -Name $Name -Value $value
     Write-BridgeLog "User $UserId set $Name = $value"
-    $shown = if ($value) { $value } else { 'بلا توقيت' }
+    $shown = if ($value) { $value } else { (T 'kb.noTimingPlain') }
     Add-AuditEntry "⚙️ $Name = $shown - بواسطة $(Format-UserAuditActor -UserId $UserId)"
     return $value
 }
@@ -2875,15 +2875,15 @@ function Get-SettingPickKeyboard {
         }
     }
     if ($pair.Count -gt 0) { $keyboard += , $pair }
-    if ($items.Count -eq 0) { $keyboard += , @((New-Button 'لا توجد عناصر معرفة' 'cfgcat:templates')) }
+    if ($items.Count -eq 0) { $keyboard += , @((New-Button (T 'kb.noItemsDefined') 'cfgcat:templates')) }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "cfgpickpage:$Name`:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "cfgpickpage:$Name`:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "cfgpickpage:$Name`:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "cfgpickpage:$Name`:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "cfgpickpage:$Name`:$($window.Page + 1)") }
         $keyboard += , $pager
     }
-    if ($chosen.Count -gt 0) { $keyboard += , @((New-Button '🧹 إفراغ القائمة (للجميع)' "cfgpickclear:$Name" -Style danger)) }
+    if ($chosen.Count -gt 0) { $keyboard += , @((New-Button (T 'kb.emptyTheList') "cfgpickclear:$Name" -Style danger)) }
     $keyboard += , @((New-Button (T 'common.done') 'cfgcat:templates'))
     return @{ inline_keyboard = $keyboard }
 }
@@ -2896,13 +2896,13 @@ function Get-SettingPickText {
     $label = if ($script:SettingNavigationLabels.ContainsKey($Name)) { [string]$script:SettingNavigationLabels[$Name] } else { $Name }
     $lines = @("<b>$(ConvertTo-TelegramHtmlText -Text $label)</b>")
     $lines += if ($chosen.Count -eq 0) {
-        '<i>لا شيء محدد — متاح للجميع.</i>'
+        (T 'kb.nothingChosen')
     }
-    else { "<i>المحدد ($($chosen.Count)): $(ConvertTo-TelegramHtmlText -Text ($chosen -join '، '))</i>" }
+    else { "<i>المحدد ($($chosen.Count)): $(ConvertTo-TelegramHtmlText -Text ($chosen -join (T 'common.comma')))</i>" }
     $window = Get-BridgePageWindow -ItemCount (@(Get-SettingPickItems -Name $Name)).Count -Page $Page -PageSize $PageSize
     if ($window.PageCount -gt 1) { $lines += "<i>صفحة $($window.Page + 1) من $($window.PageCount)</i>" }
     $lines += ''
-    $lines += 'اضغط العنصر لإضافته أو إزالته.'
+    $lines += (T 'kb.tapToToggle')
     return ($lines -join "`n")
 }
 
@@ -3001,7 +3001,7 @@ function Complete-SettingText {
         return
     }
     if ($state.Name -eq 'NewsFilePath' -and -not (Test-NewsTickerFilePathSetting -Path $trimmed)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ يجب إدخال مسار مطلق ينتهي بـ .txt، مثل:`nD:\cingy cg\ticker msg\news.txt`nلم يتغيّر الإعداد." -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.needAbsoluteTxtPath') -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return
     }
@@ -3039,7 +3039,7 @@ function Set-SettingChoice {
             }
         }
         catch {
-            Send-TelegramMessage -ChatId $ChatId -Text "⛔ وضع المشاهد المتعددة غير متاح: تعذّر التحقق من Cinegy." -ReplyMarkup (Get-SettingsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.multiSceneUnavailable') -ReplyMarkup (Get-SettingsKeyboard)
             return
         }
     }

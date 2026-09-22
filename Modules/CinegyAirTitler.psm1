@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     CinegyAirTitler.psm1
 
@@ -315,6 +315,12 @@ function Get-TitlerLayerStatus {
         $hasActiveItem = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
             $normalizedId -ne '00000000-0000-0000-0000-000000000000'
         $isOnAir = $false
+        # Why the layer is off air, kept because the log could not say.
+        # 'no-active-item' never reaches /status/active at all, and
+        # 'empty-item' is the engine's own IsEmpty="y" filler; both used
+        # to be written as "Cinegy confirmed hidden", which is the one
+        # question the log is asked when a graphic leaves by itself.
+        $offAirReason = 'no-active-item'
         $activeItemXml = ''
         $activeName = ''
         $activeDescription = ''
@@ -331,6 +337,7 @@ function Get-TitlerLayerStatus {
             if (-not $itemNode) { throw "Cinegy active status did not contain an Item element." }
             $isEmpty = [string]$itemNode.GetAttribute('IsEmpty')
             $isOnAir = $isEmpty -notmatch '^(?i:y|yes|true|1)$'
+            $offAirReason = if ($isOnAir) { '' } else { 'empty-item' }
             $activeName = [string]$itemNode.GetAttribute('Name')
             $activeDescription = [string]$itemNode.GetAttribute('Description')
             if ($activeDescription -match '(?i)^\s*(?:Show|Play|Take)\s+(?:.*[\\/])?(?<Template>.+?)\.cintitle(?:\s+on\s+layer\s+\d+)?\s*$') {
@@ -360,6 +367,7 @@ function Get-TitlerLayerStatus {
         return [pscustomobject]@{
             Success    = $true
             IsOnAir    = $isOnAir
+            OffAirReason = $offAirReason
             ActiveId   = $activeId
             ActiveName = $activeName
             ActiveTemplateName = $activeTemplateName
@@ -384,6 +392,7 @@ function Get-TitlerLayerStatus {
         return [pscustomobject]@{
             Success  = $false
             IsOnAir  = $null
+            OffAirReason = 'unreadable'
             ActiveId = ''
             ActiveName = ''
             ActiveTemplateName = ''

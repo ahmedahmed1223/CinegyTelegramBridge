@@ -276,7 +276,13 @@ function Update-OnAirStateFromCinegy {
             Remove-OnAirLayerScenes -Layer ([int]$layer)
             $recordSource = [string](Get-JsonProp $record 'Source')
             if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
-            Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy confirmed hidden; template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId'))" "INFO"
+            # Change is null when a discovered record is dropped for want of a
+            # name, so the reason and the engine id are read off it defensively:
+            # a log line that throws under StrictMode takes the sync with it.
+            $offAirReason = if ($decision.Change) { [string]$decision.Change.OffAirReason } else { '' }
+            if ([string]::IsNullOrWhiteSpace($offAirReason)) { $offAirReason = 'unstated' }
+            $engineActiveId = if ($decision.Change) { [string]$decision.Change.ActualActiveId } else { '' }
+            Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy reported it off air ($offAirReason); template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId')), expected active id '$([string](Get-JsonProp $record 'ActiveId'))', engine reported '$engineActiveId'" "INFO"
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
             for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {

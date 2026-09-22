@@ -68,6 +68,7 @@ function Resolve-BridgeCinegyLayerState {
                 # Decided here, where the status is, rather than re-derived
                 # from ActualActiveId by whoever writes the notice.
                 Replaced=(Test-BridgeCinegyNamedScene -Status $Status)
+                OffAirReason=[string](Get-CinegyStateProperty $Status OffAirReason)
             }
             return [pscustomobject]@{Action='remove';Record=$null;Change=$change}
         }

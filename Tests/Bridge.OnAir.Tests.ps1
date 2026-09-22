@@ -1158,7 +1158,10 @@ Describe 'Update-OnAirStateFromCinegy' {
         $result.Removed | Should -Be @(4)
         Should -Invoke Save-OnAirState -Times 1 -Exactly
         Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter {
-            $Message -match 'removed on-air record.*layer 4.*confirmed hidden'
+            # The line now names WHY the engine read off air, and the ids on
+            # both sides, because "confirmed hidden" could not tell an empty
+            # filler item from a layer that reported no active item at all.
+            $Message -match "removed on-air record.*layer 4.*reported it off air \(.+\).*expected active id"
         }
     }
 

@@ -316,3 +316,51 @@ Describe 'Telling an operator WHY their graphic left the layer' {
         Test-BridgeCinegyNamedScene -Status (New-TestSpentItemStatus -ActiveName 'Lower third.CinTitle on Layer 4') | Should -BeTrue
     }
 }
+
+Describe 'Why a layer read as off air' {
+    <#
+        Asked in the field: an urgent left the air twice in half an hour and
+        nobody had touched Cinegy. The audit settled what the bridge did - two
+        SHOWs on layer 7 that day and no HIDE, no EXIT - but not what the
+        engine had said, because every removal was logged with the same
+        sentence, "Cinegy confirmed hidden".
+
+        Get-TitlerLayerStatus reaches IsOnAir = $false two different ways:
+        /status carries no active item id at all, in which case /status/active
+        is never even called, or the active item is the engine's own filler
+        with IsEmpty="y". The first is the engine saying nothing; the second is
+        the engine saying nothing is showing. The log could not tell them
+        apart, so the one question it exists to answer had no answer.
+
+        The reason is named where it is decided and carried to the line that
+        prints it. This costs nothing and cannot change what the bridge does.
+    #>
+    It 'carries the reason from the status to the change' {
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'
+            ActiveId = '{684580B2-B668-11F1-96C5-C85EA97266A8}'
+            ActiveName = ''; ActiveTemplateName = ''; ActiveDescription = ''
+            OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''
+            Error = ''
+        }
+        $record = @{ Key = 'Urgent'; UserId = 7275359265L; At = (Get-Date); ActiveId = '{OLD}'; Source = 'bridge' }
+        $decision = Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $record -Status $status
+        $decision.Action | Should -Be 'remove'
+        $decision.Change.OffAirReason | Should -Be 'empty-item'
+    }
+
+    It 'says nothing rather than guessing when the status carries no reason' {
+        # An older status object, or a caller that built one by hand: the
+        # change still resolves, with an empty reason the log renders as
+        # "unstated" rather than inventing one of the two.
+        $status = [pscustomobject]@{
+            Success = $true; IsOnAir = $false
+            ActiveId = ''; ActiveName = ''; ActiveTemplateName = ''; ActiveDescription = ''
+            OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''
+            Error = ''
+        }
+        $record = @{ Key = 'Urgent'; UserId = 1L; At = (Get-Date); ActiveId = ''; Source = 'bridge' }
+        (Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $record -Status $status).Change.OffAirReason |
+            Should -BeNullOrEmpty
+    }
+}

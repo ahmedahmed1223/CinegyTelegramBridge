@@ -80,4 +80,7 @@ function Add-BridgeTextAir {
     $catalogue['onair.unknownExternalSource'] = @{ ar = 'مصدر خارجي غير معرّف'; en = 'an unidentified outside source' }
     $catalogue['onair.layerEmptyExplain'] = @{ ar = 'لا عنصر آخر على الطبقة — المشهد انتهى أو أُخفي من خارج البوت، ولم يأخذها أحد.'; en = 'Nothing else is on the layer — the scene ended or was hidden from outside the bot, and no one took it.' }
     $catalogue['onair.stateUpdated'] = @{ ar = 'تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط.'; en = 'The bot state was refreshed and any timer tied to it was cancelled.' }
+    $catalogue['onair.yoursLeft'] = @{ ar = '⚫️ <b>{0}</b> لم يعد على الهواء — طبقة {1}.'; en = '⚫️ <b>{0}</b> is no longer on air — layer {1}.' }
+    $catalogue['onair.yoursLeftAfter'] = @{ ar = '⏱ بقي على الهواء {0}.'; en = '⏱ It was on air for {0}.' }
+    $catalogue['onair.yoursReplaced'] = @{ ar = '⚠️ أخذ الطبقة: {0}'; en = '⚠️ What took the layer: {0}' }
 }

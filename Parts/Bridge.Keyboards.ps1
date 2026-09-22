@@ -570,6 +570,10 @@ function Get-AdminToolsCategoryKeyboard {
                 $relayData = if ($relayRunning) { "menu:stream:stop" } else { "menu:stream:start" }
                 $rows += , @( (New-Button $relayLabel $relayData), (New-Button (T 'kb.feedLink') "menu:stream:seturl") )
             }
+            # Beside the feed it describes, and shown whether or not the relay
+            # is enabled: the watch reads the channel's own output, which exists
+            # even when nothing is being republished from it.
+            $rows += , @( (New-Button (T 'feed.watch') "menu:feedwatch") )
             $rows += , @( (New-Button (T 'kb.exportSettings') "menu:cfgexport"), (New-Button (T 'kb.importSettings') "menu:cfgimport") )
             if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button (T 'kb.restartBridge') "menu:restart" -Style danger) ) }
         }

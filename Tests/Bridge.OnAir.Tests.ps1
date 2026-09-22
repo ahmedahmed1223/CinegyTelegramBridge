@@ -2749,3 +2749,74 @@ Describe 'Expired flow resume (D3)' {
         }
     }
 }
+
+Describe 'The operator is told their own graphic left the air' {
+    <#
+        Reported from the field, and the older half of that report: an urgent
+        was pushed, it left the air, and nothing on the operator's screen said
+        so. The external-change alert existed the whole time and went to
+        Send-AdminBroadcast - so the administrators were told, and the one
+        person mid-task with that graphic was not.
+    #>
+    BeforeEach {
+        Mock Send-TelegramMessage { }
+        Mock Test-Admin { $false }
+    }
+
+    It 'writes to the operator who put it there' {
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 7275359265
+                ShownAt = (Get-Date).AddMinutes(-3); Replaced = $false
+                ActualActiveName = ''; ActualActiveId = ''
+            })
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $ChatId -eq 7275359265 }
+    }
+
+    It 'says the layer simply emptied rather than naming an intruder' {
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 42
+                ShownAt = (Get-Date).AddMinutes(-1); Replaced = $false
+                ActualActiveName = ''; ActualActiveId = '{B092DCC7}'
+            })
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter {
+            $Text -notmatch 'أخذ الطبقة' -and $Text -notmatch 'What took the layer'
+        }
+    }
+
+    It 'names what took the layer when something genuinely did' {
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 42
+                ShownAt = (Get-Date).AddMinutes(-1); Replaced = $true
+                ActualActiveName = 'Lower third.CinTitle on Layer 7'; ActualActiveId = '{B092DCC7}'
+            })
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter {
+            $Text -match 'Lower third'
+        }
+    }
+
+    It 'stays quiet for a graphic the bridge did not put there' {
+        # A discovered layer has no operator behind it, and UserId 0 is not a
+        # chat to write to.
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 8; TemplateKey = 'ticker'; ShowUserId = 0
+                ShownAt = (Get-Date); Replaced = $false
+                ActualActiveName = ''; ActualActiveId = ''
+            })
+
+        Should -Invoke Send-TelegramMessage -Times 0
+    }
+
+    It 'does not say it twice to an operator who is an administrator' {
+        Mock Test-Admin { $true }
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 42
+                ShownAt = (Get-Date); Replaced = $false
+                ActualActiveName = ''; ActualActiveId = ''
+            })
+
+        Should -Invoke Send-TelegramMessage -Times 0 -Because 'they have just read the same event in the admin broadcast'
+    }
+}

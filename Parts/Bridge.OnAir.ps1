@@ -603,3 +603,40 @@ function Get-FavoriteTemplateKeys {
     )
 }
 
+
+function Send-OwnGraphicLeftNotice {
+    <#
+        Tells whoever put a graphic on air that it is no longer there.
+
+        Reported from the field, and it is the older of the two halves of that
+        report: the operator pushed an urgent, it left the air, and nothing on
+        their screen said so. The external-change alert existed the whole time
+        and went to Send-AdminBroadcast - so the administrators were told, and
+        the one person who was mid-task with that graphic was not.
+
+        An operator who is also an administrator is skipped: they have just
+        read the same event in the broadcast, and a bot that says a thing
+        twice teaches people to read it once.
+    #>
+    param([Parameter(Mandatory)][object[]]$Changes)
+    foreach ($change in @($Changes)) {
+        if (-not $change) { continue }
+        $userId = [long](Get-JsonProp $change 'ShowUserId')
+        if ($userId -le 0) { continue }
+        if (Test-Admin -ChatId $userId -UserId $userId) { continue }
+
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add((T 'onair.yoursLeft' $(ConvertTo-TelegramHtmlText -Text ([string]$change.TemplateKey)) $([int]$change.Layer)))
+        $shownAt = Get-JsonProp $change 'ShownAt'
+        if ($shownAt -is [datetime] -and $shownAt -gt [datetime]::MinValue) {
+            $lines.Add((T 'onair.yoursLeftAfter' $(Format-DurationSeconds -Seconds ([int]((Get-Date) - $shownAt).TotalSeconds))))
+        }
+        if ([bool](Get-JsonProp $change 'Replaced')) {
+            $name = if ([string]::IsNullOrWhiteSpace([string]$change.ActualActiveName)) { (T 'onair.unnamedItem') }
+            else { ConvertTo-TelegramHtmlText -Text ([string]$change.ActualActiveName) }
+            $lines.Add((T 'onair.yoursReplaced' $name))
+        }
+        else { $lines.Add((T 'onair.layerEmptyExplain')) }
+        Send-TelegramMessage -ChatId $userId -Text ($lines -join "`n") -ParseMode HTML | Out-Null
+    }
+}

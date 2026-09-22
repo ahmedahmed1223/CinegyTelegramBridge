@@ -83,6 +83,7 @@ Import-Module (Join-Path $moduleRoot "BridgeUiPaging.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeLiveScenes.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeOperationLifecycle.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeLanguage.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeStreamOutages.psm1") -Force
 
 $script:ProcessedUpdateLedger = New-BridgeUpdateLedger -Capacity 4096
 
@@ -711,6 +712,7 @@ $script:accessGuardFile = Join-Path $logDir "access-guard.json"
 $script:LastAccessGuardSweep = [datetime]::MinValue
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
+$script:streamOutageFile = Join-Path $logDir "stream-outages.json"
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -1036,6 +1038,8 @@ $script:OutputMonitorFallbackActive = $false
 # stream did for twelve days before it degraded to hourly failures, with no
 # warning at any point because every failure was followed by a success.
 $script:OutputMonitorFailureMoments = [System.Collections.Generic.List[datetime]]::new()
+$script:StreamOutages = New-BridgeOutageLedger
+$script:StreamOutagesDirty = $false
 $script:OutputMonitorFlapAlertedAt = [datetime]::MinValue
 # Last ffmpeg stderr detail from any capture attempt (monitor or snapshot).
 # Powers the server link of Get-OutputFailureDiagnosis: without it the bridge
@@ -2034,6 +2038,7 @@ Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s);
 # layers Cinegy reports empty - a guard that ran against two empty in-memory
 # lists and was then undone two lines later by loading the un-pruned files.
 Import-AutoHideQueue
+Import-StreamOutages
 Import-TemplateReminderQueue
 Initialize-CinegyOnAirState | Out-Null
 Restore-MojazPlayback | Out-Null

@@ -2054,8 +2054,15 @@ function Update-CinegyStateWatchdog {
         Write-BridgeLog "Cinegy state watchdog $detail"
     }
 
-    if ($sync.Removed.Count -gt 0 -and (Get-Setting 'NotifyAdminsOnExternalChange')) {
-        Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
+    if ($sync.Removed.Count -gt 0) {
+        # The operator first, and whatever the admin setting says. Whether
+        # the administrators want to hear about external changes is a
+        # station's choice; whether the person mid-task with that graphic
+        # is told it left the screen is not.
+        Send-OwnGraphicLeftNotice -Changes @($sync.Changes)
+        if (Get-Setting 'NotifyAdminsOnExternalChange') {
+            Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
+        }
     }
 }
 

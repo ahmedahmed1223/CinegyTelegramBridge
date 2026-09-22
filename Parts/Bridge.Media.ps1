@@ -518,6 +518,9 @@ function Update-OutputBlackWatchdog {
         # followed by a success that zeroed the count.
         $script:OutputMonitorFailureMoments.Add($now)
         Test-OutputMonitorFlapping -Now $now | Out-Null
+        # The ledger, which is the only thing here that survives a restart
+        # and the only thing that can say how long the feed was gone.
+        Start-StreamOutage -Kind 'unreachable' -Cause ([string]$script:LastCaptureErrorDetail) -At $now
         $failureThreshold = [math]::Max(1, (Get-SettingInt 'OutputMonitorFailureAlertThreshold' 2))
         $backup = Get-BackupLiveStreamConfig
         # A configured standby is actionable immediately. Waiting for the
@@ -563,6 +566,7 @@ function Update-OutputBlackWatchdog {
         elseif ($script:OutputMonitorFailureAlerted) {
             Send-OutputMonitorFailureNotification -Recovered
         }
+        Stop-StreamOutage -Kind 'unreachable' -At $now
         $script:OutputMonitorFailureCount = 0
         $script:OutputMonitorFailureAlerted = $false
         $script:LastCaptureErrorDetail = ''
@@ -575,6 +579,7 @@ function Update-OutputBlackWatchdog {
         if ($script:OutputBlackAlerted) {
             $script:OutputBlackAlerted = $false
             Write-BridgeLog "Output brightness recovered (luma $first)"
+            Stop-StreamOutage -Kind 'black'
             Send-OutputBlackNotification -Recovered -Luminance $first
         }
         return
@@ -610,6 +615,10 @@ function Complete-OutputBlackConfirmation {
     $script:OutputBlackAlerted = $true
     Write-BridgeLog "Output confirmed black across two captures (luma $first then $second)" 'WARN'
     Add-AuditEntry (T 'media.blackConfirmed' $second)
+    # Opened on the confirmation, never on the first dark frame: a cut or a
+    # fade is legitimately black, and filing each one as an outage would
+    # make the screen a list of transitions.
+    Start-StreamOutage -Kind 'black' -Cause (T 'media.blackConfirmedShort' $second)
     Send-OutputBlackNotification -Luminance $second
 }
 
@@ -1028,4 +1037,197 @@ function Complete-StreamUrl {
     Save-Config
     Write-BridgeLog "User $($state.UserId) updated LiveStream.RtmpDestination"
     Send-TelegramMessage -ChatId $ChatId -Text (T 'media.linkSaved' $(Get-ConfigSaveWarning)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
+}
+
+function Import-StreamOutages {
+    <#
+        Reads the outage ledger from disk at start.
+
+        An unreadable file is not an empty ledger and is not a reason to
+        refuse to start: the bridge keeps going with what it can read, and
+        says so once. The worst this costs is a forgotten outage; refusing to
+        start costs the channel its graphics.
+    #>
+    if (-not (Test-Path -LiteralPath $script:streamOutageFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:streamOutageFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $ledger = New-BridgeOutageLedger
+        foreach ($outage in @(Get-JsonProp $raw 'Outages')) {
+            if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $outage 'StartedAt'))) { continue }
+            $ledger.Outages.Add([pscustomobject]@{
+                    Kind = [string](Get-JsonProp $outage 'Kind')
+                    StartedAt = [string](Get-JsonProp $outage 'StartedAt')
+                    EndedAt = [string](Get-JsonProp $outage 'EndedAt')
+                    Cause = [string](Get-JsonProp $outage 'Cause')
+                    Source = [string](Get-JsonProp $outage 'Source')
+                })
+        }
+        $script:StreamOutages = $ledger
+        Write-BridgeLog "Read $(@($ledger.Outages).Count) recorded feed outage(s) from stream-outages.json"
+    }
+    catch {
+        Write-BridgeLog "Could not read stream-outages.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN'
+    }
+}
+
+function Save-StreamOutages {
+    <# Written only when something changed, and trimmed on the way out so the
+       file cannot grow past what the screen will ever show. #>
+    if (-not $script:StreamOutagesDirty) { return }
+    $script:StreamOutagesDirty = $false
+    try {
+        Limit-BridgeOutageLedger -Ledger $script:StreamOutages -Keep 40 -WindowDays 30 | Out-Null
+        $payload = [pscustomobject]@{
+            SchemaVersion = 1
+            Outages = @($script:StreamOutages.Outages)
+        }
+        Write-BridgeValidatedJson -Path $script:streamOutageFile -Json ($payload | ConvertTo-Json -Depth 5) | Out-Null
+    }
+    catch {
+        Write-BridgeLog "Could not write stream-outages.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN'
+    }
+}
+
+function Start-StreamOutage {
+    <# The feed went. Idempotent: the watchdog calls this once per failed
+       capture and a source that is down stays down. #>
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [AllowEmptyString()][string]$Cause = '',
+        [datetime]$At = (Get-Date)
+    )
+    $before = @($script:StreamOutages.Outages).Count
+    $open = Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind $Kind
+    $source = if ($script:OutputMonitorFallbackActive) { (T 'media.cinegyBackup') } else { (T 'media.primarySource') }
+    Open-BridgeOutage -Ledger $script:StreamOutages -Kind $Kind -At $At -Cause $Cause -Source $source | Out-Null
+    $script:StreamOutagesDirty = $true
+    if (-not $open -and @($script:StreamOutages.Outages).Count -gt $before) {
+        Write-BridgeLog "Feed outage opened ($Kind)$(if ($Cause) { ": $Cause" })"
+    }
+    Save-StreamOutages
+}
+
+function Stop-StreamOutage {
+    <# The feed came back. Silent when no outage of this kind was open, which
+       is every successful capture on a healthy channel. #>
+    param([Parameter(Mandatory)][string]$Kind, [datetime]$At = (Get-Date))
+    $closed = Close-BridgeOutage -Ledger $script:StreamOutages -Kind $Kind -At $At
+    if (-not $closed) { return }
+    $script:StreamOutagesDirty = $true
+    Write-BridgeLog "Feed outage closed ($Kind) after $(Format-DurationSeconds -Seconds (Get-BridgeOutageDurationSeconds -Outage $closed))"
+    Save-StreamOutages
+}
+
+function Get-FeedWatchText {
+    <#
+        One screen for the question the station actually asks: is the feed
+        arriving, since when, and what has it done lately.
+
+        The pieces already existed and none of them were together. The state
+        lived in a counter, the source in the status block, and the history
+        nowhere at all - the six-hour list of failure moments is pruned and
+        in memory, so "what happened last night" had no answer but a grep
+        through bridge.log for lines that never say when the trouble ended.
+
+        -Probe grabs one frame to measure. Read-only: nothing is sent to
+        Cinegy and nothing on air is touched.
+    #>
+    [CmdletBinding()]
+    param([switch]$Probe)
+
+    $now = Get-Date
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add((T 'feed.title'))
+    $lines.Add('')
+
+    $openUnreachable = Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind 'unreachable'
+    $openBlack = Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind 'black'
+    $status = Get-OutputMonitorStatus -Probe:$Probe
+
+    # The open outage outranks the probe: a single lucky frame does not mean a
+    # source that has failed every capture for an hour is back, and the
+    # watchdog is what decides that, on its own clock.
+    $state = if ($openUnreachable) { (T 'feed.stateDown') }
+    elseif ($openBlack) { (T 'feed.stateBlack') }
+    elseif ($script:LastOutputMonitorAt -le [datetime]::MinValue) { (T 'feed.stateUnknown') }
+    else { (T 'feed.stateGood') }
+    $openOutage = if ($openUnreachable) { $openUnreachable } else { $openBlack }
+    if ($openOutage) {
+        $state += ' · ' + (T 'feed.since' (Format-DurationSeconds -Seconds (Get-BridgeOutageDurationSeconds -Outage $openOutage -Now $now)))
+    }
+    $lines.Add($state)
+
+    if (-not (Get-FfmpegPath)) { $lines.Add((T 'feed.noFfmpeg')) }
+    elseif ((Get-SettingInt 'OutputMonitorMinutes' 0) -le 0) { $lines.Add((T 'feed.watchOff')) }
+
+    $lastCheck = if ($script:LastOutputMonitorAt -gt [datetime]::MinValue) {
+        ([datetime]$script:LastOutputMonitorAt).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    else { (T 'feed.neverChecked') }
+    $lines.Add((T 'feed.lastCheck' $lastCheck))
+    $lines.Add((T 'feed.source' $($status.ActiveSource) $($status.PrimaryState)))
+
+    $intervalMinutes = [math]::Max(0, (Get-SettingInt 'OutputMonitorMinutes' 0))
+    if ($intervalMinutes -gt 0) { $lines.Add((T 'feed.cycle' (Format-DurationMinutes -Minutes $intervalMinutes))) }
+
+    $summary = Get-BridgeOutageSummary -Ledger $script:StreamOutages -WindowHours 24 -Now $now
+    $lines.Add('')
+    if ($summary.Count -le 0) {
+        $lines.Add((T 'feed.windowClean' (Format-DurationMinutes -Minutes ($summary.WindowHours * 60))))
+    }
+    else {
+        $window = Format-DurationMinutes -Minutes ($summary.WindowHours * 60)
+        $counted = Get-ArabicCountNoun -Count $summary.Count -One 'انقطاع' -Two 'انقطاعان' -Few 'انقطاعات' -Many 'انقطاعًا' -EnglishOne 'outage' -EnglishMany 'outages'
+        $total = Format-DurationSeconds -Seconds $summary.TotalSeconds
+        $lines.Add((T 'feed.windowSummary' $window $counted $total))
+    }
+    if ($summary.LastGoodAt) {
+        $lines.Add((T 'feed.lastGood' $($summary.LastGoodAt.ToString('yyyy-MM-dd HH:mm'))))
+    }
+
+    $lines.Add('')
+    $outages = @($script:StreamOutages.Outages)
+    if ($outages.Count -eq 0) { $lines.Add((T 'feed.noOutages')) }
+    else {
+        $lines.Add((T 'feed.outagesTitle'))
+        # Eight, not the whole ledger: this screen is one Telegram message and
+        # the list is the part that grows.
+        foreach ($outage in @($outages | Select-Object -First 8)) {
+            $started = [datetime]::Parse([string]$outage.StartedAt, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            $glyph = if ([string]$outage.Kind -eq 'black') { '🖤' } else { '🔴' }
+            $kind = if ([string]$outage.Kind -eq 'black') { (T 'feed.kind.black') } else { (T 'feed.kind.unreachable') }
+            $length = if ([string]::IsNullOrWhiteSpace([string]$outage.EndedAt)) { (T 'feed.stillDown') }
+            else { Format-DurationSeconds -Seconds (Get-BridgeOutageDurationSeconds -Outage $outage -Now $now) }
+            $detail = if ([string]::IsNullOrWhiteSpace([string]$outage.Cause)) { [string]$outage.Source }
+            else { [string]$outage.Cause }
+            $tail = ConvertTo-TelegramHtmlText -Text "$length$(if ($detail) { " · $detail" })"
+            $lines.Add((T 'feed.outageRow' $glyph $($started.ToString('MM-dd HH:mm')) $kind $tail))
+        }
+    }
+
+    $lines.Add('')
+    $lines.Add((T 'feed.probeNote'))
+    return ($lines -join "`n")
+}
+
+function Get-FeedWatchKeyboard {
+    <# A snapshot and a refresh, then back where the operator came from.
+       The rows are the same for everyone who can reach this screen, so it
+       takes no chat and no user: the door is what decides who gets in. #>
+    $rows = @()
+    if (Get-Setting 'EnableSnapshot') {
+        $rows += , @( (New-Button (T 'feed.snapshotNow') 'menu:snapshot'), (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') )
+    }
+    else { $rows += , @( (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') ) }
+    $rows += , @( (New-Button (T 'kb.backToAdminTools') 'menu:admintools') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Show-FeedWatchScreen {
+    <# The screen, drawn from the ledger and the monitor. -Probe costs one
+       frame grab; the plain open costs nothing. #>
+    param([Parameter(Mandatory)][long]$ChatId, [switch]$Probe)
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML `
+        -Text (Get-FeedWatchText -Probe:$Probe) `
+        -ReplyMarkup (Get-FeedWatchKeyboard) | Out-Null
 }

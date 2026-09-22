@@ -1265,6 +1265,10 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
+        'menu:feedwatch' { Show-FeedWatchScreen -ChatId $chatId; break }
+        # The probe costs one frame grab, so it is a press rather than
+        # something the plain open does on every visit.
+        'menu:feedwatch:probe' { Show-FeedWatchScreen -ChatId $chatId -Probe; break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:material' { Show-MaterialScheduleScreen -ChatId $chatId -UserId $userId; break }
         'menu:handover' { Show-ShiftHandoverScreen -ChatId $chatId -UserId $userId; break }

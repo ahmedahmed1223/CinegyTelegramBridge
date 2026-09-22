@@ -150,7 +150,7 @@ function Restore-TemplateRegistryBackup {
         $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
         $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
         if ($blocked.Count -gt 0) {
-            throw "لا يمكن تغيير أو حذف قالب على الهواء أو في جدولة قادمة: $($blocked -join (T 'common.comma'))"
+            throw (T 'tpl.lockedOnAir' $($blocked -join (T 'common.comma')))
         }
         # The registry as it stands becomes a backup of its own first, so the
         # restore itself is undoable. A one-way undo is a trap.
@@ -174,7 +174,7 @@ function Get-TemplateStore {
        positions stay stable between renders (hashtable order is not). #>
     $path = Get-TemplateRegistryFilePath
     if (-not (Test-Path $path)) {
-        return @{ Map = @{}; Order = @(); Errors = @("ملف القوالب غير موجود: $path"); InvalidKeys = @(); SharedLayers = @{} }
+        return @{ Map = @{}; Order = @(); Errors = @((T 'tpl.fileMissing' $path)); InvalidKeys = @(); SharedLayers = @{} }
     }
     return Get-TemplateStoreParsed -Path $path
 }
@@ -230,7 +230,7 @@ function Get-TemplateStoreParsed {
         # call - dozens of times per button press.
         $script:TemplateCache = @{
             WriteTime = $writeTime; Path = $path; Map = @{}; Order = @()
-            Errors    = @("تعذّر قراءة templates.json: $($_.Exception.Message)")
+            Errors    = @((T 'tpl.unreadable' $($_.Exception.Message)))
             InvalidKeys = @(); SharedLayers = @{}
         }
         Write-BridgeLog "Template registry unreadable: $($_.Exception.Message)" "ERROR"
@@ -244,23 +244,23 @@ function Get-TemplateStoreParsed {
         $layerRaw = Get-JsonProp $entry 'layer'
         $layer = 0
         if ([string]::IsNullOrWhiteSpace([string]$tplPath)) {
-            $errors.Add("القالب '$key' بلا حقل path - تم تخطيه.")
+            $errors.Add((T 'tpl.noPath' $key))
             $invalidKeys.Add($key)
             continue
         }
         $tplPath = Resolve-TemplateScenePath -Path ([string]$tplPath)
         if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
-            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
+            $errors.Add((T 'tpl.pathNotAbsolute' $key $tplPath))
             $invalidKeys.Add($key)
             continue
         }
         if (-not [IO.Path]::GetExtension([string]$tplPath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
-            $errors.Add("القالب '$key' يجب أن يشير إلى ملف .cintitle - تم تخطيه.")
+            $errors.Add((T 'tpl.notCintitle' $key))
             $invalidKeys.Add($key)
             continue
         }
         if (-not [int]::TryParse([string]$layerRaw, [ref]$layer)) {
-            $errors.Add("القالب '$key' بلا حقل layer صالح - تم تخطيه.")
+            $errors.Add((T 'tpl.noLayer' $key))
             $invalidKeys.Add($key)
             continue
         }
@@ -311,7 +311,7 @@ function Get-TemplateStoreParsed {
             else {
                 $fname = [string](Get-JsonProp $f 'name')
                 if ([string]::IsNullOrWhiteSpace($fname)) {
-                    $errors.Add("القالب '$key' فيه حقل بلا اسم - تم تخطيه.")
+                    $errors.Add((T 'tpl.fieldWithoutName' $key))
                     continue
                 }
                 $fieldNames += $fname
@@ -336,7 +336,7 @@ function Get-TemplateStoreParsed {
         # must stay unique even when a device name is given.
         $deviceName = [string](Get-JsonProp $entry 'device')
         if ($deviceName -and $deviceName -notmatch '^[A-Za-z0-9_]{1,32}$') {
-            $errors.Add("القالب '$key' فيه اسم جهاز غير صالح '$deviceName' - تم تجاهل الاسم.")
+            $errors.Add((T 'tpl.badDeviceName' $key $deviceName))
             $deviceName = ''
         }
 
@@ -345,7 +345,7 @@ function Get-TemplateStoreParsed {
         $rawReminderMinutes = [string](Get-JsonProp $entry 'reminderMinutes')
         if (-not [string]::IsNullOrWhiteSpace($rawReminderMinutes)) {
             if (-not [int]::TryParse($rawReminderMinutes, [ref]$parsedReminderMinutes) -or $parsedReminderMinutes -lt 0 -or $parsedReminderMinutes -gt 1440) {
-                $errors.Add("القالب '$key' فيه reminderMinutes غير صالح؛ استخدم 0 إلى 1440 دقيقة.")
+                $errors.Add((T 'tpl.badReminder' $key))
             }
             else { $reminderMinutes = $parsedReminderMinutes }
         }
@@ -464,9 +464,9 @@ function Format-TemplateLastAir {
     # UTC on both sides: tick subtraction across DateTime Kinds does not
     # convert, and a Local-minus-Utc age would gain the whole timezone.
     $age = (Get-Date).ToUniversalTime() - $at.ToUniversalTime()
-    if ($age.TotalMinutes -lt 60) { return "قبل $([math]::Max(1, [int]$age.TotalMinutes)) د" }
-    if ($age.TotalHours -lt 24) { return "قبل $([int]$age.TotalHours) س" }
-    if ($age.TotalDays -lt 7) { return "قبل $(Get-ArabicCountNoun -Count ([int]$age.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا' -EnglishOne 'day' -EnglishMany 'days')" }
+    if ($age.TotalMinutes -lt 60) { return (T 'tpl.minutesBefore' $([math]::Max(1, [int]$age.TotalMinutes))) }
+    if ($age.TotalHours -lt 24) { return (T 'tpl.hoursBefore' $([int]$age.TotalHours)) }
+    if ($age.TotalDays -lt 7) { return (T 'tpl.before' $(Get-ArabicCountNoun -Count ([int]$age.TotalDays) -One 'يوم' -Two 'يومان' -Few 'أيام' -Many 'يومًا' -EnglishOne 'day' -EnglishMany 'days')) }
     return $at.ToLocalTime().ToString('yyyy-MM-dd')
 }
 
@@ -544,8 +544,8 @@ function Save-TemplateDefinitionChange {
     try {
         $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $existing = Get-JsonProp $raw $TemplateKey
-        if ($Action -eq 'create' -and $existing) { throw "يوجد قالب بالمفتاح '$TemplateKey' بالفعل." }
-        if ($Action -ne 'create' -and -not $existing) { throw "القالب '$TemplateKey' غير موجود." }
+        if ($Action -eq 'create' -and $existing) { throw (T 'tpl.keyExists' $TemplateKey) }
+        if ($Action -ne 'create' -and -not $existing) { throw (T 'tpl.notFound' $TemplateKey) }
         if ($Action -eq 'delete') {
             if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteOnAir') }
             if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteScheduled') }
@@ -593,7 +593,7 @@ function Save-TemplateReminderMinutes {
     try {
         $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $template = Get-JsonProp $raw $TemplateKey
-        if (-not $template) { throw "القالب '$TemplateKey' غير موجود." }
+        if (-not $template) { throw (T 'tpl.notFound' $TemplateKey) }
         $backupPath = Backup-TemplateRegistryFile -Path $path
 
         $template | Add-Member -NotePropertyName reminderMinutes -NotePropertyValue $Minutes -Force
@@ -644,11 +644,11 @@ function Format-CinegyLayerDashboard {
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
         $layer = [int]$status.Layer
         if (-not $status.Success) {
-            $lines.Add("⚠️ $(Get-LayerDisplayName -Layer $layer): غير معروف")
+            $lines.Add((T 'tpl.layerUnknown' $(Get-LayerDisplayName -Layer $layer)))
             continue
         }
         if (-not $status.IsOnAir) {
-            $lines.Add("⚪ $(Get-LayerDisplayName -Layer $layer): مخفية")
+            $lines.Add((T 'tpl.layerHidden' $(Get-LayerDisplayName -Layer $layer)))
             continue
         }
 
@@ -670,7 +670,7 @@ function Format-CinegyLayerDashboard {
             $activeName = [string](Get-JsonProp $status 'ActiveTemplateName')
             if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = [string](Get-JsonProp $status 'ActiveName') }
             if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = (T 'tpl.unnamedScene') }
-            $lines.Add("🟠 $(Get-LayerDisplayName -Layer $layer): $activeName (خارجي)")
+            $lines.Add((T 'tpl.layerExternal' $(Get-LayerDisplayName -Layer $layer) $activeName))
         }
     }
 
@@ -682,11 +682,11 @@ function Format-CinegyLayerDashboard {
         $licenseState = [string](Get-JsonProp $meta 'LicenseState')
         $clientIdentity = [string](Get-JsonProp $meta 'ClientIdentity')
         $clientConnected = [bool](Get-JsonProp $meta 'ClientConnected')
-        if ($outputState) { $parts.Add("الخرج $outputState") }
-        if ($licenseState) { $parts.Add("الترخيص $licenseState") }
+        if ($outputState) { $parts.Add((T 'tpl.output' $outputState)) }
+        if ($licenseState) { $parts.Add((T 'tpl.licence' $licenseState)) }
         if ($clientConnected) {
             if (-not $clientIdentity) { $clientIdentity = (T 'tpl.connected') }
-            $parts.Add("العميل $clientIdentity")
+            $parts.Add((T 'tpl.client' $clientIdentity))
         }
         else { $parts.Add((T 'tpl.clientOffline')) }
         if ($parts.Count -gt 0) { $lines.Add('• ' + ($parts -join ' | ')) }
@@ -702,8 +702,8 @@ function Format-CinegyTelemetryStatus {
     if ($null -eq $Telemetry.Healthy) {
         return (T 'tpl.healthUnknownSamples')
     }
-    $summary = "العينات $($Telemetry.SampleCount)، الخرج $($Telemetry.OutputCount)، الساقط $($Telemetry.DroppedCount)، فقد الإدخال $($Telemetry.NoInputSignal)، أخطاء القراءة $($Telemetry.MaxReadErrorRate)%، متوسط القراءة $($Telemetry.AverageReadTime)ms، Heartbeat $($Telemetry.MaxHeartbeat)ms"
-    if ($Telemetry.Healthy) { return "💚 صحة Cinegy: سليمة — $summary" }
-    return "🔴 صحة Cinegy: تحذير — $summary"
+    $summary = (T 'tpl.metrics' $($Telemetry.SampleCount) $($Telemetry.OutputCount) $($Telemetry.DroppedCount) $($Telemetry.NoInputSignal) $($Telemetry.MaxReadErrorRate) $($Telemetry.AverageReadTime) $($Telemetry.MaxHeartbeat))
+    if ($Telemetry.Healthy) { return (T 'tpl.healthGood' $summary) }
+    return (T 'tpl.healthWarning' $summary)
 }
 

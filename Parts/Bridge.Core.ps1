@@ -415,7 +415,17 @@ function Get-BridgeLanguage {
     if (-not $configVariable) { $configVariable = Get-Variable -Name 'config' -ErrorAction SilentlyContinue }
     $configValue = if ($configVariable) { $configVariable.Value } else { $null }
     if ($configValue -and $configValue.PSObject.Properties.Match('Settings').Count -gt 0) {
-        $language = [string](Get-JsonProp $configValue.Settings 'Language')
+        # Not Get-JsonProp either, for the same reason as Get-Setting above: a
+        # test that mocks it with -ParameterFilter { $Name -eq 'device' } has
+        # no default to fall back on, so the first translated sentence in that
+        # code path failed the mock rather than the feature.
+        $settings = $configValue.Settings
+        if ($settings -is [System.Collections.IDictionary]) {
+            if ($settings.Contains('Language')) { $language = [string]$settings['Language'] }
+        }
+        elseif ($settings -and $settings.PSObject.Properties.Match('Language').Count -gt 0) {
+            $language = [string]$settings.Language
+        }
     }
     $defaults = Get-Variable -Name 'DefaultSettings' -Scope Script -ErrorAction SilentlyContinue
     if ([string]::IsNullOrWhiteSpace($language) -and $defaults -and $defaults.Value.Contains('Language')) {

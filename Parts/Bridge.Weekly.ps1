@@ -128,11 +128,11 @@ function Get-WeeklyReportBlocks {
     <# The digest as rich blocks: a heading, then one section per signal,
        each opening with its own glyph the way the other reports do. #>
     $data = Get-WeeklyReportData
-    $blocks = @(@{ type = 'heading'; text = "📋 تقرير أسبوعي — $($data.Label)"; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'wk.title' $($data.Label)); size = 3 })
 
     # Screens near their payload cap.
     if ($data.NearLimit) {
-        $blocks += @{ type = 'paragraph'; text = "📐 شاشة قريبة من حدّ حجمها: <b>$(ConvertTo-HtmlText $data.PeakScreen)</b> — $($data.PeakPercent)% من الحدّ." }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.screenNearLimit' $(ConvertTo-HtmlText $data.PeakScreen) $($data.PeakPercent)) }
     }
     else {
         $blocks += @{ type = 'paragraph'; text = (T 'wk.noScreensNearLimit') }
@@ -146,9 +146,9 @@ function Get-WeeklyReportBlocks {
     else {
         $shown = @($idle | Select-Object -First 5)
         $extra = $idle.Count - 5
-        $tail = if ($extra -gt 0) { " (+$extra أخرى)" } else { '' }
+        $tail = if ($extra -gt 0) { (T 'wk.plusOthers' $extra) } else { '' }
         $safe = @($shown | ForEach-Object { ConvertTo-HtmlText ([string]$_) })
-        $blocks += @{ type = 'paragraph'; text = "🕸 قوالب بلا استعمال منذ شهر: $($safe -join ' · ')$tail" }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.unusedTemplates' $($safe -join ' · ') $tail) }
     }
 
     # Repeated failure reasons.
@@ -158,9 +158,9 @@ function Get-WeeklyReportBlocks {
     }
     else {
         $parts = @($repeats | ForEach-Object {
-                "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')"
+                (T 'wk.pair' $(ConvertTo-HtmlText $_.Cause) $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'))
             })
-        $blocks += @{ type = 'paragraph'; text = "🔁 فشل متكرر بنفس السبب: $($parts -join ' · ')" }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.repeatFailures' $($parts -join ' · ')) }
     }
 
     # Changed settings.
@@ -171,8 +171,8 @@ function Get-WeeklyReportBlocks {
     else {
         $safe = @($changed | Select-Object -First 8 | ForEach-Object { "<code>$(ConvertTo-HtmlText ([string]$_))</code>" })
         $extra = $changed.Count - 8
-        $tail = if ($extra -gt 0) { " (+$extra غيرها)" } else { '' }
-        $blocks += @{ type = 'paragraph'; text = "⚙️ إعدادات معدّلة عن الافتراضي: $($safe -join ' ')$tail" }
+        $tail = if ($extra -gt 0) { (T 'wk.plusOthers2' $extra) } else { '' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.changedSettings' $($safe -join ' ') $tail) }
     }
 
     # Ticker publish summary.
@@ -181,14 +181,14 @@ function Get-WeeklyReportBlocks {
     }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
-        $blocks += @{ type = 'paragraph'; text = "📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') · آخر نشرة $lastAt" }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.news' $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') $lastAt) }
     }
 
     # Urgent board activity.
-    $blocks += @{ type = 'paragraph'; text = "🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') بُثّت" }
+    $blocks += @{ type = 'paragraph'; text = (T 'wk.urgents' $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')) }
 
     if ($data.Truncated) {
-        $blocks += @{ type = 'paragraph'; text = "⚠️ بلغ السجل حدّ القراءة ($script:ReportMaxRecords سجلًّا)؛ قد تكون هناك عمليات أقدم داخل المدة." }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.readLimit' $script:ReportMaxRecords) }
     }
 
     return $blocks
@@ -199,10 +199,10 @@ function Get-WeeklyReportText {
        its own glyph, every operator-typed value escaped. #>
     $data = Get-WeeklyReportData
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>📋 تقرير أسبوعي</b> — $(ConvertTo-HtmlText $data.Label)")
+    $lines.Add((T 'wk.titleHtml' $(ConvertTo-HtmlText $data.Label)))
 
     if ($data.NearLimit) {
-        $lines.Add("📐 شاشة قريبة من حدّها: <b>$(ConvertTo-HtmlText $data.PeakScreen)</b> — $($data.PeakPercent)%")
+        $lines.Add((T 'wk.screenNearLimitShort' $(ConvertTo-HtmlText $data.PeakScreen) $($data.PeakPercent)))
     }
     else { $lines.Add((T 'wk.noScreensNearLimit')) }
 
@@ -211,16 +211,16 @@ function Get-WeeklyReportText {
     else {
         $shown = @($idle | Select-Object -First 5)
         $extra = $idle.Count - 5
-        $tail = if ($extra -gt 0) { " (+$extra أخرى)" } else { '' }
+        $tail = if ($extra -gt 0) { (T 'wk.plusOthers' $extra) } else { '' }
         $safe = @($shown | ForEach-Object { ConvertTo-HtmlText ([string]$_) })
-        $lines.Add("🕸 قوالب بلا استعمال منذ شهر: $($safe -join ' · ')$tail")
+        $lines.Add((T 'wk.unusedTemplates' $($safe -join ' · ') $tail))
     }
 
     $repeats = @($data.Repeats)
     if ($repeats.Count -eq 0) { $lines.Add((T 'wk.noRepeatFailure')) }
     else {
-        $parts = @($repeats | ForEach-Object { "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')" })
-        $lines.Add("🔁 فشل متكرر: $($parts -join ' · ')")
+        $parts = @($repeats | ForEach-Object { (T 'wk.pair' $(ConvertTo-HtmlText $_.Cause) $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')) })
+        $lines.Add((T 'wk.repeatFailuresShort' $($parts -join ' · ')))
     }
 
     $changed = @($data.ChangedSettings)
@@ -228,17 +228,17 @@ function Get-WeeklyReportText {
     else {
         $safe = @($changed | Select-Object -First 8 | ForEach-Object { "<code>$(ConvertTo-HtmlText ([string]$_))</code>" })
         $extra = $changed.Count - 8
-        $tail = if ($extra -gt 0) { " (+$extra غيرها)" } else { '' }
-        $lines.Add("⚙️ إعدادات معدّلة: $($safe -join ' ')$tail")
+        $tail = if ($extra -gt 0) { (T 'wk.plusOthers2' $extra) } else { '' }
+        $lines.Add((T 'wk.changedSettingsShort' $($safe -join ' ') $tail))
     }
 
     if ($data.TickerPublishes -eq 0) { $lines.Add((T 'wk.noTickerThisWeek')) }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
-        $lines.Add("📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') · آخر نشرة $lastAt")
+        $lines.Add((T 'wk.news' $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') $lastAt))
     }
 
-    $lines.Add("🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') بُثّت")
+    $lines.Add((T 'wk.urgents' $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')))
 
     if ($data.Truncated) { $lines.Add((T 'rep.readLimit')) }
     return ($lines -join "`n")

@@ -59,7 +59,7 @@ function Get-AnnouncementScopeLabel {
     switch ([string](Get-JsonProp $Announcement 'Scope')) {
         'admins' { return (T 'ann.forAdmins') }
         'operators' { return (T 'ann.forOperators') }
-        'user' { return "لـ $(Get-UserDisplayName -UserId ([long](Get-JsonProp $Announcement 'TargetUserId')))" }
+        'user' { return (T 'ann.forWhom' $(Get-UserDisplayName -UserId ([long](Get-JsonProp $Announcement 'TargetUserId')))) }
         default { return (T 'ann.forEveryone') }
     }
 }
@@ -115,7 +115,7 @@ function Format-AnnouncementMessage {
     param([Parameter(Mandatory)]$Announcement)
     $lines = @((T 'ann.noticeTitle'), '', (ConvertTo-TelegramHtmlText -Text ([string](Get-JsonProp $Announcement 'Text'))))
     $by = [long](Get-JsonProp $Announcement 'CreatedBy')
-    if ($by -gt 0) { $lines += @('', "<i>من $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId $by))</i>") }
+    if ($by -gt 0) { $lines += @('', (T 'ann.from' $(ConvertTo-TelegramHtmlText -Text (Get-UserDisplayName -UserId $by)))) }
     return ($lines -join "`n")
 }
 
@@ -219,7 +219,7 @@ function Stop-BridgeAnnouncement {
     if ($found.Count -eq 0) { return $false }
     $found[0] | Add-Member -NotePropertyName Status -NotePropertyValue 'cancelled' -Force
     Write-BridgeLog "Announcement $AnnouncementId cancelled by $UserId"
-    Add-AuditEntry "📢 إيقاف تنويه $AnnouncementId - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'ann.stoppedAudit' $AnnouncementId $(Format-UserAuditActor -UserId $UserId))
     return (Save-BridgeAnnouncements)
 }
 
@@ -273,8 +273,8 @@ function Get-AnnouncementsText {
         return ($lines -join "`n")
     }
     $window = Get-BridgePageWindow -ItemCount $all.Count -Page $Page -PageSize $PageSize
-    $tally = "$($all.Count) تنويهًا · $(@(Get-ActiveAnnouncements -Now $Now).Count) نشِط"
-    if ($window.PageCount -gt 1) { $tally += " · صفحة $($window.Page + 1) من $($window.PageCount)" }
+    $tally = (T 'ann.countLine' $($all.Count) $(@(Get-ActiveAnnouncements -Now $Now).Count))
+    if ($window.PageCount -gt 1) { $tally += (T 'ann.page' $($window.Page + 1) $($window.PageCount)) }
     $lines.Add("<i>$tally</i>")
     $lines.Add('')
     foreach ($index in $window.StartIndex..$window.EndIndex) {
@@ -287,9 +287,9 @@ function Get-AnnouncementsText {
             default { (T 'ann.expired') }
         }
         $lines.Add("$($index + 1). <b>$(ConvertTo-TelegramHtmlText -Text $text)</b>")
-        $detail = "   $state · $(Get-AnnouncementScopeLabel -Announcement $announcement) · اطّلع $(Get-AnnouncementReadCount -Announcement $announcement)"
+        $detail = (T 'ann.row' $state $(Get-AnnouncementScopeLabel -Announcement $announcement) $(Get-AnnouncementReadCount -Announcement $announcement))
         $every = [int](Get-JsonProp $announcement 'RepeatHours')
-        if ($every -gt 0) { $detail += " · يتكرر كل $every س" }
+        if ($every -gt 0) { $detail += (T 'ann.repeatsEvery' $every) }
         if ([bool](Get-JsonProp $announcement 'Pinned')) { $detail += (T 'ann.pinned') }
         $lines.Add($detail)
     }
@@ -307,7 +307,7 @@ function Get-AnnouncementsKeyboard {
             if (-not (Test-AnnouncementLive -Announcement $announcement -Now $Now)) { continue }
             $text = ([string](Get-JsonProp $announcement 'Text') -replace '[\r\n]+', ' ').Trim()
             if ($text.Length -gt 24) { $text = $text.Substring(0, 23) + '…' }
-            $rows += , @( (New-Button "🚫 إيقاف · $text" "anncancel:$([string](Get-JsonProp $announcement 'Id'))" -Style danger) )
+            $rows += , @( (New-Button (T 'ann.stopButton' $text) "anncancel:$([string](Get-JsonProp $announcement 'Id'))" -Style danger) )
         }
     }
     if ($window.PageCount -gt 1) {
@@ -332,12 +332,7 @@ function Show-AnnouncementsScreen {
 function Start-AnnouncementCompose {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'announcement_text'; UserId = $UserId } | Out-Null
-    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard) -Text @"
-📢 <b>تنويه جديد</b>
-
-أرسل نص التنويه كما تريد أن يقرأه الناس.
-<i>الحد $(Get-SettingInt 'AnnouncementMaxLength' 500) حرفًا، وتختار بعده من يصله ومدّته وتكراره.</i>
-"@
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard) -Text (T 'ann.newScreen' $(Get-SettingInt 'AnnouncementMaxLength' 500))
 }
 
 function Complete-AnnouncementText {
@@ -368,14 +363,14 @@ function Get-AnnouncementOptionsKeyboard {
         default { (T 'ann.everyone') }
     }
     $expiry = [int]$State.ExpiryHours
-    $expiryLabel = if ($expiry -le 0) { "$(Get-SettingInt 'AnnouncementDefaultExpiryHours' 24) س" } else { "$expiry س" }
+    $expiryLabel = if ($expiry -le 0) { (T 'ann.hours' $(Get-SettingInt 'AnnouncementDefaultExpiryHours' 24)) } else { (T 'ann.hours' $expiry) }
     $repeat = [int]$State.RepeatHours
-    $repeatLabel = if ($repeat -le 0) { (T 'sch.once') } else { "كل $repeat س" }
+    $repeatLabel = if ($repeat -le 0) { (T 'sch.once') } else { (T 'ann.everyHours' $repeat) }
     return @{ inline_keyboard = @(
-            , @( (New-Button "👥 المستلمون: $scope" 'annopt:scope') )
-            , @( (New-Button "⌛ المدة: $expiryLabel" 'annopt:expiry'), (New-Button "🔁 التكرار: $repeatLabel" 'annopt:repeat') )
-            , @( (New-Button "$(if ([bool]$State.RequireAck) { '✅' } else { '⬜' }) زر «تم الاطلاع»" 'annopt:ack'),
-                (New-Button "$(if ([bool]$State.Pinned) { '📌' } else { '⬜' }) تثبيت في القائمة" 'annopt:pin') )
+            , @( (New-Button (T 'ann.recipients' $scope) 'annopt:scope') )
+            , @( (New-Button (T 'ann.duration' $expiryLabel) 'annopt:expiry'), (New-Button (T 'ann.repeat' $repeatLabel) 'annopt:repeat') )
+            , @( (New-Button (T 'ann.seenButtonToggle' $(if ([bool]$State.RequireAck) { '✅' } else { '⬜' })) 'annopt:ack'),
+                (New-Button (T 'ann.pinToggle' $(if ([bool]$State.Pinned) { '📌' } else { '⬜' })) 'annopt:pin') )
             , @( (New-Button (T 'ann.sendNow') 'annopt:send' -Style success), (New-Button (T 'common.cancel') 'cancel') )
         ) }
 }
@@ -387,13 +382,7 @@ function Show-AnnouncementOptionsScreen {
     $preview = ([string]$state.Text -replace '[\r\n]+', ' ').Trim()
     if ($preview.Length -gt 200) { $preview = $preview.Substring(0, 199) + '…' }
     $audience = @(Get-AnnouncementAudience -Announcement ([pscustomobject]@{ Scope = [string]$state.Scope; TargetUserId = 0 })).Count
-    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-AnnouncementOptionsKeyboard -State $state) -Text @"
-📢 <b>مراجعة التنويه</b>
-
-$(ConvertTo-TelegramHtmlText -Text $preview)
-
-<i>سيصل إلى $audience شخصًا عداك.</i>
-"@
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-AnnouncementOptionsKeyboard -State $state) -Text (T 'ann.review' $(ConvertTo-TelegramHtmlText -Text $preview) $audience)
 }
 
 function Switch-AnnouncementOption {
@@ -426,7 +415,7 @@ function Complete-AnnouncementSend {
     $sent = Send-BridgeAnnouncement -Announcement $announcement
     Save-BridgeAnnouncements | Out-Null
     Write-BridgeLog "Announcement $($announcement.Id) sent to $sent recipient(s) by $UserId"
-    Add-AuditEntry "📢 تنويه $(Get-AnnouncementScopeLabel -Announcement $announcement) ($sent مستلمًا) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ وصل التنويه إلى $sent شخصًا." -ReplyMarkup (Get-AnnouncementsKeyboard)
+    Add-AuditEntry (T 'ann.sentAudit' $(Get-AnnouncementScopeLabel -Announcement $announcement) $sent $(Format-UserAuditActor -UserId $UserId))
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'ann.delivered' $sent) -ReplyMarkup (Get-AnnouncementsKeyboard)
     return $true
 }

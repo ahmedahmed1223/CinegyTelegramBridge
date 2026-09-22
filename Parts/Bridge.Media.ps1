@@ -1156,8 +1156,15 @@ function Get-FeedWatchText {
     elseif ($script:LastOutputMonitorAt -le [datetime]::MinValue) { (T 'feed.stateUnknown') }
     else { (T 'feed.stateGood') }
     $openOutage = if ($openUnreachable) { $openUnreachable } else { $openBlack }
+    $summary = Get-BridgeOutageSummary -Ledger $script:StreamOutages -WindowHours 24 -Now $now
     if ($openOutage) {
         $state += ' · ' + (T 'feed.since' (Format-DurationSeconds -Seconds (Get-BridgeOutageDurationSeconds -Outage $openOutage -Now $now)))
+    }
+    elseif ($summary.LastGoodAt) {
+        # "Arriving" on its own does not answer what the screen was asked.
+        # How long it has been arriving is the half that says whether the
+        # feed settled an hour ago or has been steady since Tuesday.
+        $state += ' · ' + (T 'feed.since' (Format-DurationSeconds -Seconds ([int]($now - $summary.LastGoodAt).TotalSeconds)))
     }
     $lines.Add($state)
 
@@ -1174,7 +1181,6 @@ function Get-FeedWatchText {
     $intervalMinutes = [math]::Max(0, (Get-SettingInt 'OutputMonitorMinutes' 0))
     if ($intervalMinutes -gt 0) { $lines.Add((T 'feed.cycle' (Format-DurationMinutes -Minutes $intervalMinutes))) }
 
-    $summary = Get-BridgeOutageSummary -Ledger $script:StreamOutages -WindowHours 24 -Now $now
     $lines.Add('')
     if ($summary.Count -le 0) {
         $lines.Add((T 'feed.windowClean' (Format-DurationMinutes -Minutes ($summary.WindowHours * 60))))

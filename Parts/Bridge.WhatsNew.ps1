@@ -1160,14 +1160,14 @@ function Get-WhatsNewText {
 
     $lines = [System.Collections.Generic.List[string]]::new()
     if (-not $NoHeading) { $lines.Add((T 'whatsnew.title' $($script:BridgeVersion))) }
-    else { $lines.Add('<b>🆕 ما الجديد</b> — <i>الإصدارات الأقدم</i>') }
+    else { $lines.Add((T 'whatsnew.olderReleases')) }
     foreach ($section in $sections) {
         $lines.Add('')
         $lines.Add("<b>▪️ $(ConvertTo-TelegramHtmlText -Text ([string]$section.Version))</b>")
         foreach ($item in $section.Items) { $lines.Add("• $(ConvertTo-TelegramHtmlText -Text ([string]$item))") }
     }
     $lines.Add('')
-    $lines.Add('<i>السجل التقني الكامل في ملف CHANGELOG.md مع الإصدار.</i>')
+    $lines.Add((T 'whatsnew.fullLog'))
     return ($lines -join "`n")
 }
 
@@ -1190,6 +1190,6 @@ function Get-WhatsNewKeyboard {
        somebody to open the server. #>
     param([long]$ChatId = 0, [long]$UserId = 0)
     $menu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
-    $rows = @(, @((New-Button '📄 السجل التقني (ملف)' 'menu:changelog')))
+    $rows = @(, @((New-Button (T 'whatsnew.technicalLog') 'menu:changelog')))
     return @{ inline_keyboard = $rows + @($menu.inline_keyboard) }
 }

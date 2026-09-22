@@ -545,7 +545,7 @@ function Get-HelpRichBlocks {
     #>
     param([long]$ChatId = 0, [long]$UserId = 0)
     $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
-    $blocks = @(@{ type = 'heading'; text = '📖 دليل الجسر'; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'help.guide'); size = 3 })
     # Capped against the payload limit rather than built and hoped for. Every
     # chapter of this manual at once came to 115% of the limit for an operator
     # and 182% for an administrator, so the rich send failed every time and the
@@ -585,7 +585,7 @@ function Get-HelpRichBlocks {
         $skipped += [string]$chapter.Title
     }
     if ($skipped.Count -gt 0) {
-        $blocks += @{ type = 'paragraph'; text = "📚 وبقية الأبواب في الفهرس: $($skipped -join ' · ')" }
+        $blocks += @{ type = 'paragraph'; text = (T 'help.otherChapters' $($skipped -join ' · ')) }
     }
     return $blocks
 }
@@ -619,8 +619,8 @@ function Get-MyOperationBlock {
     # failed one it is the thing the administrator needs, so it arrives on the
     # same line as what to do about it.
     $advice = switch ([string]$Item.Result) {
-        'failed' { 'افحص الاتصال ثم أعد المحاولة' }
-        'blocked' { 'راجع صلاحيتك أو حالة Cinegy' }
+        'failed' { (T 'help.checkConnection') }
+        'blocked' { (T 'help.checkRights') }
         default { '' }
     }
     if ($advice) {
@@ -646,16 +646,16 @@ function Get-MyOperationsBlocks {
     #>
     param([Parameter(Mandatory)][long]$UserId)
     $history = @(Get-UserOperationHistory -UserId $UserId | Select-Object -Last 10)
-    $blocks = @(@{ type = 'heading'; text = '🧾 آخر عملياتك'; size = 3 })
+    $blocks = @(@{ type = 'heading'; text = (T 'help.yourLatestOperations'); size = 3 })
     if ($history.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = 'لم تُسجَّل لك عمليات بعد.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'help.noOperationsYet') }
         return $blocks
     }
 
     $failed = @($history | Where-Object { [string]$_.Result -eq 'failed' }).Count
     $blockedCount = @($history | Where-Object { [string]$_.Result -eq 'blocked' }).Count
     $succeeded = $history.Count - $failed - $blockedCount
-    $tally = "$(Get-ArabicCountNoun -Count $history.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') · ✅ $succeeded"
+    $tally = (T 'help.pair' $(Get-ArabicCountNoun -Count $history.Count -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $succeeded)
     if ($failed -gt 0) { $tally += " · ❌ $failed" }
     if ($blockedCount -gt 0) { $tally += " · ⛔ $blockedCount" }
     $blocks += @{ type = 'paragraph'; text = $tally }
@@ -676,13 +676,13 @@ function Get-MyOperationsBlocks {
             if ($inner.Count -gt 0) { $inner += @{ type = 'divider' } }
             $inner += @(Get-MyOperationBlock -Item $item)
         }
-        $blocks += @{ type = 'details'; summary = "🔍 عمليات أقدم ($($older.Count))"; blocks = $inner }
+        $blocks += @{ type = 'details'; summary = (T 'help.olderOperations' $($older.Count)); blocks = $inner }
     }
     # Only when the keyboard actually carries the button - both screens ask
     # the same function, so the promise cannot outlive the button.
     $copyReference = Get-MyOperationsCopyReference -UserId $UserId
     if ($copyReference) {
-        $blocks += @{ type = 'paragraph'; text = (Get-CopyButtonNotice -Label (Get-MyOperationsCopyLabel -Reference $copyReference) -Hint 'أرسله للمشرف مع وصف ما حدث.') }
+        $blocks += @{ type = 'paragraph'; text = (Get-CopyButtonNotice -Label (Get-MyOperationsCopyLabel -Reference $copyReference) -Hint (T 'help.sendToAdmin')) }
     }
     return $blocks
 }
@@ -733,7 +733,7 @@ function Get-HelpChapterText {
     $chapter = $chapters[$index]
     $lines = @("<b>📖 $(ConvertTo-TelegramHtmlText -Text ([string]$chapter.Title))</b>", '━━━━━━━━━━━━━━') +
         @(@($chapter.Body) | ForEach-Object { Format-HelpHtmlLine -Line ([string]$_) }) +
-        @('', "<i>الباب $($index + 1) من $($chapters.Count)</i>")
+        @('', (T 'help.chapterOf' $($index + 1) $($chapters.Count)))
     return ($lines -join "`n")
 }
 
@@ -744,12 +744,12 @@ function Get-HelpChapterKeyboard {
     $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
     $index = Get-HelpChapterIndex -Chapters $chapters -Key $Key
     $navigation = @()
-    if ($index -gt 0) { $navigation += @{ text = '⬅️ السابق'; callback_data = "help:ch:$($chapters[$index - 1].Key)" } }
-    $navigation += @{ text = '📖 الفهرس'; callback_data = 'help:home' }
-    if ($index -ge 0 -and $index -lt ($chapters.Count - 1)) { $navigation += @{ text = '➡️ التالي'; callback_data = "help:ch:$($chapters[$index + 1].Key)" } }
+    if ($index -gt 0) { $navigation += @{ text = (T 'common.previous'); callback_data = "help:ch:$($chapters[$index - 1].Key)" } }
+    $navigation += @{ text = (T 'help.index'); callback_data = 'help:home' }
+    if ($index -ge 0 -and $index -lt ($chapters.Count - 1)) { $navigation += @{ text = (T 'help.next'); callback_data = "help:ch:$($chapters[$index + 1].Key)" } }
     $rows = @()
     $rows += , @($navigation)
-    $rows += , @(@{ text = '🏠 القائمة'; callback_data = 'menu:main' })
+    $rows += , @(@{ text = (T 'common.home'); callback_data = 'menu:main' })
     return @{ inline_keyboard = $rows }
 }
 
@@ -757,14 +757,14 @@ function Get-HelpHomeText {
     param([long]$ChatId = 0, [long]$UserId = 0)
     $chapters = @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)
     $lines = @(
-        '<b>📘 دليل بوت Cinegy Air</b>'
-        "الإصدار <code>$($script:BridgeVersion)</code>"
+        (T 'help.title')
+        (T 'help.release' $($script:BridgeVersion))
         ''
-        '<b>اختر ما تريد معرفته:</b>'
+        (T 'help.chooseWhat')
         ''
     )
     foreach ($chapter in $chapters) { $lines += "• $(ConvertTo-TelegramHtmlText -Text ([string]$chapter.Title))" }
-    $lines += @('', '<i>🚀 جديد على البوت؟ ابدأ بـ«بداية سريعة».</i>')
+    $lines += @('', (T 'help.newHere'))
     return ($lines -join "`n")
 }
 
@@ -780,7 +780,7 @@ function Get-HelpHomeKeyboard {
         if ($i + 1 -lt $chapters.Count) { $row += @{ text = $chapters[$i + 1].Title; callback_data = "help:ch:$($chapters[$i + 1].Key)" } }
         $rows += , $row
     }
-    $rows += , @(@{ text = '📄 الدليل كاملًا'; callback_data = 'help:full' }, @{ text = '🏠 القائمة'; callback_data = 'menu:main' })
+    $rows += , @(@{ text = (T 'help.wholeGuide'); callback_data = 'help:full' }, @{ text = (T 'common.home'); callback_data = 'menu:main' })
     return @{ inline_keyboard = $rows }
 }
 
@@ -792,8 +792,8 @@ function Get-HelpText {
     if ($UserId -eq 0) { $UserId = $ChatId }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('<b>📘 دليل بوت Cinegy Air</b>')
-    $lines.Add("الإصدار <code>$($script:BridgeVersion)</code>")
+    $lines.Add((T 'help.title'))
+    $lines.Add((T 'help.release' $($script:BridgeVersion)))
     $lines.Add('')
     foreach ($chapter in @(Get-HelpChapters -ChatId $ChatId -UserId $UserId)) {
         $lines.Add('━━━━━━━━━━━━━━━━')

@@ -207,10 +207,10 @@ function Restore-ConfigBackup {
     )
     $restoreTempPath = "$Path.restore.tmp"
     try {
-        if (-not (Test-Path -LiteralPath $BackupPath)) { throw "ملف النسخة غير موجود." }
+        if (-not (Test-Path -LiteralPath $BackupPath)) { throw (T 'core.backupFileMissing') }
         $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $candidate 'BotToken'))) {
-            throw "النسخة لا تحتوي BotToken صالحًا."
+            throw (T 'core.backupNoToken')
         }
         $backupDirectory = "$Path.backups"
         New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
@@ -251,7 +251,7 @@ function Protect-SettingDisplayValue {
     param([string]$Name, $Value)
     if ($Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
-        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { '(فارغ)' })
+        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { (T 'core.empty') })
     }
     return $Value
 }
@@ -273,12 +273,12 @@ function Format-ConfigDiffValue {
     param([string]$Name, $Value)
     if ($Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
-        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { '(فارغ)' })
+        return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { (T 'core.empty') })
     }
     if ($Value -is [array]) { return (T 'core.items' $(@($Value).Count)) }
-    if ($null -eq $Value) { return '(غير موجود)' }
+    if ($null -eq $Value) { return (T 'core.notThere') }
     $text = ([string]$Value -replace '[\r\n]+', ' ').Trim()
-    if ([string]::IsNullOrEmpty($text)) { return '(فارغ)' }
+    if ([string]::IsNullOrEmpty($text)) { return (T 'core.empty') }
     if ($text.Length -gt 40) { return $text.Substring(0, 39) + '…' }
     return $text
 }
@@ -332,14 +332,14 @@ function Get-ConfigRestoreBlocks {
     if ($null -eq $rows) { return @() }
     $blocks = @(@{ type = 'heading'; text = (T 'core.restoreBackup' $BackupName); size = 3 })
     if ($rows.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = 'لا اختلافات ظاهرة: الاستعادة لن تغيّر شيئًا.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'core.noVisibleDifferences') }
         return $blocks
     }
     $blocks += @{ type = 'paragraph'; text = (T 'core.settingsWillChange' $($rows.Count)) }
     $cells = @(, @(
-            @{ text = 'الإعداد'; is_header = $true }
-            @{ text = 'الحالي'; is_header = $true }
-            @{ text = 'في النسخة'; is_header = $true }
+            @{ text = (T 'core.col.setting'); is_header = $true }
+            @{ text = (T 'core.col.current'); is_header = $true }
+            @{ text = (T 'core.col.inBackup'); is_header = $true }
         ))
     foreach ($row in $rows) {
         $cells += , @(@{ text = $row.Name }, @{ text = $row.Current }, @{ text = $row.Backup })
@@ -364,8 +364,8 @@ function Get-ConfigDifferenceSummary {
             $backupJson = $backupValue | ConvertTo-Json -Depth 20 -Compress
             if ($currentJson -ne $backupJson) { $name }
         }
-        if (@($changed).Count -eq 0) { return 'الاختلافات: لا توجد اختلافات ظاهرة.' }
-        return (T 'core.differences' $(@($changed) -join '، '))
+        if (@($changed).Count -eq 0) { return (T 'core.noDifferences') }
+        return (T 'core.differences' $(@($changed) -join (T 'common.comma')))
     }
     catch { return (T 'core.differencesFailed' $($_.Exception.Message)) }
 }
@@ -373,7 +373,7 @@ function Get-ConfigDifferenceSummary {
 function Get-ConfigSaveWarning {
     <# Appended to any confirmation whose change could not be persisted, so an
        operator is never told something was saved when it was not. #>
-    if ($script:LastConfigSaveFailed) { return "`n⚠️ تعذّر حفظ config.json - التغيير مؤقّت حتى إعادة التشغيل." }
+    if ($script:LastConfigSaveFailed) { return (T 'core.configNotSaved') }
     return ''
 }
 
@@ -668,14 +668,14 @@ function Get-BridgeTextWarnings {
     if ([string]::IsNullOrWhiteSpace($Text)) { return $warnings }
 
     if ($Text -match '(\p{L})\1\1') { $warnings += (T 'core.tripledLetter' $($Matches[0])) }
-    if ($Text -match '  ') { $warnings += 'مسافتان متتاليتان' }
+    if ($Text -match '  ') { $warnings += (T 'core.doubleSpace') }
     # A comma or full stop with no space after it is the commonest phone slip
     # in Arabic, and it closes up two words into one on screen.
-    if ($Text -match '[،,.؟!:](?=\p{L})') { $warnings += 'علامة ترقيم بلا مسافة بعدها' }
-    if ($Text -match '\s[،,.؟!]') { $warnings += 'مسافة قبل علامة ترقيم' }
+    if ($Text -match '[،,.؟!:](?=\p{L})') { $warnings += (T 'core.punctuationNoSpace') }
+    if ($Text -match '\s[،,.؟!]') { $warnings += (T 'core.spaceBeforePunctuation') }
     # Latin digits inside Arabic reorder against the text around them.
-    if ($Text -match '\p{IsArabic}' -and $Text -match '[0-9]') { $warnings += 'أرقام لاتينية داخل نصّ عربي' }
-    if ($Text -ne $Text.Trim()) { $warnings += 'مسافة في أول النصّ أو آخره' }
+    if ($Text -match '\p{IsArabic}' -and $Text -match '[0-9]') { $warnings += (T 'core.latinDigits') }
+    if ($Text -ne $Text.Trim()) { $warnings += (T 'core.edgeSpace') }
 
     # A lexicon too small to know the language has no business judging a word.
     # Before this gate the check flagged الرئيس and اجتماع on a fresh install,
@@ -706,7 +706,7 @@ function Get-BridgeTextWarnings {
     # naming twenty of them is a wall; naming one or two is a question.
     $unseen = @($unseen | Select-Object -Unique)
     if ($unseen.Count -gt 0 -and $unseen.Count -le 2) {
-        $warnings += (T 'core.unseenWord' $($unseen -join '، '))
+        $warnings += (T 'core.unseenWord' $($unseen -join (T 'common.comma')))
     }
     return $warnings
 }
@@ -774,15 +774,12 @@ function Format-DurationMinutes {
         chosen together instead of gluing an "s" on the end.
     #>
     param([int]$Minutes)
-    $name = { param([int]$Count, [string]$One, [string]$Two, [string]$Few, [string]$Many)
-        switch ($Count) {
-            1 { $One }
-            2 { $Two }
-            default { if ($Count -le 10) { "$Count $Few" } else { "$Count $Many" } }
-        } }
-
-    if ($Minutes -le 0) { return '0 دقيقة' }
-    if ($Minutes -lt 60) { return (& $name $Minutes 'دقيقة' 'دقيقتان' 'دقائق' 'دقيقة') }
+    # Get-ArabicCountNoun, not a closure of its own. This function used
+    # to carry a second counting machine that counted the same way and
+    # knew nothing of English, so "منذ أسبوعين" stayed Arabic on a
+    # screen whose every other number had been translated.
+    if ($Minutes -le 0) { return (Get-ArabicCountNoun -Count 0 -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes' -BareOne) }
+    if ($Minutes -lt 60) { return (Get-ArabicCountNoun -Count $Minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes' -BareOne) }
 
     # Months and weeks as well as days. Idle time and how long a banner stayed
     # up are open-ended: an account last seen a fortnight ago read as "20160
@@ -794,11 +791,11 @@ function Format-DurationMinutes {
     # an exact month would make the same elapsed time read differently
     # depending on which month it happened to fall in.
     $units = @(
-        @{ Size = 43200; One = 'شهر'; Two = 'شهران'; Few = 'أشهر'; Many = 'شهرًا' }
-        @{ Size = 10080; One = 'أسبوع'; Two = 'أسبوعان'; Few = 'أسابيع'; Many = 'أسبوعًا' }
-        @{ Size = 1440; One = 'يوم'; Two = 'يومان'; Few = 'أيام'; Many = 'يومًا' }
-        @{ Size = 60; One = 'ساعة'; Two = 'ساعتان'; Few = 'ساعات'; Many = 'ساعة' }
-        @{ Size = 1; One = 'دقيقة'; Two = 'دقيقتان'; Few = 'دقائق'; Many = 'دقيقة' }
+        @{ Size = 43200; One = 'شهر'; Two = 'شهران'; Few = 'أشهر'; Many = 'شهرًا'; EnglishOne = 'month'; EnglishMany = 'months' }
+        @{ Size = 10080; One = 'أسبوع'; Two = 'أسبوعان'; Few = 'أسابيع'; Many = 'أسبوعًا'; EnglishOne = 'week'; EnglishMany = 'weeks' }
+        @{ Size = 1440; One = 'يوم'; Two = 'يومان'; Few = 'أيام'; Many = 'يومًا'; EnglishOne = 'day'; EnglishMany = 'days' }
+        @{ Size = 60; One = 'ساعة'; Two = 'ساعتان'; Few = 'ساعات'; Many = 'ساعة'; EnglishOne = 'hour'; EnglishMany = 'hours' }
+        @{ Size = 1; One = 'دقيقة'; Two = 'دقيقتان'; Few = 'دقائق'; Many = 'دقيقة'; EnglishOne = 'minute'; EnglishMany = 'minutes' }
     )
     # The two largest units only. "شهر و12 يومًا و7 ساعات و20 دقيقة" is precise
     # and unreadable, and nobody deciding whether an account is dormant cares
@@ -809,24 +806,21 @@ function Format-DurationMinutes {
         if ($parts.Count -ge 2) { break }
         $count = [math]::Floor($remaining / $unit.Size)
         if ($count -le 0) { continue }
-        $parts += (& $name $count $unit.One $unit.Two $unit.Few $unit.Many)
+        $parts += (Get-ArabicCountNoun -Count $count -One $unit.One -Two $unit.Two -Few $unit.Few -Many $unit.Many -EnglishOne $unit.EnglishOne -EnglishMany $unit.EnglishMany -BareOne)
         $remaining = $remaining % $unit.Size
     }
-    return ($parts -join ' و')
+    return ($parts -join (T 'core.joinAnd'))
 }
 
 function Format-DurationSeconds {
     <# Seconds, handed up to the minutes formatter once there are enough of
        them. Same counting rules, so "5 ثانية" stops happening. #>
     param([int]$Seconds)
+    # The same one counter, for the same reason as the minutes above.
     $second = { param([int]$Count)
-        switch ($Count) {
-            1 { 'ثانية' }
-            2 { 'ثانيتان' }
-            default { if ($Count -le 10) { (T 'core.secondsFew' $Count) } else { (T 'core.seconds' $Count) } }
-        } }
+        Get-ArabicCountNoun -Count $Count -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'-BareOne }
 
-    if ($Seconds -le 0) { return '0 ثانية' }
+    if ($Seconds -le 0) { return (& $second 0) }
     if ($Seconds -lt 60) { return (& $second $Seconds) }
 
     # Promoted whenever there are enough seconds, not only when they divide
@@ -851,7 +845,7 @@ function Get-ArabicCountNoun {
 
         1 keeps its number ("1 مرة" reads better than a bare "مرة" inside a
         ranked list), 2 takes the bare dual ("مرتين"), 3-10 the plural
-        ("8 مرات"), and 0 and 11+ the singular ("0 مرة"، "359 مرة").
+        ("8 مرات"), and 0 and 11+ the singular ("0 مرة(T 'common.comma')359 مرة").
     #>
     param(
         [int]$Count,
@@ -864,14 +858,18 @@ function Get-ArabicCountNoun {
         # where they do not, the Arabic is used and reads as it always did
         # rather than as a bare key.
         [string]$EnglishOne = '',
-        [string]$EnglishMany = ''
+        [string]$EnglishMany = '',
+        # A duration reads "منذ دقيقة", not "منذ 1 دقيقة". Elsewhere the
+        # number earns its place - "1 مرة" inside a ranked list of
+        # counts - so the bare form is asked for rather than assumed.
+        [switch]$BareOne
     )
     if ((Get-BridgeLanguage) -eq 'en' -and -not [string]::IsNullOrWhiteSpace($EnglishOne)) {
         $word = if ($Count -eq 1) { $EnglishOne } else { if ([string]::IsNullOrWhiteSpace($EnglishMany)) { $EnglishOne } else { $EnglishMany } }
         return "$Count $word"
     }
     switch ($Count) {
-        1 { return "1 $One" }
+        1 { if ($BareOne) { return $One }; return "1 $One" }
         2 { return $Two }
         default {
             if ($Count -ge 3 -and $Count -le 10) { return "$Count $Few" }

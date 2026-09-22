@@ -118,14 +118,14 @@ function Show-HideAllLayerSettings {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layers = @(Get-HideAllTargetLayers)
-    $scopeText = if ($layers.Count -gt 0) { $layers -join '، ' } else { (T 'cmd.noLayersSelected') }
+    $scopeText = if ($layers.Count -gt 0) { $layers -join (T 'common.comma') } else { (T 'cmd.noLayersSelected') }
     Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.hideAllLayers' $scopeText) -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
 }
 
 function Show-LayerNamesScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -Text "🏷️ أسماء الطبقات`nاختر طبقة، ثم أرسل اسمًا واحدًا واضحًا لها. لا تحتاج إلى كتابة رموز أو أرقام بصيغة خاصة." -ReplyMarkup (Get-LayerNamesKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerNamesScreen') -ReplyMarkup (Get-LayerNamesKeyboard)
 }
 
 function Set-LayerName {
@@ -268,7 +268,7 @@ function Complete-SettingValue {
     if ($state.Name -eq 'TemplateTestLayer') {
         $conflict = @(Get-TemplateTestLayerConflict -Layer $parsed)
         if ($conflict.Count -gt 0) {
-            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerInProduction' $parsed $($conflict -join '، ')) -ReplyMarkup (Get-SettingsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerInProduction' $parsed $($conflict -join (T 'common.comma'))) -ReplyMarkup (Get-SettingsKeyboard)
             return
         }
     }
@@ -467,7 +467,7 @@ function Invoke-AdminRawCommand {
     }
     $parts = $ArgText -split '\s+', 3
     if ($parts.Count -lt 2) {
-        Send-TelegramMessage -ChatId $ChatId -Text "الاستخدام: /أمر Device Cmd [Op1]" -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.usageRaw') -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     $device = $parts[0]; $cmd = $parts[1]; $op1 = if ($parts.Count -gt 2) { $parts[2] } else { "" }
@@ -487,7 +487,7 @@ function Invoke-ShowCommand {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $parts = @($ArgText -split '\|' | ForEach-Object { $_.Trim() })
     if ($parts.Count -lt 1 -or [string]::IsNullOrWhiteSpace($parts[0])) {
-        Send-TelegramMessage -ChatId $ChatId -Text "الاستخدام: /عرض اسم_القالب | نص الحقل الأول | ..." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.usageShow') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $key = $parts[0]
@@ -545,7 +545,7 @@ function Invoke-SetCommand {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $pairs = @($ArgText -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '=' })
     if ($pairs.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text "الاستخدام: /تحديث الاسم=القيمة [| الاسم٢=القيمة٢ ...]" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.usageUpdate') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $values = @{}
@@ -563,7 +563,7 @@ function Invoke-UserAliasCommand {
         return
     }
     if ($ArgText -notmatch '^\s*(\d+)\s*(.*)$') {
-        Send-TelegramMessage -ChatId $ChatId -Text "الاستخدام: /alias USER_ID الاسم`nلحذف الاسم: /alias USER_ID -"
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.usageAlias')
         return
     }
     $targetUserId = [long]$Matches[1]; $alias = $Matches[2].Trim()
@@ -651,11 +651,11 @@ function Invoke-BridgeCommand {
         { $_ -in @('جدولة', 'schedule') } { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.scheduling') -ReplyMarkup (Get-ScheduleMenuKeyboard) }
         { $_ -in @('سجل', 'audit') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Invoke-AuditCommand -ChatId $ChatId -UserId $UserId }
-            else { Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+            else { Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.adminOptionOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         }
         { $_ -in @('اعدادات', 'إعدادات', 'settings') } {
             if (Test-Admin -ChatId $ChatId -UserId $UserId) { Show-SettingsScreen -ChatId $ChatId -UserId $UserId }
-            else { Send-TelegramMessage -ChatId $ChatId -Text "هذا الخيار للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
+            else { Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.adminOptionOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         }
         { $_ -in @('امر', 'أمر', 'cmd') } { Invoke-AdminRawCommand -ArgText $argText -ChatId $ChatId -UserId $UserId }
         default {

@@ -371,6 +371,37 @@ Describe 'Durations read like durations' {
         Format-DurationMinutes -Minutes 90 | Should -Be 'ساعة و30 دقيقة'
     }
 
+    It 'counts in English without losing how Arabic reads' {
+        # Two counting machines lived here: Get-ArabicCountNoun, which
+        # learned English when the catalogue did, and a closure inside this
+        # function that never did - so "منذ أسبوعين" stayed Arabic on a
+        # screen whose every other number had been translated. The closure
+        # is gone; both now ask the one counter.
+        #
+        # -BareOne is why the Arabic did not change with it: a duration
+        # reads "ساعة و30 دقيقة", never "1 ساعة و30 دقيقة", while a counted
+        # noun in a ranked list keeps its number.
+        # config.example.json carries no Language, so the property is
+        # added rather than assigned: the bridge reads the setting and
+        # falls back to the default when it is absent.
+        $config.Settings | Add-Member -NotePropertyName Language -NotePropertyValue 'en' -Force
+        try {
+            Format-DurationMinutes -Minutes 90 | Should -Be '1 hour and 30 minutes'
+            Format-DurationMinutes -Minutes 20160 | Should -Be '2 weeks'
+            Format-DurationMinutes -Minutes 43200 | Should -Be '1 month'
+            Format-DurationSeconds -Seconds 7 | Should -Be '7 seconds'
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName Language -NotePropertyValue 'ar' -Force }
+    }
+
+    It 'still says a bare noun for one, in Arabic' {
+        Format-DurationMinutes -Minutes 1 | Should -Be 'دقيقة'
+        Format-DurationMinutes -Minutes 1440 | Should -Be 'يوم'
+        Format-DurationSeconds -Seconds 1 | Should -Be 'ثانية'
+        # and everywhere else the number stays
+        Get-ArabicCountNoun -Count 1 -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' | Should -Be '1 مرة'
+    }
+
     It 'reaches for days once there are enough hours' {
         # 1200 minutes was the complaint: twenty hours, written as a number
         # the reader had to divide.

@@ -94,10 +94,10 @@ function Invoke-FullStatusCommand {
         $overall = (T 'hl.cinegyUnavailable')
     }
     elseif ($script:OnAir.Count -gt 0) {
-        $overall = "🟠 طبقات على الهواء"
+        $overall = (T 'hlth.layersOnAir')
     }
     else {
-        $overall = "🟢 كل شيء سليم"
+        $overall = (T 'hlth.allWell')
     }
 
     $now = Get-Date
@@ -159,12 +159,12 @@ function Invoke-FullStatusCommand {
     $lines.Add("🔔 طلبات الوصول المعلّقة: <code>$($script:PendingApprovals.Count)</code>")
     $lines.Add('')
     $lines.Add($sep)
-    $lines.Add('<b>🔄 التزامن</b>')
+    $lines.Add((T 'hlth.sync'))
     if ($sync.Failed.Count -gt 0) {
-        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
+        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join (T 'common.comma')) — تم الاحتفاظ بالحالة السابقة.")
     }
     elseif ($sync.Removed.Count -gt 0) {
-        $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
+        $lines.Add("🔄 أُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join (T 'common.comma'))")
     }
     else { $lines.Add((T 'hl.cinegySynced')) }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
@@ -668,7 +668,7 @@ function Get-BridgeHealthCenterText {
     $icons = @($rows | ForEach-Object { [string]$_.Icon })
     $verdict = if ($icons -contains '🔴') { (T 'hl.faultNeedsAction') }
     elseif ($icons -contains '🟠') { (T 'hl.needsReview') }
-    else { '🟢 كل شيء سليم' }
+    else { (T 'hlth.allWell') }
 
     return @(
         (T 'hl.healthCentreTitle')
@@ -904,7 +904,7 @@ function Request-BridgeRestart {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     if (-not (Get-Setting 'AllowRemoteRestart')) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ إعادة التشغيل من البوت معطّلة.`nفعّل AllowRemoteRestart من الإعدادات، وتأكد أولًا أن الجسر يعمل كخدمة أو كمهمة مجدولة تعيد تشغيله." -ReplyMarkup (Get-AdminToolsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.restartDisabled') -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
     $supervisor = Get-BridgeSupervisor

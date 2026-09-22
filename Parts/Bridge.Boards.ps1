@@ -141,11 +141,11 @@ function Get-BoardEligibleTemplates {
             $path = [string](Get-JsonProp $template 'Path')
             $reason = ''
             $textFields = @()
-            if (-not $path) { $reason = 'لا مسار لملف المشهد.' }
-            elseif (-not (Test-Path -LiteralPath $path)) { $reason = 'ملف المشهد غير موجود في مساره.' }
+            if (-not $path) { $reason = (T 'board.noScenePath') }
+            elseif (-not (Test-Path -LiteralPath $path)) { $reason = (T 'board.sceneFileMissing') }
             else {
                 $textFields = @(Get-BoardTextFields -TemplateKey $key)
-                if ($textFields.Count -lt 1) { $reason = 'المشهد لا يعلن حقلًا نصّيًا يُكتب فيه.' }
+                if ($textFields.Count -lt 1) { $reason = (T 'board.noTextField') }
             }
             [pscustomobject]@{
                 Key = $key
@@ -260,7 +260,7 @@ function Show-BoardItemOnAir {
     $item = Get-BoardItem -Board $board -ItemId $ItemId
     if (-not $item) { return $false }
     if (-not [bool](Get-BoardProperty $item 'Enabled' $true)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '🚫 هذا الصفّ معطّل. فعّله أولًا.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.rowDisabled')
         return $false
     }
     $key = [string](Get-BoardProperty $board 'TemplateKey' '')
@@ -553,7 +553,7 @@ function Complete-BoardText {
             return $false
         }
         if (-not (Save-ContentBoard -Board $result.Value)) {
-            Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الجدول.'
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
             return $false
         }
         Add-AuditEntry "🗂 إنشاء جدول محتوى «$([string]$result.Value.Name)» - بواسطة $(Format-UserAuditActor -UserId $UserId)"
@@ -563,7 +563,7 @@ function Complete-BoardText {
 
     if (-not $board) { Show-BoardsScreen -ChatId $ChatId -UserId $UserId; return $false }
     if (-not (Test-BoardEditAllowed -Board $board -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ تحرير هذا الجدول ليس لك.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.notYoursToEdit')
         return $false
     }
     $fields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' '')))
@@ -577,7 +577,7 @@ function Complete-BoardText {
             # so a producer learns one convention rather than two.
             $parsed = ConvertFrom-BoardPasteText -Text $Value -TextFields $fields
             if (@($parsed.Rows).Count -lt 1) {
-                Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا بدّ من ملء حقل واحد على الأقل.'
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'board.needOneField')
                 Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
                 return $false
             }
@@ -587,7 +587,7 @@ function Complete-BoardText {
         'board_field' {
             $index = [int](Get-JsonProp $state 'FieldIndex')
             if ($index -lt 0 -or $index -ge $fields.Count) {
-                Send-TelegramMessage -ChatId $ChatId -Text '⛔ هذا الحقل لم يعد في المشهد.'
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'board.fieldGone')
                 Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
                 return $false
             }
@@ -607,7 +607,7 @@ function Complete-BoardText {
                 $added++
             }
             if ($added -gt 0 -and -not (Save-ContentBoard -Board $working)) {
-                Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الجدول.'
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
                 return $false
             }
             # Counted AND accounted for: "23 added" with no mention of the seven
@@ -628,7 +628,7 @@ function Complete-BoardText {
         return $false
     }
     if (-not (Save-ContentBoard -Board $result.Value)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الجدول.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
         return $false
     }
     Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
@@ -645,7 +645,7 @@ function Invoke-BoardEdit {
         return $false
     }
     if (-not (Save-ContentBoard -Board $Result.Value)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حفظ الجدول.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
         return $false
     }
     if ($ItemId -and (Get-BoardItem -Board $Result.Value -ItemId $ItemId)) {

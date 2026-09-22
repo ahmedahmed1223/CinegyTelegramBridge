@@ -20,7 +20,7 @@ function Get-OnAirSummary {
     <# Shows the bridge's tracked layers after they have been reconciled with
        Cinegy. Externally started scenes cannot be named reliably, but a scene
        hidden outside the bridge is removed by Update-OnAirStateFromCinegy. #>
-    if ($script:OnAir.Count -eq 0) { return "📺 المشاهد النشطة`n• لا توجد مشاهد على الهواء حسب آخر فحص." }
+    if ($script:OnAir.Count -eq 0) { return (T 'adm.noActiveScenes') }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'adm.activeScenes'))
     foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
@@ -521,7 +521,7 @@ function Invoke-StatusCommand {
     if ($material) { $lines.Add($material) }
     $sharedLayers = Get-JsonProp $store 'SharedLayers'
     if ($sharedLayers -and $sharedLayers.Count -gt 0) {
-        $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join '، ')" }) -join ' | ')
+        $sharedText = ConvertTo-TelegramHtmlText (@($sharedLayers.Keys | Sort-Object {[int]$_} | ForEach-Object { "طبقة ${_}: $(@($sharedLayers[$_]) -join (T 'common.comma'))" }) -join ' | ')
         # Not 'allowed' - a Cinegy GFX layer holds one scene, so templates
         # sharing a layer can never be on air together. Calling that harmless
         # is how a logo and a ticker end up silently evicting each other.
@@ -546,10 +546,10 @@ function Invoke-StatusCommand {
     $lines.Add($sep)
     $lines.Add((T 'adm.syncTitle'))
     if ($sync.Failed.Count -gt 0) {
-        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join '، ') — تم الاحتفاظ بالحالة السابقة.")
+        $lines.Add("⚠️ تعذّر فحص طبقات Cinegy: $($sync.Failed -join (T 'common.comma')) — تم الاحتفاظ بالحالة السابقة.")
     }
     elseif ($sync.Removed.Count -gt 0) {
-        $lines.Add("🔄 تم تحديث الحالة وأُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join '، ')")
+        $lines.Add("🔄 تم تحديث الحالة وأُزيلت الطبقات المخفية خارجيًا: $($sync.Removed -join (T 'common.comma'))")
     }
     else {
         $lines.Add((T 'adm.syncedWithCinegy'))
@@ -585,7 +585,7 @@ function Request-HideAllConfirmation {
         Mode = 'hide_all_review'; UserId = $UserId; Layers = $layers
     }
     $labels = @($layers | ForEach-Object { Get-LayerDisplayName -Layer ([int]$_) })
-    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($labels -join '، '). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text "⚠️ سيتم إخفاء الطبقات المحددة: $($labels -join (T 'common.comma')). هل أنت متأكد؟" -ReplyMarkup (Get-HideAllConfirmKeyboard)
 }
 
 function Get-HealthStatusReport {
@@ -660,7 +660,7 @@ function Show-TemplateAdminDetail {
         "الطبقة: $($template.Layer)",
         "الترتيب: $($template.Order)",
         "الوصف: $($template.Description)",
-        "الحقول: $(if (@($template.Fields).Count -gt 0) { $template.Fields -join '، ' } else { 'لا توجد' })",
+        "الحقول: $(if (@($template.Fields).Count -gt 0) { $template.Fields -join (T 'common.comma') } else { (T 'adm.none') })",
         "النصوص الجاهزة: $(@($template.Presets).Count)"
     )
     $reminderText = if ([bool](Get-JsonProp $template 'LongRunning')) {

@@ -30,7 +30,7 @@ function Start-AirOperation {
 
 function Get-TemplateTestReviewKeyboard {
     return @{ inline_keyboard = @(
-        , @((New-Button '🧪 نعم، اختبر القالب' 'tadm:testconfirm' -Style success), (New-Button '❌ إلغاء' 'menu:templatesadmin'))
+        , @((New-Button (T 'air.yesTestTemplate') 'tadm:testconfirm' -Style success), (New-Button (T 'common.cancel') 'menu:templatesadmin'))
     ) }
 }
 
@@ -187,7 +187,7 @@ function Send-TemplateAirNotice {
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $layerPart = if ($Layer -gt 0) { " · طبقة $Layer" } else { '' }
-    $heading = if ($Action -eq 'hide') { '⚫️ <b>رُفع عن الهواء</b>' } else { '🔴 <b>على الهواء الآن</b>' }
+    $heading = if ($Action -eq 'hide') { (T 'air.takenOffTitle') } else { (T 'air.onAirNow') }
     $lines.Add("$heading — $(ConvertTo-TelegramHtmlText $Key)$layerPart")
     if (-not [string]::IsNullOrWhiteSpace($Copy)) {
         # In a code span, like every other place the on-air copy appears: it is
@@ -203,7 +203,7 @@ function Send-TemplateAirNotice {
         }
     }
     else {
-        $lines.Add($(if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" } else { '⏱ يبقى حتى يُخفى يدويًا' }))
+        $lines.Add($(if ($AutoHideSeconds -gt 0) { "⏱ يُخفى تلقائيًا بعد $(Format-DurationSeconds -Seconds $AutoHideSeconds)" } else { (T 'air.staysUntilHidden') }))
     }
     if ($ActorName) { $lines.Add("👤 $(ConvertTo-TelegramHtmlText $ActorName)") }
     $text = $lines -join "`n"
@@ -962,19 +962,19 @@ function Get-ShowFailureDiagnosisLines {
     $freshness = Get-CinegyStateFreshness -LastSuccessfulAt $lastSuccess -FailedCount 0 -Now $Now `
         -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
     $lines.Add($(switch ([string]$freshness.State) {
-                'connected' { '✅ Cinegy يستجيب، وحالة الطبقات حديثة.' }
+                'connected' { (T 'air.cinegyAnswers') }
                 'stale' { "⚠️ حالة Cinegy متأخرة ($(ConvertTo-TelegramHtmlText ([string]$freshness.Label))) — قد يكون المحرّك مشغولًا أو الشبكة بطيئة." }
-                default { '❌ لا حالة حديثة من Cinegy — تحقّق من عنوان المحرّك ومن الشبكة قبل أي شيء آخر.' }
+                default { (T 'air.noFreshState') }
             }))
 
     # 2. The scene file, the cause a status screen never shows: a moved or
     # renamed .cintitle fails the push with a message about the push.
     $scenePath = Resolve-TemplateScenePath -Path ([string]$template.Path)
     if ([string]::IsNullOrWhiteSpace($scenePath)) {
-        $lines.Add('❌ لا مسار مشهد لهذا القالب في سجل القوالب.')
+        $lines.Add((T 'air.noScenePath'))
     }
     elseif (Test-Path -LiteralPath $scenePath) {
-        $lines.Add('✅ ملف المشهد موجود في مساره.')
+        $lines.Add((T 'air.sceneFileThere'))
     }
     else {
         $lines.Add("❌ ملف المشهد غير موجود: <code>$(ConvertTo-TelegramHtmlText $scenePath)</code> — نُقل أو أُعيدت تسميته أو تعذّر الوصول إلى المشاركة.")
@@ -1011,7 +1011,7 @@ function Get-ShowFailureDiagnosisLines {
     if ($sharedLayers -and $sharedLayers.Contains([string]$layer)) {
         $siblings = @(@($sharedLayers[[string]$layer]) | Where-Object { $_ -ne $Key })
         if ($siblings.Count -gt 0) {
-            $lines.Add("ℹ️ يتشارك الطبقة $layer أيضًا: $(ConvertTo-TelegramHtmlText ($siblings -join '، ')) — لا يظهر اثنان منها معًا.")
+            $lines.Add("ℹ️ يتشارك الطبقة $layer أيضًا: $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma'))) — لا يظهر اثنان منها معًا.")
         }
     }
     return $lines.ToArray()

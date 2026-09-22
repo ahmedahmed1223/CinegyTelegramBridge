@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -55,7 +55,7 @@ function Start-OperationReferenceLookup {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'operation_reference'; UserId = $UserId }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل مرجع العملية — ثمانية أحرف، مثل 5023333b.`nينسخه المشغّل من 🧾 عملياتي." -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.sendReference') -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-OperationReferenceLookup {
@@ -67,7 +67,7 @@ function Complete-OperationReferenceLookup {
     # Checked again here, not only when the button was drawn: this reads the
     # runtime log, and the screen may have been opened before a role changed.
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '🔎 البحث بالمرجع للمشرف وحده.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.searchAdminOnly')
         return
     }
     # The null check has to come before the @() wrap - @($null) is a one-item
@@ -76,7 +76,7 @@ function Complete-OperationReferenceLookup {
     # return: exactly one matching AIR_OP line made this a [string], and
     # .Count on a string throws under StrictMode. Which is what it did.
     if (-not (Test-OperationReference -Reference $Value)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ ليس مرجعًا: يتكوّن من ثمانية أحرف من 0-9 و a-f.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.notAReference') -ReplyMarkup (Get-DiagnosticsKeyboard)
         return
     }
     # @() because PowerShell unwraps a one-item array on return, and .Count on
@@ -105,10 +105,10 @@ function Complete-OperationReferenceLookup {
 
 function Get-DiagnosticsKeyboard {
     return @{ inline_keyboard = @(
-        , @((New-Button '🔎 ابحث بمرجع عملية' 'diag:findref'))
-        , @((New-Button '📦 حزمة تشخيص منقحة' 'diag:bundle'))
-        , @((New-Button '🧹 مسح سجل التشغيل' 'diag:clearruntime' -Style danger), (New-Button '🧹 مسح سجل التدقيق' 'diag:clearaudit' -Style danger))
-        , @((New-Button '🏠 القائمة' 'menu:main'))
+        , @((New-Button (T 'diag.searchByReference') 'diag:findref'))
+        , @((New-Button (T 'diag.redactedBundle') 'diag:bundle'))
+        , @((New-Button (T 'diag.clearRunLog') 'diag:clearruntime' -Style danger), (New-Button (T 'diag.clearAuditLog') 'diag:clearaudit' -Style danger))
+        , @((New-Button (T 'common.home') 'menu:main'))
     ) }
 }
 
@@ -158,22 +158,22 @@ function New-DiagnosticBundle {
 function Invoke-DiagnosticBundleCommand {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'هذا الخيار للمشرفين فقط.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.adminOptionOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $bundlePath = $null
     try {
         $bundlePath = New-DiagnosticBundle
-        if (Send-TelegramDocument -ChatId $ChatId -FilePath $bundlePath -Caption '📦 حزمة تشخيص منقحة: لا تحتوي الإعدادات أو حالة الهواء أو معرفات المستخدمين.') {
+        if (Send-TelegramDocument -ChatId $ChatId -FilePath $bundlePath -Caption (T 'diag.bundleNote')) {
             Add-AuditEntry "📦 تنزيل حزمة تشخيص منقحة - بواسطة $(Format-UserAuditActor -UserId $UserId)"
         }
         else {
-            Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر إرسال حزمة التشخيص.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.bundleSendFailed') -ReplyMarkup (Get-DiagnosticsKeyboard)
         }
     }
     catch {
         Write-BridgeLog "Diagnostic bundle creation failed: $($_.Exception.Message)" 'ERROR'
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذر إنشاء حزمة التشخيص.' -ReplyMarkup (Get-DiagnosticsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.bundleCreateFailed') -ReplyMarkup (Get-DiagnosticsKeyboard)
     }
     finally {
         if ($bundlePath -and (Test-Path -LiteralPath $bundlePath)) { Remove-Item -LiteralPath $bundlePath -Force -ErrorAction SilentlyContinue }
@@ -187,10 +187,10 @@ function Request-DiagnosticLogClear {
         [Parameter(Mandatory)][long]$UserId
     )
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'diagnostic_log_clear'; Kind = $Kind; UserId = $UserId }
-    $label = if ($Kind -eq 'runtime') { 'سجل التشغيل الحالي وكل نسخه المدورة' } else { 'سجل التدقيق الدائم' }
+    $label = if ($Kind -eq 'runtime') { (T 'diag.currentRunLog') } else { (T 'diag.permanentAuditLog') }
     Send-TelegramMessage -ChatId $ChatId -Text "⚠️ هل تريد مسح $label؟`nلا يؤثر هذا على onair.json أو القوالب الموجودة على الهواء." -ReplyMarkup @{
         inline_keyboard = @(
-            , @((New-Button '⚠️ نعم، امسح' 'diag:clearconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:diagnostics'))
+            , @((New-Button (T 'diag.yesClear') 'diag:clearconfirm' -Style danger), (New-Button (T 'common.cancel') 'menu:diagnostics'))
         )
     }
 }
@@ -225,24 +225,24 @@ function Invoke-DiagnosticsCommand {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "هذا الأمر مخصص للمشرفين فقط." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.adminCommandOnly') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $store = Get-TemplateStore
     $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-    $relayState = if ($script:RelayState.ShouldRun) { 'مطلوب التشغيل' } else { 'متوقف' }
+    $relayState = if ($script:RelayState.ShouldRun) { (T 'diag.shouldBeRunning') } else { (T 'diag.stopped') }
     $diagnostics = Get-BridgeDiagnosticsSnapshot
-    $buildText = if ($diagnostics.BuildTimeUtc) { ([datetime]$diagnostics.BuildTimeUtc).ToString('yyyy-MM-dd HH:mm:ss') + ' UTC' } else { 'غير معروف' }
+    $buildText = if ($diagnostics.BuildTimeUtc) { ([datetime]$diagnostics.BuildTimeUtc).ToString('yyyy-MM-dd HH:mm:ss') + ' UTC' } else { (T 'adm.unknown') }
     $uptime = [timespan]$diagnostics.Uptime
     $fileText = ($diagnostics.FileSizes.GetEnumerator() | ForEach-Object { "$($_.Key)=$([math]::Round([double]$_.Value / 1KB, 1))KB" }) -join ' | '
-    $diskText = if ($null -ne $diagnostics.DiskFreeGB) { "$($diagnostics.DiskFreeGB) GB" } else { 'غير معروف' }
+    $diskText = if ($null -ne $diagnostics.DiskFreeGB) { "$($diagnostics.DiskFreeGB) GB" } else { (T 'adm.unknown') }
     $diagnosticWarnings = @(Get-DiagnosticWarnings -Snapshot $diagnostics `
         -DiskFreeWarningGB (Get-SettingInt 'DiskFreeWarningGB' 1) `
         -RuntimeStorageWarningMB (Get-SettingInt 'RuntimeStorageWarningMB' 1) `
         -BackupStorageWarningMB (Get-SettingInt 'BackupStorageWarningMB' 1))
     $text = @(
-        "🧪 تشخيص Cinegy Telegram Bridge",
+        (T 'diag.title'),
         "Bridge: v$script:BridgeVersion | PowerShell $($PSVersionTable.PSVersion)",
         "وقت البناء: $buildText | مدة التشغيل: $(Format-DurationSeconds -Seconds ([int]$uptime.TotalSeconds))",
         "المعالج: $($diagnostics.Processor)",
@@ -282,8 +282,8 @@ function Get-AuditScreenKeyboard {
     # a parameter kept "for symmetry" is a parameter that will be trusted.
     param()
     return @{ inline_keyboard = @(
-            , @((New-Button '📅 سجل العمليات بالساعات' 'oplog:48'))
-            , @((New-Button '🏠 القائمة' 'menu:main'))
+            , @((New-Button (T 'diag.opsByHour') 'oplog:48'))
+            , @((New-Button (T 'common.home') 'menu:main'))
         ) }
 }
 
@@ -293,7 +293,7 @@ function Invoke-AuditCommand {
     if ($script:AuditTrail.Count -eq 0) {
         # Rebuilt from audit.jsonl at startup, so empty no longer means
         # "the process restarted" - it means nothing has happened yet.
-        Send-TelegramMessage -ChatId $ChatId -Text "📜 آخر العمليات`n━━━━━━━━━━━━━━`nلا توجد عمليات مسجّلة بعد." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.latestOpsEmpty') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     # The period first. This screen shows a fixed number of lines, not a
@@ -302,7 +302,7 @@ function Invoke-AuditCommand {
     # ask.
     $shown = @($script:AuditTrail | Select-Object -Last 20)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('📜 آخر العمليات')
+    $lines.Add((T 'diag.latestOps'))
     $lines.Add('━━━━━━━━━━━━━━')
     $lines.Add("الفترة: $(Get-AuditTrailStamp -Line @($shown)[0]) ← $(Get-AuditTrailStamp -Line @($shown)[-1])")
     $lines.Add("المعروض: $($shown.Count) من $($script:AuditTrail.Count) سطرًا محفوظة")
@@ -365,7 +365,7 @@ function Request-Approval {
         # Out-Null on both: whatever they emit would ride out on this
         # function's return value, and the caller reads that as "queued".
         Set-PendingState -ChatId $ChatId -State @{ Mode = 'access_request_name'; UserId = $UserId } | Out-Null
-        Send-TelegramMessage -ChatId $ChatId -Text '📝 أرسل اسمك كما تريده أن يظهر للمشرفين (مثل: أحمد - قسم الأخبار).' | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.sendYourName') | Out-Null
     }
     return $true
 }
@@ -375,7 +375,7 @@ function Request-JoinSecret {
        beyond that the bot is closed - the prompt is the whole hint. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'join_secret'; UserId = $UserId } | Out-Null
-    Send-TelegramMessage -ChatId $ChatId -Text '🔑 هذا البوت مغلق. أرسل رمز الانضمام للمتابعة.' | Out-Null
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.botClosed') | Out-Null
     return $true
 }
 
@@ -400,14 +400,14 @@ function Complete-JoinSecret {
             Block-AccessChat -ChatId $ChatId -Reason 'join_secret' | Out-Null
             return $false
         }
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ الرمز غير صحيح.' | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.wrongCode') | Out-Null
         return $false
     }
     Clear-PendingState -ChatId $ChatId
     Set-AccessSecretPassed -ChatId $ChatId | Out-Null
     Write-BridgeLog "Chat $ChatId passed the join code"
     $queued = Request-Approval -ChatId $ChatId -UserId $UserId -From $From
-    if (-not $queued) { Send-TelegramMessage -ChatId $ChatId -Text 'تعذّر تسجيل طلبك الآن. حاول لاحقًا.' | Out-Null }
+    if (-not $queued) { Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.requestNotRecorded') | Out-Null }
     return $queued
 }
 
@@ -432,7 +432,7 @@ function Complete-AccessRequestName {
 	]+', ' ').Trim()
     if ($clean.Length -gt 60) { $clean = $clean.Substring(0, 60) }
     if ([string]::IsNullOrWhiteSpace($clean)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ الاسم فارغ. أرسل اسمك.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'diag.nameEmpty')
         return $false
     }
     Clear-PendingState -ChatId $ChatId
@@ -504,7 +504,7 @@ function Grant-UserAccess {
         -Result 'approved' -UserId $ApproverUserId -ChatId $TargetChatId -Action 'approve' `
         -Target ([string]$targetUserId) -Message ([string]$requestedName)
     Send-TelegramMessage -ChatId $ApprovedBy -Text "✅ تمت الموافقة على $TargetChatId وأُضيف إلى المستخدمين المصرح لهم.$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ApprovedBy -UserId $ApproverUserId)
-    Send-TelegramMessage -ChatId $TargetChatId -Text "✅ تمت الموافقة على طلبك، يمكنك الآن استخدام البوت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)
+    Send-TelegramMessage -ChatId $TargetChatId -Text (T 'diag.approved') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $TargetChatId -UserId $targetUserId)
 }
 
 function Deny-UserAccess {
@@ -523,7 +523,7 @@ function Deny-UserAccess {
     Write-AuditRecord -OperationId "access-$([guid]::NewGuid().ToString('N'))" -EventName 'access' `
         -Result 'rejected' -UserId $RejecterUserId -ChatId $TargetChatId -Action 'reject' `
         -Target ([string]$TargetChatId) -Message $(if ($blocked) { 'blocked' } else { '' })
-    $note = if ($blocked) { " وحُظرت المحادثة من الطلب مجددًا." } else { "" }
+    $note = if ($blocked) { (T 'diag.chatBlockedToo') } else { "" }
     Send-TelegramMessage -ChatId $RejectedBy -Text "❌ تم رفض طلب $TargetChatId.$note" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $RejectedBy -UserId $RejecterUserId)
-    Send-TelegramMessage -ChatId $TargetChatId -Text "تم رفض طلب الوصول الخاص بك."
+    Send-TelegramMessage -ChatId $TargetChatId -Text (T 'diag.requestRefused')
 }

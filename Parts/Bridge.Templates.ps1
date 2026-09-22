@@ -138,10 +138,10 @@ function Restore-TemplateRegistryBackup {
     )
     $restoreTemporary = "$Path.restore.tmp"
     try {
-        if (-not (Test-Path -LiteralPath $BackupPath)) { throw 'ملف النسخة غير موجود.' }
+        if (-not (Test-Path -LiteralPath $BackupPath)) { throw (T 'tpl.backupFileMissing') }
         $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if (-not $candidate -or @($candidate.PSObject.Properties.Name).Count -eq 0) {
-            throw 'النسخة لا تحتوي أي قالب.'
+            throw (T 'tpl.backupEmpty')
         }
         $current = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $candidate
@@ -150,7 +150,7 @@ function Restore-TemplateRegistryBackup {
         $scheduledKeys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
         $blocked = @($unsafeKeys | Where-Object { $liveKeys -contains $_ -or $scheduledKeys -contains $_ })
         if ($blocked.Count -gt 0) {
-            throw "لا يمكن تغيير أو حذف قالب على الهواء أو في جدولة قادمة: $($blocked -join '، ')"
+            throw "لا يمكن تغيير أو حذف قالب على الهواء أو في جدولة قادمة: $($blocked -join (T 'common.comma'))"
         }
         # The registry as it stands becomes a backup of its own first, so the
         # restore itself is undoable. A one-way undo is a trap.

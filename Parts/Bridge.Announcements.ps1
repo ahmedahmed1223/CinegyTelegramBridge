@@ -57,10 +57,10 @@ function Get-ActiveAnnouncements {
 function Get-AnnouncementScopeLabel {
     param([Parameter(Mandatory)]$Announcement)
     switch ([string](Get-JsonProp $Announcement 'Scope')) {
-        'admins' { return 'للمشرفين' }
-        'operators' { return 'للمشغّلين' }
+        'admins' { return (T 'ann.forAdmins') }
+        'operators' { return (T 'ann.forOperators') }
         'user' { return "لـ $(Get-UserDisplayName -UserId ([long](Get-JsonProp $Announcement 'TargetUserId')))" }
-        default { return 'للجميع' }
+        default { return (T 'ann.forEveryone') }
     }
 }
 
@@ -105,7 +105,7 @@ function Get-AnnouncementReadCount {
 function Get-AnnouncementKeyboard {
     param([Parameter(Mandatory)]$Announcement)
     if (-not [bool](Get-JsonProp $Announcement 'RequireAck')) { return $null }
-    return @{ inline_keyboard = @(, @( (New-Button '✅ تم الاطلاع' "annack:$([string](Get-JsonProp $Announcement 'Id'))" -Style success) )) }
+    return @{ inline_keyboard = @(, @( (New-Button (T 'ann.seen') "annack:$([string](Get-JsonProp $Announcement 'Id'))" -Style success) )) }
 }
 
 function Format-AnnouncementMessage {

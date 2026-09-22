@@ -490,3 +490,56 @@ Describe 'The manual exists in both languages, chapter for chapter' {
         Get-QuickStartText -ChatId 101 -UserId 101 | Should -Match 'بداية سريعة'
     }
 }
+
+Describe 'The release notes in English' {
+    <#
+        The notes are a pair like the manual, and a shorter one on purpose:
+        248 releases written for one Arabic station about screens as they
+        were is not what an English operator opens this screen for. The ten
+        newest are what anyone reads, and CHANGELOG.md ships beside the
+        release for the rest.
+
+        What that shape invites is drift. The English half is written by hand
+        beside the Arabic, so a release cut without it silently leaves an
+        English operator one release behind, reading "what's new" that is not.
+    #>
+    BeforeAll {
+        $script:OriginalNotesLanguage = [string](Get-JsonProp $config.Settings 'Language')
+    }
+    AfterEach {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $script:OriginalNotesLanguage -Force
+    }
+
+    It 'covers the newest Arabic releases, in the same order' {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+        $arabic = @(Get-WhatsNewSections)
+        $english = @(Get-WhatsNewSectionsEn)
+
+        $english.Count | Should -BeGreaterThan 0
+        @($english.Version) | Should -Be @($arabic | Select-Object -First $english.Count).Version -Because 'the English half must be the newest releases, not a set of its own'
+    }
+
+    It 'carries every note of the releases it covers' {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'ar' -Force
+        $arabic = @(Get-WhatsNewSections)
+        $english = @(Get-WhatsNewSectionsEn)
+
+        for ($i = 0; $i -lt $english.Count; $i++) {
+            @($english[$i].Items).Count | Should -Be @($arabic[$i].Items).Count -Because "release $($english[$i].Version) must say the same number of things in both languages"
+        }
+    }
+
+    It 'writes the English notes in English' {
+        $arabicLetters = [regex]'[\u0600-\u06FF]'
+        foreach ($section in @(Get-WhatsNewSectionsEn)) {
+            $arabicLetters.IsMatch((@($section.Items) -join ' ')) | Should -BeFalse -Because "release $($section.Version) still carries Arabic in its English notes"
+        }
+    }
+
+    It 'serves the English notes when the bridge is set to English' {
+        $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue 'en' -Force
+        $sections = @(Get-WhatsNewSections)
+        $sections.Count | Should -Be @(Get-WhatsNewSectionsEn).Count
+        [regex]'[\u0600-\u06FF]' | ForEach-Object { $_.IsMatch((@($sections[0].Items) -join ' ')) } | Should -BeFalse
+    }
+}

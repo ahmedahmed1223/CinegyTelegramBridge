@@ -15,6 +15,34 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.67.0
+
+The translation sweep is finished: every screen the bot draws is bilingual.
+The catalogue holds 3023 keys across twenty-five domain files, each with both
+languages, and a test requires it of every key. What is still Arabic in
+`Parts/` is Arabic on purpose — the words an operator types and the four
+expressions that read them, the Arabic machinery the headline checker measures
+against, the Arabic manual whose English half is `Parts/Bridge.Help.En.ps1`,
+and the release archive, whose English half is now the ten newest releases in
+`Get-WhatsNewSectionsEn`.
+
+Two fixes came out of the sweep. Durations were being formatted by a second
+counting machine hidden inside `Format-DurationMinutes` that never learned
+English, so a relative time stayed Arabic beside numbers that had been
+translated; both formatters now call the one counter, and `-BareOne` keeps the
+Arabic reading exactly as it did. And a whole-literal substitution turned two
+template warnings into a function call shown where the message should be — a
+class of mistake that passes every other test, now guarded by a check that
+cuts the holes out of every string in `Parts/` and fails on a call left behind.
+
+The layer-removal log also says why now. `Get-TitlerLayerStatus` reads a layer
+as off air either because Cinegy reported no active item at all or because the
+active item is its own `IsEmpty` filler; both used to be logged as "Cinegy
+confirmed hidden", which is the one question that log is asked when a graphic
+leaves on its own. It now names which, with the id the bridge expected and the
+one the engine returned, and every show records the engine's declared duration
+and manual-end flag for the item it just placed.
+
 ## Version 8.66.0
 
 **The operator manual now exists in English, chapter for chapter**, in `Parts/Bridge.Help.En.ps1`.

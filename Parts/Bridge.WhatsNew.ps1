@@ -13,6 +13,79 @@
     Nothing moved between scopes - dot-sourced parts share one.
 #>
 
+function Get-WhatsNewSectionsEn {
+    <#
+        The English half of the release notes, the way Bridge.Help.En.ps1 is
+        the English half of the manual.
+
+        The ten newest releases, and deliberately not the whole archive. There
+        are 248 of them, written for one Arabic station about screens as they
+        were; an English operator opens this screen to learn what changed
+        recently, and CHANGELOG.md ships beside the release for anything
+        older. Half-translating the archive would be worse than leaving it:
+        the page would change language partway down.
+
+        Keep this in step with the Arabic when a release is cut. A test
+        requires the versions here to be the newest Arabic ones in the same
+        order with the same number of items, and no Arabic letter to survive
+        in an English note.
+    #>
+    return @(
+                @{ Version = '8.67.0'; Items = @(
+                        '🌐 **The conversion is finished: every screen the bot draws speaks both languages.** Three thousand and twenty-three texts in one catalogue, **each with both of its languages**, and a test that requires it of every key. What stayed Arabic stayed on purpose: **the words you type** - the Arabic command words and the four expressions that read them, the Arabic machinery in the headline checker itself, the manual whose English half is a file of its own, and the release archive.'
+                        '🆕 **And the what''s-new screen has an English half now:** the ten newest releases, built the way the manual is. Not the whole archive — two hundred and forty-eight releases written for one station about screens as they were, and a half-translated archive changes language partway down the page. **A test stops the drift:** a release cut in Arabic and forgotten in English **fails the gate**, rather than leaving an English reader one release behind while the screen says "what''s new".'
+                        '⏱ **Fixed: durations stayed Arabic on an English screen.** The bridge held **two counting machines**: one that learned English when the catalogue did, and another hidden inside the duration formatter that never did — so a relative time such as "two weeks ago" stayed Arabic beside "8 times" on the same line. They are one now. **The Arabic did not change by a letter:** an hour and a half still reads as an hour and thirty minutes, with no bare "1" before the hour.'
+                        '🛡 **And a guard against a mistake that nearly got through:** replacing text cannot tell a quote mark from an apostrophe, and it turned two template warnings into **a function call the operator reads where the message should be** — passing every test on the way. The check now cuts the holes out of every string and fails if a call is left in what remains.'
+                        '🔍 **Why an urgent disappeared:** the log line said "Cinegy confirmed hidden" for two different answers — the engine reporting an empty item, or reporting no item at all. It now **names which**, with the id the bridge expected and the one the engine returned. And every show records what **Cinegy intends** for the item: its duration and whether it ends by hand — so a duration that ran out means nobody hid it, and an open one means something outside the bridge took the layer.'
+                    ) }
+                @{ Version = '8.66.0'; Items = @(
+                        '📖 **The whole manual in English:** seventeen chapters and the quick-start card. A test requires the chapters to be **the same ones, in the same order, for the same readers** in both languages, and no Arabic letter to survive in an English chapter — which is the mistake two parallel files invite.'
+                        '⚙️ **The two hundred and eight setting descriptions in both languages** too, which completes the settings area: the sections, their summaries, the labels and the descriptions.'
+                        '✅ **The confirmations, the template screens and what is on air:** hide, exit, send, approve, refuse and undo, the timer buttons, the template list with its card and its search, and the days of the week.'
+                        '📏 **Still to do:** the administrator screens, the reports, the alerts and the three system screens show in Arabic in both modes until they are converted. None of them shows blank, and none shows a key name.'
+                    ) }
+                @{ Version = '8.65.0'; Items = @(
+                        '⚙️ **Every setting now has a name in both languages:** two hundred and eight of them, so an English screen no longer carries one lone Arabic label in the middle of it. Their sections and summaries came with them.'
+                        '🔒 **And a test that stops the Arabic drifting from itself:** the catalogue holds both languages together, so if an Arabic label is edited in its old place alone **the gate fails** and names the setting that drifted — rather than the operator reading one label while the test approves another.'
+                    ) }
+                @{ Version = '8.64.0'; Items = @(
+                        '✅ **Fixed: "an external change in Cinegy" was accusing somebody who was never there:** when your scene ends by itself, the spent Cinegy item stays on the layer **with its id and with no name**. The bridge read the presence of an id alone as proof that a stranger had taken the layer, and said "replaced from outside · an unnamed item · an unidentified outside source" — **while the log line for that very same decision said Cinegy had confirmed the layer hidden**. Two stories from one decision, and the alarming one was the wrong one.'
+                        '📝 **And the message now says what actually happened:** "no longer on air" instead of "replaced from outside", with one line beside it: **nothing else is on the layer — the scene ended or was hidden from outside the bot, and no one took it.** No "source" is named for an empty layer, because naming one sends an operator looking for an intruder who never existed.'
+                        '🛡 **The real warning has lost nothing:** if a **named** scene genuinely takes the layer, the warning stands as it did, with its name and its source.'
+                    ) }
+                @{ Version = '8.63.0'; Items = @(
+                        '🌐 **The main menu and the settings sections speak both languages:** every button in the menu — from the on-air rows to the undo, the favourites and the eleven sections with their summaries — is drawn from the one text catalogue. A test requires the menu to be drawn in both languages **with the same number of buttons**: a translation changes what a button says, not how many there are.'
+                        '🧱 **The translation is resolved when the text is read, not when it is loaded:** the setting names and their sections are built once as the bridge starts, and the language changes while it runs — so they are now translated at the moment they are shown. **Anything not yet translated stays Arabic as it was**, rather than appearing blank or as its key, so the translation fills up one setting at a time without breaking anything.'
+                        '📏 **Where it stands:** 134 keys in the catalogue, and converted so far: the main menu, the settings screen and its sections, hide-all, the refusal messages, and "content boards" in full. Some 4200 Arabic lines remain in the other files — the work goes on.'
+                    ) }
+                @{ Version = '8.62.0'; Items = @(
+                        '🛠 **Fixed: "content boards" failed on the first press:** your report. The template was read through a cache created inside the function itself by a line that **could never run**: it read the variable before anything had been assigned to it, and that alone throws. So the function was already broken on any station where the bulletin screens had never been opened — and the programme boards were the first to call it, so the first to fall. It is now declared at load.'
+                        '🌐 **English — the foundation:** one setting for the whole bridge (**⚙️ Settings ← 🌐 English**) switches the language at once for everyone. A text catalogue holds both languages side by side, and a test requires every key to carry both of them in full with the same placeholders. Converted so far: the main settings menu, hide-all, the refusal messages, and "content boards" in full. **Anything not yet converted shows in Arabic in both modes** — and the conversion goes on.'
+                        '📖 **A full English guide in the repository** (`docs/GUIDE.md`): installation, setup, rights, the four systems, scheduling and diagnosis.'
+                    ) }
+                @{ Version = '8.61.0'; Items = @(
+                        '📐 **"Content boards" now says which template it is built on:** every board is **built on a template you choose**, and the template is what decides the fields of each row and the layer it goes out on. The screens used to say "fields: 2" without saying what they were. Now the template picker explains what the choice means and numbers the two steps (choose the template ← name the board), and the board''s own heading gives the template, the layer and **the field names**, and says plainly that the template cannot be changed after the board is made — another programme gets another board.'
+                        '🛡 **The "who fills the board" button actually exists now:** the manual described it and the right was stored and honoured in the code, but **there was no screen that set it** — so a board created open stayed open for ever. It is now a button that cycles through everyone, the administrators and the owner, shows which one is set, and records the change in 📜 the log.'
+                        '📖 **A "🗂 Content boards" chapter in the manual** explains the two steps and where its settings live.'
+                    ) }
+                @{ Version = '8.60.0'; Items = @(
+                        '🚨🗂 **The urgent board and content boards each got their own settings section:** they had lived inside "📰 News ticker" because they were born from it, not because they belong to it, until that one section carried three systems and thirty-four settings. **And somebody looking for the urgent board''s timing does not think to open a section called News ticker** — which is how "the gap between headlines" stayed lost until release 8.57.0. There are eleven sections now, and the news ticker is the news ticker again. No setting changed and no value changed; what changed is where you look for it.'
+                    ) }
+                @{ Version = '8.59.0'; Items = @(
+                        '🚨 **"Hide all" now honours a layer''s protection in front of an operator:** the emergency button was the only one that skipped the question "whose layer is this?", so a layer the ordinary hide button refuses to let an operator touch came down from here. Now what they hold the right to is hidden, and what they do not **is named to them with its reason** — not listed under "failed" beside a Cinegy fault, because those are two different pieces of news. **An administrator — and the owner with them — hides everything as before, the logo and the ticker and every sensitive or long-running template included**: that is exactly what the button exists for, and an emergency a rule can overrule is not an emergency.'
+                    ) }
+                @{ Version = '8.58.0'; Items = @(
+                        '🗂 **Content boards — a table of ready text for each programme:** a new door in the main menu lets whoever prepares a programme write the whole episode''s text into a table in advance, so at air time the operator has nothing left to do but press the row they want. An administrator creates the board and chooses a template for it, and the fields come from the scene itself — they are neither typed by hand nor invented.'
+                        '✍️ **Row by row, or one paste:** add a row and fill its fields, or paste the prepared text in one go, a line per row with the fields separated by `|`. Whatever the paste will not accept is named with its reason and its line number, never swallowed in silence.'
+                        '🎛 **Rows managed like the urgent board:** reordered with arrows, a row disabled without losing what was written in it (ten were prepared and today six are needed), deleted, or any field edited — then ▶️ to show it and ⏹ to hide it.'
+                        '🛡 **Who fills a board is set per board:** everyone, the administrators, or the owner alone. And if the scene is recut in Titler and a field disappears, the prepared text stays saved and is not sent, and the screen says the field is no longer there rather than quietly ruining the work.'
+                    ) }
+                @{ Version = '8.57.0'; Items = @(
+                        '⏳ **The gap between headlines is where it belongs:** the "gap between headlines" button moved to **⚙️ Board timings** inside the urgent management, beside the gap, the repeat and the total duration — it had been in the general settings screen alone, far from the board it governs. It is set by pressing rather than typing, and 0 now reads "the scene''s own motion" rather than "zero seconds".'
+                    ) }
+    )
+}
+
 function Get-WhatsNewSections {
     <#
         Operator-facing release notes, held here rather than parsed out of
@@ -21,8 +94,20 @@ function Get-WhatsNewSections {
         needs to know what changed on their screen and what to do
         differently. Keep the newest release first, keep it short, and only
         mention things an operator can see or act on.
+
+        On an English bridge this hands over to Get-WhatsNewSectionsEn, which
+        carries the ten newest releases. Same shape, same screen, one half of
+        a pair - the manual is built this way too.
     #>
+    if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.67.0'; Items = @(
+                        '🌐 **انتهى التحويل: كل شاشة يرسمها البوت تتكلّم اللغتين.** ثلاثة آلاف وثلاثة وعشرون نصًّا في جدول واحد، **لكلٍّ لغتاه**، واختبار يوجب ذلك على كل مفتاح. ما بقي عربيًّا بقي عن قصد: **الكلمات التي تكتبها أنت** (بدء، عرض، اخفاء… وتعابير قراءتها)، وآلة العربية نفسها في المدقّق، والدليل الذي نصفه الإنجليزي ملفٌّ مستقلّ، وأرشيف الإصدارات.'
+                        '🆕 **وسجلّ «ما الجديد» صار له نصفٌ إنجليزي:** أحدث عشرة إصدارات، على شاكلة الدليل. وليس الأرشيف كلّه — مائتان وثمانية وأربعون إصدارًا كُتبت لمحطّة واحدة عن شاشات كما كانت، وأرشيفٌ نصفُ مترجَم يبدّل لغته في منتصف الصفحة. **واختبار يمنع الانحراف:** إصدارٌ يُقطَع بالعربية ويُنسى بالإنجليزية **يُسقط البوابة** بدل أن يترك القارئ الإنجليزي إصدارًا وراء وهو يقرأ «ما الجديد».'
+                        '⏱ **إصلاح: المدد كانت تبقى عربية على شاشة إنجليزية.** كان في الجسر **آلتا عدّ**: واحدة تعلّمت الإنجليزية مع الجدول، وأخرى مخبّأة داخل منسّق المدّة لم تتعلّمها قطّ — فتقرأ «منذ أسبوعين» بجوار «8 times» في السطر نفسه. صارتا واحدة. **والعربية لم تتغيّر حرفًا:** ما زالت «ساعة و30 دقيقة» لا «1 ساعة و30 دقيقة».'
+                        '🛡 **وحارس يمنع خطأً كاد يمرّ:** استبدال النصّ لا يفرّق بين علامة اقتباس وفاصلة عليا، فحوّل تحذيرين عن القوالب إلى **نداء دالّة يقرأه المشغّل مكان الرسالة** — وكان يمرّ على كل اختبار. صار الفحص يقطع الفراغات من كل نصّ ويسقط إن بقي نداءٌ فيما تبقّى.'
+                        '🔍 **ولماذا اختفى العاجل:** سطر السجلّ كان يقول «Cinegy أكّد الإخفاء» في حالتين مختلفتين — أن يردّ المحرّك بعنصر فارغ، أو ألّا يذكر عنصرًا أصلًا. صار **يسمّي أيّهما**، ومعه المعرّف الذي توقّعه الجسر والذي أعاده المحرّك. وعند كل عرض يُسجَّل ما **ينويه Cinegy** للعنصر: مدّته وهل ينتهي يدويًّا — فإن انتهت مدّته فلم يُخفه أحد، وإن كانت مفتوحة فشيءٌ خارج الجسر أخذ الطبقة.'
+                    ) }
                 @{ Version = '8.66.0'; Items = @(
                         '📖 **الدليل كلّه بالإنجليزية:** سبعة عشر فصلاً وبطاقة البداية السريعة. واختبار يوجب أن تكون الفصول **نفسها بالترتيب نفسه وللجمهور نفسه** في اللغتين، وألّا يبقى حرف عربي في فصل إنجليزي — وهذا هو الخطأ الذي يغري به ملفّان متوازيان.'
                         '⚙️ **أوصاف الإعدادات المائتان والثمانية باللغتين** أيضًا، فاكتملت منطقة الإعدادات: الأبواب وملخّصاتها والعناوين والأوصاف.'

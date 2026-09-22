@@ -21,7 +21,7 @@ function Get-LayerLockNotice {
     $lock = $script:LayerLocks[$Layer]
     if ([long]$lock.UserId -eq $UserId) { return '' }
     $held = if ($lock.StartedAt -is [datetime]) { Format-Duration -Seconds ([int]((Get-Date) - $lock.StartedAt).TotalSeconds) } else { (T 'flow.period') }
-    return "⚠️ $(Get-UserDisplayName -UserId ([long]$lock.UserId)) يجهّز '$($lock.Key)' على الطبقة $Layer منذ $held."
+    return (T 'flow.someonePreparing' $(Get-UserDisplayName -UserId ([long]$lock.UserId)) $($lock.Key) $Layer $held)
 }
 
 function Lock-GfxLayer {
@@ -173,14 +173,14 @@ function Start-ShowFlow {
     }
     $policy = Test-TemplateShowPolicy -Key ([string]$t.Key) -Layer ([int]$t.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⛔ لا يمكن تجهيز العرض: $($policy.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.cannotPrepare' $($policy.Reason)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $requestedAutoHideSeconds = $AutoHideSeconds
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key ([string]$t.Key) -RequestedSeconds $AutoHideSeconds
     $lock = Lock-GfxLayer -Layer ([int]$t.Layer) -ChatId $ChatId -UserId $UserId -Key ([string]$t.Key)
     if (-not $lock.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer ([int]$t.Layer) -UserId $UserId)`nانتظر أو اختر قالبًا على طبقة أخرى." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.waitOrOther' $(Get-LayerLockNotice -Layer ([int]$t.Layer) -UserId $UserId)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $replacementContext = Get-LayerShowContext -Layer ([int]$t.Layer)
@@ -259,7 +259,7 @@ function Resume-ExpiredFlow {
     if ($layer -le 0) { $layer = [int]$template.Layer }
     $lock = Lock-GfxLayer -Layer $layer -ChatId $ChatId -UserId $UserId -Key ([string](Get-JsonProp $saved 'Key'))
     if (-not $lock.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "$(Get-LayerLockNotice -Layer $layer -UserId $UserId)`nمسودتك محفوظة — حاول الاستئناف بعد أن تتحرر الطبقة." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.draftKept' $(Get-LayerLockNotice -Layer $layer -UserId $UserId)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $script:ExpiredFlowResume.Remove($ChatId) | Out-Null
@@ -275,7 +275,7 @@ function Resume-ExpiredFlow {
     foreach ($name in @(if ($saved.Values) { $saved.Values.Keys } else { @() })) { $state.Values[[string]$name] = [string]$saved.Values[$name] }
     if ([string]$state.Mode -ne 'show_review') { $state.Mode = 'show_fields' }
     Set-PendingState -ChatId $ChatId -State $state
-    Add-AuditEntry "↩️ استئناف مسودة منتهية ($([string]$state.Key)) - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'flow.resumedExpiredAudit' $([string]$state.Key) $(Format-UserAuditActor -UserId $UserId))
     if ([string]$state.Mode -eq 'show_review') {
         Send-TelegramMessage -ChatId $ChatId -Text (Format-ShowReviewText -State $state) -ParseMode HTML -ReplyMarkup (Get-ShowReviewKeyboard -HasFields)
     }
@@ -343,7 +343,7 @@ function Format-ShowReviewText {
     # monospace span is the strongest distinction it does have, and it is
     # tap-to-copy as well.
     $lines.Add((T 'flow.reviewTitle'))
-    $lines.Add("القالب: <b>$(ConvertTo-TelegramHtmlText ([string]$State.Key))</b> · الطبقة <code>$($State.LockLayer)</code>")
+    $lines.Add((T 'flow.templateLayer' $(ConvertTo-TelegramHtmlText ([string]$State.Key)) $($State.LockLayer)))
     $context = Get-JsonProp $State 'ReplacementContext'
     if ($context -and -not [bool](Get-JsonProp $context 'IsKnown')) {
         $lines.Add((T 'flow.freshnessWarning'))
@@ -352,8 +352,8 @@ function Format-ShowReviewText {
         $currentKey = [string](Get-JsonProp $context 'Key')
         if ([string]::IsNullOrWhiteSpace($currentKey)) { $currentKey = (T 'flow.unnamedScene') }
         $currentUserId = [long](Get-JsonProp $context 'UserId')
-        $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { "المستخدم $(Get-UserDisplayName -UserId $currentUserId)" } else { 'Bot' }
-        $lines.Add("<b>⚠️ سيتم استبدال القالب الحالي</b>: $(ConvertTo-TelegramHtmlText $currentKey) ($(ConvertTo-TelegramHtmlText $sourceText))")
+        $sourceText = if ([string](Get-JsonProp $context 'Source') -eq 'cinegy') { 'Cinegy Air' } elseif ($currentUserId -gt 0) { (T 'flow.user' $(Get-UserDisplayName -UserId $currentUserId)) } else { 'Bot' }
+        $lines.Add((T 'flow.willReplace' $(ConvertTo-TelegramHtmlText $currentKey) $(ConvertTo-TelegramHtmlText $sourceText)))
     }
     # A structural clash, distinct from the runtime one above: these templates
     # can never be on air together, whether or not the layer is busy right now.
@@ -362,11 +362,11 @@ function Format-ShowReviewText {
     if ($sharedLayers -and $sharedLayers.Contains($layerKey)) {
         $siblings = @(@($sharedLayers[$layerKey]) | Where-Object { $_ -ne [string]$State.Key })
         if ($siblings.Count -gt 0) {
-            $lines.Add("<b>⚠️ هذه الطبقة يتشاركها أيضًا</b>: $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma'))) — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
+            $lines.Add((T 'flow.layerShared' $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma')))))
         }
     }
     if ($State.AutoHideSeconds -gt 0) {
-        $lines.Add("الإخفاء التلقائي: <code>$($State.AutoHideSeconds)</code> ثانية")
+        $lines.Add((T 'flow.autoHideSeconds' $($State.AutoHideSeconds)))
         $note = Get-TemplateAirLimitExplanation -Key ([string]$State.Key) -RequestedSeconds ([int]$State.RequestedAutoHideSeconds)
         if ($note) { $lines.Add("$(ConvertTo-TelegramHtmlText $note)") }
     }
@@ -383,7 +383,7 @@ function Format-ShowReviewText {
             $lines.Add("$(ConvertTo-TelegramHtmlText $label):`n<code>$(ConvertTo-TelegramHtmlText ([string]$State.Values[$name]))</code>")
         }
         else {
-            $lines.Add("$(ConvertTo-TelegramHtmlText $label): <i>(متروك)</i>")
+            $lines.Add((T 'flow.leftBlank' $(ConvertTo-TelegramHtmlText $label)))
         }
     }
     # Advisory, and last, so it never sits between the operator and the copy
@@ -431,7 +431,7 @@ function Test-FieldLength {
     $visibleLength = Get-TextElementCount -Text $Value
     if ($max -le 0 -or $visibleLength -le $max) { return $true }
     if (-not $ReplyMarkup) { $ReplyMarkup = Get-FieldPromptKeyboard }
-    Send-TelegramMessage -ChatId $ChatId -Text "❌ النص طويل جدًا ($visibleLength حرفًا) والحد الأقصى $max حرفًا. أرسل نصًا أقصر." -ReplyMarkup $ReplyMarkup
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.textTooLong' $visibleLength $max) -ReplyMarkup $ReplyMarkup
     return $false
 }
 
@@ -488,7 +488,7 @@ function Get-FieldPromptText {
     $lines.Add("<i>$progress</i>")
     $lines.Add('')
     $lines.Add($shownLabel)
-    if ($limit -gt 0) { $lines.Add("     <i>الحد: $limit حرفًا</i>") }
+    if ($limit -gt 0) { $lines.Add((T 'flow.limitIs' $limit)) }
     $lines.Add('')
     $lines.Add((T 'flow.typeInBox'))
     return ($lines -join "`n")
@@ -564,7 +564,7 @@ function Invoke-HideLayer {
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor hid layer $Layer"
-        Add-AuditEntry "🙈 إخفاء طبقة $Layer - بواسطة $actor"
+        Add-AuditEntry (T 'flow.hideAudit' $Layer $actor)
         # The room is told a graphic came off for the same reason it is told
         # one went on: what is on screen changed. Sent even for a quiet hide -
         # an auto-hide timer taking a strap down is exactly the change nobody
@@ -581,15 +581,15 @@ function Invoke-HideLayer {
         if (-not $Quiet) {
             $unconfirmed = $script:OnAir.ContainsKey($Layer)
             $hideText = if ($unconfirmed) {
-                "🕓 أُرسل أمر إخفاء الطبقة $Layer وقبِله Cinegy، لكن لم يُؤكَّد رفعها بعد.`nتبقى معروضة هنا كأنها على الهواء حتى يصل التأكيد."
+                (T 'flow.hideNotConfirmed' $Layer)
             }
-            else { "✅ تم إخفاء الطبقة $Layer." }
+            else { (T 'flow.hidden' $Layer) }
             Send-TelegramMessage -ChatId $ChatId -Text $hideText -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
         }
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     elseif (-not $Quiet) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إخفاء الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.hideFailed' $Layer $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     if (-not $result.Success) {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$result.Error)
@@ -644,14 +644,14 @@ function Invoke-ExitLayer {
         Remove-OnAirRecord -Layer $Layer -Reason 'after-exit' | Out-Null
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor exited scene on layer $Layer"
-        Add-AuditEntry "🚪 خروج من مشهد طبقة $Layer - بواسطة $actor"
+        Add-AuditEntry (T 'flow.exitAudit' $Layer $actor)
         Send-TemplateAirNotice -Key $outgoingKey -Layer $Layer -ActorChatId $ChatId -ActorName $actor `
             -Copy $outgoingCopy -Action hide -OnAirSince (Get-JsonProp $outgoing 'At') | Out-Null
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم الخروج من المشهد على الطبقة $Layer." -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exited' $Layer) -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل الخروج من المشهد على الطبقة $Layer : $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exitFailed' $Layer $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$result.Error)
     }
     return $result.Success
@@ -686,7 +686,7 @@ function Start-SafeRollbackReview {
         }
     }
     catch { Write-BridgeLog "Rollback review: after-frame capture failed: $($_.Exception.Message)" }
-    Send-TelegramMessage -ChatId $ChatId -Text "↩️ مراجعة التراجع الآمن`nالطبقة: $Layer`nسيُستعاد القالب: $($snapshot.Key)`nشرط التنفيذ: $expected`nتنتهي الصلاحية: $(([datetime]$candidate.ExpiresAt).ToString('HH:mm:ss'))`n`nسيُفحص Cinegy مباشرة بعد التأكيد." -ReplyMarkup (Get-RollbackReviewKeyboard -Layer $Layer)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.undoReview' $Layer $($snapshot.Key) $expected $(([datetime]$candidate.ExpiresAt).ToString('HH:mm:ss'))) -ReplyMarkup (Get-RollbackReviewKeyboard -Layer $Layer)
 }
 
 function Confirm-SafeRollback {
@@ -728,22 +728,21 @@ function Confirm-SafeRollback {
             if ($hidden.Success) {
                 Remove-OnAirRecord -Layer $Layer -Reason 'undo of show onto an empty layer' | Out-Null
                 $actor = Format-UserAuditActor -UserId $UserId
-                Add-AuditEntry "↩️ تراجع: أُزيل $($restore.Key) من طبقة $Layer - بواسطة $actor"
+                Add-AuditEntry (T 'flow.undoAudit' $($restore.Key) $Layer $actor)
                 Write-BridgeLog "User $actor undid the show of '$($restore.Key)' on layer $Layer" 'WARN'
                 # Asked now, not later: in ten seconds they will have moved on.
                 $script:PendingCancelReason = @{ UserId = $UserId; Key = [string]$restore.Key; At = (Get-Date) }
-                Send-TelegramMessage -ChatId $ChatId -Text "↩️ أُزيل '$($restore.Key)' من الطبقة $Layer.
-ما السبب؟ (اختياري)" -ReplyMarkup (Get-CancelReasonKeyboard)
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.undoAskReason' $($restore.Key) $Layer) -ReplyMarkup (Get-CancelReasonKeyboard)
             }
             else {
-                Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر التراجع: $($hidden.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.undoFailed' $($hidden.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
             }
             return
         }
         $result = Invoke-ShowTemplateResult -Key ([string]$restore.Key) -Variables ([hashtable]$restore.Variables) -ChatId $ChatId -UserId $UserId
         if ($result -and $result.Success) {
             $actor = Format-UserAuditActor -UserId $UserId
-            Add-AuditEntry "↩️ تراجع آمن إلى $($restore.Key) على طبقة $Layer - بواسطة $actor"
+            Add-AuditEntry (T 'flow.safeUndoAudit' $($restore.Key) $Layer $actor)
             Write-BridgeLog "User $actor safely rolled layer $Layer back to '$($restore.Key)'" 'WARN'
         }
     }
@@ -784,7 +783,7 @@ function Invoke-HideAllLayers {
     $script:AutoHideQueue.Clear()
     $actor = Format-UserAuditActor -UserId $UserId
     Write-BridgeLog "User $actor triggered HIDE ALL (ok: $($ok -join ','); failed: $($failed -join ','); blocked: $(@($blocked | ForEach-Object { $_.Layer }) -join ','))" "WARN"
-    Add-AuditEntry "🚨 إخفاء الكل - بواسطة $actor"
+    Add-AuditEntry (T 'flow.hideAllAudit' $actor)
     $text = if ($ok.Count -gt 0) { T 'hideAll.hidden' ($ok -join ', ') } else { T 'hideAll.nothing' }
     if ($failed.Count -gt 0) { $text += "`n$(T 'hideAll.failed' ($failed -join ', '))" }
     foreach ($item in $blocked) { $text += "`n$(T 'hideAll.blocked' $item.Layer $item.Reason)" }
@@ -805,12 +804,12 @@ function Invoke-SetValues {
     if ($result.Success) {
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor set values: $($Values.Keys -join ', ')"
-        Add-AuditEntry "✏️ تحديث $($Values.Keys -join ', ') - بواسطة $actor"
-        Send-TelegramMessage -ChatId $ChatId -Text "✅ تم التحديث: $($Values.Keys -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Add-AuditEntry (T 'flow.updateAudit' $($Values.Keys -join ', ') $actor)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updated' $($Values.Keys -join ', ')) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -Values (Format-AuditTemplateValues -Variables $Values)
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل التحديث: $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updateFailed' $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText ([string]$result.Error)
     }
     return $result.Success
@@ -821,8 +820,8 @@ function Start-UpdateFieldPrompt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'update_field'; Field = $FieldName; UserId = $UserId; FieldLimit = $FieldLimit }
     $limit = Get-EffectiveFieldLimit -FieldLimit $FieldLimit
-    $limitText = if ($limit -gt 0) { " (الحد: $limit حرفًا)" } else { "" }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل القيمة الجديدة لـ '$FieldName'$limitText`:" -ReplyMarkup (Get-CancelKeyboard)
+    $limitText = if ($limit -gt 0) { (T 'flow.limitParen' $limit) } else { "" }
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendNewValueFor' $FieldName $limitText) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-UpdateField {
@@ -853,7 +852,7 @@ function Set-LayerAutoHide {
     }
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     if ($null -eq $current) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ لا يوجد مشهد مسجّل على الطبقة $Layer؛ لم يُضبط المؤقت." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noSceneOnLayer' $Layer) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $currentKey = [string](Get-JsonProp $current 'Key')
@@ -886,14 +885,14 @@ function Set-LayerAutoHide {
         -TemplateKey $currentKey -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true
     $actor = Format-UserAuditActor -UserId $UserId
     Write-BridgeLog "User $actor set an auto-hide timer of $Seconds s on layer $Layer"
-    Add-AuditEntry "⏱ مؤقت $Seconds ث على طبقة $Layer - بواسطة $actor"
+    Add-AuditEntry (T 'flow.timerAudit' $Seconds $Layer $actor)
     $timerText = if ($timerSaved) {
         $savedTimer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer }) | Select-Object -First 1
         $remaining = if ($savedTimer) { [int][math]::Max(0.0, [math]::Ceiling(([datetimeoffset]$savedTimer.At - [datetimeoffset]::Now).TotalSeconds)) } else { $Seconds }
-        "⏱ سيتم إخفاء الطبقة $Layer خلال $(Format-Duration -Seconds $remaining)؛ لا يتجاوز حدّ القالب إن كان مضبوطًا."
+        (T 'flow.willHideWithin' $Layer $(Format-Duration -Seconds $remaining))
     }
     else {
-        "⚠️ ضُبط مؤقت الطبقة $Layer داخل الجسر، لكن تعذّر حفظه ليستمر بعد إعادة التشغيل."
+        (T 'flow.timerNotPersisted' $Layer)
     }
     Send-TelegramMessage -ChatId $ChatId -Text $timerText -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
@@ -975,7 +974,7 @@ function Get-MyOperationsCopyReference {
 function Get-MyOperationsCopyLabel {
     <# What the button says, so the notice can name it exactly. #>
     param([Parameter(Mandatory)][string]$Reference)
-    return "نسخ مرجع $Reference"
+    return (T 'flow.copyReference' $Reference)
 }
 
 function Get-MyOperationsKeyboard {
@@ -1035,11 +1034,11 @@ function Get-OperationSentence {
     }
     $phrase = switch ($Result) {
         'success' { $verb }
-        'blocked' { "رُفض $verb" }
-        default { "فشل $verb" }
+        'blocked' { (T 'flow.refused' $verb) }
+        default { (T 'flow.failed' $verb) }
     }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $phrase += " «$Target»" }
-    if ($Layer -gt 0) { $phrase += " على الطبقة $Layer" }
+    if ($Layer -gt 0) { $phrase += (T 'flow.onLayer' $Layer) }
     return $phrase
 }
 
@@ -1092,7 +1091,7 @@ function Invoke-MyOperationsCommand {
         # failures: when an operator asks "what happened at 21:40" the
         # reference is what turns that into one grep.
         $reference = Get-OperationReference -OperationId ([string]$item.OperationId)
-        if ($reference) { $lines.Add("      🔖 مرجع $reference") }
+        if ($reference) { $lines.Add((T 'flow.reference' $reference)) }
 
         $advice = switch ([string]$item.Result) {
             'failed' { (T 'flow.checkConnection') }
@@ -1151,7 +1150,7 @@ function Show-PresetAdminTemplate {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.templateGone') -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
         return
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "⚡ النصوص الجاهزة للقالب '$($template.Key)'`nاختر نصًا لإدارته أو أنشئ نصًا جديدًا:" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $TemplateIndex -Page $Page)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.readyTextsFor' $($template.Key)) -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $TemplateIndex -Page $Page)
 }
 
 function Show-PresetAdminReview {
@@ -1159,8 +1158,8 @@ function Show-PresetAdminReview {
     $actionLabel = switch ([string]$State.Action) {
         'create' { (T 'flow.presetCreate') }; 'edit' { (T 'flow.presetEdit') }; 'rename' { (T 'flow.presetRename') }; 'delete' { (T 'flow.presetDelete') }
     }
-    $lines = @((T 'flow.reviewPreset'), "العملية: $actionLabel", "القالب: $($State.TemplateKey)")
-    if ($State.Name) { $lines += "الاسم: $($State.Name)" }
+    $lines = @((T 'flow.reviewPreset'), (T 'flow.operation' $actionLabel), (T 'flow.template' $($State.TemplateKey)))
+    if ($State.Name) { $lines += (T 'flow.name' $($State.Name)) }
     if ($State.Action -in @('create', 'edit')) {
         for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
             $value = if ($i -lt @($State.Values).Count) { [string]$State.Values[$i] } else { '' }
@@ -1183,7 +1182,7 @@ function Start-PresetAdminCreate {
         TemplateKey = [string]$template.Key; PresetIndex = -1; UserId = $UserId
         Fields = @($template.Fields); Values = @(); Name = ''; Index = 0
     }
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل اسم النص الجاهز الجديد للقالب '$($template.Key)':" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendReadyTextName' $($template.Key)) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-PresetAdminEditValues {
@@ -1198,7 +1197,7 @@ function Start-PresetAdminEditValues {
     }
     if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
     Set-PendingState -ChatId $ChatId -State $state
-    Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendFirstField' $($state.Fields.Count) $($state.Fields[0])) -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Complete-PresetAdminText {
@@ -1215,7 +1214,7 @@ function Complete-PresetAdminText {
         $state.Mode = 'preset_admin_values'
         if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
         Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل (1/$($state.Fields.Count)):`n$($state.Fields[0])" -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendFirstField' $($state.Fields.Count) $($state.Fields[0])) -ReplyMarkup (Get-CancelKeyboard)
         return
     }
     if ($state.Mode -eq 'preset_admin_values') {
@@ -1223,7 +1222,7 @@ function Complete-PresetAdminText {
         $state.Index = [int]$state.Index + 1
         if ($state.Index -ge $state.Fields.Count) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
         Set-PendingState -ChatId $ChatId -State $state
-        Send-TelegramMessage -ChatId $ChatId -Text "أرسل قيمة الحقل ($($state.Index + 1)/$($state.Fields.Count)):`n$($state.Fields[$state.Index])" -ReplyMarkup (Get-CancelKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendField' $($state.Index + 1) $($state.Fields.Count) $($state.Fields[$state.Index])) -ReplyMarkup (Get-CancelKeyboard)
     }
 }
 
@@ -1243,7 +1242,7 @@ function Confirm-PresetAdminChange {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.presetSaved') -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ تعذّر حفظ التغيير: $($result.Error)" -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.saveFailed' $($result.Error)) -ReplyMarkup (Get-PresetAdminKeyboard -TemplateIndex $templateIndex)
     }
 }
 
@@ -1259,7 +1258,7 @@ function Invoke-TemplatesCommand {
     }
     $lines = foreach ($key in $store.Order) {
         $t = $store.Map[$key]
-        "$($t.Key) (طبقة $($t.Layer)): $($t.Description)  الحقول: $($t.Fields -join ', ')"
+        (T 'flow.templateLine' $($t.Key) $($t.Layer) $($t.Description) $($t.Fields -join ', '))
     }
     $text = ($lines -join "`n")
     if ($store.Errors.Count -gt 0) { $text += "`n`n⚠️ " + ($store.Errors -join "`n⚠️ ") }

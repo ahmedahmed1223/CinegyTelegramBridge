@@ -209,7 +209,7 @@ function Invoke-CallbackQuery {
         'news:sheetdraftconfirm' {
             if (-not (Test-NewsSheetPullAccess -ChatId $chatId -UserId $userId)) { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sheetPullDeniedShort'); break }
             $sync = Invoke-NewsSheetSync -Trigger manual -Target draft -UserId $userId -ChatId $chatId -Confirmed
-            $text = if ($sync.Success) { "📝 حُمّل $(@($sync.Items).Count) خبرًا في المسودة. راجعها ثم اضغط «مراجعة ونشر»." } else { "❌ $($sync.Error)" }
+            $text = if ($sync.Success) { (T 'cb.draftLoaded' $(@($sync.Items).Count)) } else { "❌ $($sync.Error)" }
             Send-TelegramMessage -ChatId $chatId -Text $text
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
@@ -250,7 +250,7 @@ function Invoke-CallbackQuery {
             # only on the last chunk, so the buttons were under a wall of text
             # the editor had to scroll up through. Paging puts the first page
             # and the keyboard together, with 📄 المزيد for the rest.
-            Send-TelegramPagedText -ChatId $chatId -Text "👁 معاينة المسودة ($(@($draft.Items).Count)):`n$preview" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            Send-TelegramPagedText -ChatId $chatId -Text (T 'cb.draftPreview' $(@($draft.Items).Count) $preview) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:publish' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
@@ -263,7 +263,7 @@ function Invoke-CallbackQuery {
                         @{ text = (T 'reply.yesPublish'); callback_data = 'news:publishconfirm'; style = 'success' }
                         @{ text = (T 'reply.cancelWord'); callback_data = 'news:refresh' }
                     )) }
-            Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد نشر $(@($draft.Items).Count) خبرًا إلى الملف الحي؟" -ReplyMarkup $publishConfirm
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmPublish' $(@($draft.Items).Count)) -ReplyMarkup $publishConfirm
             break
         }
         'news:publishconfirm' {
@@ -283,7 +283,7 @@ function Invoke-CallbackQuery {
                         , @(@{text=(T 'reply.cancel');callback_data='news:refresh'}))}
             }
             else {
-                Send-TelegramMessage -ChatId $chatId -Text "❌ لم يتم النشر: $($result.Error)" -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.notPublished' $($result.Error)) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -349,13 +349,13 @@ function Invoke-CallbackQuery {
         'news:rebaseappend' {
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode append
             Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
-                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.appended') } else { "❌ لم يتم النشر: $($result.Error)" })
+                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.appended') } else { (T 'cb.notPublished' $($result.Error)) })
             break
         }
         'news:rebasereplace' {
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode replace
             Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
-                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.replaced') } else { "❌ لم يتم النشر: $($result.Error)" })
+                -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.replaced') } else { (T 'cb.notPublished' $($result.Error)) })
             break
         }
         'news:lockrequest' { Request-NewsLockRelease -ChatId $chatId -UserId $userId | Out-Null; break }
@@ -420,7 +420,7 @@ function Invoke-CallbackQuery {
             $chosenBackup = Get-NewsTickerBackupByIndex -Index $i
             if (-not $chosenBackup) { break }
             $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $chosenBackup.FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry "📰 استعادة نسخة شريط الأخبار بواسطة $(Format-UserAuditActor -UserId $userId)"};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){(T 'reply.restored')}else{"❌ فشلت الاستعادة: $($result.Error)"}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry (T 'cb.tickerRestoreAudit' $(Format-UserAuditActor -UserId $userId))};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){(T 'reply.restored')}else{(T 'cb.restoreFailed' $($result.Error))}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
         }
         'news:handover' {
             if (Open-NewsTickerDraftToAll -ChatId $chatId -UserId $userId) {
@@ -576,7 +576,7 @@ function Invoke-CallbackQuery {
                 if ($fIndex -ge 0 -and $fIndex -lt $fFields.Count) {
                     $fItem = Get-BoardItem -Board $fBoard -ItemId $parts[1]
                     Set-PendingState -ChatId $chatId -State @{ Mode = 'board_field'; UserId = $userId; BoardId = $parts[0]; ItemId = $parts[1]; FieldIndex = $fIndex; StartedAt = (Get-Date) }
-                    Send-BridgeTextEditPrompt -ChatId $chatId -Prompt "أرسل قيمة «$($fFields[$fIndex])»" `
+                    Send-BridgeTextEditPrompt -ChatId $chatId -Prompt (T 'cb.sendValueFor' $($fFields[$fIndex])) `
                         -Current ([string](Get-BoardProperty (Get-BoardProperty $fItem 'Values' $null) $fFields[$fIndex] '')) -CancelData "boards:i:$($parts[0]):$($parts[1])"
                 }
             }
@@ -588,7 +588,7 @@ function Invoke-CallbackQuery {
             if ($addBoard -and (Test-BoardEditAllowed -Board $addBoard -ChatId $chatId -UserId $userId)) {
                 $addFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $addBoard 'TemplateKey' '')))
                 Set-PendingState -ChatId $chatId -State @{ Mode = 'board_add'; UserId = $userId; BoardId = $addId; StartedAt = (Get-Date) }
-                $addHint = if ($addFields.Count -gt 1) { "أرسل الصفّ: $($addFields -join ' | ')" } else { (T 'reply.sendRowText') }
+                $addHint = if ($addFields.Count -gt 1) { (T 'cb.sendRow' $($addFields -join ' | ')) } else { (T 'reply.sendRowText') }
                 Send-TelegramMessage -ChatId $chatId -Text $addHint -ReplyMarkup (Get-CancelKeyboard)
             }
             break
@@ -600,7 +600,7 @@ function Invoke-CallbackQuery {
                 $pasteFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $pasteBoard 'TemplateKey' '')))
                 Set-PendingState -ChatId $chatId -State @{ Mode = 'board_paste'; UserId = $userId; BoardId = $pasteId; StartedAt = (Get-Date) }
                 $pasteHint = @((T 'reply.pasteRows'))
-                if ($pasteFields.Count -gt 1) { $pasteHint += "الحقول بترتيب المشهد مفصولة بـ | : $($pasteFields -join ' | ')" }
+                if ($pasteFields.Count -gt 1) { $pasteHint += (T 'cb.fieldsInSceneOrder' $($pasteFields -join ' | ')) }
                 # Said before the paste, not after it is truncated: Telegram caps
                 # one inbound message at 4096 characters, so a long block arrives
                 # cut and the producer would never know which rows were lost.
@@ -662,7 +662,7 @@ function Invoke-CallbackQuery {
             }
             $roleResult = Set-BoardEditRole -Board $roleBoard -Role $nextRole -UserId $userId
             if ($roleResult.Success -and (Save-ContentBoard -Board $roleResult.Value)) {
-                Add-AuditEntry "🛡 صلاحية تعبئة «$([string](Get-BoardProperty $roleBoard 'Name' ''))» = $nextRole - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.fillRightAudit' $([string](Get-BoardProperty $roleBoard 'Name' '')) $nextRole $(Format-UserAuditActor -UserId $userId))
             }
             Show-BoardScreen -BoardId $roleId -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
@@ -684,7 +684,7 @@ function Invoke-CallbackQuery {
             $delGoId = [string](Get-CallbackArg $data 'boards:delgo:')
             $delGoBoard = Get-ContentBoard -BoardId $delGoId
             if ($delGoBoard) {
-                Add-AuditEntry "🗑 حذف جدول محتوى «$([string](Get-BoardProperty $delGoBoard 'Name' ''))» - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.boardDeletedAudit' $([string](Get-BoardProperty $delGoBoard 'Name' '')) $(Format-UserAuditActor -UserId $userId))
                 Remove-ContentBoardFile -BoardId $delGoId
             }
             Show-BoardsScreen -ChatId $chatId -UserId $userId
@@ -840,8 +840,8 @@ function Invoke-CallbackQuery {
             $doomed = Get-MojazSelected -ChatId $chatId
             if (-not $doomed) { Show-MojazLibraryScreen -ChatId $chatId -UserId $userId; break }
             $waiting = @(Get-MojazBulletinSchedules -BulletinId ([string]$doomed.Id)).Count
-            $warning = "⚠️ حذف «$([string]$doomed.Name)» نهائيًا مع $(@(Get-JsonProp $doomed 'Rows').Count) صفًّا؟"
-            if ($waiting -gt 0) { $warning += " وسيُلغى معه $waiting موعدًا." }
+            $warning = (T 'cb.confirmBoardDelete' $([string]$doomed.Name) $(@(Get-JsonProp $doomed 'Rows').Count))
+            if ($waiting -gt 0) { $warning += (T 'cb.andCancelSlots' $waiting) }
             Send-TelegramMessage -ChatId $chatId -Text $warning `
                 -ReplyMarkup (Get-MojazConfirmKeyboard -Question (T 'reply.yesDeleteBulletin') -ConfirmData 'mojaz:dropconfirm')
             break
@@ -873,7 +873,7 @@ function Invoke-CallbackQuery {
             if ($key -eq $script:MojazUrgentKey -and $script:MojazPlayback) {
                 Set-MojazPendingUrgent -Key $key -Variables $variables -AutoHideSeconds $autoHideSeconds -ChatId $chatId -UserId $userId
                 Send-TelegramMessage -ChatId $chatId `
-                    -Text "📑 «$([string]$script:MojazPlayback.BulletinName)» على الهواء الآن.`nمتى يخرج العاجل؟" `
+                    -Text (T 'cb.bulletinOnAirWhen' $([string]$script:MojazPlayback.BulletinName)) `
                     -ReplyMarkup (Get-MojazUrgentConflictKeyboard)
                 break
             }
@@ -909,7 +909,7 @@ function Invoke-CallbackQuery {
                 Send-TelegramMessage -ChatId $chatId -Text (T 'reply.nothingToPreview') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                 break
             }
-            $preview = "<b>🔎 معاينة المسودة الحالية</b>`n`n$(Format-ShowReviewText -State $state)"
+            $preview = (T 'cb.currentDraftPreview' $(Format-ShowReviewText -State $state))
             Send-TelegramMessage -ChatId $chatId -Text $preview -ParseMode HTML -ReplyMarkup (Get-FieldPromptKeyboard -State $state)
             break
         }
@@ -960,7 +960,7 @@ function Invoke-CallbackQuery {
                 break
             }
             $category = [string]$categories[$categoryIndex]
-            Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$category':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $category -BrowseControls -ChatId $chatId -UserId $userId)
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.templatesOf' $category) -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $category -BrowseControls -ChatId $chatId -UserId $userId)
             break
         }
         'tplinfo:*' {
@@ -987,8 +987,8 @@ function Invoke-CallbackQuery {
             $selected = @(Get-UserFavoriteSelection -UserId $userId) -contains [string]$template.Key
             if (Set-UserFavorite -UserId $userId -TemplateKey ([string]$template.Key) -Enabled (-not $selected)) {
                 $action = if ($selected) { (T 'reply.removedFrom') } else { (T 'reply.addedTo') }
-                Add-AuditEntry "⭐ $($template.Key) $action مفضلة - بواسطة $(Format-UserAuditActor -UserId $userId)"
-                Send-TelegramMessage -ChatId $chatId -Text "✅ $($template.Key): $action المفضلة.`n$(Get-FavoritesManagementText -UserId $userId)" -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
+                Add-AuditEntry (T 'cb.favouritesAudit' $($template.Key) $action $(Format-UserAuditActor -UserId $userId))
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.favouritesResult' $($template.Key) $action $(Get-FavoritesManagementText -UserId $userId)) -ReplyMarkup (Get-FavoritesManagementKeyboard -UserId $userId)
             }
             else {
                 # A failed write used to be silent, so the tick simply did not
@@ -1127,7 +1127,7 @@ function Invoke-CallbackQuery {
                 $knownCategories = @(Get-TemplateCategories)
                 if ($catIndex -ge 0 -and $catIndex -lt $knownCategories.Count) {
                     $pagedCategory = [string]$knownCategories[$catIndex]
-                    Send-TelegramMessage -ChatId $chatId -Text "🗂 قوالب '$pagedCategory':" -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $pagedCategory -BrowseControls -ChatId $chatId -UserId $userId -Page $catPage)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.templatesOf' $pagedCategory) -ReplyMarkup (Get-TemplatesKeyboard -Prefix tpl -Category $pagedCategory -BrowseControls -ChatId $chatId -UserId $userId -Page $catPage)
                 }
             }
             break
@@ -1272,7 +1272,7 @@ function Invoke-CallbackQuery {
             # Recorded, not merely acknowledged: a spoken handover leaves
             # nothing behind, and "who had it when" is the first question
             # asked after anything goes wrong overnight.
-            Add-AuditEntry "🤝 تسليم مناوبة - بواسطة $(Format-UserAuditActor -UserId $userId)"
+            Add-AuditEntry (T 'cb.handoverAudit' $(Format-UserAuditActor -UserId $userId))
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.handoverRecorded') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
@@ -1345,7 +1345,7 @@ function Invoke-CallbackQuery {
             $comparison = Update-OnAirStateFromCinegy -Reason 'operator-check' -LayerStatuses $layerStatuses `
                 -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal
             $comparisonText = @(
-                "🔎 نتيجة المقارنة: أضيف $(@($comparison.Added).Count) · أزيل $(@($comparison.Removed).Count) · تعذر $(@($comparison.Failed).Count)",
+                (T 'cb.compareResult' $(@($comparison.Added).Count) $(@($comparison.Removed).Count) $(@($comparison.Failed).Count)),
                 (Format-CinegyLayerDashboard -LayerStatuses $layerStatuses)
             ) -join "`n`n"
             Send-TelegramMessage -ChatId $chatId -Text $comparisonText -ReplyMarkup (Get-LayerDashboardKeyboard -LayerStatuses $layerStatuses)
@@ -1398,7 +1398,7 @@ function Invoke-CallbackQuery {
         'quiet:on' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $script:ManualQuietUntil = (Get-Date).AddHours(2)
-                Add-AuditEntry "🔇 هدوء يدوي حتى $($script:ManualQuietUntil.ToString('HH:mm')) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.quietUntilAudit' $($script:ManualQuietUntil.ToString('HH:mm')) $(Format-UserAuditActor -UserId $userId))
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text (T 'reply.quietTwoHours')
                 Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
             }
@@ -1407,7 +1407,7 @@ function Invoke-CallbackQuery {
         'quiet:off' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $script:ManualQuietUntil = [datetime]::MinValue
-                Add-AuditEntry "🔊 إلغاء الهدوء اليدوي - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.quietCancelledAudit' $(Format-UserAuditActor -UserId $userId))
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text (T 'reply.quietEnded')
                 Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
             }
@@ -1440,7 +1440,7 @@ function Invoke-CallbackQuery {
             $nextLanguage = if ((Get-BridgeLanguage) -eq 'ar') { 'en' } else { 'ar' }
             Set-Setting -Name 'Language' -Value $nextLanguage
             Write-BridgeLog "User $userId set Language = $nextLanguage"
-            Add-AuditEntry "🌐 Language = $nextLanguage - بواسطة $(Format-UserAuditActor -UserId $userId)"
+            Add-AuditEntry (T 'cb.languageAudit' $nextLanguage $(Format-UserAuditActor -UserId $userId))
             # Announced in the NEW language, which is the only way an operator
             # who pressed it by mistake can tell that it worked.
             Send-TelegramMessage -ChatId $chatId -Text (T 'lang.changed')
@@ -1669,7 +1669,7 @@ function Invoke-CallbackQuery {
                 $result = Revoke-AuthorizedUser -TargetUserId $target
                 if ($result -and $result.Success) {
                     Restore-DeadChat -ChatId $target
-                    Add-AuditEntry "💀 سحب صلاحية المحادثة الميتة $target - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Add-AuditEntry (T 'cb.deadChatRevokedAudit' $target $(Format-UserAuditActor -UserId $userId))
                     Show-DeadChatsScreen -ChatId $chatId -UserId $userId
                 }
                 else {
@@ -1724,7 +1724,7 @@ function Invoke-CallbackQuery {
             if (Set-UserDisabled -TargetUserId $target -Disabled (-not $disabled)) {
                 $action = if ($disabled) { (T 'reply.reEnable') } else { (T 'reply.disableWord') }
                 Write-BridgeLog "Admin $userId changed user $target state: $action"
-                Add-AuditEntry "👥 $action المستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.userAudit' $action $(Format-UserAuditActor -UserId $target) $(Format-UserAuditActor -UserId $userId))
                 Show-UsersAdminScreen -ChatId $chatId -UserId $userId
             }
             break
@@ -1747,8 +1747,8 @@ function Invoke-CallbackQuery {
             $result = Revoke-AuthorizedUser -TargetUserId $target
             if ($result.Success) {
                 Write-BridgeLog "Admin $userId revoked user $target" 'WARN'
-                Add-AuditEntry "👥 سحب صلاحية المستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
-                Send-TelegramMessage -ChatId $chatId -Text "✅ تم سحب صلاحية المستخدم $target." -ReplyMarkup (Get-UsersAdminKeyboard)
+                Add-AuditEntry (T 'cb.userRevokedAudit' $(Format-UserAuditActor -UserId $target) $(Format-UserAuditActor -UserId $userId))
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.userRevoked' $target) -ReplyMarkup (Get-UsersAdminKeyboard)
             }
             else { Send-TelegramMessage -ChatId $chatId -Text "❌ $($result.Error)" -ReplyMarkup (Get-UsersAdminKeyboard) }
             break
@@ -1775,11 +1775,11 @@ function Invoke-CallbackQuery {
             if ($result.Success) {
                 $what = if ($makeAdmin) { (T 'reply.promoteToAdmin') } else { (T 'reply.demoteToOperator') }
                 Write-BridgeLog "Owner $userId performed '$what' on user $target" 'WARN'
-                Add-AuditEntry "👑 $what للمستخدم $(Format-UserAuditActor -UserId $target) - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                Add-AuditEntry (T 'cb.roleAudit' $what $(Format-UserAuditActor -UserId $target) $(Format-UserAuditActor -UserId $userId))
                 # So the ☰ menu matches the new role straight away, rather
                 # than still offering ⚙️ الإعدادات to someone just demoted.
                 Register-BotCommands
-                Send-TelegramMessage -ChatId $chatId -Text "✅ تم $what للمستخدم $(Get-UserDisplayName -UserId $target)."
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.roleDone' $what $(Get-UserDisplayName -UserId $target))
                 # Told to their face: a role change applied silently is one the
                 # person only discovers when a button stops working.
                 Send-TelegramMessage -ChatId $target -Text $(if ($makeAdmin) {
@@ -1867,7 +1867,7 @@ function Invoke-CallbackQuery {
             if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $day = [string](Get-CallbackArg $data 'schday:')
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
-                -Text "🕒 $day — اختر الساعة:" -ReplyMarkup (Get-ScheduleHourKeyboard -Date $day) | Out-Null
+                -Text (T 'cb.pickHour' $day) -ReplyMarkup (Get-ScheduleHourKeyboard -Date $day) | Out-Null
             break
         }
         'schhour:*' {
@@ -1875,7 +1875,7 @@ function Invoke-CallbackQuery {
             if (-not $state -or [string]$state.Mode -notin @('schedule_time', 'mojaz_start_at')) { break }
             $parts = ([string](Get-CallbackArg $data 'schhour:')) -split ':'
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
-                -Text "🕒 $($parts[0]) $($parts[1]) — اختر الدقيقة:" -ReplyMarkup (Get-ScheduleMinuteKeyboard -Date $parts[0] -Hour ([int]$parts[1])) | Out-Null
+                -Text (T 'cb.pickMinute' $($parts[0]) $($parts[1])) -ReplyMarkup (Get-ScheduleMinuteKeyboard -Date $parts[0] -Hour ([int]$parts[1])) | Out-Null
             break
         }
         'schmin:*' {
@@ -1954,7 +1954,7 @@ function Invoke-CallbackQuery {
             $state.Mode = 'schedule_anchor_offset'; Set-PendingState -ChatId $chatId -State $state
             $safeName = ConvertTo-TelegramHtmlText ([string]$choices[$index].Name)
             Edit-TelegramMessageText -ChatId $chatId -MessageId ([int]$msgObj.message_id) `
-                -Text "🎞 المادة: $safeName`nمتى يُعرض الغرافيك؟" -ReplyMarkup (Get-ScheduleAnchorOffsetKeyboard) | Out-Null
+                -Text (T 'cb.itemWhenGraphic' $safeName) -ReplyMarkup (Get-ScheduleAnchorOffsetKeyboard) | Out-Null
             break
         }
         'schoff:*' {
@@ -2019,7 +2019,7 @@ function Invoke-CallbackQuery {
             $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
             if (-not $scheduleEntry) { break }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
-            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesCancel') 'schedule:cancelconfirm' -Style danger), (New-Button (T 'cb.back') 'schedule:list'))) }
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmEventCancel' $(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)) -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesCancel') 'schedule:cancelconfirm' -Style danger), (New-Button (T 'cb.back') 'schedule:list'))) }
             break
         }
         'schedule:cancelconfirm' {
@@ -2072,7 +2072,7 @@ function Invoke-CallbackQuery {
                 break
             }
             $key = [string]$entries[$index].Key
-            Send-TelegramMessage -ChatId $chatId -Text "🗑 حذف القالب غير الصالح '$key'؟`n$(ConvertTo-TelegramHtmlText $entries[$index].Reason)`nتُؤخذ نسخة احتياطية أولًا." -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesDelete') "tplinv:go:$index" -Style danger), (New-Button (T 'reply.back') 'tpladmin:invalid'))) }
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmInvalidDelete' $key $(ConvertTo-TelegramHtmlText $entries[$index].Reason)) -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesDelete') "tplinv:go:$index" -Style danger), (New-Button (T 'reply.back') 'tpladmin:invalid'))) }
             break
         }
         'tplinv:go:*' {
@@ -2086,8 +2086,8 @@ function Invoke-CallbackQuery {
             $key = [string]$entries[$index].Key
             $result = Save-TemplateDefinitionChange -TemplateKey $key -Action delete
             if ($result -and $result.Success) {
-                Add-AuditEntry "🧹 حذف قالب غير صالح $key - بواسطة $(Format-UserAuditActor -UserId $userId)"
-                Send-TelegramMessage -ChatId $chatId -Text "✅ حُذف '$key' مع نسخة احتياطية."
+                Add-AuditEntry (T 'cb.invalidDeletedAudit' $key $(Format-UserAuditActor -UserId $userId))
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.deletedWithBackup' $key)
             }
             else {
                 $why = if ($result) { [string]$result.Error } else { (T 'reply.deleteFailed') }
@@ -2151,7 +2151,7 @@ function Invoke-CallbackQuery {
             $template = Get-TemplateByIndex -Index $templateIndex
             $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
             if (-not $chosenPreset) { break }
-            Send-TelegramMessage -ChatId $chatId -Text "⚡ $($chosenPreset.Name)`nاختر العملية المطلوبة:" -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.pickAction' $($chosenPreset.Name)) -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
             break
         }
         'pac:*' {
@@ -2178,7 +2178,7 @@ function Invoke-CallbackQuery {
                 TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
                 Fields = @($template.Fields); Values = @(); Name = [string]$chosenPreset.Name; Index = 0
             }
-            Send-TelegramMessage -ChatId $chatId -Text "أرسل الاسم الجديد لـ '$($chosenPreset.Name)':" -ReplyMarkup (Get-CancelKeyboard)
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.sendNewNameFor' $($chosenPreset.Name)) -ReplyMarkup (Get-CancelKeyboard)
             break
         }
         'pad:*' {
@@ -2234,7 +2234,7 @@ function Invoke-CallbackQuery {
             if ((Test-CallbackAdmin -ChatId $chatId -UserId $userId) -and
                 [long]::TryParse((Get-CallbackArg $data 'unblock:'), [ref]$target) -and $target -ne 0) {
                 if (Unblock-AccessChat -ChatId $target -ByUserId $userId) {
-                    Add-AuditEntry "👤 رفع حظر $target - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Add-AuditEntry (T 'cb.unblockAudit' $target $(Format-UserAuditActor -UserId $userId))
                 }
                 Send-TelegramMessage -ChatId $chatId -Text (Get-BlockedChatsText) -ParseMode HTML -ReplyMarkup (Get-BlockedChatsKeyboard)
             }
@@ -2307,7 +2307,7 @@ function Invoke-CallbackQuery {
             $idx = [int]((Get-CallbackArg $data 'tplT:'))
             $t = Get-TemplateByIndex -Index $idx
             $name = if ($t) { $t.Key } else { '' }
-            Send-TelegramMessage -ChatId $chatId -Text "المدة قبل الإخفاء التلقائي لـ '$name'`:" -ReplyMarkup (Get-DurationKeyboard -Prefix 'dur' -Token "$idx" -BackData 'menu:timed')
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.autoHideFor' $name) -ReplyMarkup (Get-DurationKeyboard -Prefix 'dur' -Token "$idx" -BackData 'menu:timed')
             break
         }
         'dur:*' {
@@ -2324,7 +2324,7 @@ function Invoke-CallbackQuery {
         }
         'timer:*' {
             $layer = [int]((Get-CallbackArg $data 'timer:'))
-            Send-TelegramMessage -ChatId $chatId -Text "المدة قبل إخفاء الطبقة $layer`:" -ReplyMarkup (Get-DurationKeyboard -Prefix 'tlay' -Token "$layer")
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.autoHideLayer' $layer) -ReplyMarkup (Get-DurationKeyboard -Prefix 'tlay' -Token "$layer")
             break
         }
         'tlay:*' {
@@ -2332,7 +2332,7 @@ function Invoke-CallbackQuery {
             $layer = [int]$parts[1]
             if ($parts[2] -eq 'c') {
                 Set-PendingState -ChatId $chatId -State @{ Mode = 'layer_timer_custom'; Layer = $layer; UserId = $userId }
-                Send-TelegramMessage -ChatId $chatId -Text "أرسل المدة بالثواني لإخفاء الطبقة $layer (رقم فقط):" -ReplyMarkup (Get-CancelKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.sendSecondsForLayer' $layer) -ReplyMarkup (Get-CancelKeyboard)
             }
             else {
                 Set-LayerAutoHide -Layer $layer -Seconds ([int]$parts[2]) -ChatId $chatId -UserId $userId
@@ -2349,7 +2349,7 @@ function Invoke-CallbackQuery {
                 $newSeconds = [math]::Max(5, $currentRemaining + $adjustSeconds)
                 Set-LayerAutoHide -Layer $layer -Seconds $newSeconds -ChatId $chatId -UserId $userId
             } else {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ لا يوجد مؤقت نشط للطبقة $layer." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.noTimerForLayer' $layer) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             }
             break
         }
@@ -2426,7 +2426,7 @@ function Invoke-CallbackQuery {
             # path that does not matter is how operators learn to tap through
             # the confirmation that does.
             if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الإخفاء`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmHide' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide)
             }
             else { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
             break
@@ -2440,7 +2440,7 @@ function Invoke-CallbackQuery {
                 break
             }
             if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد الخروج من المشهد`n$(Get-LayerRemovalSummary -Layer $targetLayer)" -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmExit' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit)
             }
             else { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId }
             break
@@ -2479,7 +2479,7 @@ function Invoke-CallbackQuery {
                 $name = if ($pending) { [string](Get-JsonProp $pending 'Name') } else { '' }
                 $who = if ($name) { "$name ‎($target)‎" } else { [string]$target }
                 Send-TelegramMessage -ChatId $chatId -ParseMode HTML `
-                    -Text "⚠️ <b>منح الوصول إلى $(ConvertTo-TelegramHtmlText $who)؟</b>`nسيتمكّن من عرض الغرافيك على الهواء." `
+                    -Text (T 'cb.confirmGrant' $(ConvertTo-TelegramHtmlText $who)) `
                     -ReplyMarkup (Get-AccessGrantConfirmKeyboard -TargetChatId $target)
             }
             break
@@ -2587,7 +2587,7 @@ function Invoke-CallbackQuery {
                     $preview = Get-TemplateRegistryImportComparison -Current $live -Imported $saved
                 }
                 catch {
-                    Send-TelegramMessage -ChatId $chatId -Text "❌ تعذّرت قراءة النسخة: $(Protect-SensitiveText $_.Exception.Message)" -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.backupUnreadable' $(Protect-SensitiveText $_.Exception.Message)) -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
                     break
                 }
                 Clear-PendingState -ChatId $chatId
@@ -2610,11 +2610,11 @@ function Invoke-CallbackQuery {
                 $outcome = Restore-TemplateRegistryBackup -BackupPath $restoreFrom
                 if ($outcome.Success) {
                     Write-BridgeLog "Admin user $userId restored template registry backup '$([System.IO.Path]::GetFileName($restoreFrom))'" 'WARN'
-                    Add-AuditEntry "🗄 استعادة نسخة قوالب - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Add-AuditEntry (T 'cb.templateRestoreAudit' $(Format-UserAuditActor -UserId $userId))
                     Send-TelegramMessage -ChatId $chatId -Text (T 'reply.templatesRestored') -ParseMode HTML -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard -ChatId $chatId -UserId $userId)
                 }
                 else {
-                    Send-TelegramMessage -ChatId $chatId -Text "❌ فشلت الاستعادة: $($outcome.Error)" -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.restoreFailed' $($outcome.Error)) -ParseMode HTML -ReplyMarkup (Get-TemplateBackupsKeyboard)
                 }
             }
             break
@@ -2631,11 +2631,11 @@ function Invoke-CallbackQuery {
                 $restore = Restore-ConfigBackup -BackupPath $backupPath
                 if ($restore.Success) {
                     Write-BridgeLog "Admin user $userId restored configuration backup '$([System.IO.Path]::GetFileName($backupPath))'" "WARN"
-                    Add-AuditEntry "🗄 استعادة نسخة إعدادات - بواسطة $(Format-UserAuditActor -UserId $userId)"
+                    Add-AuditEntry (T 'cb.settingsRestoreAudit' $(Format-UserAuditActor -UserId $userId))
                     Send-TelegramMessage -ChatId $chatId -Text (T 'reply.settingsRestored') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
                 }
                 else {
-                    Send-TelegramMessage -ChatId $chatId -Text "❌ فشلت الاستعادة: $($restore.Error)" -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.restoreFailed' $($restore.Error)) -ReplyMarkup (Get-ConfigBackupsKeyboard)
                 }
             }
             break
@@ -2662,7 +2662,7 @@ function Invoke-CallbackQuery {
                     if (Send-TelegramRichMessage -ChatId $chatId -Blocks $restoreBlocks -ReplyMarkup $restoreKeyboard) { break }
                 }
                 $differenceSummary = Get-ConfigDifferenceSummary -CurrentPath $ConfigPath -BackupPath $files[$index].FullName
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تأكيد استعادة النسخة '$($files[$index].Name)'؟`n$differenceSummary`nسيتم حفظ الإعدادات الحالية أولًا، ويجب إعادة تشغيل البوت بعد الاستعادة." -ReplyMarkup $restoreKeyboard
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmRestore' $($files[$index].Name) $differenceSummary) -ReplyMarkup $restoreKeyboard
             }
             break
         }

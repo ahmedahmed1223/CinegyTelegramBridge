@@ -76,7 +76,7 @@ function Get-SettingChangeText {
     $label = [string](Get-SettingNavigationMetadata -Name $Name).Label
     $lines = @(
         "✅ <b>$(ConvertTo-TelegramHtmlText -Text $label)</b>"
-        "من «$(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $From))» إلى «$(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $To))»"
+        (T 'cmd.fromTo' $(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $From)) $(ConvertTo-TelegramHtmlText -Text (Get-SettingValueDisplay -Name $Name -Value $To)))
     )
     $warning = [string](Get-ConfigSaveWarning)
     if ($warning) { $lines += (ConvertTo-TelegramHtmlText -Text $warning.Trim()) }
@@ -102,7 +102,7 @@ function Show-SettingsCategoryScreen {
     # held what they came for. The summary answers that, and each line under
     # it explains the button below it.
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("<b>⚙️ الإعدادات ← $(ConvertTo-TelegramHtmlText -Text $title)</b>")
+    $lines.Add((T 'cmd.settingsSection' $(ConvertTo-TelegramHtmlText -Text $title)))
     $summary = [string](Get-JsonProp $definition[0] 'Summary')
     if ($summary) { $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text $summary)</i>") }
     $lines.Add('')
@@ -119,7 +119,7 @@ function Show-HideAllLayerSettings {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $layers = @(Get-HideAllTargetLayers)
     $scopeText = if ($layers.Count -gt 0) { $layers -join '، ' } else { (T 'cmd.noLayersSelected') }
-    Send-TelegramMessage -ChatId $ChatId -Text "🚨 طبقات إخفاء الكل الحالية: $scopeText`nاضغط طبقة لتضمينها أو استبعادها. هذا التحديد هو فقط ما سيخفيه زر الطوارئ." -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.hideAllLayers' $scopeText) -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
 }
 
 function Show-LayerNamesScreen {
@@ -161,8 +161,8 @@ function Set-LayerName {
     Set-Setting -Name 'LayerNames' -Value $stored
     $action = if ([string]::IsNullOrWhiteSpace($trimmed)) { 'cleared' } else { "set to '$trimmed'" }
     Write-BridgeLog "User $UserId $action layer $Layer name"
-    Add-AuditEntry "🏷️ اسم طبقة $Layer $action - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    $message = if ([string]::IsNullOrWhiteSpace($trimmed)) { "✅ تم مسح اسم طبقة $Layer." } else { "✅ تم حفظ الاسم: $(Get-LayerDisplayName -Layer $Layer)" }
+    Add-AuditEntry (T 'cmd.layerNameAudit' $Layer $action $(Format-UserAuditActor -UserId $UserId))
+    $message = if ([string]::IsNullOrWhiteSpace($trimmed)) { (T 'cmd.layerNameCleared' $Layer) } else { (T 'cmd.nameSaved' $(Get-LayerDisplayName -Layer $Layer)) }
     Send-TelegramMessage -ChatId $ChatId -Text "$message$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-LayerNamesKeyboard)
     return $true
 }
@@ -172,8 +172,8 @@ function Start-LayerNamePrompt {
     if ($UserId -eq 0) { $UserId = $ChatId }
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'layer_name'; Layer = $Layer; UserId = $UserId }
     $current = Get-LayerName -Layer $Layer
-    $currentText = if ($current) { "الاسم الحالي: $current" } else { (T 'cmd.noNameYet') }
-    Send-TelegramMessage -ChatId $ChatId -Text "🏷️ طبقة $Layer`n$currentText`nأرسل الاسم الجديد فقط." -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
+    $currentText = if ($current) { (T 'cmd.currentName' $current) } else { (T 'cmd.noNameYet') }
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerNamePrompt' $Layer $currentText) -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
 }
 
 function Complete-LayerName {
@@ -213,7 +213,7 @@ function Set-HideAllLayerSelection {
     }
     Set-Setting -Name 'HideAllLayers' -Value $value
     Write-BridgeLog "User $UserId changed HideAllLayers to '$value'" "WARN"
-    Add-AuditEntry "🚨 طبقات إخفاء الكل = $value - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'cmd.hideAllAudit' $value $(Format-UserAuditActor -UserId $UserId))
     Show-HideAllLayerSettings -ChatId $ChatId -UserId $UserId
 }
 
@@ -221,7 +221,7 @@ function Invoke-SettingToggle {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Confirmed)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:DefaultSettings.Contains($Name)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "إعداد غير معروف: $Name" -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.unknownSetting' $Name) -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     $new = -not [bool](Get-Setting $Name)
@@ -230,12 +230,12 @@ function Invoke-SettingToggle {
     # protection should stay a single tap.
     if (-not $Confirmed -and -not $new -and $script:ProtectedSettings -contains $Name) {
         $protectedLabel = [string](Get-SettingNavigationMetadata -Name $Name).Label
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ «$protectedLabel» إعداد حماية. تعطيله يوسّع من يستطيع التحكم بالهواء.`nهل أنت متأكد؟" -ReplyMarkup (Get-SettingConfirmKeyboard -Name $Name)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.protectionSetting' $protectedLabel) -ReplyMarkup (Get-SettingConfirmKeyboard -Name $Name)
         return
     }
     Set-Setting -Name $Name -Value $new
     Write-BridgeLog "User $UserId set $Name = $new"
-    Add-AuditEntry "⚙️ $Name = $new - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'cmd.settingAudit' $Name $new $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From (-not $new) -To $new) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -243,7 +243,7 @@ function Start-SettingValuePrompt {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:DefaultSettings.Contains($Name)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "إعداد غير معروف: $Name" -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.unknownSetting' $Name) -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     # Buttons first, typing on request: a number reached by tapping cannot be
@@ -268,18 +268,18 @@ function Complete-SettingValue {
     if ($state.Name -eq 'TemplateTestLayer') {
         $conflict = @(Get-TemplateTestLayerConflict -Layer $parsed)
         if ($conflict.Count -gt 0) {
-            Send-TelegramMessage -ChatId $ChatId -Text "❌ الطبقة $parsed مستخدمة في قوالب الإنتاج: $($conflict -join '، ')`nاختر طبقة غير مستخدمة، وإلا خرجت التجربة على الهواء. لم يتغيّر شيء." -ReplyMarkup (Get-SettingsKeyboard)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerInProduction' $parsed $($conflict -join '، ')) -ReplyMarkup (Get-SettingsKeyboard)
             return
         }
     }
     $previous = Get-Setting $state.Name
     if ($previous -eq $parsed) {
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ القيمة الحالية مطابقة بالفعل ($parsed). لم يتغيّر شيء." -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.valueUnchanged' $parsed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
     Set-Setting -Name $state.Name -Value $parsed
     Write-BridgeLog "User $($state.UserId) set $($state.Name) = $parsed"
-    Add-AuditEntry "⚙️ $($state.Name) = $parsed - بواسطة $(Format-UserAuditActor -UserId ([long]$state.UserId))"
+    Add-AuditEntry (T 'cmd.settingAudit' $($state.Name) $parsed $(Format-UserAuditActor -UserId ([long]$state.UserId)))
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name ([string]$state.Name) -From $previous -To $parsed) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -331,10 +331,10 @@ function Complete-TemplateMaxAirCustom {
     $friendly = if ($seconds -ge 60) {
         $m = [math]::Floor($seconds / 60)
         $s = $seconds % 60
-        if ($s -eq 0) { "$m دقيقة" } else { "$m دقيقة و$s ثانية" }
-    } else { "$seconds ثانية" }
+        if ($s -eq 0) { (T 'cmd.minutes' $m) } else { (T 'cmd.minutesSeconds' $m $s) }
+    } else { (T 'cmd.seconds' $seconds) }
     Write-BridgeLog "Template maximum on-air policy updated by $($state.UserId) to $seconds seconds (custom input)."
-    Send-TelegramMessage -ChatId $ChatId -Text "✅ تم ضبط الحد الأقصى لـ '$key' على $friendly." -ReplyMarkup (Get-SettingsKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.ceilingSet' $key $friendly) -ReplyMarkup (Get-SettingsKeyboard)
 }
 
 function Reset-SettingsToDefault {
@@ -360,12 +360,12 @@ function Reset-SettingsToDefault {
             $lines.Add((T 'cmd.nothingDiffers'))
         }
         else {
-            $lines.Add("<i>$($modified.Count) إعدادًا ستعود إلى قيمتها الأصلية:</i>")
+            $lines.Add((T 'cmd.willReset' $($modified.Count)))
             $lines.Add('')
             foreach ($line in @(Get-SettingsExplainedLines -Names @($modified | Select-Object -First 8 | ForEach-Object { [string]$_.Name }))) {
                 $lines.Add($line)
             }
-            if ($modified.Count -gt 8) { $lines.Add("… و$($modified.Count - 8) غيرها.") }
+            if ($modified.Count -gt 8) { $lines.Add((T 'cmd.andOthers' $($modified.Count - 8))) }
         }
         $lines.Add('')
         $lines.Add((T 'cmd.backupBeforeWrite'))
@@ -379,7 +379,7 @@ function Reset-SettingsToDefault {
     $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $settings -Force
     Save-Config
     Write-BridgeLog "User $UserId reset all settings to defaults" "WARN"
-    Add-AuditEntry "♻️ استعادة الإعدادات الافتراضية - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'cmd.resetAudit' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.allRestored') -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -398,7 +398,7 @@ function Show-SettingsListScreen {
         }
         'search' { @(Find-BridgeSettings -Schema $script:SettingSchema -Query $Query) }
     })
-    $title = switch ($Mode) { 'simple' { (T 'cmd.simpleSettings') }; 'advanced' { (T 'cmd.allSettings') }; 'modified' { (T 'cmd.changedSettings') }; default { "🔎 نتائج البحث عن «$Query»" } }
+    $title = switch ($Mode) { 'simple' { (T 'cmd.simpleSettings') }; 'advanced' { (T 'cmd.allSettings') }; 'modified' { (T 'cmd.changedSettings') }; default { (T 'cmd.searchResults' $Query) } }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(ConvertTo-TelegramHtmlText -Text $title)</b>")
     if ($records.Count -eq 0) {
@@ -411,7 +411,7 @@ function Show-SettingsListScreen {
         # buttons under them are the same settings.
         $window = Get-BridgePageWindow -ItemCount $records.Count -Page $Page -PageSize 8
         $shown = @($records[$window.StartIndex..$window.EndIndex] | ForEach-Object { [string]$_.Name })
-        $lines.Add("<i>$($records.Count) إعدادًا$(if ($window.PageCount -gt 1) { " · صفحة $($window.Page + 1) من $($window.PageCount)" })</i>")
+        $lines.Add((T 'cmd.settingCount' $($records.Count) $(if ($window.PageCount -gt 1) { (T 'cmd.pageOf' $($window.Page + 1) $($window.PageCount)) })))
         $lines.Add('')
         foreach ($line in @(Get-SettingsExplainedLines -Names $shown)) { $lines.Add($line) }
     }
@@ -441,12 +441,12 @@ function Reset-SingleSettingToDefault {
         $resetLabel = [string](Get-SettingNavigationMetadata -Name $Name).Label
         $current = Get-SettingValueDisplay -Name $Name -Value (Get-Setting $Name)
         $default = Get-SettingValueDisplay -Name $Name -Value $script:DefaultSettings[$Name]
-        Send-TelegramMessage -ChatId $ChatId -Text "↩️ إعادة «$resetLabel» وحده إلى الافتراضي؟`nالآن: $current`nسيصير: $default" -ReplyMarkup (Get-SingleSettingResetConfirmKeyboard -Name $Name)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.confirmResetOne' $resetLabel $current $default) -ReplyMarkup (Get-SingleSettingResetConfirmKeyboard -Name $Name)
         return
     }
     $previousValue = Get-Setting $Name
     Set-Setting -Name $Name -Value $script:DefaultSettings[$Name]
-    Add-AuditEntry "↩️ إعادة إعداد $Name - بواسطة $(Format-UserAuditActor -UserId $UserId)"
+    Add-AuditEntry (T 'cmd.resetOneAudit' $Name $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (Get-SettingChangeText -Name $Name -From $previousValue -To $script:DefaultSettings[$Name]) -ParseMode HTML -ReplyMarkup (Get-SettingsKeyboard)
 }
 
@@ -474,11 +474,11 @@ function Invoke-AdminRawCommand {
     $result = Send-AirCommand -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Device $device -Cmd $cmd -Op1 $op1 -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         Write-BridgeLog "User $UserId (admin) sent raw command Device=$device Cmd=$cmd"
-        Add-AuditEntry "🛠 أمر خام $device/$cmd - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-        Send-TelegramMessage -ChatId $ChatId -Text "تم الإرسال: Device=$device Cmd=$cmd" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Add-AuditEntry (T 'cmd.rawAudit' $device $cmd $(Format-UserAuditActor -UserId $UserId))
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.rawSent' $device $cmd) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text "فشل: $($result.Error)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.failed' $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
 }
 
@@ -496,12 +496,12 @@ function Invoke-ShowCommand {
 
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($key)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب '$key' غير معروف. استخدم زر 📋 القوالب." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.templateUnknown' $key) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $fields = @($store.Map[$key].Fields)
     if ($fieldValues.Count -gt $fields.Count) {
-        Send-TelegramMessage -ChatId $ChatId -Text "القالب '$key' يحتوي على $($fields.Count) حقل/حقول فقط: $($fields -join ', ')" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.templateFieldCount' $key $($fields.Count) $($fields -join ', ')) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $limits = @($store.Map[$key].FieldLimits)
@@ -569,9 +569,9 @@ function Invoke-UserAliasCommand {
     $targetUserId = [long]$Matches[1]; $alias = $Matches[2].Trim()
     if ($alias -eq '-') { $alias = '' }
     if (Set-UserAlias -TargetUserId $targetUserId -Alias $alias) {
-        $result = if ($alias) { "✅ تم تعيين اسم المستخدم $targetUserId إلى: $alias" } else { "✅ تم حذف الاسم المستعار للمستخدم $targetUserId" }
+        $result = if ($alias) { (T 'cmd.userNameSet' $targetUserId $alias) } else { (T 'cmd.userAliasCleared' $targetUserId) }
         Write-BridgeLog "Admin $(Get-UserDisplayName -UserId $UserId) updated alias for user $targetUserId"
-        Add-AuditEntry "👤 اسم بديل للمستخدم $(Format-UserAuditActor -UserId ([long]$targetUserId)) عُدّل بواسطة $(Format-UserAuditActor -UserId $UserId)"
+        Add-AuditEntry (T 'cmd.userAliasAudit' $(Format-UserAuditActor -UserId ([long]$targetUserId)) $(Format-UserAuditActor -UserId $UserId))
         Send-TelegramMessage -ChatId $ChatId -Text $result -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     }
     else { Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.aliasSaveFailed') }
@@ -665,7 +665,7 @@ function Invoke-BridgeCommand {
             # put the wrong graphic on air from a typo.
             $shortcut = Resolve-TemplateShortcut -Text $command
             if ($shortcut -ge 0) { Start-ShowFlow -TemplateIndex $shortcut -ChatId $ChatId -UserId $UserId; return }
-            Send-TelegramMessage -ChatId $ChatId -Text "أمر غير معروف '/$command'. استخدم الأزرار أدناه:" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.unknownCommand' $command) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         }
     }
 }

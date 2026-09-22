@@ -363,10 +363,10 @@ function Get-CinegyStateFreshness {
         [int]$StaleAfterSeconds = 45
     )
     if ($FailedCount -gt 0) {
-        return [pscustomobject]@{ State = 'unavailable'; Label = '🔴 غير متاح'; AgeSeconds = $null }
+        return [pscustomobject]@{ State = 'unavailable'; Label = (T 'onair.unavailable'); AgeSeconds = $null }
     }
     if ($null -eq $LastSuccessfulAt -or [string]::IsNullOrWhiteSpace([string]$LastSuccessfulAt)) {
-        return [pscustomobject]@{ State = 'unknown'; Label = '⚪ غير معروف'; AgeSeconds = $null }
+        return [pscustomobject]@{ State = 'unknown'; Label = (T 'onair.unknownDot'); AgeSeconds = $null }
     }
     $ageSeconds = [math]::Max(0, [math]::Floor(($Now - ([datetime]$LastSuccessfulAt)).TotalSeconds))
     if ($ageSeconds -gt [math]::Max(1, $StaleAfterSeconds)) {
@@ -375,13 +375,13 @@ function Get-CinegyStateFreshness {
         # glancing at a status screen.
         return [pscustomobject]@{ State = 'stale'; Label = "🟠 متأخر منذ $(Format-DurationSeconds -Seconds $ageSeconds)"; AgeSeconds = $ageSeconds }
     }
-    return [pscustomobject]@{ State = 'connected'; Label = '🟢 متصل'; AgeSeconds = $ageSeconds }
+    return [pscustomobject]@{ State = 'connected'; Label = (T 'onair.connected'); AgeSeconds = $ageSeconds }
 }
 
 function Format-ExternalCinegyChangeAlert {
     param([Parameter(Mandatory)][object[]]$Changes)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('⚠️ تغيير خارجي في Cinegy')
+    $lines.Add((T 'onair.externalChange'))
     $lines.Add("خادم Air: $($config.AirServerAddress) | القناة: $($config.AirChannelNumber)")
     foreach ($change in @($Changes)) {
         # Asked of the decision, not re-derived from the id. An id survives a
@@ -389,28 +389,28 @@ function Format-ExternalCinegyChangeAlert {
         # the layer" - the alarming half of a story whose own log line said
         # the layer was confirmed hidden.
         $replaced = [bool](Get-JsonProp $change 'Replaced')
-        $state = if ($replaced) { 'استُبدل خارجيًا' } else { 'لم يعد على الهواء' }
+        $state = if ($replaced) { (T 'onair.replacedExternally') } else { (T 'onair.noLongerOnAir') }
         $lines.Add('')
         $lines.Add("$(Get-LayerDisplayName -Layer ([int]$change.Layer)): $state")
         $lines.Add("القالب الذي كان يعرضه البوت: $($change.TemplateKey)")
         $lines.Add("المشغّل: $($change.ShowUserId) | بدأ: $($change.ShownAt)")
         $lines.Add("المعرّف السابق: $($change.ExpectedActiveId)")
         if ($replaced) {
-            $name = if ([string]::IsNullOrWhiteSpace([string]$change.ActualActiveName)) { 'عنصر غير مسمّى' } else { $change.ActualActiveName }
+            $name = if ([string]::IsNullOrWhiteSpace([string]$change.ActualActiveName)) { (T 'onair.unnamedItem') } else { $change.ActualActiveName }
             $lines.Add("العنصر الحالي: $name | المعرّف: $($change.ActualActiveId)")
         }
         if ($change.OutputState) { $lines.Add("حالة الخرج: $($change.OutputState)") }
         if ($replaced) {
-            $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { 'مصدر خارجي غير معرّف' }
+            $source = if ($change.ClientConnected -and -not [string]::IsNullOrWhiteSpace([string]$change.ClientIdentity)) { "عميل Cinegy: $($change.ClientIdentity)" } else { (T 'onair.unknownExternalSource') }
             $lines.Add("المصدر: $source")
         }
         else {
             # Naming a "source" for a graphic that simply ran out sent an
             # operator looking for an intruder who was never there.
-            $lines.Add('لا عنصر آخر على الطبقة — المشهد انتهى أو أُخفي من خارج البوت، ولم يأخذها أحد.')
+            $lines.Add((T 'onair.layerEmptyExplain'))
         }
     }
-    $lines.Add('تم تحديث حالة البوت وإلغاء أي مؤقت مرتبط.')
+    $lines.Add((T 'onair.stateUpdated'))
     return ($lines -join "`n")
 }
 

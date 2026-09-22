@@ -250,7 +250,7 @@ function Get-TemplateStoreParsed {
         }
         $tplPath = Resolve-TemplateScenePath -Path ([string]$tplPath)
         if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
-            $errors.Add("القالب '$key' له مسار غير مطلق '$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
+            $errors.Add("القالب '$key(T 'tpl.pathNotAbsolute')$tplPath' - اضبط TemplateBasePath أو اكتب مسارًا كاملًا.")
             $invalidKeys.Add($key)
             continue
         }
@@ -336,7 +336,7 @@ function Get-TemplateStoreParsed {
         # must stay unique even when a device name is given.
         $deviceName = [string](Get-JsonProp $entry 'device')
         if ($deviceName -and $deviceName -notmatch '^[A-Za-z0-9_]{1,32}$') {
-            $errors.Add("القالب '$key' فيه اسم جهاز غير صالح '$deviceName' - تم تجاهل الاسم.")
+            $errors.Add("القالب '$key(T 'tpl.badDeviceName')$deviceName' - تم تجاهل الاسم.")
             $deviceName = ''
         }
 
@@ -422,7 +422,7 @@ function Get-InvalidTemplateEntries {
     foreach ($key in @(Get-JsonProp $store 'InvalidKeys' | Where-Object { $null -ne $_ })) {
         $name = [string]$key
         $reason = @(Get-JsonProp $store 'Errors' | Where-Object { [string]$_ -match "'$([regex]::Escape($name))'" } | Select-Object -First 1)
-        if (-not $reason) { $reason = 'غير صالح' }
+        if (-not $reason) { $reason = (T 'tpl.invalid') }
         $entries += [pscustomobject]@{ Key = $name; Reason = [string]$reason }
     }
     return $entries
@@ -459,8 +459,8 @@ function Get-TemplateLastAirMap {
 
 function Format-TemplateLastAir {
     param($Stamp)
-    if (-not $Stamp) { return 'لم يُبث بعد' }
-    try { $at = [datetime]$Stamp } catch { return 'لم يُبث بعد' }
+    if (-not $Stamp) { return (T 'tpl.neverAired') }
+    try { $at = [datetime]$Stamp } catch { return (T 'tpl.neverAired') }
     # UTC on both sides: tick subtraction across DateTime Kinds does not
     # convert, and a Local-minus-Utc age would gain the whole timezone.
     $age = (Get-Date).ToUniversalTime() - $at.ToUniversalTime()
@@ -547,22 +547,22 @@ function Save-TemplateDefinitionChange {
         if ($Action -eq 'create' -and $existing) { throw "يوجد قالب بالمفتاح '$TemplateKey' بالفعل." }
         if ($Action -ne 'create' -and -not $existing) { throw "القالب '$TemplateKey' غير موجود." }
         if ($Action -eq 'delete') {
-            if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -eq $TemplateKey }).Count -gt 0) { throw 'لا يمكن حذف قالب على الهواء.' }
-            if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0) { throw 'لا يمكن حذف قالب مرتبط بجدولة قادمة.' }
+            if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteOnAir') }
+            if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteScheduled') }
             $raw.PSObject.Properties.Remove($TemplateKey)
         }
         else {
             $templatePath = [string](Get-JsonProp $Definition 'path')
             $layer = 0
-            if ([string]::IsNullOrWhiteSpace($templatePath)) { throw 'مسار القالب فارغ.' }
-            if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw 'رقم الطبقة يجب أن يكون موجبًا.' }
+            if ([string]::IsNullOrWhiteSpace($templatePath)) { throw (T 'tpl.pathEmpty') }
+            if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw (T 'tpl.layerPositive') }
             $root = [IO.Path]::GetFullPath($scriptRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
             $resolved = [IO.Path]::GetFullPath((Join-Path $scriptRoot $templatePath))
-            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw 'مسار القالب يجب أن يكون داخل مجلد المشروع.' }
+            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw (T 'tpl.pathInsideProject') }
             $fields = @(Get-JsonProp $Definition 'fields')
             foreach ($field in $fields) {
                 $fieldName = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }
-                if ([string]::IsNullOrWhiteSpace([string]$fieldName)) { throw 'يوجد حقل بلا اسم صالح.' }
+                if ([string]::IsNullOrWhiteSpace([string]$fieldName)) { throw (T 'tpl.fieldNoName') }
             }
             if ($Action -eq 'create') { $target = [pscustomobject]@{}; $raw | Add-Member -NotePropertyName $TemplateKey -NotePropertyValue $target }
             else { $target = $existing }
@@ -587,7 +587,7 @@ function Save-TemplateReminderMinutes {
        mutation contract so one button cannot leave a partial JSON file. #>
     param([Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][int]$Minutes)
     if ($Minutes -lt 0 -or $Minutes -gt 1440) {
-        return [pscustomobject]@{ Success = $false; Error = 'المدة يجب أن تكون من 0 إلى 1440 دقيقة.'; BackupPath = '' }
+        return [pscustomobject]@{ Success = $false; Error = (T 'tpl.durationRange'); BackupPath = '' }
     }
     $path = Get-TemplateRegistryFilePath
     try {
@@ -637,8 +637,8 @@ function Get-CinegyLayerDashboard {
 function Format-CinegyLayerDashboard {
     param([Parameter(Mandatory)][object[]]$LayerStatuses)
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add('🎚 حالة طبقات Cinegy:')
-    $lines.Add('الإجراءات: 🙈 إخفاء = يخفي الطبقة فورًا | 🔄 تحديث = يعيد فحص كل الطبقات')
+    $lines.Add((T 'tpl.layerState'))
+    $lines.Add((T 'tpl.layerActions'))
     $lines.Add('')
 
     foreach ($status in @($LayerStatuses | Sort-Object Layer)) {
@@ -669,7 +669,7 @@ function Format-CinegyLayerDashboard {
         else {
             $activeName = [string](Get-JsonProp $status 'ActiveTemplateName')
             if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = [string](Get-JsonProp $status 'ActiveName') }
-            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = 'مشهد غير مسمّى' }
+            if ([string]::IsNullOrWhiteSpace($activeName)) { $activeName = (T 'tpl.unnamedScene') }
             $lines.Add("🟠 $(Get-LayerDisplayName -Layer $layer): $activeName (خارجي)")
         }
     }
@@ -685,10 +685,10 @@ function Format-CinegyLayerDashboard {
         if ($outputState) { $parts.Add("الخرج $outputState") }
         if ($licenseState) { $parts.Add("الترخيص $licenseState") }
         if ($clientConnected) {
-            if (-not $clientIdentity) { $clientIdentity = 'متصل' }
+            if (-not $clientIdentity) { $clientIdentity = (T 'tpl.connected') }
             $parts.Add("العميل $clientIdentity")
         }
-        else { $parts.Add('العميل غير متصل') }
+        else { $parts.Add((T 'tpl.clientOffline')) }
         if ($parts.Count -gt 0) { $lines.Add('• ' + ($parts -join ' | ')) }
     }
     return ($lines -join "`n")
@@ -697,10 +697,10 @@ function Format-CinegyLayerDashboard {
 function Format-CinegyTelemetryStatus {
     param([Parameter(Mandatory)]$Telemetry)
     if (-not $Telemetry.Success) {
-        return "⚠️ صحة Cinegy: غير معروفة (تعذّر قراءة metrics)"
+        return (T 'tpl.healthUnknownMetrics')
     }
     if ($null -eq $Telemetry.Healthy) {
-        return "⚠️ صحة Cinegy: غير معروفة (لا توجد عينات)"
+        return (T 'tpl.healthUnknownSamples')
     }
     $summary = "العينات $($Telemetry.SampleCount)، الخرج $($Telemetry.OutputCount)، الساقط $($Telemetry.DroppedCount)، فقد الإدخال $($Telemetry.NoInputSignal)، أخطاء القراءة $($Telemetry.MaxReadErrorRate)%، متوسط القراءة $($Telemetry.AverageReadTime)ms، Heartbeat $($Telemetry.MaxHeartbeat)ms"
     if ($Telemetry.Healthy) { return "💚 صحة Cinegy: سليمة — $summary" }

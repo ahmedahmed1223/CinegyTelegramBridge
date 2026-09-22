@@ -267,7 +267,7 @@ function Send-HeldAirNotices {
     $pending = @($script:AirNoticeHeld[$ChatId])
     $script:AirNoticeHeld.Remove($ChatId)
     if ($pending.Count -eq 0) { return 0 }
-    $header = if ($pending.Count -eq 1) { '📣 <b>حدث أثناء انشغالك:</b>' } else { "📣 <b>حدث أثناء انشغالك ($($pending.Count)):</b>" }
+    $header = if ($pending.Count -eq 1) { (T 'air.whileBusy') } else { "📣 <b>حدث أثناء انشغالك ($($pending.Count)):</b>" }
     $body = (@($header) + $pending) -join "`n`n"
     Send-TelegramMessage -ChatId $ChatId -Text $body -ParseMode HTML -ReplyMarkup (Get-AirNoticeMuteKeyboard)
     return $pending.Count
@@ -307,7 +307,7 @@ function Send-AirCollisionWarning {
         $sameTemplate = $stateKey -and [string]::Equals($stateKey, $Key, [System.StringComparison]::OrdinalIgnoreCase)
         $sameLayer = $Layer -gt 0 -and $stateLayer -eq $Layer
         if (-not ($sameTemplate -or $sameLayer)) { continue }
-        $verb = if ($Action -eq 'hide') { 'رُفع عن الهواء' } else { 'عُرض على الهواء' }
+        $verb = if ($Action -eq 'hide') { (T 'air.takenOff') } else { (T 'air.putOn') }
         $who = if ($ActorName) { " بواسطة $(ConvertTo-TelegramHtmlText $ActorName)" } else { '' }
         Send-TelegramMessage -ChatId $chatId -ParseMode HTML `
             -Text "⚠️ <b>$(ConvertTo-TelegramHtmlText $Key) $verb$who أثناء تجهيزك.</b>`nراجع ما أعددته قبل الإرسال — قد يكون ما على الشاشة قد تغيّر."
@@ -349,7 +349,7 @@ function Get-AirNoticeMuteKeyboard {
        being interrupted without hunting for a settings screen. A bot with no
        way out is a bot muted at the operating system level, and then the
        alert that mattered is gone too. #>
-    return @{ inline_keyboard = @(, @((New-Button '🔕 أوقف تنبيهاتي' 'notice:mute'))) }
+    return @{ inline_keyboard = @(, @((New-Button (T 'air.muteMyAlerts') 'notice:mute'))) }
 }
 
 function Test-MaintenanceWindowActive {
@@ -373,7 +373,7 @@ function Test-MaintenanceControl {
     $reason = if ($scheduled -and -not $manual) {
         "🛠 نافذة الصيانة المجدولة مفتوحة ($([string](Get-Setting 'MaintenanceWindowStart'))–$([string](Get-Setting 'MaintenanceWindowEnd')))؛ أوامر الهواء متوقفة حتى نهايتها."
     }
-    else { '🛠 وضع الصيانة مفعّل؛ أوامر التحكم في الهواء متوقفة مؤقتًا.' }
+    else { (T 'air.maintenanceOn') }
     Send-TelegramMessage -ChatId $ChatId -Text $reason -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $false
 }
@@ -494,7 +494,7 @@ function Get-TemplateAirLimitExplanation {
     $effective = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $RequestedSeconds
     if ($RequestedSeconds -le 0 -or $effective -ge $RequestedSeconds -or $effective -le 0) { return '' }
     $sensitive = @([string](Get-Setting 'SensitiveTemplateKeys') -split '[,;\r\n]+' | ForEach-Object { $_.Trim() }) -contains $Key
-    $reason = if ($sensitive -and (Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1) -eq $effective) { 'سقف القالب الحسّاس' } else { 'حد القالب' }
+    $reason = if ($sensitive -and (Get-SettingInt 'SensitiveTemplateAutoHideSeconds' 1) -eq $effective) { (T 'air.sensitiveCap') } else { (T 'air.templateLimit') }
     return "⏱ المدة المطلوبة $RequestedSeconds ثانية؛ خُفّضت إلى $effective ثانية — $reason."
 }
 
@@ -562,12 +562,12 @@ function Get-VerifiedCinegyShowIdentity {
         -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not [bool](Get-JsonProp $status 'Success') -or -not [bool](Get-JsonProp $status 'IsOnAir')) {
-        return (& $failed 'لم يؤكد Cinegy أن المشهد على الهواء بعد SHOW.')
+        return (& $failed (T 'air.noConfirmAfterShow'))
     }
     $activeId = [string](Get-JsonProp $status 'ActiveId')
     $normalizedId = $activeId.Trim().Trim('{', '}')
     if ([string]::IsNullOrWhiteSpace($normalizedId) -or $normalizedId -eq '00000000-0000-0000-0000-000000000000') {
-        return (& $failed 'لم يعرض Cinegy معرّفًا نشطًا صالحًا.')
+        return (& $failed (T 'air.noActiveId'))
     }
 
     $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
@@ -589,7 +589,7 @@ function Get-VerifiedCinegyShowIdentity {
               -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
             return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation' }
         }
-        return (& $failed 'لم يعرض Cinegy اسم قالب يمكن مطابقته.')
+        return (& $failed (T 'air.noMatchableName'))
     }
     $reported = $reported.Trim()
     $reportedWithoutExtension = [IO.Path]::GetFileNameWithoutExtension($reported)
@@ -618,7 +618,7 @@ function Invoke-ShowTemplateResult {
     $operation = New-AirOperationContext -Action SHOW -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'maintenance mode'
-        return [pscustomobject]@{ Success = $false; Error = 'وضع الصيانة مفعّل.' }
+        return [pscustomobject]@{ Success = $false; Error = (T 'air.maintenanceOnShort') }
     }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
@@ -656,7 +656,7 @@ function Invoke-ShowTemplateResult {
         Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text "⛔ لم يتم الإرسال: تعذّر التحقق من حالة طبقة Cinegy $($template.Layer). أعد فحص الحالة ثم حاول مجددًا." -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText $errorText
-        return [pscustomobject]@{ Success = $false; Error = 'تعذّر التحقق من حالة طبقة Cinegy.' }
+        return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
@@ -864,24 +864,24 @@ function Invoke-ShowTemplateResult {
             $timerSaved = $activeIdConfirmed -and (Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
                     -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId $activeId -ActiveIdConfirmed $true)
             $suffix = if (-not $activeIdConfirmed) {
-                " ⚠️ لم يُضبط الإخفاء التلقائي لأن Cinegy لم يؤكد هوية المشهد؛ أخفه يدويًا."
+                (T 'air.autoHideNotSet')
             }
             elseif ($timerSaved) {
                 " سيُخفى تلقائيًا بعد $(Get-ArabicCountNoun -Count $AutoHideSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')."
             }
             else {
-                " ⚠️ تعذّر حفظ مؤقت الإخفاء؛ أخفه يدويًا."
+                (T 'air.hideTimerNotSaved')
             }
         }
         if (-not [bool](Get-JsonProp $template 'LongRunning') -and $reminderMinutes -gt 0) {
             if (-not $activeIdConfirmed) {
-                $suffix += ' ⚠️ لم يُضبط تنبيه الظهور لأن Cinegy لم يؤكد هوية المشهد.'
+                $suffix += (T 'air.appearAlertNotSet')
             }
             elseif (Set-TemplateReminder -Template $template -ChatId $ChatId -UserId $UserId -ActiveId $activeId -ActiveIdConfirmed $true) {
                 $suffix += " سيصل إليك تنبيه شخصي بعد $(Get-ArabicCountNoun -Count $reminderMinutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') إذا بقي القالب ظاهرًا."
             }
             else {
-                $suffix += ' ⚠️ تعذّر حفظ تنبيه ظهور القالب لإعادة التشغيل.'
+                $suffix += (T 'air.appearAlertNotSaved')
             }
         }
         else {
@@ -914,7 +914,7 @@ function Invoke-ShowTemplateResult {
         # Order into an empty array, whose IndexOf is -1 - no button, no throw.
         $failureIndex = [array]::IndexOf(@(Get-JsonProp $store 'Order'), $Key)
         if ($failureIndex -ge 0) {
-            $failureMenu.inline_keyboard = @(, @( (New-Button '🔍 لماذا لم يظهر؟' "whynot:$failureIndex") )) + @($failureMenu.inline_keyboard)
+            $failureMenu.inline_keyboard = @(, @( (New-Button (T 'air.whyNotShown') "whynot:$failureIndex") )) + @($failureMenu.inline_keyboard)
         }
         Send-TelegramMessage -ChatId $ChatId -Text "❌ فشل إظهار '$Key': $($result.Error)" -ReplyMarkup $failureMenu
     }
@@ -997,13 +997,13 @@ function Get-ShowFailureDiagnosisLines {
     # not about an administrator reading over their shoulder.
     if ($ChatId -gt 0) {
         $access = Test-TemplateAccess -Key $Key -Layer $layer -ChatId $ChatId -UserId $UserId
-        $lines.Add($(if ($access.Allowed) { '✅ هذا القالب مسموح لك.' } else { "⛔ القالب ممنوع عليك: $(ConvertTo-TelegramHtmlText ([string]$access.Reason))" }))
+        $lines.Add($(if ($access.Allowed) { (T 'air.templateAllowed') } else { "⛔ القالب ممنوع عليك: $(ConvertTo-TelegramHtmlText ([string]$access.Reason))" }))
     }
 
     # 5. The two switches that stop everything, named rather than left to be
     # discovered on the settings screen.
-    if ([bool](Get-Setting 'MaintenanceMode')) { $lines.Add('🛠 وضع الصيانة مفعّل — كل أوامر الهواء موقوفة.') }
-    elseif (Test-MaintenanceWindowActive) { $lines.Add('🛠 نافذة الصيانة المجدولة مفتوحة الآن — أوامر الهواء موقوفة حتى نهايتها.') }
+    if ([bool](Get-Setting 'MaintenanceMode')) { $lines.Add((T 'air.maintenanceAllStopped')) }
+    elseif (Test-MaintenanceWindowActive) { $lines.Add((T 'air.maintenanceWindowOpen')) }
 
     # 6. A sibling on the same layer can never be up with it, and the clash
     # reads as a mysterious replacement rather than a rule.
@@ -1029,7 +1029,7 @@ function Get-ShowFailureDiagnosisText {
     $lines.Add('')
     foreach ($line in @(Get-ShowFailureDiagnosisLines -Key $Key -ChatId $ChatId -UserId $UserId -Now $Now)) { $lines.Add($line) }
     $lines.Add('')
-    $lines.Add('<i>فحص قراءة فقط: لم يُرسل شيء إلى Cinegy لإعداد هذه الشاشة.</i>')
+    $lines.Add((T 'air.readOnlyCheck'))
     return ($lines -join "`n")
 }
 

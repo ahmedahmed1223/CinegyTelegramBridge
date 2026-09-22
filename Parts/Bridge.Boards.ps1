@@ -301,8 +301,8 @@ function Get-BoardsKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $navigation = @()
-        if ($window.HasPrevious) { $navigation += (New-Button '⬅️ السابق' "boards:page:$($window.Page - 1)") }
-        if ($window.HasNext) { $navigation += (New-Button 'التالي ➡️' "boards:page:$($window.Page + 1)") }
+        if ($window.HasPrevious) { $navigation += (New-Button (T 'common.previous') "boards:page:$($window.Page - 1)") }
+        if ($window.HasNext) { $navigation += (New-Button (T 'common.next') "boards:page:$($window.Page + 1)") }
         $rows += , $navigation
     }
     if (Test-Admin -ChatId $ChatId -UserId $UserId) {
@@ -351,8 +351,8 @@ function Get-BoardScreenKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $navigation = @()
-        if ($window.HasPrevious) { $navigation += (New-Button '⬅️ السابق' "boards:bp:$boardId`:$($window.Page - 1)") }
-        if ($window.HasNext) { $navigation += (New-Button 'التالي ➡️' "boards:bp:$boardId`:$($window.Page + 1)") }
+        if ($window.HasPrevious) { $navigation += (New-Button (T 'common.previous') "boards:bp:$boardId`:$($window.Page - 1)") }
+        if ($window.HasNext) { $navigation += (New-Button (T 'common.next') "boards:bp:$boardId`:$($window.Page + 1)") }
         $rows += , $navigation
     }
     if (Test-BoardEditAllowed -Board $Board -ChatId $ChatId -UserId $UserId) {
@@ -418,7 +418,7 @@ function Get-BoardItemKeyboard {
             $rows += , @( (New-Button (T 'boards.live') 'boards:noop' -Style primary), (New-Button (T 'boards.hide') "boards:hide:$boardId`:$itemId" -Style danger) )
         }
         else {
-            $rows += , @( (New-Button '▶️ اعرض الآن' "boards:show:$boardId`:$itemId" -Style success) )
+            $rows += , @( (New-Button (T 'board.showNow') "boards:show:$boardId`:$itemId" -Style success) )
         }
     }
     if (Test-BoardEditAllowed -Board $Board -ChatId $ChatId -UserId $UserId) {
@@ -433,13 +433,13 @@ function Get-BoardItemKeyboard {
         }
     }
     $enabled = [bool](Get-BoardProperty $Item 'Enabled' $true)
-    $stateRow = @( (New-Button $(if ($enabled) { '🚫 تعطيل' } else { '✅ تفعيل' }) "boards:en:$boardId`:$itemId") )
+    $stateRow = @( (New-Button $(if ($enabled) { (T 'board.disable') } else { (T 'urgent.enable') }) "boards:en:$boardId`:$itemId") )
     if (Test-BoardEditAllowed -Board $Board -ChatId $ChatId -UserId $UserId) {
-        $stateRow += (New-Button '🗑 حذف' "boards:rm:$boardId`:$itemId" -Style danger)
+        $stateRow += (New-Button (T 'common.delete') "boards:rm:$boardId`:$itemId" -Style danger)
     }
     $rows += , $stateRow
     $rows += , @( (New-Button '⬆️' "boards:mv:$boardId`:$itemId`:-1"), (New-Button '⬇️' "boards:mv:$boardId`:$itemId`:1") )
-    $rows += , @( (New-Button '⬅️ الجدول' "boards:b:$boardId"), (New-Button '🏠 القائمة' 'menu:main') )
+    $rows += , @( (New-Button (T 'board.backToBoard') "boards:b:$boardId"), (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -458,7 +458,7 @@ function Show-BoardItemScreen {
     $values = Get-BoardProperty $item 'Values' $null
     foreach ($field in @(Get-BoardTextFields -TemplateKey $key)) {
         $value = [string](Get-BoardProperty $values $field '')
-        $shown = if ($value) { ConvertTo-TelegramHtmlText $value } else { '<i>(فارغ)</i>' }
+        $shown = if ($value) { ConvertTo-TelegramHtmlText $value } else { (T 'board.empty') }
         $lines += "• <b>$(ConvertTo-TelegramHtmlText $field)</b>: $shown"
     }
     # Listed, never editable, and said out loud. Silence here would read as a
@@ -466,12 +466,12 @@ function Show-BoardItemScreen {
     $media = @(Get-BoardMediaFields -TemplateKey $key)
     if ($media.Count -gt 0) {
         $lines += ''
-        $lines += "🖼 $(ConvertTo-TelegramHtmlText ($media -join '، ')) — من المشهد، لا تُملأ من هنا."
+        $lines += "🖼 $(ConvertTo-TelegramHtmlText ($media -join (T 'common.comma'))) — من المشهد، لا تُملأ من هنا."
     }
     $orphans = @(Get-BoardOrphanFields -Item $item -TextFields @(Get-BoardTextFields -TemplateKey $key))
     if ($orphans.Count -gt 0) {
         $lines += ''
-        $lines += (T 'boards.orphan' (ConvertTo-TelegramHtmlText ($orphans -join '، ')))
+        $lines += (T 'boards.orphan' (ConvertTo-TelegramHtmlText ($orphans -join (T 'common.comma'))))
     }
     $ceiling = Get-EffectiveAutoHideSeconds -Key $key -RequestedSeconds 0
     if ($ceiling -gt 0) {
@@ -500,8 +500,8 @@ function Get-BoardTemplatePickerKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $navigation = @()
-        if ($window.HasPrevious) { $navigation += (New-Button '⬅️ السابق' "boards:pickp:$($window.Page - 1)") }
-        if ($window.HasNext) { $navigation += (New-Button 'التالي ➡️' "boards:pickp:$($window.Page + 1)") }
+        if ($window.HasPrevious) { $navigation += (New-Button (T 'common.previous') "boards:pickp:$($window.Page - 1)") }
+        if ($window.HasNext) { $navigation += (New-Button (T 'common.next') "boards:pickp:$($window.Page + 1)") }
         $rows += , $navigation
     }
     $rows += , @( (New-Button (T 'common.cancel') 'boards:open') )

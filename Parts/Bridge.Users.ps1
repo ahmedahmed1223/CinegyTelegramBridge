@@ -37,11 +37,11 @@ function Receive-TelegramDocument {
     )
     $metadata = Invoke-RestMethod -Uri "$apiBase/getFile?file_id=$([uri]::EscapeDataString($FileId))" -Method Get `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)
-    if (-not (Get-JsonProp $metadata 'ok')) { throw 'Telegram رفض طلب معلومات الملف.' }
+    if (-not (Get-JsonProp $metadata 'ok')) { throw (T 'usr.fileInfoRefused') }
     $result = Get-JsonProp $metadata 'result'
     $remotePath = [string](Get-JsonProp $result 'file_path')
     if ([string]::IsNullOrWhiteSpace($remotePath) -or $remotePath.Contains('..') -or $remotePath -notmatch '^[A-Za-z0-9_./-]+$') {
-        throw 'Telegram أعاد مسار ملف غير صالح.'
+        throw (T 'usr.badFilePath')
     }
     $reportedSize = Get-JsonProp $result 'file_size'
     if ($null -ne $reportedSize -and ([long]$reportedSize -le 0 -or [long]$reportedSize -gt $MaximumBytes)) {
@@ -162,7 +162,7 @@ function Register-TelegramSendFailure {
     # An admin that stops receiving is itself an outage: everyone else hears
     # urgently, because a held quiet-hours digest about missing alerts is how
     # a dead admin stays dead unnoticed.
-    $keyboard = @{ inline_keyboard = @(, @((New-Button '✅ إعادة تفعيل' "deadchat:un:$ChatId"))) }
+    $keyboard = @{ inline_keyboard = @(, @((New-Button (T 'usr.reEnable') "deadchat:un:$ChatId"))) }
     Send-AdminBroadcast -Text "💀 المحادثة «$name» ($ChatId) لا تستقبل من البوت ($StatusCode) — أُوقف الإرسال لها. أعد التفعيل بعد إصلاحها أو اسحب صلاحيتها من شاشة المستخدمين." `
         -ReplyMarkup $keyboard -Urgent:$isAdmin
 }
@@ -195,11 +195,11 @@ function Test-DeadChatDelivery {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $id = [string]$TargetChatId
     if (-not $script:DeadChats.ContainsKey($id)) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'هذه المحادثة ليست محجورة الآن.' -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'usr.notQuarantined') -ReplyMarkup (Get-UsersAdminKeyboard -ViewerUserId $UserId)
         return
     }
     $probe = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post `
-        -Body @{ chat_id = $TargetChatId; text = '🔔 اختبار استلام من البوت — تجاهل هذه الرسالة.' } `
+        -Body @{ chat_id = $TargetChatId; text = (T 'usr.deliveryTest') } `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
     if ($probe.Success) {
         Restore-DeadChat -ChatId $TargetChatId
@@ -228,9 +228,9 @@ function Show-DeadChatsScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $ids = @($script:DeadChats.Keys | Sort-Object { [long]$_ })
-    $back = @{ inline_keyboard = @(, @((New-Button '⬅️ المستخدمون' 'menu:usersadmin'))) }
+    $back = @{ inline_keyboard = @(, @((New-Button (T 'usr.backToUsers') 'menu:usersadmin'))) }
     if ($ids.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '💀 لا محادثات ميتة — كل القائمة تستقبل.' -ReplyMarkup $back
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'usr.noDeadChats') -ReplyMarkup $back
         return
     }
     # Buttons grow three per chat, so the rows are paged like the users roster -
@@ -251,15 +251,15 @@ function Show-DeadChatsScreen {
         $name = ConvertTo-TelegramHtmlText (Get-UserDisplayName -UserId $target)
         $why = ConvertTo-TelegramHtmlText ([string](Get-JsonProp $entry 'LastError'))
         $lines.Add("• $name (<code>$id</code>) · منذ $since`n  $why")
-        $rows += , @((New-Button '✅ إعادة تفعيل' "deadchat:un:$target"), (New-Button '🔍 اختبار' "deadchat:probe:$target"), (New-Button '⛔ سحب الصلاحية' "deadchat:revoke:$target"))
+        $rows += , @((New-Button (T 'usr.reEnable') "deadchat:un:$target"), (New-Button (T 'usr.test') "deadchat:probe:$target"), (New-Button (T 'usr.revoke') "deadchat:revoke:$target"))
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "deadchat:page:$($window.Page - 1)") }
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "deadchat:page:$($window.Page + 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "deadchat:page:$($window.Page - 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "deadchat:page:$($window.Page + 1)") }
         $rows += , $pager
     }
-    $rows += , @((New-Button '⬅️ المستخدمون' 'menu:usersadmin'))
+    $rows += , @((New-Button (T 'usr.backToUsers') 'menu:usersadmin'))
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup @{ inline_keyboard = $rows } -ParseMode HTML
 }
 
@@ -522,10 +522,10 @@ function Get-UnauthorizedReplyText {
        say it. Empty means say nothing: the join-code prompt has already gone
        out, and a second line contradicting it only confuses. #>
     param([Parameter(Mandatory)][long]$ChatId, [bool]$Queued)
-    if ($Queued) { return 'غير مصرح لك باستخدام هذا البوت بعد. تم إرسال طلب وصول إلى المشرف - ستصلك رسالة فور الموافقة.' }
+    if ($Queued) { return (T 'usr.notAuthorisedYet') }
     $state = Get-PendingState -ChatId $ChatId
     if ($state -and [string]$state.Mode -eq 'join_secret') { return '' }
-    return 'غير مصرح لك باستخدام هذا البوت. تواصل مع المشرف مباشرة.'
+    return (T 'usr.notAuthorised')
 }
 
 function Get-UserIdleDays {
@@ -566,10 +566,10 @@ function Update-DormantUsers {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("😴 مستخدمون بلا نشاط منذ $days يومًا أو أكثر:")
     foreach ($user in $dormant) {
-        $disabled = if ($auto -and (Set-UserDisabled -TargetUserId ([long]$user.UserId) -Disabled $true)) { ' · تم تعطيله' } else { '' }
+        $disabled = if ($auto -and (Set-UserDisabled -TargetUserId ([long]$user.UserId) -Disabled $true)) { (T 'usr.wasDisabled') } else { '' }
         $lines.Add("• $($user.Alias) ($($user.UserId)) · $(Get-UserIdleDays -User $user -Now $Now) يومًا$disabled")
     }
-    $lines.Add($(if ($auto) { 'أعد التفعيل من 👥 المستخدمين عند الحاجة.' } else { 'التعطيل التلقائي مغلق؛ فعّل AutoDisableDormantUsers إن أردته.' }))
+    $lines.Add($(if ($auto) { (T 'usr.reEnableWhenNeeded') } else { (T 'usr.autoDisableOff') }))
     Send-AdminBroadcast -Text ($lines -join "`n") | Out-Null
     Write-BridgeLog "Dormant sweep: $($dormant.Count) user(s) idle $days+ days, auto-disable=$auto"
     return $dormant
@@ -648,10 +648,10 @@ function Test-UserDisabled {
 function Revoke-AuthorizedUser {
     param([Parameter(Mandatory)][long]$TargetUserId)
     if ((Get-OwnerIds) -contains $TargetUserId) {
-        return [pscustomobject]@{ Success = $false; Error = 'لا يمكن سحب صلاحية المالك.' }
+        return [pscustomobject]@{ Success = $false; Error = (T 'usr.cannotRevokeOwner') }
     }
     $admins = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') | Where-Object { [long]$_ -gt 0 } | Sort-Object -Unique)
-    if ($admins -contains $TargetUserId -and $admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن سحب صلاحية آخر مشرف.' } }
+    if ($admins -contains $TargetUserId -and $admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.cannotRevokeLastAdmin') } }
     foreach ($name in @('AllowedChatIds', 'AllowedUserIds', 'AdminChatIds', 'AdminUserIds')) {
         $remaining = @(@(Get-JsonProp $config $name) | Where-Object { [long]$_ -ne $TargetUserId })
         $config | Add-Member -NotePropertyName $name -NotePropertyValue $remaining -Force
@@ -685,7 +685,7 @@ function Request-UserRevocation {
     param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$AdminUserId)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'user_revoke'; TargetUserId = $TargetUserId; UserId = $AdminUserId }
     Send-TelegramMessage -ChatId $ChatId -Text "⚠️ تأكيد سحب صلاحية $(Get-UserDisplayName -UserId $TargetUserId) ($TargetUserId)؟" `
-        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button '✅ نعم، اسحب الصلاحية' 'usr:revokeconfirm' -Style danger), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
+        -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'usr.yesRevoke') 'usr:revokeconfirm' -Style danger), (New-Button (T 'common.cancel') 'menu:usersadmin'))) }
 }
 
 function Test-Authorized {
@@ -719,7 +719,7 @@ function Get-UserActivityStatus {
     param([AllowEmptyString()][string]$LastActivityAt = '', [datetime]$Now = (Get-Date), [ValidateRange(1, 1440)][int]$ActiveWithinMinutes = 5)
     $last = [datetime]::MinValue
     if ([string]::IsNullOrWhiteSpace($LastActivityAt) -or -not [datetime]::TryParse($LastActivityAt, [ref]$last)) {
-        return [pscustomobject]@{ State = 'unknown'; Label = '⚪ النشاط غير معروف'; AgeMinutes = $null }
+        return [pscustomobject]@{ State = 'unknown'; Label = (T 'usr.activityUnknown'); AgeMinutes = $null }
     }
     $ageMinutes = [math]::Max(0, [int][math]::Floor(($Now - $last).TotalMinutes))
     # Through the formatter, not "$ageMinutes د". An account last seen on
@@ -743,7 +743,7 @@ function Get-UserActivitySummaryText {
     # reading as one more line of it. Aliases are typed by an administrator
     # and escaped like any other human text.
     $lines.Add("<b>👥 نشاط المستخدمين التقريبي</b> · النافذة <code>$windowMinutes</code> د")
-    $lines.Add('<i>Telegram لا يوفّر حالة اتصال لحظية؛ الحالة مبنية على آخر تفاعل مع البوت.</i>')
+    $lines.Add((T 'usr.noLiveStatus'))
     $rows = @(@(Get-AuthorizedUsers) | ForEach-Object {
             $activity = Get-UserActivityStatus -LastActivityAt ([string]$_.LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
             "• <b>$(ConvertTo-TelegramHtmlText ([string]$_.Alias))</b>: $(ConvertTo-TelegramHtmlText ([string]$activity.Label))"
@@ -762,7 +762,7 @@ function Get-UserActivitySummaryText {
 function Get-UserActivityDetailText {
     param([Parameter(Mandatory)][long]$TargetUserId, [datetime]$Now = (Get-Date))
     $user = @(Get-AuthorizedUsers | Where-Object { [long]$_.UserId -eq $TargetUserId } | Select-Object -First 1)
-    if ($user.Count -eq 0) { return '<i>المستخدم لم يعد ضمن قائمة المصرح لهم.</i>' }
+    if ($user.Count -eq 0) { return (T 'usr.userGoneHtml') }
     $windowMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
     $activity = Get-UserActivityStatus -LastActivityAt ([string]$user[0].LastActivityAt) -Now $Now -ActiveWithinMinutes $windowMinutes
     return "<b>👤 $(ConvertTo-TelegramHtmlText ([string]$user[0].Alias))</b>`n$(ConvertTo-TelegramHtmlText ([string]$activity.Label))`n<i>الحالة تقريبية حسب آخر تفاعل مع البوت؛ Telegram لا يوفّر اتصالًا لحظيًا للبوت.</i>"
@@ -840,22 +840,22 @@ function Set-AdminRole {
             never doubles as a way in.
     #>
     param([Parameter(Mandatory)][long]$TargetUserId, [Parameter(Mandatory)][bool]$IsAdmin)
-    if ($TargetUserId -le 0) { return [pscustomobject]@{ Success = $false; Error = 'معرّف مستخدم غير صالح.' } }
+    if ($TargetUserId -le 0) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.badUserId') } }
 
     $admins = @(@(Get-JsonProp $config 'AdminUserIds') + @(Get-JsonProp $config 'AdminChatIds') |
             Where-Object { [long]$_ -gt 0 } | ForEach-Object { [long]$_ } | Sort-Object -Unique)
 
     if ($IsAdmin) {
-        if ($admins -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'هذا المستخدم مشرف بالفعل.' } }
+        if ($admins -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.alreadyAdmin') } }
         $authorized = @(@(Get-JsonProp $config 'AllowedUserIds') + @(Get-JsonProp $config 'AllowedChatIds') |
                 Where-Object { [long]$_ -gt 0 } | ForEach-Object { [long]$_ })
-        if ($authorized -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن ترقية مستخدم غير مصرّح له.' } }
+        if ($authorized -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.cannotPromoteUnauthorised') } }
         $updated = @($admins + $TargetUserId | Sort-Object -Unique)
     }
     else {
-        if ($admins -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'هذا المستخدم ليس مشرفًا.' } }
-        if ((Get-OwnerIds) -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن خفض صلاحية المالك.' } }
-        if ($admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = 'لا يمكن خفض آخر مشرف.' } }
+        if ($admins -notcontains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.notAnAdmin') } }
+        if ((Get-OwnerIds) -contains $TargetUserId) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.cannotDemoteOwner') } }
+        if ($admins.Count -le 1) { return [pscustomobject]@{ Success = $false; Error = (T 'usr.cannotDemoteLastAdmin') } }
         $updated = @($admins | Where-Object { $_ -ne $TargetUserId })
     }
 
@@ -916,7 +916,7 @@ function Request-AdminRoleChange {
     }
     else { "⚠️ خفض $alias ($TargetUserId) إلى مشغّل؟`nستُسحب منه أدوات الإدارة كلها." }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup @{ inline_keyboard = @(, @(
-                (New-Button '✅ تأكيد' 'usr:roleconfirm' -Style success), (New-Button '❌ إلغاء' 'menu:usersadmin'))) }
+                (New-Button (T 'usr.confirm') 'usr:roleconfirm' -Style success), (New-Button (T 'common.cancel') 'menu:usersadmin'))) }
 }
 
 function Test-TelegramPrivateChat {

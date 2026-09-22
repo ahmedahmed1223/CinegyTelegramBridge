@@ -293,9 +293,9 @@ function Get-UrgentAutoHideLabel {
     $maximum = 0
     $raw = Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $script:MojazUrgentKey
     if ([int]::TryParse([string]$raw, [ref]$maximum) -and $maximum -gt 0 -and $maximum -eq $Seconds) {
-        return 'الحد الأقصى للقالب'
+        return (T 'urg.templateCeiling')
     }
-    return 'الإخفاء التلقائي للقالب الحسّاس'
+    return (T 'urg.sensitiveAutoHide')
 }
 
 function New-UrgentBoardPlan {
@@ -316,7 +316,7 @@ function New-UrgentBoardPlan {
         -MaxSeconds $ceiling.Seconds -MaxReason $ceiling.Reason
     if ($result.Success -and $ceiling.Reason -eq 'autohide') {
         $label = Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds
-        $result.Value.Notes = @($result.Value.Notes | ForEach-Object { $_.Replace('الإخفاء التلقائي للقالب الحسّاس', $label) })
+        $result.Value.Notes = @($result.Value.Notes | ForEach-Object { $_.Replace((T 'urg.sensitiveAutoHide'), $label) })
     }
     return $result
 }
@@ -544,9 +544,9 @@ function Get-UrgentBoardKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $nav = @()
-        if ($window.HasPrevious) { $nav += (New-Button '⬅️ السابق' "urgentb:page:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $nav += (New-Button (T 'common.previous') "urgentb:page:$($window.Page - 1)") }
         $nav += (New-Button "$($window.Page + 1)/$($window.PageCount)" 'urgentb:noop')
-        if ($window.HasNext) { $nav += (New-Button 'التالي ➡️' "urgentb:page:$($window.Page + 1)") }
+        if ($window.HasNext) { $nav += (New-Button (T 'common.next') "urgentb:page:$($window.Page + 1)") }
         $rows += , $nav
     }
     # Table-level controls
@@ -580,7 +580,7 @@ function Get-UrgentBoardKeyboard {
         $rows += , $playRow
         $rows += , @((New-Button (T 'urgent.playNextReady') 'urgentb:next' -Style success))
     }
-    $rows += , @( (New-Button '🔄 تحديث' 'urgentb:open'), (New-Button '⬅️ القائمة' 'menu:main') )
+    $rows += , @( (New-Button (T 'urg.refresh') 'urgentb:open'), (New-Button (T 'adm.menu') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -622,7 +622,7 @@ function Get-UrgentBoardBlocks {
     $runStatus = Get-UrgentRunStatusText
     if ($runStatus) { $blocks += @{ type = 'paragraph'; text = $runStatus } }
 
-    $order = if ([string](Get-UrgentProperty $defaults 'RepeatMode' 'cycle') -eq 'item') { '١ ١ · ٢ ٢' } else { '١ ٢ ٣ · ١ ٢ ٣' }
+    $order = if ([string](Get-UrgentProperty $defaults 'RepeatMode' 'cycle') -eq 'item') { (T 'urg.pairPattern') } else { (T 'urg.roundPattern') }
     $total = [int](Get-UrgentProperty $defaults 'TotalSeconds' 0)
     $totalText = if ($total -gt 0) { "$total ث" } else { (T 'urgent.noCeiling') }
     $blocks += @{ type = 'paragraph'; text = "الافتراضي: $(Get-UrgentModeLabel -Mode ([string](Get-UrgentProperty $defaults 'Mode' 'text'))) · فاصل $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) ث · $([int](Get-UrgentProperty $defaults 'Repeats' 1)) دورة ($order) · المدة $totalText" }
@@ -779,7 +779,7 @@ function Get-UrgentItemKeyboard {
     $rows += , $repeatRow
     $enabled = [bool](Get-UrgentProperty $item 'Enabled' $true)
     $toggle = if ($enabled) { (T 'urgent.disable') } else { (T 'urgent.enable') }
-    $rows += , @( (New-Button $toggle "urgentb:enable:$itemId"), (New-Button '🗑 حذف' "urgentb:itemdel:$itemId" -Style danger) )
+    $rows += , @( (New-Button $toggle "urgentb:enable:$itemId"), (New-Button (T 'common.delete') "urgentb:itemdel:$itemId" -Style danger) )
     $rows += , @( (New-Button (T 'urgent.moveUp') "urgentb:up:$itemId"), (New-Button (T 'urgent.moveDown') "urgentb:down:$itemId") )
     $boardPage = [int][math]::Floor($Position / (Get-UrgentBoardPageSize))
     $rows += , @( (New-Button (T 'urgent.back') "urgentb:page:$boardPage") )
@@ -816,9 +816,9 @@ function Show-UrgentManualConfirm {
         if ($currentText.Length -gt 120) { $currentText = $currentText.Substring(0, 119) + '…' }
         $text += "`n⚠️ سيتم استبدال الخبر الحالي:`n«$currentText»`nبالخبر:`n«$($state.Text)»"
     }
-    if ($state.HadRun) { $text += "`nسيُوقف الجدول التلقائي أولًا؛ إن فشل الإيقاف فلن يُعرض الخبر." }
+    if ($state.HadRun) { $text += (T 'urg.boardStopsFirst') }
     if (-not $state.LiveStamp) { $text += "`n`n$($state.Text)" }
-    if ($text.Length -gt 3900) { $text = $text.Substring(0,3800) + "`n… اقرأ النص الكامل من زر العودة قبل التأكيد." }
+    if ($text.Length -gt 3900) { $text = $text.Substring(0,3800) + (T 'urg.readFullText') }
     $markup = @{ inline_keyboard = @(
         , @((New-Button (T 'urgent.showThisOne') "urgmanual:show:$($state.Token)" -Style success))
         , @((New-Button (T 'urgent.backNoShow') "urgread:${ItemId}:0"))
@@ -967,9 +967,9 @@ function Show-UrgentItemScreen {
         }
     }
     $lines += ''
-    $lines += "العرض: $(Get-UrgentModeLabel -Mode $timing.Mode)$(if ($timing.ModeInherited) { ' (من الجدول)' } else { '' })"
-    $lines += "الفاصل: $($timing.HoldSeconds) ث$(if ($timing.IntervalInherited) { ' (من الجدول)' } else { '' })"
-    $lines += "التكرار: $($timing.Repeats)$(if ($timing.RepeatsInherited) { ' (من الجدول)' } else { '' })"
+    $lines += "العرض: $(Get-UrgentModeLabel -Mode $timing.Mode)$(if ($timing.ModeInherited) { (T 'urg.fromTheBoard') } else { '' })"
+    $lines += "الفاصل: $($timing.HoldSeconds) ث$(if ($timing.IntervalInherited) { (T 'urg.fromTheBoard') } else { '' })"
+    $lines += "التكرار: $($timing.Repeats)$(if ($timing.RepeatsInherited) { (T 'urg.fromTheBoard') } else { '' })"
     if ($timing.IntervalRaisedToFloor) { $lines += "⚠️ رُفع الفاصل إلى $($timing.HoldSeconds) ث: أقصر ممّا يسمح به المشهد." }
     if ($timing.Mode -eq 'text' -and -not (Test-UrgentSceneLoop)) { $lines += (T 'urgent.noLoopSwap') }
     $disabledReason = [string](Get-UrgentProperty $item 'DisabledReason' '')
@@ -1061,7 +1061,7 @@ function Show-UrgentReviewScreen {
     if (-not (Test-UrgentSceneLoop) -and $textSteps.Count -gt 0) {
         $rows += , @( (New-Button (T 'urgent.fixLoop') 'urgentb:timing' -Style primary) )
     }
-    $rows += , @( (New-Button '⬅️ رجوع' 'urgentb:open') )
+    $rows += , @( (New-Button (T 'kb.back') 'urgentb:open') )
     $text = $lines -join "`n"
     $keyboard = @{ inline_keyboard = $rows }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return $true }
@@ -1178,7 +1178,7 @@ function Show-UrgentDeleteConfirm {
     $token = [guid]::NewGuid().ToString('N').Substring(0, 12)
     Set-PendingState -ChatId $ChatId -State @{ Mode = 'urgent_delete_confirm'; Token = $token; ItemIds = @($selected); StartedAt = (Get-Date) }
     $rows += , @( (New-Button "🗑 احذف $($selected.Count)" "urgentb:delconfirm:$token" -Style danger) )
-    $rows += , @( (New-Button '⬅️ رجوع' 'urgentb:open') )
+    $rows += , @( (New-Button (T 'kb.back') 'urgentb:open') )
     Send-TelegramMessage -ChatId $ChatId -Text "🗑 حذف $($selected.Count) عاجلًا من الجدول؟" -ReplyMarkup @{ inline_keyboard = $rows }
     return $true
 }

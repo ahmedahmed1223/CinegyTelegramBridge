@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Dot-sourced by TelegramBridge.ps1. NOT a module: these functions must
     share the bridge script's scope and $script: state.
@@ -30,12 +30,12 @@ function Start-MojazPlayback {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:MojazPlayback) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز يعمل بالفعل.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.alreadyRunning')
         return $false
     }
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز غير موجود.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notThere')
         return $false
     }
     # The urgent outranks the bulletin, so starting one underneath it is a
@@ -68,7 +68,7 @@ function Start-MojazPlayback {
     }
     $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule -OffsetSeconds $syncOffset
     if (-not $snapshotResult.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الجدول فارغ.' -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.boardEmpty') -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
     $snapshot = $snapshotResult.Value
@@ -79,7 +79,7 @@ function Start-MojazPlayback {
     $templateImage = Get-MojazTemplateImage
     $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) -ChatId $ChatId -UserId $UserId
     if (-not $result -or -not $result.Success) {
-        $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { 'تعذّر العرض' }
+        $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'mjp.showFailed') }
         Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ الموجز: $reason" -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
@@ -197,7 +197,7 @@ function Set-MojazPlaybackStopFailed {
     Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Bulletin exit could not be confirmed; the run is frozen and still stoppable." 'WARN'
     if ($ChatId -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر تأكيد خروج الموجز. جُمّد التشغيل؛ أعد محاولة الإيقاف وتحقّق من الطبقة.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.exitUnconfirmed')
     }
     return $false
 }
@@ -429,7 +429,7 @@ function Update-MojazPendingUrgent {
     if (-not $script:MojazPendingUrgent) { return $false }
     $pending = $script:MojazPendingUrgent
     $script:MojazPendingUrgent = $null
-    Send-TelegramMessage -ChatId ([long]$pending.ChatId) -Text '▶️ انتهى الموجز — يُرسل العاجل الآن.'
+    Send-TelegramMessage -ChatId ([long]$pending.ChatId) -Text (T 'mjp.endedUrgentNow')
     Invoke-ShowTemplateResult -Key ([string]$pending.Key) -Variables ([hashtable]$pending.Variables) `
         -ChatId ([long]$pending.ChatId) -UserId ([long]$pending.UserId) -AutoHideSeconds ([int]$pending.AutoHideSeconds) | Out-Null
     return $true
@@ -439,9 +439,9 @@ function Get-MojazUrgentConflictKeyboard {
     <# Asked before the urgent goes out, while a bulletin is running. "Now" is
        first because that is what an urgent usually means. #>
     return @{ inline_keyboard = @(
-            , @( (New-Button '🚨 الآن — يخرج الموجز' 'urgent:now' -Style danger) )
-            , @( (New-Button '⏳ بعد انتهاء الموجز' 'urgent:after') )
-            , @( (New-Button '❌ إلغاء' 'cancel') )
+            , @( (New-Button (T 'mjp.nowBulletinLeaves') 'urgent:now' -Style danger) )
+            , @( (New-Button (T 'mjp.afterBulletinEnds') 'urgent:after') )
+            , @( (New-Button (T 'common.cancel') 'cancel') )
         ) }
 }
 
@@ -449,9 +449,9 @@ function Get-MojazUrgentWaitKeyboard {
     <# Asked before the bulletin starts, while the urgent is on air. Waiting
        is first here: the bulletin is the thing that yields. #>
     return @{ inline_keyboard = @(
-            , @( (New-Button '⏳ بعد خروج العاجل' 'mojaz:playafter' -Style success) )
-            , @( (New-Button '▶️ ابدأ الآن رغم العاجل' 'mojaz:playnow') )
-            , @( (New-Button '❌ إلغاء' 'mojaz:refresh') )
+            , @( (New-Button (T 'mjp.afterUrgentLeaves') 'mojaz:playafter' -Style success) )
+            , @( (New-Button (T 'mjp.startDespiteUrgent') 'mojaz:playnow') )
+            , @( (New-Button (T 'common.cancel') 'mojaz:refresh') )
         ) }
 }
 
@@ -468,7 +468,7 @@ function Start-MojazAfterUrgent {
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return $false }
     if (-not (Add-MojazSchedule -BulletinId ([string]$bulletin.Id) -ScheduledAt ([datetimeoffset]::Now) -ChatId $ChatId -UserId $UserId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر حجز الموعد. لم يتغيّر شيء.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.slotNotHeld')
         return $false
     }
     Add-AuditEntry "⏳ تأجيل «$([string]$bulletin.Name)» إلى ما بعد العاجل - بواسطة $(Format-UserAuditActor -UserId $UserId)"
@@ -483,7 +483,7 @@ function Send-MojazPendingUrgentNow {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:MojazPendingUrgent) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد عاجل بانتظار الإرسال.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.noUrgentWaiting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
     $pending = $script:MojazPendingUrgent
@@ -498,11 +498,11 @@ function Confirm-MojazPendingUrgent {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not $script:MojazPendingUrgent) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد عاجل بانتظار الإرسال.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.noUrgentWaiting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
     Add-AuditEntry "⏳ تأجيل العاجل إلى ما بعد الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text '⏳ ينتظر العاجل انتهاء الموجز، ثم يخرج وحده.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.urgentWaits') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 
@@ -548,7 +548,7 @@ function Hide-MojazOnAir {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $template = Get-MojazTemplate
     if (-not $template) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'لا يوجد قالب للموجز.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.noTemplate') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
     if ($script:MojazPlayback) {
@@ -559,11 +559,11 @@ function Hide-MojazOnAir {
         Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId | Out-Null
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text 'الموجز ليس على الهواء.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notOnAir') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
     Add-AuditEntry "⏹ إخفاء الموجز - بواسطة $(Format-UserAuditActor -UserId $UserId)"
-    Send-TelegramMessage -ChatId $ChatId -Text '⏹ خرج الموجز.' -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.left') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
 }
 

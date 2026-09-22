@@ -140,7 +140,7 @@ function Get-MojazKeyboard {
         (New-Button "⏹ الأخير: $(Get-MojazLastRowFrames -Bulletin $Bulletin) إطار" 'mojaz:last')
     )
     $keyboard += , @(
-        (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { 'نعم · الإيقاع من اللوب' } else { 'لا · الإيقاع من المدة' })" 'mojaz:sync')
+        (New-Button "🎬 مزامنة الظهور: $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { (T 'mjz.paceFromLoop') } else { (T 'mjz.paceFromDuration') })" 'mojaz:sync')
     )
     # T-12: a warning that already computed the fix should not make the
     # operator retype it. Shown only beside the warning it answers - silent
@@ -521,7 +521,7 @@ function Send-MojazImagePrompt {
     <# One prompt for both flows; the pending mode already says which. #>
     param([Parameter(Mandatory)][long]$ChatId, [string]$Cancel = 'mojaz:refresh')
     $script:MojazImageChatId = $ChatId
-    Send-TelegramMessage -ChatId $ChatId -Text "🖼 أرسل صورة الصف (كصورة أو كملف)، أو أرسل مسارًا مثل ‎.\Mojaz\Pic01.png‎`nأو اختر أحد الأزرار." `
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.sendRowPicture') `
         -ReplyMarkup (Get-MojazImageKeyboard -Cancel $Cancel)
 }
 

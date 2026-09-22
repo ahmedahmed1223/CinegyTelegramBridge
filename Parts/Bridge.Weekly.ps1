@@ -25,7 +25,7 @@ function Get-WeeklyReportData {
     #>
     $now = Get-Date
     $window = Get-ReportPeriod -Period 'week'
-    $label = 'آخر 7 أيام'
+    $label = (T 'wk.lastSevenDays')
 
     # Screens approaching their payload cap. Get-RichPayloadPeak is the
     # runtime's own measurement: the biggest rich payload sent this run,
@@ -50,7 +50,7 @@ function Get-WeeklyReportData {
                     if ([datetime]$script:TemplateLastUsed[$name] -ge $cutoff) { continue }
                     $when = ([datetime]$script:TemplateLastUsed[$name]).ToLocalTime().ToString('MM-dd')
                 }
-                else { $when = 'أبدًا' }
+                else { $when = (T 'wk.never') }
                 $idle.Add("$name — $when")
             }
         }
@@ -135,13 +135,13 @@ function Get-WeeklyReportBlocks {
         $blocks += @{ type = 'paragraph'; text = "📐 شاشة قريبة من حدّ حجمها: <b>$(ConvertTo-HtmlText $data.PeakScreen)</b> — $($data.PeakPercent)% من الحدّ." }
     }
     else {
-        $blocks += @{ type = 'paragraph'; text = '📐 لا شاشات قريبة من حدّ حجمها.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.noScreensNearLimit') }
     }
 
     # Idle templates.
     $idle = @($data.IdleTemplates)
     if ($idle.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = '🕸 كل القوالب مستخدمة خلال آخر شهر.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.allTemplatesUsed') }
     }
     else {
         $shown = @($idle | Select-Object -First 5)
@@ -154,7 +154,7 @@ function Get-WeeklyReportBlocks {
     # Repeated failure reasons.
     $repeats = @($data.Repeats)
     if ($repeats.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = '🔁 لا فشل متكرر بنفس السبب هذا الأسبوع.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.noRepeatFailureWeek') }
     }
     else {
         $parts = @($repeats | ForEach-Object {
@@ -166,7 +166,7 @@ function Get-WeeklyReportBlocks {
     # Changed settings.
     $changed = @($data.ChangedSettings)
     if ($changed.Count -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = '⚙️ لا إعدادات معدّلة عن الافتراضي.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.noChangedSettings') }
     }
     else {
         $safe = @($changed | Select-Object -First 8 | ForEach-Object { "<code>$(ConvertTo-HtmlText ([string]$_))</code>" })
@@ -177,7 +177,7 @@ function Get-WeeklyReportBlocks {
 
     # Ticker publish summary.
     if ($data.TickerPublishes -eq 0) {
-        $blocks += @{ type = 'paragraph'; text = '📰 لم يُنشر شريط أخبار هذا الأسبوع.' }
+        $blocks += @{ type = 'paragraph'; text = (T 'wk.noTickerThisWeek') }
     }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
@@ -204,10 +204,10 @@ function Get-WeeklyReportText {
     if ($data.NearLimit) {
         $lines.Add("📐 شاشة قريبة من حدّها: <b>$(ConvertTo-HtmlText $data.PeakScreen)</b> — $($data.PeakPercent)%")
     }
-    else { $lines.Add('📐 لا شاشات قريبة من حدّ حجمها.') }
+    else { $lines.Add((T 'wk.noScreensNearLimit')) }
 
     $idle = @($data.IdleTemplates)
-    if ($idle.Count -eq 0) { $lines.Add('🕸 كل القوالب مستخدمة خلال آخر شهر.') }
+    if ($idle.Count -eq 0) { $lines.Add((T 'wk.allTemplatesUsed')) }
     else {
         $shown = @($idle | Select-Object -First 5)
         $extra = $idle.Count - 5
@@ -217,14 +217,14 @@ function Get-WeeklyReportText {
     }
 
     $repeats = @($data.Repeats)
-    if ($repeats.Count -eq 0) { $lines.Add('🔁 لا فشل متكرر بنفس السبب.') }
+    if ($repeats.Count -eq 0) { $lines.Add((T 'wk.noRepeatFailure')) }
     else {
         $parts = @($repeats | ForEach-Object { "$(ConvertTo-HtmlText $_.Cause) — $(Get-ArabicCountNoun -Count $_.Count -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times')" })
         $lines.Add("🔁 فشل متكرر: $($parts -join ' · ')")
     }
 
     $changed = @($data.ChangedSettings)
-    if ($changed.Count -eq 0) { $lines.Add('⚙️ لا إعدادات معدّلة عن الافتراضي.') }
+    if ($changed.Count -eq 0) { $lines.Add((T 'wk.noChangedSettings')) }
     else {
         $safe = @($changed | Select-Object -First 8 | ForEach-Object { "<code>$(ConvertTo-HtmlText ([string]$_))</code>" })
         $extra = $changed.Count - 8
@@ -232,7 +232,7 @@ function Get-WeeklyReportText {
         $lines.Add("⚙️ إعدادات معدّلة: $($safe -join ' ')$tail")
     }
 
-    if ($data.TickerPublishes -eq 0) { $lines.Add('📰 لم يُنشر شريط أخبار هذا الأسبوع.') }
+    if ($data.TickerPublishes -eq 0) { $lines.Add((T 'wk.noTickerThisWeek')) }
     else {
         $lastAt = if ($data.TickerLastAt) { ([datetime]$data.TickerLastAt).ToString('MM/dd HH:mm') } else { '—' }
         $lines.Add("📰 الأخبار: $(Get-ArabicCountNoun -Count $data.TickerPublishes -One 'تعديل' -Two 'تعديلان' -Few 'تعديلات' -Many 'تعديلًا' -EnglishOne 'edit' -EnglishMany 'edits') · آخر نشرة $lastAt")
@@ -240,7 +240,7 @@ function Get-WeeklyReportText {
 
     $lines.Add("🚨 العواجل: $(Get-ArabicCountNoun -Count $data.UrgentRunsStarted -One 'تشغيل' -Two 'تشغيلان' -Few 'تشغيلات' -Many 'تشغيلًا' -EnglishOne 'run' -EnglishMany 'runs') · $(Get-ArabicCountNoun -Count $data.UrgentStoriesPlayed -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines') بُثّت")
 
-    if ($data.Truncated) { $lines.Add("<i>⚠️ بلغ السجل حدّ القراءة؛ قد تكون هناك عمليات أقدم داخل المدة.</i>") }
+    if ($data.Truncated) { $lines.Add((T 'rep.readLimit')) }
     return ($lines -join "`n")
 }
 
@@ -248,8 +248,8 @@ function Get-WeeklyReportKeyboard {
     <# The digest has no period to switch - a week is the span - so the
        keyboard is just the way back to the reports menu and the main menu. #>
     return @{ inline_keyboard = @(
-            , @((New-Button '📊 التقارير' 'menu:reports'))
-            , @((New-Button '🏠 القائمة' 'menu:main'))
+            , @((New-Button (T 'wk.reports') 'menu:reports'))
+            , @((New-Button (T 'common.home') 'menu:main'))
         )
     }
 }

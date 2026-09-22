@@ -548,8 +548,8 @@ function Export-OperationLogCsv {
         $caption = "🧾 سجل العمليات — $($data.Label) · $(Get-OperationLogScopeLabel -Data $data -ViewerUserId $UserId)"
         # A partial export that does not say it is partial is worse than no
         # export: it becomes the archive nobody knows has a hole in it.
-        if ($data.Truncated) { $caption += "`n⚠️ بلغ السجل حدّ القراءة؛ قد تكون هناك عمليات أقدم داخل المدة لم تدخل الملف." }
-        $caption += "`nلا يحتوي نصوص ما عُرض على الشاشة."
+        if ($data.Truncated) { $caption += (T 'rep.readLimitFile') }
+        $caption += (T 'rep.noScreenText')
         if (-not (Send-TelegramDocument -ChatId $ChatId -FilePath $path -Caption $caption)) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'rep.sendLogFailed') -ReplyMarkup $keyboard
         }
@@ -1480,7 +1480,7 @@ function Get-BannerReportText {
             "$icon $span"
             $detail
             if ($session.Values) { "     📝 $(ConvertTo-HtmlText ([string]$session.Values))" }
-            else { '     📝 <i>النص غير مسجَّل لهذه العملية</i>' }
+            else { (T 'rep.textNotRecordedRow') }
         })
     $tag = if ($sessions.Count -gt 3) { '<blockquote expandable>' } else { '<blockquote>' }
     $lines.Add("$tag$($sessionLines -join "`n")</blockquote>")

@@ -752,7 +752,7 @@ function Start-TemplateTestReview {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -or -not (Get-Setting 'EnableFullTemplateManagement')) { return }
     $template = Get-TemplateByIndex -Index $TemplateIndex
-    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text 'القالب لم يعد موجودًا.' -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
+    if (-not $template) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
     $testLayer = Get-SettingInt 'TemplateTestLayer' 0
     if ($testLayer -le 0) { Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.testLayerDisabled') -ReplyMarkup (Get-TemplateAdminDetailKeyboard -TemplateIndex $TemplateIndex); return }
     if (@(Get-KnownLayers | ForEach-Object { [int]$_ }) -contains $testLayer) {

@@ -277,7 +277,7 @@ function Invoke-CallbackQuery {
                     -Text (Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.tickerPublished'))
             }
             elseif ($result.Conflict) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚠️ تغيّر ملف الأخبار خارج البوت منذ أن بدأت المسودة، فلم يُنشر شيء.`nنظام آخر يكتب هذا الملف أيضًا، فاختر كيف تريد المتابعة:" -ReplyMarkup @{inline_keyboard=@(
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.newsFileChangedOutside') -ReplyMarkup @{inline_keyboard=@(
                         , @(@{text=(T 'reply.appendMine');callback_data='news:rebaseappend'})
                         , @(@{text=(T 'reply.replaceAll');callback_data='news:rebasereplace';style='danger'})
                         , @(@{text=(T 'reply.cancel');callback_data='news:refresh'}))}
@@ -1143,7 +1143,7 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $presetPage = 0
                 if ([int]::TryParse((Get-CallbackArg $data 'padmpage:'), [ref]$presetPage) -and $presetPage -ge 0) {
-                    Send-TelegramMessage -ChatId $chatId -Text "⚡ إدارة النصوص الجاهزة`nاختر القالب:" -ReplyMarkup (Get-PresetAdminTemplatesKeyboard -Page $presetPage)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.manageReadyTexts') -ReplyMarkup (Get-PresetAdminTemplatesKeyboard -Page $presetPage)
                 }
             }
             break
@@ -2019,7 +2019,7 @@ function Invoke-CallbackQuery {
             $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
             if (-not $scheduleEntry) { break }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
-            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesCancel') 'schedule:cancelconfirm' -Style danger), (New-Button "❌ رجوع" 'schedule:list'))) }
+            Send-TelegramMessage -ChatId $chatId -Text "هل تريد إلغاء الحدث؟`n$(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)" -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesCancel') 'schedule:cancelconfirm' -Style danger), (New-Button (T 'cb.back') 'schedule:list'))) }
             break
         }
         'schedule:cancelconfirm' {
@@ -2033,7 +2033,7 @@ function Invoke-CallbackQuery {
         }
         'menu:presetsadmin' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Send-TelegramMessage -ChatId $chatId -Text "⚡ إدارة النصوص الجاهزة`nاختر القالب:" -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.manageReadyTexts') -ReplyMarkup (Get-PresetAdminTemplatesKeyboard)
             }
             break
         }
@@ -2623,7 +2623,7 @@ function Invoke-CallbackQuery {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 $state = Get-PendingState -ChatId $chatId
                 if (-not $state -or $state.Mode -ne 'config_restore' -or [long]$state.UserId -ne $userId) {
-                    Send-TelegramMessage -ChatId $chatId -Text "انتهى أو تغيّر طلب الاستعادة. اختر النسخة من جديد." -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.restoreExpired') -ReplyMarkup (Get-ConfigBackupsKeyboard)
                     break
                 }
                 $backupPath = [string]$state.BackupPath
@@ -2645,7 +2645,7 @@ function Invoke-CallbackQuery {
                 $files = @(Get-ConfigBackupFiles -Path $ConfigPath)
                 $index = [int](Get-CallbackArg $data 'cfg:restore:')
                 if ($index -lt 0 -or $index -ge $files.Count) {
-                    Send-TelegramMessage -ChatId $chatId -Text "النسخة المحددة لم تعد موجودة." -ReplyMarkup (Get-ConfigBackupsKeyboard)
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'cb.backupGone') -ReplyMarkup (Get-ConfigBackupsKeyboard)
                     break
                 }
                 Clear-PendingState -ChatId $chatId

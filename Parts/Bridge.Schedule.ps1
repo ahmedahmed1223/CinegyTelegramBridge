@@ -56,7 +56,7 @@ function Get-ScheduleCalendarKeyboard {
     $today = $Now.DateTime.Date
     $rows = @()
     $rows += , @((New-BridgeButton -Text $first.ToString('yyyy / MM') -Disabled))
-    $rows += , @('أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت' | ForEach-Object { New-BridgeButton -Text $_ -Disabled })
+    $rows += , @((T 'sch.day.sun'), (T 'sch.day.mon'), (T 'sch.day.tue'), (T 'sch.day.wed'), (T 'sch.day.thu'), (T 'sch.day.fri'), (T 'sch.day.sat') | ForEach-Object { New-BridgeButton -Text $_ -Disabled })
 
     # Sunday-first, matching the weekday header above it.
     $week = @()
@@ -181,7 +181,7 @@ function ConvertTo-BridgeLatinDigits {
 function Get-ScheduleTimeHint {
     <# Kept in one place because the prompt, the re-prompt after a rejection
        and the help chapter all have to describe the same accepted forms. #>
-    return "الصيغ المقبولة:`n• 21:45 — اليوم، أو الغد إن مضى الوقت`n• غدًا 21:45 · اليوم 21:45`n• +30 — بعد ثلاثين دقيقة`n• 09-15 21:45 — يوم وشهر`n• 2026-09-15 21:45 — كاملة"
+    return (T 'sch.acceptedForms')
 }
 
 function ConvertFrom-OperatorScheduleTime {
@@ -817,7 +817,7 @@ function Update-ScheduleQueue {
         $targetLayer = [int]$templateStatus.Layer
         if ($targetLayer -gt 0 -and $script:OnAir.ContainsKey($targetLayer) -and (Get-Setting 'NotifyOnScheduleOverwrite')) {
             $displaced = $script:OnAir[$targetLayer]
-            Send-AdminBroadcast -Text ("⚠️ حدث مجدول يستبدل مشهدًا على الهواء`n" +
+            Send-AdminBroadcast -Text ((T 'sch.replacesOnAir') +
                 "الطبقة ${targetLayer}: '$($displaced.Key)' ← '$($scheduleEntry.TemplateKey)'")
             Write-BridgeLog "Scheduled '$($scheduleEntry.TemplateKey)' is overwriting live '$($displaced.Key)' on layer $targetLayer" 'WARN'
         }
@@ -1071,7 +1071,7 @@ function Show-ScheduleReview {
     if ($anchorLine) { $lines += $anchorLine }
     if ([string]$State.Recurrence -ne 'once') {
         $until = [string](Get-JsonProp $State 'RecurrenceUntil')
-        $lines += "نهاية التكرار: $(if ($until) { $until } else { 'بدون تاريخ انتهاء' })"
+        $lines += "نهاية التكرار: $(if ($until) { $until } else { (T 'sch.noEndDate') })"
     }
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
     $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt ([datetimeoffset]$State.ScheduledAt) `

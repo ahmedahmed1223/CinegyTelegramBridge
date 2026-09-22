@@ -670,7 +670,7 @@ function Get-NewsSheetConfirmKeyboard {
     param([ValidateSet('air', 'draft')][string]$Target = 'air')
     $go = if ($Target -eq 'air') { @{text=(T 'news.yesPublish');callback_data='news:sheetconfirm';style='danger'} }
     else { @{text=(T 'news.yesLoadDraft');callback_data='news:sheetdraftconfirm';style='success'} }
-    return @{inline_keyboard=@(,@($go, @{text='❌ إلغاء';callback_data='news:refresh'}))}
+    return @{inline_keyboard=@(,@($go, @{text=(T 'common.cancel');callback_data='news:refresh'}))}
 }
 
 function Get-NewsSheetPullLockDenial {
@@ -1003,7 +1003,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     # The automatic sheet sync publishes to air on its own clock and used to
     # report only to bridge.log; this is where whoever owns the ticker asks
     # whether it ran and what it pushed.
-    $rows += , @(@{text=(T 'news.executionLog');callback_data='schedule:execlog:news'}, @{text='🔄 تحديث';callback_data='news:refresh'})
+    $rows += , @(@{text=(T 'news.executionLog');callback_data='schedule:execlog:news'}, @{text=(T 'news.refresh');callback_data='news:refresh'})
     $rows += , @(@{text=(T 'news.home');callback_data='menu'})
     return @{inline_keyboard=$rows}
 }
@@ -1037,7 +1037,7 @@ function Show-NewsTickerDeleteConfirm {
     $text = "🗑 تأكيد حذف الخبر $($Index + 1) من $(@($draft.Items).Count):`n`n$preview"
     $markup = @{inline_keyboard=@(
             , @((New-BridgeButton -Text (T 'news.yesDelete') -CallbackData "news:delete:$Index" -Style 'danger'),
-                (New-BridgeButton -Text '❌ إلغاء' -CallbackData "news:item:$Index")))}
+                (New-BridgeButton -Text (T 'common.cancel') -CallbackData "news:item:$Index")))}
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return $true }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
     return $true
@@ -1057,8 +1057,8 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $down = if ($Index -lt ($count - 1)) { New-BridgeButton -Text (T 'news.moveDown') -CallbackData "news:idown:$Index" }
             else { New-BridgeButton -Text (T 'news.moveDown') -Disabled }
     $rows=@(,@($up,$down))
-    $rows+=,@((New-BridgeButton -Text '✏️ تعديل' -CallbackData "news:edit:$Index"),
-        (New-BridgeButton -Text '🗑 حذف' -CallbackData "news:delask:$Index" -Style 'danger'))
+    $rows+=,@((New-BridgeButton -Text (T 'news.edit') -CallbackData "news:edit:$Index"),
+        (New-BridgeButton -Text (T 'common.delete') -CallbackData "news:delask:$Index" -Style 'danger'))
     $rows+=,@(@{text=(T 'news.backToOrder');callback_data='news:list'})
     $text="📰 الخبر $($Index+1) من ${count}:`n`n$($draft.Items[$Index])"
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}
@@ -1542,7 +1542,7 @@ function Get-NewsTickerBackupsText {
         }
         catch { $count = (T 'news.backupUnreadable') }
         $lines.Add("$($i + 1). <code>$($file.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))</code>$count")
-        $lines.Add("   $(if ($age -lt 1) { 'حُفظت الآن' } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
+        $lines.Add("   $(if ($age -lt 1) { (T 'news.savedNow') } else { "منذ $(Format-DurationMinutes -Minutes $age)" })")
     }
     $lines.Add('')
     $lines.Add((T 'news.restoreNote'))

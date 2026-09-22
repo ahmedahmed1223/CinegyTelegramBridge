@@ -73,9 +73,9 @@ function Get-MojazDesigns {
         $path = [string](Get-JsonProp $template 'Path')
         $verdict = if ($path -and (Test-Path -LiteralPath $path)) {
             try { Test-BridgeSceneUsable -Xml (Get-Content -LiteralPath $path -Raw) }
-            catch { [pscustomobject]@{ Usable = $false; Reason = 'تعذّرت قراءة ملف المشهد.'; Fields = @(); SupportsRows = $false } }
+            catch { [pscustomobject]@{ Usable = $false; Reason = (T 'mjd.sceneUnreadable'); Fields = @(); SupportsRows = $false } }
         }
-        else { [pscustomobject]@{ Usable = $false; Reason = 'ملف المشهد غير موجود في مساره.'; Fields = @(); SupportsRows = $false } }
+        else { [pscustomobject]@{ Usable = $false; Reason = (T 'mjd.sceneMissing'); Fields = @(); SupportsRows = $false } }
         [pscustomobject]@{
             Key = [string]$key
             Layer = [int](Get-JsonProp $template 'Layer')
@@ -202,8 +202,8 @@ function Format-MojazDesignSummary {
     $parts = @()
     if ($media -gt 0) { $parts += "$media وسائط" }
     if ($text -gt 0) { $parts += "$text نص" }
-    if ($parts.Count -eq 0) { $parts += 'بلا حقول' }
-    $parts += $(if ($Design.SupportsRows) { 'عدة أخبار' } else { 'خبر واحد' })
+    if ($parts.Count -eq 0) { $parts += (T 'mjd.noFields') }
+    $parts += $(if ($Design.SupportsRows) { (T 'mjd.manyHeadlines') } else { (T 'mjd.oneHeadline') })
     return ($parts -join ' · ')
 }
 
@@ -228,24 +228,19 @@ function Get-MojazDesignKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button '⬅️ السابق' "mojazdesignpage:$($window.Page - 1)") }
+        if ($window.HasPrevious) { $pager += (New-Button (T 'common.previous') "mojazdesignpage:$($window.Page - 1)") }
         $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazdesignpage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button 'التالي ➡️' "mojazdesignpage:$($window.Page + 1)") }
+        if ($window.HasNext) { $pager += (New-Button (T 'common.next') "mojazdesignpage:$($window.Page + 1)") }
         $rows += , $pager
     }
-    $rows += , @( (New-Button '❌ إلغاء' 'menu:mojaz') )
+    $rows += , @( (New-Button (T 'common.cancel') 'menu:mojaz') )
     return @{ inline_keyboard = $rows }
 }
 
 function Show-MojazDesignScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-MojazDesignKeyboard -Page $Page) -Text @"
-🎬 <b>تصميم الموجز</b>
-
-اختر التصميم الذي تُبثّ عليه هذه النشرة.
-<i>الحقول تُقرأ من المشهد نفسه، فما يطلبه التصميم هو ما ستُسأل عنه.</i>
-"@
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-MojazDesignKeyboard -Page $Page) -Text (T 'mjd.screen')
 }
 
 function Set-MojazBulletinDesign {
@@ -256,12 +251,12 @@ function Set-MojazBulletinDesign {
         [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:MojazPlayback -and [string]$script:MojazPlayback.BulletinId -eq $BulletinId) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ لا يُبدَّل تصميم موجز وهو على الهواء. أوقفه أولًا.' | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjd.notWhileOnAir') | Out-Null
         return $false
     }
     $design = @(Get-MojazUsableDesigns | Where-Object { $_.Key -eq $TemplateKey } | Select-Object -First 1)
     if ($design.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⛔ هذا التصميم غير صالح أو لم يعد موجودًا.' | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjd.designGone') | Out-Null
         return $false
     }
     $result = Update-MojazBulletinIn -Library $script:MojazLibrary -BulletinId $BulletinId -UserId $UserId -Change {
@@ -513,10 +508,10 @@ function Get-MojazSyncText {
     param($Bulletin)
     $timing = Get-MojazSceneTiming
     if (-not (Test-MojazSyncToLoop -Bulletin $Bulletin)) {
-        return '<b>🎬 المزامنة متوقّفة</b>: يتغيّر الصف في منتصف الثبات، بلا حركة تُخفيه.'
+        return (T 'mjd.syncOff')
     }
     if (-not $timing -or [double]$timing.LoopSeconds -le 0) {
-        return '<b>⚠️ المزامنة مطلوبة</b> لكن القالب لا يعطي لوبًا صالحًا، فيعمل الموجز بالمدّة المكتوبة.'
+        return (T 'mjd.syncWantedNoLoop')
     }
     $loop = [double]$timing.LoopSeconds
     $line = "<b>🎬 مزامنة مع حركة الظهور</b>: كل صف يبقى لوبًا كاملًا (<code>$loop</code> ث) ويتبدّل داخل ظهورٍ مدّته <code>$($timing.IntroSeconds)</code> ث."
@@ -555,7 +550,7 @@ function Get-MojazPlanText {
     }
     if (Test-MojazSyncToLoop -Bulletin $Bulletin) {
         $loopSeconds = if ($timing) { [double](Get-JsonProp $timing 'LoopSeconds') } else { 0 }
-        $line += "`n🎬 المزامنة مفعّلة: كل خبر يُكتب داخل فيضة اللوب فلا يُرى وهو يتبدّل"
+        $line += (T 'mjd.syncOn')
         if ($loopSeconds -gt 0) {
             $line += "، والإيقاع يصير طول اللوب ($(Format-DurationSeconds -Seconds ([int][math]::Round($loopSeconds)))) لا المدة أعلاه"
         }

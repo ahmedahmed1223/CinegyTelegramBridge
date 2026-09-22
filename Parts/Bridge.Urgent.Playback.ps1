@@ -184,11 +184,11 @@ function Start-UrgentBoardRun {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [switch]$Force)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-UrgentBoardAvailable)) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ جدول العواجل غير مفعّل أو لا قالب له.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.boardOffOrNoTemplate')
         return $false
     }
     if ($script:UrgentBoardRun) {
-        Send-TelegramMessage -ChatId $ChatId -Text 'جدول العواجل يعمل بالفعل.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.alreadyRunning')
         return $false
     }
     $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
@@ -204,7 +204,7 @@ function Start-UrgentBoardRun {
     # scene is the same scene, and a bulletin left underneath it would keep
     # walking its own table behind a breaking line.
     if (-not $Force -and $script:MojazPlayback) {
-        Send-TelegramMessage -ChatId $ChatId -Text '📑 الموجز على الهواء. ابدأ الجدول بعد إيقافه، أو أوقفه من شاشته.' `
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.bulletinOnAir') `
             -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
         return $false
     }
@@ -221,7 +221,7 @@ function Start-UrgentBoardRun {
     }
     finally { $script:UrgentBoardStarting = $false }
     if (-not $result -or -not $result.Success) {
-        $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { 'تعذّر العرض' }
+        $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'urgp.showFailed') }
         Send-TelegramMessage -ChatId $ChatId -Text "❌ لم يبدأ جدول العواجل: $reason" -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
         return $false
     }
@@ -269,7 +269,7 @@ function Set-UrgentRunStopFailed {
     $script:UrgentBoardRun = $Run
     Save-UrgentRunState | Out-Null
     if ($ChatId -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ تعذّر تأكيد خروج العاجل. جُمّد الجدول؛ أعد محاولة الإيقاف وتحقّق من الطبقة.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.exitUnconfirmed')
     }
     return $false
 }
@@ -352,7 +352,7 @@ function Stop-UrgentBoardForManualUrgent {
     $chat = [long]$script:UrgentBoardRun.ChatId
     Stop-UrgentBoardRun -Reason 'manual_override' -Quiet -NoExit | Out-Null
     if ($chat -gt 0) {
-        Send-TelegramMessage -ChatId $chat -Text '⏹ توقّف جدول العواجل: أُرسل عاجل مفرد على المشهد نفسه.'
+        Send-TelegramMessage -ChatId $chat -Text (T 'urgp.stoppedBySingle')
     }
     Write-BridgeLog "Urgent board run stopped: a single urgent took the scene (user $UserId, chat $ChatId)."
     return $true
@@ -393,7 +393,7 @@ function Update-UrgentBoardRun {
         $shown = Show-UrgentBoardScene -Template $template -Values $pending.Values
         if (-not $shown.Success) {
             Write-BridgeLog "Urgent board could not return after the gap: $([string](Get-JsonProp $shown 'Error'))" 'WARN'
-            Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text "❌ توقّف جدول العواجل: تعذّر إعادة المشهد بعد الفاصل."
+            Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text (T 'urgp.stoppedNoReturn')
             Stop-UrgentBoardRun -Reason 'failed' -Quiet | Out-Null
             return
         }
@@ -416,7 +416,7 @@ function Update-UrgentBoardRun {
         if (Stop-UrgentBoardRun -Reason 'finished' -Quiet) {
             Write-BridgeLog "Urgent board run finished after $($steps.Count) step(s)."
             if (Get-Setting 'UrgentBoardNotifyOnFinish') {
-                Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text '⏹ انتهى جدول العواجل وخرج عن الهواء.'
+                Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text (T 'urgp.ended')
             }
         }
         return
@@ -462,7 +462,7 @@ function Send-UrgentBoardStep {
         return $posted
     }
     $template = Get-UrgentTemplate
-    if (-not $template) { return [pscustomobject]@{ Success = $false; Error = 'لا قالب للعاجل.' } }
+    if (-not $template) { return [pscustomobject]@{ Success = $false; Error = (T 'urgp.noTemplate') } }
     $layer = [int]$template.Layer
     $exit = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $layer -TimeoutSec (Get-AirTimeout)
@@ -601,7 +601,7 @@ function Restore-UrgentBoardRun {
         return $false
     }
     Write-BridgeLog "An urgent board run resumed after a restart at step $($step + 1) of $($steps.Count)."
-    $restoreStatus = if ($paused) { 'بقي متوقفًا مؤقتًا' } else { 'استأنف' }
+    $restoreStatus = if ($paused) { (T 'urgp.stayedPaused') } else { (T 'urgp.resumed') }
     Send-AdminBroadcast -Text "🚨 جدول العواجل $restoreStatus بعد إعادة التشغيل عند الخطوة $($step + 1) من $($steps.Count)." | Out-Null
     return $true
 }
@@ -610,7 +610,7 @@ function Test-UrgentRunControl {
     param([long]$ChatId, [long]$UserId)
     if (-not $script:UrgentBoardRun) { return $false }
     if ([bool](Get-JsonProp $script:UrgentBoardRun 'StopFailed')) {
-        Send-TelegramMessage -ChatId $ChatId -Text '⚠️ خروج المشهد غير مؤكّد؛ أعد محاولة الإيقاف أولًا.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.exitUnsure')
         return $false
     }
     $template = Get-UrgentTemplate
@@ -658,7 +658,7 @@ function Move-UrgentBoardNext {
     $step = $run.Steps[$next]
     $sent = Send-UrgentBoardStep -Step $step -ForceExit
     if (-not $sent.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الانتقال للعاجل التالي؛ أُوقف الجدول. راجع حالة الطبقة.'
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.cannotAdvance')
         Stop-UrgentBoardRun -Reason 'skip_failed' -ChatId $ChatId -UserId $UserId -Quiet -NoExit | Out-Null
         return $false
     }

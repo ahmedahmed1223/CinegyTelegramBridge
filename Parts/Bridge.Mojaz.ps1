@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Mojaz.ps1 - the bulletin library.
 
@@ -85,7 +85,7 @@ function ConvertFrom-LegacyMojazPlaylist {
     <# The single table that existed before the library becomes the first
        bulletin in it, timings and inherited pictures intact. #>
     param([Parameter(Mandatory)]$Saved)
-    $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name 'الموجز الحالي' -UserId 0
+    $created = Add-MojazBulletin -Library (New-MojazLibrary) -Name (T 'mjz.current') -UserId 0
     $bulletin = $created.Value.Bulletins[0]
     $delay = 0
     if ([int]::TryParse([string](Get-JsonProp $Saved 'DelaySeconds'), [ref]$delay) -and $delay -ge 1) {
@@ -207,7 +207,7 @@ function Invoke-MojazEdit {
         return $false
     }
     if (-not (Save-MojazLibrary -Library $Result.Value)) {
-        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text '❌ تعذّر الحفظ. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.' }
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.saveFailed') }
         return $false
     }
     return $true
@@ -387,9 +387,9 @@ function Get-MojazImageMark {
 function Get-MojazImageLabel {
     param($Row, [int]$Index = 0)
     switch (Get-MojazRowImageMode -Row $Row) {
-        'new' { return '🖼 صورة خاصة' }
-        'template' { return '▫️ صورة القالب' }
-        default { return $(if ($Index -eq 0) { '▫️ صورة القالب' } else { '↑ يتبع الصف السابق' }) }
+        'new' { return (T 'mjz.ownPicture') }
+        'template' { return (T 'mjz.templatePicture') }
+        default { return $(if ($Index -eq 0) { (T 'mjz.templatePicture') } else { (T 'mjz.followsPrevious') }) }
     }
 }
 

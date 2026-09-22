@@ -362,7 +362,7 @@ function Format-ShowReviewText {
     if ($sharedLayers -and $sharedLayers.Contains($layerKey)) {
         $siblings = @(@($sharedLayers[$layerKey]) | Where-Object { $_ -ne [string]$State.Key })
         if ($siblings.Count -gt 0) {
-            $lines.Add("<b>⚠️ هذه الطبقة يتشاركها أيضًا</b>: $(ConvertTo-TelegramHtmlText ($siblings -join '، ')) — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
+            $lines.Add("<b>⚠️ هذه الطبقة يتشاركها أيضًا</b>: $(ConvertTo-TelegramHtmlText ($siblings -join (T 'common.comma'))) — لا يمكن عرضها مع هذا القالب في الوقت نفسه.")
         }
     }
     if ($State.AutoHideSeconds -gt 0) {
@@ -1027,10 +1027,10 @@ function Get-OperationSentence {
        says «عرض» rather than SHOW and never prints a millisecond count. #>
     param([string]$Action, [string]$Result, [string]$Target, [int]$Layer)
     $verb = switch ($Action) {
-        'SHOW' { 'عرض' }
-        'HIDE' { 'إخفاء' }
-        'EXIT' { 'خروج' }
-        'UPDATE' { 'تحديث' }
+        'SHOW' { (T 'rep.op.show') }
+        'HIDE' { (T 'rep.op.hide') }
+        'EXIT' { (T 'rep.op.exit') }
+        'UPDATE' { (T 'rep.op.update') }
         default { $Action }
     }
     $phrase = switch ($Result) {
@@ -1066,7 +1066,7 @@ function Invoke-MyOperationsCommand {
     if ($history.Count -eq 0) {
         # Not (T 'flow.sinceLastStart') any more: the history is rebuilt from audit.jsonl
         # at startup, so an empty screen now genuinely means nothing was done.
-        Send-TelegramMessage -ChatId $ChatId -Text "🧾 آخر عملياتك`n━━━━━━━━━━━━━━`nلم تُسجَّل لك أي عملية بعد." -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.noOperationsYet') -ReplyMarkup (Get-MyOperationsKeyboard -UserId $UserId)
         return
     }
     $lines = [System.Collections.Generic.List[string]]::new()

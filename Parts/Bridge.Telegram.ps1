@@ -895,7 +895,7 @@ function Send-CallbackFailureNotice {
         $peer = Get-JsonProp (Get-JsonProp $CallbackQuery 'message') 'chat'
         $target = 0L
         if (-not [long]::TryParse([string](Get-JsonProp $peer 'id'), [ref]$target) -or $target -eq 0) { return $false }
-        Send-TelegramMessage -ChatId $target -Text '⚠️ حدث خطأ أثناء تنفيذ طلبك — حاول مجددًا، وإن تكرر أبلغ المشرف.' | Out-Null
+        Send-TelegramMessage -ChatId $target -Text (T 'tg.requestFailed') | Out-Null
         return $true
     }
     catch {
@@ -1428,7 +1428,7 @@ function Get-CopyButtonNotice {
     #>
     param(
         [Parameter(Mandatory)][string]$Label,
-        [string]$Hint = 'الصقه حيث تحتاجه.'
+        [string]$Hint = (T 'tg.pasteWhereNeeded')
     )
     return "📋 زر «$Label» ينسخ النص إلى حافظة جهازك فورًا — $Hint"
 }
@@ -1454,7 +1454,7 @@ function Send-BridgeTextEditPrompt {
         [Parameter(Mandatory)][string]$Prompt,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Current,
         [Parameter(Mandatory)][string]$CancelData,
-        [string]$CopyLabel = '📋 نسخ النص الحالي'
+        [string]$CopyLabel = (T 'tg.copyCurrentText')
     )
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("<b>$(ConvertTo-TelegramHtmlText $Prompt)</b>")
@@ -1464,11 +1464,11 @@ function Send-BridgeTextEditPrompt {
     # a current value at all.
     $copyButton = $null
     if ([string]::IsNullOrWhiteSpace($Current)) {
-        $lines.Add('<i>لا يوجد نص حالي.</i>')
+        $lines.Add((T 'tg.noCurrentText'))
     }
     else {
         $lines.Add('')
-        $lines.Add('النص الحالي — اضغط عليه لنسخه:')
+        $lines.Add((T 'tg.currentTextTapToCopy'))
         $lines.Add("<code>$(ConvertTo-TelegramHtmlText $Current)</code>")
         # Only when there is a button: over 256 characters New-CopyButton
         # declines, and a row holding $null is the malformed shape the repair
@@ -1477,15 +1477,15 @@ function Send-BridgeTextEditPrompt {
         if ($copyButton) { $rows += , @($copyButton) }
     }
     $lines.Add('')
-    $lines.Add('⌨️ <b>اكتب النص الجديد في صندوق الرسالة وأرسله</b>، أو انسخ الحالي وعدّله.')
+    $lines.Add((T 'tg.typeNewText'))
     if ($copyButton) {
         # Named after the button as it is actually labelled, minus its emoji:
         # a notice pointing at a button that reads something else is worse
         # than no notice.
-        $notice = Get-CopyButtonNotice -Label ($CopyLabel -replace '^[^\p{L}]+', '') -Hint 'الصقه في صندوق الرسالة ثم عدّله.'
+        $notice = Get-CopyButtonNotice -Label ($CopyLabel -replace '^[^\p{L}]+', '') -Hint (T 'tg.pasteThenEdit')
         $lines.Add("<i>$(ConvertTo-TelegramHtmlText $notice)</i>")
     }
-    $rows += , @((New-Button '❌ إلغاء' $CancelData))
+    $rows += , @((New-Button (T 'common.cancel') $CancelData))
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup @{ inline_keyboard = $rows }
 }
 
@@ -1649,7 +1649,7 @@ function Show-MainMenu {
     # every single press - the menu they opened for an answer led with a line
     # telling them the menu exists.
     if ((Get-Setting 'EnablePersistentMenuButton') -and -not $script:PersistentKeyboardPinned.ContainsKey($ChatId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text "استخدم زر 🏠 القائمة أسفل الشاشة في أي وقت للرجوع إلى هنا." -ReplyMarkup (Get-PersistentReplyKeyboard)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tg.useHomeButton') -ReplyMarkup (Get-PersistentReplyKeyboard)
         $script:PersistentKeyboardPinned[$ChatId] = $true
     }
     # An -Intro leads the screen, it does not replace it. "أهلاً! اختر من

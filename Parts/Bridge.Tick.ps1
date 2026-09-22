@@ -911,7 +911,7 @@ function Get-MissedEventsBlocks {
     $blocks = @(@{ type = 'heading'; text = "🕘 ماذا فاتني — آخر $Hours ساعة"; size = 3 })
     # On air first: it is the question this screen is opened to answer.
     $blocks += @{ type = 'paragraph'; text = $(if ($script:OnAir.Count -eq 0) { (T 'tick.nothingOnAirNow') }
-            else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join '، ')" }) }
+            else { "🔴 على الهواء: $(@($script:OnAir.Keys | Sort-Object | ForEach-Object { $script:OnAir[$_].Key }) -join (T 'common.comma'))" }) }
     $blocks += @{ type = 'divider' }
 
     if ($records.Count -eq 0) {
@@ -1115,7 +1115,7 @@ function Get-MissedEventsText {
     $nowLine = if ($script:OnAir.Count -eq 0) { (T 'tick.nothingOnAirNow') }
     else {
         $live = @($script:OnAir.Keys | Sort-Object | ForEach-Object { ConvertTo-TelegramHtmlText ([string]$script:OnAir[$_].Key) })
-        "🔴 <b>على الهواء</b>: $($live -join '، ')"
+        "🔴 <b>على الهواء</b>: $($live -join (T 'common.comma'))"
     }
     $lines.Add("<blockquote>$nowLine
 Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))</code> · Telegram: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))</code></blockquote>")
@@ -1300,7 +1300,7 @@ function Update-NewsDraftExpiry {
         # and an expiry destroys exactly as much.
         if ($count -gt 0) {
             $numbered = @(for ($i = 0; $i -lt $count; $i++) { "$($i + 1). $($items[$i])" })
-            Send-TelegramPagedText -ChatId $owner -Text ("📝 أخبار المسودة المنتهية، انسخها إن أردت:`n" + ($numbered -join "`n"))
+            Send-TelegramPagedText -ChatId $owner -Text ((T 'tick.expiredDraft') + ($numbered -join "`n"))
         }
     }
 }
@@ -1801,8 +1801,8 @@ function Update-MaterialProxyWatchdog {
             "• $($_.ScheduledAt.ToLocalTime().ToString('HH:mm')) · $(ConvertTo-TelegramHtmlText ([string]$_.Name)) — $state"
         })
     Write-BridgeLog "Material due within $lead minute(s) without a complete local copy: $(@($missing | ForEach-Object { $_.Name }) -join ' | ')" 'WARN'
-    Send-AdminBroadcast -Urgent -Text ("📼 <b>مادة تقارب موعدها بلا نسخة محلية</b>`n" + ($lines -join "`n") +
-        "`nستُقرأ من المصدر أثناء البثّ — تحقّق من المصدر والشبكة، أو أوقف هذا التنبيه من ⚙️ الإعدادات.")
+    Send-AdminBroadcast -Urgent -Text ((T 'tick.itemNoLocalCopy') + ($lines -join "`n") +
+        (T 'tick.readFromSource'))
 }
 
 function Update-StaleOnAirWatchdog {
@@ -1874,7 +1874,7 @@ function Update-StaleOnAirWatchdog {
         (T 'tick.stillOnAirRepeat')
     }
     else { (T 'tick.longOnAir') }
-    $body = "$head`n" + ($lines -join "`n") + "`nإن كانت الشاشة خالية فالإخفاء يصفّي السجل."
+    $body = "$head`n" + ($lines -join "`n") + (T 'tick.hideClearsRecord')
 
     Send-AdminBroadcast -Urgent -Text $body -ReplyMarkup $keyboard
 
@@ -2123,7 +2123,7 @@ function Update-CinegyHealthWatchdog {
         $err = [string](Get-JsonProp $telemetry 'Error')
         if ($err) { "تعذّر الوصول: $(Protect-SensitiveText $err)" } else { (T 'tick.unreachable') }
     }
-    elseif ($issues.Count -gt 0) { "قياسات غير سليمة: $($issues -join '، ')" }
+    elseif ($issues.Count -gt 0) { "قياسات غير سليمة: $($issues -join (T 'common.comma'))" }
     else {
         "قياسات غير سليمة (الساقط $(Get-JsonProp $telemetry 'DroppedCount') من $(Get-JsonProp $telemetry 'OutputCount')" +
         " · $(Get-JsonProp $telemetry 'DroppedPercent')% · أخطاء القراءة $(Get-JsonProp $telemetry 'MaxReadErrorRate')%)"

@@ -570,6 +570,17 @@ function Get-VerifiedCinegyShowIdentity {
         return (& $failed (T 'air.noActiveId'))
     }
 
+    # What the engine intends for the item just placed. Asked here because
+    # this is the only moment the bridge holds a status for its OWN item:
+    # afterwards the layer may be carrying anything.
+    #
+    # It exists to answer a question the log could not. An urgent left the
+    # air twice in half an hour with no HIDE and no EXIT in the audit, and
+    # nothing recorded whether Cinegy had given that item a finite duration
+    # - in which case nobody hid it, the clock ran out - or an open one, in
+    # which case something outside the bridge took the layer.
+    Write-BridgeLog "Cinegy accepted '$Key' on layer $Layer as item $activeId; engine duration ""$([int](Get-JsonProp $status 'ActiveDurationSeconds'))s"", manual end $([bool](Get-JsonProp $status 'ActiveManualEnd'))"
+
     $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
     $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
 

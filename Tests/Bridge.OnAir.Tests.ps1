@@ -2820,3 +2820,81 @@ Describe 'The operator is told their own graphic left the air' {
         Should -Invoke Send-TelegramMessage -Times 0 -Because 'they have just read the same event in the admin broadcast'
     }
 }
+
+Describe 'An engine stops with the layer Cinegy took' {
+    <#
+        Measured on air. A bulletin was accepted on layer 5 at 18:08:13 as an
+        item Cinegy gave an open duration and a manual end - so its time never
+        ran out. At 18:11:39 the watchdog found a DIFFERENT item on that layer,
+        the engine's own empty filler, and dropped the record.
+
+        The run did not stop with it. It went on writing rows until 18:12:59
+        and then sent its own EXIT to a layer it no longer owned, logged with
+        an empty target because the record had already gone.
+        Send-PostboxValues is channel-wide and takes no layer at all, so those
+        rows went wherever the channel was pointing.
+
+        Stop-MojazForLayer exists for exactly this and says so: "the hide
+        button, an exit, hide-all". Every way a layer is taken except the way
+        Cinegy takes it.
+    #>
+    BeforeEach {
+        $OnAir.Clear()
+        $OnAir[5] = @{ Key = 'Mojaz'; At = (Get-Date); UserId = 42; ActiveId = '{MINE}'; Source = 'bridge' }
+        Mock Save-OnAirState { }
+        Mock Write-BridgeLog { }
+        Mock Stop-MojazForLayer { $true }
+        Mock Stop-UrgentBoardForLayer { $false }
+        Mock Send-OwnGraphicLeftNotice { }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'
+                ActiveId = '{THEIRS}'; ActiveName = ''; ActiveTemplateName = ''
+                ActiveDescription = ''; OutputState = 'Normal'
+                ClientConnected = $false; ClientIdentity = ''; Error = ''
+            }
+        }
+    }
+
+    It 'closes a bulletin run when Cinegy empties its layer' {
+        Update-OnAirStateFromCinegy -Reason 'watchdog' | Out-Null
+
+        Should -Invoke Stop-MojazForLayer -Times 1 -ParameterFilter { $Layer -eq 5 }
+    }
+
+    It 'closes an urgent board run the same way' {
+        Update-OnAirStateFromCinegy -Reason 'watchdog' | Out-Null
+
+        Should -Invoke Stop-UrgentBoardForLayer -Times 1 -ParameterFilter { $Layer -eq 5 }
+    }
+
+    It 'leaves a run alone while its layer is still on air' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $true; OffAirReason = ''
+                ActiveId = '{MINE}'; ActiveName = 'Mojaz.CinTitle on Layer 5'
+                ActiveTemplateName = 'Mojaz'; ActiveDescription = ''
+                OutputState = 'Normal'; ClientConnected = $false; ClientIdentity = ''; Error = ''
+            }
+        }
+        Update-OnAirStateFromCinegy -Reason 'watchdog' | Out-Null
+
+        Should -Invoke Stop-MojazForLayer -Times 0 -Because 'the bulletin is still where it thinks it is'
+    }
+
+    It 'leaves a run alone when the engine could not be read at all' {
+        # An unreachable Cinegy is not an empty layer, and a bulletin killed by
+        # a network blip is a bulletin that stops mid-broadcast for nothing.
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $false; IsOnAir = $null; OffAirReason = 'unreadable'
+                ActiveId = ''; ActiveName = ''; ActiveTemplateName = ''
+                ActiveDescription = ''; OutputState = ''
+                ClientConnected = $false; ClientIdentity = ''; Error = 'timed out'
+            }
+        }
+        Update-OnAirStateFromCinegy -Reason 'watchdog' | Out-Null
+
+        Should -Invoke Stop-MojazForLayer -Times 0
+    }
+}

@@ -274,6 +274,19 @@ function Update-OnAirStateFromCinegy {
             # on-air record so onair.json reflects what is live now.
             $changes.Add($decision.Change)
             Remove-OnAirLayerScenes -Layer ([int]$layer)
+            # An engine walking this layer has to stop with it. Stop-MojazForLayer
+            # and its urgent twin are called by the hide button, by an exit and by
+            # a replacing SHOW - every way a layer is taken except this one, which
+            # is the way Cinegy takes it.
+            #
+            # Measured: a bulletin whose layer Cinegy emptied at 18:11:39 went on
+            # writing rows until 18:12:59 and then sent its own EXIT to a layer it
+            # no longer owned. Send-PostboxValues is channel-wide and takes no
+            # layer at all, so those rows went wherever the channel was pointing.
+            #
+            # The record is already gone above, so neither of these exits again.
+            Stop-MojazForLayer -Layer ([int]$layer) | Out-Null
+            Stop-UrgentBoardForLayer -Layer ([int]$layer) | Out-Null
             $recordSource = [string](Get-JsonProp $record 'Source')
             if ([string]::IsNullOrWhiteSpace($recordSource)) { $recordSource = 'bridge' }
             # Change is null when a discovered record is dropped for want of a

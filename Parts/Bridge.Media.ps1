@@ -1108,7 +1108,15 @@ function Import-StreamOutages {
         $raw = Get-Content -LiteralPath $script:streamOutageFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $ledger = New-BridgeOutageLedger
         foreach ($outage in @(Get-JsonProp $raw 'Outages')) {
-            if ([string]::IsNullOrWhiteSpace([string](Get-JsonProp $outage 'StartedAt'))) { continue }
+            # Every reader of the ledger parses these dates, six places in
+            # all, so a row with one that does not parse is refused here, at
+            # the only door from disk: it used to throw inside the feed watch
+            # and take the whole screen - and its history - down with it.
+            $parsed = [datetime]::MinValue
+            $startText = [string](Get-JsonProp $outage 'StartedAt')
+            $endText = [string](Get-JsonProp $outage 'EndedAt')
+            if (-not [datetime]::TryParse($startText, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) { continue }
+            if ($endText -and -not [datetime]::TryParse($endText, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) { continue }
             $ledger.Outages.Add([pscustomobject]@{
                     Kind = [string](Get-JsonProp $outage 'Kind')
                     StartedAt = [string](Get-JsonProp $outage 'StartedAt')
@@ -1320,8 +1328,11 @@ function Get-FeedWatchKeyboard {
 function Show-FeedWatchScreen {
     <# The screen, drawn from the ledger and the monitor. -Probe costs one
        frame grab; the plain open costs nothing. #>
-    param([Parameter(Mandatory)][long]$ChatId, [switch]$Probe)
-    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML `
-        -Text (Get-FeedWatchText -Probe:$Probe) `
-        -ReplyMarkup (Get-FeedWatchKeyboard) | Out-Null
+    param([Parameter(Mandatory)][long]$ChatId, [switch]$Probe, [int]$MessageId = 0)
+    $text = Get-FeedWatchText -Probe:$Probe
+    $keyboard = Get-FeedWatchKeyboard
+    # Refresh redraws the screen it was pressed on: a new message per press
+    # left a column of stale states whose buttons still looked live.
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode HTML)) { return }
+    Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -Text $text -ReplyMarkup $keyboard | Out-Null
 }

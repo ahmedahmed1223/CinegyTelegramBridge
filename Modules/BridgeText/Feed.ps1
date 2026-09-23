@@ -29,7 +29,6 @@ function Add-BridgeTextFeed {
     $catalogue['feed.source'] = @{ ar = '🎚 المصدر: {0} · {1}'; en = '🎚 The source: {0} · {1}' }
     $catalogue['feed.cycle'] = @{ ar = '⏱ الدورة: {0}'; en = '⏱ The cycle: {0}' }
     $catalogue['feed.lastGood'] = @{ ar = '✅ آخر مرّة كان سليمًا: {0}'; en = '✅ Last whole: {0}' }
-    $catalogue['feed.noOutageRecorded'] = @{ ar = '✅ لا انقطاع مسجَّل بعد.'; en = '✅ No outage is recorded yet.' }
     $catalogue['feed.windowSummary'] = @{ ar = '📉 خلال {0}: {1} — بإجمالي {2}'; en = '📉 In the last {0}: {1} — {2} in all' }
     $catalogue['feed.windowClean'] = @{ ar = '📗 خلال {0}: لا انقطاع.'; en = '📗 In the last {0}: no outage.' }
     $catalogue['feed.outagesTitle'] = @{ ar = '<b>الانقطاعات الأخيرة</b>'; en = '<b>The recent outages</b>' }
@@ -37,7 +36,7 @@ function Add-BridgeTextFeed {
     $catalogue['feed.stillDown'] = @{ ar = 'ما زال'; en = 'still going' }
     $catalogue['feed.kind.unreachable'] = @{ ar = 'لا يصل'; en = 'not arriving' }
     $catalogue['feed.kind.black'] = @{ ar = 'سوداء'; en = 'black' }
-    $catalogue['feed.noOutages'] = @{ ar = '<i>لا انقطاع مسجَّل. تُسجَّل الانقطاعات منذ هذا الإصدار.</i>'; en = '<i>No outage is recorded. Outages have been recorded since this release.</i>' }
+    $catalogue['feed.noOutages'] = @{ ar = '<i>لا انقطاع مسجَّل خلال آخر 30 يومًا.</i>'; en = '<i>No outage is recorded in the last 30 days.</i>' }
     $catalogue['feed.snapshotNow'] = @{ ar = '📸 لقطة الآن'; en = '📸 A snapshot now' }
     $catalogue['feed.refresh'] = @{ ar = '🔄 تحديث'; en = '🔄 Refresh' }
     $catalogue['feed.watch'] = @{ ar = '📡 مراقبة البثّ'; en = '📡 The feed watch' }

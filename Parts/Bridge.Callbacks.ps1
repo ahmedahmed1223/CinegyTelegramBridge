@@ -1269,7 +1269,7 @@ function Invoke-CallbackQuery {
         'menu:feedwatch' { Show-FeedWatchScreen -ChatId $chatId; break }
         # The probe costs one frame grab, so it is a press rather than
         # something the plain open does on every visit.
-        'menu:feedwatch:probe' { Show-FeedWatchScreen -ChatId $chatId -Probe; break }
+        'menu:feedwatch:probe' { Show-FeedWatchScreen -ChatId $chatId -Probe -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:material' { Show-MaterialScheduleScreen -ChatId $chatId -UserId $userId; break }
         'menu:handover' { Show-ShiftHandoverScreen -ChatId $chatId -UserId $userId; break }

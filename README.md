@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.1
+
+**The feed watch's Refresh edits its own message** instead of posting a new
+copy per press. And a row in `stream-outages.json` whose dates do not parse is
+refused when the ledger is read, rather than throwing inside the screen and
+taking the whole outage history down with it.
+
 ## Version 8.69.0
 
 **🎬 A clip from air**, beside the still on the feed watch. 📸 answers what is

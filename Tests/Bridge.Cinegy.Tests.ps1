@@ -1512,3 +1512,51 @@ Describe 'The watch page address' {
         $button.ContainsKey('callback_data') | Should -BeFalse -Because 'Telegram sends the bot nothing when a Mini App opens, so there is no callback to answer'
     }
 }
+
+Describe 'The feed watch screen' {
+    <#
+        The ledger is a file on disk, so a row can arrive half-written or
+        hand-edited. One such row used to throw inside the list and take the
+        whole screen with it - the station lost its outage history because of
+        one date. And Refresh used to post a new copy per press.
+    #>
+    BeforeEach {
+        Mock Get-OutputMonitorStatus { [pscustomobject]@{ ActiveSource = 'primary'; PrimaryState = 'ok' } }
+        Mock Get-FfmpegPath { 'ffmpeg.exe' }
+        $script:LastOutputMonitorAt = [datetime]::MinValue
+        $script:StreamOutages = New-BridgeOutageLedger
+        $script:streamOutageFile = Join-Path $TestDrive 'stream-outages.json'
+        @{ SchemaVersion = 1; Outages = @(
+                @{ Kind = 'black'; StartedAt = 'not a date'; EndedAt = ''; Cause = ''; Source = 'x' }
+                @{ Kind = 'black'; StartedAt = '2026-09-21T10:00:00.0000000'; EndedAt = 'garbage'; Cause = ''; Source = 'x' }
+                @{ Kind = 'unreachable'; StartedAt = '2026-09-20T10:00:00.0000000'; EndedAt = '2026-09-20T10:05:00.0000000'; Cause = 'timeout'; Source = 'x' }
+            ) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:streamOutageFile -Encoding utf8
+        Import-StreamOutages
+    }
+
+    It 'still opens, and shows the good rows, when one row has no readable date' {
+        @($script:StreamOutages.Outages).Count | Should -Be 1 -Because 'a row whose start or end does not parse is refused on the way in'
+        $text = Get-FeedWatchText
+        $text | Should -BeLike '*09-20 10:00*'
+        $text | Should -BeLike '*timeout*'
+    }
+
+    It 'redraws the screen Refresh was pressed on instead of posting another' {
+        Mock Edit-TelegramMessageText { $true }
+        Mock Send-TelegramMessage { }
+
+        Show-FeedWatchScreen -ChatId 1 -MessageId 42
+
+        Should -Invoke Edit-TelegramMessageText -Times 1 -ParameterFilter { $MessageId -eq 42 }
+        Should -Invoke Send-TelegramMessage -Times 0
+    }
+
+    It 'falls back to a new message when the old one cannot be edited' {
+        Mock Edit-TelegramMessageText { $false }
+        Mock Send-TelegramMessage { }
+
+        Show-FeedWatchScreen -ChatId 1 -MessageId 42
+
+        Should -Invoke Send-TelegramMessage -Times 1
+    }
+}

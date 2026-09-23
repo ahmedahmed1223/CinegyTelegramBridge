@@ -1251,6 +1251,10 @@ function Send-AdminBroadcast {
         Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup | Out-Null
         $sentIds[$adminId] = [int]$script:LastTelegramMessageId
     }
+    # The first line names the notice without its detail. Without this the
+    # log could say a notice failed but never that one went.
+    $firstLine = (($Text -split "`n")[0]) -replace '<[^>]+>', ''
+    Write-BridgeLog "Admin notice sent to $($sentIds.Count) administrator(s): $(Protect-SensitiveText -Text $firstLine)" 
     if ($repeatCause) { Sync-PinnedRecurrence -Cause $repeatCause -Text $Text -SentMessageIds $sentIds }
 }
 

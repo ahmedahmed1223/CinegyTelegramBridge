@@ -15,6 +15,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.6
+
+When the Cinegy side takes a bridge-shown graphic off air, the chats that got
+the "on air" notice now get the matching "off air" one, saying it ended from
+Cinegy rather than the bridge; before, only the bridge's own hide announced a
+take-down. And every personal and administrator notice now leaves a log line,
+so "was anyone told?" has an answer.
+
 ## Version 8.69.5
 
 The four content screens are back on a row each, at the station's request:

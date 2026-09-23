@@ -178,7 +178,11 @@ function Send-TemplateAirNotice {
         [AllowEmptyString()][string]$Copy = '',
         [int]$AutoHideSeconds = 0,
         [ValidateSet('show', 'hide')][string]$Action = 'show',
-        [AllowNull()]$OnAirSince = $null
+        [AllowNull()]$OnAirSince = $null,
+        # The take-down was not the bridge's: the room was told it went up,
+        # and "who took it down" is the question this answers before it is
+        # asked in the chat.
+        [switch]$EndedOutside
     )
     $scope = Get-TemplateNotifyScope -Key $Key
     $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $ActorChatId)
@@ -201,6 +205,7 @@ function Send-TemplateAirNotice {
         if ($OnAirSince -is [datetime]) {
             $lines.Add((T 'air.left' $(Format-DurationSeconds -Seconds ([int]((Get-Date) - $OnAirSince).TotalSeconds))))
         }
+        if ($EndedOutside) { $lines.Add((T 'air.endedOutside')) }
     }
     else {
         $lines.Add($(if ($AutoHideSeconds -gt 0) { (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $AutoHideSeconds)) } else { (T 'air.staysUntilHidden') }))

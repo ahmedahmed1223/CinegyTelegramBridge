@@ -2971,3 +2971,96 @@ Describe 'The feed watch button says when the feed is in trouble' {
         $button['text'] | Should -BeLike '🖤*'
     }
 }
+
+Describe 'The room hears a graphic left when Cinegy ended it' {
+    <#
+        Measured on air: an urgent went up at 14:03:12, eleven chats were told,
+        Cinegy ended it at 14:03:36 - and the take-down notice was sent only
+        from the bridge's own hide, so all eleven still believed it was up.
+    #>
+    BeforeEach {
+        Mock Send-TemplateAirNotice { 1 }
+        Mock Write-BridgeLog { }
+    }
+
+    It 'sends the take-down notice for what the bridge put there, saying where it ended' {
+        Send-OutsideEndRoomNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 122238225; ShownAt = (Get-Date).AddSeconds(-24)
+            })
+
+        Should -Invoke Send-TemplateAirNotice -Times 1 -ParameterFilter {
+            $Key -eq 'Urgent' -and $Layer -eq 7 -and $Action -eq 'hide' -and $EndedOutside -and $ActorChatId -eq 122238225
+        }
+    }
+
+    It 'stays quiet for a layer it only discovered, since no show notice was sent for it' {
+        Send-OutsideEndRoomNotice -Changes @([pscustomobject]@{ Layer = 8; TemplateKey = 'ticker'; ShowUserId = 0; ShownAt = (Get-Date) })
+
+        Should -Invoke Send-TemplateAirNotice -Times 0
+    }
+
+    It 'is called by the watchdog when it drops a layer' {
+        $OnAir.Clear()
+        $OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; ActiveId = '{MINE}'; Source = 'bridge' }
+        Mock Save-OnAirState { }
+        Mock Send-OwnGraphicLeftNotice { }
+        Mock Send-AdminBroadcast { }
+        Mock Stop-MojazForLayer { $false }
+        Mock Stop-UrgentBoardForLayer { $false }
+        Mock Update-MissingGraphicWatchdog { }
+        Mock Send-OutsideEndRoomNotice { }
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'
+                ActiveId = '{THEIRS}'; ActiveName = ''; ActiveTemplateName = ''
+                ActiveDescription = ''; OutputState = 'Normal'
+                ClientConnected = $false; ClientIdentity = ''; Error = ''
+            }
+        }
+        $script:RuntimeState.Monitoring.LastCinegyStateCheck = [datetime]::MinValue
+
+        Update-CinegyStateWatchdog
+
+        Should -Invoke Send-OutsideEndRoomNotice -Times 1
+    }
+
+}
+
+Describe 'The take-down notice says when it ended outside the bridge' {
+    It 'adds the ended-outside line to the take-down text' {
+        Mock Write-BridgeLog { }
+        Mock Get-TemplateNotifyScope { 'all' }
+        Mock Get-TemplateNoticeAudience { @(555) }
+        Mock Test-AirNoticeDue { $true }
+        Mock Test-AirNoticeMuted { $false }
+        Mock Send-AirCollisionWarning { }
+        Mock Send-AirNoticeOrHold { $true }
+
+        Send-TemplateAirNotice -Key 'Urgent' -Layer 7 -Action hide -EndedOutside | Out-Null
+
+        Should -Invoke Send-AirNoticeOrHold -Times 1 -ParameterFilter { $Text -like "*$(T 'air.endedOutside')*" }
+    }
+}
+
+Describe 'Every notice sent leaves a line in the log' {
+    It 'records the personal notice to the operator' {
+        Mock Send-TelegramMessage { }
+        Mock Test-Admin { $false }
+        Mock Write-BridgeLog { }
+        Send-OwnGraphicLeftNotice -Changes @([pscustomobject]@{
+                Layer = 7; TemplateKey = 'Urgent'; ShowUserId = 42; ShownAt = (Get-Date); Replaced = $false
+                ActualActiveName = ''; ActualActiveId = ''
+            })
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Message -like "Told user 42 *Urgent*layer 7*" }
+    }
+
+    It 'records the admin broadcast and how many it reached' {
+        Mock Send-TelegramMessage { }
+        Mock Get-AdminNotifyIds { @(1, 2, 3) }
+        Mock Test-QuietHoursActive { $false }
+        Mock Test-BridgeNoticeSuppressed { $false }
+        Mock Write-BridgeLog { }
+        Send-AdminBroadcast -Text "🔔 <b>External change in Cinegy</b>`ndetail"
+        Should -Invoke Write-BridgeLog -ParameterFilter { $Message -like 'Admin notice sent to 3 *External change in Cinegy' }
+    }
+}

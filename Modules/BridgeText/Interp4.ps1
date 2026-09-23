@@ -93,6 +93,7 @@ function Add-BridgeTextInterp4 {
     $catalogue['adm.sendAlertMinutes'] = @{ ar = "🔔 أرسل مدة التنبيه لقالب '{0}' بالدقائق من 0 إلى 1440.`nأرسل 0 لإيقاف التنبيه."; en = "🔔 Send the alert delay for the template '{0}' in minutes, from 0 to 1440.`nSend 0 to turn the alert off." }
     $catalogue['air.layer'] = @{ ar = ' · طبقة {0}'; en = ' · layer {0}' }
     $catalogue['air.left'] = @{ ar = '⏱ بقي {0}'; en = '⏱ {0} left' }
+    $catalogue['air.endedOutside'] = @{ ar = '⚠️ انتهى من جهة Cinegy لا من الجسر.'; en = '⚠️ It ended from the Cinegy side, not through the bridge.' }
     $catalogue['air.autoHideAfter'] = @{ ar = '⏱ يُخفى تلقائيًا بعد {0}'; en = '⏱ Hidden by itself after {0}' }
     $catalogue['air.whileBusyCount'] = @{ ar = '📣 <b>حدث أثناء انشغالك ({0}):</b>'; en = '📣 <b>While you were busy ({0}):</b>' }
     $catalogue['air.by'] = @{ ar = ' بواسطة {0}'; en = ' by {0}' }

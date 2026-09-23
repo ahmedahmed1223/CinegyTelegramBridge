@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.6'; Items = @(
+                        '📴 **When Cinegy takes a graphic off air, the chats that were told it went up are told it came down** — with how long it stayed and a line saying it ended from the Cinegy side, not through the bridge. Before, only a take-down from the bridge was announced.'
+                    ) }
                 @{ Version = '8.69.5'; Items = @(
                         '📰 **News, bulletin, breaking news and boards are back on a row each**, full width and easier to hit.'
                     ) }
@@ -172,6 +175,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.6'; Items = @(
+                        '📴 **حين يُنزل Cinegy رسمًا عن الهواء، تعلم المحادثات التي أُبلغت بظهوره أنه نزل** — ومعه كم بقي، وسطر يقول إنه انتهى من جهة Cinegy لا من الجسر. قبل هذا لم يُعلَن إلا الإنزال من الجسر.'
+                    ) }
                 @{ Version = '8.69.5'; Items = @(
                         '📰 **الأخبار والموجز والعاجل والبرامج عادت كلٌّ في صفّه**، بعرض كامل وأسهل وصولًا.'
                     ) }

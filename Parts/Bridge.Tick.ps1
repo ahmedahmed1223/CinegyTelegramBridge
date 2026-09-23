@@ -2060,6 +2060,7 @@ function Update-CinegyStateWatchdog {
         # station's choice; whether the person mid-task with that graphic
         # is told it left the screen is not.
         Send-OwnGraphicLeftNotice -Changes @($sync.Changes)
+        Send-OutsideEndRoomNotice -Changes @($sync.Changes)
         if (Get-Setting 'NotifyAdminsOnExternalChange') {
             Send-AdminBroadcast -Text (Format-ExternalCinegyChangeAlert -Changes @($sync.Changes))
         }

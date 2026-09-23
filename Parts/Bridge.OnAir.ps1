@@ -651,5 +651,34 @@ function Send-OwnGraphicLeftNotice {
         }
         else { $lines.Add((T 'onair.layerEmptyExplain')) }
         Send-TelegramMessage -ChatId $userId -Text ($lines -join "`n") -ParseMode HTML | Out-Null
+        # Logged because "was he told?" was once asked of this log and it had
+        # no answer: a failed send logs itself, a delivered one did not.
+        Write-BridgeLog "Told user $userId that '$($change.TemplateKey)' left layer $([int]$change.Layer)"
+    }
+}
+
+function Send-OutsideEndRoomNotice {
+    <#
+        Tells the room a graphic has left the air when the bridge did not
+        take it down.
+
+        The room heard it go up - the show notice reaches every chat its
+        rule names - but the matching take-down notice was sent only from
+        the bridge's own hide. An urgent that Cinegy ended after 24 seconds
+        left eleven chats believing it was still on the screen. Same notice,
+        same audience, same mute, with one line saying where it ended.
+
+        Only for what the bridge put there (ShowUserId): the show notice was
+        never sent for a discovered layer, so there is nothing to close.
+    #>
+    param([Parameter(Mandatory)][object[]]$Changes)
+    foreach ($change in @($Changes)) {
+        if (-not $change) { continue }
+        $showUserId = [long](Get-JsonProp $change 'ShowUserId')
+        if ($showUserId -le 0) { continue }
+        $shownAt = Get-JsonProp $change 'ShownAt'
+        $since = if ($shownAt -is [datetime]) { $shownAt } else { $null }
+        Send-TemplateAirNotice -Key ([string]$change.TemplateKey) -Layer ([int]$change.Layer) `
+            -ActorChatId $showUserId -Action hide -OnAirSince $since -EndedOutside | Out-Null
     }
 }

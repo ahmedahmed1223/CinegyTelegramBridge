@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.5'; Items = @(
+                        '📰 **News, bulletin, breaking news and boards are back on a row each**, full width and easier to hit.'
+                    ) }
                 @{ Version = '8.69.4'; Items = @(
                         '📡 **The feed watch button warns from the menu** — 🔴 while the feed is not arriving, 🖤 while the screen is black. No mark when all is well.'
                         '📰 **The content screens sit two to a row** — news with the bulletin, breaking news with the boards — so the menu is shorter. One-hand mode still gives each its own row.'
@@ -169,6 +172,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.5'; Items = @(
+                        '📰 **الأخبار والموجز والعاجل والبرامج عادت كلٌّ في صفّه**، بعرض كامل وأسهل وصولًا.'
+                    ) }
                 @{ Version = '8.69.4'; Items = @(
                         '📡 **زرّ مراقبة البثّ ينبّه من القائمة** — 🔴 والبثّ لا يصل، و🖤 والشاشة سوداء. ولا علامة حين يكون كل شيء سليمًا.'
                         '📰 **شاشات المحتوى اثنتان في كل صفّ** — الأخبار مع الموجز، والعاجل مع البرامج — فصارت القائمة أقصر. ووضع اليد الواحدة يُبقي لكلٍّ صفّه.'

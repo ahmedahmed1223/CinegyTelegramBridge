@@ -1538,8 +1538,8 @@ Describe 'Main menu on-air priority' {
             Should -Be @('menu:status', 'menu:fullstatus')
         @((& $rowOf 'menu:schedule') | ForEach-Object { $_['callback_data'] }) |
             Should -Be @('menu:schedule', 'menu:reports')
-        # The content screens two to a row, in their order: four stacked rows
-        # were the longest run on the admin menu.
+        # The content screens one to a row: the station's choice, for a
+        # full-width target on the buttons reached for fastest.
         Mock Test-UrgentBoardAvailable { $true }
         Mock Test-BoardsAvailable { $true }
         $original = Get-Setting 'EnableNewsTickerManagement'
@@ -1549,9 +1549,13 @@ Describe 'Main menu on-air priority' {
         }
         finally { $config.Settings | Add-Member -NotePropertyName EnableNewsTickerManagement -NotePropertyValue $original -Force }
         @((& $rowOf 'menu:news') | ForEach-Object { $_['callback_data'] }) |
-            Should -Be @('menu:news', 'menu:mojaz')
+            Should -Be @('menu:news')
+        @((& $rowOf 'menu:mojaz') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('menu:mojaz')
         @((& $rowOf 'urgentb:open') | ForEach-Object { $_['callback_data'] }) |
-            Should -Be @('urgentb:open', 'boards:open')
+            Should -Be @('urgentb:open')
+        @((& $rowOf 'boards:open') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('boards:open')
     }
 
     It 'splits every pair back apart for a thumb in one-hand mode' {

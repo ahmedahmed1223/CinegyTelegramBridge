@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.5
+
+The four content screens are back on a row each, at the station's request:
+they are the buttons reached for fastest, and a full-width target is easier
+to hit. The 📡 feed-state mark from 8.69.4 stays.
+
 ## Version 8.69.4
 
 The main menu's 📡 feed watch button now reads 🔴 while the feed is not

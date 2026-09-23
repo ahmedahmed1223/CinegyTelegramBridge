@@ -223,20 +223,17 @@ function Get-MainMenuKeyboard {
     $rows += , $fourthRow
     $rows += , @( (New-Button (T 'menu.schedule') 'menu:schedule'), (New-Button (T 'menu.reports') 'menu:reports') )
     $rows += , @( (New-Button (T 'menu.myOps') 'menu:myops'), (New-Button (T 'menu.digest') 'menu:digest') )
-    # The content screens, two to a row in their order: news ticker (the
-    # daily driver), bulletin, breaking news, programme boards. They were one
-    # to a row, and four stacked rows were the longest run on the admin menu.
-    # OneHandMode splits the pairs back apart for a thumb.
-    # Boards is one door however many programmes there are: a button per
-    # board would grow this menu without a bound.
-    $content = [System.Collections.Generic.List[object]]::new()
-    if (Get-Setting 'EnableNewsTickerManagement') { $content.Add((New-Button (T 'menu.news') 'menu:news')) }
-    if (Test-MojazAvailable) { $content.Add((New-Button (T 'menu.mojaz') 'menu:mojaz')) }
-    if (Test-UrgentBoardAvailable) { $content.Add((New-Button (T 'menu.urgent') 'urgentb:open')) }
-    if (Test-BoardsAvailable) { $content.Add((New-Button (T 'menu.boards') 'boards:open')) }
-    for ($at = 0; $at -lt $content.Count; $at += 2) {
-        $rows += , @($content[$at..([math]::Min($at + 1, $content.Count - 1))])
-    }
+    # Each content screen on its own row: one tap, no crowding. Order: news
+    # ticker (the daily driver), bulletin, breaking news, programme boards.
+    # 8.69.4 paired them to shorten the menu; the station asked for them back
+    # one to a row, because these are the buttons reached for fastest and a
+    # full-width target is easier to hit than half of one.
+    if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button (T 'menu.news') 'menu:news') ) }
+    if (Test-MojazAvailable) { $rows += , @( (New-Button (T 'menu.mojaz') 'menu:mojaz') ) }
+    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button (T 'menu.urgent') 'urgentb:open') ) }
+    # One door however many programmes there are: a button per board would
+    # grow this menu without a bound.
+    if (Test-BoardsAvailable) { $rows += , @( (New-Button (T 'menu.boards') 'boards:open') ) }
 
     # 📡 beside 📸: both answer "what is actually going out", and the watch
     # is where that answer keeps its history. It moved here from the

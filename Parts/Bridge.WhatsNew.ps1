@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.4'; Items = @(
+                        '📡 **The feed watch button warns from the menu** — 🔴 while the feed is not arriving, 🖤 while the screen is black. No mark when all is well.'
+                        '📰 **The content screens sit two to a row** — news with the bulletin, breaking news with the boards — so the menu is shorter. One-hand mode still gives each its own row.'
+                    ) }
                 @{ Version = '8.69.3'; Items = @(
                         '🧹 **With nothing on air, 🚨 Hide everything is now 🧹 Clear the layers**, and no longer red. It still clears the same layers — something left from before a restart, or put up from Cinegy — without looking like an alarm. While something is live it stays 🚨 in red.'
                         '⏱ **The timer button no longer shows negative seconds** on an old menu; past its moment it reads ⏱ Timer.'
@@ -165,6 +169,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.4'; Items = @(
+                        '📡 **زرّ مراقبة البثّ ينبّه من القائمة** — 🔴 والبثّ لا يصل، و🖤 والشاشة سوداء. ولا علامة حين يكون كل شيء سليمًا.'
+                        '📰 **شاشات المحتوى اثنتان في كل صفّ** — الأخبار مع الموجز، والعاجل مع البرامج — فصارت القائمة أقصر. ووضع اليد الواحدة يُبقي لكلٍّ صفّه.'
+                    ) }
                 @{ Version = '8.69.3'; Items = @(
                         '🧹 **حين لا شيء على الهواء صار 🚨 «إخفاء الكل» 🧹 «تنظيف الطبقات»** ولم يعد أحمر. ما زال ينظّف الطبقات نفسها — ما بقي من قبل إعادة التشغيل أو ما عُرض من Cinegy — دون أن يبدو إنذارًا. وأثناء العرض يبقى 🚨 بالأحمر.'
                         '⏱ **زرّ المؤقّت لم يعد يعرض ثوانيَ سالبة** في قائمة قديمة؛ بعد موعده يقول «⏱ مؤقت».'

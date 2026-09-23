@@ -1538,11 +1538,20 @@ Describe 'Main menu on-air priority' {
             Should -Be @('menu:status', 'menu:fullstatus')
         @((& $rowOf 'menu:schedule') | ForEach-Object { $_['callback_data'] }) |
             Should -Be @('menu:schedule', 'menu:reports')
-        # Each management button on its own row: news, mojaz, urgent stacked vertically
+        # The content screens two to a row, in their order: four stacked rows
+        # were the longest run on the admin menu.
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-BoardsAvailable { $true }
+        $original = Get-Setting 'EnableNewsTickerManagement'
+        try {
+            $config.Settings | Add-Member -NotePropertyName EnableNewsTickerManagement -NotePropertyValue $true -Force
+            $rows = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard)
+        }
+        finally { $config.Settings | Add-Member -NotePropertyName EnableNewsTickerManagement -NotePropertyValue $original -Force }
         @((& $rowOf 'menu:news') | ForEach-Object { $_['callback_data'] }) |
-            Should -Be @('menu:news')
-        @((& $rowOf 'menu:mojaz') | ForEach-Object { $_['callback_data'] }) |
-            Should -Be @('menu:mojaz')
+            Should -Be @('menu:news', 'menu:mojaz')
+        @((& $rowOf 'urgentb:open') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('urgentb:open', 'boards:open')
     }
 
     It 'splits every pair back apart for a thumb in one-hand mode' {
@@ -2931,5 +2940,30 @@ Describe 'The menu does not claim what is not on air' {
         $script:AutoHideQueue.Add([pscustomobject]@{ Layer = 5; At = (Get-Date).AddSeconds(-40) })
         $timer = @((Get-MainMenuKeyboard -ChatId 70 -UserId 70).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_.callback_data -eq 'timer:5' })[0]
         $timer.text | Should -Be (T 'menu.timer')
+    }
+}
+
+Describe 'The feed watch button says when the feed is in trouble' {
+    <#
+        The layers button already carries 🔴/🟢. The feed's button carries a
+        mark only for trouble: a green one while the regular watch is off
+        would be a claim nobody checked.
+    #>
+    BeforeEach { $script:StreamOutages = New-BridgeOutageLedger }
+
+    It 'carries no mark on a quiet feed' {
+        $button = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_['callback_data'] -eq 'menu:feedwatch' })[0]
+        $button['text'] | Should -Be (T 'feed.watch')
+    }
+
+    It 'turns red while the feed is not arriving, and black while the screen is' {
+        Open-BridgeOutage -Ledger $script:StreamOutages -Kind 'unreachable' -At (Get-Date) | Out-Null
+        $button = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_['callback_data'] -eq 'menu:feedwatch' })[0]
+        $button['text'] | Should -BeLike '🔴*'
+
+        $script:StreamOutages = New-BridgeOutageLedger
+        Open-BridgeOutage -Ledger $script:StreamOutages -Kind 'black' -At (Get-Date) | Out-Null
+        $button = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_['callback_data'] -eq 'menu:feedwatch' })[0]
+        $button['text'] | Should -BeLike '🖤*'
     }
 }

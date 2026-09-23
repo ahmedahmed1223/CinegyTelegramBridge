@@ -223,14 +223,20 @@ function Get-MainMenuKeyboard {
     $rows += , $fourthRow
     $rows += , @( (New-Button (T 'menu.schedule') 'menu:schedule'), (New-Button (T 'menu.reports') 'menu:reports') )
     $rows += , @( (New-Button (T 'menu.myOps') 'menu:myops'), (New-Button (T 'menu.digest') 'menu:digest') )
-    # Each management button on its own row: one tap, no crowding.
-    # Order: News Ticker first (daily driver), then Mojaz (bulletin), then Urgent (breaking news).
-    if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button (T 'menu.news') 'menu:news') ) }
-    if (Test-MojazAvailable) { $rows += , @( (New-Button (T 'menu.mojaz') 'menu:mojaz') ) }
-    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button (T 'menu.urgent') 'urgentb:open') ) }
-    # One door however many programmes there are. A button per board would
-    # grow this menu without a bound, and the menu is already sixteen rows.
-    if (Test-BoardsAvailable) { $rows += , @( (New-Button (T 'menu.boards') 'boards:open') ) }
+    # The content screens, two to a row in their order: news ticker (the
+    # daily driver), bulletin, breaking news, programme boards. They were one
+    # to a row, and four stacked rows were the longest run on the admin menu.
+    # OneHandMode splits the pairs back apart for a thumb.
+    # Boards is one door however many programmes there are: a button per
+    # board would grow this menu without a bound.
+    $content = [System.Collections.Generic.List[object]]::new()
+    if (Get-Setting 'EnableNewsTickerManagement') { $content.Add((New-Button (T 'menu.news') 'menu:news')) }
+    if (Test-MojazAvailable) { $content.Add((New-Button (T 'menu.mojaz') 'menu:mojaz')) }
+    if (Test-UrgentBoardAvailable) { $content.Add((New-Button (T 'menu.urgent') 'urgentb:open')) }
+    if (Test-BoardsAvailable) { $content.Add((New-Button (T 'menu.boards') 'boards:open')) }
+    for ($at = 0; $at -lt $content.Count; $at += 2) {
+        $rows += , @($content[$at..([math]::Min($at + 1, $content.Count - 1))])
+    }
 
     # 📡 beside 📸: both answer "what is actually going out", and the watch
     # is where that answer keeps its history. It moved here from the
@@ -238,11 +244,18 @@ function Get-MainMenuKeyboard {
     # dropping had to go through a door meant for configuration.
     #
     # No row is added in the common case: help and what's-new pair up.
+    #
+    # Marked for trouble only, read from the outage ledger the watchdog
+    # keeps - the watch screen's own source. No green for a quiet feed: with
+    # the regular watch off it would be a claim nobody checked.
+    $feedLabel = T 'feed.watch'
+    if (Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind 'unreachable') { $feedLabel = "🔴 $feedLabel" }
+    elseif (Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind 'black') { $feedLabel = "🖤 $feedLabel" }
     if (Get-Setting 'EnableSnapshot') {
-        $rows += , @( (New-Button (T 'menu.snapshot') "menu:snapshot"), (New-Button (T 'feed.watch') 'menu:feedwatch') )
+        $rows += , @( (New-Button (T 'menu.snapshot') "menu:snapshot"), (New-Button $feedLabel 'menu:feedwatch') )
     }
     else {
-        $rows += , @( (New-Button (T 'feed.watch') 'menu:feedwatch') )
+        $rows += , @( (New-Button $feedLabel 'menu:feedwatch') )
     }
     $rows += , @( (New-Button (T 'menu.help') "menu:help"), (New-Button (T 'menu.whatsNew') "menu:whatsnew") )
 

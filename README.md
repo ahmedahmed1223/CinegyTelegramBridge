@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.4
+
+The main menu's 📡 feed watch button now reads 🔴 while the feed is not
+arriving and 🖤 while the screen is black, from the same outage ledger the
+watch screen reads; a quiet feed gets no mark, since green with the regular
+watch off would be unchecked. And the four content screens sit two to a row.
+
 ## Version 8.69.3
 
 With nothing on air, the main menu's red "🚨 Hide everything" becomes a plain

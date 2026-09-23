@@ -15,6 +15,30 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.0
+
+**🎬 A clip from air**, beside the still on the feed watch. 📸 answers what is
+on screen; 🎬 answers what it is doing — a few seconds of the channel output,
+sent as video. The stream is copied rather than re-encoded, so it costs the
+playout machine nothing, and the clip rides the snapshot machinery rather
+than duplicating its in-flight guard, its per-job error file and its switch
+to Cinegy's standby input. Measured on a real source: 2.09 MB against
+Telegram's 50 MB limit, 1920x1080 with sound, 8.015 seconds.
+
+**📺 Watch the feed inside Telegram.** `docs/watch.html` is a Mini App that
+plays the channel's own HLS output, opened from a button and handed the same
+link the output monitor already watches. It is one static file with no server
+side at all, and it prefers native HLS where the platform has it, falling back
+to hls.js where it does not.
+
+Testing it against a live station found a fault worth naming: the stream
+server sends `Access-Control-Allow-Origin` twice, which is invalid CORS that
+every browser refuses, so iPhone plays and Android and Desktop are blocked.
+curl and PowerShell do not enforce CORS and read it as open. The page names
+that cause rather than shrugging at "could not play" — and hosting the page on
+the stream's own origin sidesteps it entirely, since a same-origin fetch runs
+no CORS check at all.
+
 ## Version 8.68.0
 
 A new **feed watch** screen under Administration tools: whether the feed is

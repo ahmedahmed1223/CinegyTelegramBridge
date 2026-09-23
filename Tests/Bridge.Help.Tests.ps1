@@ -543,3 +543,42 @@ Describe 'The release notes in English' {
         [regex]'[\u0600-\u06FF]' | ForEach-Object { $_.IsMatch((@($sections[0].Items) -join ' ')) } | Should -BeFalse
     }
 }
+
+Describe 'A release note is read, not studied' {
+    <#
+        This screen is opened on a phone between two graphics, and a release
+        that takes a scroll to read is a release nobody reads.
+        Get-WhatsNewSections has said "keep it short" in its own docstring
+        since it was written, and nothing enforced it.
+
+        Measured across the 250 releases in the archive when this was added:
+        the median release is 211 characters. The three longest were all
+        written in one sitting - 1630, 1342 and 900 - against a next-longest
+        of 1106 from years of everybody else. They were cut to under 500.
+
+        The ceiling is 1200 rather than the median: this exists to catch a
+        runaway, not to make every release the same size, and the archive's
+        own longest honest entry is 1106. A release that needs more than this
+        is a release whose detail belongs in CHANGELOG.md, which is written
+        for whoever maintains the bridge and has no limit at all.
+    #>
+    It 'keeps every release inside a ceiling nobody has to scroll past' {
+        $tooLong = @(
+            foreach ($section in @(Get-WhatsNewSections)) {
+                $length = (@($section.Items) -join ' ').Length
+                if ($length -gt 1200) { "$($section.Version) ($length chars)" }
+            }
+        )
+        $tooLong | Should -BeNullOrEmpty -Because "the detail belongs in CHANGELOG.md: $($tooLong -join ', ')"
+    }
+
+    It 'holds the English half to the same ceiling' {
+        $tooLong = @(
+            foreach ($section in @(Get-WhatsNewSectionsEn)) {
+                $length = (@($section.Items) -join ' ').Length
+                if ($length -gt 1200) { "$($section.Version) ($length chars)" }
+            }
+        )
+        $tooLong | Should -BeNullOrEmpty -Because "a translation is not a licence to say more: $($tooLong -join ', ')"
+    }
+}

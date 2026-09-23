@@ -1232,11 +1232,38 @@ function Get-FeedWatchText {
     return ($lines -join "`n")
 }
 
+function Get-LiveWatchUrl {
+    <#
+        The Mini App page's address with this channel's stream on it, or
+        nothing.
+
+        Nothing when the setting is empty, when it is not https - Telegram
+        refuses any other scheme for a Mini App, so the button would simply
+        fail to open - or when no stream is configured, because a player
+        with nothing to play is a black rectangle with a back button.
+
+        The stream travels as a query parameter rather than being written
+        into the page, so one static file serves every station.
+    #>
+    $page = [string](Get-Setting 'LiveWatchUrl')
+    if ([string]::IsNullOrWhiteSpace($page) -or $page -notmatch '^(?i:https://)') { return '' }
+    $source = [string](Get-ActiveLiveStreamConfig).SourceUrl
+    if ([string]::IsNullOrWhiteSpace($source)) { return '' }
+    $separator = if ($page.Contains('?')) { '&' } else { '?' }
+    return "$page$separator" + "src=$([uri]::EscapeDataString($source))&lang=$(Get-BridgeLanguage)"
+}
+
 function Get-FeedWatchKeyboard {
     <# A snapshot and a refresh, then back where the operator came from.
        The rows are the same for everyone who can reach this screen, so it
        takes no chat and no user: the door is what decides who gets in. #>
     $rows = @()
+    # 📺 opens the channel's own output inside Telegram, above the stills: a
+    # snapshot answers "what is on screen" and this answers "what is it
+    # doing". Only where a page has been hosted - the bridge serves no HTTP,
+    # so the address is a station's own and empty means no button.
+    $watch = Get-LiveWatchUrl
+    if ($watch) { $rows += , @( (New-Button (T 'feed.watchLive') '' -WebAppUrl $watch) ) }
     if (Get-Setting 'EnableSnapshot') {
         $rows += , @( (New-Button (T 'feed.snapshotNow') 'menu:snapshot'), (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') )
     }

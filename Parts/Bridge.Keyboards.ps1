@@ -54,7 +54,10 @@ function New-Button {
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Data,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Data,
+        # An https page Telegram opens inside itself. When given, it
+        # replaces the callback data rather than joining it.
+        [AllowEmptyString()][string]$WebAppUrl = '',
         [int]$MaxTextLength = -1,
         [ValidateSet('', 'danger', 'success', 'primary')][string]$Style = ''
     )
@@ -64,7 +67,11 @@ function New-Button {
         $info = [Globalization.StringInfo]::new($Text)
         $displayText = $info.SubstringByTextElements(0, $maxLength - 1).TrimEnd() + '…'
     }
-    $button = @{ text = $displayText; callback_data = $Data }
+    # A Mini App button carries a URL instead of callback data: Telegram
+    # opens the page inside itself and sends the bot nothing, so there is
+    # no callback to answer and the two are mutually exclusive.
+    $button = if ($WebAppUrl) { @{ text = $displayText; web_app = @{ url = $WebAppUrl } } }
+    else { @{ text = $displayText; callback_data = $Data } }
     if ($Style) { $button.style = $Style }
     return $button
 }

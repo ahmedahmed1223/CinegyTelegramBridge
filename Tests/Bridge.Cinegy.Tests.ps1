@@ -1453,3 +1453,62 @@ Describe 'A slow source is not a dead one' {
         $script:OutputMonitorFailureCount | Should -Be 1
     }
 }
+
+Describe 'The watch page address' {
+    <#
+        The Mini App is one static file that needs hosting somewhere with
+        HTTPS, and where that is differs per station, so the address is a
+        setting rather than a constant. Empty means no button.
+
+        Every refusal here is a button that would have opened to something
+        broken, which is worse than a button that is not there.
+    #>
+    BeforeEach {
+        Mock Get-ActiveLiveStreamConfig { [pscustomobject]@{ SourceUrl = 'https://s.example/live.m3u8' } }
+        Mock Get-BridgeLanguage { 'ar' }
+    }
+
+    It 'carries the stream and the language to the page' {
+        Mock Get-Setting { 'https://watch.example/watch.html' } -ParameterFilter { $Name -eq 'LiveWatchUrl' }
+
+        $url = Get-LiveWatchUrl
+        $url | Should -BeLike 'https://watch.example/watch.html?src=*'
+        $url | Should -BeLike '*lang=ar*'
+        $url | Should -BeLike '*s.example*live.m3u8*' -Because 'the page is the same file for every station; the stream arrives in the query'
+    }
+
+    It 'keeps a question mark the address already had' {
+        Mock Get-Setting { 'https://watch.example/p?v=2' } -ParameterFilter { $Name -eq 'LiveWatchUrl' }
+
+        Get-LiveWatchUrl | Should -BeLike 'https://watch.example/p?v=2&src=*'
+    }
+
+    It 'says nothing when no address is set' {
+        Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'LiveWatchUrl' }
+
+        Get-LiveWatchUrl | Should -BeNullOrEmpty
+    }
+
+    It 'refuses an address that is not https' {
+        # Telegram opens a Mini App from https alone, so the button would
+        # simply fail to open - and a button that does nothing is worse than
+        # no button.
+        Mock Get-Setting { 'http://watch.example/watch.html' } -ParameterFilter { $Name -eq 'LiveWatchUrl' }
+
+        Get-LiveWatchUrl | Should -BeNullOrEmpty
+    }
+
+    It 'says nothing when there is no stream to play' {
+        Mock Get-Setting { 'https://watch.example/watch.html' } -ParameterFilter { $Name -eq 'LiveWatchUrl' }
+        Mock Get-ActiveLiveStreamConfig { [pscustomobject]@{ SourceUrl = '' } }
+
+        Get-LiveWatchUrl | Should -BeNullOrEmpty -Because 'a player with nothing to play is a black rectangle with a back button'
+    }
+
+    It 'builds a Mini App button, not a callback one' {
+        $button = New-Button -Text '📺' -Data '' -WebAppUrl 'https://watch.example/watch.html?src=x'
+
+        $button.web_app.url | Should -Be 'https://watch.example/watch.html?src=x'
+        $button.ContainsKey('callback_data') | Should -BeFalse -Because 'Telegram sends the bot nothing when a Mini App opens, so there is no callback to answer'
+    }
+}

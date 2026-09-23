@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>البثّ المباشر</title>
+<!--
+  A Telegram Mini App that plays the channel's own HLS output.
+
+  One static file on purpose. The bridge is a PowerShell script on the
+  gallery machine and serves no HTTP, so anything needing a server would need
+  a server nobody wants to run beside playout. This has no server side at
+  all: the stream URL arrives in ?src=, and the page is the same file for
+  every station.
+
+  Two players, because the three places this opens do not agree:
+    * iOS opens it in WKWebView, which plays HLS natively from a <video src>
+      and needs no library at all;
+    * Android's WebView and Telegram Desktop do not, and need Media Source
+      Extensions, which is what hls.js drives.
+  Native is preferred where it exists: it is the one that hardware-decodes.
+
+  Measured on the station's own source: HTTPS, a valid certificate, and
+  Content-Type application/vnd.apple.mpegurl - and Access-Control-Allow-Origin
+  sent TWICE, which is invalid CORS that every browser refuses. So on that
+  source the native path plays and hls.js is blocked, which is why the page
+  names that specific cause rather than shrugging at "could not play". It is
+  one header on the stream server, and the person looking at this screen is
+  the person who can have it changed.
+-->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #fff;
+    --muted: rgba(255, 255, 255, .55);
+    --accent: #3390ec;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; }
+  #stage {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    position: relative;
+  }
+  video {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    background: #000;
+    display: block;
+  }
+  #note {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    background: var(--bg);
+  }
+  #note[hidden] { display: none; }
+  #note p { margin: 0; color: var(--muted); max-width: 30rem; }
+  #note b { color: var(--fg); font-weight: 600; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 10px;
+    padding: 11px 22px;
+    cursor: pointer;
+  }
+  button:active { opacity: .8; }
+  #bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(255, 255, 255, .09);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  #dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #888;
+    flex: 0 0 auto;
+  }
+  #dot.live { background: #e0245e; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #dot.live { animation: none; } }
+  #edge { margin-inline-start: auto; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="v" playsinline controls autoplay muted></video>
+  <div id="note" hidden><p id="noteText"></p><button id="noteAction" hidden></button></div>
+</div>
+<div id="bar"><span id="dot"></span><span id="state"></span><span id="edge"></span></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  var params = new URLSearchParams(location.search);
+  var src = params.get('src') || '';
+  var lang = (params.get('lang') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.user &&
+    tg.initDataUnsafe.user.language_code) || 'ar').slice(0, 2).toLowerCase();
+  var ar = lang !== 'en';
+  document.documentElement.lang = ar ? 'ar' : 'en';
+  document.documentElement.dir = ar ? 'rtl' : 'ltr';
+
+  var TEXT = {
+    live:      [ 'مباشر',                          'Live' ],
+    connecting:[ 'يتّصل…',                          'Connecting…' ],
+    buffering: [ 'يخزّن…',                          'Buffering…' ],
+    paused:    [ 'متوقّف',                          'Paused' ],
+    noSource:  [ 'لا رابط بثّ في هذه الصفحة.',      'This page carries no stream link.' ],
+    failed:    [ 'تعذّر تشغيل البثّ.',              'The stream would not play.' ],
+    retry:     [ 'أعد المحاولة',                    'Try again' ],
+    tapPlay:   [ 'اضغط للتشغيل',                    'Tap to play' ],
+    unmute:    [ '🔇 الصوت مكتوم — اضغط لتشغيله',  '🔇 Muted — tap for sound' ],
+    noSupport: [ 'هذا الجهاز لا يشغّل هذا النوع من البثّ.',
+                 'This device cannot play this kind of stream.' ],
+    // Named rather than hidden behind "could not play". Measured on this
+    // station's own source: the server sends Access-Control-Allow-Origin
+    // twice, which is invalid CORS and every browser refuses it. iPhone is
+    // unaffected because native HLS never asks; Android and Desktop need
+    // hls.js, which fetches over XHR and is blocked. One header on the
+    // stream server fixes it, and whoever opens this screen is the person
+    // who can say so.
+    blocked:   [ 'خادم البثّ يرفض القراءة من صفحة أخرى (CORS).<br>يُرسل ترويسة <b>Access-Control-Allow-Origin</b> مرّتين، والمتصفّح يقبلها مرّة واحدة.<br>يُصلَح من إعدادات الخادم أو Cloudflare.',
+                 'The stream server refuses cross-origin reads (CORS).<br>It sends <b>Access-Control-Allow-Origin</b> twice, and a browser accepts it once.<br>Fixed on the stream server or in Cloudflare.' ]
+  };
+  function t(k) { return TEXT[k][ar ? 0 : 1]; }
+
+  var video = document.getElementById('v');
+  var note = document.getElementById('note');
+  var noteText = document.getElementById('noteText');
+  var noteAction = document.getElementById('noteAction');
+  var state = document.getElementById('state');
+  var dot = document.getElementById('dot');
+  var edge = document.getElementById('edge');
+
+  function say(text, live) {
+    state.textContent = text;
+    dot.classList.toggle('live', !!live);
+  }
+  function show(text, actionLabel, action) {
+    noteText.innerHTML = text;
+    noteAction.hidden = !actionLabel;
+    if (actionLabel) { noteAction.textContent = actionLabel; noteAction.onclick = action; }
+    note.hidden = false;
+  }
+  function hide() { note.hidden = true; }
+
+  if (!src || !/^https:\/\//i.test(src)) {
+    say('');
+    show('<b>' + t('noSource') + '</b>');
+    return;
+  }
+
+  // Muted autoplay is the only kind every browser allows without a gesture,
+  // so it starts muted and offers the sound rather than failing to start.
+  function offerSound() {
+    if (!video.muted) { edge.textContent = ''; return; }
+    edge.textContent = t('unmute');
+    edge.style.cursor = 'pointer';
+    edge.onclick = function () {
+      video.muted = false;
+      video.play().catch(function () {});
+      edge.textContent = '';
+    };
+  }
+
+  video.addEventListener('playing', function () { hide(); say(t('live'), true); offerSound(); });
+  video.addEventListener('waiting', function () { say(t('buffering')); });
+  video.addEventListener('pause', function () { say(t('paused')); });
+
+  var hls = null;
+
+  function fail() {
+    say('');
+    show('<b>' + t('failed') + '</b>', t('retry'), start);
+  }
+
+  function start() {
+    hide();
+    say(t('connecting'));
+    if (hls) { hls.destroy(); hls = null; }
+
+    // Native first where it exists: on iOS this is the path that
+    // hardware-decodes, and hls.js would be a library doing worse.
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = src;
+      video.load();
+      video.play().catch(function () { show('', t('tapPlay'), function () { video.play(); }); });
+      return;
+    }
+
+    if (!window.Hls || !window.Hls.isSupported()) {
+      say('');
+      show('<b>' + t('noSupport') + '</b>');
+      return;
+    }
+    hls = new window.Hls({ lowLatencyMode: true, backBufferLength: 30 });
+    hls.on(window.Hls.Events.ERROR, function (_e, data) {
+      if (!data.fatal) { return; }
+      // A manifest that will not load at all is almost always the server
+      // refusing the origin, not a network that dropped: retrying that for
+      // ever shows a spinner where a sentence belongs.
+      if (data.details === window.Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+          data.details === window.Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+        say('');
+        show('<b>' + t('failed') + '</b><p>' + t('blocked') + '</p>', t('retry'), start);
+        return;
+      }
+      // A live stream drops segments; recovering beats surrendering, and only
+      // an error that recovery cannot touch reaches the operator.
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
+      if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
+      fail();
+    });
+    hls.loadSource(src);
+    hls.attachMedia(video);
+    video.play().catch(function () { show('', t('tapPlay'), function () { video.play(); }); });
+  }
+
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    start();
+  } else {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
+    s.onload = start;
+    s.onerror = fail;
+    document.head.appendChild(s);
+    say(t('connecting'));
+  }
+})();
+</script>
+</body>
+</html>

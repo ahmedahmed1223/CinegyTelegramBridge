@@ -64,6 +64,7 @@ function Add-BridgeTextSettings {
     # shipped all along; holding both together is what lets the catalogue
     # test see a label that has gained an English half and lost its Arabic.
     $catalogue['setting.EnableSnapshot.label'] = @{ ar = 'التقاط لقطات البث'; en = 'Output snapshots' }
+    $catalogue['setting.LiveWatchUrl.label'] = @{ ar = 'رابط صفحة المشاهدة'; en = 'The watch page address' }
     $catalogue['setting.EnableLiveRelay.label'] = @{ ar = 'ترحيل البث المباشر'; en = 'Live relay' }
     $catalogue['setting.EnableTimedShow.label'] = @{ ar = 'العرض المؤقت'; en = 'Timed show' }
     $catalogue['setting.EnableHideAll.label'] = @{ ar = 'تفعيل إخفاء الكل'; en = 'Hide-all button' }
@@ -431,6 +432,7 @@ function Add-BridgeTextSettings {
     $catalogue['setting.EnableFullTemplateManagement.description'] = @{ ar = 'يسمح بتعديل بنية القوالب من تيليجرام لا بعرضها فقط'; en = 'Allows editing template structure from Telegram, not only viewing it' }
     $catalogue['setting.EnableDpapiSecrets.description'] = @{ ar = 'يخزّن الأسرار مشفّرة بـ Windows DPAPI لحساب التشغيل بدل نص صريح في config.json'; en = 'Stores secrets encrypted with Windows DPAPI for the run account instead of plain text in config.json' }
     $catalogue['setting.EnableSnapshot.description'] = @{ ar = 'يفعّل 📸 صورة من البث: لقطة من خرج القناة'; en = 'Enables the output snapshot: a frame from the channel output' }
+    $catalogue['setting.LiveWatchUrl.description'] = @{ ar = 'رابط صفحة المشاهدة (https) التي يفتحها زرّ 📺 داخل تيليجرام. اتركه فارغًا ليختفي الزرّ. الصفحة ملف واحد في docs/watch.html'; en = 'The https page the 📺 button opens inside Telegram. Leave it empty and the button disappears. The page is one file, docs/watch.html' }
     $catalogue['setting.EnableLiveRelay.description'] = @{ ar = 'يفعّل ▶️ البث المباشر: ترحيل خرج القناة إلى تيليجرام'; en = 'Enables the live relay: the channel output forwarded to Telegram' }
     $catalogue['setting.EnableTimedShow.description'] = @{ ar = 'يفعّل ⏱ العرض المؤقّت: عرض يُخفى تلقائيًا بعد مدة'; en = 'Enables the timed show: a graphic that hides itself after a set time' }
     $catalogue['setting.EnableHideAll.description'] = @{ ar = 'يفعّل 🚨 إخفاء الكل: زر الطوارئ الذي يخفي الطبقات المحددة'; en = 'Enables hide-all: the emergency button that clears the selected layers' }

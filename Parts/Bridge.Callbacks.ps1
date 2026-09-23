@@ -1265,6 +1265,7 @@ function Invoke-CallbackQuery {
             break
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
+        'menu:clip' { Start-SnapshotJob -ChatId $chatId -UserId $userId -Kind clip; break }
         'menu:feedwatch' { Show-FeedWatchScreen -ChatId $chatId; break }
         # The probe costs one frame grab, so it is a press rather than
         # something the plain open does on every visit.

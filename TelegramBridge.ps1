@@ -182,6 +182,7 @@ $script:DefaultSettings = [ordered]@{
     # anywhere. The page is one static file and needs no server of its
     # own; the stream URL reaches it as ?src=.
     LiveWatchUrl               = ''
+    ClipSeconds                = 8      # how many seconds the clip button records
     EnableLiveRelay            = $true
     EnableTimedShow            = $true
     EnableHideAll              = $true
@@ -573,6 +574,7 @@ $script:SettingDisplayMetadata = @{
     EnableFullTemplateManagement = @{ Unit = ''; Description = 'يسمح بتعديل بنية القوالب من تيليجرام لا بعرضها فقط' }
     EnableDpapiSecrets = @{ Unit = ''; Description = 'يخزّن الأسرار مشفّرة بـ Windows DPAPI لحساب التشغيل بدل نص صريح في config.json' }
     EnableSnapshot = @{ Unit = ''; Description = 'يفعّل 📸 صورة من البث: لقطة من خرج القناة' }
+    ClipSeconds = @{ Unit = 'ثانية'; Description = 'طول المقطع الذي يسجّله زرّ 🎬 من خرج القناة. الملف يُنسخ بلا إعادة ترميز، فلا يُثقل جهاز البثّ' }
     LiveWatchUrl = @{ Unit = ''; Description = 'رابط صفحة المشاهدة (https) التي يفتحها زرّ 📺 داخل تيليجرام. اتركه فارغًا ليختفي الزرّ. الصفحة ملف واحد في docs/watch.html' }
     EnableLiveRelay = @{ Unit = ''; Description = 'يفعّل ▶️ البث المباشر: ترحيل خرج القناة إلى تيليجرام' }
     EnableTimedShow = @{ Unit = ''; Description = 'يفعّل ⏱ العرض المؤقّت: عرض يُخفى تلقائيًا بعد مدة' }
@@ -1337,7 +1339,7 @@ foreach ($entry in @(
                 'DormantUserDays', 'AutoDisableDormantUsers', 'LeaveUnknownGroups'
             ) },
         @{ Category = 'onair'; Names = @(
-                'EnableSnapshot', 'LiveWatchUrl', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
+                'EnableSnapshot', 'ClipSeconds', 'LiveWatchUrl', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
                 'BroadcastFps', 'MojazMultiDesign', 'MojazAnchorToAirClock', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
                 'SceneMode',
                 'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
@@ -1442,6 +1444,7 @@ foreach ($entry in @(
 
 $script:SettingNavigationLabels = @{
     EnableSnapshot = 'التقاط لقطات البث'
+    ClipSeconds = 'طول المقطع المسجّل'
     LiveWatchUrl = 'رابط صفحة المشاهدة'
     EnableLiveRelay = 'ترحيل البث المباشر'
     EnableTimedShow = 'العرض المؤقت'

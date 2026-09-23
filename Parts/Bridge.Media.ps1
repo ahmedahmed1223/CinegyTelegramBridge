@@ -144,7 +144,14 @@ function Start-SnapshotJob {
        check and each spawn their own ffmpeg against the live source, from
        any allowlisted account - not just an admin. The in-flight guard below
        catches exactly that gap: at most one capture runs at a time. #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [long]$UserId = 0,
+        # 'clip' asks ffmpeg for seconds instead of one frame and sends the
+        # result as video. Everything else about the job is the same, which
+        # is why it is a parameter rather than a second function.
+        [ValidateSet('photo', 'clip')][string]$Kind = 'photo'
+    )
     if ($UserId -eq 0) { $UserId = $ChatId }
 
     if (-not (Get-Setting 'EnableSnapshot')) {
@@ -152,7 +159,10 @@ function Start-SnapshotJob {
         return
     }
 
-    $cooldown = Get-SettingInt 'SnapshotCooldownSeconds' 0
+    # A clip is never re-sent from the cache. A still from ten seconds ago
+    # still answers "what is on screen"; a clip from ten seconds ago
+    # answers a question about a moment that has passed.
+    $cooldown = if ($Kind -eq 'clip') { 0 } else { Get-SettingInt 'SnapshotCooldownSeconds' 0 }
     if ($cooldown -gt 0 -and $script:LastSnapshotFile -and (Test-Path $script:LastSnapshotFile) -and
         ((Get-Date) - $script:LastSnapshotAt).TotalSeconds -lt $cooldown) {
         Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
@@ -186,13 +196,27 @@ function Start-SnapshotJob {
     }
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-    $outPath = Join-Path $logDir "snapshot-$stamp.jpg"
+    $extension = if ($Kind -eq 'clip') { 'mp4' } else { 'jpg' }
+    $outPath = Join-Path $logDir "snapshot-$stamp.$extension"
     # Per-job stderr file: a shared one would race between concurrent captures
     # and report the wrong error back to the wrong operator.
     $errLog = Join-Path $logDir "snapshot-$stamp.err"
     $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
+    $clipSeconds = [math]::Max(1, (Get-SettingInt 'ClipSeconds' 1))
 
-    $processArguments = @('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '2', $outPath)
+    $processArguments = if ($Kind -eq 'clip') {
+        # Copied, not re-encoded: the gallery machine is running playout
+        # and has no cycles to spare for an x264 pass nobody asked for.
+        # faststart moves the index to the front so Telegram can begin
+        # playing before the whole file has arrived.
+        @('-y', '-loglevel', 'error') + $inputArgs +
+        @('-t', "$clipSeconds", '-c', 'copy', '-movflags', '+faststart', $outPath)
+    }
+    else { @('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '2', $outPath) }
+    # A clip cannot finish before its own length, so the deadline is that
+    # plus the time the source takes to open - which on an HLS feed here
+    # was measured at five to ten seconds.
+    if ($Kind -eq 'clip') { $timeout = $clipSeconds + ($timeout * 3) }
     try {
         $proc = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $processArguments `
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
@@ -204,10 +228,11 @@ function Start-SnapshotJob {
 
     $script:SnapshotJobs.Add(@{
             Proc = $proc; ChatId = $ChatId; UserId = $UserId; OutPath = $outPath; ErrLog = $errLog
+            Kind = $Kind
             SourceIsPrimary = (-not $script:OutputMonitorFallbackActive)
             Deadline = (Get-Date).AddSeconds($timeout)
         })
-    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.grabbing')
+    Send-TelegramMessage -ChatId $ChatId -Text $(if ($Kind -eq 'clip') { (T 'media.recording' $clipSeconds) } else { (T 'media.grabbing') })
 }
 
 function Update-SnapshotJobs {
@@ -246,12 +271,23 @@ function Update-SnapshotJobs {
                 # The operator asked for a picture, so do not make them wait for
                 # the hourly watchdog. Retry this same request from Cinegy's
                 # standby input after switching the active source.
-                $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId }
+                $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId; Kind = [string]$job.Kind }
                 Send-TelegramMessage -ChatId $job.ChatId -Text (T 'media.tryingBackup')
             }
             else {
                 Send-TelegramMessage -ChatId $job.ChatId -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
             }
+        }
+        elseif ([string]$job.Kind -eq 'clip') {
+            $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
+            Write-BridgeLog "User $($job.UserId) recorded a clip from $sourceLabel"
+            Add-AuditEntry (T 'media.clipAudit' $(Format-UserAuditActor -UserId ([long]$job.UserId)))
+            Send-TelegramVideo -ChatId $job.ChatId -FilePath $job.OutPath `
+                -Caption (T 'media.clipOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
+                -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            # Not kept: the cooldown cache is for stills, and a clip is
+            # megabytes that answer a question already answered.
+            Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
         }
         else {
             # Retain only the newest frame for the cooldown cache.
@@ -273,7 +309,10 @@ function Update-SnapshotJobs {
         $done += $job
     }
     foreach ($job in $done) { $script:SnapshotJobs.Remove($job) | Out-Null }
-    foreach ($request in $retryRequests) { Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId }
+    foreach ($request in $retryRequests) {
+        $kind = if ($request.Kind) { [string]$request.Kind } else { 'photo' }
+        Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId -Kind $kind
+    }
 }
 
 function Test-PrimaryMonitorSourceBack {
@@ -1265,7 +1304,10 @@ function Get-FeedWatchKeyboard {
     $watch = Get-LiveWatchUrl
     if ($watch) { $rows += , @( (New-Button (T 'feed.watchLive') '' -WebAppUrl $watch) ) }
     if (Get-Setting 'EnableSnapshot') {
-        $rows += , @( (New-Button (T 'feed.snapshotNow') 'menu:snapshot'), (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') )
+        # A still and a clip on one row: the same question asked of one
+        # frame and of a few seconds.
+        $rows += , @( (New-Button (T 'feed.snapshotNow') 'menu:snapshot'), (New-Button (T 'feed.clipNow') 'menu:clip') )
+        $rows += , @( (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') )
     }
     else { $rows += , @( (New-Button (T 'feed.refresh') 'menu:feedwatch:probe') ) }
     # Home, not the administration tools: the screen is opened from the main

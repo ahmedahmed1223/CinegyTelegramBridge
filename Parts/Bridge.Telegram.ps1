@@ -853,6 +853,47 @@ function Send-TelegramPhoto {
     }
 }
 
+function Send-TelegramVideo {
+    <#
+        The same shape as Send-TelegramPhoto, against sendVideo.
+
+        supports_streaming lets a client start playing before the whole file
+        has arrived, which is the difference between a clip that plays on tap
+        and one that downloads first - and the bot is sending seconds of
+        video, not a film.
+
+        Telegram takes 50 MB per file. A few seconds of a broadcast stream
+        does not come close, and the clip length is capped where it is asked
+        for rather than checked here.
+    #>
+    param(
+        [Parameter(Mandatory)][long]$ChatId,
+        [Parameter(Mandatory)][string]$FilePath,
+        [string]$Caption,
+        [hashtable]$ReplyMarkup
+    )
+    if (Test-DeadChat -ChatId $ChatId) {
+        Write-BridgeLog "Skipping video send to quarantined dead chat $ChatId"
+        return
+    }
+    $form = @{ chat_id = "$ChatId"; video = Get-Item -Path $FilePath; supports_streaming = 'true' }
+    if ($Caption) { $form.caption = $Caption }
+    if ($ReplyMarkup) { $form.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendVideo" -Method Post -Form $form `
+        -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
+    if (-not $request.Success) {
+        if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {
+            $script:TelegramRateLimitHits++
+            $retryMs = [math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs'))
+            Add-TelegramOutboxItem -Uri "$apiBase/sendVideo" -Form $form -DueAt (Get-Date).AddMilliseconds($retryMs) -Attempts 0 | Out-Null
+            return
+        }
+        Write-BridgeLog "Failed to send Telegram video to $ChatId : $($request.Error)" "ERROR"
+        Register-TelegramSendFailure -ChatId $ChatId -StatusCode ([int](Get-JsonProp $request 'StatusCode')) -ErrorText ([string]$request.Error)
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tg.videoFailed' $($request.Error))
+    }
+}
+
 function Confirm-TelegramCallback {
     <# Acknowledges a button press so Telegram stops showing the loading
        spinner on the client. Optional Text shows a small toast. #>

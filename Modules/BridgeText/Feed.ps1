@@ -43,4 +43,9 @@ function Add-BridgeTextFeed {
     $catalogue['feed.watch'] = @{ ar = '📡 مراقبة البثّ'; en = '📡 The feed watch' }
     $catalogue['feed.probeNote'] = @{ ar = '<i>«تحديث» يلتقط إطارًا من الخرج ليقيس عليه — قراءة فقط.</i>'; en = '<i>"Refresh" grabs one frame from the output to measure — a read, nothing more.</i>' }
     $catalogue['feed.watchLive'] = @{ ar = '📺 شاهد البثّ الآن'; en = '📺 Watch the feed now' }
+    $catalogue['feed.clipNow'] = @{ ar = '🎬 مقطع من الهواء'; en = '🎬 A clip from air' }
+    $catalogue['media.recording'] = @{ ar = '🎬 يسجّل {0} ثوانٍ من الهواء…'; en = '🎬 Recording {0} seconds from air…' }
+    $catalogue['media.clipOfAir'] = @{ ar = "🎬 مقطع من الهواء - {0}`n📡 المصدر: {1}"; en = "🎬 A clip from air - {0}`n📡 The source: {1}" }
+    $catalogue['media.clipAudit'] = @{ ar = '🎬 مقطع من الهواء - بواسطة {0}'; en = '🎬 A clip from air - by {0}' }
+    $catalogue['tg.videoFailed'] = @{ ar = '❌ فشل إرسال المقطع: {0}'; en = '❌ The clip could not be sent: {0}' }
 }

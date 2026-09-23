@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.2'; Items = @(
+                        '🏠 **One way home, one name** — every button back to the menu now reads 🏠 Menu; some said ⬅️ Main menu and looked like a different place.'
+                        '🧰 **Home from inside the admin tools** — each tools page has 🏠 beside back, so the menu is one tap away, not two.'
+                    ) }
                 @{ Version = '8.69.1'; Items = @(
                         '🔄 **Refresh on the feed watch updates the same message** instead of sending a new copy each press, so the chat no longer fills with old states.'
                         '📡 **One damaged outage record no longer hides the screen** — it is skipped, and the rest of the history shows.'
@@ -157,6 +161,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.2'; Items = @(
+                        '🏠 **طريق واحد إلى القائمة باسم واحد** — كل زرّ يعود إلى القائمة صار «🏠 القائمة»؛ بعضها كان «⬅️ الرئيسية» فبدا مكانًا آخر.'
+                        '🧰 **العودة إلى القائمة من داخل أدوات الإدارة** — كل صفحة أدوات فيها 🏠 بجوار «رجوع»، فالقائمة على ضغطة لا ضغطتين.'
+                    ) }
                 @{ Version = '8.69.1'; Items = @(
                         '🔄 **«تحديث» في مراقبة البثّ يحدّث الرسالة نفسها** بدل إرسال نسخة جديدة مع كل ضغطة، فلا تمتلئ المحادثة بحالات قديمة.'
                         '📡 **سجلّ انقطاع تالف لم يعد يُخفي الشاشة** — يُتجاوَز ويظهر باقي السجلّ.'

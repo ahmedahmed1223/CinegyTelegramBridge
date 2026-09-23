@@ -550,7 +550,7 @@ function Get-AdminToolsKeyboard {
         if ($pair.Count -eq 2) { $rows += , $pair; $pair = @() }
     }
     if ($pair.Count -gt 0) { $rows += , $pair }
-    $rows += , @( (New-Button (T 'news.home') "menu") )
+    $rows += , @( (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -587,7 +587,9 @@ function Get-AdminToolsCategoryKeyboard {
             if (Get-Setting 'AllowRemoteRestart') { $rows += , @( (New-Button (T 'kb.restartBridge') "menu:restart" -Style danger) ) }
         }
     }
-    $rows += , @( (New-Button (T 'kb.backToAdminTools') "menu:admintools") )
+    # Home beside back: two levels down, the menu was two taps away, and the
+    # menu is where the live controls are.
+    $rows += , @( (New-Button (T 'kb.backToAdminTools') "menu:admintools"), (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
 
@@ -1481,7 +1483,7 @@ function Get-ApprovalKeyboard {
     param([Parameter(Mandatory)][long]$TargetChatId)
     return @{ inline_keyboard = @(
             , @( (New-Button (T 'confirm.approve') "approve:confirm:$TargetChatId" -Style success), (New-Button (T 'confirm.reject') "reject:$TargetChatId") )
-            , @( (New-Button (T 'news.home') "menu") )
+            , @( (New-Button (T 'common.home') 'menu:main') )
         ) }
 }
 

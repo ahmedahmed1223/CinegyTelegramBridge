@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.2
+
+Every button back to the menu now carries one label; three screens used the
+news screen's own "⬅️ Main menu" and looked like a different destination. And
+each administrator-tools page has 🏠 beside its back button, so the menu with
+the live controls is one tap away rather than two.
+
 ## Version 8.69.1
 
 **The feed watch's Refresh edits its own message** instead of posting a new

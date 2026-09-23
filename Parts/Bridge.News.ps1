@@ -1004,7 +1004,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     # report only to bridge.log; this is where whoever owns the ticker asks
     # whether it ran and what it pushed.
     $rows += , @(@{text=(T 'news.executionLog');callback_data='schedule:execlog:news'}, @{text=(T 'news.refresh');callback_data='news:refresh'})
-    $rows += , @(@{text=(T 'news.home');callback_data='menu'})
+    $rows += , @(@{text=(T 'common.home');callback_data='menu:main'})
     return @{inline_keyboard=$rows}
 }
 

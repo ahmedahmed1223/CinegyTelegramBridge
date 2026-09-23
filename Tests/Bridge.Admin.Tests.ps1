@@ -712,7 +712,7 @@ Describe 'Administrator tools grouping' {
         Mock Get-RunningRelayProcess { $null }
         $top = @((Get-AdminToolsKeyboard).inline_keyboard |
                 ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
-        $top | Should -Contain 'menu'
+        $top | Should -Contain 'menu:main'
 
         # Each moved entry now sits one tap deeper, inside its category - the
         # top-level picker only carries the four category buttons.
@@ -1436,6 +1436,25 @@ Describe 'Version 6 administrator health center' {
             $callbacks = @((Get-AdminToolsCategoryKeyboard -Category 'health' -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data)
 
             $callbacks | Should -Contain 'menu:healthcenter'
+        }
+
+        It 'reaches the menu in one tap from every tools category' {
+            Mock Get-RunningRelayProcess { $null }
+            foreach ($category in 'users', 'content', 'health', 'system') {
+                $last = @((Get-AdminToolsCategoryKeyboard -Category $category -ChatId 100 -UserId 101).inline_keyboard)[-1]
+                @($last | ForEach-Object callback_data) | Should -Contain 'menu:main' -Because "the $category tools are two levels down, and the live controls are on the menu"
+            }
+        }
+
+        It 'labels every way home the same' {
+            # Two labels for one destination read as two destinations.
+            $homeLabel = (T 'common.home')
+            $buttons = foreach ($keyboard in (Get-AdminToolsKeyboard), (Get-ApprovalKeyboard -TargetChatId 5)) {
+                foreach ($row in $keyboard.inline_keyboard) { @($row) | Where-Object { $_.callback_data -in 'menu', 'menu:main' } }
+            }
+            $buttons = @($buttons)
+            $buttons.Count | Should -Be 2
+            $buttons | ForEach-Object { $_.text | Should -Be $homeLabel }
         }
 
         It 'routes the health center callback only after the admin guard succeeds' {

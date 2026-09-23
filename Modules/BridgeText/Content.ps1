@@ -197,159 +197,313 @@ function Add-BridgeTextContent {
     $catalogue['urgent.num.doneBack'] = @{ ar = '✅ تمّ / رجوع'; en = '✅ Done / back' }
     $catalogue['urgent.num.expired'] = @{ ar = '⚠️ انتهت صلاحية هذه الأزرار. افتح شاشة الرقم من جديد.'; en = '⚠️ These buttons have expired. Open the number screen again.' }
     $catalogue['urgent.manualSingle'] = @{ ar = '🚨 عرض خبر واحد فقط — دون انتقال تلقائي.'; en = '🚨 Showing one story only — with no automatic advance.' }
-    $catalogue['urgent.manualRules'] = @{ ar = 'تظل قواعد الإخفاء والتمديد سارية.'; en = 'The hide and extension rules still apply.' }
+    $catalogue['urgent.manualRules'] = @{ ar = 'تظل قواعد الإخفاء والتمديد سارية.'; en = 'The hide and extension rules still apply.' }
+
+
     # --- The news ticker ------------------------------------------------
+
     $catalogue['news.noResumableDraft'] = @{ ar = 'لا مسودة منتهية قابلة للاستئناف.'; en = 'There is no expired draft to resume.' }
+
     $catalogue['news.draftActive'] = @{ ar = 'توجد مسودة نشطة الآن — انشرها أو أغلقها أولًا.'; en = 'A draft is open right now — publish or close it first.' }
+
     $catalogue['news.noDraftOfYours'] = @{ ar = 'لا توجد مسودة مملوكة لك.'; en = 'You do not hold a draft.' }
+
     $catalogue['news.noDraftOfYoursShort'] = @{ ar = 'لا توجد مسودة مملوكة لك'; en = 'You do not hold a draft' }
+
     $catalogue['news.writeUrlHttps'] = @{ ar = 'يجب أن يبدأ رابط الكتابة بـ https.'; en = 'The write-back link must start with https.' }
+
     $catalogue['news.publishTicker'] = @{ ar = 'نشر شريط الأخبار'; en = 'publishing the news ticker' }
+
     $catalogue['news.draftAlreadyOpen'] = @{ ar = '🤝 المسودة مفتوحة أصلًا — اضغط ✏️ لتتابعها.'; en = '🤝 The draft is already open — press ✏️ to continue it.' }
+
     $catalogue['news.handLock'] = @{ ar = '✅ سلّم القفل'; en = '✅ Hand over the lock' }
+
     $catalogue['news.stillWorking'] = @{ ar = '⛔ ما زلت أعمل'; en = '⛔ I am still working' }
+
     $catalogue['news.requestNotSaved'] = @{ ar = '⚠️ تعذّر حفظ الطلب على القرص؛ إعادة تشغيل الجسر قبل الردّ ستُلغيه.'; en = '⚠️ The request could not be saved to disk; a restart before an answer will cancel it.' }
+
     $catalogue['news.ownerChanged'] = @{ ar = 'ℹ️ تغيّر مالك المسودة أثناء انتظار طلبك؛ أرسل طلب فكّ قفل جديدًا إن كنت ما زلت بحاجة إليها.'; en = 'ℹ️ The draft changed hands while your request was waiting; send a new unlock request if you still need it.' }
+
     $catalogue['news.lockHandedOver'] = @{ ar = '🔓 سُلّم قفل شريط الأخبار وأُلغيت مسودتك.'; en = '🔓 The ticker lock was handed over and your draft was discarded.' }
+
     $catalogue['news.draftTextBeforeDelete'] = @{ ar = '📄 نصّ مسودتك قبل حذفها، انسخه إن أردت:'; en = '📄 Your draft text before it is deleted; copy it if you want it:' }
+
     $catalogue['news.confirmSheetPublish'] = @{ ar = '⚠️ سحب الشيت ونشره على الهواء مباشرة؟'; en = '⚠️ Pull the sheet and publish it straight to air?' }
+
     $catalogue['news.confirmSheetDraft'] = @{ ar = '⚠️ تحميل الشيت في المسودة للمراجعة؟'; en = '⚠️ Load the sheet into the draft for review?' }
+
     $catalogue['news.nothingUntilPublish'] = @{ ar = 'لن يصل الهواء شيء قبل أن تضغط «مراجعة ونشر».'; en = 'Nothing reaches air until you press "review and publish".' }
+
     $catalogue['news.yesPublish'] = @{ ar = '✅ نعم، انشر'; en = '✅ Yes, publish' }
+
     $catalogue['news.yesLoadDraft'] = @{ ar = '✅ نعم، حمّل المسودة'; en = '✅ Yes, load the draft' }
+
     $catalogue['news.sheetNeedsLock'] = @{ ar = 'السحب من الشيت يحتاج قفل المسودة. اضغط ✏️ بدء التحرير أولًا.'; en = 'Pulling from the sheet needs the draft lock. Press ✏️ start editing first.' }
+
     $catalogue['news.draftUnowned'] = @{ ar = 'المسودة مفتوحة ولا مالك لها. اضغط ✏️ تابِع المسودة لتتبنّاها أولًا.'; en = 'The draft is open and unowned. Press ✏️ continue the draft to adopt it first.' }
+
     $catalogue['news.sheetUrlUnset'] = @{ ar = 'لم يُضبط رابط الشيت.'; en = 'The sheet link is not set.' }
+
     $catalogue['news.sheetUrlHttps'] = @{ ar = 'يجب أن يبدأ رابط الشيت بـ https.'; en = 'The sheet link must start with https.' }
+
     $catalogue['news.automatically'] = @{ ar = 'تلقائيًا'; en = 'automatically' }
+
     $catalogue['news.orderOnly'] = @{ ar = 'تغيّر الترتيب فقط'; en = 'only the order changed' }
+
     $catalogue['news.sheetUpdatedToo'] = @{ ar = '📄 وحُدِّث الشيت بالنص نفسه.'; en = '📄 And the sheet was updated with the same text.' }
+
     $catalogue['news.airAlreadyPublished'] = @{ ar = 'ما على الهواء منشور فعلًا؛ الشيت وحده متأخّر عنه.'; en = 'What is on air is already published; only the sheet is behind it.' }
+
     $catalogue['news.draftNeedsUser'] = @{ ar = 'السحب إلى المسودة يحتاج مستخدمًا معروفًا.'; en = 'Pulling into the draft needs a known user.' }
+
     $catalogue['news.sheetNotConfigured'] = @{ ar = 'لم يُضبط رابط Google Sheets في الإعدادات.'; en = 'The Google Sheets link is not set in Settings.' }
+
     $catalogue['news.syncSkipped'] = @{ ar = 'مسودة الأخبار قيد التحرير؛ تُخطّيت هذه الدورة.'; en = 'A news draft is being edited; this cycle was skipped.' }
+
     $catalogue['news.openDraftWarning'] = @{ ar = '🤝 توجد مسودة مفتوحة للجميع. التأكيد يستبدل محتواها بمحتوى الشيت.'; en = '🤝 There is a draft open to everyone. Confirming replaces its content with the sheet.' }
+
     $catalogue['news.sheetEmpty'] = @{ ar = 'الشيت فارغ؛ لن يُمسح الشريط تلقائيًا. امسحه يدويًا إن كان هذا مقصودًا.'; en = 'The sheet is empty; the ticker will not be cleared automatically. Clear it by hand if that is what you meant.' }
+
     $catalogue['news.autoSync'] = @{ ar = 'المزامنة التلقائية'; en = 'the automatic sync' }
+
     $catalogue['news.importTxt'] = @{ ar = '📥 استيراد TXT'; en = '📥 Import TXT' }
+
     $catalogue['news.startEditing'] = @{ ar = '✏️ بدء التحرير'; en = '✏️ Start editing' }
+
     $catalogue['news.addItem'] = @{ ar = '➕ إضافة خبر'; en = '➕ Add a headline' }
+
     $catalogue['news.editOrder'] = @{ ar = '📝 تعديل وترتيب'; en = '📝 Edit and reorder' }
+
     $catalogue['news.preview'] = @{ ar = '👁 معاينة'; en = '👁 Preview' }
+
     $catalogue['news.clearAll'] = @{ ar = '🧹 مسح الكل'; en = '🧹 Clear everything' }
+
     $catalogue['news.handOverDraft'] = @{ ar = '🤝 سلّم المسودة للتالي'; en = '🤝 Hand the draft to the next person' }
+
     $catalogue['news.reviewPublish'] = @{ ar = '✅ مراجعة ونشر'; en = '✅ Review and publish' }
+
     $catalogue['news.discardDraft'] = @{ ar = '🗑 إلغاء المسودة'; en = '🗑 Discard the draft' }
+
     $catalogue['news.requestUnlock'] = @{ ar = '🔓 طلب فكّ القفل'; en = '🔓 Request the lock' }
+
     $catalogue['news.forceUnlock'] = @{ ar = '🔓 إلغاء القفل (مشرف)'; en = '🔓 Force the lock open (administrator)' }
+
     $catalogue['news.backups'] = @{ ar = '🕘 النسخ والاستعادة'; en = '🕘 Backups and restore' }
+
     $catalogue['news.pullPublish'] = @{ ar = '⬇️ سحب ونشر'; en = '⬇️ Pull and publish' }
+
     $catalogue['news.pullDraft'] = @{ ar = '📝 سحب إلى المسودة'; en = '📝 Pull into the draft' }
+
     $catalogue['news.executionLog'] = @{ ar = '🧾 سجل التنفيذ'; en = '🧾 Execution log' }
-    $catalogue['news.home'] = @{ ar = '⬅️ الرئيسية'; en = '⬅️ Main menu' }
+
+
     $catalogue['news.yesDelete'] = @{ ar = '🗑 نعم، احذف'; en = '🗑 Yes, delete' }
+
     $catalogue['news.moveUp'] = @{ ar = '⬆️ تحريك لأعلى'; en = '⬆️ Move up' }
+
     $catalogue['news.moveDown'] = @{ ar = '⬇️ تحريك لأسفل'; en = '⬇️ Move down' }
+
     $catalogue['news.backToOrder'] = @{ ar = '⬅️ رجوع للترتيب'; en = '⬅️ Back to the ordering' }
+
     $catalogue['news.backToManage'] = @{ ar = '⬅️ إدارة الأخبار'; en = '⬅️ News management' }
+
     $catalogue['news.prev'] = @{ ar = '◀️ السابق'; en = '◀️ Previous' }
+
     $catalogue['news.next'] = @{ ar = 'التالي ▶️'; en = 'Next ▶️' }
+
     $catalogue['news.orderTitle'] = @{ ar = '<b>📝 ترتيب المسودة</b>'; en = '<b>📝 Ordering the draft</b>' }
+
     $catalogue['news.orderHintStacked'] = @{ ar = 'أزرار كل خبر أسفله: ⬆️ ⬇️ ترتيب · ✏️ تعديل · 🗑 حذف'; en = 'Each headlines buttons are under it: ⬆️ ⬇️ order · ✏️ edit · 🗑 delete' }
+
     $catalogue['news.orderHintInline'] = @{ ar = '⬆️ ⬇️ للترتيب · اضغط النص للتعديل · 🗑 للحذف'; en = '⬆️ ⬇️ to reorder · press the text to edit · 🗑 to delete' }
+
     $catalogue['news.orderHintCompact'] = @{ ar = 'اضغط رقم الخبر: الترتيب والتعديل والحذف في شاشته'; en = 'Press the headline number: ordering, editing and deleting are on its screen' }
+
     $catalogue['news.orderHintNumbers'] = @{ ar = 'الرقم يفتح الخبر للتعديل · ⬆️ ⬇️ للترتيب · 🗑 للحذف'; en = 'The number opens the headline to edit · ⬆️ ⬇️ to reorder · 🗑 to delete' }
+
     $catalogue['news.orderHeading'] = @{ ar = '📝 الترتيب والتعديل'; en = '📝 Ordering and editing' }
+
     $catalogue['news.noDraftWarning'] = @{ ar = '⚠️ لا توجد مسودة مملوكة لك.'; en = '⚠️ You do not hold a draft.' }
+
     $catalogue['news.col.item'] = @{ ar = 'الخبر'; en = 'Headline' }
+
     $catalogue['news.chars'] = @{ ar = 'أحرف'; en = 'characters' }
+
     $catalogue['news.noDifference'] = @{ ar = 'لا فرق بين المسودة وما على الهواء.'; en = 'There is no difference between the draft and what is on air.' }
+
     $catalogue['news.reviewPublishButton'] = @{ ar = '✅ مراجعة النشر'; en = '✅ Review the publish' }
+
     $catalogue['news.noChangeOnPublish'] = @{ ar = 'لا فرق: النشر لن يغيّر ما على الهواء.'; en = 'No difference: publishing will not change what is on air.' }
+
     $catalogue['news.pickBackup'] = @{ ar = 'اختر نسخة لمراجعة استعادتها:'; en = 'Choose a backup to review restoring:' }
+
     $catalogue['news.backupsTitle'] = @{ ar = '<b>🕘 نسخ شريط الأخبار</b>'; en = '<b>🕘 News ticker backups</b>' }
+
     $catalogue['news.noBackups'] = @{ ar = '<i>لا نسخ محفوظة بعد. تُحفظ نسخة مع كل نشر.</i>'; en = '<i>No backups yet. One is kept with every publish.</i>' }
+
     $catalogue['news.backupUnreadable'] = @{ ar = ' · تعذّرت قراءتها'; en = ' · could not be read' }
+
     $catalogue['news.restoreNote'] = @{ ar = '<i>الاستعادة تعرض النسخة للمراجعة قبل أن يصل شيء إلى الهواء.</i>'; en = '<i>Restoring shows the backup for review before anything reaches air.</i>' }
+
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
+
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+
     $catalogue['news.addFailed'] = @{ ar = '❌ لم تتم الإضافة؛ تحقق من النص والحدود.'; en = '❌ It was not added; check the text and the limits.' }
+
     $catalogue['news.itemUpdated'] = @{ ar = '✅ حُدّث الخبر في المسودة.'; en = '✅ The headline was updated in the draft.' }
+
     $catalogue['news.editFailed'] = @{ ar = '❌ تعذر تعديل الخبر.'; en = '❌ The headline could not be edited.' }
+
     $catalogue['news.startImportFirst'] = @{ ar = 'ابدأ الاستيراد من إدارة شريط الأخبار أولًا.'; en = 'Start the import from news management first.' }
+
     $catalogue['news.txtOnly'] = @{ ar = 'يُقبل ملف TXT فقط.'; en = 'Only a TXT file is accepted.' }
+
     $catalogue['news.orderNoDraft'] = @{ ar = '📝 الترتيب والتعديل'; en = '📝 Ordering and editing' }
+
     # --- The bulletin --------------------------------------------------
+
     $catalogue['mojaz.word'] = @{ ar = 'الموجز'; en = 'the bulletin' }
+
     $catalogue['mojaz.emptyAddRow'] = @{ ar = 'الجدول فارغ. أضف صفًّا: صورة، عنوان، خبر.'; en = 'The table is empty. Add a row: image, headline, story.' }
+
     $catalogue['mojaz.emptyAddRowHtml'] = @{ ar = '<i>الجدول فارغ. أضف صفًّا: صورة، عنوان، خبر.</i>'; en = '<i>The table is empty. Add a row: image, headline, story.</i>' }
+
     $catalogue['mojaz.col.title'] = @{ ar = 'العنوان'; en = 'Headline' }
+
     $catalogue['mojaz.col.story'] = @{ ar = 'الخبر'; en = 'Story' }
+
     $catalogue['mojaz.imageLegend'] = @{ ar = '🖼 صورة خاصة · ↑ يتبع الصف السابق · ▫️ صورة القالب'; en = '🖼 its own image · ↑ follows the previous row · ▫️ the template image' }
+
     $catalogue['mojaz.stopExit'] = @{ ar = '⏹ إيقاف وخروج'; en = '⏹ Stop and exit' }
+
     $catalogue['mojaz.runLater'] = @{ ar = '🕒 تشغيل لاحقًا'; en = '🕒 Run later' }
+
     $catalogue['mojaz.addRow'] = @{ ar = '➕ إضافة صف'; en = '➕ Add a row' }
+
     $catalogue['mojaz.clearTable'] = @{ ar = '🧹 مسح الجدول'; en = '🧹 Clear the table' }
+
     $catalogue['mojaz.rename'] = @{ ar = '✏️ إعادة تسمية'; en = '✏️ Rename' }
+
     $catalogue['mojaz.duplicate'] = @{ ar = '📋 نسخة منه'; en = '📋 Duplicate it' }
+
     $catalogue['mojaz.delete'] = @{ ar = '🗑 حذف الموجز'; en = '🗑 Delete the bulletin' }
+
     $catalogue['mojaz.previewFull'] = @{ ar = '👁 معاينة النص كاملًا'; en = '👁 Preview the whole text' }
+
     $catalogue['mojaz.schedules'] = @{ ar = '🕒 المواعيد'; en = '🕒 Scheduled times' }
+
     $catalogue['mojaz.refresh'] = @{ ar = '🔄 تحديث'; en = '🔄 Refresh' }
+
     $catalogue['mojaz.backToLibrary'] = @{ ar = '⬅️ الموجزات'; en = '⬅️ Bulletins' }
+
     $catalogue['mojaz.emptyHtml'] = @{ ar = '<i>الجدول فارغ.</i>'; en = '<i>The table is empty.</i>' }
+
     $catalogue['mojaz.backToTable'] = @{ ar = '⬅️ الجدول'; en = '⬅️ The table' }
+
     $catalogue['mojaz.noneSaved'] = @{ ar = 'لا توجد موجزات محفوظة. أنشئ موجزًا ثم أضف صفوفه.'; en = 'No bulletins are saved. Create one, then add its rows.' }
+
     $catalogue['mojaz.noneSavedHtml'] = @{ ar = '<i>لا توجد موجزات محفوظة. أنشئ موجزًا ثم أضف صفوفه.</i>'; en = '<i>No bulletins are saved. Create one, then add its rows.</i>' }
+
     $catalogue['mojaz.col.rows'] = @{ ar = 'صفوف'; en = 'Rows' }
+
     $catalogue['mojaz.col.review'] = @{ ar = 'مراجعة'; en = 'Review' }
+
     $catalogue['mojaz.col.state'] = @{ ar = 'الحالة'; en = 'State' }
+
     $catalogue['mojaz.onAir'] = @{ ar = '▶️ على الهواء'; en = '▶️ On air' }
+
     $catalogue['mojaz.onAirSuffix'] = @{ ar = ' · ▶️ على الهواء'; en = ' · ▶️ on air' }
+
     $catalogue['mojaz.libraryTitle'] = @{ ar = '<b>📑 الموجزات المحفوظة</b>'; en = '<b>📑 Saved bulletins</b>' }
+
     $catalogue['mojaz.prev'] = @{ ar = '⬅️ السابق'; en = '⬅️ Previous' }
+
     $catalogue['mojaz.next'] = @{ ar = 'التالي ➡️'; en = 'Next ➡️' }
+
     $catalogue['mojaz.new'] = @{ ar = '➕ موجز جديد'; en = '➕ New bulletin' }
+
     $catalogue['mojaz.home'] = @{ ar = '🏠 القائمة'; en = '🏠 Menu' }
+
     $catalogue['mojaz.askNewName'] = @{ ar = '📝 أرسل اسم الموجز الجديد، مثل: الموجز الصباحي.'; en = '📝 Send the new bulletins name, for example: Morning bulletin.' }
+
     $catalogue['mojaz.askRename'] = @{ ar = '✏️ أرسل الاسم الجديد لهذا الموجز.'; en = '✏️ Send this bulletins new name.' }
+
     $catalogue['mojaz.askCopyName'] = @{ ar = '📋 أرسل اسم النسخة الجديدة.'; en = '📋 Send the name for the copy.' }
+
     $catalogue['mojaz.saveFailed'] = @{ ar = '❌ تعذّر الحفظ. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.'; en = '❌ Could not save. Nothing changed; check the disk space and the log.' }
+
     $catalogue['mojaz.actionCreate'] = @{ ar = 'إنشاء'; en = 'creating' }
+
     $catalogue['mojaz.actionCopy'] = @{ ar = 'نسخ'; en = 'copying' }
+
     $catalogue['mojaz.undo'] = @{ ar = '↩️ تراجع'; en = '↩️ Undo' }
+
     $catalogue['mojaz.onAirStopFirst'] = @{ ar = '❌ هذا الموجز على الهواء الآن. أوقفه أولًا.'; en = '❌ This bulletin is on air right now. Stop it first.' }
+
     $catalogue['mojaz.cancelSchedulesFailed'] = @{ ar = '❌ تعذّر إلغاء مواعيد هذا الموجز، فلم يُحذف شيء.'; en = '❌ Its scheduled times could not be cancelled, so nothing was deleted.' }
+
     $catalogue['mojaz.deleteFailed'] = @{ ar = '❌ تعذّر حذف الموجز. لم يتغيّر شيء؛ تحقّق من مساحة القرص والسجل.'; en = '❌ Could not delete the bulletin. Nothing changed; check the disk space and the log.' }
+
     $catalogue['mojaz.img.inherit'] = @{ ar = '↑ يتبع السابق'; en = '↑ Follow the previous' }
+
     $catalogue['mojaz.img.template'] = @{ ar = '▫️ صورة القالب'; en = '▫️ The template image' }
+
     $catalogue['mojaz.cancel'] = @{ ar = '❌ إلغاء'; en = '❌ Cancel' }
+
     $catalogue['mojaz.askTitle'] = @{ ar = '📝 أرسل عنوان الصف (مثل: قطاع غزة).'; en = '📝 Send the rows headline.' }
+
     $catalogue['mojaz.field.image'] = @{ ar = '🖼 الصورة'; en = '🖼 Image' }
+
     $catalogue['mojaz.field.title'] = @{ ar = '📝 العنوان'; en = '📝 Headline' }
+
     $catalogue['mojaz.field.story'] = @{ ar = '📰 النص'; en = '📰 Story' }
+
     $catalogue['mojaz.deleteRow'] = @{ ar = '🗑 حذف الصف'; en = '🗑 Delete the row' }
+
     $catalogue['mojaz.askNewTitle'] = @{ ar = '📝 أرسل العنوان الجديد'; en = '📝 Send the new headline' }
+
     $catalogue['mojaz.askNewStory'] = @{ ar = '📰 أرسل نص الخبر الجديد'; en = '📰 Send the new story text' }
+
     $catalogue['mojaz.titleEmpty'] = @{ ar = '❌ العنوان فارغ. أرسل عنوانًا.'; en = '❌ The headline is empty. Send one.' }
+
     $catalogue['mojaz.storyEmpty'] = @{ ar = '❌ نص الخبر فارغ. أرسل النص.'; en = '❌ The story is empty. Send the text.' }
+
     $catalogue['mojaz.askStory'] = @{ ar = '📰 أرسل نص الخبر.'; en = '📰 Send the story text.' }
+
     $catalogue['mojaz.noImageFolder'] = @{ ar = '❌ لا يمكن تحديد مجلد الصور: القالب غير موجود.'; en = '❌ The image folder cannot be determined: the template does not exist.' }
+
     $catalogue['mojaz.asIs'] = @{ ar = 'كما هي'; en = 'as it is' }
+
     $catalogue['mojaz.notAnImage'] = @{ ar = '❌ هذا الملف ليس صورة يمكن قراءتها. أرسل صورة (JPG أو PNG).'; en = '❌ That file is not a readable image. Send a JPG or PNG.' }
+
     $catalogue['mojaz.frames1to15000'] = @{ ar = '❌ أرسل عدد إطارات بين 1 و15000.'; en = '❌ Send a frame count between 1 and 15000.' }
+
     $catalogue['mojaz.frames0to15000'] = @{ ar = '❌ أرسل عدد إطارات بين 0 و15000.'; en = '❌ Send a frame count between 0 and 15000.' }
+
     $catalogue['mojaz.cancelScheduleFailed'] = @{ ar = '❌ تعذّر إلغاء الموعد. لم يتغيّر شيء.'; en = '❌ Could not cancel the time. Nothing changed.' }
+
     $catalogue['mojaz.saveScheduleFailed'] = @{ ar = '❌ تعذّر حفظ الموعد. لم يتغيّر شيء.'; en = '❌ Could not save the time. Nothing changed.' }
+
     $catalogue['mojaz.schedTitle'] = @{ ar = '<b>🕒 مواعيد الموجزات</b>'; en = '<b>🕒 Bulletin schedule</b>' }
+
     $catalogue['mojaz.schedNone'] = @{ ar = '<i>لا مواعيد. افتح موجزًا واضغط «تشغيل لاحقًا».</i>'; en = '<i>No times. Open a bulletin and press "run later".</i>' }
+
     $catalogue['mojaz.schedNote'] = @{ ar = '<i>الموعد يستخدم آخر تحديث محفوظ للموجز، لا نسخته وقت الحجز</i>'; en = '<i>A scheduled time plays the latest saved version, not the one booked</i>' }
+
     $catalogue['mojaz.deletedBulletin'] = @{ ar = 'موجز محذوف'; en = 'a deleted bulletin' }
+
     $catalogue['mojaz.waitingOther'] = @{ ar = '⏳ في الانتظار — موجز آخر كان يعمل'; en = '⏳ Waiting — another bulletin was running' }
+
     $catalogue['mojaz.scheduled'] = @{ ar = '🕒 مجدول'; en = '🕒 Scheduled' }
+
     $catalogue['mojaz.execLog'] = @{ ar = '🧾 سجل التنفيذ'; en = '🧾 Execution log' }
+
     $catalogue['mojaz.scheduledBulletin'] = @{ ar = 'موجز مجدول'; en = 'a scheduled bulletin' }
+
     $catalogue['mojaz.theScheduled'] = @{ ar = 'الموجز المجدول'; en = 'the scheduled bulletin' }
+
     $catalogue['mojaz.theCurrent'] = @{ ar = 'الموجز الحالي'; en = 'the current bulletin' }
+
     $catalogue['mojaz.urgentOnAir'] = @{ ar = 'العاجل على الهواء'; en = 'the urgent item on air' }
 }

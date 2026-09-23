@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.3
+
+With nothing on air, the main menu's red "🚨 Hide everything" becomes a plain
+"🧹 Clear the layers": the same action, which still clears graphics the bridge
+does not know about, without an alarm claiming something is live. And the
+timer button no longer counts below zero on a menu drawn earlier.
+
 ## Version 8.69.2
 
 Every button back to the menu now carries one label; three screens used the

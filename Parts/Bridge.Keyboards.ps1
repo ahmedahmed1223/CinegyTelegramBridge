@@ -100,8 +100,11 @@ function Get-MainMenuKeyboard {
             if (Get-Setting 'EnableTimedShow') {
                 $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
                 $timerLabel = if ($pending.Count -gt 0) {
+                    # Counted when the menu is drawn, so an old menu - or a queue
+                    # the tick has not reached yet - can be past its moment. A
+                    # negative countdown reads as a fault; past zero it is a timer.
                     $remaining = [int](($pending[0].At - (Get-Date)).TotalSeconds)
-                    T 'menu.timerExtend' $remaining
+                    if ($remaining -gt 0) { T 'menu.timerExtend' $remaining } else { T 'menu.timer' }
                 } else {
                     T 'menu.timer'
                 }
@@ -202,7 +205,13 @@ function Get-MainMenuKeyboard {
     # keyboard instead of here; see the on-air block above.
     $thirdRow = @()
     if ((Get-Setting 'EnableHideAll') -and $script:OnAir.Count -eq 0) {
-        $thirdRow += (New-Button (T 'menu.hideAll') "menu:hideall" -Style danger)
+        # Kept with nothing on air, because it clears the layers it is set
+        # to whatever the bridge believes: a graphic left from before a
+        # restart, or put up from Cinegy itself. But not red and not "hide
+        # all": an alarm offering to hide something when nothing is on air
+        # reads as a claim that something is - the reason the bulletin's
+        # hide button above only shows while a bulletin is up.
+        $thirdRow += (New-Button (T 'menu.clearLayers') "menu:hideall")
     }
     if ($script:OnAir.Count -eq 0 -and $script:LastShow.ContainsKey($ChatId)) {
         $thirdRow += (New-Button (T 'menu.repeatEdit') "menu:repeat")

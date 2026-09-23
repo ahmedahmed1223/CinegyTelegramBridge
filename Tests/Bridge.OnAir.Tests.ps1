@@ -2898,3 +2898,38 @@ Describe 'An engine stops with the layer Cinegy took' {
         Should -Invoke Stop-MojazForLayer -Times 0
     }
 }
+
+Describe 'The menu does not claim what is not on air' {
+    <#
+        Two buttons drawn from state that can be stale or empty: the red
+        "hide everything" with nothing on air read as an alarm, and a timer
+        counted when the menu was drawn could read minus seconds.
+    #>
+    BeforeEach {
+        $script:OnAir = @{}
+        $script:AutoHideQueue = [Collections.Generic.List[object]]::new()
+        # Everything else off, so the menu is only what these tests read.
+        Mock Get-Setting { $null }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -in 'EnableHideAll', 'EnableTimedShow' }
+    }
+
+    It 'offers to clear the layers, not a red hide-all, when nothing is on air' {
+        $buttons = @((Get-MainMenuKeyboard -ChatId 70 -UserId 70).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_.callback_data -eq 'menu:hideall' })
+        $buttons.Count | Should -Be 1
+        $buttons[0].text | Should -Be (T 'menu.clearLayers')
+        $buttons[0].ContainsKey('style') | Should -BeFalse -Because 'red is for an emergency, and nothing is on air'
+    }
+
+    It 'keeps the red hide-all while something is on air' {
+        $script:OnAir[5] = @{ Key = 'alpha'; Values = @{}; ShownAt = (Get-Date) }
+        $button = @((Get-MainMenuKeyboard -ChatId 70 -UserId 70).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_.callback_data -eq 'menu:hideall' })[0]
+        $button.text | Should -Be (T 'menu.hideAll')
+    }
+
+    It 'never shows a countdown below zero' {
+        $script:OnAir[5] = @{ Key = 'alpha'; Values = @{}; ShownAt = (Get-Date) }
+        $script:AutoHideQueue.Add([pscustomobject]@{ Layer = 5; At = (Get-Date).AddSeconds(-40) })
+        $timer = @((Get-MainMenuKeyboard -ChatId 70 -UserId 70).inline_keyboard | ForEach-Object { @($_) } | Where-Object { $_.callback_data -eq 'timer:5' })[0]
+        $timer.text | Should -Be (T 'menu.timer')
+    }
+}

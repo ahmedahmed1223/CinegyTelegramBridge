@@ -939,9 +939,10 @@ Describe 'Button colour policy' {
         $no.ContainsKey('style') | Should -BeFalse
     }
 
-    It 'colours the emergency hide-all entry wherever it appears' {
-        # F8: the press takes everything off air, so both menu entries wear
-        # danger - beside live rows and on the quiet menu alike.
+    It 'colours the emergency hide-all entry while something is on air' {
+        # F8 coloured both entries. Since 8.69.3 the quiet menu's is a plain
+        # "clear the layers": red with nothing on air read as an alarm. The
+        # press that actually clears - the confirmation above - stays red.
         $script:OnAir[7] = @{ Key = 'urgent'; At = (Get-Date); UserId = 1; Source = 'bridge' }
         try {
             $live = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
@@ -949,7 +950,7 @@ Describe 'Button colour policy' {
         }
         finally { $script:OnAir.Remove(7) }
         $quiet = @((Get-MainMenuKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { @($_) })
-        @($quiet | Where-Object { $_['callback_data'] -eq 'menu:hideall' })[0].style | Should -Be 'danger'
+        @($quiet | Where-Object { $_['callback_data'] -eq 'menu:hideall' })[0].ContainsKey('style') | Should -BeFalse
     }
 
     It 'uses only the three styles Telegram defines' {

@@ -47,6 +47,7 @@ function Add-BridgeTextCommon {
     $catalogue['menu.timer'] = @{ ar = '⏱ مؤقت'; en = '⏱ Timer' }
     $catalogue['menu.reshow'] = @{ ar = '↩️ إعادة عرض {0}'; en = '↩️ Show {0} again' }
     $catalogue['menu.hideAll'] = @{ ar = '🚨 إخفاء الكل'; en = '🚨 Hide everything' }
+    $catalogue['menu.clearLayers'] = @{ ar = '🧹 تنظيف الطبقات'; en = '🧹 Clear the layers' }
     $catalogue['menu.snapshotNow'] = @{ ar = '📷 لقطة الآن'; en = '📷 Grab a frame' }
     $catalogue['menu.copyStatus'] = @{ ar = '📋 نسخ الحالة'; en = '📋 Copy status' }
     $catalogue['menu.hideMojaz'] = @{ ar = '⏹ إخفاء الموجز'; en = '⏹ Stop the bulletin' }

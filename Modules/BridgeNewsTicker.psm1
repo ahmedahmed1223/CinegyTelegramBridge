@@ -1,5 +1,28 @@
 Set-StrictMode -Version Latest
 
+function Get-CleanNewsItemText {
+    <#
+        One headline as it may safely reach the ticker file and the screen.
+
+        Text pasted from WhatsApp, a browser or Word carries characters nobody
+        typed. Direction marks and embeddings (U+200E/F, U+202A-E, U+2066-9)
+        reorder the words on air; a BOM, zero-width space or soft hyphen is
+        invisible here and a gap or a stray glyph there; a tab, non-breaking
+        space or line break inside a headline breaks the strap. They go, and
+        whitespace runs become one space.
+
+        U+200D stays: it is what holds an emoji sequence - a family, a flag -
+        together, and without it one picture becomes several. U+200C stays
+        with it: it is meaningful in Persian and Urdu text.
+    #>
+    param([AllowEmptyString()][string]$Text = '')
+    $clean = [regex]::Replace($Text, '[\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00AD]', '')
+    # Every other control and every kind of space: tab, CR/LF, NBSP, the
+    # thin and figure spaces a typesetter uses.
+    $clean = [regex]::Replace($clean, '[\p{Cc}\p{Zs}\u2028\u2029]+', ' ')
+    return $clean.Trim()
+}
+
 function ConvertFrom-NewsTickerText {
     [CmdletBinding()]
     param(
@@ -21,7 +44,7 @@ function ConvertFrom-NewsTickerText {
     $emptyCount = 0
     $duplicateCount = 0
     for ($index = 0; $index -lt $parts.Count; $index++) {
-        $item = ([string]$parts[$index]).Trim()
+        $item = Get-CleanNewsItemText -Text ([string]$parts[$index])
         $isStructuralTail = $index -eq ($parts.Count - 1) -and $item.Length -eq 0 -and
             (($usesSeparator -and $Text.TrimEnd().EndsWith($Separator, [StringComparison]::Ordinal)) -or
              (-not $usesSeparator -and $Text -match '(?:\r?\n)$'))
@@ -46,6 +69,44 @@ function ConvertFrom-NewsTickerText {
         DuplicateCount = $duplicateCount
         Errors = @($errors)
     }
+}
+
+function ConvertFrom-NewsPasteText {
+    <#
+        Several headlines pasted at once, split and set aside rather than
+        refused.
+
+        ConvertFrom-NewsTickerText refuses the whole text when one item is too
+        long - right for a file that must publish whole, wrong for a paste,
+        where one long line should not cost the other nine. So the long ones
+        come back by name in TooLong, and the rest go on.
+
+        A copied list brings its numbering and bullets: "1.", "2)", "٣-",
+        "-", "•", "*", "▪️". A marker is stripped only when punctuation or a
+        bullet follows it and a space follows that, so "3 شهداء" and
+        "2026 عام" stay news. \d matches Arabic-Indic digits too.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Text = '',
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Separator,
+        [int]$MaxItemLength = 0
+    )
+    $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator $Separator
+    $items = [Collections.Generic.List[string]]::new()
+    $tooLong = [Collections.Generic.List[string]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $duplicates = [int]$parsed.DuplicateCount
+    foreach ($raw in @($parsed.Items)) {
+        $item = ([regex]::Replace([string]$raw, '^(?:\d{1,3}\s*[.)\-\u2013\u2014:]|[-\u2013\u2014\u2022*\u00B7\u25CF\u25AA\u25FE\u25A0\u25BA\u25B6\uFE0F]+)\s+', '')).Trim()
+        if ($item.Length -eq 0) { continue }
+        if (-not $seen.Add($item)) { $duplicates++; continue }
+        if ($MaxItemLength -gt 0 -and [Globalization.StringInfo]::ParseCombiningCharacters($item).Count -gt $MaxItemLength) {
+            $tooLong.Add($item); continue
+        }
+        $items.Add($item)
+    }
+    return [pscustomobject]@{ Items = @($items); TooLong = @($tooLong); DuplicateCount = $duplicates }
 }
 
 function ConvertTo-NewsTickerText {
@@ -197,4 +258,4 @@ function Restore-NewsTickerBackup {
         -BackupDirectory $BackupDirectory -BackupKeepFiles $BackupKeepFiles -MaxItemLength $MaxItemLength -MaxItems $MaxItems
 }
 
-Export-ModuleMember -Function ConvertFrom-NewsSheetCsv,ConvertFrom-NewsTickerText,ConvertTo-NewsTickerText,Get-NewsTickerSnapshot,Publish-NewsTickerFile,Restore-NewsTickerBackup
+Export-ModuleMember -Function ConvertFrom-NewsSheetCsv,ConvertFrom-NewsTickerText,ConvertFrom-NewsPasteText,Get-CleanNewsItemText,ConvertTo-NewsTickerText,Get-NewsTickerSnapshot,Publish-NewsTickerFile,Restore-NewsTickerBackup

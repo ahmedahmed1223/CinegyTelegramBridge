@@ -28,7 +28,7 @@ function Add-BridgeTextReplies {
     $catalogue['reply.urgentItemChanged'] = @{ ar = '⚠️ لم يُنفّذ الطلب: تغيّر الخبر أو العرض أو انتهت صلاحية التأكيد. افتح الخبر من جديد.'; en = '⚠️ Nothing was done: the story, the display or the confirmation changed. Open the story again.' }
     $catalogue['reply.sheetMatchesAir'] = @{ ar = 'ℹ️ الشيت مطابق لما على الهواء؛ لم يتغير شيء.'; en = 'ℹ️ The sheet matches what is on air; nothing changed.' }
     $catalogue['reply.noDraftOfYours'] = @{ ar = 'لا توجد مسودة مملوكة لك.'; en = 'You do not hold a draft.' }
-    $catalogue['reply.sendNewStory'] = @{ ar = 'أرسل نص الخبر الجديد:'; en = 'Send the new headline text:' }
+    $catalogue['reply.sendNewStory'] = @{ ar = 'أرسل نص الخبر الجديد — أو الصق عدّة أخبار، خبرًا في كل سطر:'; en = 'Send the new headline text — or paste several, one per line:' }
     $catalogue['reply.yesPublish'] = @{ ar = '✅ نعم، انشر'; en = '✅ Yes, publish' }
     $catalogue['reply.cancelWord'] = @{ ar = 'إلغاء'; en = 'Cancel' }
     $catalogue['reply.notPublished'] = @{ ar = 'لم يتم النشر'; en = 'It was not published' }

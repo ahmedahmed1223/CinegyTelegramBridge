@@ -15,6 +15,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.8
+
+**Paste several ticker headlines at once.** "Add headline" now takes one or
+many, one per line; several get a review (new, already in the draft, too
+long, no room) and nothing is added until it is confirmed, in the order
+pasted. A paste Telegram splits into several messages joins one batch.
+Every entry path now strips what a paste smuggles in - direction marks that
+reorder words on air, zero-width characters, soft hyphens, tabs and line
+breaks inside a headline - while keeping emoji sequences whole.
+
 ## Version 8.69.7
 
 Removal confirmations now expire after two minutes, belong to the requesting operator and reviewed scene, and can be consumed only once. Changed scenes or an unverifiable recorded active item require a fresh review. Account edits in BridgeManager preserve administrator ordering so an implicit owner cannot change just because the account list is sorted; managed permission changes can no longer be saved with a knowingly transient result.

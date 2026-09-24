@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.8'; Items = @(
+                        '📋 **Paste several headlines at once** — ➕ Add headline now takes one or many, one per line. Several get a review first: how many are new, which are already in the draft, which are too long or have no room. Nothing is added until you press Add, and they go in in the order pasted. A long paste Telegram splits into several messages joins one batch.'
+                        '🧹 **Pasted text is cleaned before it reaches the ticker** — list numbers and bullets, the invisible direction marks that reorder words on air, tabs and line breaks inside one headline. Emoji stay whole.'
+                    ) }
                 @{ Version = '8.69.7'; Items = @(
                         '🛡 **A removal confirmation belongs to the scene you reviewed** — a changed scene, expired request or repeated tap cannot remove a different graphic. Request a new confirmation when prompted.'
                         '👤 **Editing accounts keeps the existing administrator order and shows the effective owner** — saving managed permissions requires applying them through a restart, rather than offering a save that can be overwritten.'
@@ -181,6 +185,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.8'; Items = @(
+                        '📋 **لصق عدّة أخبار دفعة واحدة** — «➕ إضافة خبر» يقبل الآن خبرًا أو عدّة أخبار، خبرًا في كل سطر. العدّة تُعرض للمراجعة أولًا: كم منها جديد، وما الموجود في المسودة، وما الأطول من الحد أو لا مكان له. لا يُضاف شيء حتى تضغط «أضف»، وتدخل بترتيب اللصق. واللصق الطويل الذي يقسمه تيليجرام إلى عدّة رسائل يُجمع في دفعة واحدة.'
+                        '🧹 **النص الملصوق يُنظَّف قبل أن يصل الشريط** — أرقام القوائم ونقاطها، وعلامات الاتجاه الخفية التي تقلب ترتيب الكلمات على الهواء، والجدولة والأسطر المكسورة داخل الخبر الواحد. والرموز التعبيرية تبقى سليمة.'
+                    ) }
                 @{ Version = '8.69.7'; Items = @(
                         '🛡 **تأكيد الإزالة يخص المشهد الذي راجعته** — تغيّر المشهد أو انتهاء الطلب أو تكرار الضغط لا يزيل رسمًا آخر. اطلب تأكيدًا جديدًا عند التنبيه.'
                         '👤 **تعديل الحسابات يحافظ على ترتيب المديرين ويعرض المالك الفعلي** — حفظ الصلاحيات التي يديرها الجسر يتطلب تطبيقها بإعادة التشغيل بدل حفظ قد يضيع.'

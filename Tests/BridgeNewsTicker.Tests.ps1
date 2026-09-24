@@ -86,3 +86,75 @@ Describe 'Safe news ticker persistence' {
         (Get-NewsTickerSnapshot -Path $script:NewsPath -Separator '|').Items | Should -Be @('قديم')
     }
 }
+
+Describe 'What a pasted headline cannot carry onto the ticker' {
+    <#
+        Text copied out of WhatsApp, a browser or Word arrives carrying
+        characters nobody typed: direction marks that reorder the words on
+        air, zero-width joiners, soft hyphens, non-breaking spaces, a line
+        break inside one headline. Every entry path - add, edit, paste,
+        import, the sheet - parses through ConvertFrom-NewsTickerText, so the
+        cleaning lives there once.
+    #>
+    It 'drops direction and zero-width controls, keeping the words' {
+        $dirty = "`u{200F}شهيد`u{200E} في `u{202A}غزة`u{202C} `u{2067}الآن`u{2069}`u{FEFF}`u{00AD}"
+        (ConvertFrom-NewsTickerText -Text $dirty -Separator '|').Items | Should -Be @('شهيد في غزة الآن')
+    }
+
+    It 'turns tabs, non-breaking and repeated spaces into one space' {
+        (ConvertFrom-NewsTickerText -Text "خبر`t `u{00A0}عاجل  من   الميدان" -Separator '|').Items | Should -Be @('خبر عاجل من الميدان')
+    }
+
+    It 'keeps an emoji sequence joined' {
+        # U+200D holds a family or flag emoji together; stripping it would
+        # split one picture into several.
+        $emoji = "خبر `u{1F468}`u{200D}`u{1F469}`u{200D}`u{1F467}"
+        (ConvertFrom-NewsTickerText -Text $emoji -Separator '|').Items | Should -Be @($emoji)
+    }
+
+    It 'never lets a line break survive inside one item' {
+        # In separator mode a part can span lines; on air that is a broken strap.
+        (ConvertFrom-NewsTickerText -Text "سطر أول`r`nتكملة |" -Separator '|').Items | Should -Be @('سطر أول تكملة')
+    }
+
+    It 'treats an item that is only invisible characters as empty' {
+        $parsed = ConvertFrom-NewsTickerText -Text "`u{200F}`u{200E}`nخبر" -Separator '|'
+        $parsed.Items | Should -Be @('خبر')
+    }
+}
+
+Describe 'Splitting a paste into headlines' {
+    It 'takes one headline per line, in the order pasted' {
+        $parsed = ConvertFrom-NewsPasteText -Text "الأول`nالثاني`n`nالثالث" -Separator '|'
+        $parsed.Items | Should -Be @('الأول', 'الثاني', 'الثالث')
+    }
+
+    It 'splits on the separator instead when the paste carries one' {
+        (ConvertFrom-NewsPasteText -Text "أ | ب | ج |" -Separator '|').Items | Should -Be @('أ', 'ب', 'ج')
+    }
+
+    It 'strips the numbering and bullets a copied list brings' {
+        $paste = "1. الأول`n2) الثاني`n٣- الثالث`n- الرابع`n• الخامس`n* السادس`n▪️ السابع"
+        (ConvertFrom-NewsPasteText -Text $paste -Separator '|').Items |
+            Should -Be @('الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع')
+    }
+
+    It 'leaves a headline that merely starts with a number alone' {
+        # "3 شهداء" is news, not a list marker: no punctuation after the digit.
+        (ConvertFrom-NewsPasteText -Text "3 شهداء في غزة`n2026 عام الأسرى" -Separator '|').Items |
+            Should -Be @('3 شهداء في غزة', '2026 عام الأسرى')
+    }
+
+    It 'reports a repeated line once and counts the repeat' {
+        $parsed = ConvertFrom-NewsPasteText -Text "خبر`nخبر`nآخر" -Separator '|'
+        $parsed.Items | Should -Be @('خبر', 'آخر')
+        $parsed.DuplicateCount | Should -Be 1
+    }
+
+    It 'sets a too-long headline aside by name instead of failing the whole paste' {
+        $long = 'ك' * 30
+        $parsed = ConvertFrom-NewsPasteText -Text "قصير`n$long" -Separator '|' -MaxItemLength 20
+        $parsed.Items | Should -Be @('قصير')
+        @($parsed.TooLong) | Should -Be @($long)
+    }
+}

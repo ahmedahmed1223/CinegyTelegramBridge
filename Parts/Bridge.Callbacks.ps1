@@ -238,6 +238,8 @@ function Invoke-CallbackQuery {
             Set-PendingState -ChatId $chatId -State @{Mode='news_add_text';UserId=$userId;StartedAt=(Get-Date)}
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sendNewStory');break
         }
+        'news:pasteok' { Complete-NewsPaste -ChatId $chatId -UserId $userId; break }
+        'news:pastecancel' { Complete-NewsPaste -ChatId $chatId -UserId $userId -Cancel; break }
         'news:preview' {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
             $position=0;$preview=@($draft.Items|ForEach-Object {$position++;"$position. $_"}) -join "`n"

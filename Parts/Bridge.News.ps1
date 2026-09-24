@@ -1576,9 +1576,163 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
+function Get-NewsPasteParse { param([string]$Text)
+    ConvertFrom-NewsPasteText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1)
+}
+
+function Add-NewsTickerDraftItems {
+    <#
+        Several headlines into the draft as one block, in the order pasted.
+
+        One at a time through Add-NewsTickerDraftItem would reverse them when
+        new items go to the top: the last one pasted would lead. The block
+        goes to the top or the end whole, as NewNewsItemAtTop says.
+
+        Items already in the draft are skipped, and the block is cut at
+        NewsMaxItems rather than refused whole - the review already told the
+        operator how many would fit. Returns how many went in.
+    #>
+    param([long]$UserId, [string[]]$Items)
+    $draft = Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return 0 }
+    $existing = [Collections.Generic.HashSet[string]]::new([string[]]@($draft.Items), [StringComparer]::Ordinal)
+    $room = [math]::Max(0, (Get-SettingInt 'NewsMaxItems' 1) - @($draft.Items).Count)
+    $block = @(@($Items) | Where-Object { $existing.Add([string]$_) } | Select-Object -First $room)
+    if ($block.Count -eq 0) { return 0 }
+    $draft.Items = if (Get-Setting 'NewNewsItemAtTop') { @($block) + @($draft.Items) } else { @($draft.Items) + @($block) }
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    if (-not (Save-NewsTickerDraft)) { return 0 }
+    return $block.Count
+}
+
+function Get-NewsPastePlan {
+    <# What the review shows and what confirming would do, from one place so
+       the two cannot disagree. #>
+    param([long]$UserId, [string[]]$Items)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    $inDraft = [Collections.Generic.HashSet[string]]::new([string[]]@(if ($draft) { $draft.Items }), [StringComparer]::Ordinal)
+    $new = @(@($Items) | Where-Object { -not $inDraft.Contains([string]$_) })
+    $room = [math]::Max(0, (Get-SettingInt 'NewsMaxItems' 1) - $inDraft.Count)
+    return [pscustomobject]@{
+        New = @($new | Select-Object -First $room)
+        AlreadyInDraft = @($Items).Count - $new.Count
+        NoRoom = [math]::Max(0, $new.Count - $room)
+    }
+}
+
+function Get-NewsPasteSnippet { param([string]$Text, [int]$Length = 50)
+    # Escaped here, because this is the operator's pasted text going into an
+    # HTML message, and cut by text element so an emoji is never halved.
+    $elements = [Globalization.StringInfo]::new($Text)
+    $cut = if ($elements.LengthInTextElements -gt $Length) { $elements.SubstringByTextElements(0, $Length) + '…' } else { $Text }
+    return (ConvertTo-TelegramHtmlText -Text $cut)
+}
+
+function Show-NewsPasteReview {
+    <#
+        The review a multi-line paste gets before anything is added.
+
+        Nothing goes into the draft from here: a paste is the one place a
+        slip of the thumb can put thirty lines of somebody's chat into the
+        ticker, so the count, the skips and the first few headlines are shown
+        first. Redrawn in place as more of the paste arrives.
+    #>
+    param([long]$ChatId, [long]$UserId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'news_paste_review') { return }
+    $items = @($state.Items)
+    $plan = Get-NewsPastePlan -UserId $UserId -Items $items
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add((T 'news.paste.found' ($items.Count + @($state.TooLong).Count)))
+    $lines.Add((T 'news.paste.new' @($plan.New).Count))
+    if ($plan.AlreadyInDraft -gt 0) { $lines.Add((T 'news.paste.inDraft' $plan.AlreadyInDraft)) }
+    if ([int]$state.Duplicates -gt 0) { $lines.Add((T 'news.paste.repeated' $([int]$state.Duplicates))) }
+    if (@($state.TooLong).Count -gt 0) {
+        $lines.Add((T 'news.paste.tooLong' @($state.TooLong).Count (Get-SettingInt 'NewsMaxItemLength' 1)))
+        foreach ($long in @($state.TooLong | Select-Object -First 3)) { $lines.Add("   «$(Get-NewsPasteSnippet -Text $long -Length 40)»") }
+    }
+    if ($plan.NoRoom -gt 0) { $lines.Add((T 'news.paste.noRoom' $plan.NoRoom (Get-SettingInt 'NewsMaxItems' 1))) }
+    if (@($plan.New).Count -gt 0) {
+        $lines.Add('')
+        $position = 0
+        foreach ($item in @($plan.New | Select-Object -First 5)) { $position++; $lines.Add("$position. $(Get-NewsPasteSnippet -Text $item)") }
+        if (@($plan.New).Count -gt 5) { $lines.Add((T 'news.paste.more' (@($plan.New).Count - 5))) }
+    }
+    $lines.Add('')
+    $lines.Add((T 'news.paste.keepSending'))
+    $rows = @()
+    if (@($plan.New).Count -gt 0) {
+        $where = if (Get-Setting 'NewNewsItemAtTop') { (T 'news.atStart') } else { (T 'news.atEnd') }
+        $rows += , @( @{ text = (T 'news.paste.confirm' @($plan.New).Count $where); callback_data = 'news:pasteok'; style = 'success' } )
+    }
+    $rows += , @( @{ text = (T 'reply.cancelWord'); callback_data = 'news:pastecancel' } )
+    $markup = @{ inline_keyboard = $rows }
+    $text = $lines -join "`n"
+    $messageId = [int]$state.MessageId
+    if ($messageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $messageId -Text $text -ReplyMarkup $markup -ParseMode HTML)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $markup | Out-Null
+    $state.MessageId = [int]$script:LastTelegramMessageId
+}
+
+function Add-NewsPasteChunk {
+    <#
+        More of a paste arriving while its review is open.
+
+        Telegram splits a message past 4096 characters into several, so a
+        long paste lands as two or three messages a moment apart. Each joins
+        the open batch instead of starting another, and the review redraws.
+    #>
+    param([long]$ChatId, [long]$UserId, [string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or $state.Mode -ne 'news_paste_review' -or [long]$state.UserId -ne $UserId) { return }
+    $parsed = Get-NewsPasteParse -Text $Value
+    $seen = [Collections.Generic.HashSet[string]]::new([string[]]@($state.Items), [StringComparer]::Ordinal)
+    $items = [Collections.Generic.List[string]]::new([string[]]@($state.Items))
+    $duplicates = [int]$state.Duplicates + [int]$parsed.DuplicateCount
+    foreach ($item in @($parsed.Items)) { if ($seen.Add([string]$item)) { $items.Add([string]$item) } else { $duplicates++ } }
+    $state.Items = @($items)
+    $state.TooLong = @(@($state.TooLong) + @($parsed.TooLong))
+    $state.Duplicates = $duplicates
+    Show-NewsPasteReview -ChatId $ChatId -UserId $UserId
+}
+
+function Complete-NewsPaste {
+    <# The review's two buttons. The draft is re-read here, not trusted from
+       the review: it may have been published or handed on since. #>
+    param([long]$ChatId, [long]$UserId, [switch]$Cancel)
+    $state = Get-PendingState -ChatId $ChatId
+    $mine = $state -and $state.Mode -eq 'news_paste_review' -and [long]$state.UserId -eq $UserId
+    if ($mine) { Clear-PendingState -ChatId $ChatId }
+    $text = if ($Cancel) { (T 'news.paste.cancelled') }
+    elseif (-not $mine) { (T 'news.paste.gone') }
+    elseif (-not (Get-NewsTickerDraft -UserId $UserId)) { (T 'reply.noDraftOfYours') }
+    else {
+        $added = Add-NewsTickerDraftItems -UserId $UserId -Items @($state.Items)
+        $where = if (Get-Setting 'NewNewsItemAtTop') { (T 'news.atStart') } else { (T 'news.atEnd') }
+        if ($added -gt 0) { Write-BridgeLog "User $UserId pasted $added headline(s) into the news draft" }
+        if ($added -gt 0) { (T 'news.paste.added' $added $where) } else { (T 'news.paste.nothingAdded') }
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
 function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]$Value)
     Clear-PendingState -ChatId $ChatId
-    $ok=Add-NewsTickerDraftItem -UserId $UserId -Text $Value
+    # One headline goes straight in, as it always has. Anything more - several
+    # lines, a repeat, a line too long - opens the review instead of failing
+    # with "check the text and the limits", which is what a paste used to get.
+    $paste = Get-NewsPasteParse -Text $Value
+    if (@($paste.Items).Count -ne 1 -or @($paste.TooLong).Count -gt 0 -or [int]$paste.DuplicateCount -gt 0) {
+        if (@($paste.Items).Count + @($paste.TooLong).Count -eq 0) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'news.addFailed') -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+            return
+        }
+        Set-PendingState -ChatId $ChatId -State @{
+            Mode = 'news_paste_review'; UserId = $UserId; StartedAt = (Get-Date)
+            Items = @($paste.Items); TooLong = @($paste.TooLong); Duplicates = [int]$paste.DuplicateCount; MessageId = 0
+        } | Out-Null
+        Show-NewsPasteReview -ChatId $ChatId -UserId $UserId
+        return
+    }
+    $ok=Add-NewsTickerDraftItem -UserId $UserId -Text ([string]@($paste.Items)[0])
     # Says where it landed, so "first" is visible rather than assumed.
     $where = if (Get-Setting 'NewNewsItemAtTop') { (T 'news.atStart') } else { (T 'news.atEnd') }
     Send-TelegramMessage -ChatId $ChatId -Text $(if($ok){(T 'news.added' $where)}else{(T 'news.addFailed')}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)

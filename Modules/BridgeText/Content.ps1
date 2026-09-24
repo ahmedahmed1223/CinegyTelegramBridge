@@ -348,6 +348,19 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.paste.found'] = @{ ar = '📋 <b>وُجد في اللصق {0} خبر</b>'; en = '📋 <b>{0} headline(s) found in the paste</b>' }
+    $catalogue['news.paste.new'] = @{ ar = '✅ جديدة: {0}'; en = '✅ New: {0}' }
+    $catalogue['news.paste.inDraft'] = @{ ar = '↩️ موجودة في المسودة وستُتجاوز: {0}'; en = '↩️ Already in the draft, skipped: {0}' }
+    $catalogue['news.paste.repeated'] = @{ ar = '🔁 مكرّرة داخل اللصق: {0}'; en = '🔁 Repeated within the paste: {0}' }
+    $catalogue['news.paste.tooLong'] = @{ ar = '⚠️ أطول من {1} حرف ولن تُضاف: {0}'; en = '⚠️ Longer than {1} characters, not added: {0}' }
+    $catalogue['news.paste.noRoom'] = @{ ar = '⛔ لا تتّسع لها المسودة (الحد {1}): {0}'; en = '⛔ No room in the draft (the limit is {1}): {0}' }
+    $catalogue['news.paste.more'] = @{ ar = '… و{0} أخرى'; en = '… and {0} more' }
+    $catalogue['news.paste.keepSending'] = @{ ar = '<i>أرسل المزيد ليُضم إلى هذه الدفعة، أو اضغط «أضف». لم يُضف شيء بعد.</i>'; en = '<i>Send more to join this batch, or press Add. Nothing has been added yet.</i>' }
+    $catalogue['news.paste.confirm'] = @{ ar = '➕ أضف {0} {1}'; en = '➕ Add {0} {1}' }
+    $catalogue['news.paste.added'] = @{ ar = '✅ أُضيف {0} خبر {1}، بترتيب اللصق.'; en = '✅ Added {0} headline(s) {1}, in the order pasted.' }
+    $catalogue['news.paste.nothingAdded'] = @{ ar = 'لم يُضف شيء: كل الأخبار موجودة في المسودة أو لا مكان لها.'; en = 'Nothing was added: every headline is already in the draft or there is no room.' }
+    $catalogue['news.paste.cancelled'] = @{ ar = 'أُلغي اللصق، ولم يُضف شيء.'; en = 'The paste was cancelled, and nothing was added.' }
+    $catalogue['news.paste.gone'] = @{ ar = 'انتهت هذه المراجعة. الصق الأخبار من جديد.'; en = 'This review has ended. Paste the headlines again.' }
 
     $catalogue['news.addFailed'] = @{ ar = '❌ لم تتم الإضافة؛ تحقق من النص والحدود.'; en = '❌ It was not added; check the text and the limits.' }
 

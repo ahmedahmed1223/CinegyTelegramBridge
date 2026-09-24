@@ -1436,3 +1436,108 @@ Describe 'News ticker backups: what is kept is what is offered' {
         $script:SettingConstraints['NewsBackupKeepFiles'].Maximum | Should -Be 30
     }
 }
+
+Describe 'Pasting several headlines at once' {
+    <#
+        "Add a headline" took exactly one. A paste of several lines was
+        refused with "check the text and the limits", and the only way to add
+        many was the .txt import, which replaces the draft. The same button
+        now takes one or many; many get a review before anything is added.
+    #>
+    BeforeEach {
+        $script:PasteOriginal = @{}
+        foreach ($name in 'NewsItemSeparator', 'NewsMaxItemLength', 'NewsMaxItems', 'NewNewsItemAtTop') { $script:PasteOriginal[$name] = Get-JsonProp $config.Settings $name }
+        $config.Settings | Add-Member NewsItemSeparator '|' -Force
+        $config.Settings | Add-Member NewsMaxItemLength 60 -Force
+        $config.Settings | Add-Member NewsMaxItems 5 -Force
+        $config.Settings | Add-Member NewNewsItemAtTop $true -Force
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('قديم'); UpdatedAt = (Get-Date).ToString('o') }
+        Clear-PendingState -ChatId 42
+        $script:pasteSent = [Collections.Generic.List[object]]::new()
+        Mock Send-TelegramMessage { $script:pasteSent.Add([pscustomobject]@{ Text = $Text; Markup = $ReplyMarkup }) }
+        Mock Edit-TelegramMessageText { $script:pasteSent.Add([pscustomobject]@{ Text = $Text; Markup = $ReplyMarkup }); $true }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Write-BridgeLog { }
+        Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
+    }
+    AfterEach {
+        foreach ($name in $script:PasteOriginal.Keys) { $config.Settings | Add-Member $name $script:PasteOriginal[$name] -Force }
+        $script:NewsTickerDraft = $null
+        Clear-PendingState -ChatId 42
+    }
+
+    It 'still adds a single headline straight away, cleaned of a list marker' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value '1. خبر واحد'
+        $script:NewsTickerDraft.Items | Should -Be @('خبر واحد', 'قديم')
+        Get-PendingState -ChatId 42 | Should -BeNullOrEmpty
+    }
+
+    It 'adds nothing until the review is confirmed' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "أ`nب`nج"
+        $script:NewsTickerDraft.Items | Should -Be @('قديم')
+        (Get-PendingState -ChatId 42).Mode | Should -Be 'news_paste_review'
+        $script:pasteSent[-1].Text | Should -BeLike '*3*'
+    }
+
+    It 'adds the block in the order pasted, at the top, on confirm' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "أ`nب`nج"
+        Complete-NewsPaste -ChatId 42 -UserId 42
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب', 'ج', 'قديم') -Because 'adding one at a time to the top would have reversed them'
+    }
+
+    It 'skips what the draft already holds and stops at the item limit' {
+        # Limit 5, one already in the draft: room for four.
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "قديم`nأ`nب`nج`nد`nهـ"
+        $script:pasteSent[-1].Text | Should -BeLike "*$(T 'news.paste.inDraft' 1)*"
+        $script:pasteSent[-1].Text | Should -BeLike "*$(T 'news.paste.noRoom' 1 5)*"
+        Complete-NewsPaste -ChatId 42 -UserId 42
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب', 'ج', 'د', 'قديم')
+    }
+
+    It 'names a line too long instead of refusing the whole paste' {
+        $long = 'ك' * 80
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "قصير`n$long"
+        $script:pasteSent[-1].Text | Should -BeLike "*$(T 'news.paste.tooLong' 1 60)*"
+        Complete-NewsPaste -ChatId 42 -UserId 42
+        $script:NewsTickerDraft.Items | Should -Be @('قصير', 'قديم')
+    }
+
+    It 'joins a paste Telegram split across messages into one batch' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "أ`nب"
+        Add-NewsPasteChunk -ChatId 42 -UserId 42 -Value "ب`nج"
+        @((Get-PendingState -ChatId 42).Items) | Should -Be @('أ', 'ب', 'ج')
+        Should -Invoke Edit-TelegramMessageText -Times 0 -Because 'the first review was sent through the mock, which records no message id'
+        Complete-NewsPaste -ChatId 42 -UserId 42
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب', 'ج', 'قديم')
+    }
+
+    It 'escapes pasted HTML in the review, so a headline cannot break the message' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "<b>خبر</b> & آخر`nثان"
+        $script:pasteSent[-1].Text | Should -BeLike '*&lt;b&gt;خبر&lt;/b&gt; &amp; آخر*'
+    }
+
+    It 'cancels without adding' {
+        Complete-NewsTickerAddText -ChatId 42 -UserId 42 -Value "أ`nب"
+        Complete-NewsPaste -ChatId 42 -UserId 42 -Cancel
+        $script:NewsTickerDraft.Items | Should -Be @('قديم')
+        Get-PendingState -ChatId 42 | Should -BeNullOrEmpty
+    }
+
+    It 'refuses a stale confirm from someone whose review is not open' {
+        Complete-NewsPaste -ChatId 42 -UserId 42
+        $script:NewsTickerDraft.Items | Should -Be @('قديم')
+        $script:pasteSent[-1].Text | Should -Be (T 'news.paste.gone')
+    }
+
+    It 'routes the review buttons' {
+        Mock Complete-NewsPaste { }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        foreach ($data in 'news:pasteok', 'news:pastecancel') {
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{ id = 'p'; from = [pscustomobject]@{ id = 42 }; data = $data
+                    message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 42; type = 'private' } } })
+        }
+        Should -Invoke Complete-NewsPaste -Times 1 -ParameterFilter { -not $Cancel }
+        Should -Invoke Complete-NewsPaste -Times 1 -ParameterFilter { $Cancel }
+    }
+}

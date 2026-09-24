@@ -2403,19 +2403,11 @@ function Invoke-CallbackQuery {
         # screen under pressure. Off by default so the emergency path keeps
         # its single tap.
         'hidego:*' {
-            $targetLayer = [int](Get-CallbackArg $data 'hidego:')
-            $onAirKey = if ($script:OnAir.ContainsKey($targetLayer)) { [string](Get-JsonProp $script:OnAir[$targetLayer] 'Key') } else { '' }
-            $access = Test-TemplateAccess -Key $onAirKey -Layer $targetLayer -ChatId $chatId -UserId $userId
-            if ($access.Allowed) { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
-            else { Send-TelegramMessage -ChatId $chatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) }
+            Confirm-LayerRemoval -TicketId (Get-CallbackArg $data 'hidego:') -Action hide -ChatId $chatId -UserId $userId
             break
         }
         'exitgo:*' {
-            $targetLayer = [int](Get-CallbackArg $data 'exitgo:')
-            $onAirKey = if ($script:OnAir.ContainsKey($targetLayer)) { [string](Get-JsonProp $script:OnAir[$targetLayer] 'Key') } else { '' }
-            $access = Test-TemplateAccess -Key $onAirKey -Layer $targetLayer -ChatId $chatId -UserId $userId
-            if ($access.Allowed) { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
-            else { Send-TelegramMessage -ChatId $chatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId) }
+            Confirm-LayerRemoval -TicketId (Get-CallbackArg $data 'exitgo:') -Action exit -ChatId $chatId -UserId $userId
             break
         }
         'hide:*' {
@@ -2431,7 +2423,7 @@ function Invoke-CallbackQuery {
             # path that does not matter is how operators learn to tap through
             # the confirmation that does.
             if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmHide' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmHide' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action hide -ChatId $chatId -UserId $userId)
             }
             else { Invoke-HideLayer -Layer $targetLayer -ChatId $chatId -UserId $userId | Out-Null }
             break
@@ -2445,7 +2437,7 @@ function Invoke-CallbackQuery {
                 break
             }
             if ((Get-Setting 'ConfirmLayerRemoval') -and $script:OnAir.ContainsKey($targetLayer)) {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmExit' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit)
+                Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmExit' $(Get-LayerRemovalSummary -Layer $targetLayer)) -ReplyMarkup (Get-LayerRemovalConfirmKeyboard -Layer $targetLayer -Action exit -ChatId $chatId -UserId $userId)
             }
             else { Invoke-ExitLayer -Layer $targetLayer -ChatId $chatId -UserId $userId }
             break

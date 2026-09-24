@@ -187,6 +187,18 @@ internal static class SelfTest
         Check("OwnerUserIds is not bridge-managed",
             !SettingsForm.NeedsRestartToPersist(true, new[] { "OwnerUserIds" }));
         Check("no edit needs nothing", !SettingsForm.NeedsRestartToPersist(true, Array.Empty<string>()));
+        Check("editing managers preserves the implicit owner and existing order",
+            SettingsForm.OrderRoleIds(new long[] { 900, 100 }, new long[] { 100, 500, 900 }).SequenceEqual(new long[] { 900, 100, 500 }));
+        Check("removed accounts do not return when preserving order",
+            SettingsForm.OrderRoleIds(new long[] { 900, 100 }, new long[] { 100, 500 }).SequenceEqual(new long[] { 100, 500 }));
+        Check("declining restart cannot save transient permissions",
+            SettingsForm.ResolveRestartChoice(DialogResult.No) is null);
+        Check("accepting restart permits a persistent permission save",
+            SettingsForm.ResolveRestartChoice(DialogResult.Yes) == true);
+        Check("an explicit owner wins over the first administrator",
+            SettingsForm.EffectiveOwners(new long[] { 500 }, new long[] { 900, 100 }, new long[] { 200 }).SequenceEqual(new long[] { 500 }));
+        Check("the first positive admin chat is owner only when no user admin exists",
+            SettingsForm.EffectiveOwners(Array.Empty<long>(), Array.Empty<long>(), new long[] { -100, 900, 200 }).SequenceEqual(new long[] { 900 }));
         Check("an untouched manager field preserves a newer disk value",
             !SettingsForm.ShouldWriteLoadedValue("127.0.0.1", "127.0.0.1"));
         Check("an edited manager field replaces its loaded value",
@@ -342,12 +354,19 @@ internal static class SelfTest
             onAirRows.Exists(r => r.Layer == 9 && r.Key == "logo"));
         Check("reads the stamp as month-first",
             onAirRows[0].AtLocal is DateTime at && at.Month == 9 && at.Day == 11 && at.Hour == 15);
-        Check("an absent file is an empty window, not an error",
-            OnAirForm.ParseOnAirRows(null).Count == 0);
-        Check("a torn file is an empty window, not an error",
-            OnAirForm.ParseOnAirRows("{\"Scenes\":[{").Count == 0);
-        Check("a scene without a layer is skipped",
-            OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Key\":\"logo\"}]}").Count == 0);
+        foreach (var invalidState in new string?[] { null, "{\"Scenes\":[{", "{}", "{\"Scenes\":[{\"Key\":\"logo\"}]}" })
+        {
+            var unavailable = false;
+            try { OnAirForm.ParseOnAirRows(invalidState); }
+            catch (InvalidDataException) { unavailable = true; }
+            Check("unavailable or malformed state cannot claim a clear output", unavailable);
+        }
+        Check("a valid empty state can report no tracked scenes", OnAirForm.ParseOnAirRows("{\"Scenes\":[]}").Count == 0);
+        var heartbeatNow = new DateTime(2026, 9, 24, 12, 0, 0, DateTimeKind.Utc);
+        Check("an old heartbeat cannot certify the on-air record", !OnAirForm.IsHeartbeatFresh(heartbeatNow.AddMinutes(-6), heartbeatNow));
+        Check("a missing heartbeat cannot certify the on-air record", !OnAirForm.IsHeartbeatFresh(null, heartbeatNow));
+        Check("a current heartbeat permits a current-record caption", OnAirForm.IsHeartbeatFresh(heartbeatNow.AddSeconds(-30), heartbeatNow));
+        Check("failed reads visibly identify retained data", OnAirForm.ReadStatusText(false, heartbeatNow, null, heartbeatNow).Contains("آخر سجل"));
         Check("reads numbers written as JSON numbers",
             OnAirForm.ParseOnAirRows("{\"Scenes\":[{\"Layer\":9,\"Key\":\"logo\",\"UserId\":122238225}]}")[0].UserId == 122238225);
         Check("reads numbers written as JSON strings",
@@ -391,6 +410,48 @@ internal static class SelfTest
         Check("the leader fills its bar", bars.Count == 2 && bars[0].Fraction == 1.0);
         Check("the rest scale against the leader", bars[1].Fraction == 0.5);
         Check("no usage is no bars", ReportsForm.BuildUsageBars(new List<ReportsForm.TemplateUsage>(), key => key).Count == 0);
+
+        using (var auditChart = new BarChart())
+        {
+            auditChart.SetData(new[] { new BarChart.Bar("Urgent", "10 times", 1), new BarChart.Bar("Logo", "5 times", .5) });
+            Check("assistive readers receive report labels and values", auditChart.AccessibleDescription!.Contains("Urgent") && auditChart.AccessibleDescription.Contains("5 times"));
+            auditChart.SetData(Enumerable.Range(0, 8).Select(i => new BarChart.Bar("Row " + i, "1", 1)).ToArray());
+            Check("eight report bars reserve enough scrollable height", auditChart.Height >= 448);
+        }
+        static double Luminance(Color c)
+        {
+            static double Linear(byte x) { var v = x / 255.0; return v <= .04045 ? v / 12.92 : Math.Pow((v + .055) / 1.055, 2.4); }
+            return .2126 * Linear(c.R) + .7152 * Linear(c.G) + .0722 * Linear(c.B);
+        }
+        foreach (var dark in new[] { false, true })
+        {
+            Theme.SetMode(dark);
+            foreach (var fill in new Func<Color>[] { () => Theme.Running, () => Theme.Stopped, () => Theme.Pending, () => Theme.Accent })
+            {
+                using var auditButton = Theme.PrimaryButton("Test", fill);
+                foreach (var background in new[] { auditButton.BackColor, auditButton.FlatAppearance.MouseOverBackColor, auditButton.FlatAppearance.MouseDownBackColor })
+                {
+                    var a = Luminance(auditButton.ForeColor); var b = Luminance(background);
+                    Check("primary labels remain readable in each palette and pointer state", (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05) >= 4.5);
+                }
+            }
+        }
+        Theme.SetMode(false);
+        var reportErrorCount = 1;
+        var reportFixture = Path.Combine(Path.GetTempPath(), "BridgeManager-report-" + Guid.NewGuid().ToString("N"));
+        using (var liveReport = new ReportsForm(reportFixture, () => reportErrorCount))
+        {
+            var reloadReport = typeof(ReportsForm).GetMethod("Reload", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var reportValue = (Label)typeof(ReportsForm).GetField("_errorsValue", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(liveReport)!;
+            reloadReport.Invoke(liveReport, null);
+            Check("report refresh reads the current error count", reportValue.Text == "1");
+            reportErrorCount = 4;
+            reloadReport.Invoke(liveReport, null);
+            Check("report refresh includes new errors without reopening", reportValue.Text == "4");
+            reportErrorCount = 0;
+            reloadReport.Invoke(liveReport, null);
+            Check("report refresh clears errors after they age out", reportValue.Text == "0");
+        }
 
         var today = new DateTime(2026, 9, 12);
         var logLines = new[]
@@ -576,14 +637,21 @@ internal static class SelfTest
         Check("earlier warning remains before later information", MainForm.PriorityComesFirst(1, 2));
         Check("priority queue drains when information is empty", MainForm.PriorityComesFirst(1, null));
         var stopRefused = false;
-        try { SettingsForm.VerifyStoppedForSave(true, () => false); }
+        try { SettingsForm.VerifyStoppedForSaveAsync(true, () => Task.FromResult(false)).GetAwaiter().GetResult(); }
         catch (IOException) { stopRefused = true; }
         Check("save and restart refuses an unverified stop", stopRefused);
         var stopCalls = 0;
-        SettingsForm.VerifyStoppedForSave(false, () => { stopCalls++; return true; });
+        SettingsForm.VerifyStoppedForSaveAsync(false, () => { stopCalls++; return Task.FromResult(true); }).GetAwaiter().GetResult();
         Check("ordinary save does not stop the bridge", stopCalls == 0);
-        SettingsForm.VerifyStoppedForSave(true, () => { stopCalls++; return true; });
+        SettingsForm.VerifyStoppedForSaveAsync(true, () => { stopCalls++; return Task.FromResult(true); }).GetAwaiter().GetResult();
         Check("save and restart verifies stop before proceeding", stopCalls == 1);
+        var stopCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pendingSave = SettingsForm.VerifyStoppedForSaveAsync(true, () => stopCompletion.Task);
+        Check("waiting for a stop yields to the UI instead of finishing the save", !pendingSave.IsCompleted);
+        stopCompletion.SetResult(false);
+        var delayedStopRefused = false;
+        try { pendingSave.GetAwaiter().GetResult(); } catch (IOException) { delayedStopRefused = true; }
+        Check("an asynchronous stop failure still prevents writing", delayedStopRefused);
         var testMutexName = "BridgeManager-selftest-" + Guid.NewGuid().ToString("N");
         using var observingWriter = new Mutex(false, testMutexName);
         try { SettingsForm.WithConfigLock(testMutexName, () => throw new IOException("fixture")); }

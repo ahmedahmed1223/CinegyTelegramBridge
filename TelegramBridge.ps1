@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.69.6'
+$script:BridgeVersion = '8.69.7'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1007,6 +1007,7 @@ $script:PendingApprovals = @{}
 $script:LastShow = @{}
 $script:LastSuccessfulLayerShows = @{}
 $script:RollbackCandidates = @{}
+$script:LayerRemovalTickets = @{}
 # T-15 before/after: layer -> last cached frame path, kept by reference when
 # fresh at SHOW time. Owned by the snapshot cache; never deleted here, and a
 # missing file simply means the review goes text-only.

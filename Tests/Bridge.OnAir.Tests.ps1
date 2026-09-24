@@ -1935,7 +1935,8 @@ Describe 'Layer removal confirmation' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ShowOnAirTextOnRemoval' }
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
 
-        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'hidego:7')
+        $ticket = New-LayerRemovalTicket -Layer 7 -Action hide -ChatId 42 -UserId 42
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data "hidego:$ticket")
 
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
     }
@@ -1949,7 +1950,8 @@ Describe 'Layer removal confirmation' {
         Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'exit:7')
         Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
 
-        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data 'exitgo:7')
+        $ticket = New-LayerRemovalTicket -Layer 7 -Action exit -ChatId 42 -UserId 42
+        Invoke-CallbackQuery -CallbackQuery (New-HideCallback -Data "exitgo:$ticket")
         Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
     }
 }
@@ -2173,7 +2175,11 @@ Describe 'Named Cinegy layers' {
 Describe 'Confirming removal of a live graphic' {
     BeforeEach {
         $script:OnAir = @{}
-        Mock Send-TelegramMessage {}
+        Mock Get-MainMenuKeyboard { @{ inline_keyboard = @() } }
+        $script:removalButton = ''
+        Mock Send-TelegramMessage {
+            if ($ReplyMarkup -and @($ReplyMarkup.inline_keyboard).Count -gt 0) { $script:removalButton = [string]$ReplyMarkup.inline_keyboard[0][0].callback_data }
+        }
         Mock Invoke-HideLayer { $true }
         Mock Invoke-ExitLayer { $true }
         Mock Test-Authorized { $true }
@@ -2212,10 +2218,52 @@ Describe 'Confirming removal of a live graphic' {
 
     It 'acts once the operator confirms' {
         $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; Source = 'bridge' }
-
-        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hidego:7')
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
+        $confirmData = $script:removalButton
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data $confirmData)
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data $confirmData)
 
         Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+
+    It 'refuses an old layer-only confirmation' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42 }
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hidego:7')
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+    }
+
+    It 'does not remove a replacement graphic with an earlier confirmation' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42 }
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
+        $confirmData = $script:removalButton
+        $script:OnAir[7].Key = 'Logo'
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data $confirmData)
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+    }
+
+    It 'does not exit when the reviewed text has changed on the same template' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42; AirCopy = 'first' }
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'exit:7')
+        $confirmData = $script:removalButton
+        $script:OnAir[7].AirCopy = 'second'
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data $confirmData)
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'does not accept another operators confirmation' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = (Get-Date); UserId = 42 }
+        Invoke-CallbackQuery -CallbackQuery (New-Cb -Data 'hide:7')
+        $foreign = New-Cb -Data $script:removalButton
+        $foreign.from.id = 43
+        Invoke-CallbackQuery -CallbackQuery $foreign
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+    }
+
+    It 'expires a confirmation before it can remove a graphic' {
+        $script:OnAir[7] = @{ Key = 'Urgent'; At = [datetime]'2026-09-24T10:00:00'; UserId = 42 }
+        $ticket = New-LayerRemovalTicket -Layer 7 -Action hide -ChatId 42 -UserId 42 -Now ([datetime]'2026-09-24T10:00:00')
+        Confirm-LayerRemoval -TicketId $ticket -Action hide -ChatId 42 -UserId 42 -Now ([datetime]'2026-09-24T10:02:00')
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
     }
 
     It 'does not ask about a layer with nothing on it' {

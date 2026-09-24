@@ -502,6 +502,77 @@ function Sync-LayerAfterOperatorAction {
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
 }
 
+function Get-LayerRemovalFingerprint {
+    param([Parameter(Mandatory)][int]$Layer)
+    if (-not $script:OnAir.ContainsKey($Layer)) { return '' }
+    $record = $script:OnAir[$Layer]
+    if (-not (Get-JsonProp $record 'Key') -or
+        (-not (Get-JsonProp $record 'At') -and -not (Get-JsonProp $record 'ActiveId'))) { return '' }
+    # Ignore monitoring timestamps, but include authored text and every scene
+    # on a Multi layer: removing a layer removes more than its primary scene.
+    $snapshot = [ordered]@{}
+    foreach ($field in @('Key', 'At', 'ActiveId', 'AirCopy', 'Values', 'UserId')) {
+        $snapshot[$field] = Get-JsonProp $record $field
+    }
+    $snapshot.Scenes = @($script:OnAirScenes | Where-Object { [int]$_.Layer -eq $Layer } |
+        Sort-Object SceneId | ForEach-Object { [ordered]@{
+            SceneId = $_.SceneId; Key = $_.Key; At = $_.At; ActiveId = $_.ActiveId
+        } })
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($snapshot | ConvertTo-Json -Depth 12 -Compress))
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+}
+
+function New-LayerRemovalTicket {
+    param([int]$Layer, [ValidateSet('hide', 'exit')][string]$Action,
+        [long]$ChatId, [long]$UserId, [datetime]$Now = (Get-Date))
+    foreach ($id in @($script:LayerRemovalTickets.Keys)) {
+        $entry = $script:LayerRemovalTickets[$id]
+        if ($entry.ExpiresAt -le $Now -or ($entry.ChatId -eq $ChatId -and $entry.UserId -eq $UserId)) {
+            $script:LayerRemovalTickets.Remove($id)
+        }
+    }
+    # ponytail: 256 simultaneous confirmations; evict the oldest when full.
+    # A shared persistent ticket service is only needed for multiple workers.
+    if ($script:LayerRemovalTickets.Count -ge 256) {
+        $oldest = $script:LayerRemovalTickets.Keys | Sort-Object { $script:LayerRemovalTickets[$_].ExpiresAt } | Select-Object -First 1
+        $script:LayerRemovalTickets.Remove($oldest)
+    }
+    $fingerprint = Get-LayerRemovalFingerprint -Layer $Layer
+    $id = [guid]::NewGuid().ToString('N')
+    if ($fingerprint) {
+        $script:LayerRemovalTickets[$id] = @{ Layer = $Layer; Action = $Action; ChatId = $ChatId; UserId = $UserId
+            Fingerprint = $fingerprint; ExpiresAt = $Now.AddMinutes(2) }
+    }
+    return $id
+}
+
+function Confirm-LayerRemoval {
+    param([string]$TicketId, [ValidateSet('hide', 'exit')][string]$Action,
+        [long]$ChatId, [long]$UserId, [datetime]$Now = (Get-Date))
+    $ticket = $script:LayerRemovalTickets[$TicketId]
+    $valid = $ticket -and $ticket.ChatId -eq $ChatId -and $ticket.UserId -eq $UserId -and
+        $ticket.Action -eq $Action -and $ticket.ExpiresAt -gt $Now
+    if ($valid) {
+        # Consume before any I/O, including a refusal. A replay never acts twice.
+        $script:LayerRemovalTickets.Remove($TicketId)
+        $valid = $ticket.Fingerprint -eq (Get-LayerRemovalFingerprint -Layer $ticket.Layer)
+    }
+    if ($valid) {
+        $activeId = [string](Get-JsonProp $script:OnAir[$ticket.Layer] 'ActiveId')
+        if ($activeId) {
+            $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+                -Layer $ticket.Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+            $valid = $live.Success -and $live.IsOnAir -and [string]$live.ActiveId -eq $activeId
+        }
+    }
+    if (-not $valid) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cb.removalExpired') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
+    if ($Action -eq 'hide') { Invoke-HideLayer -Layer $ticket.Layer -ChatId $ChatId -UserId $UserId | Out-Null }
+    else { Invoke-ExitLayer -Layer $ticket.Layer -ChatId $ChatId -UserId $UserId | Out-Null }
+}
+
 function Invoke-HideLayer {
     param(
         [Parameter(Mandatory)][int]$Layer,

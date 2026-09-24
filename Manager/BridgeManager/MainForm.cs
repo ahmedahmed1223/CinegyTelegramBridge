@@ -148,6 +148,7 @@ public sealed class MainForm : Form
     private readonly ManagerSettings _settings;
     private Process? _bridgeProcess;
     private bool _stoppingIntentionally;
+    private Process? _settingsStopProcess;
     private bool _restartAfterExit;
     private bool _exiting;
 
@@ -349,7 +350,7 @@ public sealed class MainForm : Form
         logsButton.Click += (_, _) => OpenLogsFolder();
         clearButton.Click += (_, _) => ClearOutput();
         onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new OnAirForm(BridgeRoot); form.ShowDialog(this); } };
-        reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new ReportsForm(BridgeRoot, _recentErrors.Count); form.ShowDialog(this); } };
+        reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new ReportsForm(BridgeRoot, () => { PruneRecentErrors(); return _recentErrors.Count; }); form.ShowDialog(this); } };
 
         // Keep each group intact when the manager reaches its minimum width.
         // A lone "clear" control beside a live stop button is too easy to misread
@@ -1287,7 +1288,7 @@ public sealed class MainForm : Form
         // A rapid restart can leave an old process's Exited event arriving
         // after a newer one has already taken its place - acting on it here
         // would null out tracking of the process that is actually running now.
-        if (!ReferenceEquals(exitedProcess, _bridgeProcess)) return;
+        if (!ReferenceEquals(exitedProcess, _bridgeProcess) || ReferenceEquals(exitedProcess, _settingsStopProcess)) return;
 
         var exitCode = -1;
         try { exitCode = exitedProcess.ExitCode; } catch { /* process handle already gone */ }
@@ -2138,22 +2139,23 @@ public sealed class MainForm : Form
         catch { /* logging must never be the reason the app breaks */ }
     }
 
-    private bool StopForSettingsSave()
+    private async Task<bool> StopForSettingsSave()
     {
         _restartTimer.Stop();
         _restartAfterExit = false;
         _stoppingIntentionally = true;
         if (_bridgeProcess is not { } process) return true;
-        // WaitForExit blocks this thread, which is the UI thread, for up to ten
-        // seconds. It cannot become async without restructuring the save, but a
-        // window that stops repainting with no cursor and no message reads as a
-        // hang - and the operator's next move is to kill it mid-save.
+        // Defer the Exited callback's disposal until the async wait releases
+        // the process handle. Timers and repainting continue during the wait.
+        _settingsStopProcess = process;
         SetHeader("جارٍ إيقاف الجسر…", Theme.Pending, "ينتظر المدير انتهاء العملية قبل حفظ الإعدادات.");
         Cursor = Cursors.WaitCursor;
         try
         {
             if (!process.HasExited) process.Kill(entireProcessTree: true);
-            if (!process.WaitForExit(10000)) return false;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync(timeout.Token);
+            _settingsStopProcess = null;
             // Consume the exit now: its queued UI callback must not stop a replacement.
             OnBridgeExited(process);
             SetHeader("الجسر متوقف", Theme.Stopped, "جارٍ حفظ الإعدادات؛ عند فشل الحفظ يبقى الجسر متوقفًا.");
@@ -2164,7 +2166,12 @@ public sealed class MainForm : Form
             SetHeader("تعذّر الإيقاف", Theme.Pending, "لم تُحفظ الإعدادات؛ تحقّق من حالة الجسر.");
             return false;
         }
-        finally { Cursor = Cursors.Default; }
+        finally
+        {
+            _settingsStopProcess = null;
+            Cursor = Cursors.Default;
+            if (ReferenceEquals(_bridgeProcess, process) && process.HasExited) OnBridgeExited(process);
+        }
     }
 
     private void OpenSettings()

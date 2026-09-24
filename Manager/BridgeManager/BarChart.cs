@@ -29,29 +29,43 @@ internal sealed class BarChart : Control
         RightToLeft = RightToLeft.Yes;
         BackColor = Theme.Surface;
         Font = Theme.Ui;
-        AccessibleName = "رسم أعمدة";
+        AccessibleName = "استخدام القوالب";
+        AccessibleRole = AccessibleRole.Graphic;
+        TabStop = true;
     }
 
     public void SetData(IReadOnlyList<Bar> bars)
     {
         _bars = bars;
-        AccessibleDescription = bars.Count == 0 ? EmptyText : $"{bars.Count} أعمدة";
+        AccessibleDescription = DescribeBars(bars, EmptyText);
+        Height = RequiredHeight(bars.Count, DeviceDpi);
         Invalidate();
     }
+
+    internal static string DescribeBars(IReadOnlyList<Bar> bars, string emptyText) =>
+        bars.Count == 0 ? emptyText : string.Join("; ", bars.Select(bar => $"{bar.Label}: {bar.Value}"));
+
+    internal static int RequiredHeight(int count, int dpi) =>
+        (int)Math.Ceiling((Pad * 2 + Math.Max(1, count) * RowHeight) * dpi / 96.0);
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
         var g = e.Graphics;
+        var scale = DeviceDpi / 96f;
+        g.ScaleTransform(scale, scale);
+        var logicalWidth = Width / scale;
 
         if (_bars.Count == 0)
         {
             using var empty = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
             using var brush = new SolidBrush(Theme.TextMuted);
-            g.DrawString(EmptyText, Theme.Ui, brush, ClientRectangle, empty);
+            g.DrawString(EmptyText, Theme.Ui, brush, new RectangleF(0, 0, logicalWidth, Height / scale), empty);
             return;
         }
 
+        using var labelFont = new Font(Theme.UiBold.FontFamily, Theme.UiBold.SizeInPoints * 96f / 72f, Theme.UiBold.Style, GraphicsUnit.Pixel);
+        using var valueFont = new Font(Theme.UiSmall.FontFamily, Theme.UiSmall.SizeInPoints * 96f / 72f, Theme.UiSmall.Style, GraphicsUnit.Pixel);
         using var labelBrush = new SolidBrush(Theme.Text);
         using var valueBrush = new SolidBrush(Theme.TextMuted);
         using var trackBrush = new SolidBrush(Theme.SurfaceAlt);
@@ -63,15 +77,15 @@ internal sealed class BarChart : Control
         // edge. Label and value get their own thirds of the line, so a long
         // template name meets "357 مرة" with an ellipsis, not a collision.
         var y = Pad;
-        var labelWidth = (Width - Pad * 2) * 0.62f;
+        var labelWidth = (logicalWidth - Pad * 2) * 0.62f;
         foreach (var bar in _bars)
         {
-            var labelRect = new RectangleF(Width - Pad - labelWidth, y, labelWidth, 22);
-            var valueRect = new RectangleF(Pad, y, Width - Pad * 2 - labelWidth - 8, 22);
-            g.DrawString(bar.Label, Theme.UiBold, labelBrush, labelRect, near);
-            g.DrawString(bar.Value, Theme.UiSmall, valueBrush, valueRect, far);
+            var labelRect = new RectangleF(logicalWidth - Pad - labelWidth, y, labelWidth, 22);
+            var valueRect = new RectangleF(Pad, y, logicalWidth - Pad * 2 - labelWidth - 8, 22);
+            g.DrawString(bar.Label, labelFont, labelBrush, labelRect, near);
+            g.DrawString(bar.Value, valueFont, valueBrush, valueRect, far);
 
-            var track = new RectangleF(Pad, y + 26, Width - Pad * 2, BarHeight);
+            var track = new RectangleF(Pad, y + 26, logicalWidth - Pad * 2, BarHeight);
             g.FillRectangle(trackBrush, track);
             var fillWidth = (float)(track.Width * Math.Clamp(bar.Fraction, 0, 1));
             if (fillWidth > 0)
@@ -93,3 +107,4 @@ internal sealed class BarChart : Control
         Invalidate();
     }
 }
+

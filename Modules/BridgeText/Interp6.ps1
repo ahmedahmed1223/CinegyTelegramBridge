@@ -55,6 +55,7 @@ function Add-BridgeTextInterp6 {
     $catalogue['cb.autoHideLayer'] = @{ ar = 'المدة قبل إخفاء الطبقة {0}:'; en = 'How long before layer {0} is hidden:' }
     $catalogue['cb.sendSecondsForLayer'] = @{ ar = 'أرسل المدة بالثواني لإخفاء الطبقة {0} (رقم فقط):'; en = 'Send the seconds before layer {0} is hidden (a number alone):' }
     $catalogue['cb.noTimerForLayer'] = @{ ar = '⚠️ لا يوجد مؤقت نشط للطبقة {0}.'; en = '⚠️ No timer is running for layer {0}.' }
+    $catalogue['cb.removalExpired'] = @{ ar = 'انتهى التأكيد أو تغيّر المشهد أو تعذّر التحقق منه. لم يُرسل أمر إزالة؛ راجع الحالة واطلب تأكيدًا جديدًا.'; en = 'The confirmation expired, the scene changed, or its state could not be verified. No removal was sent; review the state and request a new confirmation.' }
     $catalogue['cb.confirmHide'] = @{ ar = "⚠️ تأكيد الإخفاء`n{0}"; en = "⚠️ Confirm the hide`n{0}" }
     $catalogue['cb.confirmExit'] = @{ ar = "⚠️ تأكيد الخروج من المشهد`n{0}"; en = "⚠️ Confirm the exit from the scene`n{0}" }
     $catalogue['cb.confirmGrant'] = @{ ar = "⚠️ <b>منح الوصول إلى {0}؟</b>`nسيتمكّن من عرض الغرافيك على الهواء."; en = "⚠️ <b>Grant access to {0}?</b>`nThey will be able to put graphics on air." }

@@ -31,6 +31,12 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.7'; Items = @(
+                        '🛡 **A removal confirmation belongs to the scene you reviewed** — a changed scene, expired request or repeated tap cannot remove a different graphic. Request a new confirmation when prompted.'
+                        '👤 **Editing accounts keeps the existing administrator order and shows the effective owner** — saving managed permissions requires applying them through a restart, rather than offering a save that can be overwritten.'
+                        '📡 **Unavailable on-air records are marked as unknown** — the last readable record stays visible with its reading time and a warning if the bridge heartbeat is old.'
+                        '📊 **Manager reports scroll to every displayed bar and refresh the error count** — chart labels are available to assistive readers, buttons are more readable, and saving keeps the window responsive.'
+                    ) }
                 @{ Version = '8.69.6'; Items = @(
                         '📴 **When Cinegy takes a graphic off air, the chats that were told it went up are told it came down** — with how long it stayed and a line saying it ended from the Cinegy side, not through the bridge. Before, only a take-down from the bridge was announced.'
                     ) }
@@ -175,6 +181,12 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.7'; Items = @(
+                        '🛡 **تأكيد الإزالة يخص المشهد الذي راجعته** — تغيّر المشهد أو انتهاء الطلب أو تكرار الضغط لا يزيل رسمًا آخر. اطلب تأكيدًا جديدًا عند التنبيه.'
+                        '👤 **تعديل الحسابات يحافظ على ترتيب المديرين ويعرض المالك الفعلي** — حفظ الصلاحيات التي يديرها الجسر يتطلب تطبيقها بإعادة التشغيل بدل حفظ قد يضيع.'
+                        '📡 **تعذّر قراءة سجل الهواء يظهر كحالة غير مؤكدة** — تبقى آخر قراءة سليمة مع وقتها وتنبيه إذا كانت نبضة الجسر قديمة.'
+                        '📊 **تقارير المدير تُمرّر إلى جميع الأعمدة المعروضة وتحدّث عداد الأخطاء** — أسماء الرسم وقيمه متاحة لقارئ الشاشة، والأزرار أوضح، ونافذة الحفظ تبقى مستجيبة.'
+                    ) }
                 @{ Version = '8.69.6'; Items = @(
                         '📴 **حين يُنزل Cinegy رسمًا عن الهواء، تعلم المحادثات التي أُبلغت بظهوره أنه نزل** — ومعه كم بقي، وسطر يقول إنه انتهى من جهة Cinegy لا من الجسر. قبل هذا لم يُعلَن إلا الإنزال من الجسر.'
                     ) }

@@ -1049,7 +1049,8 @@ Describe 'Colour survives the safer configuration' {
         # would hand the operator the weaker screen.
         foreach ($action in 'hide', 'exit') {
             $rows = @((Get-LayerRemovalConfirmKeyboard -Layer 7 -Action $action).inline_keyboard | ForEach-Object { @($_) })
-            $yes = @($rows | Where-Object { $_['callback_data'] -eq "${action}go:7" })[0]
+            # The yes button carries a one-time ticket, not the bare layer.
+            $yes = @($rows | Where-Object { $_['callback_data'] -like "${action}go:*" })[0]
             $cancel = @($rows | Where-Object { $_['callback_data'] -eq 'menu' })[0]
 
             $yes.style | Should -Be 'danger' -Because "the $action confirmation performs the removal"

@@ -33,7 +33,7 @@ public sealed class SettingsForm : Form
     private readonly string _configPath;
     private readonly string _bridgeRoot;
     private readonly bool _bridgeRunning;
-    private readonly Func<bool>? _stopBeforeSave;
+    private readonly Func<Task<bool>>? _stopBeforeSave;
 
     private readonly TextBox _botToken = Theme.Input(400);
     private readonly CheckBox _showToken;
@@ -44,6 +44,8 @@ public sealed class SettingsForm : Form
     private readonly ListView _accounts;
     private readonly TextBox _newId = Theme.Input(190);
     private readonly Label _accountsSummary = Theme.Hint("");
+    private readonly Label _ownerSummary = Theme.Hint("");
+    private readonly Dictionary<string, long[]> _loadedRoleOrder = new(StringComparer.Ordinal);
     private readonly Label _permissionsCaption = Theme.Caption("صلاحيات الحساب المحدد");
     private readonly Dictionary<string, CheckBox> _permissionChips = new(StringComparer.Ordinal);
     private readonly FlowLayoutPanel _permissionsRow;
@@ -145,6 +147,7 @@ public sealed class SettingsForm : Form
     // Esc) used to drop edits with no prompt and no trace; the bullet in the
     // title is the warning and FormClosing is the net.
     private bool _dirty;
+    private bool _saving;
     private readonly Dictionary<string, string> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _loadedScalars = new(StringComparer.Ordinal);
     /// <summary>Set when LoadValues could not read config.json, which leaves every remembered
@@ -155,7 +158,7 @@ public sealed class SettingsForm : Form
 
     public bool RestartRequested { get; private set; }
 
-    public SettingsForm(string configPath, string bridgeRoot, bool bridgeRunning = false, Func<bool>? stopBeforeSave = null)
+    public SettingsForm(string configPath, string bridgeRoot, bool bridgeRunning = false, Func<Task<bool>>? stopBeforeSave = null)
     {
         _configPath = configPath;
         _bridgeRoot = bridgeRoot;
@@ -307,6 +310,7 @@ public sealed class SettingsForm : Form
         }
         layout.Controls.Add(_permissionsRow);
         layout.Controls.Add(_accountsSummary);
+        layout.Controls.Add(_ownerSummary);
 
         if (_bridgeRunning)
         {
@@ -323,7 +327,8 @@ public sealed class SettingsForm : Form
 
         // ---- buttons -------------------------------------------------------
         var buttons = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Theme.Surface, Padding = new Padding(18, 12, 18, 12) };
-        var buttonFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        var buttonFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
+        buttonFlow.SizeChanged += (_, _) => buttons.Height = buttonFlow.GetPreferredSize(new Size(buttonFlow.ClientSize.Width, 0)).Height + buttons.Padding.Vertical;
 
         var saveRestartButton = Theme.PrimaryButton("حفظ وإعادة التشغيل", () => Theme.Accent);
         saveRestartButton.Width = 175;
@@ -337,8 +342,8 @@ public sealed class SettingsForm : Form
         openFileButton.Enabled = !_bridgeRunning;
         if (_bridgeRunning) openFileButton.Text = "أوقف الجسر لفتح الملف";
 
-        saveButton.Click += (_, _) => { if (Save(restarting: false)) DialogResult = DialogResult.OK; };
-        saveRestartButton.Click += (_, _) => { if (Save(restarting: true)) { RestartRequested = true; DialogResult = DialogResult.OK; } };
+        saveButton.Click += async (_, _) => { if (await SaveAsync(restarting: false)) DialogResult = DialogResult.OK; };
+        saveRestartButton.Click += async (_, _) => { if (await SaveAsync(restarting: true)) { RestartRequested = true; DialogResult = DialogResult.OK; } };
         openFileButton.Click += (_, _) => Process.Start(new ProcessStartInfo("notepad.exe", $"\"{_configPath}\"") { UseShellExecute = true });
 
         buttonFlow.Controls.AddRange(new Control[] { saveRestartButton, saveButton, cancelButton, openFileButton });
@@ -357,12 +362,14 @@ public sealed class SettingsForm : Form
         Load += (_, _) => LoadValues();
         FormClosing += (_, e) =>
         {
+            if (_saving) { e.Cancel = true; return; }
             if (_dirty && MessageBox.Show(this, "تجاهل التعديلات غير المحفوظة؟", "تعديلات غير محفوظة",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 e.Cancel = true;
         };
         Shown += (_, _) =>
         {
+            buttons.Height = buttonFlow.GetPreferredSize(new Size(buttonFlow.ClientSize.Width, 0)).Height + buttons.Padding.Vertical;
             var workingArea = Screen.FromControl(this).WorkingArea;
             Size = new Size(Math.Min(Width, workingArea.Width), Math.Min(Height, workingArea.Height));
         };
@@ -509,8 +516,16 @@ public sealed class SettingsForm : Form
         RefreshList();
     }
 
+    internal static long[] EffectiveOwners(IEnumerable<long> owners, IEnumerable<long> admins, IEnumerable<long> adminChats)
+    {
+        var explicitOwners = owners.Where(id => id > 0).Distinct().ToArray();
+        return explicitOwners.Length > 0 ? explicitOwners : admins.Where(id => id > 0).Concat(adminChats.Where(id => id > 0)).Take(1).ToArray();
+    }
+
     private void UpdateSummary()
     {
+        var owners = EffectiveOwners(ReadIds(IdsFor("OwnerUserIds")), ReadIds(IdsFor("AdminUserIds")), ReadIds(IdsFor("AdminChatIds")));
+        _ownerSummary.Text = owners.Length == 0 ? "لا مالك فعلي؛ عيّن مالكًا قبل اعتماد الصلاحيات." : "المالك بعد تطبيق التعديل: " + string.Join("، ", owners);
         var withNone = _model.Count(kv => kv.Value.Count == 0);
         var parts = Roles
             .Select(r => new { r.Label, Count = _model.Count(kv => kv.Value.Contains(r.Key)) })
@@ -532,12 +547,23 @@ public sealed class SettingsForm : Form
     }
 
     /// <summary>The model flattened back into the shape config.json wants.</summary>
-    private JsonArray IdsFor(string roleKey)
+    private JsonArray IdsFor(string roleKey, JsonNode? current = null)
     {
         var array = new JsonArray();
-        foreach (var (id, roles) in _model) if (roles.Contains(roleKey)) array.Add(id);
+        var original = current is not null ? ReadIds(current) : (_loadedRoleOrder.TryGetValue(roleKey, out var ids) ? ids.AsEnumerable() : Array.Empty<long>());
+        foreach (var id in OrderRoleIds(original, _model.Where(pair => pair.Value.Contains(roleKey)).Select(pair => pair.Key))) array.Add(id);
         return array;
     }
+
+    internal static long[] OrderRoleIds(IEnumerable<long> original, IEnumerable<long> edited)
+    {
+        var wanted = edited.ToHashSet();
+        // First admin is the fallback owner. Sorting the display must not
+        // silently sort that semantic order in the saved configuration.
+        return original.Where(wanted.Contains).Concat(wanted.OrderBy(id => id)).Distinct().ToArray();
+    }
+
+    internal static bool? ResolveRestartChoice(DialogResult answer) => answer == DialogResult.Yes ? true : null;
 
     /// <summary>A stable text form of one permission's ids, for spotting what the operator changed.</summary>
     private string Signature(string roleKey) =>
@@ -586,9 +612,11 @@ public sealed class SettingsForm : Form
             _loadedScalars["AirChannelNumber"] = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
 
             _model.Clear();
+            _loadedRoleOrder.Clear();
             foreach (var role in Roles)
             {
-                foreach (var id in ReadIds(root[role.Key]))
+                _loadedRoleOrder[role.Key] = ReadIds(root[role.Key]).ToArray();
+                foreach (var id in _loadedRoleOrder[role.Key])
                 {
                     if (!_model.TryGetValue(id, out var roles))
                     {
@@ -634,8 +662,9 @@ public sealed class SettingsForm : Form
              .Where(key => !_loaded.TryGetValue(key, out var was) || !string.Equals(was, Signature(key), StringComparison.Ordinal))
              .ToList();
 
-    private bool Save(bool restarting)
+    private async Task<bool> SaveAsync(bool restarting)
     {
+        if (_saving) return false;
         if (!_tokenIsDpapiReference && string.IsNullOrWhiteSpace(_botToken.Text))
         {
             MessageBox.Show(this, "رمز البوت (BotToken) مطلوب.", "تحقّق", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -664,11 +693,11 @@ public sealed class SettingsForm : Form
                 "الصلاحيات التي عدّلتها يديرها الجسر وهو يعمل، فسيكتب نسخته فوقها عند أول حفظ منه " +
                 "(موافقة مستخدم، أو تغيير إعداد من تيليجرام) ويضيع تعديلك.\n\n" +
                 "نعم = حفظ وإعادة تشغيل الجسر ليثبت التعديل.\n" +
-                "لا = حفظ الآن على أي حال.\n" +
-                "إلغاء = العودة للتحرير.",
-                "التعديل قد لا يثبت", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
-            if (answer == DialogResult.Cancel) return false;
-            if (answer == DialogResult.Yes) restarting = true;
+                "لا = العودة للتحرير دون حفظ.",
+                "تطبيق الصلاحيات يتطلب إعادة تشغيل", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            var choice = ResolveRestartChoice(answer);
+            if (choice is null) return false;
+            restarting = choice.Value;
         }
 
         if (_loadFailed)
@@ -679,12 +708,22 @@ public sealed class SettingsForm : Form
             return false;
         }
 
+        var changedKeys = ChangedKeys().ToHashSet(StringComparer.Ordinal);
+        var editedRoles = changedKeys.ToDictionary(key => key, key => ReadIds(IdsFor(key)).ToArray());
+        var tokenText = _botToken.Text.Trim();
+        var serverText = _airServer.Text.Trim();
+        var channelNumber = (int)_airChannel.Value;
+        _saving = true;
+        Enabled = false;
+        UseWaitCursor = true;
+        Text = "جارٍ حفظ الإعدادات…";
         try
         {
-            var changedKeys = ChangedKeys().ToHashSet(StringComparer.Ordinal);
             RestartRequested = false;
-            VerifyStoppedForSave(restarting, _stopBeforeSave ?? (() => !_bridgeRunning));
-            WithConfigLock(@"Global\CinegyTelegramBridge.Config", () =>
+            await VerifyStoppedForSaveAsync(restarting, _stopBeforeSave ?? (() => Task.FromResult(!_bridgeRunning)));
+            // UI values are captured above; the writer holds and releases its
+            // mutex on the same worker thread without blocking window messages.
+            await Task.Run(() => WithConfigLock(@"Global\CinegyTelegramBridge.Config", () =>
             {
                 var root = LoadRoot();
                 // A DPAPI-protected token is left exactly as it sits on disk. Any
@@ -692,35 +731,48 @@ public sealed class SettingsForm : Form
                 // Only fields this operator actually edited are written back, so
                 // a value the bridge changed on disk while the dialog was open
                 // survives instead of being overwritten with a stale reading.
-                if (!_tokenIsDpapiReference && ShouldWriteLoadedValue(_loadedScalars["BotToken"], _botToken.Text.Trim()))
+                if (!_tokenIsDpapiReference && ShouldWriteLoadedValue(_loadedScalars["BotToken"], tokenText))
                 {
-                    root["BotToken"] = _botToken.Text.Trim();
+                    root["BotToken"] = tokenText;
                 }
-                if (ShouldWriteLoadedValue(_loadedScalars["AirServerAddress"], _airServer.Text.Trim()))
+                if (ShouldWriteLoadedValue(_loadedScalars["AirServerAddress"], serverText))
                 {
-                    root["AirServerAddress"] = _airServer.Text.Trim();
+                    root["AirServerAddress"] = serverText;
                 }
-                var channel = ((int)_airChannel.Value).ToString(CultureInfo.InvariantCulture);
+                var channel = channelNumber.ToString(CultureInfo.InvariantCulture);
                 if (ShouldWriteLoadedValue(_loadedScalars["AirChannelNumber"], channel))
                 {
-                    root["AirChannelNumber"] = (int)_airChannel.Value;
+                    root["AirChannelNumber"] = channelNumber;
                 }
                 foreach (var role in Roles)
                 {
-                    if (changedKeys.Contains(role.Key)) root[role.Key] = IdsFor(role.Key);
+                    if (changedKeys.Contains(role.Key))
+                    {
+                        var ids = new JsonArray();
+                        foreach (var id in OrderRoleIds(ReadIds(root[role.Key]), editedRoles[role.Key])) ids.Add(id);
+                        root[role.Key] = ids;
+                    }
                 }
 
                 var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
                 WriteConfigAtomically(json);
-            });
+            }));
             RestartRequested = restarting;
             _dirty = false;
             return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"تعذّر الحفظ:\n{ex.Message}", "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Enabled = true;
+            MessageBox.Show(this, $"تعذّر الحفظ:\n{ex.Message}" + (restarting ? "\nتحقّق من حالة الجسر؛ قد يبقى متوقفًا حتى تشغيله من النافذة الرئيسية." : ""), "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
+        }
+        finally
+        {
+            _saving = false;
+            Enabled = true;
+            UseWaitCursor = false;
+            Text = _dirty ? "إعدادات الجسر •" : "إعدادات الجسر";
         }
     }
 
@@ -735,11 +787,12 @@ public sealed class SettingsForm : Form
     /// </summary>
     private void WriteConfigAtomically(string json) => WriteConfigFile(_configPath, json);
 
-    internal static void VerifyStoppedForSave(bool restarting, Func<bool> stop)
+    internal static async Task VerifyStoppedForSaveAsync(bool restarting, Func<Task<bool>> stop)
     {
-        if (restarting && !stop())
+        if (restarting && !await stop().ConfigureAwait(false))
             throw new IOException("تعذّر التحقق من توقف الجسر؛ لم تُحفظ الإعدادات.");
     }
+
     internal static void WithConfigLock(string mutexName, Action write)
     {
         using var mutex = new Mutex(false, mutexName);

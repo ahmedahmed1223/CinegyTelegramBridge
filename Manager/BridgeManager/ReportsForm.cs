@@ -25,7 +25,7 @@ public sealed class ReportsForm : Form
     internal sealed record HealthSnapshot(DateTime? GeneratedUtc, List<HealthRow> Rows);
 
     private readonly string _bridgeRoot;
-    private readonly int _errorsLastHour;
+    private readonly Func<int> _errorsLastHour;
     private readonly BarChart _chart = new();
     private readonly Label _usageFootnote;
     private readonly Panel _usagePage = new() { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(14, 6, 14, 10) };
@@ -43,7 +43,7 @@ public sealed class ReportsForm : Form
     private readonly FlowLayoutPanel _liveHealthList = new() { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 4, 0, 8) };
     private readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 200 };
 
-    public ReportsForm(string bridgeRoot, int errorsLastHour)
+    public ReportsForm(string bridgeRoot, Func<int> errorsLastHour)
     {
         _bridgeRoot = bridgeRoot;
         _errorsLastHour = errorsLastHour;
@@ -82,9 +82,11 @@ public sealed class ReportsForm : Form
 
         var usageHint = new Label { Dock = DockStyle.Top, Height = 20, Text = "مرتبة بالأكثر نشرًا، من عدّاد الجسر.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
         _usageFootnote = new Label { Dock = DockStyle.Bottom, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleRight };
-        _chart.Dock = DockStyle.Fill;
+        var chartScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Surface };
+        _chart.Dock = DockStyle.Top;
+        chartScroll.Controls.Add(_chart);
         _chart.EmptyText = "لا استخدام مسجل بعد.";
-        _usagePage.Controls.Add(_chart);
+        _usagePage.Controls.Add(chartScroll);
         _usagePage.Controls.Add(usageHint);
         _usagePage.Controls.Add(_usageFootnote);
 
@@ -176,15 +178,16 @@ public sealed class ReportsForm : Form
             _stopsValue.Text = summary.ManualStops.ToString(CultureInfo.CurrentCulture);
             _watchdogValue.Text = summary.WatchdogRestarts.ToString(CultureInfo.CurrentCulture);
             _giveupsValue.Text = summary.GiveUps.ToString(CultureInfo.CurrentCulture);
-            _errorsValue.Text = _errorsLastHour.ToString(CultureInfo.CurrentCulture);
-            _errorsValue.ForeColor = _errorsLastHour == 0 ? Theme.Running : Theme.Stopped;
+            var currentErrors = _errorsLastHour();
+            _errorsValue.Text = currentErrors.ToString(CultureInfo.CurrentCulture);
+            _errorsValue.ForeColor = currentErrors == 0 ? Theme.Running : Theme.Stopped;
             // Calm when zero, coloured only when the number says look here.
             _watchdogAccent.BackColor = summary.WatchdogRestarts == 0 ? Theme.Running : Theme.Pending;
             _giveupsAccent.BackColor = summary.GiveUps == 0 ? Theme.Running : Theme.Stopped;
-            _errorsAccent.BackColor = _errorsLastHour == 0 ? Theme.Running : Theme.Stopped;
+            _errorsAccent.BackColor = currentErrors == 0 ? Theme.Running : Theme.Stopped;
 
             var live = ParseHealthSnapshot(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "health-snapshot.json")));
-            _liveHealthList.Controls.Clear();
+            foreach (Control oldRow in _liveHealthList.Controls.Cast<Control>().ToArray()) oldRow.Dispose();
             if (live.Rows.Count == 0)
             {
                 _liveHealthList.Controls.Add(new Label { AutoSize = true, Font = Theme.UiSmall, ForeColor = Theme.TextMuted, Text = "بلا بيانات حالة حيّة بعد — يحتاج جسرًا بإصدار يكتب health-snapshot.json." });

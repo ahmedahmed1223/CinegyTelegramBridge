@@ -24,6 +24,8 @@ public sealed class OnAirForm : Form
     private readonly string _bridgeRoot;
     private readonly ListView _list;
     private readonly Label _emptyLabel;
+    private readonly Label _readStatus;
+    private DateTime? _lastRead;
     private readonly System.Windows.Forms.Timer _refreshTimer;
 
     public OnAirForm(string bridgeRoot)
@@ -72,7 +74,7 @@ public sealed class OnAirForm : Form
         _emptyLabel = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "لا شيء على الهواء — الشاشة نظيفة.",
+            Text = "لا توجد مشاهد مسجلة لدى الجسر.",
             TextAlign = ContentAlignment.MiddleCenter,
             Font = Theme.Ui,
             ForeColor = Theme.TextMuted,
@@ -90,8 +92,11 @@ public sealed class OnAirForm : Form
         buttonFlow.Controls.AddRange(new Control[] { refreshButton, closeButton });
         buttons.Controls.Add(buttonFlow);
 
+        _readStatus = new Label { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(12, 4, 12, 4),
+            Text = "لم تُقرأ الحالة بعد.", Font = Theme.UiSmall, ForeColor = Theme.Pending };
         Controls.Add(_list);
         Controls.Add(_emptyLabel);
+        Controls.Add(_readStatus);
         Controls.Add(buttons);
         Controls.Add(header);
 
@@ -119,6 +124,8 @@ public sealed class OnAirForm : Form
             var aliases = ReadAliases(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "user-aliases.json")));
 
             _list.BeginUpdate();
+            try
+            {
             _list.Items.Clear();
             foreach (var row in rows.OrderBy(r => r.Layer))
             {
@@ -133,11 +140,22 @@ public sealed class OnAirForm : Form
                 item.SubItems.Add(string.Equals(row.Source, "bridge", StringComparison.OrdinalIgnoreCase) ? "الجسر" : "خارجي");
                 _list.Items.Add(item);
             }
-            _list.EndUpdate();
+            }
+            finally { _list.EndUpdate(); }
+            _lastRead = DateTime.Now;
+            var heartbeat = MainForm.ParseLiveness(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "bridge.liveness"))).Stamp;
+            _readStatus.Text = ReadStatusText(true, _lastRead, heartbeat, DateTime.UtcNow);
+            _readStatus.ForeColor = IsHeartbeatFresh(heartbeat, DateTime.UtcNow) ? Theme.TextMuted : Theme.Pending;
             _emptyLabel.Visible = rows.Count == 0;
             _list.Visible = rows.Count > 0;
         }
-        catch { /* a half-written state file is a reason to keep old rows, not to crash */ }
+        catch
+        {
+            _emptyLabel.Visible = false;
+            _list.Visible = true;
+            _readStatus.Text = ReadStatusText(false, _lastRead, null, DateTime.UtcNow);
+            _readStatus.ForeColor = Theme.Pending;
+        }
     }
 
     private string? ReadBridgeSetting(string name)
@@ -186,29 +204,42 @@ public sealed class OnAirForm : Form
         return ok && wide >= int.MinValue && wide <= int.MaxValue;
     }
 
-    /// <summary>Every scene the bridge currently tracks, or empty when the file is absent or mid-write.</summary>
+    internal static bool IsHeartbeatFresh(DateTime? heartbeat, DateTime utcNow) =>
+        heartbeat is DateTime stamp && utcNow - stamp.ToUniversalTime() >= TimeSpan.Zero && utcNow - stamp.ToUniversalTime() <= TimeSpan.FromMinutes(5);
+
+    internal static string ReadStatusText(bool readSucceeded, DateTime? lastRead, DateTime? heartbeat, DateTime utcNow)
+    {
+        var stamp = lastRead is DateTime at ? $"آخر قراءة سليمة للسجل: {at:HH:mm:ss}." : "لا توجد قراءة سليمة بعد.";
+        if (!readSucceeded) return "⚠ تعذّرت قراءة الحالة؛ المعروض إن وجد آخر سجل متاح. " + stamp;
+        return IsHeartbeatFresh(heartbeat, utcNow)
+            ? stamp + " المعروض من سجل الجسر، وليس فحصًا مباشرًا للخرج."
+            : "⚠ نبضة الجسر قديمة أو غير متاحة؛ حالة الهواء غير مؤكدة. " + stamp;
+    }
+
+    /// <summary>Invalid state is unavailable, never evidence of an empty output.</summary>
     internal static List<OnAirRow> ParseOnAirRows(string? json)
     {
         var rows = new List<OnAirRow>();
         try
         {
-            if (string.IsNullOrWhiteSpace(json)) return rows;
+            if (string.IsNullOrWhiteSpace(json)) throw new InvalidDataException("On-air state unavailable.");
             var root = JsonNode.Parse(json);
-            var scenes = root?["Scenes"] as JsonArray;
-            if (scenes is null) return rows;
+            if (root?["Scenes"] is not JsonArray scenes) throw new InvalidDataException("On-air scene list unavailable.");
             foreach (var scene in scenes)
             {
-                if (scene is null) continue;
-                if (!TryReadInt32(scene["Layer"], out var layer)) continue;
+                if (scene is null || !TryReadInt32(scene["Layer"], out var layer))
+                    throw new InvalidDataException("Invalid on-air scene.");
                 var key = (string?)scene["Key"] ?? "";
-                if (key.Length == 0) continue;
+                if (string.IsNullOrWhiteSpace(key)) throw new InvalidDataException("Invalid on-air scene.");
                 TryReadInt64(scene["UserId"], out var userId);
-                var airCopy = (string?)scene["AirCopy"] ?? "";
-                rows.Add(new OnAirRow(layer, key, airCopy, ParseOnAirStamp((string?)scene["At"]),
+                rows.Add(new OnAirRow(layer, key, (string?)scene["AirCopy"] ?? "", ParseOnAirStamp((string?)scene["At"]),
                     userId, (string?)scene["Source"] ?? ""));
             }
         }
-        catch { /* torn write - empty beats half a row */ }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
+            throw new InvalidDataException("On-air state unavailable.");
+        }
         return rows;
     }
 

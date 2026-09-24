@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.7
+
+Removal confirmations now expire after two minutes, belong to the requesting operator and reviewed scene, and can be consumed only once. Changed scenes or an unverifiable recorded active item require a fresh review. Account edits in BridgeManager preserve administrator ordering so an implicit owner cannot change just because the account list is sorted; managed permission changes can no longer be saved with a knowingly transient result.
+
+The manager distinguishes unreadable on-air data from a valid empty record, retains the last good rows, and labels stale or missing heartbeats. Usage charts scroll and expose their labels and values to assistive readers, report refresh reads the current error count, and primary buttons meet a 4.5:1 text contrast target in both palettes. The settings footer wraps and stop/save waits no longer block repainting. No new settings are required.
+
 ## Version 8.69.6
 
 When the Cinegy side takes a bridge-shown graphic off air, the chats that got

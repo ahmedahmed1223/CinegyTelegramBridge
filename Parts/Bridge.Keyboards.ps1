@@ -530,12 +530,14 @@ function Get-LayerRemovalSummary {
 }
 
 function Get-LayerRemovalConfirmKeyboard {
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][ValidateSet('hide', 'exit')][string]$Action)
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][ValidateSet('hide', 'exit')][string]$Action,
+        [long]$ChatId = 0, [long]$UserId = 0)
+    $ticketId = New-LayerRemovalTicket -Layer $Layer -Action $Action -ChatId $ChatId -UserId $UserId
     $label = if ($Action -eq 'hide') { (T 'confirm.hideYes') } else { (T 'confirm.exitYes') }
     return @{ inline_keyboard = @(
             # Red here too, or turning ConfirmLayerRemoval ON - the safer
             # setting - would hand the operator the weaker screen.
-            , @( (New-Button $label "${Action}go:$Layer" -Style danger), (New-Button (T 'common.cancel') 'menu') )
+            , @( (New-Button $label "${Action}go:$ticketId" -Style danger), (New-Button (T 'common.cancel') 'menu') )
         ) }
 }
 

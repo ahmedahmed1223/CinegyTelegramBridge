@@ -125,6 +125,20 @@ internal static class Theme
     /// default disabled rendering keeps its full-strength background and only
     /// greys the text, so "Stop" looked live while it was inert.
     /// </summary>
+    internal static Color ReadableButtonFill(Color colour)
+    {
+        static double Linear(byte component)
+        {
+            var value = component / 255.0;
+            return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4);
+        }
+        // The state swatch and the button fill have different jobs. Keep white
+        // labels readable without making the status indicator itself darker.
+        while (.2126 * Linear(colour.R) + .7152 * Linear(colour.G) + .0722 * Linear(colour.B) > 1.05 / 4.5 - .05)
+            colour = Darken(colour, .08);
+        return colour;
+    }
+
     public static Button PrimaryButton(string text, Func<Color> fill)
     {
         var button = BaseButton(text);
@@ -132,11 +146,11 @@ internal static class Theme
 
         void Apply()
         {
-            var colour = fill();
+            var colour = ReadableButtonFill(fill());
             button.BackColor = button.Enabled ? colour : SurfaceAlt;
             button.ForeColor = button.Enabled ? Color.White : TextMuted;
             button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = Lighten(colour, 0.14);
+            button.FlatAppearance.MouseOverBackColor = Darken(colour, 0.08);
             button.FlatAppearance.MouseDownBackColor = Darken(colour, 0.16);
         }
 

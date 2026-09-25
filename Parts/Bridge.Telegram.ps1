@@ -292,7 +292,10 @@ function Test-RedrawInPlacePress {
         follows it, so nothing stale is left either way.
     #>
     param([string]$Data)
-    foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojaz:skip:', 'mojazpage:', 'mojazlib:')) {
+    # The urgent board as a whole: an operator works it for minutes, and
+    # asked for one screen that changes rather than a column of copies.
+    foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojaz:skip:', 'mojazpage:', 'mojazlib:',
+            'urgentb:', 'urgmode:', 'urgsingle:', 'urgt:', 'urgmanual:', 'urgread:')) {
         if ($Data.StartsWith($prefix, [StringComparison]::Ordinal)) { return $true }
     }
     return $Data -in @('mojaz:sync', 'mojaz:matchloop')
@@ -811,6 +814,10 @@ function Send-TelegramRichMessage {
         # edit above would send the next screen chasing a message id that
         # has already been replaced.
         if ($refreshTarget -and [long]$refreshTarget.ChatId -eq $ChatId) { Clear-RefreshTarget }
+        # Recorded like a plain send's, so a screen that wants to come back
+        # to this message later knows which one it is.
+        $sentId = [int](Get-JsonProp (Get-JsonProp (Get-JsonProp $request 'Response') 'result') 'message_id')
+        $script:LastTelegramMessageId = $sentId
         return $true
     }
     if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {

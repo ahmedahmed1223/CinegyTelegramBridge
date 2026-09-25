@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.71.6'
+$script:BridgeVersion = '8.71.7'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1176,6 +1176,8 @@ $script:BridgeSelfTestFailed = $false
 $script:UrgentManualMode = @{}
 $script:UrgentManualLive = @{}
 $script:UrgentBoardFilters = @{}
+# The one message each chat works the urgent board on: chat id -> message id.
+$script:UrgentHomeMessage = @{}
 # Programme content boards: id -> board, filled from logs/boards/ at startup.
 # The directory is the index; there is no index file to drift from it.
 $script:ContentBoards = [ordered]@{}

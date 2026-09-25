@@ -726,24 +726,52 @@ function Get-UrgentBoardText {
     return ($lines -join "`n")
 }
 
+function Send-UrgentScreen {
+    <#
+        Every urgent screen lands on the chat's one board message.
+
+        The message a screen was pressed on is edited when the caller has
+        it; otherwise the message this chat last worked the board on - the
+        "home" - is edited, which is what a typed reply (a new story, a
+        replacement text) comes back to. Only when neither can be edited is
+        a message sent, and that one becomes the home. An operator asked to
+        work the board on one screen instead of a column of copies.
+
+        The home id is taken only from a send that reported one, so a stale
+        id can never point a later edit at somebody else's message.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [int]$MessageId = 0, [Parameter(Mandatory)][string]$Text, $Keyboard, [object[]]$Blocks = $null)
+    $homeChat = [long]$ChatId
+    if ($MessageId -le 0 -and $script:UrgentHomeMessage.ContainsKey($homeChat)) { $MessageId = [int]$script:UrgentHomeMessage[$homeChat] }
+    if ($Blocks -and -not $script:RichMessagesUnavailable) {
+        if ($MessageId -gt 0) {
+            if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $Blocks -ReplyMarkup $Keyboard) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
+        }
+        else {
+            $script:LastTelegramMessageId = 0
+            if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $Blocks -ReplyMarkup $Keyboard) {
+                if ([int]$script:LastTelegramMessageId -gt 0) { $script:UrgentHomeMessage[$homeChat] = [int]$script:LastTelegramMessageId }
+                return
+            }
+        }
+    }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML')) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
+    $script:LastTelegramMessageId = 0
+    Send-TelegramMessage -ChatId $ChatId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML'
+    if ([int]$script:LastTelegramMessageId -gt 0) { $script:UrgentHomeMessage[$homeChat] = [int]$script:LastTelegramMessageId }
+}
+
 function Show-UrgentBoardScreen {
     <# -Notice is one line above the board - what the button just did - so
        the answer and the state arrive on the same message. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
-    if (-not $script:RichMessagesUnavailable) {
-        $blocks = @(Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page)
-        if ($Notice) { $blocks = @(@{ type = 'paragraph'; text = $Notice }) + $blocks }
-        if ($MessageId -gt 0) {
-            if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $blocks -ReplyMarkup $keyboard) { return }
-        }
-        elseif (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $keyboard) { return }
-    }
+    $blocks = @(Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page)
+    if ($Notice) { $blocks = @(@{ type = 'paragraph'; text = $Notice }) + $blocks }
     $text = Get-UrgentBoardText -ChatId $ChatId -Page $Page
     if ($Notice) { $text = "$(ConvertTo-TelegramHtmlText -Text $Notice)`n$text" }
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
+    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text $text -Keyboard $keyboard -Blocks $blocks
 }
 
 function Get-UrgentItemKeyboard {
@@ -1030,9 +1058,7 @@ function Show-UrgentItemScreen {
     }
     $lines += (T 'urg.lastEdit' $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt')))
     $keyboard = Get-UrgentItemKeyboard -Position $Position
-    $text = $lines -join "`n"
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
+    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text ($lines -join "`n") -Keyboard $keyboard
 }
 
 function Get-UrgentTimingKeyboard {
@@ -1068,9 +1094,7 @@ function Show-UrgentTimingScreen {
     $floor = Get-UrgentFloorSeconds
     $lines += (T 'urg.shortestGap' $([math]::Round($floor, 1)))
     $keyboard = Get-UrgentTimingKeyboard
-    $text = $lines -join "`n"
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
+    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text ($lines -join "`n") -Keyboard $keyboard
 }
 
 function Show-UrgentReviewScreen {

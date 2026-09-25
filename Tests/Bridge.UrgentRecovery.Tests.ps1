@@ -109,8 +109,10 @@ Describe 'Urgent playback recovery safety' {
 
     It 'announces completion only after a successful exit' {
         Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'UrgentBoardNotifyOnFinish' }
+        # Said on the board itself since 8.71.7, as the notice above it.
+        Mock Show-UrgentBoardScreen { }
         Mock Invoke-ExitLayer {
-            Should -Invoke Send-TelegramMessage -Times 0 -Exactly -ParameterFilter { $Text -eq '⏹ انتهى جدول العواجل وخرج عن الهواء.' }
+            Should -Invoke Show-UrgentBoardScreen -Times 0 -Exactly -ParameterFilter { $Notice -eq '⏹ انتهى جدول العواجل وخرج عن الهواء.' }
             return $true
         }
         $script:UrgentBoardRun.Step = 2
@@ -118,7 +120,7 @@ Describe 'Urgent playback recovery safety' {
 
         Update-UrgentBoardRun
 
-        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -eq '⏹ انتهى جدول العواجل وخرج عن الهواء.' }
+        Should -Invoke Show-UrgentBoardScreen -Times 1 -Exactly -ParameterFilter { $Notice -eq '⏹ انتهى جدول العواجل وخرج عن الهواء.' }
         $script:UrgentBoardRun | Should -BeNullOrEmpty
     }
 

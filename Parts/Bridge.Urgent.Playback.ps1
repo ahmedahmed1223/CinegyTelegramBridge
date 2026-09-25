@@ -518,7 +518,7 @@ function Update-UrgentBoardRun {
         if (Stop-UrgentBoardRun -Reason 'finished' -Quiet) {
             Write-BridgeLog "Urgent board run finished after $($steps.Count) step(s)."
             if (Get-Setting 'UrgentBoardNotifyOnFinish') {
-                Send-TelegramMessage -ChatId ([long]$run.ChatId) -Text (T 'urgp.ended')
+                Show-UrgentBoardScreen -ChatId ([long]$run.ChatId) -UserId ([long]$run.UserId) -Notice (T 'urgp.ended')
             }
         }
         return

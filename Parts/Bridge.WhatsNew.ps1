@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.7'; Items = @(
+                        '🖥 **The urgent board is one screen** — every button on it, and every typed reply (a new story, a replacement text, a number), redraws the board message you are working on instead of sending a new copy. Starting a sequence and its end are said on that same screen. Only if the message can no longer be edited is a fresh one sent, and that one becomes the screen.'
+                    ) }
                 @{ Version = '8.71.6'; Items = @(
                         '➕ **A story added during a live sequence joins it** — type a new story while the board is on air and it plays after the last one; the board tells you which headline number it became. A hand-picked (selected-only) run does not grow by itself, and the board says so.'
                         '🔢 **The sequence plays in the order you see** — with the "newest" view the table is numbered newest first, and the run now follows that order instead of the stored one.'
@@ -256,6 +259,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.7'; Items = @(
+                        '🖥 **شاشة العواجل شاشة واحدة** — كل زرّ فيها، وكل ردّ تكتبه (خبر جديد، نصّ بديل، رقم)، يعيد رسم رسالة الجدول التي تعمل عليها بدل رسالة جديدة. بدء التتابع ونهايته يُقالان على الشاشة نفسها. ولا تُرسل رسالة جديدة إلا إن تعذّر تعديل القديمة، فتصير هي الشاشة.'
+                    ) }
                 @{ Version = '8.71.6'; Items = @(
                         '➕ **خبر يُضاف والتتابع حيّ يلتحق به** — اكتب خبرًا جديدًا والجدول على الهواء فيُعرض بعد آخر خبر، ويقول لك الجدول رقمه في التتابع. التشغيل على المحدد فقط لا يكبر وحده، ويقول الجدول ذلك.'
                         '🔢 **التتابع يعرض بالترتيب الذي تراه** — في عرض «الأحدث» يُرقَّم الجدول من الأحدث، وصار التشغيل يتبع هذا الترتيب لا الترتيب المخزّن.'

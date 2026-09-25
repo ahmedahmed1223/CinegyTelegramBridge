@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.7
+
+The urgent board works on one message: every urgent callback prefix rides the refresh mark, and a new `Send-UrgentScreen` anchors the board, item and timing screens to a per-chat home message that typed replies come back to; a new message is sent only when the old one cannot be edited, and it becomes the home. Rich sends now record their message id. The end of a run is said on the board rather than as a separate message.
+
 ## Version 8.71.6
 
 A story added while the board is on air is appended to the live run (`Add-UrgentRunStep`) as one more moment after the last, under the same ceiling, persisted with the run; a selected-only run keeps its scope. The board says which headline number the story became, or that it waits for the next run. With the newest-first view the run plays in the order the table shows.

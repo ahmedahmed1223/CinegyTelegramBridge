@@ -205,6 +205,43 @@ Describe 'Running the breaking-news board' {
     }
     AfterEach { $script:UrgentBoardRun = $null; $script:MojazPlayback = $null }
 
+    It 'works the board on one message: a typed reply comes back to the screen it left' {
+        $script:UrgentHomeMessage.Clear()
+        Mock Send-TelegramRichMessage { $script:LastTelegramMessageId = 55; $true }
+        Mock Edit-TelegramRichMessage { $true }
+        try {
+            Show-UrgentBoardScreen -ChatId 100 -UserId 101
+            $script:UrgentHomeMessage[[long]100] | Should -Be 55
+
+            # No message id in hand - the way Complete-UrgentBoardText calls it
+            # after a typed story - and still the same message is redrawn.
+            Show-UrgentBoardScreen -ChatId 100 -UserId 101
+            Should -Invoke Edit-TelegramRichMessage -Times 1 -Exactly -ParameterFilter { $MessageId -eq 55 }
+            Should -Invoke Send-TelegramRichMessage -Times 1 -Exactly
+
+            Show-UrgentItemScreen -ChatId 100 -Position 0
+            Should -Invoke Edit-TelegramMessageText -Times 1 -ParameterFilter { $MessageId -eq 55 }
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+
+            # Every urgent button rides the refresh mark, so its answer edits the pressed message.
+            Test-RedrawInPlacePress -Data 'urgentb:add' | Should -BeTrue
+            Test-RedrawInPlacePress -Data 'urgsingle:u_0000000a:t' | Should -BeTrue
+            Test-RedrawInPlacePress -Data 'menu:main' | Should -BeFalse
+        }
+        finally { $script:UrgentHomeMessage.Clear() }
+    }
+
+    It 'records a new rich message as home only when the send reported an id' {
+        $script:UrgentHomeMessage.Clear()
+        $script:LastTelegramMessageId = 999
+        Mock Send-TelegramRichMessage { $true }
+        try {
+            Show-UrgentBoardScreen -ChatId 100 -UserId 101
+            $script:UrgentHomeMessage.ContainsKey([long]100) | Should -BeFalse -Because 'a stale id must never aim a later edit at another message'
+        }
+        finally { $script:UrgentHomeMessage.Clear(); $script:LastTelegramMessageId = 0 }
+    }
+
     It 'takes a story added mid-run onto the end of the run, and plays it' {
         Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
         $before = @($script:UrgentBoardRun.Steps).Count
@@ -476,6 +513,9 @@ Describe 'Running the breaking-news board' {
     }
 
     It 'exits at the end of the run and says so once' {
+        # No board message on record from an earlier test, so the notice
+        # arrives as a send rather than an edit of message 9.
+        $script:UrgentHomeMessage.Clear()
         $config.Settings | Add-Member -NotePropertyName 'UrgentBoardNotifyOnFinish' -NotePropertyValue $true -Force
         Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
         Step-TestUrgentRun

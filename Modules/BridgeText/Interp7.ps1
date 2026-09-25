@@ -67,6 +67,8 @@ function Add-BridgeTextInterp7 {
     $catalogue['news.headlineCount'] = @{ ar = ' · {0} خبرًا'; en = ' · {0} headlines' }
     $catalogue['news.indented'] = @{ ar = '   {0}'; en = '   {0}' }
     $catalogue['news.manage'] = @{ ar = "📰 إدارة شريط الأخبار`nالحالي: {0} على الهواء."; en = "📰 Manage the news ticker`nCurrently: {0} on air." }
+    $catalogue['news.draftHeading'] = @{ ar = "`n`n✏️ مسودتك: {0} خبر، منها {1} 🆕 جديد"; en = "`n`n✏️ Your draft: {0} headline(s), {1} of them 🆕 new" }
+    $catalogue['news.draftRemoves'] = @{ ar = '🗑 ونشرها يحذف من الهواء: {0}'; en = '🗑 Publishing it drops from air: {0}' }
     $catalogue['news.andMore'] = @{ ar = "`n… و{0} آخر"; en = "`n… and {0} more" }
     $catalogue['news.tickerEmpty'] = @{ ar = "{0}`nالشريط فارغ."; en = "{0}`nThe ticker is empty." }
     $catalogue['news.fileUnreadable'] = @{ ar = '⚠️ تعذر قراءة ملف الأخبار: {0}'; en = '⚠️ The news file could not be read: {0}' }

@@ -195,8 +195,8 @@ function Invoke-CallbackQuery {
             break
         }
         'tmax:*' { Invoke-TemplateMaxAirPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'tmax:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
-        'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
-        'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+        'menu:news' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'news:refresh' { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
         'news:resume' {
             Resume-ExpiredNewsDraft -ChatId $chatId -UserId $userId
             break

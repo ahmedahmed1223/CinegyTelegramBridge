@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.1'; Items = @(
+                        '✏️ **The news screen shows your draft while you edit it** — what you are about to publish, 🆕 on what is new against the air, and how many live headlines publishing would drop. Others still see the live ticker.'
+                        '📤 **Review and publish comes first** on your draft, as ▶️ play does on the bulletin. Long headlines are cut on the screen, and 🔄 refresh redraws the same message instead of sending another.'
+                    ) }
                 @{ Version = '8.70.0'; Items = @(
                         '🗂 **Settings are sorted into groups** — a large door opens on its groups first (On air: showing and hiding, time on screen, connection, maintenance), then the settings inside the one you pick. Small doors open straight on their settings as before.'
                         '📑 **The bulletin has its own door**, out of On air; **🩺 Cinegy health and connection** has its own, out of Monitoring, which is now 📡 The feed and its watch.'
@@ -196,6 +200,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.1'; Items = @(
+                        '✏️ **شاشة الأخبار تعرض مسودتك وأنت تحرّرها** — ما ستنشره، مع 🆕 على الجديد مقارنةً بالهواء، وكم خبرًا من الهواء سيحذفه النشر. والآخرون يرون الشريط الحالي كما كان.'
+                        '📤 **«مراجعة ونشر» صار أول الأزرار** في مسودتك، كما «▶️ تشغيل» أول أزرار الموجز. والأخبار الطويلة تُقصّ على الشاشة، و🔄 التحديث يعيد رسم الرسالة نفسها بدل إرسال أخرى.'
+                    ) }
                 @{ Version = '8.70.0'; Items = @(
                         '🗂 **الإعدادات مقسّمة إلى أقسام** — الباب الكبير يُفتح على أقسامه أولًا (الهواء: العرض والإخفاء، مدة الظهور، الاتصال، الصيانة)، ثم على إعدادات القسم الذي تختاره. والأبواب الصغيرة تُفتح على إعداداتها مباشرة كما كانت.'
                         '📑 **للموجز باب خاص** بعد أن كان داخل «التشغيل على الهواء»، و**🩺 صحة Cinegy والاتصال** باب خاص بعد أن كانت داخل «المراقبة» التي صارت 📡 البث ومراقبته.'

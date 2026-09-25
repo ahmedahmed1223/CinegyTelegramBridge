@@ -1576,3 +1576,65 @@ Describe 'The ticker execution log records every publish' {
         Should -Invoke Write-BridgeExecutionRecord -Times 1 -Exactly
     }
 }
+
+Describe 'The news management screen shows what is being worked on' {
+    <#
+        Measured against the bulletin and boards screens. The news screen sent
+        a new message on every tap, listed the live ticker while the operator
+        edited a draft (the draft was one line with a count), put publish
+        under five other rows, and printed each headline whole - eight of up
+        to a thousand characters.
+    #>
+    BeforeEach {
+        $script:NewsTickerDraft = $null
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('على الهواء', 'سيُحذف'); Error = '' } }
+        Mock Send-TelegramMessage { }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Test-Admin { $false }
+        Mock Get-NewsLockReservation { $null }
+    }
+    AfterEach { $script:NewsTickerDraft = $null }
+
+    It 'redraws the screen it was pressed on' {
+        Show-NewsTickerManagementScreen -ChatId 42 -UserId 42 -MessageId 7
+        Should -Invoke Edit-TelegramMessageText -Times 1 -ParameterFilter { $MessageId -eq 7 }
+        Should -Invoke Send-TelegramMessage -Times 0
+    }
+
+    It 'shows the owner their draft, marking what is new against the air' {
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('جديد', 'على الهواء'); UpdatedAt = (Get-Date).ToString('o') }
+        Show-NewsTickerManagementScreen -ChatId 42 -UserId 42
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter {
+            $Text -like '*🆕 جديد*' -and $Text -like '*على الهواء*' -and $Text -like "*$(T 'news.draftRemoves' 1)*" -and $Text -notlike '*سيُحذف*'
+        }
+    }
+
+    It 'still shows the live ticker to someone without the draft' {
+        $script:NewsTickerDraft = @{ OwnerUserId = 99; OwnerChatId = 99; Items = @('مسودة غيري'); UpdatedAt = (Get-Date).ToString('o') }
+        Show-NewsTickerManagementScreen -ChatId 42 -UserId 42
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -like '*سيُحذف*' -and $Text -notlike '*مسودة غيري*' }
+    }
+
+    It 'cuts a long headline on the screen' {
+        Mock Get-NewsTickerConfiguredSnapshot { [pscustomobject]@{ Success = $true; Items = @('ك' * 500); Error = '' } }
+        Show-NewsTickerManagementScreen -ChatId 42 -UserId 42
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text.Length -lt 300 -and $Text -like '*…*' }
+    }
+
+    It 'puts publish first for the draft owner' {
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('أ'); UpdatedAt = (Get-Date).ToString('o') }
+        $first = @(@((Get-NewsTickerManagementKeyboard -ChatId 42 -UserId 42).inline_keyboard)[0] | ForEach-Object { $_['callback_data'] })
+        $first | Should -Contain 'news:publish'
+    }
+
+    It 'passes the pressed message through refresh and the main-menu door' {
+        Mock Show-NewsTickerManagementScreen { }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        foreach ($data in 'news:refresh', 'menu:news') {
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{ id = 'n'; from = [pscustomobject]@{ id = 42 }; data = $data
+                    message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 42; type = 'private' } } })
+        }
+        Should -Invoke Show-NewsTickerManagementScreen -Times 2 -Exactly -ParameterFilter { $MessageId -eq 55 }
+    }
+}

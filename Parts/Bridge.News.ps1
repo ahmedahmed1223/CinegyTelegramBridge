@@ -982,6 +982,11 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         $rows += , @(@{text=(T 'news.startEditing');callback_data='news:start'}, @{text=(T 'news.importTxt');callback_data='news:import'})
     }
     elseif ([long]$draft.OwnerUserId -eq $UserId) {
+        # First, as the bulletin's play is first: it is what the draft is for,
+        # and it sat under five other rows. Colour still marks the one place a
+        # mis-tap costs work.
+        $rows += , @((New-BridgeButton -Text (T 'news.reviewPublish') -CallbackData 'news:publish' -Style 'success'),
+            (New-BridgeButton -Text (T 'news.discardDraft') -CallbackData 'news:cancel' -Style 'danger'))
         $rows += , @(@{text=(T 'news.addItem');callback_data='news:add'}, @{text=(T 'news.editOrder');callback_data='news:list'})
         $rows += , @(@{text=(T 'news.importTxt');callback_data='news:import'}, @{text=(T 'news.preview');callback_data='news:preview'})
         if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsClearAllNews')) {
@@ -990,10 +995,6 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         # Leaving without publishing, which until now meant destroying the
         # draft or waiting for somebody to ask for it.
         $rows += , @(@{text=(T 'news.handOverDraft');callback_data='news:handover'})
-        # The publish/discard row is the one place on this screen where a
-        # mis-tap costs work, so it is the one place colour earns its keep.
-        $rows += , @((New-BridgeButton -Text (T 'news.reviewPublish') -CallbackData 'news:publish' -Style 'success'),
-            (New-BridgeButton -Text (T 'news.discardDraft') -CallbackData 'news:cancel' -Style 'danger'))
     }
     else {
         $rows += , @(@{text=(T 'news.with' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)));callback_data='news:refresh'})
@@ -1567,26 +1568,61 @@ function Get-NewsTickerBackupsKeyboard {
     for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text="$($i+1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))";callback_data="news:restore:$i"})};$rows+=,@(@{text=(T 'news.backToManage');callback_data='news:refresh'});return @{inline_keyboard=$rows}
 }
 
-function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId)
+function Get-NewsScreenLine { param([string]$Text, [int]$Length = 80)
+    # One headline as a line of the screen. Cut by text element, as the
+    # bulletin table cuts its cells: eight headlines of up to a thousand
+    # characters each made the screen a wall.
+    $elements = [Globalization.StringInfo]::new($Text)
+    if ($elements.LengthInTextElements -le $Length) { return $Text }
+    return $elements.SubstringByTextElements(0, $Length) + '…'
+}
+
+function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)
+    <#
+        Whoever holds the draft sees the draft - what they are about to
+        publish - with what is new against the air marked, and how many live
+        headlines publishing would drop. Everyone else sees the live ticker.
+        It used to show the live ticker to the draft's owner too, with the
+        draft as one line and a count.
+
+        Redrawn in place when a message is given, as the boards screens are;
+        a new message per tap left a column of stale screens whose buttons
+        still looked live.
+    #>
     $snapshot=Get-NewsTickerConfiguredSnapshot
-    $text=if($snapshot.Success){
-        $items = @($snapshot.Items)
-        $header = (T 'news.manage' $(Get-ArabicCountNoun -Count $items.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
-        if ($items.Count -gt 0) {
-            $shown = $items | Select-Object -First 8
+    $mine = Get-NewsTickerDraft -UserId $UserId
+    $text=if(-not $snapshot.Success){(T 'news.fileUnreadable' $($snapshot.Error))}
+    else {
+        $live = @($snapshot.Items)
+        $header = (T 'news.manage' $(Get-ArabicCountNoun -Count $live.Count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
+        $items = if ($mine) { @($mine.Items) } else { $live }
+        $body = ''
+        if ($mine) {
+            $diff = Get-NewsDraftDiff -Draft $items -Live $live
+            $header += (T 'news.draftHeading' @($items).Count @($diff.Added).Count)
+            if (@($diff.Removed).Count -gt 0) { $header += "`n" + (T 'news.draftRemoves' @($diff.Removed).Count) }
+        }
+        if (@($items).Count -gt 0) {
             $n = 0
-            $body = ($shown | ForEach-Object { "$(++$n). $_" }) -join "`n"
-            $tail = if ($items.Count -gt 8) { (T 'news.andMore' $(Get-ArabicCountNoun -Count ($items.Count - 8) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')) } else { "" }
+            $body = (@($items | Select-Object -First 8) | ForEach-Object {
+                    $n++
+                    $mark = if ($mine -and $live -notcontains [string]$_) { '🆕 ' } else { '' }
+                    "$n. $mark$(Get-NewsScreenLine -Text ([string]$_))"
+                }) -join "`n"
+            $rest = @($items).Count - 8
+            $tail = if ($rest -gt 0) { (T 'news.andMore' $(Get-ArabicCountNoun -Count $rest -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines')) } else { '' }
             "$header`n`n$body$tail"
         } else { (T 'news.tickerEmpty' $header) }
-    }else{(T 'news.fileUnreadable' $($snapshot.Error))}
+    }
     if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) {
         $by = [long](Get-JsonProp $script:NewsTickerDraft 'HandedOverBy')
         $byText = if ($by -gt 0) { (T 'news.handedOverBy' $(Get-UserDisplayName -UserId $by)) } else { '' }
         $text += (T 'news.openDraftLine' $byText $(@($script:NewsTickerDraft.Items).Count))
     }
-    elseif($script:NewsTickerDraft){$text+=(T 'news.lockedDraftLine' $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) $(@($script:NewsTickerDraft.Items).Count))}
-    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
+    elseif($script:NewsTickerDraft -and -not $mine){$text+=(T 'news.lockedDraftLine' $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) $(@($script:NewsTickerDraft.Items).Count))}
+    $keyboard = Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard
 }
 
 function Get-NewsPasteParse { param([string]$Text)

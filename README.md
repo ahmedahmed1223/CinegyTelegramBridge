@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.1
+
+The news management screen shows its draft's owner the draft - new headlines
+marked against the air, and how many live ones publishing would drop - puts
+review-and-publish first, cuts long headlines on the screen, and redraws in
+place from refresh and the menu door, as the bulletin and boards screens do.
+
 ## Version 8.70.0
 
 Settings are grouped. Every setting belongs to one group of one door, from a

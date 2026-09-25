@@ -15,6 +15,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.9
+
+The ticker screen's execution-log button always showed an empty log: only
+the automatic sheet sync wrote to it, and a station publishing by hand never
+did. Every ticker publish - from the draft, a manual sheet pull or the
+automatic sync - is now recorded once, from the one function they all pass
+through, named for how it was made.
+
 ## Version 8.69.8
 
 **Paste several ticker headlines at once.** "Add headline" now takes one or

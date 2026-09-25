@@ -337,10 +337,23 @@ function Write-NewsPublishRecord {
     <# A structured sibling to the human audit line above. The reports screen
        needs a count per day per operator, and parsing that back out of an
        Arabic sentence would break the first time someone rewords it. #>
-    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount)
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount,
+        [ValidateSet('draft', 'sheet', 'auto')][string]$Source = 'draft')
     Write-AuditRecord -OperationId "news-$([guid]::NewGuid().ToString('N'))" -EventName news_publish `
         -Result success -UserId $UserId -Action PUBLISH -Count $ItemCount `
         -Message (T 'news.publishTicker')
+    # And to the execution log, which the ticker screen's button opens. Only
+    # the automatic sheet sync wrote there, so on a station that publishes by
+    # hand - this one, with NewsSheetSyncMode manual - the button always said
+    # nothing had run. Every publish passes through here, so it is recorded
+    # once, from here, however it was made.
+    $counted = Get-ArabicCountNoun -Count $ItemCount -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'
+    $label = switch ($Source) {
+        'auto' { (T 'tick.sheetSync' $counted) }
+        'sheet' { (T 'news.execSheet' $counted) }
+        default { (T 'news.execDraft' $counted) }
+    }
+    Write-BridgeExecutionRecord -Kind 'news' -Result 'success' -Label $label | Out-Null
 }
 
 function Resolve-NewsPublishConflict {
@@ -942,7 +955,7 @@ function Invoke-NewsSheetSync {
     if ($draft) { Remove-NewsTickerDraft }
     $who = if ($Trigger -eq 'manual' -and $UserId) { Get-UserDisplayName -UserId $UserId } else { (T 'news.autoSync') }
     Add-AuditEntry (T 'news.publishedFromSheetAudit' $who $($items.Count))
-    Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count
+    Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count -Source $(if ($Trigger -eq 'auto') { 'auto' } else { 'sheet' })
     Send-NewsSheetNotice -Text (Get-NewsSheetNoticeText -Summary $summary -Trigger $Trigger -UserId $UserId)
 
     return [pscustomobject]@{ Success = $true; Skipped = $false; Unchanged = $false; Drafted = $false

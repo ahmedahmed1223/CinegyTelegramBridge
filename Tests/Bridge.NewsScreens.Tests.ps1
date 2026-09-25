@@ -1541,3 +1541,38 @@ Describe 'Pasting several headlines at once' {
         Should -Invoke Complete-NewsPaste -Times 1 -ParameterFilter { $Cancel }
     }
 }
+
+Describe 'The ticker execution log records every publish' {
+    <#
+        The ticker screen's execution-log button opens the log filtered to
+        the ticker. Only the automatic sheet sync wrote there, and this
+        station publishes by hand, so the button always said nothing had run.
+    #>
+    BeforeEach {
+        Mock Write-AuditRecord { }
+        Mock Write-BridgeExecutionRecord { $true }
+    }
+
+    It 'records a draft published from Telegram' {
+        Write-NewsPublishRecord -UserId 42 -ItemCount 7
+        Should -Invoke Write-BridgeExecutionRecord -Times 1 -ParameterFilter { $Kind -eq 'news' -and $Result -eq 'success' -and $Label -like "$(T 'news.execDraft' '*')" }
+    }
+
+    It 'records a manual sheet pull and an automatic one apart' {
+        Write-NewsPublishRecord -UserId 42 -ItemCount 3 -Source sheet
+        Write-NewsPublishRecord -UserId 0 -ItemCount 3 -Source auto
+        Should -Invoke Write-BridgeExecutionRecord -Times 1 -ParameterFilter { $Label -like "$(T 'news.execSheet' '*')" }
+        Should -Invoke Write-BridgeExecutionRecord -Times 1 -ParameterFilter { $Label -like "$(T 'tick.sheetSync' '*')" }
+    }
+
+    It 'writes one line, not two, when the automatic sync publishes' {
+        Mock Get-Setting { 'auto' } -ParameterFilter { $Name -eq 'NewsSheetSyncMode' }
+        Mock Get-Setting { 'https://sheet.example/x.csv' } -ParameterFilter { $Name -eq 'NewsSheetCsvUrl' }
+        Mock Get-SettingInt { 5 }
+        Mock Invoke-NewsSheetSync { Write-NewsPublishRecord -UserId 0 -ItemCount 2 -Source auto; [pscustomobject]@{ Success = $true; Items = @('a', 'b'); Unchanged = $false; Skipped = $false; Error = '' } }
+        Mock Write-BridgeLog { }
+        $script:NewsSheetLastSyncAt = $null
+        Update-NewsSheetSync
+        Should -Invoke Write-BridgeExecutionRecord -Times 1 -Exactly
+    }
+}

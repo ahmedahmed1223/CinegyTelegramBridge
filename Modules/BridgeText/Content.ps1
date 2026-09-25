@@ -348,6 +348,8 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.execDraft'] = @{ ar = 'نشر المسودة · {0}'; en = 'the draft published · {0}' }
+    $catalogue['news.execSheet'] = @{ ar = 'سحب من الشيت · {0}'; en = 'pulled from the sheet · {0}' }
     $catalogue['news.paste.found'] = @{ ar = '📋 <b>وُجد في اللصق {0} خبر</b>'; en = '📋 <b>{0} headline(s) found in the paste</b>' }
     $catalogue['news.paste.new'] = @{ ar = '✅ جديدة: {0}'; en = '✅ New: {0}' }
     $catalogue['news.paste.inDraft'] = @{ ar = '↩️ موجودة في المسودة وستُتجاوز: {0}'; en = '↩️ Already in the draft, skipped: {0}' }

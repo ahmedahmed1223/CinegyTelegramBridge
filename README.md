@@ -15,6 +15,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.0
+
+Settings are grouped. Every setting belongs to one group of one door, from a
+single list the door is read from; a door with several groups opens on them
+first, a one-group door on its settings as before. The bulletin and Cinegy
+health get doors of their own, and manual quiet moves beside the quiet hours
+it overrides. No setting name or stored value changed. Three settings that
+had never been assigned a door, and fell silently into Advanced, now have one.
+
 ## Version 8.69.10
 
 The template maximum-air editor's custom-amount button always answered

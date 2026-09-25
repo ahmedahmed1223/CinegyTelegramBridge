@@ -1896,11 +1896,56 @@ function Get-SettingNavigationMetadata {
     return $copy
 }
 
-function Get-SettingsInCategory {
+function Get-SettingGroups {
+    <# The groups of one category, labels translated at read time like the
+       category labels are. Position is the address: cfgsub:<category>:<n>. #>
     param([Parameter(Mandatory)][string]$Category)
-    foreach ($record in @($script:SettingSchema)) {
-        if ($record.Category -eq $Category) { $record.Name }
+    $entry = @($script:SettingGroupDefinitions | Where-Object { $_.Category -eq $Category })
+    if ($entry.Count -ne 1) { return @() }
+    return @(foreach ($group in @($entry[0].Groups)) {
+            [pscustomobject]@{
+                Key = [string]$group.Key
+                Label = (TF "settingGroup.$Category.$($group.Key).label" ([string]$group.Label))
+                Names = @($group.Names)
+            }
+        })
+}
+
+function Get-SettingsInCategory {
+    <# In group order, so a category read whole lists its settings as its
+       groups do. -Group narrows to one group by position. #>
+    param([Parameter(Mandatory)][string]$Category, [int]$Group = -1)
+    $groups = @(Get-SettingGroups -Category $Category)
+    if ($Group -ge 0) { $groups = @($groups | Select-Object -Skip $Group -First 1) }
+    foreach ($entry in $groups) {
+        foreach ($name in @($entry.Names)) {
+            if ($script:SettingCategoryByName[$name] -eq $Category) { $name }
+        }
     }
+}
+
+function Get-SettingsGroupPickerKeyboard {
+    <# A category of several groups opens here: one button per group, with how
+       many settings are behind it, one to a row so the label reads whole. #>
+    param([Parameter(Mandatory)][string]$Category)
+    $rows = @()
+    $groups = @(Get-SettingGroups -Category $Category)
+    for ($index = 0; $index -lt $groups.Count; $index++) {
+        $rows += , @( (New-Button "$($groups[$index].Label) · $(@($groups[$index].Names).Count)" "cfgsub:$Category`:$index`:0" -MaxTextLength 64) )
+    }
+    if ($Category -eq 'notifications') { $rows += , @(Get-ManualQuietButton) }
+    $rows += , @( (New-Button (T 'kb.backToSettingsSections') 'menu:settings') )
+    return @{ inline_keyboard = $rows }
+}
+
+function Get-ManualQuietButton {
+    # P4: manual quiet lives with its scheduled sibling. A setting would
+    # persist across restarts and lie about it; a two-hour window that dies
+    # with the process fails loud.
+    if ((Get-Date) -lt $script:ManualQuietUntil) {
+        return (New-Button (T 'kb.quietUntil' $($script:ManualQuietUntil.ToString('HH:mm'))) 'quiet:off')
+    }
+    return (New-Button (T 'kb.quietTwoHours') 'quiet:on')
 }
 
 function Get-SettingsResetConfirmKeyboard {
@@ -1918,9 +1963,10 @@ function Get-SettingsCategoryPageNames {
     param(
         [Parameter(Mandatory)][string]$Category,
         [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
-        [ValidateRange(1, 20)][int]$PageSize = 8
+        [ValidateRange(1, 20)][int]$PageSize = 8,
+        [int]$Group = -1
     )
-    $names = @(Get-SettingsInCategory -Category $Category)
+    $names = @(Get-SettingsInCategory -Category $Category -Group $Group)
     if ($names.Count -eq 0) { return @() }
     $pageCount = [math]::Max(1, [int][math]::Ceiling($names.Count / [double]$PageSize))
     $safePage = [math]::Min($Page, $pageCount - 1)
@@ -1992,18 +2038,21 @@ function Get-SettingsCategoryKeyboard {
     param(
         [Parameter(Mandatory)][string]$Category,
         [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
-        [ValidateRange(1, 20)][int]$PageSize = 8
+        [ValidateRange(1, 20)][int]$PageSize = 8,
+        [int]$Group = -1
     )
     $definition = @($script:SettingCategoryDefinitions | Where-Object { $_.Key -eq $Category })
     if ($definition.Count -ne 1) { return (Get-SettingsKeyboard) }
 
-    $names = @(Get-SettingsInCategory -Category $Category)
+    $names = @(Get-SettingsInCategory -Category $Category -Group $Group)
+    # Paging stays inside the group it was opened on.
+    $pagePrefix = if ($Group -ge 0) { "cfgsub:$Category`:$Group`:" } else { "cfgcat:$Category`:" }
     $pageCount = [math]::Max(1, [int][math]::Ceiling($names.Count / [double]$PageSize))
     $safePage = [math]::Min($Page, $pageCount - 1)
     $rows = @()
 
     if ($names.Count -gt 0) {
-        foreach ($name in @(Get-SettingsCategoryPageNames -Category $Category -Page $Page -PageSize $PageSize)) {
+        foreach ($name in @(Get-SettingsCategoryPageNames -Category $Category -Page $Page -PageSize $PageSize -Group $Group)) {
             $value = Get-Setting $name
             $metadata = Get-SettingNavigationMetadata -Name $name
             if ($name -eq 'HideAllLayers') {
@@ -2041,23 +2090,23 @@ function Get-SettingsCategoryKeyboard {
 
     if ($pageCount -gt 1) {
         $navigation = @()
-        if ($safePage -gt 0) { $navigation += (New-Button (T 'common.previous') "cfgcat:$Category`:$($safePage - 1)") }
-        $navigation += (New-Button "$($safePage + 1)/$pageCount" "cfgcat:$Category`:$safePage")
-        if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button (T 'common.next') "cfgcat:$Category`:$($safePage + 1)") }
+        if ($safePage -gt 0) { $navigation += (New-Button (T 'common.previous') "$pagePrefix$($safePage - 1)") }
+        $navigation += (New-Button "$($safePage + 1)/$pageCount" "$pagePrefix$safePage")
+        if ($safePage + 1 -lt $pageCount) { $navigation += (New-Button (T 'common.next') "$pagePrefix$($safePage + 1)") }
         $rows += , $navigation
     }
-    # P4: manual quiet lives with its scheduled sibling. A setting would
-    # persist across restarts and lie about it; a two-hour window that dies
-    # with the process fails loud.
-    if ($Category -eq 'monitoring') {
-        if ((Get-Date) -lt $script:ManualQuietUntil) {
-            $rows += , @((New-Button (T 'kb.quietUntil' $($script:ManualQuietUntil.ToString('HH:mm'))) 'quiet:off'))
-        }
-        else {
-            $rows += , @((New-Button (T 'kb.quietTwoHours') 'quiet:on'))
-        }
+    # Beside the scheduled quiet hours it overrides, which moved from
+    # monitoring to the notifications' quiet group.
+    $groups = @(Get-SettingGroups -Category $Category)
+    if ($Category -eq 'notifications' -and ($Group -lt 0 -or ($Group -lt $groups.Count -and $groups[$Group].Key -eq 'quiet'))) {
+        $rows += , @(Get-ManualQuietButton)
     }
-    $rows += , @( (New-Button (T 'kb.backToSettingsSections') 'menu:settings') )
+    # Back to the category's groups when there are several, and home to the
+    # settings either way.
+    if ($Group -ge 0 -and $groups.Count -gt 1) {
+        $rows += , @( (New-Button (T 'kb.backToSettingGroups') "cfgcat:$Category`:0"), (New-Button (T 'kb.backToSettingsSections') 'menu:settings') )
+    }
+    else { $rows += , @( (New-Button (T 'kb.backToSettingsSections') 'menu:settings') ) }
     return @{ inline_keyboard = $rows }
 }
 

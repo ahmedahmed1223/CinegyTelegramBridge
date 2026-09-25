@@ -1407,7 +1407,7 @@ function Invoke-CallbackQuery {
                 $script:ManualQuietUntil = (Get-Date).AddHours(2)
                 Add-AuditEntry (T 'cb.quietUntilAudit' $($script:ManualQuietUntil.ToString('HH:mm')) $(Format-UserAuditActor -UserId $userId))
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text (T 'reply.quietTwoHours')
-                Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
+                Show-SettingsCategoryScreen -Category 'notifications' -Group 0 -Page 0 -ChatId $chatId -UserId $userId
             }
             break
         }
@@ -1416,7 +1416,7 @@ function Invoke-CallbackQuery {
                 $script:ManualQuietUntil = [datetime]::MinValue
                 Add-AuditEntry (T 'cb.quietCancelledAudit' $(Format-UserAuditActor -UserId $userId))
                 Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text (T 'reply.quietEnded')
-                Show-SettingsCategoryScreen -Category 'monitoring' -Page 0 -ChatId $chatId -UserId $userId
+                Show-SettingsCategoryScreen -Category 'notifications' -Group 0 -Page 0 -ChatId $chatId -UserId $userId
             }
             break
         }
@@ -1431,6 +1431,15 @@ function Invoke-CallbackQuery {
                 else {
                     Show-SettingsScreen -ChatId $chatId -UserId $userId
                 }
+            }
+            break
+        }
+        'cfgsub:*' {
+            if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                if ($data -match '^cfgsub:([a-z]+):(\d{1,2}):(\d{1,4})$') {
+                    Show-SettingsCategoryScreen -Category $Matches[1] -Group ([int]$Matches[2]) -Page ([int]$Matches[3]) -ChatId $chatId -UserId $userId
+                }
+                else { Show-SettingsScreen -ChatId $chatId -UserId $userId }
             }
             break
         }

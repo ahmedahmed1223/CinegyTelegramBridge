@@ -17,29 +17,75 @@ function Add-BridgeTextSettings {
     param([Parameter(Mandatory)]$Catalogue)
     $catalogue = $Catalogue
 
-    # --- The eleven settings doors --------------------------------------
+    # --- The thirteen settings doors --------------------------------------
     $catalogue['settingCategory.security.label'] = @{ ar = 'الأمان والصلاحيات'; en = 'Security and permissions' }
-    $catalogue['settingCategory.onair.label'] = @{ ar = 'التشغيل على الهواء'; en = 'On air' }
+    $catalogue['settingCategory.onair.label'] = @{ ar = 'الهواء'; en = 'On air' }
     $catalogue['settingCategory.templates.label'] = @{ ar = 'القوالب والطبقات'; en = 'Templates and layers' }
     $catalogue['settingCategory.news.label'] = @{ ar = 'شريط الأخبار'; en = 'News ticker' }
     $catalogue['settingCategory.urgent.label'] = @{ ar = 'جدول العواجل'; en = 'The urgent board' }
     $catalogue['settingCategory.boards.label'] = @{ ar = 'محتوى البرامج'; en = 'Programme content' }
     $catalogue['settingCategory.schedule.label'] = @{ ar = 'الجدولة'; en = 'Scheduling' }
-    $catalogue['settingCategory.monitoring.label'] = @{ ar = 'المراقبة والتنبيهات'; en = 'Monitoring and alerts' }
+    $catalogue['settingCategory.monitoring.label'] = @{ ar = 'البث ومراقبته'; en = 'The feed and its watch' }
     $catalogue['settingCategory.storage.label'] = @{ ar = 'الملفات والاحتفاظ'; en = 'Files and retention' }
     $catalogue['settingCategory.notifications.label'] = @{ ar = 'الإشعارات والتنبيهات'; en = 'Notifications' }
     $catalogue['settingCategory.advanced.label'] = @{ ar = 'خيارات متقدمة'; en = 'Advanced' }
     $catalogue['settingCategory.security.summary'] = @{ ar = 'من يستطيع التحكم بالهواء، وكيف يُتحقق منه، وأي أبواب إدارية مفتوحة.'; en = 'Who may control the air, how they are verified, and which administrative doors are open.' }
-    $catalogue['settingCategory.onair.summary'] = @{ ar = 'ما يظهر ويختفي على الشاشة: أزرار العرض والإخفاء والطوارئ، وكيف يتعامل الجسر مع Cinegy.'; en = 'What appears and disappears on screen: the show, hide and emergency buttons, and how the bridge deals with Cinegy.' }
+    $catalogue['settingCategory.onair.summary'] = @{ ar = 'ما يظهر ويختفي على الشاشة، ومدته، والاتصال بـ Cinegy والصيانة.'; en = 'What appears on screen and leaves it, for how long, the Cinegy connection and maintenance.' }
     $catalogue['settingCategory.templates.summary'] = @{ ar = 'أي قالب متاح، وعلى أي طبقة، وبأي اسم يراه المشغّل.'; en = 'Which template is available, on which layer, and under what name the operator sees it.' }
     $catalogue['settingCategory.news.summary'] = @{ ar = 'الشريط وملفه وحدوده، والربط مع Google Sheets، وما يُسمح به للمشغّل.'; en = 'The ticker, its file and limits, the Google Sheets link, and what an operator is allowed to do with it.' }
     $catalogue['settingCategory.urgent.summary'] = @{ ar = 'الجدول الذي يتقدّم وحده: توقيته وتكراره ونمطه وحدود نصّه، والفاصل بين خبر وآخر.'; en = 'The board that advances by itself: its timing, repeats, mode and text limits, and the gap between stories.' }
     $catalogue['settingCategory.boards.summary'] = @{ ar = 'جداول النصوص المجهَّزة لقوالب البرامج: كم جدولًا، وكم صفًّا في الجدول الواحد.'; en = 'The prepared text tables for programme templates: how many boards, and how many rows in each.' }
     $catalogue['settingCategory.schedule.summary'] = @{ ar = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.'; en = 'Deferred events: when they run, when a clash is flagged, and what happens if one fails.' }
-    $catalogue['settingCategory.monitoring.summary'] = @{ ar = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.'; en = 'What the bridge watches by itself and when it wakes an administrator: the output, Cinegy health, forgotten templates.' }
+    $catalogue['settingCategory.monitoring.summary'] = @{ ar = 'اللقطة والمقطع والمشاهدة، ومراقبة الخرج والشاشة السوداء، وإعادة البث، والمواد.'; en = 'Snapshot, clip and watching, the output and black-screen watch, the relay and material.' }
     $catalogue['settingCategory.storage.summary'] = @{ ar = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.'; en = 'How long logs, snapshots and backups are kept, and when a full disk is flagged.' }
     $catalogue['settingCategory.notifications.summary'] = @{ ar = 'ما الذي يوقظك ومتى: تنبيهات الهواء والصحة والجدولة، وساعات الهدوء، والملخصات الدورية.'; en = 'What wakes you and when: air, health and schedule alerts, quiet hours, and the periodic digests.' }
     $catalogue['settingCategory.advanced.summary'] = @{ ar = 'تفاصيل التشخيص والسلوك الداخلي؛ لا يحتاجها التشغيل اليومي.'; en = 'Diagnostic detail and internal behaviour; daily operation does not need these.' }
+
+    # --- The groups inside each settings door ---------------------------
+    $catalogue['settingGroup.security.access.label'] = @{ ar = 'الوصول وطلبات الانضمام'; en = 'Access and join requests' }
+    $catalogue['settingGroup.security.accounts.label'] = @{ ar = 'الحسابات والتحقق'; en = 'Accounts and verification' }
+    $catalogue['settingGroup.security.doors.label'] = @{ ar = 'الأبواب الإدارية'; en = 'Administrative doors' }
+    $catalogue['settingGroup.onair.show.label'] = @{ ar = 'العرض والإخفاء'; en = 'Showing and hiding' }
+    $catalogue['settingGroup.onair.autohide.label'] = @{ ar = 'مدة الظهور والإخفاء التلقائي'; en = 'Time on screen and auto-hide' }
+    $catalogue['settingGroup.onair.connection.label'] = @{ ar = 'الاتصال والمهلات'; en = 'Connection and timeouts' }
+    $catalogue['settingGroup.onair.maintenance.label'] = @{ ar = 'الصيانة وإعادة التشغيل'; en = 'Maintenance and restart' }
+    $catalogue['settingGroup.mojaz.timing.label'] = @{ ar = 'التوقيت والإطارات'; en = 'Timing and frames' }
+    $catalogue['settingGroup.mojaz.sync.label'] = @{ ar = 'المزامنة'; en = 'Synchronisation' }
+    $catalogue['settingGroup.mojaz.images.label'] = @{ ar = 'الصور'; en = 'Images' }
+    $catalogue['settingGroup.mojaz.design.label'] = @{ ar = 'التصميم'; en = 'Design' }
+    $catalogue['settingGroup.templates.access.label'] = @{ ar = 'من يصل إلى ماذا'; en = 'Who reaches what' }
+    $catalogue['settingGroup.templates.airtime.label'] = @{ ar = 'المدة القصوى والتمديد'; en = 'Maximum time and extension' }
+    $catalogue['settingGroup.templates.test.label'] = @{ ar = 'الاختبار والتراجع'; en = 'Testing and rollback' }
+    $catalogue['settingGroup.templates.ui.label'] = @{ ar = 'الأزرار والمفضلة والأسماء'; en = 'Buttons, favourites and names' }
+    $catalogue['settingGroup.templates.files.label'] = @{ ar = 'الملفات والاستيراد'; en = 'Files and import' }
+    $catalogue['settingGroup.news.file.label'] = @{ ar = 'الملف والحدود'; en = 'The file and its limits' }
+    $catalogue['settingGroup.news.screen.label'] = @{ ar = 'شاشة الترتيب'; en = 'The ordering screen' }
+    $catalogue['settingGroup.news.lock.label'] = @{ ar = 'المسودة والقفل'; en = 'The draft and its lock' }
+    $catalogue['settingGroup.news.sheet.label'] = @{ ar = 'Google Sheets'; en = 'Google Sheets' }
+    $catalogue['settingGroup.news.operators.label'] = @{ ar = 'صلاحيات المشغّل'; en = 'What operators may do' }
+    $catalogue['settingGroup.urgent.all.label'] = @{ ar = 'جدول العواجل'; en = 'The urgent board' }
+    $catalogue['settingGroup.boards.all.label'] = @{ ar = 'محتوى البرامج'; en = 'Programme content' }
+    $catalogue['settingGroup.schedule.all.label'] = @{ ar = 'الجدولة'; en = 'Scheduling' }
+    $catalogue['settingGroup.monitoring.view.label'] = @{ ar = 'اللقطة والمقطع والمشاهدة'; en = 'Snapshot, clip and watching' }
+    $catalogue['settingGroup.monitoring.output.label'] = @{ ar = 'مراقبة الخرج والشاشة السوداء'; en = 'Output and black-screen watch' }
+    $catalogue['settingGroup.monitoring.relay.label'] = @{ ar = 'إعادة البث'; en = 'The relay' }
+    $catalogue['settingGroup.monitoring.material.label'] = @{ ar = 'المواد والتسليم'; en = 'Material and handover' }
+    $catalogue['settingGroup.health.engine.label'] = @{ ar = 'فحص المحرك'; en = 'Engine checks' }
+    $catalogue['settingGroup.health.layers.label'] = @{ ar = 'حالة الطبقات'; en = 'Layer state' }
+    $catalogue['settingGroup.health.telegram.label'] = @{ ar = 'اتصال تيليجرام'; en = 'The Telegram connection' }
+    $catalogue['settingGroup.storage.all.label'] = @{ ar = 'الملفات والاحتفاظ'; en = 'Files and retention' }
+    $catalogue['settingGroup.notifications.quiet.label'] = @{ ar = 'الهدوء وحدّ التكرار'; en = 'Quiet and repeat limits' }
+    $catalogue['settingGroup.notifications.admins.label'] = @{ ar = 'ما يصل المشرفين'; en = 'What reaches administrators' }
+    $catalogue['settingGroup.notifications.operators.label'] = @{ ar = 'ما يصل المشغّلين'; en = 'What reaches operators' }
+    $catalogue['settingGroup.notifications.notices.label'] = @{ ar = 'الإعلانات'; en = 'Announcements' }
+    $catalogue['settingGroup.notifications.digests.label'] = @{ ar = 'الملخصات الدورية'; en = 'Regular digests' }
+    $catalogue['settingGroup.advanced.all.label'] = @{ ar = 'خيارات متقدمة'; en = 'Advanced' }
+    $catalogue['settingCategory.mojaz.label'] = @{ ar = 'الموجز'; en = 'The bulletin' }
+    $catalogue['settingCategory.health.label'] = @{ ar = 'صحة Cinegy والاتصال'; en = 'Cinegy health and connection' }
+    $catalogue['settingCategory.mojaz.summary'] = @{ ar = 'توقيت الموجز وإطاراته، ومزامنته مع المشهد، وصوره وتصميمه.'; en = 'The bulletin''s timing and frames, its sync with the scene, its images and design.' }
+    $catalogue['settingCategory.health.summary'] = @{ ar = 'فحص المحرك وحالة الطبقات واتصال تيليجرام، وما يُحتمل قبل أن يُعدّ عطلًا.'; en = 'Engine checks, layer state and the Telegram connection, and how much is tolerated before it counts as a fault.' }
+    $catalogue['kb.backToSettingGroups'] = @{ ar = '↩️ أقسام هذا الباب'; en = '↩️ This door''s groups' }
+    $catalogue['cmd.pickSettingGroup'] = @{ ar = 'اختر القسم:'; en = 'Pick a group:' }
 
     # --- The settings home screen ---------------------------------------
     $catalogue['settings.title'] = @{ ar = '⚙️ الإعدادات'; en = '⚙️ Settings' }

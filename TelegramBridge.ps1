@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.69.10'
+$script:BridgeVersion = '8.70.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1315,7 +1315,8 @@ $script:SettingChoices = @{
 # setting somebody came looking for.
 $script:SettingCategoryDefinitions = @(
     [pscustomobject]@{ Key = 'security';   Label = 'الأمان والصلاحيات';       Icon = '🔐'; Summary = 'من يستطيع التحكم بالهواء، وكيف يُتحقق منه، وأي أبواب إدارية مفتوحة.' }
-    [pscustomobject]@{ Key = 'onair';      Label = 'التشغيل على الهواء';      Icon = '🔴'; Summary = 'ما يظهر ويختفي على الشاشة: أزرار العرض والإخفاء والطوارئ، وكيف يتعامل الجسر مع Cinegy.' }
+    [pscustomobject]@{ Key = 'onair';      Label = 'الهواء';                  Icon = '🔴'; Summary = 'ما يظهر ويختفي على الشاشة، ومدته، والاتصال بـ Cinegy والصيانة.' }
+    [pscustomobject]@{ Key = 'mojaz';      Label = 'الموجز';                  Icon = '📑'; Summary = 'توقيت الموجز وإطاراته، ومزامنته مع المشهد، وصوره وتصميمه.' }
     [pscustomobject]@{ Key = 'templates';  Label = 'القوالب والطبقات';        Icon = '📚'; Summary = 'أي قالب متاح، وعلى أي طبقة، وبأي اسم يراه المشغّل.' }
     [pscustomobject]@{ Key = 'news';       Label = 'شريط الأخبار';            Icon = '📰'; Summary = 'الشريط وملفه وحدوده، والربط مع Google Sheets، وما يُسمح به للمشغّل.' }
     # العواجل والبرامج كانا داخل «شريط الأخبار» لأنهما وُلدا منه، لا لأنهما
@@ -1324,123 +1325,175 @@ $script:SettingCategoryDefinitions = @(
     [pscustomobject]@{ Key = 'urgent';     Label = 'جدول العواجل';            Icon = '🚨'; Summary = 'الجدول الذي يتقدّم وحده: توقيته وتكراره ونمطه وحدود نصّه، والفاصل بين خبر وآخر.' }
     [pscustomobject]@{ Key = 'boards';     Label = 'محتوى البرامج';           Icon = '🗂'; Summary = 'جداول النصوص المجهَّزة لقوالب البرامج: كم جدولًا، وكم صفًّا في الجدول الواحد.' }
     [pscustomobject]@{ Key = 'schedule';   Label = 'الجدولة';                 Icon = '📅'; Summary = 'الأحداث المؤجلة: متى تُنفَّذ، ومتى يُنبَّه على تعارضها، وماذا يجري إن فشلت.' }
-    [pscustomobject]@{ Key = 'monitoring'; Label = 'المراقبة والتنبيهات';     Icon = '📊'; Summary = 'ما يراقبه الجسر بنفسه ومتى يوقظ المشرف: المخرج، صحة Cinegy، القوالب المنسية.' }
+    [pscustomobject]@{ Key = 'monitoring'; Label = 'البث ومراقبته';           Icon = '📡'; Summary = 'اللقطة والمقطع والمشاهدة، ومراقبة الخرج والشاشة السوداء، وإعادة البث، والمواد.' }
+    [pscustomobject]@{ Key = 'health';     Label = 'صحة Cinegy والاتصال';     Icon = '🩺'; Summary = 'فحص المحرك وحالة الطبقات واتصال تيليجرام، وما يُحتمل قبل أن يُعدّ عطلًا.' }
     [pscustomobject]@{ Key = 'storage';    Label = 'الملفات والاحتفاظ';       Icon = '🗄️'; Summary = 'كم يُحتفظ بالسجلات واللقطات والنسخ، ومتى يُنبَّه على امتلاء القرص.' }
     [pscustomobject]@{ Key = 'notifications'; Label = 'الإشعارات والتنبيهات';   Icon = '🔔'; Summary = 'ما الذي يوقظك ومتى: تنبيهات الهواء والصحة والجدولة، وساعات الهدوء، والملخصات الدورية.' }
     [pscustomobject]@{ Key = 'advanced';   Label = 'خيارات متقدمة';           Icon = '🛠️'; Summary = 'تفاصيل التشخيص والسلوك الداخلي؛ لا يحتاجها التشغيل اليومي.' }
 )
 
+<#
+    Every setting belongs to one group, and every group to one category: the
+    group list is the single source, and the category of a setting is read
+    from it. A category of forty settings in one paged list was a wall -
+    the bulletin's twelve timings sat inside "On air" beside the relay and
+    the snapshot - so a category with more than one group opens on its
+    groups first. A category with one group ('all') opens straight on its
+    settings, as before. Groups are addressed by position in a callback,
+    so a label can change without breaking a button already delivered.
+#>
+$script:SettingGroupDefinitions = @(
+    [pscustomobject]@{ Category = 'security'; Groups = @(
+            [pscustomobject]@{ Key = 'access'; Label = 'الوصول وطلبات الانضمام'; Names = @(
+                    'EnableSelfServiceRequests', 'MaxPendingApprovals', 'PendingApprovalExpiryHours', 'BlockRejectedRequesters', 'JoinSecret', 'JoinSecretMaxAttempts', 'MaxAccessRequestsPerDay', 'LeaveUnknownGroups'
+                ) }
+            [pscustomobject]@{ Key = 'accounts'; Label = 'الحسابات والتحقق'; Names = @(
+                    'RequireUserLevelAuth', 'UserActivityRecentMinutes', 'DormantUserDays', 'AutoDisableDormantUsers'
+                ) }
+            [pscustomobject]@{ Key = 'doors'; Label = 'الأبواب الإدارية'; Names = @(
+                    'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'onair'; Groups = @(
+            [pscustomobject]@{ Key = 'show'; Label = 'العرض والإخفاء'; Names = @(
+                    'EnableTimedShow', 'EnableHideAll', 'HideAllLayers', 'SceneMode', 'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs', 'ConfirmLayerRemoval', 'ShowOnAirTextOnRemoval', 'AskRequesterName', 'MaxFieldLength'
+                ) }
+            [pscustomobject]@{ Key = 'autohide'; Label = 'مدة الظهور والإخفاء التلقائي'; Names = @(
+                    'AutoHideDefaultSeconds', 'AutoHidePresetSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'connection'; Label = 'الاتصال والمهلات'; Names = @(
+                    'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'DropPendingUpdatesOnStart'
+                ) }
+            [pscustomobject]@{ Key = 'maintenance'; Label = 'الصيانة وإعادة التشغيل'; Names = @(
+                    'MaintenanceMode', 'AllowRemoteRestart'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'mojaz'; Groups = @(
+            [pscustomobject]@{ Key = 'timing'; Label = 'التوقيت والإطارات'; Names = @(
+                    'BroadcastFps', 'MojazRowFrames', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazAnchorToAirClock'
+                ) }
+            [pscustomobject]@{ Key = 'sync'; Label = 'المزامنة'; Names = @(
+                    'MojazSyncOffsetMs', 'MojazSyncLeadMs'
+                ) }
+            [pscustomobject]@{ Key = 'images'; Label = 'الصور'; Names = @(
+                    'MojazImageKeepHours', 'MojazImageWidth', 'MojazImageHeight'
+                ) }
+            [pscustomobject]@{ Key = 'design'; Label = 'التصميم'; Names = @(
+                    'MojazMultiDesign', 'MojazHidesTicker'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'templates'; Groups = @(
+            [pscustomobject]@{ Key = 'access'; Label = 'من يصل إلى ماذا'; Names = @(
+                    'ReservedLayers', 'DisabledTemplateKeys', 'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess'
+                ) }
+            [pscustomobject]@{ Key = 'airtime'; Label = 'المدة القصوى والتمديد'; Names = @(
+                    'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateMaxAirSeconds', 'TemplateAirExtensionEnabled', 'TemplateAirExtensionResponseSeconds', 'TemplateAirExtensionMaxSeconds', 'RespectCinegyItemDuration'
+                ) }
+            [pscustomobject]@{ Key = 'test'; Label = 'الاختبار والتراجع'; Names = @(
+                    'TemplateTestLayer', 'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'ui'; Label = 'الأزرار والمفضلة والأسماء'; Names = @(
+                    'LayerNames', 'EnableFavorites', 'FavoritesCount', 'RecentValuesPerField', 'ShowLayerLockBadge', 'ButtonTextMaxLength', 'EnableButtonStyles', 'EnableTextChecks'
+                ) }
+            [pscustomobject]@{ Key = 'files'; Label = 'الملفات والاستيراد'; Names = @(
+                    'TemplateBasePath', 'TemplateRegistryImportMaxTemplates'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'news'; Groups = @(
+            [pscustomobject]@{ Key = 'file'; Label = 'الملف والحدود'; Names = @(
+                    'EnableNewsTickerManagement', 'NewsFilePath', 'NewsItemSeparator', 'NewsMaxItemLength', 'NewsMaxItems', 'NewsImportMaxBytes'
+                ) }
+            [pscustomobject]@{ Key = 'screen'; Label = 'شاشة الترتيب'; Names = @(
+                    'NewsListLayout', 'NewNewsItemAtTop', 'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength', 'NewsListStackedLabelLength'
+                ) }
+            [pscustomobject]@{ Key = 'lock'; Label = 'المسودة والقفل'; Names = @(
+                    'NewsDraftTimeoutMinutes', 'NewsLockRequestMinutes', 'NewsLockGrantHoldSeconds', 'NewsPublishNotifyScope'
+                ) }
+            [pscustomobject]@{ Key = 'sheet'; Label = 'Google Sheets'; Names = @(
+                    'NewsSheetCsvUrl', 'NewsSheetSyncMode', 'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'operators'; Label = 'صلاحيات المشغّل'; Names = @(
+                    'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews', 'AllowOperatorsClearAllNews', 'AllowOperatorsSheetPull'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'urgent'; Groups = @(
+            [pscustomobject]@{ Key = 'all'; Label = 'جدول العواجل'; Names = @(
+                    'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode', 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems', 'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish', 'UrgentBoardMaxTextLength'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'boards'; Groups = @(
+            [pscustomobject]@{ Key = 'all'; Label = 'محتوى البرامج'; Names = @(
+                    'EnableContentBoards', 'MaxContentBoards', 'BoardMaxItems'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'schedule'; Groups = @(
+            [pscustomobject]@{ Key = 'all'; Label = 'الجدولة'; Names = @(
+                    'ScheduleConflictWindowMinutes', 'SchedulePaused', 'ScheduleMaxRetries', 'ScheduleRetryDelaySeconds', 'ScheduleRetryBackoffFactor', 'ScheduleRetryMaxDelaySeconds'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'monitoring'; Groups = @(
+            [pscustomobject]@{ Key = 'view'; Label = 'اللقطة والمقطع والمشاهدة'; Names = @(
+                    'EnableSnapshot', 'ClipSeconds', 'LiveWatchUrl', 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'output'; Label = 'مراقبة الخرج والشاشة السوداء'; Names = @(
+                    'OutputMonitorMinutes', 'OutputBlackLuminance', 'OutputBlackConfirmSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'relay'; Label = 'إعادة البث'; Names = @(
+                    'EnableLiveRelay', 'RelayAutoRestart', 'RelayMaxRestarts', 'RelayWatchdogSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'material'; Label = 'المواد والتسليم'; Names = @(
+                    'EnableMaterialSchedule', 'MaterialProxyLeadMinutes', 'MaterialEndAlertMinutes', 'NotifyAdminsOnMissingProxy', 'EnableShiftHandover'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'health'; Groups = @(
+            [pscustomobject]@{ Key = 'engine'; Label = 'فحص المحرك'; Names = @(
+                    'EnableEngineHealth', 'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds', 'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent', 'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance'
+                ) }
+            [pscustomobject]@{ Key = 'layers'; Label = 'حالة الطبقات'; Names = @(
+                    'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds', 'CinegyStateBackoffMaxSeconds'
+                ) }
+            [pscustomobject]@{ Key = 'telegram'; Label = 'اتصال تيليجرام'; Names = @(
+                    'TelegramPollMarginSeconds', 'TelegramPollTimeoutTolerance'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'storage'; Groups = @(
+            [pscustomobject]@{ Key = 'all'; Label = 'الملفات والاحتفاظ'; Names = @(
+                    'SnapshotRetentionMinutes', 'UploadRetentionMinutes', 'NewsBackupKeepFiles', 'LogMaxSizeMB', 'LogKeepFiles', 'AuditMaxSizeMB', 'AuditArchiveKeepFiles', 'ExecutionLogKeepRecords', 'ScheduleHistoryKeepDays', 'AccessGuardKeepDays', 'AuditTrailSize', 'AuditTemplateValues', 'AuditTemplateValuesMaxChars', 'ConfigBackupKeepFiles', 'DiskFreeWarningGB', 'RuntimeStorageWarningMB', 'BackupStorageWarningMB'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'notifications'; Groups = @(
+            [pscustomobject]@{ Key = 'quiet'; Label = 'الهدوء وحدّ التكرار'; Names = @(
+                    'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd', 'AlertMaxPerCausePerHour', 'RepeatAlertWindowHours', 'StartupStormThreshold'
+                ) }
+            [pscustomobject]@{ Key = 'admins'; Label = 'ما يصل المشرفين'; Names = @(
+                    'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat', 'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks', 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange', 'NotifyAdminsOnCinegyHealth', 'HealthFailureAlertThreshold', 'OutputMonitorFailureAlertThreshold', 'OutputMonitorFlapAlertCount', 'StaleOnAirAlertHours', 'MissedEventsHours', 'NewsSheetFailureAlertAfter'
+                ) }
+            [pscustomobject]@{ Key = 'operators'; Label = 'ما يصل المشغّلين'; Names = @(
+                    'NotifyOperatorsOnBlackOutput', 'TemplateNotifyRules', 'TemplateReminderFollowUpMinutes', 'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'NewsSheetNotifyScope'
+                ) }
+            [pscustomobject]@{ Key = 'notices'; Label = 'الإعلانات'; Names = @(
+                    'EnableAnnouncements', 'AnnouncementMaxLength', 'AnnouncementDefaultExpiryHours'
+                ) }
+            [pscustomobject]@{ Key = 'digests'; Label = 'الملخصات الدورية'; Names = @(
+                    'HeartbeatEnabled', 'HeartbeatHour', 'UsageDigestEnabled', 'UsageDigestDayOfWeek'
+                ) }
+        ) }
+    [pscustomobject]@{ Category = 'advanced'; Groups = @(
+            [pscustomobject]@{ Key = 'all'; Label = 'خيارات متقدمة'; Names = @(
+                    'LogAirXml', 'AirVariableType', 'PendingStateTimeoutMinutes', 'RepeatWarningCount', 'RepeatWarningWindowMinutes', 'MaintenanceWindowStart', 'MaintenanceWindowEnd', 'OneHandMode', 'EnablePersistentMenuButton', 'EnableTextShortcuts', 'Language'
+                ) }
+        ) }
+)
+
 $script:SettingCategoryByName = @{}
-foreach ($entry in @(
-        @{ Category = 'security'; Names = @(
-                'RequireUserLevelAuth', 'EnableSelfServiceRequests', 'EnableRawCommand',
-                'EnableFullTemplateManagement', 'EnableDpapiSecrets', 'MaxPendingApprovals',
-                'PendingApprovalExpiryHours', 'UserActivityRecentMinutes',
-                'BlockRejectedRequesters', 'JoinSecret', 'JoinSecretMaxAttempts', 'MaxAccessRequestsPerDay',
-                'DormantUserDays', 'AutoDisableDormantUsers', 'LeaveUnknownGroups'
-            ) },
-        @{ Category = 'onair'; Names = @(
-                'EnableSnapshot', 'ClipSeconds', 'LiveWatchUrl', 'EnableLiveRelay', 'EnableTimedShow', 'EnableHideAll',
-                'BroadcastFps', 'MojazMultiDesign', 'MojazAnchorToAirClock', 'MojazRowFrames', 'MojazImageKeepHours', 'MojazIntroExtraFrames', 'MojazLastRowFrames', 'MojazSyncOffsetMs', 'MojazSyncLeadMs', 'MojazHidesTicker', 'MojazImageWidth', 'MojazImageHeight',
-                'SceneMode',
-                'HideAllLayers', 'MaintenanceMode', 'DropPendingUpdatesOnStart',
-                'AirCommandTimeoutSeconds', 'TelegramRequestTimeoutSeconds', 'MaxFieldLength',
-                'ReshowClearsLayer', 'SetValuesAfterShow', 'PostShowDelayMs',
-                'ConfirmLayerRemoval', 'ShowOnAirTextOnRemoval', 'AskRequesterName', 'AutoHideDefaultSeconds', 'AutoHidePresetSeconds',
-                'RelayAutoRestart', 'RelayMaxRestarts', 'RelayWatchdogSeconds',
-                'AllowRemoteRestart'
-            ) },
-        @{ Category = 'templates'; Names = @(
-                'TemplateRegistryImportMaxTemplates', 'ReservedLayers', 'DisabledTemplateKeys',
-                'AdminOnlyTemplateKeys', 'OwnerOnlyTemplateKeys', 'AdminOnlyLayers', 'OwnerOnlyLayers', 'LayersScreenAccess',
-                'SensitiveTemplateKeys', 'SensitiveTemplateAutoHideSeconds', 'TemplateMaxAirSeconds', 'TemplateTestLayer',
-                'TemplateAirExtensionEnabled', 'TemplateAirExtensionResponseSeconds', 'TemplateAirExtensionMaxSeconds',
-                'TemplateTestAutoHideSeconds', 'EnableSafeRollback', 'RollbackWindowSeconds',
-                'LayerNames', 'EnableFavorites', 'FavoritesCount',
-                'RecentValuesPerField', 'TemplateBasePath', 'RespectCinegyItemDuration',
-                'ShowLayerLockBadge', 'ButtonTextMaxLength', 'EnableButtonStyles'
-            ) },
-        @{ Category = 'news'; Names = @(
-                'EnableNewsTickerManagement', 'NewsFilePath', 'NewsItemSeparator',
-                'NewsMaxItemLength', 'NewsMaxItems', 'NewsImportMaxBytes',
-                'NewsDraftTimeoutMinutes', 'NewsListLayout', 'NewNewsItemAtTop',
-                'NewsListPaged', 'NewsListPageSize', 'NewsListLabelLength',
-                'NewsListStackedLabelLength', 'NewsLockRequestMinutes',
-                'NewsLockGrantHoldSeconds',
-                'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews',
-                'AllowOperatorsClearAllNews', 'NewsSheetCsvUrl', 'NewsSheetSyncMode',
-                'NewsSheetSyncMinutes', 'NewsSheetTimeoutSeconds',
-                'NewsPublishNotifyScope',
-                'AllowOperatorsSheetPull'
-            ) },
-        @{ Category = 'urgent'; Names = @(
-                'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode',
-                'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems',
-                'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish',
-                'UrgentBoardMaxTextLength'
-            ) },
-        @{ Category = 'boards'; Names = @(
-                'EnableContentBoards', 'MaxContentBoards', 'BoardMaxItems'
-            ) },
-        @{ Category = 'schedule'; Names = @(
-                'ScheduleConflictWindowMinutes', 'SchedulePaused',
-                'ScheduleMaxRetries', 'ScheduleRetryDelaySeconds', 'ScheduleRetryBackoffFactor',
-                'ScheduleRetryMaxDelaySeconds'
-            ) },
-        @{ Category = 'monitoring'; Names = @(
-                'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds', 'OutputMonitorMinutes',
-                'NotifyAdminsOnMissingProxy', 'MaterialProxyLeadMinutes', 'MaterialEndAlertMinutes',
-                'EnableEngineHealth', 'EnableTextChecks',
-                'RepeatAlertWindowHours',
-                'EnableMaterialSchedule', 'EnableShiftHandover',
-                'OutputBlackLuminance', 'OutputBlackConfirmSeconds',
-                'CinegyStateCheckSeconds', 'DiscoverExternalLayers', 'CinegyStateStaleSeconds',
-                'TelegramPollMarginSeconds', 'TelegramPollTimeoutTolerance',
-                'CinegyHealthCheckSeconds', 'CinegyMonitorTimeoutSeconds',
-                'CinegyFrameLossTolerance', 'CinegyFrameLossTolerancePercent',
-                'CinegyHealthConfirmChecks', 'CinegyReadErrorRateTolerance',
-                'CinegyStateBackoffMaxSeconds'
-            ) },
-        # Everything that decides whether the bot speaks to somebody, gathered
-        # from the five categories these had been scattered across: an operator
-        # asking "why did it wake me at 3am" was reading four screens.
-        @{ Category = 'notifications'; Names = @(
-                'EnableAnnouncements', 'AnnouncementMaxLength', 'AnnouncementDefaultExpiryHours',
-                'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd',
-                'AlertMaxPerCausePerHour',
-                'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat',
-                'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks',
-                'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange',
-                'NotifyAdminsOnCinegyHealth', 'NotifyOperatorsOnBlackOutput',
-                'TemplateNotifyRules',
-                'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes',
-                'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds',
-                'NewsSheetNotifyScope', 'NewsSheetFailureAlertAfter', 'TemplateReminderFollowUpMinutes',
-                'StaleOnAirAlertHours', 'HealthFailureAlertThreshold',
-                'OutputMonitorFailureAlertThreshold', 'OutputMonitorFlapAlertCount', 'MissedEventsHours',
-                'StartupStormThreshold',
-                'HeartbeatEnabled', 'HeartbeatHour',
-                'UsageDigestEnabled', 'UsageDigestDayOfWeek'
-            ) },
-        @{ Category = 'storage'; Names = @(
-                'SnapshotRetentionMinutes', 'UploadRetentionMinutes', 'NewsBackupKeepFiles',
-                'LogMaxSizeMB', 'LogKeepFiles', 'AuditMaxSizeMB', 'AuditArchiveKeepFiles',
-                'ExecutionLogKeepRecords', 'ScheduleHistoryKeepDays', 'AccessGuardKeepDays',
-                'AuditTrailSize', 'ConfigBackupKeepFiles', 'DiskFreeWarningGB',
-                'RuntimeStorageWarningMB', 'BackupStorageWarningMB'
-            ) },
-        @{ Category = 'advanced'; Names = @(
-                'LogAirXml', 'AirVariableType', 'PendingStateTimeoutMinutes',
-                'RepeatWarningCount', 'RepeatWarningWindowMinutes', 'MaintenanceWindowStart',
-                'MaintenanceWindowEnd', 'OneHandMode', 'EnableTextShortcuts',
-                # Beside OneHandMode, which is the other presentation choice a
-                # station makes once and then stops thinking about. The button
-                # an operator actually uses is on the Settings home screen; this
-                # row is what a search for "language" finds.
-                'Language'
-            ) }
-    )) {
-    foreach ($name in $entry.Names) { $script:SettingCategoryByName[$name] = $entry.Category }
+$script:SettingGroupByName = @{}
+foreach ($categoryEntry in $script:SettingGroupDefinitions) {
+    for ($groupIndex = 0; $groupIndex -lt @($categoryEntry.Groups).Count; $groupIndex++) {
+        foreach ($name in @($categoryEntry.Groups[$groupIndex].Names)) {
+            $script:SettingCategoryByName[$name] = $categoryEntry.Category
+            $script:SettingGroupByName[$name] = $groupIndex
+        }
+    }
 }
 
 $script:SettingNavigationLabels = @{

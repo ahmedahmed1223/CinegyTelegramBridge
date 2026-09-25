@@ -88,7 +88,8 @@ function Show-SettingsCategoryScreen {
         [Parameter(Mandatory)][string]$Category,
         [ValidateRange(0, [int]::MaxValue)][int]$Page = 0,
         [Parameter(Mandatory)][long]$ChatId,
-        [long]$UserId = 0
+        [long]$UserId = 0,
+        [int]$Group = -1
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $definition = @($script:SettingCategoryDefinitions | Where-Object { $_.Key -eq $Category })
@@ -96,22 +97,37 @@ function Show-SettingsCategoryScreen {
         Show-SettingsScreen -ChatId $ChatId -UserId $UserId
         return
     }
-    $title = "$($definition[0].Icon) $($definition[0].Label)"
+    $translated = @(Get-SettingCategoryDefinitions | Where-Object { $_.Key -eq $Category })[0]
+    $groups = @(Get-SettingGroups -Category $Category)
+    if ($Group -ge $groups.Count) { $Group = -1 }
+    if ($groups.Count -gt 1 -and $Group -lt 0) {
+        # A category of several groups opens on its groups, each named with
+        # what is in it, rather than on a wall of forty settings in pages.
+        $pickLines = [System.Collections.Generic.List[string]]::new()
+        $pickLines.Add((T 'cmd.settingsSection' $(ConvertTo-TelegramHtmlText -Text "$($translated.Icon) $($translated.Label)")))
+        if ($translated.Summary) { $pickLines.Add("<i>$(ConvertTo-TelegramHtmlText -Text ([string]$translated.Summary))</i>") }
+        $pickLines.Add('')
+        $pickLines.Add((T 'cmd.pickSettingGroup'))
+        Send-TelegramMessage -ChatId $ChatId -Text ($pickLines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsGroupPickerKeyboard -Category $Category)
+        return
+    }
+    $title = "$($translated.Icon) $($translated.Label)"
+    if ($Group -ge 0 -and $groups.Count -gt 1) { $title += " › $($groups[$Group].Label)" }
     # The buttons carry a label and a value; neither says what the setting
     # does, and a label alone left the reader guessing which of eight screens
     # held what they came for. The summary answers that, and each line under
     # it explains the button below it.
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'cmd.settingsSection' $(ConvertTo-TelegramHtmlText -Text $title)))
-    $summary = [string](Get-JsonProp $definition[0] 'Summary')
+    $summary = if ($Group -ge 0 -and $groups.Count -gt 1) { '' } else { [string]$translated.Summary }
     if ($summary) { $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text $summary)</i>") }
     $lines.Add('')
-    foreach ($line in @(Get-SettingsExplainedLines -Names @(Get-SettingsCategoryPageNames -Category $Category -Page $Page))) {
+    foreach ($line in @(Get-SettingsExplainedLines -Names @(Get-SettingsCategoryPageNames -Category $Category -Page $Page -Group $Group))) {
         $lines.Add($line)
     }
     $lines.Add('')
     $lines.Add((T 'cmd.pressToToggle'))
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page)
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup (Get-SettingsCategoryKeyboard -Category $Category -Page $Page -Group $Group)
 }
 
 function Show-HideAllLayerSettings {

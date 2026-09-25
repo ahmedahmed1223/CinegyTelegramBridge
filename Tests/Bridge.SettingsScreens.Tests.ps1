@@ -589,16 +589,16 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.69.10'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.69.10'
+        $script:BridgeVersion | Should -Be '8.70.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.70.0'
     }
 
     It 'presents the operational setting categories in a stable order' {
         $definitions = @(Get-SettingCategoryDefinitions)
 
         @($definitions.Key) | Should -Be @(
-            'security', 'onair', 'templates', 'news', 'urgent', 'boards',
-            'schedule', 'monitoring', 'storage', 'notifications', 'advanced'
+            'security', 'onair', 'mojaz', 'templates', 'news', 'urgent', 'boards',
+            'schedule', 'monitoring', 'health', 'storage', 'notifications', 'advanced'
         )
     }
 
@@ -659,7 +659,8 @@ Describe 'Version 6 settings navigation schema' {
     }
 
     It 'uses the existing protected toggle callback behind an Arabic label' {
-        $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Page 0
+        # Security's second group, accounts and verification.
+        $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Group 1 -Page 0
         $buttons = @($keyboard.inline_keyboard | ForEach-Object { @($_) })
         $button = @($buttons | Where-Object { $_['callback_data'] -eq 'cfg:t:RequireUserLevelAuth' })[0]
 
@@ -679,7 +680,7 @@ Describe 'Version 6 settings navigation schema' {
         $original = Get-Setting 'RequireUserLevelAuth'
         try {
             $config.Settings | Add-Member -NotePropertyName RequireUserLevelAuth -NotePropertyValue $false -Force
-            $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Page 0
+            $keyboard = Get-SettingsCategoryKeyboard -Category 'security' -Group 1 -Page 0
             $row = @($keyboard.inline_keyboard | Where-Object {
                     @($_ | Where-Object callback_data -eq 'cfg:t:RequireUserLevelAuth').Count -gt 0
                 })[0]
@@ -700,7 +701,7 @@ Describe 'Version 6 settings navigation schema' {
             $config.Settings | Add-Member -NotePropertyName CinegyMonitorTimeoutSeconds -NotePropertyValue 3 -Force
             $config.Settings | Add-Member -NotePropertyName HideAllLayers -NotePropertyValue '2,4,7' -Force
 
-            $monitoring = Get-SettingsCategoryKeyboard -Category 'monitoring' -Page 0 -PageSize 20
+            $monitoring = Get-SettingsCategoryKeyboard -Category 'health' -Page 0 -PageSize 20
             $timeout = @($monitoring.inline_keyboard | ForEach-Object { @($_) } |
                     Where-Object callback_data -eq 'cfg:v:CinegyMonitorTimeoutSeconds')[0]
             $onAir = Get-SettingsCategoryKeyboard -Category 'onair' -Page 0 -PageSize 20
@@ -739,13 +740,53 @@ Describe 'Version 6 settings navigation schema' {
         Mock Send-TelegramMessage {}
         Mock Get-SettingsCategoryKeyboard { @{ inline_keyboard = @() } }
 
-        Show-SettingsCategoryScreen -Category 'monitoring' -Page 2 -ChatId 100 -UserId 101
+        # Storage is one group, so it opens straight on its settings.
+        Show-SettingsCategoryScreen -Category 'storage' -Page 2 -ChatId 100 -UserId 101
 
         Should -Invoke Get-SettingsCategoryKeyboard -Times 1 -Exactly -ParameterFilter {
-            $Category -eq 'monitoring' -and $Page -eq 2
+            $Category -eq 'storage' -and $Page -eq 2
         }
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
-            $ChatId -eq 100 -and $Text -match 'المراقبة والتنبيهات'
+            $ChatId -eq 100 -and $Text -match 'الملفات والاحتفاظ'
+        }
+    }
+
+    It 'opens a category of several groups on its groups, not on forty settings' {
+        Mock Send-TelegramMessage {}
+        Show-SettingsCategoryScreen -Category 'onair' -Page 0 -ChatId 100 -UserId 101
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $data = @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+            ($data -contains 'cfgsub:onair:0:0') -and @($data | Where-Object { $_ -match '^cfg:(t|v|s):' }).Count -eq 0
+        }
+    }
+
+    It 'shows one group, pages inside it, and leads back to its category' {
+        $keyboard = Get-SettingsCategoryKeyboard -Category 'notifications' -Group 1 -Page 0
+        $data = @($keyboard.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $expected = @(Get-SettingsInCategory -Category 'notifications' -Group 1)
+        @($data | Where-Object { $_ -match '^cfg:(t|v|s):' }).Count | Should -Be ([math]::Min(8, $expected.Count))
+        $data | Should -Contain 'cfgsub:notifications:1:1' -Because 'thirteen admin notices page inside their own group'
+        $data | Should -Contain 'cfgcat:notifications:0'
+    }
+
+    It 'keeps the manual quiet button beside the quiet hours it overrides' {
+        $quiet = @((Get-SettingsCategoryKeyboard -Category 'notifications' -Group 0).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $quiet | Should -Contain 'quiet:on'
+        @(Get-SettingsInCategory -Category 'notifications' -Group 0) | Should -Contain 'QuietHoursStart'
+    }
+
+    It 'files the bulletin under its own door, not under on air' {
+        (Get-SettingNavigationMetadata -Name 'MojazRowFrames').Category | Should -Be 'mojaz'
+        (Get-SettingNavigationMetadata -Name 'CinegyMonitorTimeoutSeconds').Category | Should -Be 'health'
+        (Get-SettingNavigationMetadata -Name 'EnableSnapshot').Category | Should -Be 'monitoring'
+    }
+
+    It 'places every setting in exactly one group, and names every group' {
+        $placed = foreach ($entry in $script:SettingGroupDefinitions) { foreach ($group in @($entry.Groups)) { @($group.Names) } }
+        @($placed).Count | Should -Be $script:DefaultSettings.Count -Because 'a setting in no group falls silently into advanced'
+        @($placed | Sort-Object -Unique).Count | Should -Be @($placed).Count
+        foreach ($entry in $script:SettingGroupDefinitions) {
+            foreach ($group in @(Get-SettingGroups -Category $entry.Category)) { [string]$group.Label | Should -Not -BeNullOrEmpty }
         }
     }
 
@@ -772,6 +813,17 @@ Describe 'Version 6 settings navigation schema' {
             Should -Invoke Show-SettingsCategoryScreen -Times 1 -Exactly -ParameterFilter {
                 $Category -eq 'monitoring' -and $Page -eq 2 -and $ChatId -eq 100 -and $UserId -eq 101
             }
+        }
+
+        It 'routes a group page callback, and refuses a malformed one' {
+            Mock Test-CallbackAdmin { $true }
+            Mock Show-SettingsScreen {}
+            foreach ($data in 'cfgsub:news:3:1', 'cfgsub:news:x:1') {
+                Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{ id = 'g'; from = [pscustomobject]@{ id = 101 }
+                        message = [pscustomobject]@{ chat = [pscustomobject]@{ id = 100; type = 'private' } }; data = $data })
+            }
+            Should -Invoke Show-SettingsCategoryScreen -Times 1 -Exactly -ParameterFilter { $Category -eq 'news' -and $Group -eq 3 -and $Page -eq 1 }
+            Should -Invoke Show-SettingsScreen -Times 1 -Exactly
         }
 
         It 'does not open a category page for a non-administrator' {
@@ -834,14 +886,14 @@ Describe 'Settings are explained, not just listed' {
 
     It 'describes exactly the settings whose buttons are on that page' {
         Mock Send-TelegramMessage {}
-        Show-SettingsCategoryScreen -Category 'news' -Page 0 -ChatId 100 -UserId 101
+        Show-SettingsCategoryScreen -Category 'news' -Group 0 -Page 0 -ChatId 100 -UserId 101
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ParseMode -eq 'HTML' -and
             $Text -match 'شريط الأخبار' -and
             # One page, one slice: the text lines and the buttons are the same
             # eight settings.
             (@($Text -split "`n" | Where-Object { $_ -like '•*' }).Count -eq
-                @(Get-SettingsCategoryPageNames -Category 'news' -Page 0).Count)
+                @(Get-SettingsCategoryPageNames -Category 'news' -Group 0 -Page 0).Count)
         }
     }
 }

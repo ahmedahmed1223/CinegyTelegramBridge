@@ -31,6 +31,11 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.0'; Items = @(
+                        '🗂 **Settings are sorted into groups** — a large door opens on its groups first (On air: showing and hiding, time on screen, connection, maintenance), then the settings inside the one you pick. Small doors open straight on their settings as before.'
+                        '📑 **The bulletin has its own door**, out of On air; **🩺 Cinegy health and connection** has its own, out of Monitoring, which is now 📡 The feed and its watch.'
+                        '🔇 **Two hours of quiet moved** beside the quiet hours it overrides: ⚙️ Settings → Notifications → Quiet. Nothing in config.json changed.'
+                    ) }
                 @{ Version = '8.69.10'; Items = @(
                         '⏱ **Fixed: a custom maximum air time for a template could not be typed.** The ⌨️ custom-amount button answered "the buttons have expired". It now asks for the duration, as 2:30 or 90, and digits typed on an Arabic keyboard are read too.'
                     ) }
@@ -191,6 +196,11 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.0'; Items = @(
+                        '🗂 **الإعدادات مقسّمة إلى أقسام** — الباب الكبير يُفتح على أقسامه أولًا (الهواء: العرض والإخفاء، مدة الظهور، الاتصال، الصيانة)، ثم على إعدادات القسم الذي تختاره. والأبواب الصغيرة تُفتح على إعداداتها مباشرة كما كانت.'
+                        '📑 **للموجز باب خاص** بعد أن كان داخل «التشغيل على الهواء»، و**🩺 صحة Cinegy والاتصال** باب خاص بعد أن كانت داخل «المراقبة» التي صارت 📡 البث ومراقبته.'
+                        '🔇 **«هدوء ساعتين» انتقل** بجوار ساعات الهدوء التي يتجاوزها: ⚙️ الإعدادات ← الإشعارات ← الهدوء. ولم يتغيّر شيء في config.json.'
+                    ) }
                 @{ Version = '8.69.10'; Items = @(
                         '⏱ **إصلاح: لم يكن ممكنًا كتابة مدّة قصوى مخصّصة للقالب.** زرّ «⌨️ مقدار مخصص» كان يردّ بأن الأزرار انتهت صلاحيتها. صار يطلب المدّة، مثل 2:30 أو 90، ويقرأ الأرقام العربية أيضًا (٢:٣٠ أو ٩٠).'
                     ) }

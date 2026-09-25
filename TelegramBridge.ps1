@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.70.9'
+$script:BridgeVersion = '8.71.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -726,6 +726,11 @@ $script:streamOutageFile = Join-Path $logDir "stream-outages.json"
 # because the draft is removed when it is published.
 $script:newsPausedFile = Join-Path $logDir "news-paused.json"
 $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+# Named ticker sets - a normal ticker, an election one - kept apart from the
+# draft for the same reason as the shelf.
+$script:newsSetsFile = Join-Path $logDir "news-sets.json"
+$script:NewsSets = [System.Collections.Generic.List[object]]::new()
+$script:NewsSetsMax = 20
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -2112,6 +2117,7 @@ Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s);
 Import-AutoHideQueue
 Import-StreamOutages
 Import-NewsPaused
+Import-NewsSets
 Import-TemplateReminderQueue
 Initialize-CinegyOnAirState | Out-Null
 Restore-MojazPlayback | Out-Null
@@ -2291,6 +2297,7 @@ try {
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
                                 'news_add_text' { Complete-NewsTickerAddText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_paste_review' { Add-NewsPasteChunk -ChatId $chatId -UserId $userId -Value $text | Out-Null }
+                                'news_set_name' { Complete-NewsSetName -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_publish_at' { Complete-NewsPublishAt -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'row_paste_review' { Add-RowPasteChunk -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_edit_text' { Complete-NewsTickerEditText -ChatId $chatId -UserId $userId -Value $text | Out-Null }

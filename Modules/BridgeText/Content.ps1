@@ -348,6 +348,20 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.sets.open'] = @{ ar = '🗂 المجموعات المحفوظة ({0})'; en = '🗂 Saved sets ({0})' }
+    $catalogue['news.sets.title'] = @{ ar = '🗂 مجموعات الشريط المحفوظة: {0} من {1}'; en = '🗂 Saved ticker sets: {0} of {1}' }
+    $catalogue['news.sets.needDraft'] = @{ ar = 'ابدأ مسودة لتحمّل مجموعة فيها أو تحفظها.'; en = 'Start a draft to load a set into it or save one.' }
+    $catalogue['news.sets.load'] = @{ ar = '📥 حمّل {0} في المسودة'; en = '📥 Load {0} into the draft' }
+    $catalogue['news.sets.save'] = @{ ar = '💾 احفظ المسودة كمجموعة'; en = '💾 Save the draft as a set' }
+    $catalogue['news.sets.namePrompt'] = @{ ar = 'اكتب اسم المجموعة (حتى 40 حرفًا). اسمٌ موجود يستبدل مجموعته.'; en = 'Type the set''s name (up to 40 characters). An existing name replaces its set.' }
+    $catalogue['news.sets.saved'] = @{ ar = '💾 حُفظت المجموعة.'; en = '💾 The set is saved.' }
+    $catalogue['news.sets.saveRefused'] = @{ ar = 'لم تُحفظ: الاسم فارغ، أو المسودة فارغة، أو بلغت المجموعات حدّها ({0}).'; en = 'Not saved: the name or the draft is empty, or the sets are at their limit ({0}).' }
+    $catalogue['news.sets.loaded'] = @{ ar = '📥 حُمّلت المجموعة في مسودتك بدل ما كان فيها. لم يتغيّر شيء على الهواء؛ راجع وانشر حين تريد.'; en = '📥 The set is in your draft, in place of what it held. Nothing changed on air; review and publish when ready.' }
+    $catalogue['news.sets.loadRefused'] = @{ ar = 'لم تُحمَّل: تحتاج مسودة لك، أو لم تعد المجموعة موجودة.'; en = 'Not loaded: you need a draft of your own, or the set is gone.' }
+    $catalogue['news.sets.deleteYes'] = @{ ar = '🗑 نعم، احذف «{0}»'; en = '🗑 Yes, delete "{0}"' }
+    $catalogue['news.sets.deleteRefused'] = @{ ar = 'لا تُحذف المجموعة إلا ممن حفظها أو من مشرف.'; en = 'A set is deleted only by whoever saved it or an administrator.' }
+    $catalogue['news.sets.savedAudit'] = @{ ar = '💾 حُفظت مجموعة الشريط «{0}» ({1} خبر) — {2}'; en = '💾 Ticker set "{0}" saved ({1} headlines) — {2}' }
+    $catalogue['news.sets.deletedAudit'] = @{ ar = '🗑 حُذفت مجموعة الشريط «{0}» — {1}'; en = '🗑 Ticker set "{0}" deleted — {1}' }
     $catalogue['news.later.button'] = @{ ar = '📅 انشر في وقت محدّد'; en = '📅 Publish at a set time' }
     $catalogue['news.later.cancel'] = @{ ar = '📅 سيُنشر {0} — إلغاء الموعد'; en = '📅 Publishing at {0} — cancel it' }
     $catalogue['news.later.prompt'] = @{ ar = "📅 متى يُنشر الشريط؟ اكتب الوقت مثل 18:00 أو 2026-09-25 18:00، أو اختر:`nتبقى المسودة قابلة للتعديل حتى موعدها، ويُنشر ما فيها عندئذ."; en = "📅 When should the ticker publish? Type a time such as 18:00 or 2026-09-25 18:00, or pick one:`nThe draft stays editable until then, and whatever it holds is published." }

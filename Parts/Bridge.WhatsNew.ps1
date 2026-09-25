@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.0'; Items = @(
+                        '🗂 **Saved ticker sets** — 🗂 on the news screen: save your draft under a name (a normal ticker, an election one) and load it back into a draft later. Loading changes only your draft; nothing reaches air until you publish. Up to 20 sets; a set is deleted, after a confirmation, only by whoever saved it or an administrator.'
+                    ) }
                 @{ Version = '8.70.9'; Items = @(
                         '📅 **Publish the ticker at a set time** — 📅 on your draft: type 18:00 or a full date, or pick in 15, 30 or 60 minutes. The draft stays editable until then, and whatever it holds is published, exactly as the publish button would. If the ticker on air changed meanwhile, nothing is overwritten: you are told and the draft is kept.'
                     ) }
@@ -228,6 +231,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.0'; Items = @(
+                        '🗂 **مجموعات الشريط المحفوظة** — «🗂» في شاشة الأخبار: احفظ مسودتك باسم (شريط عادي، شريط انتخابات) وحمّلها في مسودة لاحقًا. التحميل يغيّر مسودتك وحدها، ولا يصل شيء إلى الهواء حتى تنشر. حتى 20 مجموعة، ولا يحذف المجموعة — بعد تأكيد — إلا من حفظها أو مشرف.'
+                    ) }
                 @{ Version = '8.70.9'; Items = @(
                         '📅 **انشر الشريط في وقت محدّد** — «📅» في مسودتك: اكتب 18:00 أو تاريخًا كاملًا، أو اختر بعد 15 أو 30 أو 60 دقيقة. تبقى المسودة قابلة للتعديل حتى موعدها، ويُنشر ما فيها كما يفعل زرّ النشر تمامًا. وإن تغيّر الشريط على الهواء في الأثناء لا يُكتب فوقه شيء: تُبلَّغ وتبقى المسودة.'
                     ) }

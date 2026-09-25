@@ -1806,3 +1806,73 @@ Describe 'Publishing the ticker at a set time' {
         $after | Should -Contain 'news:latercancel'
     }
 }
+
+Describe 'Saved ticker sets' {
+    <#
+        Borrowed from the bulletin's library. A station that runs a normal
+        ticker and an election ticker rebuilt one from the other by hand, or
+        dug through the backups. A set is a named list of headlines kept apart
+        from the draft, which is removed on publish.
+    #>
+    BeforeEach {
+        $script:newsSetsFile = Join-Path $TestDrive 'news-sets.json'
+        Remove-Item -LiteralPath $script:newsSetsFile -ErrorAction SilentlyContinue
+        $script:NewsSets = [System.Collections.Generic.List[object]]::new()
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Send-TelegramMessage { $script:setsMarkup = $ReplyMarkup }
+        Mock Edit-TelegramMessageText { $script:setsMarkup = $ReplyMarkup; $true }
+        Mock Add-AuditEntry { }
+        Mock Write-BridgeLog { }
+        Mock Test-Admin { $false }
+    }
+    AfterEach { $script:NewsTickerDraft = $null; $script:NewsSets = [System.Collections.Generic.List[object]]::new() }
+
+    It 'saves the draft under a name, and keeps it across a restart' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'الانتخابات' | Should -BeTrue
+        $script:NewsSets = [System.Collections.Generic.List[object]]::new()
+        Import-NewsSets
+        $script:NewsSets[0].Name | Should -Be 'الانتخابات'
+        @($script:NewsSets[0].Items) | Should -Be @('أ', 'ب')
+    }
+
+    It 'replaces a set of the same name rather than keeping two' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Out-Null
+        $script:NewsTickerDraft.Items = @('ج')
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Out-Null
+        $script:NewsSets.Count | Should -Be 1
+        @($script:NewsSets[0].Items) | Should -Be @('ج')
+    }
+
+    It 'loads a set into the owner''s draft, and only theirs' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Out-Null
+        $script:NewsTickerDraft.Items = @('غيره')
+        Use-NewsSet -UserId 7 -Index 0 | Should -BeFalse
+        Use-NewsSet -UserId 42 -Index 0 | Should -BeTrue
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+    }
+
+    It 'lets only the saver or an administrator delete a set' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Out-Null
+        Remove-NewsSet -ChatId 7 -UserId 7 -Index 0 | Should -BeFalse
+        $script:NewsSets.Count | Should -Be 1
+        Remove-NewsSet -ChatId 42 -UserId 42 -Index 0 | Should -BeTrue
+        $script:NewsSets.Count | Should -Be 0
+    }
+
+    It 'refuses a twenty-first set, and an empty name' {
+        1..20 | ForEach-Object { Save-NewsSetFromDraft -UserId 42 -Name "م $_" | Out-Null }
+        Save-NewsSetFromDraft -UserId 42 -Name 'زائدة' | Should -BeFalse
+        Save-NewsSetFromDraft -UserId 42 -Name "`u{200F} " | Should -BeFalse
+    }
+
+    It 'lists the sets paged, with load and a confirmed delete' {
+        1..12 | ForEach-Object { $script:NewsSets.Add([pscustomobject]@{ Name = "م $_"; Items = @('x'); SavedBy = 42; SavedAt = '' }) }
+        Show-NewsSetsScreen -ChatId 42 -UserId 42 -Page 0
+        $data = @($script:setsMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $data | Should -Contain 'news:setload:0'
+        $data | Should -Contain 'news:setdelask:0'
+        $data | Should -Contain 'news:setsp:1'
+        $data | Should -Contain 'news:setsave'
+    }
+}

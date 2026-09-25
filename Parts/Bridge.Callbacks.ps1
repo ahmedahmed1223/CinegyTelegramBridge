@@ -243,6 +243,41 @@ function Invoke-CallbackQuery {
             Set-PendingState -ChatId $chatId -State @{Mode='news_add_text';UserId=$userId;StartedAt=(Get-Date)}
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sendNewStory');break
         }
+        'news:sets' { Show-NewsSetsScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'news:setsp:*' {
+            $setsPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'news:setsp:'), [ref]$setsPage) -and $setsPage -ge 0) {
+                Show-NewsSetsScreen -ChatId $chatId -UserId $userId -Page $setsPage -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
+        'news:setload:*' {
+            $setIndex = -1
+            [int]::TryParse((Get-CallbackArg $data 'news:setload:'), [ref]$setIndex) | Out-Null
+            $loaded = Use-NewsSet -UserId $userId -Index $setIndex
+            Send-TelegramMessage -ChatId $chatId -Text $(if ($loaded) { (T 'news.sets.loaded') } else { (T 'news.sets.loadRefused') }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            break
+        }
+        'news:setdelask:*' {
+            $setIndex = -1
+            if ([int]::TryParse((Get-CallbackArg $data 'news:setdelask:'), [ref]$setIndex)) {
+                Show-NewsSetsScreen -ChatId $chatId -UserId $userId -Page ([math]::Floor([math]::Max(0, $setIndex) / 8)) -ConfirmDelete $setIndex -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
+        'news:setdel:*' {
+            $setIndex = -1
+            [int]::TryParse((Get-CallbackArg $data 'news:setdel:'), [ref]$setIndex) | Out-Null
+            if (-not (Remove-NewsSet -ChatId $chatId -UserId $userId -Index $setIndex)) { Send-TelegramMessage -ChatId $chatId -Text (T 'news.sets.deleteRefused') }
+            Show-NewsSetsScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
+        'news:setsave' {
+            if (-not (Get-NewsTickerDraft -UserId $userId)) { Show-NewsSetsScreen -ChatId $chatId -UserId $userId; break }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'news_set_name'; UserId = $userId; StartedAt = (Get-Date) }
+            Send-TelegramMessage -ChatId $chatId -Text (T 'news.sets.namePrompt') -ReplyMarkup (Get-CancelKeyboard)
+            break
+        }
         'news:later' {
             if (-not (Get-NewsTickerDraft -UserId $userId)) { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
             Set-PendingState -ChatId $chatId -State @{ Mode = 'news_publish_at'; UserId = $userId; StartedAt = (Get-Date) }

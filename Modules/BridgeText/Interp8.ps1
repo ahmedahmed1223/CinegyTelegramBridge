@@ -125,6 +125,8 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.autoMode'] = @{ ar = '{0}تلقائي — بالتتابع'; en = '{0}automatic — one after another' }
     $catalogue['urg.autoHideAfter'] = @{ ar = '⏱ إخفاء تلقائي بعد {0} ث — تغيير'; en = '⏱ Hides by itself after {0} s — change' }
     $catalogue['urg.playChosen'] = @{ ar = '▶️ تشغيل المحدَّد ({0})'; en = '▶️ Play the chosen ({0})' }
+    $catalogue['urg.airShownBy'] = @{ ar = '🚨 عاجل على الهواء الآن — رفعه {0}.'; en = '🚨 An urgent is on air now — put up by {0}.' }
+    $catalogue['urg.airHiddenBy'] = @{ ar = '⏹ خرج العاجل عن الهواء — أخفاه {0}.'; en = '⏹ The urgent is off air — hidden by {0}.' }
     $catalogue['urg.runStartedNotice'] = @{ ar = '▶️ بدأ التتابع ({0} أخبار). على الهواء الآن: {1}'; en = '▶️ The sequence is up ({0} stories). On air now: {1}' }
     $catalogue['urg.addedJoinedRun'] = @{ ar = '➕ أُضيف الخبر إلى التتابع الجاري: الخبر {0} من {1}.'; en = '➕ The story joined the live sequence as headline {0} of {1}.' }
     $catalogue['urg.headlineOf'] = @{ ar = 'الخبر {0} من {1}'; en = 'Headline {0} of {1}' }

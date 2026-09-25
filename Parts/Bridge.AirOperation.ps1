@@ -184,6 +184,9 @@ function Send-TemplateAirNotice {
         # asked in the chat.
         [switch]$EndedOutside
     )
+    # Before the audience and duplicate gates: those decide who hears about
+    # it, this keeps every open urgent board truthful whoever hears.
+    if ($Key -ceq $script:MojazUrgentKey) { Update-UrgentHomeScreens -Action $Action -ActorName $ActorName -EndedOutside:$EndedOutside | Out-Null }
     $scope = Get-TemplateNotifyScope -Key $Key
     $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $ActorChatId)
     if ($audience.Count -eq 0) { return 0 }

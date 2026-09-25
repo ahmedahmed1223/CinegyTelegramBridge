@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.10
+
+`Update-UrgentHomeScreens` redraws every chat's board message, with a notice saying what happened and by whom, whenever the urgent template is shown, hidden, exited or ended from outside; it is called from `Send-TemplateAirNotice` ahead of its audience and duplicate gates. Refreshes are edit-only (`-EditOnly` on `Send-UrgentScreen`): a board that cannot be edited is forgotten rather than replaced by an unrequested message.
+
 ## Version 8.71.9
 
 The main menu's urgent button is now `urgmenu:open`, which sends a fresh board at the bottom of the chat (`-Fresh` on `Show-UrgentBoardScreen`); sharing `urgentb:open` with the in-screen back buttons had made it edit the old menu message since 8.71.7. The add-story prompt carries a back button and a hint; a run start says which story is up; a hide from the board stops quietly and redraws once with a notice; a story shown alone answers on the board message.

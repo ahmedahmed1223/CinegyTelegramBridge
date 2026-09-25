@@ -194,6 +194,9 @@ function Add-BridgeTextContent {
     $catalogue['urgent.num.total'] = @{ ar = 'المدة الكلية (ثانية)'; en = 'Total time (seconds)' }
     $catalogue['urgent.num.gap'] = @{ ar = 'الفاصل بين الأخبار (ثانية)'; en = 'Gap between stories (seconds)' }
     $catalogue['urgent.num.sceneOnly'] = @{ ar = 'حركة المشهد وحدها'; en = 'the scene motion alone' }
+    $catalogue['urgent.airShown'] = @{ ar = '🚨 عاجل على الهواء الآن.'; en = '🚨 An urgent is on air now.' }
+    $catalogue['urgent.airHidden'] = @{ ar = '⏹ خرج العاجل عن الهواء.'; en = '⏹ The urgent is off air.' }
+    $catalogue['urgent.airEndedOutside'] = @{ ar = '⚠️ خرج العاجل عن الهواء من خارج البوت.'; en = '⚠️ The urgent left air from outside the bot.' }
     $catalogue['urgent.addHint'] = @{ ar = 'سطر واحد هو نصّ الخبر كما سيظهر على الشاشة. للتراجع اضغط رجوع.'; en = 'One line: the story as it will read on screen. Back cancels.' }
     $catalogue['urgent.hiddenByYou'] = @{ ar = '⏹ أخفيتَ العاجل، وخرج عن الهواء.'; en = '⏹ You hid the urgent; it is off air.' }
     $catalogue['urgent.addedWaitsNextRun'] = @{ ar = '➕ أُضيف الخبر؛ التتابع الجاري على المحدد فقط أو بلغ سقفه، فيُعرض في التشغيل التالي.'; en = '➕ The story was added; the live sequence is a hand-picked one or at its ceiling, so it plays next run.' }

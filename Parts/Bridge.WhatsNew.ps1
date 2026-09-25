@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.10'; Items = @(
+                        '🔄 **Every open board follows the air** — when the urgent is hidden by another operator, put up by another operator, or dropped from outside the bot, each chat''s board message is redrawn with a line saying so and by whom. Boards that can no longer be edited are left alone; the next open sends a fresh one.'
+                    ) }
                 @{ Version = '8.71.9'; Items = @(
                         '📍 **The board appears where you are** — opening it from the main menu sends a fresh board at the bottom of the chat; since 8.71.7 it had been editing the old menu message wherever that had scrolled to. Inside the board, buttons still redraw in place.'
                         '✍️ **Adding a story keeps a way back** — the "send the story" prompt now carries a back button and says what to type; a story shown alone answers on the board with its hide button.'
@@ -267,6 +270,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.10'; Items = @(
+                        '🔄 **كل جدول مفتوح يتبع الهواء** — حين يُخفي العاجلَ مشغّلٌ آخر، أو يرفعه مشغّل آخر، أو يسقط من خارج البوت، تُعاد رسم رسالة الجدول في كل محادثة مع سطر يقول ما حدث ومن فعله. الجداول التي تعذّر تعديلها تُترك، والفتح التالي يرسل جديدًا.'
+                    ) }
                 @{ Version = '8.71.9'; Items = @(
                         '📍 **الجدول يظهر حيث أنت** — فتحه من القائمة الرئيسية يرسل جدولًا جديدًا في أسفل المحادثة؛ منذ 8.71.7 كان يعدّل رسالة القائمة القديمة حيثما صعدت. وداخل الجدول تبقى الأزرار تعيد الرسم في مكانها.'
                         '✍️ **إضافة خبر تحتفظ بطريق العودة** — طلب «أرسل نصّ العاجل» صار يحمل زرّ رجوع ويقول ما تكتب؛ والخبر المعروض وحده يجيب على الجدول بزرّ إخفائه.'

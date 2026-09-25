@@ -277,6 +277,31 @@ Describe 'Running the breaking-news board' {
         Should -Invoke Show-UrgentBoardScreen -Times 1 -Exactly -ParameterFilter { $MessageId -eq 9 -and $Notice -eq (T 'urgent.hiddenByYou') }
     }
 
+    It 'redraws every open board when the urgent leaves or reaches air, by edit only' {
+        $script:UrgentHomeMessage.Clear()
+        $script:UrgentHomeMessage[[long]100] = 55
+        $script:UrgentHomeMessage[[long]200] = 66
+        $script:Redrawn = @()
+        Mock Edit-TelegramRichMessage { $script:Redrawn += "$ChatId/$MessageId"; [long]$ChatId -ne 200 }
+        Mock Edit-TelegramMessageText { $false }
+        Mock Send-TelegramRichMessage { $true }
+        Mock Send-TelegramMessage { }
+        Mock Get-TemplateNoticeAudience { @() }
+        try {
+            Send-TemplateAirNotice -Key $script:MojazUrgentKey -Layer 7 -ActorChatId 100 -ActorName 'أحمد' -Action 'hide' | Out-Null
+
+            @($script:Redrawn | Sort-Object) | Should -Be @('100/55', '200/66') -Because 'the actor is redrawn too; a hide pressed on an air notice has no other road to its board'
+            Should -Invoke Send-TelegramRichMessage -Times 0 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+            $script:UrgentHomeMessage.ContainsKey([long]100) | Should -BeTrue
+            $script:UrgentHomeMessage.ContainsKey([long]200) | Should -BeFalse -Because 'a board that cannot be edited is forgotten, not replaced'
+
+            Send-TemplateAirNotice -Key 'Other' -Layer 3 -Action 'hide' | Out-Null
+            $script:Redrawn.Count | Should -Be 2 -Because 'other templates do not touch the urgent board'
+        }
+        finally { $script:UrgentHomeMessage.Clear() }
+    }
+
     It 'records a new rich message as home only when the send reported an id' {
         $script:UrgentHomeMessage.Clear()
         $script:LastTelegramMessageId = 999

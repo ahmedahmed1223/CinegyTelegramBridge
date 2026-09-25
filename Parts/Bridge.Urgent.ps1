@@ -740,7 +740,7 @@ function Send-UrgentScreen {
         The home id is taken only from a send that reported one, so a stale
         id can never point a later edit at somebody else's message.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [int]$MessageId = 0, [Parameter(Mandatory)][string]$Text, $Keyboard, [object[]]$Blocks = $null, [switch]$Fresh)
+    param([Parameter(Mandatory)][long]$ChatId, [int]$MessageId = 0, [Parameter(Mandatory)][string]$Text, $Keyboard, [object[]]$Blocks = $null, [switch]$Fresh, [switch]$EditOnly)
     $homeChat = [long]$ChatId
     # -Fresh: entering the board from outside it. The screen goes to the
     # bottom of the chat as a new message and becomes the home; editing
@@ -760,6 +760,10 @@ function Send-UrgentScreen {
         }
     }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML')) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
+    # -EditOnly is a refresh nobody in this chat asked for: a board that can
+    # no longer be edited is forgotten, not replaced by a new message pushed
+    # at an operator who was not looking. The next open sends a fresh one.
+    if ($EditOnly) { $script:UrgentHomeMessage.Remove($homeChat) | Out-Null; return }
     $script:LastTelegramMessageId = 0
     Send-TelegramMessage -ChatId $ChatId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML'
     if ([int]$script:LastTelegramMessageId -gt 0) { $script:UrgentHomeMessage[$homeChat] = [int]$script:LastTelegramMessageId }
@@ -768,14 +772,47 @@ function Send-UrgentScreen {
 function Show-UrgentBoardScreen {
     <# -Notice is one line above the board - what the button just did - so
        the answer and the state arrive on the same message. #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '', [switch]$Fresh)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '', [switch]$Fresh, [switch]$EditOnly)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
     $blocks = @(Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page)
     if ($Notice) { $blocks = @(@{ type = 'paragraph'; text = $Notice }) + $blocks }
     $text = Get-UrgentBoardText -ChatId $ChatId -Page $Page
     if ($Notice) { $text = "$(ConvertTo-TelegramHtmlText -Text $Notice)`n$text" }
-    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text $text -Keyboard $keyboard -Blocks $blocks -Fresh:$Fresh
+    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text $text -Keyboard $keyboard -Blocks $blocks -Fresh:$Fresh -EditOnly:$EditOnly
+}
+
+function Update-UrgentHomeScreens {
+    <#
+        Every chat's board message, redrawn because the urgent's air changed.
+
+        A board left open read "on air" after another operator had hidden
+        the story, or after the engine dropped it, until somebody pressed
+        refresh. Called from Send-TemplateAirNotice, which every show, hide,
+        exit and outside ending of a template passes through - before its
+        audience and duplicate gates, which are about the room's notices,
+        not about this. Edits only: a board that cannot be edited is
+        forgotten, never replaced by a message nobody asked for.
+
+        The acting chat is redrawn too: its own handler redraws again with
+        its own words a moment later, and a hide pressed on an air notice
+        rather than on the board has no other way to reach that chat's
+        board at all.
+    #>
+    param([ValidateSet('show', 'hide')][string]$Action = 'hide', [AllowEmptyString()][string]$ActorName = '', [switch]$EndedOutside)
+    if (-not $script:UrgentHomeMessage -or $script:UrgentHomeMessage.Count -eq 0) { return 0 }
+    $notice = if ($Action -eq 'show') { if ($ActorName) { (T 'urg.airShownBy' $ActorName) } else { (T 'urgent.airShown') } }
+        elseif ($EndedOutside) { (T 'urgent.airEndedOutside') }
+        elseif ($ActorName) { (T 'urg.airHiddenBy' $ActorName) } else { (T 'urgent.airHidden') }
+    $count = 0
+    foreach ($chatId in @($script:UrgentHomeMessage.Keys)) {
+        try {
+            Show-UrgentBoardScreen -ChatId ([long]$chatId) -UserId ([long]$chatId) -MessageId ([int]$script:UrgentHomeMessage[$chatId]) -Notice $notice -EditOnly
+            $count++
+        }
+        catch { Write-BridgeLog "Could not refresh the urgent board for chat $chatId : $($_.Exception.Message)" 'WARN' }
+    }
+    return $count
 }
 
 function Get-UrgentItemKeyboard {

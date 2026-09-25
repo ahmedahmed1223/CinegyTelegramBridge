@@ -3,6 +3,24 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeContentBoards.psm1') -Force
 
+    # Should -Be compares strings through the culture, and culture comparison
+    # IGNORES the very characters these tests exist for - a direction mark,
+    # a zero-width space, a BOM. Written with Should -Be, a cleaning test
+    # passed with the cleaning removed. Ordinal, element by element.
+    function global:Assert-OrdinalEqual {
+        param([Parameter(ValueFromPipeline)]$Actual, [Parameter(Mandatory)]$Expected)
+        begin { $got = [System.Collections.Generic.List[string]]::new() }
+        process { foreach ($item in @($Actual)) { $got.Add([string]$item) } }
+        end {
+            $want = @($Expected | ForEach-Object { [string]$_ })
+            $shown = ($got | ForEach-Object { ($_.ToCharArray() | ForEach-Object { 'U+{0:X4}' -f [int]$_ }) -join ' ' }) -join ' | '
+            $got.Count | Should -Be $want.Count -Because "the items were: $shown"
+            for ($i = 0; $i -lt $want.Count; $i++) {
+                [string]::Equals($got[$i], $want[$i], [StringComparison]::Ordinal) | Should -BeTrue -Because "item $i was '$($got[$i])' ($shown), expected '$($want[$i])'"
+            }
+        }
+    }
+
     # Two text fields, which is the shape a programme banner usually has: a
     # title line and a subject line. The scene declares them; nothing here
     # invents field names.
@@ -252,5 +270,17 @@ Describe 'Either shape a board can arrive in' {
             Get-BoardProperty $shape 'Name' | Should -Be 'بنر'
             Get-BoardProperty $shape 'Missing' 'fallback' | Should -Be 'fallback'
         }
+    }
+}
+
+Describe 'What a pasted board row cannot carry onto air' {
+    It 'drops direction marks and zero-width characters from every value' {
+        ConvertTo-BoardText -Text "`u{200F}ضيف`u{200E} الحلقة`u{00A0}اليوم`u{00AD}" | Assert-OrdinalEqual -Expected 'ضيف الحلقة اليوم'
+    }
+
+    It 'cleans each field of a pasted block' {
+        $parsed = ConvertFrom-BoardPasteText -Text "`u{202B}الأول`u{202C} | ثان`nالثاني | `u{FEFF}ثالث" -TextFields @('a', 'b')
+        $parsed.Rows[0]['a'] | Assert-OrdinalEqual -Expected 'الأول'
+        $parsed.Rows[1]['b'] | Assert-OrdinalEqual -Expected 'ثالث'
     }
 }

@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot 'BridgeAirText.psm1')
 Set-StrictMode -Version Latest
 
 function New-MojazResult {
@@ -30,6 +31,14 @@ function ConvertTo-MojazName {
 function New-MojazId {
     param([Parameter(Mandatory)][ValidateSet('b', 'r', 'run', 'ms')][string]$Prefix)
     return "$Prefix`_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+}
+
+function ConvertTo-MojazRowText {
+    <# A row's title, story or design field as it may reach air: invisible
+       characters dropped, ends trimmed. Line breaks stay - a story can run to
+       two lines on the card. The one way row text is stored. #>
+    param([AllowEmptyString()][string]$Text = '')
+    return (Remove-BridgeInvisibleText -Text $Text).Trim()
 }
 
 function New-MojazLibrary {
@@ -318,7 +327,7 @@ function Get-MojazFieldValues {
         @($Fields.PSObject.Properties | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } })
     }
     foreach ($pair in $pairs) {
-        $text = ([string]$pair.Value).Trim()
+        $text = ConvertTo-MojazRowText -Text ([string]$pair.Value)
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
         $values[$pair.Name] = $text
     }
@@ -334,8 +343,8 @@ function Add-MojazBulletinRow {
         $Fields,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
-    $rowTitle = ([string]$Title).Trim()
-    $rowText = ([string]$Text).Trim()
+    $rowTitle = ConvertTo-MojazRowText -Text $Title
+    $rowText = ConvertTo-MojazRowText -Text $Text
     # A design carries whatever fields it declares, so emptiness is "nothing
     # in any of them" rather than "no title and no story". The old rule was
     # the news design's shape, and it would have refused a row on a
@@ -393,8 +402,8 @@ function Set-MojazBulletinRow {
             param($bulletin)
             $row = @(@(Get-MojazProperty $bulletin 'Rows' @()) | Where-Object { [string]$_.Id -eq $editedRowId }) | Select-Object -First 1
             if (-not $row) { return (New-MojazResult $false $null 'row_not_found' 'الصف غير موجود.') }
-            if ($fields.ContainsKey('Title')) { $row.Title = ([string]$Title).Trim() }
-            if ($fields.ContainsKey('Text')) { $row.Text = ([string]$Text).Trim() }
+            if ($fields.ContainsKey('Title')) { $row.Title = ConvertTo-MojazRowText -Text $Title }
+            if ($fields.ContainsKey('Text')) { $row.Text = ConvertTo-MojazRowText -Text $Text }
             if ($fields.ContainsKey('Image') -or $fields.ContainsKey('ImageMode')) {
                 $path = ([string]$Image).Trim()
                 $mode = if ($ImageMode) { $ImageMode } elseif ($path) { 'new' } else { 'inherit' }

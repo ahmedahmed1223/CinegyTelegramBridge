@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.70.4'
+$script:BridgeVersion = '8.70.5'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -73,6 +73,7 @@ Import-Module (Join-Path $moduleRoot "BridgeSchedulePolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMedia.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRelayPolicy.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeRuntimeState.psm1") -Force
+Import-Module (Join-Path $moduleRoot "BridgeAirText.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeNewsTicker.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeMojaz.psm1") -Force
 Import-Module (Join-Path $moduleRoot "BridgeUrgent.psm1") -Force

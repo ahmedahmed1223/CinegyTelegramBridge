@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot 'BridgeAirText.psm1')
 Set-StrictMode -Version Latest
 
 <#
@@ -59,8 +60,10 @@ function New-BoardItemId {
 }
 
 function ConvertTo-BoardText {
+    # Every board value passes here - add, edit, paste, the board's name - so
+    # the invisible characters a paste carries are dropped here, once.
     param([string]$Text)
-    return (([string]$Text) -replace '\s+', ' ').Trim()
+    return ((Remove-BridgeInvisibleText -Text ([string]$Text)) -replace '\s+', ' ').Trim()
 }
 
 function Test-BoardEditRole {

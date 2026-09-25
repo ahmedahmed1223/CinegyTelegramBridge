@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.5
+
+Bulletin rows and programme-board values are now cleaned of the invisible characters a paste carries, as the ticker has been since 8.69.8, from one list in a new `BridgeAirText.psm1` that all three modules call; bulletin stories keep their line breaks. The tests for this now compare ordinally: `Should -Be` compares through the culture, which ignores exactly these characters, so the earlier cleaning tests would have passed with the cleaning removed.
+
 ## Version 8.70.4
 
 The bulletin screens redraw in place: row moves, deletes, paging, sync and fit-to-loop ride the refresh mark from 8.70.3 instead of sending a new copy. And the bulletin library's pager shared the rows' `mojazpage:` prefix, so its next page opened the selected bulletin; it now has `mojazlib:`.

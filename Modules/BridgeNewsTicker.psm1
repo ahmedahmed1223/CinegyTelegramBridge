@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot 'BridgeAirText.psm1')
 Set-StrictMode -Version Latest
 
 function Get-CleanNewsItemText {
@@ -16,7 +17,8 @@ function Get-CleanNewsItemText {
         with it: it is meaningful in Persian and Urdu text.
     #>
     param([AllowEmptyString()][string]$Text = '')
-    $clean = [regex]::Replace($Text, '[\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00AD]', '')
+    # The list of what never reaches air lives in BridgeAirText, once.
+    $clean = Remove-BridgeInvisibleText -Text $Text
     # Every other control and every kind of space: tab, CR/LF, NBSP, the
     # thin and figure spaces a typesetter uses.
     $clean = [regex]::Replace($clean, '[\p{Cc}\p{Zs}\u2028\u2029]+', ' ')

@@ -2,6 +2,24 @@
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\Modules\BridgeMojaz.psm1') -Force
+
+    # Should -Be compares strings through the culture, and culture comparison
+    # IGNORES the very characters these tests exist for - a direction mark,
+    # a zero-width space, a BOM. Written with Should -Be, a cleaning test
+    # passed with the cleaning removed. Ordinal, element by element.
+    function global:Assert-OrdinalEqual {
+        param([Parameter(ValueFromPipeline)]$Actual, [Parameter(Mandatory)]$Expected)
+        begin { $got = [System.Collections.Generic.List[string]]::new() }
+        process { foreach ($item in @($Actual)) { $got.Add([string]$item) } }
+        end {
+            $want = @($Expected | ForEach-Object { [string]$_ })
+            $shown = ($got | ForEach-Object { ($_.ToCharArray() | ForEach-Object { 'U+{0:X4}' -f [int]$_ }) -join ' ' }) -join ' | '
+            $got.Count | Should -Be $want.Count -Because "the items were: $shown"
+            for ($i = 0; $i -lt $want.Count; $i++) {
+                [string]::Equals($got[$i], $want[$i], [StringComparison]::Ordinal) | Should -BeTrue -Because "item $i was '$($got[$i])' ($shown), expected '$($want[$i])'"
+            }
+        }
+    }
 }
 
 Describe 'Mojaz bulletin library domain' {
@@ -619,5 +637,37 @@ Describe 'How long a bulletin stays up' {
         $snapshot = (New-MojazRunSnapshot -Bulletin (New-TestClipBulletin)).Value
         $snapshot.HoldSeconds | Should -Be 0
         $snapshot.ExitAtSeconds | Should -BeGreaterThan 0
+    }
+}
+
+Describe 'What a pasted bulletin row cannot carry onto air' {
+    BeforeEach {
+        $script:library = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'المسائي').Value
+        $script:id = [string]$script:library.Bulletins[0].Id
+    }
+
+    It 'drops direction marks and zero-width characters from the title and story' {
+        $added = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id `
+            -Title "`u{200F}عنوان`u{200E}" -Text "خبر`u{202A}من`u{202C} غزة`u{FEFF}"
+        $row = $added.Value.Bulletins[0].Rows[0]
+        $row.Title | Assert-OrdinalEqual -Expected 'عنوان'
+        $row.Text | Assert-OrdinalEqual -Expected 'خبرمن غزة'
+    }
+
+    It 'keeps a line break inside a story, which may run to two lines' {
+        $added = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'ع' -Text "سطر أول`nسطر ثان"
+        $added.Value.Bulletins[0].Rows[0].Text | Assert-OrdinalEqual -Expected "سطر أول`nسطر ثان"
+    }
+
+    It 'cleans an edited row the same way' {
+        $added = Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title 'ع' -Text 'خ'
+        $rowId = [string]$added.Value.Bulletins[0].Rows[0].Id
+        $edited = Set-MojazBulletinRow -Library $added.Value -BulletinId $script:id -RowId $rowId -Title "جديد`u{2067}"
+        $edited.Value.Bulletins[0].Rows[0].Title | Assert-OrdinalEqual -Expected 'جديد'
+    }
+
+    It 'keeps an emoji sequence whole' {
+        $emoji = "خبر `u{1F468}`u{200D}`u{1F469}`u{200D}`u{1F467}"
+        (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title $emoji -Text 'خ').Value.Bulletins[0].Rows[0].Title | Assert-OrdinalEqual -Expected $emoji
     }
 }

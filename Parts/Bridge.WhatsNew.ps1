@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.5'; Items = @(
+                        '🧹 **Bulletin rows and programme boards are cleaned like the ticker** — invisible direction marks that reorder words on air, zero-width characters and soft hyphens are dropped from what you type or paste. Line breaks inside a bulletin story stay, and emoji stay whole.'
+                    ) }
                 @{ Version = '8.70.4'; Items = @(
                         '📑 **The bulletin screen updates in place** — moving, deleting, paging, sync and fit-to-loop redraw the same message instead of sending a new copy each time.'
                         '📚 **Fixed: the bulletin library''s next page opened the selected bulletin** instead of the library''s second page.'
@@ -211,6 +214,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.5'; Items = @(
+                        '🧹 **صفوف الموجز وجداول البرامج تُنظَّف كما يُنظَّف الشريط** — تُحذف مما تكتبه أو تلصقه علامات الاتجاه الخفية التي تقلب ترتيب الكلمات على الهواء، والمحارف الصفرية، والواصلات الناعمة. وتبقى الأسطر داخل قصة الموجز، وتبقى الرموز التعبيرية سليمة.'
+                    ) }
                 @{ Version = '8.70.4'; Items = @(
                         '📑 **شاشة الموجز تُحدَّث في مكانها** — التحريك والحذف والتقليب والمزامنة ومطابقة الحلقة تعيد رسم الرسالة نفسها بدل إرسال نسخة جديدة كل مرّة.'
                         '📚 **إصلاح: الصفحة التالية في مكتبة الموجزات كانت تفتح الموجز المختار** بدل الصفحة الثانية من المكتبة.'

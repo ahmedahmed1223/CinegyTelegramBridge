@@ -278,7 +278,7 @@ function Save-NewsSheetItems {
     }
 }
 
-function Publish-NewsTickerDraft { param([long]$UserId)
+function Publish-NewsTickerDraft { param([long]$UserId, [ValidateSet('draft', 'scheduled')][string]$Source = 'draft')
     $draft = Get-NewsTickerDraft -UserId $UserId
     # Carries Conflict so every caller can branch on it uniformly; without it
     # $result.Conflict throws under StrictMode on this path.
@@ -286,7 +286,7 @@ function Publish-NewsTickerDraft { param([long]$UserId)
     $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
         Add-AuditEntry (T 'news.publishedAudit' $(Format-UserAuditActor -UserId $UserId) $(@($draft.Items).Count))
-        Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count)
+        Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count) -Source $Source
         # Mirror to the sheet after the ticker is safely on air, never before.
         # A sheet that refuses the write must not undo a publish that already
         # succeeded, so this reports and rolls nothing back.
@@ -338,7 +338,7 @@ function Write-NewsPublishRecord {
        needs a count per day per operator, and parsing that back out of an
        Arabic sentence would break the first time someone rewords it. #>
     param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][int]$ItemCount,
-        [ValidateSet('draft', 'sheet', 'auto')][string]$Source = 'draft')
+        [ValidateSet('draft', 'sheet', 'auto', 'scheduled')][string]$Source = 'draft')
     Write-AuditRecord -OperationId "news-$([guid]::NewGuid().ToString('N'))" -EventName news_publish `
         -Result success -UserId $UserId -Action PUBLISH -Count $ItemCount `
         -Message (T 'news.publishTicker')
@@ -351,6 +351,7 @@ function Write-NewsPublishRecord {
     $label = switch ($Source) {
         'auto' { (T 'tick.sheetSync' $counted) }
         'sheet' { (T 'news.execSheet' $counted) }
+        'scheduled' { (T 'news.execScheduled' $counted) }
         default { (T 'news.execDraft' $counted) }
     }
     Write-BridgeExecutionRecord -Kind 'news' -Result 'success' -Label $label | Out-Null
@@ -987,6 +988,9 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         # mis-tap costs work.
         $rows += , @((New-BridgeButton -Text (T 'news.reviewPublish') -CallbackData 'news:publish' -Style 'success'),
             (New-BridgeButton -Text (T 'news.discardDraft') -CallbackData 'news:cancel' -Style 'danger'))
+        $publishAt = Get-NewsPublishAt -Draft $draft
+        if ($null -ne $publishAt) { $rows += , @(@{text=(T 'news.later.cancel' $($publishAt.ToLocalTime().ToString('HH:mm')));callback_data='news:latercancel'}) }
+        else { $rows += , @(@{text=(T 'news.later.button');callback_data='news:later'}) }
         $rows += , @(@{text=(T 'news.addItem');callback_data='news:add'}, @{text=(T 'news.editOrder');callback_data='news:list'})
         $rows += , @(@{text=(T 'news.importTxt');callback_data='news:import'}, @{text=(T 'news.preview');callback_data='news:preview'})
         if ((Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsClearAllNews')) {
@@ -1120,6 +1124,97 @@ function Resume-NewsPausedItem {
     $script:NewsPaused.RemoveAt($Index)
     Save-NewsPaused | Out-Null
     return $true
+}
+
+function Set-NewsPublishAt {
+    <#
+        Asks the draft to publish itself at a time. Borrowed from the
+        bulletin's "run later". The time rides the draft - saved with it,
+        surviving a restart - and the draft stays editable until then: the
+        tick publishes whatever the draft holds when the time comes.
+    #>
+    param([long]$UserId, [datetimeoffset]$At)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft) -or $At -le [datetimeoffset]::Now) { return $false }
+    $draft.PublishAt = $At.ToString('o')
+    if (-not (Save-NewsTickerDraft)) { $draft.Remove('PublishAt'); return $false }
+    Add-AuditEntry (T 'news.later.audit' $($At.ToLocalTime().ToString('HH:mm')) $(Format-UserAuditActor -UserId $UserId))
+    return $true
+}
+
+function Clear-NewsPublishAt {
+    param([long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or -not $draft.ContainsKey('PublishAt')) { return $false }
+    $draft.Remove('PublishAt')
+    Save-NewsTickerDraft | Out-Null
+    return $true
+}
+
+function Get-NewsPublishAt {
+    <# The draft's publish time, or $null. #>
+    param($Draft)
+    $moment = [datetimeoffset]::MinValue
+    if ($Draft -and [datetimeoffset]::TryParse([string](Get-JsonProp $Draft 'PublishAt'), [ref]$moment)) { return $moment }
+    return $null
+}
+
+function Update-NewsScheduledPublish {
+    <#
+        Publishes a draft whose time has come, through Publish-NewsTickerDraft
+        - the one publish path, with its conflict check, audit, sheet mirror
+        and notice. A failure clears the time and tells the owner, rather than
+        retrying on every tick; the draft is kept to fix and publish.
+
+        A draft handed over to everyone has no owner to publish as, so its
+        time is dropped and whoever set it is told.
+
+        Minute-grained: the tick runs between long polls, so a publish lands
+        within a poll of its minute - good enough for a ticker, and the poll
+        timeout is not shortened for it.
+    #>
+    $draft = $script:NewsTickerDraft
+    $at = Get-NewsPublishAt -Draft $draft
+    if ($null -eq $at -or $at -gt [datetimeoffset]::Now) { return }
+    $owner = [long](Get-JsonProp $draft 'OwnerUserId')
+    $chat = [long](Get-JsonProp $draft 'OwnerChatId')
+    if ((Test-NewsTickerDraftOpen -Draft $draft) -or $owner -le 0) {
+        $draft.Remove('PublishAt'); Save-NewsTickerDraft | Out-Null
+        $notify = if ($chat -gt 0) { $chat } else { [long](Get-JsonProp $draft 'HandedOverChatId') }
+        if ($notify -gt 0) { Send-TelegramMessage -ChatId $notify -Text (T 'news.later.openDraft') }
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label (T 'news.later.label') -ErrorText 'draft handed over' | Out-Null
+        return
+    }
+    $result = Publish-NewsTickerDraft -UserId $owner -Source scheduled
+    if ($result.Success) {
+        Send-TelegramMessage -ChatId $chat -Text (T 'news.later.done' $($at.ToLocalTime().ToString('HH:mm'))) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chat -UserId $owner)
+        return
+    }
+    if ($script:NewsTickerDraft) { $script:NewsTickerDraft.Remove('PublishAt'); Save-NewsTickerDraft | Out-Null }
+    $why = if ($result.Conflict) { (T 'news.later.conflict') } else { [string]$result.Error }
+    Send-TelegramMessage -ChatId $chat -Text (T 'news.later.failed' $($at.ToLocalTime().ToString('HH:mm')) $why) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chat -UserId $owner)
+    Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label (T 'news.later.label') -ErrorText $why | Out-Null
+}
+
+function Complete-NewsPublishAt {
+    <# The typed time, read by the scheduling screen's own parser - one
+       grammar for "when". #>
+    param([long]$ChatId, [long]$UserId, [string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'news_publish_at') { return }
+    $moment = ConvertFrom-OperatorScheduleTime -Text ([string]$Value)
+    if (-not $moment.Success) {
+        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string](Get-JsonProp $moment 'Error'))" -ReplyMarkup (Get-CancelKeyboard)
+        return
+    }
+    Clear-PendingState -ChatId $ChatId
+    Complete-NewsPublishAtMoment -ChatId $ChatId -UserId $UserId -At ([datetimeoffset]$moment.ScheduledAt)
+}
+
+function Complete-NewsPublishAtMoment {
+    param([long]$ChatId, [long]$UserId, [datetimeoffset]$At)
+    $text = if (Set-NewsPublishAt -UserId $UserId -At $At) { (T 'news.later.set' $($At.ToLocalTime().ToString('yyyy-MM-dd HH:mm'))) } else { (T 'news.later.refused') }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Show-NewsPausedScreen {

@@ -243,6 +243,28 @@ function Invoke-CallbackQuery {
             Set-PendingState -ChatId $chatId -State @{Mode='news_add_text';UserId=$userId;StartedAt=(Get-Date)}
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sendNewStory');break
         }
+        'news:later' {
+            if (-not (Get-NewsTickerDraft -UserId $userId)) { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId; break }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'news_publish_at'; UserId = $userId; StartedAt = (Get-Date) }
+            $laterKeyboard = @{ inline_keyboard = @(
+                    , @( @{ text = (T 'news.later.in' 15); callback_data = 'news:laterin:15' }, @{ text = (T 'news.later.in' 30); callback_data = 'news:laterin:30' }, @{ text = (T 'news.later.in' 60); callback_data = 'news:laterin:60' } )
+                    , @( @{ text = (T 'reply.cancelWord'); callback_data = 'news:refresh' } )) }
+            Send-TelegramMessage -ChatId $chatId -Text (T 'news.later.prompt') -ReplyMarkup $laterKeyboard
+            break
+        }
+        'news:laterin:*' {
+            $laterMinutes = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'news:laterin:'), [ref]$laterMinutes) -and $laterMinutes -in @(15, 30, 60)) {
+                Clear-PendingState -ChatId $chatId
+                Complete-NewsPublishAtMoment -ChatId $chatId -UserId $userId -At ([datetimeoffset]::Now.AddMinutes($laterMinutes))
+            }
+            break
+        }
+        'news:latercancel' {
+            Clear-NewsPublishAt -UserId $userId | Out-Null
+            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
         'news:pause:*' {
             $pauseIndex = 0
             if ([int]::TryParse((Get-CallbackArg $data 'news:pause:'), [ref]$pauseIndex) -and (Suspend-NewsTickerDraftItem -UserId $userId -Index $pauseIndex)) {

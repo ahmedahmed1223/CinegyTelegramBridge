@@ -1732,3 +1732,77 @@ Describe 'The paused shelf pages' {
         $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
     }
 }
+
+Describe 'Publishing the ticker at a set time' {
+    <#
+        Borrowed from the bulletin's "run later": prepare the evening ticker
+        in the afternoon and let it go out at 18:00. The time rides the draft
+        itself, and the tick publishes through Publish-NewsTickerDraft - one
+        publish path, with its conflict check, audit, sheet mirror and notice.
+    #>
+    BeforeEach {
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('أ'); BaseHash = 'h'; UpdatedAt = (Get-Date).ToString('o') }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Send-TelegramMessage { }
+        Mock Add-AuditEntry { }
+        Mock Write-BridgeLog { }
+        Mock Write-BridgeExecutionRecord { $true }
+    }
+    AfterEach { $script:NewsTickerDraft = $null }
+
+    It 'sets a publish time on the owner''s draft, and only in the future' {
+        Set-NewsPublishAt -UserId 42 -At ([datetimeoffset]::Now.AddMinutes(30)) | Should -BeTrue
+        [string]$script:NewsTickerDraft.PublishAt | Should -Not -BeNullOrEmpty
+        Set-NewsPublishAt -UserId 42 -At ([datetimeoffset]::Now.AddMinutes(-5)) | Should -BeFalse
+        Set-NewsPublishAt -UserId 7 -At ([datetimeoffset]::Now.AddMinutes(30)) | Should -BeFalse -Because 'not their draft'
+    }
+
+    It 'publishes through the normal path when the time comes, not before' {
+        Mock Publish-NewsTickerDraft { [pscustomobject]@{ Success = $true; Conflict = $false; Error = '' } }
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddMinutes(10).ToString('o')
+        Update-NewsScheduledPublish
+        Should -Invoke Publish-NewsTickerDraft -Times 0
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddSeconds(-1).ToString('o')
+        Update-NewsScheduledPublish
+        Should -Invoke Publish-NewsTickerDraft -Times 1 -ParameterFilter { $UserId -eq 42 }
+    }
+
+    It 'tells the owner and keeps the draft when the ticker moved on meanwhile' {
+        Mock Publish-NewsTickerDraft { [pscustomobject]@{ Success = $false; Conflict = $true; Error = 'changed' } }
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddSeconds(-1).ToString('o')
+        Update-NewsScheduledPublish
+        $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        $script:NewsTickerDraft.ContainsKey('PublishAt') | Should -BeFalse -Because 'a failed time is cleared, not retried every tick'
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $ChatId -eq 42 }
+        Should -Invoke Write-BridgeExecutionRecord -ParameterFilter { $Kind -eq 'news' -and $Result -eq 'failed' }
+    }
+
+    It 'does not publish a draft handed over to everyone on the scheduler''s behalf' {
+        Mock Publish-NewsTickerDraft { }
+        $script:NewsTickerDraft.IsOpen = $true
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddSeconds(-1).ToString('o')
+        Update-NewsScheduledPublish
+        Should -Invoke Publish-NewsTickerDraft -Times 0
+        $script:NewsTickerDraft.ContainsKey('PublishAt') | Should -BeFalse
+    }
+
+    It 'does not expire a draft that is waiting for its time' {
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+        Mock Remove-NewsTickerDraft { $script:removedScheduled = $true }
+        $script:removedScheduled = $false
+        $script:NewsTickerDraft.UpdatedAt = (Get-Date).AddHours(-3).ToString('o')
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddHours(1).ToString('o')
+        Update-NewsDraftExpiry
+        $script:removedScheduled | Should -BeFalse
+    }
+
+    It 'offers the time on the owner''s screen, and its cancel once set' {
+        Mock Get-NewsLockReservation { $null }
+        Mock Test-Admin { $false }
+        $before = @((Get-NewsTickerManagementKeyboard -ChatId 42 -UserId 42).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $before | Should -Contain 'news:later'
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::Now.AddHours(1).ToString('o')
+        $after = @((Get-NewsTickerManagementKeyboard -ChatId 42 -UserId 42).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $after | Should -Contain 'news:latercancel'
+    }
+}

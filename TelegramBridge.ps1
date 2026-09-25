@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.70.8'
+$script:BridgeVersion = '8.70.9'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -2291,6 +2291,7 @@ try {
                                 'user_alias_edit' { Complete-UserAliasEdit -ChatId $chatId -AdminUserId $userId -Value $text | Out-Null }
                                 'news_add_text' { Complete-NewsTickerAddText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_paste_review' { Add-NewsPasteChunk -ChatId $chatId -UserId $userId -Value $text | Out-Null }
+                                'news_publish_at' { Complete-NewsPublishAt -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'row_paste_review' { Add-RowPasteChunk -ChatId $chatId -UserId $userId -Value $text | Out-Null }
                                 'news_edit_text' { Complete-NewsTickerEditText -ChatId $chatId -UserId $userId -Value $text | Out-Null }
         'template_search' { Complete-TemplateSearch -ChatId $chatId -Value $text | Out-Null }

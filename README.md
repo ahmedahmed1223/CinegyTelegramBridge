@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.9
+
+The ticker can be published at a set time. The time rides the draft (`PublishAt`), which stays editable until then, and the tick publishes through `Publish-NewsTickerDraft`, the same path as the button - conflict check, audit, sheet mirror, notice. A conflict clears the time and tells the owner; a scheduled draft is exempt from draft expiry.
+
 ## Version 8.70.8
 
 The ticker's management screen and the programme board screen are now rich tables with their text kept as fallback; the ticker's shows its first forty in air order. A refused rich edit no longer consumes the refresh mark, so the text fallback still redraws the pressed message. And, merged with 8.70.7 from another session: the watchdog's removal log line now quotes Cinegy's Client node and active item XML.

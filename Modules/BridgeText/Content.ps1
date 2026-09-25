@@ -348,6 +348,19 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.later.button'] = @{ ar = '📅 انشر في وقت محدّد'; en = '📅 Publish at a set time' }
+    $catalogue['news.later.cancel'] = @{ ar = '📅 سيُنشر {0} — إلغاء الموعد'; en = '📅 Publishing at {0} — cancel it' }
+    $catalogue['news.later.prompt'] = @{ ar = "📅 متى يُنشر الشريط؟ اكتب الوقت مثل 18:00 أو 2026-09-25 18:00، أو اختر:`nتبقى المسودة قابلة للتعديل حتى موعدها، ويُنشر ما فيها عندئذ."; en = "📅 When should the ticker publish? Type a time such as 18:00 or 2026-09-25 18:00, or pick one:`nThe draft stays editable until then, and whatever it holds is published." }
+    $catalogue['news.later.in'] = @{ ar = 'بعد {0} د'; en = 'In {0} min' }
+    $catalogue['news.later.set'] = @{ ar = '📅 سيُنشر الشريط {0}.'; en = '📅 The ticker will publish at {0}.' }
+    $catalogue['news.later.refused'] = @{ ar = 'لم يُضبط الموعد: يجب أن يكون في المستقبل وأن تكون المسودة لك.'; en = 'The time was not set: it must be in the future, and the draft must be yours.' }
+    $catalogue['news.later.done'] = @{ ar = '📅 نُشر الشريط في موعده {0}.'; en = '📅 The ticker was published at its time, {0}.' }
+    $catalogue['news.later.failed'] = @{ ar = '⚠️ لم يُنشر الشريط في موعده {0}: {1}. المسودة باقية لتنشرها بنفسك.'; en = '⚠️ The ticker was not published at {0}: {1}. The draft is kept for you to publish.' }
+    $catalogue['news.later.conflict'] = @{ ar = 'تغيّر الشريط على الهواء منذ بدأت المسودة'; en = 'the ticker on air changed since the draft was started' }
+    $catalogue['news.later.openDraft'] = @{ ar = '📅 أُلغي موعد نشر الشريط: المسودة سُلّمت للجميع فلم يبقَ من يُنشر باسمه.'; en = '📅 The ticker''s publish time was dropped: the draft was handed to everyone, so there was nobody to publish as.' }
+    $catalogue['news.later.label'] = @{ ar = 'نشر مجدول'; en = 'a scheduled publish' }
+    $catalogue['news.later.audit'] = @{ ar = '📅 ضُبط نشر الشريط {0} — {1}'; en = '📅 The ticker set to publish at {0} — {1}' }
+    $catalogue['news.execScheduled'] = @{ ar = 'نشر مجدول · {0}'; en = 'scheduled publish · {0}' }
     $catalogue['news.table.title'] = @{ ar = '📰 شريط الأخبار'; en = '📰 The news ticker' }
     $catalogue['news.table.headline'] = @{ ar = 'الخبر'; en = 'Headline' }
     $catalogue['news.table.state'] = @{ ar = 'الحالة'; en = 'State' }

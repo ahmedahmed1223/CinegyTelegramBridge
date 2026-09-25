@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.9'; Items = @(
+                        '📅 **Publish the ticker at a set time** — 📅 on your draft: type 18:00 or a full date, or pick in 15, 30 or 60 minutes. The draft stays editable until then, and whatever it holds is published, exactly as the publish button would. If the ticker on air changed meanwhile, nothing is overwritten: you are told and the draft is kept.'
+                    ) }
                 @{ Version = '8.70.8'; Items = @(
                         '📊 **The ticker and the programme boards show a table**, as the bulletin does — number and headline (and 🆕 or on air on your draft); number, the first two fields and ✅/🚫 on a board. Where tables are not available the screen reads as before.'
                     ) }
@@ -225,6 +228,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.9'; Items = @(
+                        '📅 **انشر الشريط في وقت محدّد** — «📅» في مسودتك: اكتب 18:00 أو تاريخًا كاملًا، أو اختر بعد 15 أو 30 أو 60 دقيقة. تبقى المسودة قابلة للتعديل حتى موعدها، ويُنشر ما فيها كما يفعل زرّ النشر تمامًا. وإن تغيّر الشريط على الهواء في الأثناء لا يُكتب فوقه شيء: تُبلَّغ وتبقى المسودة.'
+                    ) }
                 @{ Version = '8.70.8'; Items = @(
                         '📊 **شريط الأخبار وجداول البرامج تُعرض جدولًا** كما يُعرض الموجز — الرقم والخبر (ومعه 🆕 أو «على الهواء» في مسودتك)؛ والرقم وأول حقلين و✅/🚫 في جدول البرامج. وحيث لا تتاح الجداول تبقى الشاشة كما كانت.'
                     ) }

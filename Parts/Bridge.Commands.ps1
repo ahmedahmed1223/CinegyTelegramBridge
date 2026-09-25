@@ -286,9 +286,14 @@ function Complete-SettingValue {
 function Complete-TemplateMaxAirCustom {
     param([Parameter(Mandatory)][long]$ChatId, [AllowEmptyString()][string]$Value = "")
     $state = Get-PendingState -ChatId $ChatId
-    if (-not $state) { return }
+    # Only the prompt this answers, and only for an administrator still: the
+    # button that opened it was admin-gated, and a role can change while the
+    # prompt waits.
+    if (-not $state -or [string](Get-JsonProp $state 'Mode') -ne 'template_max_air_custom') { return }
     Clear-PendingState -ChatId $ChatId
-    $trimmed = $Value.Trim()
+    if (-not (Test-Admin -ChatId $ChatId -UserId ([long](Get-JsonProp $state 'UserId')))) { return }
+    # An Arabic keyboard types ٩٠, which \d matches and [int] cannot read.
+    $trimmed = (ConvertTo-BridgeLatinDigits -Text $Value).Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.valueEmpty') -ReplyMarkup (Get-SettingsKeyboard)
         return

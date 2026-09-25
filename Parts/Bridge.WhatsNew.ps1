@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.69.10'; Items = @(
+                        '⏱ **Fixed: a custom maximum air time for a template could not be typed.** The ⌨️ custom-amount button answered "the buttons have expired". It now asks for the duration, as 2:30 or 90, and digits typed on an Arabic keyboard are read too.'
+                    ) }
                 @{ Version = '8.69.9'; Items = @(
                         '🧾 **Fixed: the ticker execution log always said nothing had run.** Only the automatic sheet sync wrote to it, and this station publishes by hand. Every ticker publish is now there — from the draft, pulled from the sheet, or automatic — each named for how it was made.'
                     ) }
@@ -188,6 +191,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.69.10'; Items = @(
+                        '⏱ **إصلاح: لم يكن ممكنًا كتابة مدّة قصوى مخصّصة للقالب.** زرّ «⌨️ مقدار مخصص» كان يردّ بأن الأزرار انتهت صلاحيتها. صار يطلب المدّة، مثل 2:30 أو 90، ويقرأ الأرقام العربية أيضًا (٢:٣٠ أو ٩٠).'
+                    ) }
                 @{ Version = '8.69.9'; Items = @(
                         '🧾 **إصلاح: سجلّ تنفيذ الشريط كان يقول دائمًا إن شيئًا لم يُنفَّذ.** لم يكن يكتب فيه إلا المزامنة التلقائية مع الشيت، وهذه المحطة تنشر يدويًا. صار كل نشر للشريط فيه — من المسودة، أو سحبًا من الشيت، أو تلقائيًا — ومعه كيف نُشر.'
                     ) }

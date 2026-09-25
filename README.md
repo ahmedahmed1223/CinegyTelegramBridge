@@ -15,6 +15,13 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.69.10
+
+The template maximum-air editor's custom-amount button always answered
+"the buttons have expired": its action was missing from the pattern every
+button there is checked against. Typed durations are now read in Arabic
+digits too, and only from the prompt that asked, by an administrator.
+
 ## Version 8.69.9
 
 The ticker screen's execution-log button always showed an empty log: only

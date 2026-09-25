@@ -109,3 +109,60 @@ Describe 'Per-template maximum on-air lifetime' {
         Get-EffectiveAutoHideSeconds -Key other | Should -Be 0
     }
 }
+
+Describe 'Typing a custom maximum air time' {
+    <#
+        Reported: the custom button answered with an error and the ceiling
+        could not be typed. The button's action, 'custom', was missing from
+        the pattern every tmax: button is checked against, so it was refused
+        as expired before its own branch ran. And a duration typed on an
+        Arabic keyboard ("٩٠") matched \d but threw on [int].
+    #>
+    BeforeEach {
+        $config.Settings | Add-Member TemplateMaxAirSeconds @{} -Force
+        Mock Test-Admin { $true }
+        Mock Save-Config { $script:LastConfigSaveFailed = $false }
+        Mock Send-TelegramMessage {}
+        Mock Edit-TelegramMessageText { $true }
+        Mock Get-TemplateStore { @{ Order = @('urgent'); Map = @{ urgent = @{ Key = 'urgent' } } } }
+        Show-TemplateMaxAirEditor -ChatId 100 -UserId 101
+        $state = Get-PendingState -ChatId 100
+        Invoke-TemplateMaxAirPick -ChatId 100 -UserId 101 -Argument "$($state.Token):item:0" | Out-Null
+        $script:tmaxToken = (Get-PendingState -ChatId 100).Token
+    }
+    AfterEach {
+        $config.Settings | Add-Member TemplateMaxAirSeconds @{} -Force
+        Clear-PendingState -ChatId 100
+    }
+
+    It 'asks for the amount instead of calling the button expired' {
+        Invoke-TemplateMaxAirPick -ChatId 100 -UserId 101 -Argument "$($script:tmaxToken):custom:ask" | Out-Null
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'template_max_air_custom'
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -eq (T 'kb.sendDuration') }
+        Should -Invoke Send-TelegramMessage -Times 0 -ParameterFilter { $Text -eq (T 'kb.buttonsExpired') }
+    }
+
+    It 'saves minutes:seconds typed after the button' {
+        Invoke-TemplateMaxAirPick -ChatId 100 -UserId 101 -Argument "$($script:tmaxToken):custom:ask" | Out-Null
+        Complete-TemplateMaxAirCustom -ChatId 100 -Value '2:30'
+        Get-EffectiveAutoHideSeconds -Key urgent | Should -Be 150
+    }
+
+    It 'reads a duration typed in Arabic-Indic digits' {
+        Invoke-TemplateMaxAirPick -ChatId 100 -UserId 101 -Argument "$($script:tmaxToken):custom:ask" | Out-Null
+        Complete-TemplateMaxAirCustom -ChatId 100 -Value '٩٠'
+        Get-EffectiveAutoHideSeconds -Key urgent | Should -Be 90
+    }
+
+    It 'ignores text that arrives when this prompt is not the one waiting' {
+        Complete-TemplateMaxAirCustom -ChatId 100 -Value '90'
+        Get-EffectiveAutoHideSeconds -Key urgent | Should -Be 0
+    }
+
+    It 'refuses a custom value from someone no longer an administrator' {
+        Invoke-TemplateMaxAirPick -ChatId 100 -UserId 101 -Argument "$($script:tmaxToken):custom:ask" | Out-Null
+        Mock Test-Admin { $false }
+        Complete-TemplateMaxAirCustom -ChatId 100 -Value '90'
+        Get-EffectiveAutoHideSeconds -Key urgent | Should -Be 0
+    }
+}

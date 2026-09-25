@@ -2558,7 +2558,9 @@ function Invoke-TemplateMaxAirPick {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string](Get-JsonProp $state 'Mode') -ne 'template_max_air' -or
         [long](Get-JsonProp $state 'UserId') -ne $UserId -or
-        $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable|now):(-?[0-9]{1,4}|ask|yes)$' -or
+        # 'custom' was missing here, so the custom-amount button was refused as
+        # expired before its own branch below could ever run.
+        $Argument -notmatch '^([a-f0-9]{12}):(item|page|set|delta|disable|now|custom):(-?[0-9]{1,4}|ask|yes)$' -or
         $Matches[1] -cne [string](Get-JsonProp $state 'Token')) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.buttonsExpired')
         return $false

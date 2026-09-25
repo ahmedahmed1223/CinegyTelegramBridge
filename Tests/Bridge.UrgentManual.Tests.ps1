@@ -50,7 +50,7 @@ Describe 'Full urgent reader and manual single story' {
         $script:UrgentBoardRun | Should -BeNullOrEmpty
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeFalse
     }
-    It 'hides a story shown alone after the board setting, and says so' {
+    It 'offers a timed button beside run-on-air, and only the timed one carries the hide time' {
         Mock Test-Authorized { $true }
         Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult {
@@ -60,7 +60,19 @@ Describe 'Full urgent reader and manual single story' {
         $config.Settings | Add-Member UrgentManualAutoHideSeconds 90 -Force
         try {
             $id = $script:UrgentBoard.Items[0].Id
+            $row = @((Get-UrgentItemKeyboard -Position 0).inline_keyboard[0])
+            @($row | ForEach-Object { $_['callback_data'] }) | Should -Be @("urgsingle:$id", "urgsingle:${id}:t")
+
+            # The plain button: no timer, as before.
             Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
+            $script:ManualPayload.Text | Should -Not -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
+            $state = Get-PendingState -ChatId 100
+            Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeTrue
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $AutoHideSeconds -eq 0 }
+
+            # The timed button: the board's duration, said on the review and on the live message.
+            $script:OnAir = @{}; $script:UrgentManualLive = @{}
+            Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9 -Timed
             $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
             $state = Get-PendingState -ChatId 100
             Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeTrue
@@ -71,6 +83,37 @@ Describe 'Full urgent reader and manual single story' {
         }
         finally { $config.Settings.PSObject.Properties.Remove('UrgentManualAutoHideSeconds') }
     }
+    It 'hides the timed button when neither the board nor the bridge has a duration' {
+        $config.Settings | Add-Member AutoHideDefaultSeconds 0 -Force
+        $id = $script:UrgentBoard.Items[0].Id
+        $row = @((Get-UrgentItemKeyboard -Position 0).inline_keyboard[0])
+        @($row | ForEach-Object { $_['callback_data'] }) | Should -Be @("urgsingle:$id")
+    }
+    It 'keeps each user their own manual or sequence choice, across a restart' {
+        Mock Test-Authorized { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserNameFromTelegram {}
+        Mock Update-UserLastActivity {}
+        Mock Show-UrgentBoardScreen {}
+        Mock Write-BridgeLog {}
+        $q = @{ id='m'; from=@{ id=101 }; message=@{ message_id=9; chat=@{ id=101; type='private' } }; data='urgmode:manual' }
+        Invoke-CallbackQuery $q
+        $buttons = @((Get-UrgentBoardKeyboard -ChatId 101 -UserId 101).inline_keyboard | ForEach-Object { $_ })
+        @($buttons | Where-Object { $_['callback_data'] -eq 'urgmode:manual' -and $_['text'] -like '*✅*' }).Count | Should -Be 1 -Because 'user 101 chose manual'
+        $other = @((Get-UrgentBoardKeyboard -ChatId 102 -UserId 102).inline_keyboard | ForEach-Object { $_ })
+        @($other | Where-Object { $_['callback_data'] -eq 'urgmode:auto' -and $_['text'] -like '*✅*' }).Count | Should -Be 1 -Because 'user 102 still runs the sequence'
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter { $Message -like 'User 101 set the urgent board to manual mode*saved: True*' }
+
+        $script:UrgentManualMode = @{}
+        Import-UrgentManualState
+        $script:UrgentManualMode[[long]101] | Should -BeTrue -Because 'the choice survives a restart'
+    }
+    It 'reads a manual-mode file written before 8.71.3, keyed by private chat' {
+        $legacy = '{"SchemaVersion":2,"SavedAt":"2026-09-21T10:31:39+03:00","States":[],"ManualMode":[{"ChatId":122238225,"Mode":true}],"Selections":[]}'
+        Set-Content -LiteralPath (Get-UrgentManualFile) -Value $legacy -Encoding utf8
+        Import-UrgentManualState
+        $script:UrgentManualMode[[long]122238225] | Should -BeTrue
+    }
     It 'offers manual mode and reaches full reading through actual callbacks' {
         Mock Test-Authorized { $true }
         Mock Confirm-TelegramCallback {}
@@ -80,7 +123,7 @@ Describe 'Full urgent reader and manual single story' {
         $id=$script:UrgentBoard.Items[0].Id
         $q=@{id='manual';from=@{id=101};message=@{message_id=9;chat=@{id=100;type='private'}};data='urgmode:manual'}
         Invoke-CallbackQuery $q
-        $buttons=@((Get-UrgentBoardKeyboard -ChatId 100).inline_keyboard | ForEach-Object { $_ })
+        $buttons=@((Get-UrgentBoardKeyboard -ChatId 100 -UserId 101).inline_keyboard | ForEach-Object { $_ })
         $buttons.callback_data | Should -Not -Contain 'urgentb:review:all'
         $buttons.callback_data | Should -Contain "urgread:${id}:0"
         $q.data="urgread:${id}:0"

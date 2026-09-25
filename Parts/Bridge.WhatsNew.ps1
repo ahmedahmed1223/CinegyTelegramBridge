@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.3'; Items = @(
+                        '⏱ **Two buttons to put a story on air** — on a story''s screen, beside "put it on air", a "⏱ on air for N s" button. The plain one stays up until you hide it, as before; the timed one goes off by itself after the board''s "hide a story shown alone" time, or the bridge''s default hide time when the board has none. The review and the live message say which you chose.'
+                        '👤 **Manual or sequence is yours, not the chat''s** — the urgent board remembers your choice by who you are, keeps it across a restart, and writes a log line each time it changes.'
+                    ) }
                 @{ Version = '8.71.2'; Items = @(
                         '⏱ **A story shown alone can hide itself** — in urgent management, under the board timings: "hide a story shown alone after". Set it once and every single story shown by hand goes off air by itself after that many seconds; the confirmation and the live message both say when. Zero keeps today''s behaviour: only the hide button.'
                     ) }
@@ -239,6 +243,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.3'; Items = @(
+                        '⏱ **زرّان لرفع الخبر** — في شاشة الخبر، بجانب «تشغيل على الهواء»، زرّ «⏱ تشغيل مؤقت N ث». الأول يبقى حتى تخفيه كما كان، والثاني يخرج وحده بعد مدة «إخفاء الخبر الواحد» من توقيتات الجدول، أو مدة الإخفاء الافتراضية في الجسر إن لم يُضبط الجدول. شاشة المراجعة ورسالة «عُرض» تقولان أيّهما اخترت.'
+                        '👤 **يدوي أو تتابع: اختيارك أنت لا اختيار المحادثة** — جدول العواجل يتذكّر اختيارك باسمك، ويبقيه بعد إعادة التشغيل، ويكتب سطرًا في السجلّ كلّما تغيّر.'
+                    ) }
                 @{ Version = '8.71.2'; Items = @(
                         '⏱ **الخبر المعروض وحده يخفي نفسه** — في إدارة العواجل، بين توقيتات الجدول: «إخفاء الخبر الواحد بعد». اضبطه مرة، وكل خبر يُعرض يدويًا وحده يخرج من الهواء بنفسه بعد هذه الثواني، وتذكر شاشة التأكيد ورسالة «عُرض» متى. الصفر يبقي ما كان: الإخفاء بالزر فقط.'
                     ) }

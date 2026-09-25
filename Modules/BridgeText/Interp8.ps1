@@ -154,6 +154,8 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.defaultMode'] = @{ ar = '🎬 النمط الافتراضي: {0}'; en = '🎬 The default mode: {0}' }
     $catalogue['urg.gapBetween'] = @{ ar = '⏳ الفاصل بين الأخبار: {0} ث'; en = '⏳ The gap between headlines: {0} s' }
     $catalogue['urg.manualHideAfter'] = @{ ar = '⏱ إخفاء الخبر الواحد بعد: {0} ث'; en = '⏱ A story shown alone hides after: {0} s' }
+    $catalogue['urg.runOnAirTimed'] = @{ ar = '⏱ تشغيل مؤقت {0} ث'; en = '⏱ On air for {0} s' }
+    $catalogue['urg.showThisOneTimed'] = @{ ar = 'عرض هذا الخبر لمدة {0} ث'; en = 'Show this story for {0} s' }
     $catalogue['urg.shortestGap'] = @{ ar = 'أقصر فاصل يسمح به هذا المشهد: {0} ث.'; en = 'The shortest gap this scene allows: {0} s.' }
     $catalogue['urg.didNotStart'] = @{ ar = '⚠️ لم يبدأ التشغيل: {0}'; en = '⚠️ It did not start: {0}' }
     $catalogue['urg.reviewBeforePlay'] = @{ ar = '▶️ <b>مراجعة قبل التشغيل</b> — {0}'; en = '▶️ <b>A look before it plays</b> — {0}' }

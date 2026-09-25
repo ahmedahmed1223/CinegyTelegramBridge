@@ -286,6 +286,15 @@ function Get-UrgentRunCeiling {
     return [pscustomobject]@{ Seconds = $seconds; Reason = $reason; AutoHideSeconds = $autoHide }
 }
 
+function Get-UrgentManualAutoHideSeconds {
+    <# How long a story shown by the timed button stays up: the board's own
+       number, or the bridge-wide auto-hide default when the board has none.
+       Zero means the timed button is not offered at all. #>
+    $seconds = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
+    if ($seconds -le 0) { $seconds = Get-SettingInt 'AutoHideDefaultSeconds' 0 }
+    return [int][math]::Max(0, $seconds)
+}
+
 function Get-UrgentAutoHideLabel {
     param([int]$Seconds)
     # The shared duration helper is authoritative; identify which configured
@@ -473,11 +482,14 @@ function Get-UrgentBoardSummary {
 }
 
 function Get-UrgentBoardKeyboard {
-    param([Parameter(Mandatory)][long]$ChatId, [int]$Page = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0)
+    # Manual or sequence is the person's, keyed by user; a private chat's id
+    # is the user's, so the callers that pass only a chat still get it right.
+    if ($UserId -eq 0) { $UserId = $ChatId }
     $items = @(Get-UrgentVisibleItems -ChatId $ChatId)
     $selected = @(Get-UrgentSelectedIds -ChatId $ChatId)
     $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page -PageSize (Get-UrgentBoardPageSize)
-    $manual = $script:UrgentManualMode.ContainsKey($ChatId) -and [bool]$script:UrgentManualMode[$ChatId]
+    $manual = $script:UrgentManualMode.ContainsKey($UserId) -and [bool]$script:UrgentManualMode[$UserId]
     $rows = @()
     $filter = Get-UrgentBoardFilter -ChatId $ChatId
     $filterLabel = switch ($filter) {
@@ -729,7 +741,7 @@ function Get-UrgentBoardText {
 function Show-UrgentBoardScreen {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -Page $Page
+    $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
     if (-not $script:RichMessagesUnavailable) {
         $blocks = Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page
         if ($MessageId -gt 0) {
@@ -757,7 +769,12 @@ function Get-UrgentItemKeyboard {
         $rows += , @( (New-Button (T 'urgent.liveNow') 'urgentb:noop' -Style primary), (New-Button (T 'urgent.stopThis') 'urgentb:hide' -Style danger) )
     }
     else {
-        $rows += , @( (New-Button (T 'urgent.runOnAir') "urgsingle:$itemId" -Style success) )
+        # Two ways on air, side by side: as long as it takes, or for the
+        # board's timed duration - the one an operator forgot to hide.
+        $runRow = @( (New-Button (T 'urgent.runOnAir') "urgsingle:$itemId" -Style success) )
+        $timedSeconds = Get-UrgentManualAutoHideSeconds
+        if ($timedSeconds -gt 0) { $runRow += (New-Button (T 'urg.runOnAirTimed' $timedSeconds) "urgsingle:${itemId}:t") }
+        $rows += , $runRow
     }
     # The title button is offered only where the scene can carry one - or where
     # a title is already stored, so one written before the scene was simplified
@@ -797,15 +814,19 @@ function Get-UrgentLiveStamp {
 }
 
 function Show-UrgentManualConfirm {
-    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$MessageId = 0)
+    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$MessageId = 0, [switch]$Timed)
     if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return }
     $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $ItemId } | Select-Object -First 1
     $template = Get-UrgentTemplate
     if (-not $template -or -not $item -or -not [bool](Get-JsonProp $item 'Enabled')) { return }
+    # Decided here and carried in the state, so the show does exactly what
+    # the confirmation said even if the setting changes in between.
+    $manualHide = if ($Timed) { Get-UrgentManualAutoHideSeconds } else { 0 }
     $state = @{ Mode='urgent_manual_confirm'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
         UserId=$UserId; StartedAt=Get-Date; ItemId=$ItemId; Layer=[int]$template.Layer
         Key=[string]$template.Key; Text=[string](Get-JsonProp $item 'Text'); Title=[string](Get-JsonProp $item 'Title')
-        LiveStamp=(Get-UrgentLiveStamp -Layer ([int]$template.Layer)); HadRun=[bool]$script:UrgentBoardRun }
+        LiveStamp=(Get-UrgentLiveStamp -Layer ([int]$template.Layer)); HadRun=[bool]$script:UrgentBoardRun
+        AutoHideSeconds=$manualHide }
     Set-PendingState -ChatId $ChatId -State $state | Out-Null
     $text = "$(T urgent.manualSingle)`n$(T urgent.manualRules)"
     if ($state.LiveStamp) {
@@ -817,12 +838,11 @@ function Show-UrgentManualConfirm {
         $text += (T 'urg.willReplaceHeadline' $currentText $($state.Text))
     }
     if ($state.HadRun) { $text += (T 'urg.boardStopsFirst') }
-    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
     if ($manualHide -gt 0) { $text += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
     if (-not $state.LiveStamp) { $text += "`n`n$($state.Text)" }
     if ($text.Length -gt 3900) { $text = $text.Substring(0,3800) + (T 'urg.readFullText') }
     $markup = @{ inline_keyboard = @(
-        , @((New-Button (T 'urgent.showThisOne') "urgmanual:show:$($state.Token)" -Style success))
+        , @((New-Button $(if ($manualHide -gt 0) { (T 'urg.showThisOneTimed' $manualHide) } else { (T 'urgent.showThisOne') }) "urgmanual:show:$($state.Token)" -Style success))
         , @((New-Button (T 'urgent.backNoShow') "urgread:${ItemId}:0"))
     ) }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
@@ -863,9 +883,10 @@ function Invoke-UrgentManualAction {
     # Consume confirmation BEFORE any air command; retry requires a fresh review.
     Clear-PendingState -ChatId $ChatId
     if ($script:UrgentBoardRun -and -not (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Quiet)) { return $false }
-    # The board's own auto-hide, or none: a story shown alone used to stay
-    # up until somebody remembered it, which is how an urgent ran eleven hours.
-    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
+    # What the confirmation promised: none for the plain button, the board's
+    # timed duration for the timed one. A story shown alone used to have no
+    # timer at all, which is how an urgent ran eleven hours.
+    $manualHide = [int](Get-JsonProp $state 'AutoHideSeconds')
     $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables (Get-UrgentItemVariables -Item $item) -ChatId $ChatId -UserId $UserId -AutoHideSeconds $manualHide
     if (-not [bool](Get-JsonProp $result 'Success')) { return $false }
     $stamp = Get-UrgentLiveStamp -Layer ([int]$template.Layer)
@@ -1254,6 +1275,8 @@ function Set-UrgentBoardSetting {
             Set-JsonProp $config 'Settings' $previousSettings
             throw (T 'urgent.settingSaveFailed')
         }
+        Write-BridgeLog "Urgent board setting $Name = $Value (chat $ChatId)"
+
     }
     catch {
         # Redacted on the way out, like every other exception this bridge shows

@@ -68,8 +68,9 @@ function Save-UrgentManualState {
        to hide it; a restart must not take that promise off air with no
        way back.
 
-       Also persists per-chat manual/auto mode and selections so table
-       preferences survive a restart even when no manual show is active. #>
+       Also persists each user's manual/sequence choice and the per-chat
+       selections, so table preferences survive a restart even when no
+       manual show is active. #>
     $hasContent = ($script:UrgentManualLive -and $script:UrgentManualLive.Count -gt 0) -or
                   ($script:UrgentManualMode -and $script:UrgentManualMode.Count -gt 0) -or
                   ($script:UrgentSelections -and $script:UrgentSelections.Count -gt 0)
@@ -89,7 +90,7 @@ function Save-UrgentManualState {
             [pscustomobject]@{ ChatId = [long]$_.Key; State = $_.Value }
         })
         ManualMode = @($script:UrgentManualMode.GetEnumerator() | ForEach-Object {
-            [pscustomobject]@{ ChatId = [long]$_.Key; Mode = [bool]$_.Value }
+            [pscustomobject]@{ UserId = [long]$_.Key; Mode = [bool]$_.Value }
         })
         Selections = @($script:UrgentSelections.GetEnumerator() | ForEach-Object {
             [pscustomobject]@{ ChatId = [string]$_.Key; Ids = @($_.Value) }
@@ -117,18 +118,23 @@ function Import-UrgentManualState {
         return
     }
     if (-not $payload) { return }
+    # Nonzero, not positive: a group chat's id is negative, and "greater
+    # than zero" quietly dropped every group's row on each restart.
     $states = Get-JsonProp $payload 'States'
     if ($states) {
         foreach ($entry in @($states)) {
             $cid = [long](Get-JsonProp $entry 'ChatId')
-            if ($cid -gt 0) { $script:UrgentManualLive[$cid] = $entry.State }
+            if ($cid -ne 0) { $script:UrgentManualLive[$cid] = $entry.State }
         }
     }
     $modes = Get-JsonProp $payload 'ManualMode'
     if ($modes) {
         foreach ($entry in @($modes)) {
-            $cid = [long](Get-JsonProp $entry 'ChatId')
-            if ($cid -gt 0) { $script:UrgentManualMode[$cid] = [bool](Get-JsonProp $entry 'Mode') }
+            # Keyed by user since 8.71.3; a file from before carries ChatId,
+            # which for the private chats it was written from is the user.
+            $uid = [long](Get-JsonProp $entry 'UserId')
+            if ($uid -eq 0) { $uid = [long](Get-JsonProp $entry 'ChatId') }
+            if ($uid -gt 0) { $script:UrgentManualMode[$uid] = [bool](Get-JsonProp $entry 'Mode') }
         }
     }
     $selections = Get-JsonProp $payload 'Selections'

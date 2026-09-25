@@ -75,6 +75,11 @@ pwsh -File Run-Checks.ps1
 2. `$script:SettingMetadata` — الوحدة والوصف العربي.
 3. قائمة الفئة في `$script:SettingCategoryDefinitions` — وإلا لم يظهر في أي شاشة.
 4. `$script:SettingNavigationLabels` — الاسم العربي القصير.
+5. `Modules/BridgeText/Settings.ps1` — `setting.<Name>.label` و`setting.<Name>.description`
+   بالعربية (مطابقة للمسجّل أعلاه حرفًا) والإنجليزية. البوابة تفشل بدونهما.
+
+وإن كان رقمًا: حدوده في `$script:SettingConstraints`، وإن كان لشاشة قسم بعينه
+(العواجل مثلًا) فاسمه في قائمة فئته داخل `$script:SettingCategoryDefinitions`.
 
 > هذه ليست شكليات: أربعة إعدادات صلاحيات قُرئت بـ `Get-Setting` ولم تُسجَّل قط،
 > فمرّت الاختبارات (كانت تحقن القيم) والميزة كلها ميتة على الجهاز. يوجد الآن

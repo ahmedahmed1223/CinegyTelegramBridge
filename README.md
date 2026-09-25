@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.3
+
+A story's screen now has two ways on air: the plain button with no timer, as before, and a timed button that passes the board's manual auto-hide (or the bridge's default hide time) into the show; the review carries the chosen duration in its state. The urgent board's manual/sequence choice is keyed by user instead of chat, migrates old chat-keyed files, and logs each change; the state import no longer drops negative (group) chat ids. AGENTS.md documents the fifth registration door for a new setting.
+
 ## Version 8.71.2
 
 A story shown alone from the urgent board can now hide itself. A new `UrgentManualAutoHideSeconds` setting (default 0, meaning the hide button only) sits with the board timings in urgent management and is passed to the show, so the existing auto-hide timer and its ceilings apply; the confirmation and the "shown alone" message both state the time.

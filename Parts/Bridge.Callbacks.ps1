@@ -175,8 +175,11 @@ function Invoke-CallbackQuery {
         'urgmode:*' {
             $mode = Get-CallbackArg $data 'urgmode:'
             if ($mode -in @('manual','auto')) {
-                $script:UrgentManualMode[[long]$chatId] = ($mode -eq 'manual')
-                Save-UrgentManualState | Out-Null
+                # The operator's own, not the chat's: two people sharing a
+                # group each keep the way they work, and it follows them home.
+                $script:UrgentManualMode[[long]$userId] = ($mode -eq 'manual')
+                $modeSaved = Save-UrgentManualState
+                Write-BridgeLog "User $userId set the urgent board to $mode mode (chat $chatId, saved: $modeSaved)"
                 Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             }
             break
@@ -189,8 +192,10 @@ function Invoke-CallbackQuery {
             break
         }
         'urgsingle:*' {
-            $itemId = Get-CallbackArg $data 'urgsingle:'
-            if ($itemId -match '^u_[a-f0-9]{8}$') { Show-UrgentManualConfirm -ChatId $chatId -UserId $userId -ItemId $itemId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
+            # ':t' is the timed button - the same review, with a hide time.
+            if ((Get-CallbackArg $data 'urgsingle:') -match '^(u_[a-f0-9]{8})(:t)?$') {
+                Show-UrgentManualConfirm -ChatId $chatId -UserId $userId -ItemId $Matches[1] -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Timed:([bool]$Matches[2])
+            }
             break
         }
         'urgmanual:*' {

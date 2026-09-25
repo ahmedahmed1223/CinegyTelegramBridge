@@ -153,8 +153,9 @@ function Get-MojazKeyboard {
     }
     $keyboard += , @(
         (New-Button (T 'mojaz.addRow') 'mojaz:add')
-        (New-Button (T 'mjz.durationFrames' $(Get-MojazDelayFrames -Bulletin $Bulletin)) 'mojaz:delay')
+        (New-Button (T 'mjz.pasteRows') 'mojaz:paste')
     )
+    $keyboard += , @( (New-Button (T 'mjz.durationFrames' $(Get-MojazDelayFrames -Bulletin $Bulletin)) 'mojaz:delay') )
     $keyboard += , @(
         (New-Button (T 'mjz.firstPlus' $(Get-MojazIntroFrames -Bulletin $Bulletin)) 'mojaz:intro')
         (New-Button (T 'mjz.lastFrames' $(Get-MojazLastRowFrames -Bulletin $Bulletin)) 'mojaz:last')
@@ -546,6 +547,22 @@ function Send-MojazImagePrompt {
     $script:MojazImageChatId = $ChatId
     Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.sendRowPicture') `
         -ReplyMarkup (Get-MojazImageKeyboard -Cancel $Cancel)
+}
+
+function Start-MojazRowPaste {
+    <# Several rows at once, "title | story" a line, reviewed before they are
+       added. The built-in design only: a design of its own names its own
+       fields, and guessing their order from a paste would put copy in the
+       wrong place on air. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
+    if ((Get-MojazBulletinDesignKey -Bulletin $bulletin) -ne [string]$script:MojazTemplateKey) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.pasteBuiltInOnly'); return
+    }
+    Start-RowPasteReview -ChatId $ChatId -UserId $UserId -Kind mojaz -Target ([string]$bulletin.Id)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.pastePrompt') -ParseMode HTML -ReplyMarkup (Get-CancelKeyboard)
 }
 
 function Start-MojazRowAdd {

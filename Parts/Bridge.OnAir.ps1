@@ -295,7 +295,17 @@ function Update-OnAirStateFromCinegy {
             $offAirReason = if ($decision.Change) { [string]$decision.Change.OffAirReason } else { '' }
             if ([string]::IsNullOrWhiteSpace($offAirReason)) { $offAirReason = 'unstated' }
             $engineActiveId = if ($decision.Change) { [string]$decision.Change.ActualActiveId } else { '' }
-            Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy reported it off air ($offAirReason); template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId')), expected active id '$([string](Get-JsonProp $record 'ActiveId'))', engine reported '$engineActiveId'" "INFO"
+            # The engine's own words, so a graphic that left by itself can be
+            # traced to whoever cleared it: the Client node names an attached
+            # Cinegy client when there is one, and the active item carries
+            # the command that made it. Both were read and thrown away.
+            $engineWords = if ($decision.Change) {
+                @(
+                    "client $(if ([string]::IsNullOrWhiteSpace([string]$decision.Change.ClientXml)) { '(none)' } else { [string]$decision.Change.ClientXml })"
+                    "active $(if ([string]::IsNullOrWhiteSpace([string]$decision.Change.ActiveXml)) { '(none)' } else { ([string]$decision.Change.ActiveXml) -replace '\s+', ' ' })"
+                ) -join ', '
+            } else { '' }
+            Write-BridgeLog "Cinegy state sync ($Reason) removed on-air record for layer $layer after Cinegy reported it off air ($offAirReason); template '$([string](Get-JsonProp $record 'Key'))', source $recordSource, user $([long](Get-JsonProp $record 'UserId')), expected active id '$([string](Get-JsonProp $record 'ActiveId'))', engine reported '$engineActiveId'$(if ($engineWords) { "; $engineWords" })" "INFO"
             # A stale timer must not hide a different scene that an external
             # controller may put on the same layer later.
             for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {

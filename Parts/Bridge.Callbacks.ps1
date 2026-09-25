@@ -487,6 +487,9 @@ function Invoke-CallbackQuery {
         'mojaz:open:*' { Clear-PendingState -ChatId $chatId; Open-MojazBulletin -BulletinId (Get-CallbackArg $data 'mojaz:open:') -ChatId $chatId -UserId $userId; break }
         'mojaz:refresh' { Clear-PendingState -ChatId $chatId; Show-MojazScreen -ChatId $chatId -UserId $userId; break }
         'mojaz:add' { Start-MojazRowAdd -ChatId $chatId -UserId $userId; break }
+        'mojaz:paste' { Start-MojazRowPaste -ChatId $chatId -UserId $userId; break }
+        'rows:pasteok' { Complete-RowPaste -ChatId $chatId -UserId $userId; break }
+        'rows:pastecancel' { Complete-RowPaste -ChatId $chatId -UserId $userId -Cancel; break }
         'mojaz:skipimage' { Complete-MojazRowImage -ChatId $chatId -Skip; break }
         'mojaz:img:inherit' { Complete-MojazRowImage -ChatId $chatId -Mode inherit; break }
         'mojaz:img:template' { Complete-MojazRowImage -ChatId $chatId -Mode template; break }

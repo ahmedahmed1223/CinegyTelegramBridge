@@ -203,6 +203,7 @@ Describe 'Get-TitlerLayerStatus' {
         $result.OutputState | Should -Be 'Normal'
         $result.ClientConnected | Should -BeTrue
         $result.ClientIdentity | Should -Be 'Air Client 1'
+        $result.ClientXml | Should -Be '<Client Connected="y" Identity="Air Client 1" />'
     }
 
     It 'reports hidden when the active playlist item is Cinegy empty filler' {

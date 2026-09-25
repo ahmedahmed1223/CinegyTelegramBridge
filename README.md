@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.7
+
+Programme boards and the bulletin now review a paste before adding it, as the ticker has since 8.69.8, through one shared review with a parser per kind. The bulletin gains a Paste rows button ("title | story" per line, built-in design only); boards' immediate-add paste path is removed in favour of the review.
+
 ## Version 8.70.6
 
 Headlines and bulletin rows can be paused instead of deleted. A paused headline goes to a shelf, `logs/news-paused.json`, that outlives the published draft and comes back through the draft's own block insert. A skipped bulletin row stays in the table marked ⏸ and is left out where every run is built, handing its picture to the next row that inherits.

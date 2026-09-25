@@ -378,11 +378,30 @@ Describe 'Adding several rows through the add button' {
     }
     AfterEach { $script:ContentBoards = [ordered]@{}; Clear-PendingState -ChatId 100 }
 
-    It 'adds every pasted row, not only the first' {
+    It 'adds every pasted row, not only the first, once the review is confirmed' {
         Set-PendingState -ChatId 100 -State @{ Mode = 'board_add'; UserId = 101; BoardId = $script:BoardAddId; StartedAt = (Get-Date) }
         Complete-BoardText -ChatId 100 -UserId 101 -Value "الأول`nالثاني`nالثالث" | Out-Null
+        @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 0 -Because 'a paste is reviewed before anything is added'
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'row_paste_review'
+        Complete-RowPaste -ChatId 100 -UserId 101
         @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 3
         Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -like "*$(T 'board.rowsAdded' 3)*" }
+    }
+
+    It 'reviews the paste button''s rows too, and joins a paste split across messages' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'board_paste'; UserId = 101; BoardId = $script:BoardAddId; StartedAt = (Get-Date) }
+        Complete-BoardText -ChatId 100 -UserId 101 -Value "أ`nب" | Out-Null
+        Add-RowPasteChunk -ChatId 100 -UserId 101 -Value 'ج'
+        @((Get-PendingState -ChatId 100).Rows).Count | Should -Be 3
+        Complete-RowPaste -ChatId 100 -UserId 101
+        @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 3
+    }
+
+    It 'adds nothing when the review is cancelled' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'board_paste'; UserId = 101; BoardId = $script:BoardAddId; StartedAt = (Get-Date) }
+        Complete-BoardText -ChatId 100 -UserId 101 -Value "أ`nب" | Out-Null
+        Complete-RowPaste -ChatId 100 -UserId 101 -Cancel
+        @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 0
     }
 
     It 'still adds one row straight away' {

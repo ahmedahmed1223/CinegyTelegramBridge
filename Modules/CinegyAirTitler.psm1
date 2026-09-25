@@ -307,6 +307,9 @@ function Get-TitlerLayerStatus {
         $outputState = if ($outputNode) { [string]$outputNode.GetAttribute('State') } else { '' }
         $clientConnected = $false
         $clientIdentity = ''
+        # The node verbatim, for the log: the notice reads only Identity, and
+        # a clear that came from the playlist or a plain HTTP call carries none.
+        $clientXml = if ($clientNode) { [string]$clientNode.OuterXml } else { '' }
         if ($clientNode) {
             $clientConnected = ([string]$clientNode.GetAttribute('Connected')) -match '^(?i:y|yes|true|1)$'
             $clientIdentity = [string]$clientNode.GetAttribute('Identity')
@@ -378,6 +381,7 @@ function Get-TitlerLayerStatus {
             OutputState = $outputState
             ClientConnected = $clientConnected
             ClientIdentity = $clientIdentity
+            ClientXml = $clientXml
             StatusCode = $response.StatusCode
             Error       = ''
             Uri         = $uri
@@ -403,6 +407,7 @@ function Get-TitlerLayerStatus {
             OutputState = ''
             ClientConnected = $false
             ClientIdentity = ''
+            ClientXml = ''
             StatusCode = 0
             Error    = $_.Exception.Message
             Uri      = $uri

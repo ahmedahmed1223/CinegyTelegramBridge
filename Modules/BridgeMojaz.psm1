@@ -461,6 +461,27 @@ function Remove-MojazBulletinRow {
         })
 }
 
+function ConvertFrom-MojazPasteText {
+    <#
+        Pasted bulletin rows: one per line, "title | story", or the story
+        alone. Cleaned by ConvertTo-MojazRowText like every row. Lines that
+        say nothing are skipped and counted rather than lost in silence.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Text = '', [string]$Separator = '|')
+    $rows = [System.Collections.Generic.List[hashtable]]::new()
+    $skipped = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in ([string]$Text -split '\r?\n')) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $at = $line.IndexOf($Separator, [StringComparison]::Ordinal)
+        $title = if ($at -ge 0) { ConvertTo-MojazRowText -Text $line.Substring(0, $at) } else { '' }
+        $story = if ($at -ge 0) { ConvertTo-MojazRowText -Text $line.Substring($at + $Separator.Length) } else { ConvertTo-MojazRowText -Text $line }
+        if (-not $story) { $skipped.Add('سطر بلا قصة') | Out-Null; continue }
+        $rows.Add(@{ Title = $title; Text = $story }) | Out-Null
+    }
+    return [pscustomobject]@{ Rows = @($rows.ToArray()); Skipped = @($skipped.ToArray()) }
+}
+
 function Switch-MojazBulletinRowSkip {
     <#
         Sits a row out of the run, or brings it back, without deleting it.
@@ -695,5 +716,5 @@ function Get-BridgeSceneFields {
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
-    Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip,
+    Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip, ConvertFrom-MojazPasteText,
     Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues

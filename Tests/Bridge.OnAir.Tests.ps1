@@ -1165,6 +1165,22 @@ Describe 'Update-OnAirStateFromCinegy' {
         }
     }
 
+    It 'quotes the engine client node and active item in the removal log line' {
+        Mock Get-TitlerLayerStatus {
+            [pscustomobject]@{
+                Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'; ActiveId = '{NEW}'
+                ClientXml = '<Client Connected="y" Identity="Air UI" />'
+                ActiveXml = "<Item Id=`"{NEW}`"`n  IsEmpty=`"y`" />"
+            }
+        }
+
+        Update-OnAirStateFromCinegy | Out-Null
+
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter {
+            $Message -like '*removed on-air record*client <Client Connected="y" Identity="Air UI" />, active <Item Id="{NEW}" IsEmpty="y" />'
+        }
+    }
+
     It 'keeps the tracked template when Cinegy reports a different active id but is still on air' {
         $OnAir[4].ActiveId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
         Mock Get-TitlerLayerStatus {

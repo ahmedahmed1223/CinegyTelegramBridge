@@ -2550,3 +2550,42 @@ Describe 'The bulletin screens show a row sitting out' {
         $labels | Should -Contain '✏️ 1'
     }
 }
+
+Describe 'Pasting rows into a bulletin' {
+    BeforeEach {
+        $script:MojazLibraryBackup = $script:MojazLibrary
+        $lib = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'المسائي').Value
+        $script:MojazLibrary = $lib
+        $script:pasteBulletin = [string]$lib.Bulletins[0].Id
+        $script:MojazSelections['101'] = $script:pasteBulletin
+        Mock Save-MojazLibrary { $script:MojazLibrary = $Library; $true }
+        Mock Send-TelegramMessage { }
+        Mock Show-MojazScreen { }
+        Mock Add-AuditEntry { }
+        Clear-PendingState -ChatId 101
+    }
+    AfterEach { $script:MojazLibrary = $script:MojazLibraryBackup; Clear-PendingState -ChatId 101 }
+
+    It 'adds nothing until the review is confirmed, then every row in order' {
+        Start-MojazRowPaste -ChatId 101 -UserId 101
+        Add-RowPasteChunk -ChatId 101 -UserId 101 -Value "أ | قصة أ`nب | قصة ب"
+        @($script:MojazLibrary.Bulletins[0].Rows).Count | Should -Be 0
+        Complete-RowPaste -ChatId 101 -UserId 101
+        @($script:MojazLibrary.Bulletins[0].Rows | ForEach-Object { [string]$_.Title }) | Should -Be @('أ', 'ب')
+        @($script:MojazLibrary.Bulletins[0].Rows | ForEach-Object { Get-MojazRowImageMode -Row $_ }) | Should -Be @('inherit', 'inherit')
+    }
+
+    It 'refuses a bulletin whose design names its own fields' {
+        $script:MojazLibrary.Bulletins[0] | Add-Member -NotePropertyName TemplateKey -NotePropertyValue 'OtherDesign' -Force
+        Start-MojazRowPaste -ChatId 101 -UserId 101
+        Get-PendingState -ChatId 101 | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -eq (T 'mjz.pasteBuiltInOnly') }
+    }
+
+    It 'offers the paste button beside add' {
+        $data = @((Get-MojazKeyboard -Bulletin $script:MojazLibrary.Bulletins[0]).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $data | Should -Contain 'mojaz:paste'
+        $data | Should -Contain 'mojaz:add'
+        $data | Should -Contain 'mojaz:delay'
+    }
+}

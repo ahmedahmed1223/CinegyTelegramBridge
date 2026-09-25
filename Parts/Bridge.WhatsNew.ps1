@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.7'; Items = @(
+                        '📋 **Paste many bulletin rows at once** — 📋 Paste rows beside ➕ Add row: one per line, title | story, or the story alone. They take the picture on screen; change it per row afterwards.'
+                        '🔍 **A paste is reviewed before it is added, on boards and the bulletin as on the ticker** — how many rows, the first few, what was skipped. Nothing is added until you press Add, and a long paste Telegram splits into several messages joins one batch.'
+                    ) }
                 @{ Version = '8.70.6'; Items = @(
                         '⏸ **Pause a headline instead of deleting it** — on a headline''s own screen. It leaves the draft, is kept on a ⏸ Paused shelf that outlives publishing, and comes back into the draft with one tap.'
                         '⏸ **Sit a bulletin row out of the run** — on the row''s screen. It stays in the table marked ⏸ and is not played; ▶️ brings it back. A picture set on the paused row still reaches the next row that inherits it.'
@@ -218,6 +222,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.7'; Items = @(
+                        '📋 **الصق عدّة صفوف في الموجز دفعة واحدة** — «📋 لصق صفوف» بجوار «➕ إضافة صفّ»: صفّ في كل سطر، العنوان | القصة، أو القصة وحدها. تأخذ الصورة التي على الشاشة، وتغيّرها لكل صفّ بعد ذلك.'
+                        '🔍 **اللصق يُراجَع قبل الإضافة في البرامج والموجز كما في الشريط** — كم صفًّا، وأوّلها، وما تُخطّي. لا يُضاف شيء حتى تضغط «أضف»، واللصق الطويل الذي يقسمه تيليجرام إلى عدّة رسائل يُجمع في دفعة واحدة.'
+                    ) }
                 @{ Version = '8.70.6'; Items = @(
                         '⏸ **أوقف خبرًا مؤقتًا بدل حذفه** — من شاشة الخبر نفسه. يخرج من المسودة ويُحفظ في «⏸ الموقوفة» التي تبقى بعد النشر، ويعود إلى المسودة بضغطة.'
                         '⏸ **تخطَّ صفًّا في الموجز** — من شاشة الصفّ. يبقى في الجدول مُعلَّمًا بـ⏸ ولا يُعرض، و▶️ يعيده. والصورة التي على الصفّ المتخطّى تصل الصفّ التالي الذي يرثها.'

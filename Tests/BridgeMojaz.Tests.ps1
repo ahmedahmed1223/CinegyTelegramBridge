@@ -722,3 +722,18 @@ Describe 'Skipping a bulletin row without deleting it' {
         @((New-MojazRunSnapshot -Bulletin $script:lib.Bulletins[0]).Value.Rows).Count | Should -Be 3
     }
 }
+
+Describe 'Reading pasted bulletin rows' {
+    It 'reads title and story on a line, or the story alone' {
+        $parsed = ConvertFrom-MojazPasteText -Text "عنوان أ | قصة أ`nقصة ب وحدها`n`n | "
+        @($parsed.Rows).Count | Should -Be 2
+        $parsed.Rows[0].Title | Assert-OrdinalEqual -Expected 'عنوان أ'
+        $parsed.Rows[0].Text | Assert-OrdinalEqual -Expected 'قصة أ'
+        $parsed.Rows[1].Title | Assert-OrdinalEqual -Expected ''
+        @($parsed.Skipped).Count | Should -Be 1 -Because 'a line with a separator and no story says nothing'
+    }
+
+    It 'cleans what a pasted row carries' {
+        (ConvertFrom-MojazPasteText -Text "`u{200F}عنوان | قصة`u{FEFF}").Rows[0].Text | Assert-OrdinalEqual -Expected 'قصة'
+    }
+}

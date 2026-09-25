@@ -348,6 +348,11 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['rows.paste.found'] = @{ ar = '📋 <b>وُجد في اللصق {0} صفّ</b>'; en = '📋 <b>{0} row(s) found in the paste</b>' }
+    $catalogue['rows.paste.confirm'] = @{ ar = '➕ أضف {0} صفّ'; en = '➕ Add {0} row(s)' }
+    $catalogue['mjz.pasteRows'] = @{ ar = '📋 لصق صفوف'; en = '📋 Paste rows' }
+    $catalogue['mjz.pastePrompt'] = @{ ar = "📋 الصق الصفوف، صفًّا في كل سطر: <code>العنوان | القصة</code> — أو القصة وحدها.`nتأخذ الصورة التي على الشاشة، وتغيّرها لكل صفّ بعد الإضافة."; en = "📋 Paste the rows, one per line: <code>title | story</code> — or the story alone.`nThey take the picture on screen; change it per row after adding." }
+    $catalogue['mjz.pasteBuiltInOnly'] = @{ ar = 'اللصق متاح للتصميم الأساسي للموجز وحده؛ هذا الموجز بتصميم له حقوله الخاصة، فأضف صفوفه واحدًا واحدًا.'; en = 'Pasting works with the bulletin''s built-in design only; this bulletin has a design with its own fields, so add its rows one at a time.' }
     $catalogue['news.pause'] = @{ ar = '⏸ إيقاف مؤقت (يبقى محفوظًا)'; en = '⏸ Pause (kept, not deleted)' }
     $catalogue['news.paused.done'] = @{ ar = '⏸ أُوقف الخبر مؤقتًا، ولن يُنشر حتى تعيده. تجده في «⏸ الموقوفة».'; en = '⏸ The headline is paused and will not be published until you bring it back. It is under ⏸ Paused.' }
     $catalogue['news.paused.open'] = @{ ar = '⏸ الموقوفة ({0})'; en = '⏸ Paused ({0})' }

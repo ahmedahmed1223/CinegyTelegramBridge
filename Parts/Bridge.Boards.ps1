@@ -573,6 +573,11 @@ function Complete-BoardText {
     # first, dropping the others without a word; several rows now go the
     # paste path, which adds each, counts them and names what it skipped.
     if ($mode -eq 'board_add' -and @((ConvertFrom-BoardPasteText -Text $Value -TextFields $fields).Rows).Count -gt 1) { $mode = 'board_paste' }
+    # A paste is reviewed before it is added, from either button.
+    if ($mode -eq 'board_paste') {
+        Start-RowPasteReview -ChatId $ChatId -UserId $UserId -Kind board -Target $boardId -Text $Value
+        return $true
+    }
 
     switch ($mode) {
         'board_add' {
@@ -598,31 +603,6 @@ function Complete-BoardText {
             $result = Set-BoardItemField -Board $board -ItemId ([string](Get-JsonProp $state 'ItemId')) `
                 -Field $fields[$index] -Value $Value -TextFields $fields -UserId $UserId -MaxFieldLength $maxLength
         }
-        'board_paste' {
-            $parsed = ConvertFrom-BoardPasteText -Text $Value -TextFields $fields
-            $added = 0
-            $working = $board
-            $stopped = ''
-            foreach ($row in @($parsed.Rows)) {
-                $attempt = Add-BoardItem -Board $working -Values $row -TextFields $fields -UserId $UserId `
-                    -MaxItems (Get-SettingInt 'BoardMaxItems' 1) -MaxFieldLength $maxLength
-                if (-not $attempt.Success) { $stopped = [string]$attempt.Error; break }
-                $working = $attempt.Value
-                $added++
-            }
-            if ($added -gt 0 -and -not (Save-ContentBoard -Board $working)) {
-                Send-TelegramMessage -ChatId $ChatId -Text (T 'board.saveFailed')
-                return $false
-            }
-            # Counted AND accounted for: "23 added" with no mention of the seven
-            # that were not is the shape of a screen an operator stops believing.
-            $report = @((T 'board.rowsAdded' $added))
-            if (@($parsed.Skipped).Count -gt 0) { $report += (T 'board.skipped' $(@($parsed.Skipped).Count) $(ConvertTo-TelegramHtmlText ($parsed.Skipped[0]))) }
-            if ($stopped) { $report += (T 'board.stopped' $(ConvertTo-TelegramHtmlText $stopped)) }
-            Send-TelegramMessage -ChatId $ChatId -Text ($report -join "`n")
-            Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
-            return ($added -gt 0)
-        }
     }
 
     if (-not $result) { Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId; return $false }
@@ -637,6 +617,129 @@ function Complete-BoardText {
     }
     Show-BoardScreen -BoardId $boardId -ChatId $ChatId -UserId $UserId
     return $true
+}
+
+function Add-BoardPastedRows {
+    <# The rows of a confirmed board paste, added in order and saved once.
+       Stops at the first refusal and says which, rather than skipping on. #>
+    param([Parameter(Mandatory)]$Board, [object[]]$Rows, [string[]]$Fields, [long]$UserId)
+    $added = 0; $working = $Board; $stopped = ''
+    foreach ($row in @($Rows)) {
+        $attempt = Add-BoardItem -Board $working -Values $row -TextFields $Fields -UserId $UserId `
+            -MaxItems (Get-SettingInt 'BoardMaxItems' 1) -MaxFieldLength (Get-SettingInt 'MaxFieldLength' 1)
+        if (-not $attempt.Success) { $stopped = [string]$attempt.Error; break }
+        $working = $attempt.Value; $added++
+    }
+    if ($added -gt 0 -and -not (Save-ContentBoard -Board $working)) { return [pscustomobject]@{ Added = 0; Stopped = (T 'board.saveFailed') } }
+    return [pscustomobject]@{ Added = $added; Stopped = $stopped }
+}
+
+function ConvertFrom-RowPasteText {
+    <# One parser per kind, one review for both. #>
+    param([Parameter(Mandatory)][hashtable]$State, [AllowEmptyString()][string]$Text)
+    if ([string]$State.Kind -eq 'mojaz') { return (ConvertFrom-MojazPasteText -Text $Text) }
+    $board = Get-ContentBoard -BoardId ([string]$State.Target)
+    $fields = if ($board) { @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' ''))) } else { @() }
+    return (ConvertFrom-BoardPasteText -Text $Text -TextFields $fields)
+}
+
+function Start-RowPasteReview {
+    <#
+        A paste of several rows - a programme board's or the bulletin's -
+        reviewed before anything is added, as the ticker's has been since
+        8.69.8: a paste is where a slip of the thumb puts thirty lines of
+        somebody's chat on a board. Text that arrives while it is open joins
+        it, because Telegram splits a paste past 4096 characters.
+    #>
+    param([long]$ChatId, [long]$UserId, [ValidateSet('board', 'mojaz')][string]$Kind, [string]$Target, [AllowEmptyString()][string]$Text = '')
+    $state = @{ Mode = 'row_paste_review'; Kind = $Kind; Target = $Target; UserId = $UserId; StartedAt = (Get-Date); Rows = @(); Skipped = @(); MessageId = 0 }
+    Set-PendingState -ChatId $ChatId -State $state | Out-Null
+    if ($Text) { Add-RowPasteChunk -ChatId $ChatId -UserId $UserId -Value $Text }
+}
+
+function Add-RowPasteChunk {
+    param([long]$ChatId, [long]$UserId, [AllowEmptyString()][string]$Value)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'row_paste_review' -or [long]$state.UserId -ne $UserId) { return }
+    $parsed = ConvertFrom-RowPasteText -State $state -Text $Value
+    $state.Rows = @(@($state.Rows) + @($parsed.Rows))
+    $state.Skipped = @(@($state.Skipped) + @($parsed.Skipped))
+    $state.StartedAt = Get-Date
+    Show-RowPasteReview -ChatId $ChatId
+}
+
+function Get-RowPastePreview {
+    param([hashtable]$Row)
+    $values = @(foreach ($key in @($Row.Keys | Sort-Object)) { [string]$Row[$key] } ) | Where-Object { $_ }
+    return (Get-NewsPasteSnippet -Text ($values -join ' · ') -Length 60)
+}
+
+function Show-RowPasteReview {
+    param([long]$ChatId)
+    $state = Get-PendingState -ChatId $ChatId
+    if (-not $state -or [string]$state.Mode -ne 'row_paste_review') { return }
+    $rows = @($state.Rows)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add((T 'rows.paste.found' $rows.Count))
+    if (@($state.Skipped).Count -gt 0) { $lines.Add((T 'board.skipped' @($state.Skipped).Count (ConvertTo-TelegramHtmlText ([string]@($state.Skipped)[0])))) }
+    if ($rows.Count -gt 0) {
+        $lines.Add('')
+        $n = 0
+        foreach ($row in @($rows | Select-Object -First 5)) { $n++; $lines.Add("$n. $(Get-RowPastePreview -Row $row)") }
+        if ($rows.Count -gt 5) { $lines.Add((T 'news.paste.more' ($rows.Count - 5))) }
+    }
+    $lines.Add('')
+    $lines.Add((T 'news.paste.keepSending'))
+    $keyboard = @()
+    if ($rows.Count -gt 0) { $keyboard += , @( @{ text = (T 'rows.paste.confirm' $rows.Count); callback_data = 'rows:pasteok'; style = 'success' } ) }
+    $keyboard += , @( @{ text = (T 'reply.cancelWord'); callback_data = 'rows:pastecancel' } )
+    $markup = @{ inline_keyboard = $keyboard }
+    $text = $lines -join "`n"
+    $messageId = [int]$state.MessageId
+    if ($messageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $messageId -Text $text -ReplyMarkup $markup -ParseMode HTML)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ParseMode HTML -ReplyMarkup $markup | Out-Null
+    $state.MessageId = [int]$script:LastTelegramMessageId
+}
+
+function Complete-RowPaste {
+    <# The review's buttons. The target is re-read and re-checked here: a
+       board's editors or a bulletin's existence can change while it waits. #>
+    param([long]$ChatId, [long]$UserId, [switch]$Cancel)
+    $state = Get-PendingState -ChatId $ChatId
+    $mine = $state -and [string]$state.Mode -eq 'row_paste_review' -and [long]$state.UserId -eq $UserId
+    if ($mine) { Clear-PendingState -ChatId $ChatId }
+    if ($Cancel -or -not $mine) {
+        Send-TelegramMessage -ChatId $ChatId -Text $(if ($Cancel) { (T 'news.paste.cancelled') } else { (T 'news.paste.gone') })
+        return
+    }
+    $rows = @($state.Rows)
+    if ([string]$state.Kind -eq 'mojaz') {
+        $bulletinId = [string]$state.Target
+        $library = $script:MojazLibrary; $added = 0; $failed = ''
+        foreach ($row in $rows) {
+            $attempt = Add-MojazBulletinRow -Library $library -BulletinId $bulletinId -Title ([string]$row.Title) -Text ([string]$row.Text) -ImageMode inherit -UserId $UserId
+            if (-not $attempt.Success) { $failed = [string]$attempt.Error; break }
+            $library = $attempt.Value; $added++
+        }
+        if ($added -gt 0 -and -not (Invoke-MojazEdit -Result ([pscustomobject]@{ Success = $true; Value = $library; Error = '' }) -ChatId $ChatId)) { $added = 0 }
+        $report = @((T 'board.rowsAdded' $added))
+        if ($failed) { $report += (T 'board.stopped' (ConvertTo-TelegramHtmlText $failed)) }
+        if ($added -gt 0) { Add-AuditEntry (T 'mjz.rowAddedAudit' $(Format-UserAuditActor -UserId $UserId)) }
+        Send-TelegramMessage -ChatId $ChatId -Text ($report -join "`n")
+        $script:MojazSelections[[string]$ChatId] = $bulletinId
+        Show-MojazScreen -ChatId $ChatId -UserId $UserId
+        return
+    }
+    $board = Get-ContentBoard -BoardId ([string]$state.Target)
+    if (-not $board -or -not (Test-BoardEditAllowed -Board $board -ChatId $ChatId -UserId $UserId)) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'board.notYoursToEdit'); return
+    }
+    $fields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' '')))
+    $outcome = Add-BoardPastedRows -Board $board -Rows $rows -Fields $fields -UserId $UserId
+    $report = @((T 'board.rowsAdded' $outcome.Added))
+    if ($outcome.Stopped) { $report += (T 'board.stopped' (ConvertTo-TelegramHtmlText $outcome.Stopped)) }
+    Send-TelegramMessage -ChatId $ChatId -Text ($report -join "`n")
+    Show-BoardScreen -BoardId ([string]$state.Target) -ChatId $ChatId -UserId $UserId
 }
 
 function Invoke-BoardEdit {

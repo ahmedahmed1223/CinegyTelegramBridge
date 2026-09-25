@@ -65,6 +65,8 @@ function Resolve-BridgeCinegyLayerState {
                 OutputState=[string](Get-CinegyStateProperty $Status OutputState)
                 ClientConnected=[bool](Get-CinegyStateProperty $Status ClientConnected)
                 ClientIdentity=[string](Get-CinegyStateProperty $Status ClientIdentity)
+                ClientXml=[string](Get-CinegyStateProperty $Status ClientXml)
+                ActiveXml=[string](Get-CinegyStateProperty $Status ActiveXml)
                 # Decided here, where the status is, rather than re-derived
                 # from ActualActiveId by whoever writes the notice.
                 Replaced=(Test-BridgeCinegyNamedScene -Status $Status)

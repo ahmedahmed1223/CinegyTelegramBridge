@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.70.5'
+$script:BridgeVersion = '8.70.6'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -722,6 +722,10 @@ $script:LastAccessGuardSweep = [datetime]::MinValue
 $script:onAirFile = Join-Path $logDir "onair.json"
 $script:autoHideFile = Join-Path $logDir "autohide.json"
 $script:streamOutageFile = Join-Path $logDir "stream-outages.json"
+# Headlines taken off the ticker for a while, kept apart from the draft
+# because the draft is removed when it is published.
+$script:newsPausedFile = Join-Path $logDir "news-paused.json"
+$script:NewsPaused = [System.Collections.Generic.List[string]]::new()
 $script:templateReminderFile = Join-Path $logDir "template-reminders.json"
 $script:draftsFile = Join-Path $logDir "drafts.json"
 $script:recentValuesFile = Join-Path $logDir "recent-values.json"
@@ -2107,6 +2111,7 @@ Write-BridgeLog "Restored $(@($script:ScheduleEvents).Count) scheduled event(s);
 # lists and was then undone two lines later by loading the un-pruned files.
 Import-AutoHideQueue
 Import-StreamOutages
+Import-NewsPaused
 Import-TemplateReminderQueue
 Initialize-CinegyOnAirState | Out-Null
 Restore-MojazPlayback | Out-Null

@@ -163,6 +163,34 @@ function New-MojazLoopPlan {
     }
 }
 
+function Select-MojazPlayedRows {
+    <#
+        The rows a run plays: the skipped ones left out.
+
+        A row set to inherit shows whatever picture is on screen - the one the
+        row before it sent. Leaving a row out changes what "before" is, so a
+        skipped row's own picture is handed to the next played row that
+        inherits, and that row still shows what it showed with nothing skipped.
+    #>
+    param([AllowEmptyCollection()]$Rows)
+    $played = [System.Collections.Generic.List[object]]::new()
+    $pending = $null
+    foreach ($row in @($Rows)) {
+        $mode = Get-MojazRowImageMode -Row $row
+        if ([bool](Get-MojazProperty $row 'Skipped' $false)) {
+            if ($mode -ne 'inherit') { $pending = @{ Mode = $mode; Image = [string](Get-MojazProperty $row 'Image' '') } }
+            continue
+        }
+        if ($pending -and $mode -eq 'inherit') {
+            $row | Add-Member -NotePropertyName ImageMode -NotePropertyValue $pending.Mode -Force
+            $row | Add-Member -NotePropertyName Image -NotePropertyValue $pending.Image -Force
+        }
+        $pending = $null
+        $played.Add($row)
+    }
+    return $played.ToArray()
+}
+
 function New-MojazRunSnapshot {
     <#
         Every row gets an absolute moment measured from the start of the run,
@@ -172,7 +200,7 @@ function New-MojazRunSnapshot {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Bulletin, $SceneTiming = $null, $Schedule = $null,
         [double]$OffsetSeconds = 0.4, [datetimeoffset]$Now = [datetimeoffset]::Now)
-    $rows = @(Copy-MojazValue @(Get-MojazProperty $Bulletin 'Rows' @()))
+    $rows = @(Select-MojazPlayedRows -Rows @(Copy-MojazValue @(Get-MojazProperty $Bulletin 'Rows' @())))
     if ($rows.Count -eq 0) { return (New-MojazResult $false $null 'empty_bulletin' 'الموجز بلا صفوف.') }
     $delay = [math]::Max(1, [int](Get-MojazProperty $Bulletin 'DelaySeconds' 8))
     # Doubles, not ints: these come from frame counts divided by a frame
@@ -433,6 +461,29 @@ function Remove-MojazBulletinRow {
         })
 }
 
+function Switch-MojazBulletinRowSkip {
+    <#
+        Sits a row out of the run, or brings it back, without deleting it.
+
+        Borrowed from the programme boards' on/off row: a story dropped from
+        tonight's bulletin used to be deleted and typed again tomorrow. The
+        row keeps its place, its text and its picture; only New-MojazRunSnapshot
+        reads the mark, so every way a run starts - now, later, after a
+        restart - leaves it out the same way.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
+        [Parameter(Mandatory)][string]$RowId,
+        [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+    $wanted = $RowId
+    return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
+            param($bulletin)
+            $row = @(@(Get-MojazProperty $bulletin 'Rows' @()) | Where-Object { [string]$_.Id -eq $wanted }) | Select-Object -First 1
+            if (-not $row) { return (New-MojazResult $false $null 'row_not_found' 'الصف غير موجود.') }
+            $row | Add-Member -NotePropertyName Skipped -NotePropertyValue (-not [bool](Get-MojazProperty $row 'Skipped' $false)) -Force
+        })
+}
+
 function Move-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
@@ -644,5 +695,5 @@ function Get-BridgeSceneFields {
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
-    Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow,
+    Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip,
     Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues

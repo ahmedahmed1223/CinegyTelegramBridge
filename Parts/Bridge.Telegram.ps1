@@ -292,7 +292,7 @@ function Test-RedrawInPlacePress {
         follows it, so nothing stale is left either way.
     #>
     param([string]$Data)
-    foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojazpage:', 'mojazlib:')) {
+    foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojaz:skip:', 'mojazpage:', 'mojazlib:')) {
         if ($Data.StartsWith($prefix, [StringComparison]::Ordinal)) { return $true }
     }
     return $Data -in @('mojaz:sync', 'mojaz:matchloop')

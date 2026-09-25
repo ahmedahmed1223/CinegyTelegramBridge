@@ -348,6 +348,14 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.pause'] = @{ ar = '⏸ إيقاف مؤقت (يبقى محفوظًا)'; en = '⏸ Pause (kept, not deleted)' }
+    $catalogue['news.paused.done'] = @{ ar = '⏸ أُوقف الخبر مؤقتًا، ولن يُنشر حتى تعيده. تجده في «⏸ الموقوفة».'; en = '⏸ The headline is paused and will not be published until you bring it back. It is under ⏸ Paused.' }
+    $catalogue['news.paused.open'] = @{ ar = '⏸ الموقوفة ({0})'; en = '⏸ Paused ({0})' }
+    $catalogue['news.paused.title'] = @{ ar = '⏸ الأخبار الموقوفة مؤقتًا: {0}'; en = '⏸ Paused headlines: {0}' }
+    $catalogue['news.paused.resume'] = @{ ar = '▶️ أعِد {0} إلى المسودة'; en = '▶️ Bring {0} back into the draft' }
+    $catalogue['mjz.skipRow'] = @{ ar = '⏸ تخطَّ هذا الصفّ في العرض'; en = '⏸ Sit this row out of the run' }
+    $catalogue['mjz.unskipRow'] = @{ ar = '▶️ أعِد الصفّ إلى العرض'; en = '▶️ Bring the row back into the run' }
+    $catalogue['mjz.rowSkipped'] = @{ ar = '⏸ <b>هذا الصفّ متخطّى</b> — باقٍ في الجدول ولا يُعرض.'; en = '⏸ <b>This row sits out</b> — kept in the table, not played.' }
     $catalogue['news.execDraft'] = @{ ar = 'نشر المسودة · {0}'; en = 'the draft published · {0}' }
     $catalogue['news.execSheet'] = @{ ar = 'سحب من الشيت · {0}'; en = 'pulled from the sheet · {0}' }
     $catalogue['news.paste.found'] = @{ ar = '📋 <b>وُجد في اللصق {0} خبر</b>'; en = '📋 <b>{0} headline(s) found in the paste</b>' }

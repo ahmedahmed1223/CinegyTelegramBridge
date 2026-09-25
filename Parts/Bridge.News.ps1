@@ -995,6 +995,7 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         # Leaving without publishing, which until now meant destroying the
         # draft or waiting for somebody to ask for it.
         $rows += , @(@{text=(T 'news.handOverDraft');callback_data='news:handover'})
+        if ($script:NewsPaused.Count -gt 0) { $rows += , @(@{text=(T 'news.paused.open' $script:NewsPaused.Count);callback_data='news:paused'}) }
     }
     else {
         $rows += , @(@{text=(T 'news.with' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)));callback_data='news:refresh'})
@@ -1061,6 +1062,89 @@ function Show-NewsTickerDeleteConfirm {
     return $true
 }
 
+function Import-NewsPaused {
+    <# The shelf of paused headlines, read at start. An unreadable file is
+       an empty shelf and a log line, never a bridge that will not start. #>
+    $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path -LiteralPath $script:newsPausedFile)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $script:newsPausedFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        foreach ($item in @(Get-JsonProp $raw 'Items')) {
+            $text = [string]$item
+            if (-not [string]::IsNullOrWhiteSpace($text) -and -not $script:NewsPaused.Contains($text)) { $script:NewsPaused.Add($text) }
+        }
+    }
+    catch { Write-BridgeLog "Could not read news-paused.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN' }
+}
+
+function Save-NewsPaused {
+    $payload = [pscustomobject]@{ SchemaVersion = 1; Items = @($script:NewsPaused) }
+    try { return [bool](Write-BridgeValidatedJson -Path $script:newsPausedFile -Json ($payload | ConvertTo-Json -Depth 3)) }
+    catch { Write-BridgeLog "Could not write news-paused.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN'; return $false }
+}
+
+function Suspend-NewsTickerDraftItem {
+    <#
+        Takes a headline off the ticker without deleting it: out of the draft,
+        onto the shelf. Borrowed from the programme boards' on/off row - a
+        headline pulled for an hour used to be deleted and typed again.
+
+        Pausing is not deleting, so it is the draft owner's to do whatever
+        AllowOperatorsDeleteNews says; the text is kept, not lost.
+    #>
+    param([long]$UserId, [int]$Index)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
+    $items = [System.Collections.Generic.List[string]]::new()
+    @($draft.Items) | ForEach-Object { $items.Add([string]$_) }
+    $text = $items[$Index]
+    $items.RemoveAt($Index)
+    $draft.Items = @($items)
+    $draft.UpdatedAt = (Get-Date).ToString('o')
+    if (-not $script:NewsPaused.Contains($text)) { $script:NewsPaused.Add($text) }
+    if (-not (Save-NewsTickerDraft)) { return $false }
+    Save-NewsPaused | Out-Null
+    return $true
+}
+
+function Resume-NewsPausedItem {
+    <# Back from the shelf into the draft, where new headlines go, through
+       the same block insert a paste uses - so the limit and the duplicate
+       rule are the draft's own. #>
+    param([long]$UserId, [int]$Index)
+    if (-not (Get-NewsTickerDraft -UserId $UserId) -or $Index -lt 0 -or $Index -ge $script:NewsPaused.Count) { return $false }
+    $text = $script:NewsPaused[$Index]
+    $added = Add-NewsTickerDraftItems -UserId $UserId -Items @($text)
+    $inDraft = @((Get-NewsTickerDraft -UserId $UserId).Items) -contains $text
+    if ($added -le 0 -and -not $inDraft) { return $false }
+    $script:NewsPaused.RemoveAt($Index)
+    Save-NewsPaused | Out-Null
+    return $true
+}
+
+function Show-NewsPausedScreen {
+    <# The shelf: each paused headline with a button to bring it back. #>
+    param([long]$ChatId, [int]$MessageId = 0, [int]$Page = 0)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add((T 'news.paused.title' $script:NewsPaused.Count))
+    $rows = @()
+    # Paged, because the shelf grows with whatever nobody brings back.
+    $window = Get-BridgePageWindow -ItemCount $script:NewsPaused.Count -Page $Page -PageSize 10
+    if ($window.EndIndex -ge $window.StartIndex) {
+        foreach ($i in $window.StartIndex..$window.EndIndex) {
+            $lines.Add("$($i + 1). $(Get-NewsScreenLine -Text $script:NewsPaused[$i])")
+            $rows += , @( @{ text = (T 'news.paused.resume' ($i + 1)); callback_data = "news:unpause:$i" } )
+        }
+    }
+    $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'news:pausedp')
+    if ($pager.Count -gt 0) { $rows += , $pager }
+    $rows += , @( @{ text = (T 'news.backToManage'); callback_data = 'news:refresh' } )
+    $markup = @{ inline_keyboard = $rows }
+    $text = $lines -join "`n"
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
+}
+
 function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Index,[int]$MessageId=0)
     <# One message per news item: full text in the body, move/edit/delete
        buttons carrying the item's CURRENT index. Re-rendered in place after
@@ -1077,6 +1161,7 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $rows=@(,@($up,$down))
     $rows+=,@((New-BridgeButton -Text (T 'news.edit') -CallbackData "news:edit:$Index"),
         (New-BridgeButton -Text (T 'common.delete') -CallbackData "news:delask:$Index" -Style 'danger'))
+    $rows+=,@((New-BridgeButton -Text (T 'news.pause') -CallbackData "news:pause:$Index"))
     $rows+=,@(@{text=(T 'news.backToOrder');callback_data='news:list'})
     $text=(T 'news.headlineOf' $($Index+1) ${count} $($draft.Items[$Index]))
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}

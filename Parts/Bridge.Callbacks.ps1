@@ -243,6 +243,28 @@ function Invoke-CallbackQuery {
             Set-PendingState -ChatId $chatId -State @{Mode='news_add_text';UserId=$userId;StartedAt=(Get-Date)}
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sendNewStory');break
         }
+        'news:pause:*' {
+            $pauseIndex = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'news:pause:'), [ref]$pauseIndex) -and (Suspend-NewsTickerDraftItem -UserId $userId -Index $pauseIndex)) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.paused.done') -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            }
+            else { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId }
+            break
+        }
+        'news:pausedp:*' {
+            $pausedPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'news:pausedp:'), [ref]$pausedPage) -and $pausedPage -ge 0) {
+                Show-NewsPausedScreen -ChatId $chatId -Page $pausedPage -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            }
+            break
+        }
+        'news:paused' { Show-NewsPausedScreen -ChatId $chatId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
+        'news:unpause:*' {
+            $unpauseIndex = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'news:unpause:'), [ref]$unpauseIndex)) { Resume-NewsPausedItem -UserId $userId -Index $unpauseIndex | Out-Null }
+            Show-NewsPausedScreen -ChatId $chatId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
         'news:pasteok' { Complete-NewsPaste -ChatId $chatId -UserId $userId; break }
         'news:pastecancel' { Complete-NewsPaste -ChatId $chatId -UserId $userId -Cancel; break }
         'news:preview' {
@@ -834,6 +856,7 @@ function Invoke-CallbackQuery {
             break
         }
         'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:skip:*' { Switch-MojazRowSkip -RowId (Get-CallbackArg $data 'mojaz:skip:') -ChatId $chatId -UserId $userId; break }
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
         'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }
         'mojaz:down:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:down:') -Direction down -ChatId $chatId -UserId $userId; break }

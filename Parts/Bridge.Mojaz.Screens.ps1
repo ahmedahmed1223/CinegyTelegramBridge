@@ -23,6 +23,26 @@ function Test-MojazOnAir {
 
 # --------------------------------------------------------------- one bulletin
 
+function Test-MojazRowSkipped { param($Row) return [bool](Get-JsonProp $Row 'Skipped') }
+
+function Get-MojazRowSkipMark {
+    # ⏸ beside the number, in the table and on the row's button, so a row
+    # sitting out the run is seen before play is pressed, not after.
+    param($Row)
+    if (Test-MojazRowSkipped -Row $Row) { return '⏸ ' }
+    return ''
+}
+
+function Switch-MojazRowSkip {
+    <# The row screen's pause button. Redrawn in place with the row it
+       changed, so the operator sees the new state where they pressed. #>
+    param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $result = Switch-MojazBulletinRowSkip -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -RowId $RowId -UserId $UserId
+    Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
+    Show-MojazRowScreen -RowId $RowId -ChatId $ChatId -UserId $UserId
+}
+
 function Get-MojazBlocks {
     <# The table the operator asked for: a row per story, four columns, with
        the copy itself trimmed to fit beside them. #>
@@ -43,7 +63,7 @@ function Get-MojazBlocks {
         ))
     for ($i = 0; $i -lt $rows.Count; $i++) {
         $cells += , @(
-            @{ text = [string]($i + 1) }
+            @{ text = "$(Get-MojazRowSkipMark -Row $rows[$i])$($i + 1)" }
             @{ text = (Get-MojazImageMark -Row $rows[$i] -Index $i) }
             @{ text = (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 24) }
             @{ text = (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 60) }
@@ -74,7 +94,7 @@ function Get-MojazText {
     $lines.Add('')
     for ($i = 0; $i -lt $rows.Count; $i++) {
         $picture = Get-MojazImageLabel -Row $rows[$i] -Index $i
-        $lines.Add("$($i + 1). <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 40))</b> · $picture")
+        $lines.Add("$(Get-MojazRowSkipMark -Row $rows[$i])$($i + 1). <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 40))</b> · $picture")
         $lines.Add("   $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 90))")
     }
     if (Test-MojazOnAir -Bulletin $Bulletin) {
@@ -162,7 +182,7 @@ function Get-MojazKeyboard {
     for ($i = $rowStart; $i -le $rowEnd; $i++) {
         $rowId = [string]$rows[$i].Id
         $line = @(
-            (New-Button "✏️ $($i + 1)" "mojaz:row:$rowId")
+            (New-Button "$(if (Test-MojazRowSkipped -Row $rows[$i]) { '⏸' } else { '✏️' }) $($i + 1)" "mojaz:row:$rowId")
             (New-Button '🗑' "mojaz:del:$rowId" -Style danger)
         )
         if ($i -gt 0) { $line += (New-Button '⬆️' "mojaz:up:$rowId") }
@@ -604,6 +624,7 @@ function Show-MojazRowScreen {
         "📝 <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Title) -Limit 60))</b>"
         "📰 $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Text) -Limit 200))"
     )
+    if (Test-MojazRowSkipped -Row $row) { $lines += (T 'mjz.rowSkipped') }
     $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage (Get-MojazTemplateImage))
     if ($effective.Count -gt $index -and $effective[$index]) {
         $lines += (T 'mjz.willShow' $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$index] -Leaf)))
@@ -617,6 +638,7 @@ function Show-MojazRowScreen {
                 (New-Button (T 'mojaz.field.title') "mojaz:edittitle:$RowId")
                 (New-Button (T 'mojaz.field.story') "mojaz:edittext:$RowId")
             )
+            , @( (New-Button $(if (Test-MojazRowSkipped -Row $row) { (T 'mjz.unskipRow') } else { (T 'mjz.skipRow') }) "mojaz:skip:$RowId") )
             , @(
                 (New-Button (T 'mojaz.deleteRow') "mojaz:del:$RowId" -Style danger)
                 (New-Button (T 'mojaz.backToTable') 'mojaz:refresh')

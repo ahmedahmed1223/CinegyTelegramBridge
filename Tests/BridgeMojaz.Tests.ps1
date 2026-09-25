@@ -671,3 +671,54 @@ Describe 'What a pasted bulletin row cannot carry onto air' {
         (Add-MojazBulletinRow -Library $script:library -BulletinId $script:id -Title $emoji -Text 'خ').Value.Bulletins[0].Rows[0].Title | Assert-OrdinalEqual -Expected $emoji
     }
 }
+
+Describe 'Skipping a bulletin row without deleting it' {
+    <#
+        Borrowed from the programme boards, where a row can be switched off
+        and on again. A story dropped from tonight's bulletin was deleted and
+        typed again tomorrow; it can now stay in the table and sit out a run.
+    #>
+    BeforeEach {
+        $lib = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'المسائي').Value
+        $script:id = [string]$lib.Bulletins[0].Id
+        $lib = (Add-MojazBulletinRow -Library $lib -BulletinId $script:id -Title 'أ' -Text 'خبر أ' -Image 'C:\a.png').Value
+        $lib = (Add-MojazBulletinRow -Library $lib -BulletinId $script:id -Title 'ب' -Text 'خبر ب' -Image 'C:\b.png').Value
+        $lib = (Add-MojazBulletinRow -Library $lib -BulletinId $script:id -Title 'ج' -Text 'خبر ج' -ImageMode inherit).Value
+        $script:lib = $lib
+        $script:rowB = [string]$lib.Bulletins[0].Rows[1].Id
+    }
+
+    It 'marks a row skipped and back, keeping it in the table' {
+        $off = Switch-MojazBulletinRowSkip -Library $script:lib -BulletinId $script:id -RowId $script:rowB
+        $off.Success | Should -BeTrue
+        @($off.Value.Bulletins[0].Rows).Count | Should -Be 3
+        [bool]$off.Value.Bulletins[0].Rows[1].Skipped | Should -BeTrue
+        $on = Switch-MojazBulletinRowSkip -Library $off.Value -BulletinId $script:id -RowId $script:rowB
+        [bool]$on.Value.Bulletins[0].Rows[1].Skipped | Should -BeFalse
+    }
+
+    It 'leaves a skipped row out of the run' {
+        $lib = (Switch-MojazBulletinRowSkip -Library $script:lib -BulletinId $script:id -RowId $script:rowB).Value
+        $run = New-MojazRunSnapshot -Bulletin $lib.Bulletins[0]
+        @($run.Value.Rows | ForEach-Object { [string]$_.Title }) | Should -Be @('أ', 'ج')
+    }
+
+    It 'hands a skipped row''s picture to the next row that inherits it' {
+        # C inherits "whatever is on screen" - which was B's picture. With B
+        # sitting out, C would silently inherit A's instead.
+        $lib = (Switch-MojazBulletinRowSkip -Library $script:lib -BulletinId $script:id -RowId $script:rowB).Value
+        $run = New-MojazRunSnapshot -Bulletin $lib.Bulletins[0]
+        $images = @(Get-MojazEffectiveImages -Rows @($run.Value.Rows))
+        $images[1] | Should -Be 'C:\b.png'
+    }
+
+    It 'refuses a run where every row sits out' {
+        $lib = $script:lib
+        foreach ($row in @($lib.Bulletins[0].Rows)) { $lib = (Switch-MojazBulletinRowSkip -Library $lib -BulletinId $script:id -RowId ([string]$row.Id)).Value }
+        (New-MojazRunSnapshot -Bulletin $lib.Bulletins[0]).Success | Should -BeFalse
+    }
+
+    It 'plays every row of a bulletin with none skipped, as before' {
+        @((New-MojazRunSnapshot -Bulletin $script:lib.Bulletins[0]).Value.Rows).Count | Should -Be 3
+    }
+}

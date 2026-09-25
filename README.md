@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.6
+
+Headlines and bulletin rows can be paused instead of deleted. A paused headline goes to a shelf, `logs/news-paused.json`, that outlives the published draft and comes back through the draft's own block insert. A skipped bulletin row stays in the table marked ⏸ and is left out where every run is built, handing its picture to the next row that inherits.
+
 ## Version 8.70.5
 
 Bulletin rows and programme-board values are now cleaned of the invisible characters a paste carries, as the ticker has been since 8.69.8, from one list in a new `BridgeAirText.psm1` that all three modules call; bulletin stories keep their line breaks. The tests for this now compare ordinally: `Should -Be` compares through the culture, which ignores exactly these characters, so the earlier cleaning tests would have passed with the cleaning removed.

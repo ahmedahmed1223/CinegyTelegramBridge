@@ -2522,3 +2522,31 @@ Describe 'The bulletin screen redraws in place' {
         finally { $script:MojazLibrary = $saved }
     }
 }
+
+Describe 'The bulletin screens show a row sitting out' {
+    BeforeEach {
+        $script:RefreshTarget = $null
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-MojazAvailable { $true }
+        Mock Switch-MojazRowSkip { $script:skipTarget = $script:RefreshTarget; $script:skipRow = $RowId }
+    }
+
+    It 'routes the pause button and redraws the row where it was pressed' {
+        $script:skipTarget = $null
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{ id = 's'; from = [pscustomobject]@{ id = 101 }; data = 'mojaz:skip:r9'
+                message = [pscustomobject]@{ message_id = 12; chat = [pscustomobject]@{ id = 101; type = 'private' } } })
+        $script:skipRow | Should -Be 'r9'
+        $script:skipTarget.MessageId | Should -Be 12
+    }
+
+    It 'marks a skipped row in the table and on its button' {
+        $bulletin = [pscustomobject]@{ Id = 'b1'; Name = 'م'; Rows = @(
+                [pscustomobject]@{ Id = 'r1'; Title = 'أ'; Text = 'خ'; Image = '' }
+                [pscustomobject]@{ Id = 'r2'; Title = 'ب'; Text = 'خ'; Image = ''; Skipped = $true }) }
+        (Get-MojazText -Bulletin $bulletin) | Should -Match '⏸ 2\.'
+        $labels = @((Get-MojazKeyboard -Bulletin $bulletin).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['text'] })
+        $labels | Should -Contain '⏸ 2'
+        $labels | Should -Contain '✏️ 1'
+    }
+}

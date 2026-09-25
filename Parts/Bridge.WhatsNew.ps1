@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.6'; Items = @(
+                        '⏸ **Pause a headline instead of deleting it** — on a headline''s own screen. It leaves the draft, is kept on a ⏸ Paused shelf that outlives publishing, and comes back into the draft with one tap.'
+                        '⏸ **Sit a bulletin row out of the run** — on the row''s screen. It stays in the table marked ⏸ and is not played; ▶️ brings it back. A picture set on the paused row still reaches the next row that inherits it.'
+                    ) }
                 @{ Version = '8.70.5'; Items = @(
                         '🧹 **Bulletin rows and programme boards are cleaned like the ticker** — invisible direction marks that reorder words on air, zero-width characters and soft hyphens are dropped from what you type or paste. Line breaks inside a bulletin story stay, and emoji stay whole.'
                     ) }
@@ -214,6 +218,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.6'; Items = @(
+                        '⏸ **أوقف خبرًا مؤقتًا بدل حذفه** — من شاشة الخبر نفسه. يخرج من المسودة ويُحفظ في «⏸ الموقوفة» التي تبقى بعد النشر، ويعود إلى المسودة بضغطة.'
+                        '⏸ **تخطَّ صفًّا في الموجز** — من شاشة الصفّ. يبقى في الجدول مُعلَّمًا بـ⏸ ولا يُعرض، و▶️ يعيده. والصورة التي على الصفّ المتخطّى تصل الصفّ التالي الذي يرثها.'
+                    ) }
                 @{ Version = '8.70.5'; Items = @(
                         '🧹 **صفوف الموجز وجداول البرامج تُنظَّف كما يُنظَّف الشريط** — تُحذف مما تكتبه أو تلصقه علامات الاتجاه الخفية التي تقلب ترتيب الكلمات على الهواء، والمحارف الصفرية، والواصلات الناعمة. وتبقى الأسطر داخل قصة الموجز، وتبقى الرموز التعبيرية سليمة.'
                     ) }

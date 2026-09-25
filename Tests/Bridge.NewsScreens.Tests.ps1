@@ -1638,3 +1638,74 @@ Describe 'The news management screen shows what is being worked on' {
         Should -Invoke Show-NewsTickerManagementScreen -Times 2 -Exactly -ParameterFilter { $MessageId -eq 55 }
     }
 }
+
+Describe 'Pausing a headline without deleting it' {
+    <#
+        Borrowed from the programme boards' on/off row. A headline taken off
+        the ticker for an hour was deleted and typed again. It now goes to a
+        shelf that outlives the draft - the draft is removed on publish - and
+        comes back from there.
+    #>
+    BeforeEach {
+        $script:newsPausedFile = Join-Path $TestDrive 'news-paused.json'
+        Remove-Item -LiteralPath $script:newsPausedFile -ErrorAction SilentlyContinue
+        $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+        $script:NewsTickerDraft = @{ OwnerUserId = 42; OwnerChatId = 42; Items = @('أ', 'ب', 'ج'); UpdatedAt = (Get-Date).ToString('o') }
+        Mock Save-NewsTickerDraft { $true }
+        Mock Send-TelegramMessage { }
+        Mock Edit-TelegramMessageText { $true }
+        Mock Write-BridgeLog { }
+    }
+    AfterEach { $script:NewsTickerDraft = $null; $script:NewsPaused = [System.Collections.Generic.List[string]]::new() }
+
+    It 'moves a headline from the draft to the shelf, and keeps it across a restart' {
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Should -BeTrue
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ج')
+        @($script:NewsPaused) | Should -Be @('ب')
+        $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+        Import-NewsPaused
+        @($script:NewsPaused) | Should -Be @('ب')
+    }
+
+    It 'brings a paused headline back into a draft' {
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Out-Null
+        $config.Settings | Add-Member NewNewsItemAtTop $true -Force
+        Resume-NewsPausedItem -UserId 42 -Index 0 | Should -BeTrue
+        $script:NewsTickerDraft.Items | Should -Be @('ب', 'أ', 'ج')
+        @($script:NewsPaused).Count | Should -Be 0
+    }
+
+    It 'refuses to pause from a draft that is not yours' {
+        Suspend-NewsTickerDraftItem -UserId 7 -Index 0 | Should -BeFalse
+        $script:NewsTickerDraft.Items.Count | Should -Be 3
+    }
+
+    It 'offers the shelf on the management screen only when it holds something' {
+        Mock Get-NewsLockReservation { $null }
+        Mock Test-Admin { $false }
+        $none = @((Get-NewsTickerManagementKeyboard -ChatId 42 -UserId 42).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $none | Should -Not -Contain 'news:paused'
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 0 | Out-Null
+        $some = @((Get-NewsTickerManagementKeyboard -ChatId 42 -UserId 42).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $some | Should -Contain 'news:paused'
+    }
+
+    It 'puts the pause button on a headline''s own screen' {
+        Show-NewsTickerItemScreen -ChatId 42 -UserId 42 -Index 0
+        Should -Invoke Send-TelegramMessage -ParameterFilter { @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'news:pause:0' }
+    }
+}
+
+Describe 'The paused shelf pages' {
+    It 'shows ten to a page with a pager, and the second page from its button' {
+        $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+        1..25 | ForEach-Object { $script:NewsPaused.Add("خبر $_") }
+        Mock Send-TelegramMessage { $script:pausedMarkup = $ReplyMarkup }
+        Show-NewsPausedScreen -ChatId 42 -Page 1
+        $data = @($script:pausedMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $data | Should -Contain 'news:unpause:10'
+        $data | Should -Not -Contain 'news:unpause:0'
+        $data | Should -Contain 'news:pausedp:2'
+        $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
+    }
+}

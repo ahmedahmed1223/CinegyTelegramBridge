@@ -2089,10 +2089,32 @@ Describe 'Long-running graphics are not stale' {
     It 'exempts a graphic Cinegy scheduled for longer than it has been up' {
         # The real case: the ticker's Active Id matched the record exactly, it
         # was genuinely on screen, and administrators were told five times over
-        # two days that it was a stale record.
-        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 86400; ActiveManualEnd = $true } }
+        # two days that it was a stale record. A real, finite duration.
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 86400; ActiveManualEnd = $false } }
 
         Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeTrue
+    }
+
+    It 'does not exempt a manual-end graphic the bridge put up itself' {
+        # Measured on air: an urgent went up at 21:29 and came down at 08:49,
+        # eleven hours, with StaleOnAirAlertHours at 1 and not one alert. Every
+        # SHOW from this station's scenes is accepted as 86400s with manual
+        # end - the scene file's "until stopped", identical on every show - so
+        # the exemption meant for the ticker covered everything, including the
+        # graphic somebody forgot.
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 86400; ActiveManualEnd = $true } }
+
+        Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeFalse
+    }
+
+    It 'still exempts a manual-end graphic the bridge only discovered' {
+        # Nobody through the bridge put it there, so nobody here forgot it.
+        $script:OnAir[8].Source = 'cinegy'
+        try {
+            Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveDurationSeconds = 86400; ActiveManualEnd = $true } }
+            Test-LongRunningOnAir -Layer 8 -Key 'News-Ticker' | Should -BeTrue
+        }
+        finally { $script:OnAir[8].Source = 'bridge' }
     }
 
     It 'still calls it stale once the declared duration has run out' {

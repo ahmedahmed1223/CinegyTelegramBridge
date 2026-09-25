@@ -19,7 +19,7 @@ function Add-BridgeTextInterp6 {
     $catalogue['cb.tickerRestoreAudit'] = @{ ar = '📰 استعادة نسخة شريط الأخبار بواسطة {0}'; en = '📰 A news ticker backup restored by {0}' }
     $catalogue['cb.restoreFailed'] = @{ ar = '❌ فشلت الاستعادة: {0}'; en = '❌ The restore failed: {0}' }
     $catalogue['cb.sendValueFor'] = @{ ar = 'أرسل قيمة «{0}»'; en = 'Send the value for "{0}"' }
-    $catalogue['cb.sendRow'] = @{ ar = 'أرسل الصفّ: {0}'; en = 'Send the row: {0}' }
+    $catalogue['cb.sendRow'] = @{ ar = 'أرسل الصفّ: {0} — أو الصق عدّة صفوف، صفًّا في كل سطر'; en = 'Send the row: {0} — or paste several rows, one per line' }
     $catalogue['cb.fieldsInSceneOrder'] = @{ ar = 'الحقول بترتيب المشهد مفصولة بـ | : {0}'; en = 'The fields in the scene order, separated by | : {0}' }
     $catalogue['cb.fillRightAudit'] = @{ ar = '🛡 صلاحية تعبئة «{0}» = {1} - بواسطة {2}'; en = '🛡 The right to fill "{0}" = {1} - by {2}' }
     $catalogue['cb.boardDeletedAudit'] = @{ ar = '🗑 حذف جدول محتوى «{0}» - بواسطة {1}'; en = '🗑 The content board "{0}" deleted - by {1}' }

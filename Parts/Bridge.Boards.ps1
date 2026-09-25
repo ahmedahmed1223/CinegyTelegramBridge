@@ -569,6 +569,10 @@ function Complete-BoardText {
     $fields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' '')))
     $maxLength = Get-SettingInt 'MaxFieldLength' 1
     $result = $null
+    # ➕ add takes a paste too. It already split one into rows and kept the
+    # first, dropping the others without a word; several rows now go the
+    # paste path, which adds each, counts them and names what it skipped.
+    if ($mode -eq 'board_add' -and @((ConvertFrom-BoardPasteText -Text $Value -TextFields $fields).Rows).Count -gt 1) { $mode = 'board_paste' }
 
     switch ($mode) {
         'board_add' {

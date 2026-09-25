@@ -1932,6 +1932,13 @@ function Test-LongRunningOnAir {
         if ($declared -le 0) { return $false }
         if (-not $script:OnAir.ContainsKey($Layer)) { return $false }
         $record = $script:OnAir[$Layer]
+        # A manual-end item has no end: its duration is the scene file's
+        # "until stopped", the same on every show. For a graphic the bridge
+        # put up, that is not a statement of intent - it is exactly the
+        # forgotten case this alert exists for. An urgent stayed up eleven
+        # hours in silence because of it. Graphics meant to stay are marked
+        # LongRunning above; the ticker and logo here already are.
+        if ([bool](Get-JsonProp $status 'ActiveManualEnd') -and [string](Get-JsonProp $record 'Source') -eq 'bridge') { return $false }
         if ($record.At -isnot [datetime]) { return $false }
         return ((Get-Date) - $record.At).TotalSeconds -lt $declared
     }

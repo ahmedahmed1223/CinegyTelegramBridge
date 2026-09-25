@@ -55,7 +55,7 @@ function Add-BridgeTextReplies {
     $catalogue['reply.draftHandedOver'] = @{ ar = '🤝 سُلّمت المسودة بما فيها. أول من يضغط ✏️ يتابع نفس القائمة.'; en = '🤝 The draft was handed over as it is. Whoever presses ✏️ first continues the same list.' }
     $catalogue['reply.sendTxt'] = @{ ar = '📥 أرسل ملف TXT UTF-8. سيُستورد إلى المسودة فقط ثم يمكنك معاينته ونشره.'; en = '📥 Send a UTF-8 TXT file. It is imported into the draft only; you can then preview and publish it.' }
     $catalogue['reply.extensionExpired'] = @{ ar = '⚠️ انتهت صلاحية عرض التمديد أو تم استخدامه.'; en = '⚠️ The extension offer has expired or was already used.' }
-    $catalogue['reply.sendRowText'] = @{ ar = 'أرسل نصّ الصفّ'; en = 'Send the row text' }
+    $catalogue['reply.sendRowText'] = @{ ar = 'أرسل نصّ الصفّ — أو الصق عدّة صفوف، صفًّا في كل سطر'; en = 'Send the row text — or paste several rows, one per line' }
     $catalogue['reply.pasteRows'] = @{ ar = '📋 ألصق الصفوف، سطرًا لكل صفّ.'; en = '📋 Paste the rows, one line per row.' }
     $catalogue['reply.pasteLimit'] = @{ ar = 'الرسالة الواحدة محدودة بـ4096 حرفًا — ألصق على دفعات، فاللصق يُضيف ولا يستبدل.'; en = 'One message is limited to 4096 characters — paste in batches; a paste adds and does not replace.' }
     $catalogue['reply.sendNewUrgent'] = @{ ar = 'أرسل نصّ العاجل الجديد:'; en = 'Send the new urgent text:' }

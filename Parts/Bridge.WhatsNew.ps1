@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.2'; Items = @(
+                        '🚨 **Fixed: a graphic left on air all night raised no alarm.** An urgent stayed up eleven hours with the one-hour alert set. Every graphic from this station goes to Cinegy as "until stopped", and the alert took that as "meant to stay". It no longer does; the ticker and the logo, marked long-running, stay quiet as before.'
+                        '🗂 **➕ Add row on a programme board takes a paste** — several lines add several rows. It used to keep the first line and drop the rest without saying so.'
+                    ) }
                 @{ Version = '8.70.1'; Items = @(
                         '✏️ **The news screen shows your draft while you edit it** — what you are about to publish, 🆕 on what is new against the air, and how many live headlines publishing would drop. Others still see the live ticker.'
                         '📤 **Review and publish comes first** on your draft, as ▶️ play does on the bulletin. Long headlines are cut on the screen, and 🔄 refresh redraws the same message instead of sending another.'
@@ -200,6 +204,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.2'; Items = @(
+                        '🚨 **إصلاح: رسمٌ بقي على الهواء طوال الليل دون تنبيه.** عاجلٌ بقي إحدى عشرة ساعة والتنبيه مضبوط على ساعة. كل رسم من هذه المحطة يصل Cinegy «حتى الإيقاف»، والتنبيه كان يفهم ذلك «مقصودًا أن يبقى». لم يعد كذلك؛ والشريط والشعار، المعلَّمان «طويلا البقاء»، يبقيان بلا تنبيه كما كانا.'
+                        '🗂 **«➕ إضافة صفّ» في جداول البرامج يقبل اللصق** — عدّة أسطر تضيف عدّة صفوف. كان يأخذ السطر الأول ويُسقط الباقي دون أن يقول.'
+                    ) }
                 @{ Version = '8.70.1'; Items = @(
                         '✏️ **شاشة الأخبار تعرض مسودتك وأنت تحرّرها** — ما ستنشره، مع 🆕 على الجديد مقارنةً بالهواء، وكم خبرًا من الهواء سيحذفه النشر. والآخرون يرون الشريط الحالي كما كان.'
                         '📤 **«مراجعة ونشر» صار أول الأزرار** في مسودتك، كما «▶️ تشغيل» أول أزرار الموجز. والأخبار الطويلة تُقصّ على الشاشة، و🔄 التحديث يعيد رسم الرسالة نفسها بدل إرسال أخرى.'

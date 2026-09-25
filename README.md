@@ -15,6 +15,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.2
+
+The stale on-air alert exempted any graphic whose Cinegy duration had not run
+out, and every graphic this station shows is accepted as 86400 s with manual
+end - so an urgent stayed up eleven hours with a one-hour alert and not one
+notice. A manual-end item the bridge put up is no longer exempt; templates
+meant to stay are marked LongRunning. And a programme board's add-row button
+takes a paste instead of keeping the first line and dropping the rest.
+
 ## Version 8.70.1
 
 The news management screen shows its draft's owner the draft - new headlines

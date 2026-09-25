@@ -357,3 +357,37 @@ Describe 'Boards on disk' {
         @(Get-ContentBoards).Count | Should -Be 1
     }
 }
+
+Describe 'Adding several rows through the add button' {
+    <#
+        ➕ add already split a paste into rows - and kept the first, dropping
+        the rest without a word. The paste button did it right; add now hands
+        anything of more than one row to the same path.
+    #>
+    BeforeEach {
+        Mock Get-MojazDesignFields { @([pscustomobject]@{ Name = 'title.Text'; Kind = 'text'; Consumed = $true }) }
+        Mock Get-TemplateStore { @{ Order = @('Econ'); Map = @{ 'Econ' = @{ Key = 'Econ'; Path = 'C:\econ.cintitle'; Layer = 6 } } } }
+        Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*.cintitle' }
+        Mock Send-TelegramMessage {}
+        Mock Show-BoardScreen {}
+        Mock Test-Admin { $true }
+        Mock Save-ContentBoard { $script:ContentBoards["$($Board.Id)"] = $Board; $true }
+        $board = (New-ContentBoard -Name 'بنر' -TemplateKey 'Econ' -UserId 7).Value
+        $script:ContentBoards = [ordered]@{ "$($board.Id)" = $board }
+        $script:BoardAddId = [string]$board.Id
+    }
+    AfterEach { $script:ContentBoards = [ordered]@{}; Clear-PendingState -ChatId 100 }
+
+    It 'adds every pasted row, not only the first' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'board_add'; UserId = 101; BoardId = $script:BoardAddId; StartedAt = (Get-Date) }
+        Complete-BoardText -ChatId 100 -UserId 101 -Value "الأول`nالثاني`nالثالث" | Out-Null
+        @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 3
+        Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -like "*$(T 'board.rowsAdded' 3)*" }
+    }
+
+    It 'still adds one row straight away' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'board_add'; UserId = 101; BoardId = $script:BoardAddId; StartedAt = (Get-Date) }
+        Complete-BoardText -ChatId 100 -UserId 101 -Value 'وحده' | Out-Null
+        @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 1
+    }
+}

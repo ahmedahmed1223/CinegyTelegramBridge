@@ -2477,3 +2477,48 @@ owhere\gone.cintitle'; Layer = 6 } } } }
         @(Get-MojazDesignFields -TemplateKey 'Gone') | Should -BeNullOrEmpty
     }
 }
+
+Describe 'The bulletin screen redraws in place' {
+    <#
+        None of the bulletin screens ever edited their message: every ⬆️ ⬇️
+        🗑, every page, every sync toggle sent a new copy of a screen that is
+        worked on for minutes at a time. And the library's pager shared the
+        rows' prefix, so its next page opened the selected bulletin instead.
+    #>
+    BeforeEach {
+        $script:RefreshTarget = $null
+        $script:MojazPress = { param([string]$Data) [pscustomobject]@{ id = 'm'; from = [pscustomobject]@{ id = 101 }; data = $Data
+                message = [pscustomobject]@{ message_id = 31; chat = [pscustomobject]@{ id = 101; type = 'private' } } } }
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-MojazAvailable { $true }
+        Mock Move-MojazRow { $script:seenMojazTarget = $script:RefreshTarget }
+        Mock Show-MojazLibraryScreen { $script:seenLibraryPage = $Page }
+        Mock Show-MojazScreen { }
+    }
+    AfterEach { $script:RefreshTarget = $null }
+
+    It 'marks the screen a row move was pressed on' {
+        $script:seenMojazTarget = $null
+        Invoke-CallbackQuery -CallbackQuery (& $script:MojazPress 'mojaz:up:r1')
+        $script:seenMojazTarget.MessageId | Should -Be 31
+    }
+
+    It 'pages the library as the library, not as the open bulletin' {
+        $script:seenLibraryPage = -1
+        Invoke-CallbackQuery -CallbackQuery (& $script:MojazPress 'mojazlib:2')
+        $script:seenLibraryPage | Should -Be 2
+        Should -Invoke Show-MojazScreen -Times 0
+    }
+
+    It 'gives the library pager its own prefix' {
+        $saved = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = [pscustomobject]@{ Bulletins = @(1..30 | ForEach-Object { [pscustomobject]@{ Id = "b$_"; Name = "نشرة $_"; Rows = @() } }) }
+            $data = @((Get-MojazLibraryKeyboard -Page 0).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+            @($data | Where-Object { $_ -like 'mojazpage:*' }) | Should -BeNullOrEmpty
+            $data | Should -Contain 'mojazlib:1'
+        }
+        finally { $script:MojazLibrary = $saved }
+    }
+}

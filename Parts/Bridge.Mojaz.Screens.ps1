@@ -335,9 +335,12 @@ function Get-MojazLibraryKeyboard {
     }
     if ($window.PageCount -gt 1) {
         $pager = @()
-        if ($window.HasPrevious) { $pager += (New-Button (T 'mojaz.prev') "mojazpage:$($window.Page - 1)") }
-        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazpage:$($window.Page)")
-        if ($window.HasNext) { $pager += (New-Button (T 'mojaz.next') "mojazpage:$($window.Page + 1)") }
+        # Its own prefix. It shared mojazpage: with the rows' pager, and the
+        # router's first match is the rows' - so the library's next page
+        # opened the selected bulletin instead.
+        if ($window.HasPrevious) { $pager += (New-Button (T 'mojaz.prev') "mojazlib:$($window.Page - 1)") }
+        $pager += (New-Button "$($window.Page + 1)/$($window.PageCount)" "mojazlib:$($window.Page)")
+        if ($window.HasNext) { $pager += (New-Button (T 'mojaz.next') "mojazlib:$($window.Page + 1)") }
         $keyboard += , $pager
     }
     $keyboard += , @((New-Button (T 'mojaz.new') 'mojaz:new' -Style success))

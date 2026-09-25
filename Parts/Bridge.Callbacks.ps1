@@ -86,7 +86,7 @@ function Invoke-CallbackQuery {
     $data = [string](Get-JsonProp $CallbackQuery 'data')
     # Set per press and cleared by the next press and by every tick, so it
     # can never outlive the reply it is for.
-    $script:RefreshTarget = if ($msgObj -and (Test-RefreshButtonPress -Message $msgObj -Data $data)) {
+    $script:RefreshTarget = if ($msgObj -and ((Test-RefreshButtonPress -Message $msgObj -Data $data) -or (Test-RedrawInPlacePress -Data $data))) {
         @{ ChatId = $chatId; MessageId = [int](Get-JsonProp $msgObj 'message_id') }
     } else { $null }
 
@@ -2282,9 +2282,9 @@ function Invoke-CallbackQuery {
             }
             break
         }
-        'mojazpage:*' {
+        'mojazlib:*' {
             $page = 0
-            if ([int]::TryParse((Get-CallbackArg $data 'mojazpage:'), [ref]$page) -and $page -ge 0) {
+            if ([int]::TryParse((Get-CallbackArg $data 'mojazlib:'), [ref]$page) -and $page -ge 0) {
                 Show-MojazLibraryScreen -ChatId $chatId -UserId $userId -Page $page
             }
             break

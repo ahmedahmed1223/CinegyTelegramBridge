@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.4'; Items = @(
+                        '📑 **The bulletin screen updates in place** — moving, deleting, paging, sync and fit-to-loop redraw the same message instead of sending a new copy each time.'
+                        '📚 **Fixed: the bulletin library''s next page opened the selected bulletin** instead of the library''s second page.'
+                    ) }
                 @{ Version = '8.70.3'; Items = @(
                         '🔄 **Every Refresh button now updates the message it is on**, on every screen, instead of sending a new copy. An unchanged screen stays as it is rather than being sent again.'
                     ) }
@@ -207,6 +211,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.4'; Items = @(
+                        '📑 **شاشة الموجز تُحدَّث في مكانها** — التحريك والحذف والتقليب والمزامنة ومطابقة الحلقة تعيد رسم الرسالة نفسها بدل إرسال نسخة جديدة كل مرّة.'
+                        '📚 **إصلاح: الصفحة التالية في مكتبة الموجزات كانت تفتح الموجز المختار** بدل الصفحة الثانية من المكتبة.'
+                    ) }
                 @{ Version = '8.70.3'; Items = @(
                         '🔄 **كل زرّ «تحديث» صار يحدّث الرسالة التي هو فيها**، في كل الشاشات، بدل إرسال نسخة جديدة. والشاشة التي لم يتغيّر فيها شيء تبقى كما هي ولا تُرسل مرّة أخرى.'
                     ) }

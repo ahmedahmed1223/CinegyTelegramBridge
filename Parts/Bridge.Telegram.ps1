@@ -282,6 +282,22 @@ function Test-RefreshButtonPress {
     return $false
 }
 
+function Test-RedrawInPlacePress {
+    <#
+        Buttons whose answer is the screen they sit on, redrawn: the bulletin's
+        row moves and deletes, its pages, its sync and fit-to-loop. They ride
+        the refresh mark, so the screen is edited rather than sent again - the
+        bulletin never edited its message at all, on a screen worked on for
+        minutes at a time. A refusal (❌) replaces the screen and the screen
+        follows it, so nothing stale is left either way.
+    #>
+    param([string]$Data)
+    foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojazpage:', 'mojazlib:')) {
+        if ($Data.StartsWith($prefix, [StringComparison]::Ordinal)) { return $true }
+    }
+    return $Data -in @('mojaz:sync', 'mojaz:matchloop')
+}
+
 function Clear-RefreshTarget { $script:RefreshTarget = $null }
 
 function Use-RefreshTarget {

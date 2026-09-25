@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.4
+
+The bulletin screens redraw in place: row moves, deletes, paging, sync and fit-to-loop ride the refresh mark from 8.70.3 instead of sending a new copy. And the bulletin library's pager shared the rows' `mojazpage:` prefix, so its next page opened the selected bulletin; it now has `mojazlib:`.
+
 ## Version 8.70.3
 
 Every 🔄 Refresh button redraws the message it is on. Fixed once at the send:

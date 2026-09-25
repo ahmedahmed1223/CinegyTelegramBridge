@@ -889,6 +889,10 @@ function Invoke-CallbackQuery {
             Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dtotal -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
+        'urgentb:dmanualhide' {
+            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dmanualhide -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
+            break
+        }
         'urgentb:num:*' { Invoke-UrgentNumberPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'urgentb:num:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
         'urgentb:dorder' { Invoke-UrgentDefaultSwitch -ChatId $chatId -Field RepeatMode | Out-Null; break }
         'urgentb:dmode' { Invoke-UrgentDefaultSwitch -ChatId $chatId -Field Mode | Out-Null; break }

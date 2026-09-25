@@ -817,6 +817,8 @@ function Show-UrgentManualConfirm {
         $text += (T 'urg.willReplaceHeadline' $currentText $($state.Text))
     }
     if ($state.HadRun) { $text += (T 'urg.boardStopsFirst') }
+    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
+    if ($manualHide -gt 0) { $text += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
     if (-not $state.LiveStamp) { $text += "`n`n$($state.Text)" }
     if ($text.Length -gt 3900) { $text = $text.Substring(0,3800) + (T 'urg.readFullText') }
     $markup = @{ inline_keyboard = @(
@@ -861,7 +863,10 @@ function Invoke-UrgentManualAction {
     # Consume confirmation BEFORE any air command; retry requires a fresh review.
     Clear-PendingState -ChatId $ChatId
     if ($script:UrgentBoardRun -and -not (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Quiet)) { return $false }
-    $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables (Get-UrgentItemVariables -Item $item) -ChatId $ChatId -UserId $UserId -AutoHideSeconds 0
+    # The board's own auto-hide, or none: a story shown alone used to stay
+    # up until somebody remembered it, which is how an urgent ran eleven hours.
+    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
+    $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables (Get-UrgentItemVariables -Item $item) -ChatId $ChatId -UserId $UserId -AutoHideSeconds $manualHide
     if (-not [bool](Get-JsonProp $result 'Success')) { return $false }
     $stamp = Get-UrgentLiveStamp -Layer ([int]$template.Layer)
     if (-not $stamp) { return $true }
@@ -870,7 +875,9 @@ function Invoke-UrgentManualAction {
         Layer=[int]$template.Layer; LiveStamp=$stamp }
     $script:UrgentManualLive[$ChatId] = $liveState
     Save-UrgentManualState | Out-Null
-    Send-TelegramMessage -ChatId $ChatId -Text (T 'urgent.shownAlone') -ReplyMarkup @{
+    $shownText = (T 'urgent.shownAlone')
+    if ($manualHide -gt 0) { $shownText += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
+    Send-TelegramMessage -ChatId $ChatId -Text $shownText -ReplyMarkup @{
         inline_keyboard = @(
             , @((New-Button (T 'urgent.hideShown') "urgmanual:hide:$($liveState.Token)" -Style danger))
             , @((New-Button (T 'urgent.pickAnother') "urgread:$($state.ItemId):0"))
@@ -1002,6 +1009,11 @@ function Get-UrgentTimingKeyboard {
     $gap = Get-SettingInt 'UrgentExitGapSeconds' 0
     $gapLabel = if ($gap -gt 0) { (T 'urg.gapBetween' $gap) } else { (T 'urgent.gapSceneOnly') }
     $rows += , @( (New-Button $gapLabel 'urgentb:dgap') )
+    # The one timing the board's run does not use: it belongs to the story
+    # shown alone, which until now stayed up until somebody pressed hide.
+    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
+    $manualHideLabel = if ($manualHide -gt 0) { (T 'urg.manualHideAfter' $manualHide) } else { (T 'urgent.manualHideNone') }
+    $rows += , @( (New-Button $manualHideLabel 'urgentb:dmanualhide') )
     $rows += , @( (New-Button (T 'urgent.back') 'urgentb:open') )
     return @{ inline_keyboard = $rows }
 }
@@ -1230,7 +1242,7 @@ function Set-UrgentBoardSetting {
     try {
         # Set-Setting checks bounds only when TryParse succeeds. Never persist
         # numeric text it cannot parse: Get-SettingInt would silently read 8.
-        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds')) {
+        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds', 'UrgentManualAutoHideSeconds')) {
             $number = 0
             if (-not [int]::TryParse([string]$Value, [ref]$number)) { throw (T 'urgent.pickNumberButton') }
             $Value = $number
@@ -1272,7 +1284,7 @@ function Invoke-UrgentDefaultSwitch {
 # ------------------------------------------------------------- numeric input
 
 function Get-UrgentNumberSpec {
-    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind)
+    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap', 'dmanualhide')][string]$Kind)
     $spec = @{ Field = 'IntervalSeconds'; Setting = ''; Label = (T 'urgent.num.itemInterval'); Minimum = 0; Maximum = 3600; Zero = (T 'urgent.num.inherited') }
     switch ($Kind) {
         'repeats' { $spec.Field = 'Repeats'; $spec.Label = (T 'urgent.num.itemRepeats'); $spec.Maximum = 99 }
@@ -1284,6 +1296,7 @@ function Get-UrgentNumberSpec {
         # way from the table it governs - and an operator looking for it in
         # إدارة العواجل did not find it, which is how this was reported.
         'dgap' { $spec.Setting = 'UrgentExitGapSeconds'; $spec.Field = ''; $spec.Label = (T 'urgent.num.gap'); $spec.Zero = (T 'urgent.num.sceneOnly') }
+        'dmanualhide' { $spec.Setting = 'UrgentManualAutoHideSeconds'; $spec.Field = ''; $spec.Label = (T 'urgent.num.manualHide'); $spec.Zero = (T 'urgent.num.hideButtonOnly') }
     }
     if ($spec.Setting) {
         $bounds = Get-SettingBounds -Name $spec.Setting
@@ -1328,7 +1341,7 @@ function Show-UrgentNumberPicker {
 
 function Start-UrgentNumberPicker {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap', 'dmanualhide')][string]$Kind,
         [int]$Position = -1, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId

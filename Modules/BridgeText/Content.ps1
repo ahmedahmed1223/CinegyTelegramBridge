@@ -194,6 +194,9 @@ function Add-BridgeTextContent {
     $catalogue['urgent.num.total'] = @{ ar = 'المدة الكلية (ثانية)'; en = 'Total time (seconds)' }
     $catalogue['urgent.num.gap'] = @{ ar = 'الفاصل بين الأخبار (ثانية)'; en = 'Gap between stories (seconds)' }
     $catalogue['urgent.num.sceneOnly'] = @{ ar = 'حركة المشهد وحدها'; en = 'the scene motion alone' }
+    $catalogue['urgent.num.manualHide'] = @{ ar = 'إخفاء الخبر الواحد تلقائيًا (ثانية)'; en = 'Hide a story shown alone after (seconds)' }
+    $catalogue['urgent.num.hideButtonOnly'] = @{ ar = 'بالزر فقط'; en = 'the hide button only' }
+    $catalogue['urgent.manualHideNone'] = @{ ar = '⏱ إخفاء الخبر الواحد: بالزر فقط'; en = '⏱ A story shown alone: hidden by the button only' }
     $catalogue['urgent.num.doneBack'] = @{ ar = '✅ تمّ / رجوع'; en = '✅ Done / back' }
     $catalogue['urgent.num.expired'] = @{ ar = '⚠️ انتهت صلاحية هذه الأزرار. افتح شاشة الرقم من جديد.'; en = '⚠️ These buttons have expired. Open the number screen again.' }
     $catalogue['urgent.manualSingle'] = @{ ar = '🚨 عرض خبر واحد فقط — دون انتقال تلقائي.'; en = '🚨 Showing one story only — with no automatic advance.' }

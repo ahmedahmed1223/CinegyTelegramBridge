@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.71.1'
+$script:BridgeVersion = '8.71.2'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -285,6 +285,7 @@ $script:DefaultSettings = [ordered]@{
     UrgentBoardMode            = 'text'  # the display mode a line takes when it does not state its own: text = update words, exit = outro before this line, auto_hide = outro after this line
     UrgentBoardRepeatMode      = 'cycle' # cycle = 1 2 3 · 1 2 3 (the whole board, then again); item = 1 1 · 2 2
     UrgentBoardTotalSeconds    = 0       # ceiling on the whole run; 0 means the repeats alone decide
+    UrgentManualAutoHideSeconds = 0      # a story shown alone hides itself after this; 0 means only the hide button does
     UrgentBoardMaxItems        = 40      # the rich-table row limit: past it a screen starts hiding its own rows
     UrgentMinIntervalSeconds   = 4       # floor used only when the scene cannot be read; the scene's own timing wins
     UrgentExitGapSeconds       = 0       # deliberate blank gap between stories in exit mode; 0 leaves only the scene's own outro
@@ -543,6 +544,7 @@ $script:SettingDisplayMetadata = @{
     UrgentBoardMode = @{ Unit = ''; Description = 'نمط العرض الافتراضي: text يحدّث النصّ، exit يُخرج المشهد قبل هذا العاجل، auto_hide يُخرجه عند انتهاء مدة هذا العاجل' }
     UrgentBoardRepeatMode = @{ Unit = ''; Description = 'ترتيب التكرار: cycle يعيد الجدول كاملًا (١ ٢ ٣ · ١ ٢ ٣)، وitem يكرّر كل عاجل ثم ينتقل (١ ١ · ٢ ٢)' }
     UrgentBoardTotalSeconds = @{ Unit = 'ثانية'; Description = 'سقف زمني للتشغيل كلّه، يقصّ التكرارات إن لزم. صفر يعني بلا سقف' }
+    UrgentManualAutoHideSeconds = @{ Unit = 'ثانية'; Description = 'الخبر المعروض وحده يُخفى تلقائيًا بعد هذه المدة. صفر يعني لا يُخفى إلا بالزر' }
     UrgentBoardMaxItems = @{ Unit = 'عنصر'; Description = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية' }
     UrgentMinIntervalSeconds = @{ Unit = 'ثانية'; Description = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج' }
     UrgentExitGapSeconds = @{ Unit = 'ثانية'; Description = 'فاصل شاشة فارغة بين خبر وآخر في وضع حركة الخروج (0 = حركة المشهد وحدها). يرفع أقصر فاصل مسموح بالقدر نفسه' }
@@ -1431,7 +1433,7 @@ $script:SettingGroupDefinitions = @(
         ) }
     [pscustomobject]@{ Category = 'urgent'; Groups = @(
             [pscustomobject]@{ Key = 'all'; Label = 'جدول العواجل'; Names = @(
-                    'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode', 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentBoardMaxItems', 'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish', 'UrgentBoardMaxTextLength'
+                    'EnableUrgentBoard', 'UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardMode', 'UrgentBoardRepeatMode', 'UrgentBoardTotalSeconds', 'UrgentManualAutoHideSeconds', 'UrgentBoardMaxItems', 'UrgentMinIntervalSeconds', 'UrgentExitGapSeconds', 'UrgentSyncLeadMs', 'UrgentBoardNotifyOnFinish', 'UrgentBoardMaxTextLength'
                 ) }
         ) }
     [pscustomobject]@{ Category = 'boards'; Groups = @(
@@ -1611,6 +1613,7 @@ $script:SettingNavigationLabels = @{
     UrgentBoardMode = 'نمط عرض العواجل'
     UrgentBoardRepeatMode = 'ترتيب التكرار'
     UrgentBoardTotalSeconds = 'المدة الكلية للعواجل'
+    UrgentManualAutoHideSeconds = 'إخفاء الخبر الواحد'
     UrgentBoardMaxItems = 'حدّ عدد العواجل'
     UrgentMinIntervalSeconds = 'أقصر فاصل للعواجل'
     UrgentExitGapSeconds = 'الفاصل بين الأخبار'
@@ -1782,6 +1785,7 @@ $script:SettingConstraints = @{
     UrgentBoardIntervalSeconds    = @{ Minimum = 1; Maximum = 3600 }
     UrgentBoardRepeats            = @{ Minimum = 1; Maximum = 99 }
     UrgentBoardTotalSeconds       = @{ Minimum = 0; Maximum = 3600 }
+    UrgentManualAutoHideSeconds   = @{ Minimum = 0; Maximum = 3600 }
     UrgentBoardMaxItems           = @{ Minimum = 1; Maximum = 40 }
     UrgentMinIntervalSeconds      = @{ Minimum = 1; Maximum = 60 }
     UrgentExitGapSeconds          = @{ Minimum = 0; Maximum = 300 }

@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.2'; Items = @(
+                        '⏱ **A story shown alone can hide itself** — in urgent management, under the board timings: "hide a story shown alone after". Set it once and every single story shown by hand goes off air by itself after that many seconds; the confirmation and the live message both say when. Zero keeps today''s behaviour: only the hide button.'
+                    ) }
                 @{ Version = '8.71.1'; Items = @(
                         '🔄 **Refresh stays on one message** — when a table screen could not be edited in place and came as a new message, the next screen in that chat kept chasing the old one and arrived as a duplicate. It now redraws the new one.'
                         '🔍 **Who cleared the graphic** — when a template leaves air from outside the bot, the log now quotes Cinegy''s own words: the connected client and the item that took the layer.'
@@ -236,6 +239,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.2'; Items = @(
+                        '⏱ **الخبر المعروض وحده يخفي نفسه** — في إدارة العواجل، بين توقيتات الجدول: «إخفاء الخبر الواحد بعد». اضبطه مرة، وكل خبر يُعرض يدويًا وحده يخرج من الهواء بنفسه بعد هذه الثواني، وتذكر شاشة التأكيد ورسالة «عُرض» متى. الصفر يبقي ما كان: الإخفاء بالزر فقط.'
+                    ) }
                 @{ Version = '8.71.1'; Items = @(
                         '🔄 **التحديث يبقى على رسالة واحدة** — حين تعذّر تعديل شاشة جدول في مكانها وجاءت رسالةً جديدة، كانت الشاشة التالية في المحادثة نفسها تطارد الرسالة القديمة فتصل نسخةً مكرّرة. صارت تُعاد على الجديدة.'
                         '🔍 **من أزال القالب** — حين يخرج قالب من الهواء من خارج البوت، يقتبس السجلّ كلام Cinegy نفسه: العميل المتصل والعنصر الذي أخذ الطبقة.'

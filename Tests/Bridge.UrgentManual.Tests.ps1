@@ -50,6 +50,27 @@ Describe 'Full urgent reader and manual single story' {
         $script:UrgentBoardRun | Should -BeNullOrEmpty
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeFalse
     }
+    It 'hides a story shown alone after the board setting, and says so' {
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Invoke-ShowTemplateResult {
+            $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
+            @{ Success=$true }
+        }
+        $config.Settings | Add-Member UrgentManualAutoHideSeconds 90 -Force
+        try {
+            $id = $script:UrgentBoard.Items[0].Id
+            Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
+            $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
+            $state = Get-PendingState -ChatId 100
+            Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeTrue
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $AutoHideSeconds -eq 90 }
+            $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
+            $buttons = @((Get-UrgentTimingKeyboard).inline_keyboard | ForEach-Object { $_ })
+            @($buttons | Where-Object callback_data -eq 'urgentb:dmanualhide').Count | Should -Be 1
+        }
+        finally { $config.Settings.PSObject.Properties.Remove('UrgentManualAutoHideSeconds') }
+    }
     It 'offers manual mode and reaches full reading through actual callbacks' {
         Mock Test-Authorized { $true }
         Mock Confirm-TelegramCallback {}

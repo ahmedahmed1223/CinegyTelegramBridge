@@ -107,6 +107,20 @@ Describe 'The breaking-news board and the fixed urgent template' {
         Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
     }
 
+    It 'primes the postbox before SHOW on the ordinary pipeline too' {
+        $script:AirOrder = @()
+        $config.Settings | Add-Member -NotePropertyName 'SetValuesAfterShow' -NotePropertyValue $true -Force
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Send-PostboxValues { $script:AirOrder += 'postbox'; [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
+        Mock Show-TitlerTemplate { $script:AirOrder += 'show'; [pscustomobject]@{ Success = $true; EventId = '{x}' } }
+        Mock Update-OnAirStateFromCinegy { }
+
+        Invoke-ShowTemplateResult -Key 'Urgent' -Variables @{ 'Headline.Text' = 'خبر' } -ChatId 100 -UserId 100 | Out-Null
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+        @($script:AirOrder)[0] | Should -Be 'postbox' -Because 'the previous story must be gone from the postbox before the scene loads'
+    }
+
     It 'pages the board keyboard rather than growing one row per line' {
         New-TestUrgentBoard -Count 30 | Out-Null
 
@@ -415,6 +429,23 @@ Describe 'Running the breaking-news board' {
         $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
     }
 
+    It 'primes the postbox with the line before its scene loads' {
+        $script:AirOrder = @()
+        Mock Send-PostboxValues { $script:AirOrder += 'postbox'; [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Show-TitlerTemplate { $script:AirOrder += 'show'; [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{NEW}'; ActiveDurationSeconds = 86400; ActiveManualEnd = $true; Error = '' } }
+        Mock Update-OnAirStateFromCinegy { }
+        Mock Write-BridgeLog { }
+        $config.Settings | Add-Member SetValuesAfterShow $true -Force
+        $script:PostShowQueue.Clear()
+        try {
+            Show-UrgentBoardScene -Template (Get-UrgentTemplate) -Values @{ Text = 'الخبر الثاني' } | Out-Null
+            $script:AirOrder | Should -Be @('postbox', 'show') -Because 'the scene initialises from what the postbox already holds'
+        }
+        finally { $script:PostShowQueue.Clear(); $script:OnAir.Remove(7) }
+    }
+
     It 'writes every re-shown line through the postbox and moves the record to the new item' {
         Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }
@@ -487,7 +518,8 @@ Describe 'Running the breaking-news board' {
         Step-TestUrgentRun
         Should -Invoke Exit-TitlerScene -Times 1 -Exactly
         Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Variables['Headline.Text'] -eq 'عاجل 2' }
-        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+        # Not the text-mode path: the one postbox write is the pre-show prime of the new line (8.71.8).
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter { $Values['Headline.Text'] -eq 'عاجل 2' }
     }
 
     It 'takes an exit-mode line out and brings it back' {
@@ -499,7 +531,7 @@ Describe 'Running the breaking-news board' {
 
         Should -Invoke Exit-TitlerScene -Times 1 -Exactly
         Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
-        Should -Invoke Send-PostboxValues -Times 0 -Exactly
+        Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter { $Values['Headline.Text'] -eq 'عاجل 2' }
     }
 
     It 'stops at the first failed line instead of walking a table nobody can see' {

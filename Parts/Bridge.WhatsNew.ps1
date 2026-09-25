@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.8'; Items = @(
+                        '⚡ **No flash of the previous story** — a new urgent came up wearing the previous story''s text for a second or two, then changed. The text is now written to the scene''s postbox before the scene loads, on every show and every line of a sequence.'
+                    ) }
                 @{ Version = '8.71.7'; Items = @(
                         '🖥 **The urgent board is one screen** — every button on it, and every typed reply (a new story, a replacement text, a number), redraws the board message you are working on instead of sending a new copy. Starting a sequence and its end are said on that same screen. Only if the message can no longer be edited is a fresh one sent, and that one becomes the screen.'
                     ) }
@@ -259,6 +262,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.8'; Items = @(
+                        '⚡ **لا ومضة للخبر السابق** — كان العاجل الجديد يظهر بنصّ الخبر السابق ثانية أو اثنتين ثم يتغيّر. صار النصّ يُكتب في postbox المشهد قبل تحميل المشهد، في كل عرض وكل سطر من التتابع.'
+                    ) }
                 @{ Version = '8.71.7'; Items = @(
                         '🖥 **شاشة العواجل شاشة واحدة** — كل زرّ فيها، وكل ردّ تكتبه (خبر جديد، نصّ بديل، رقم)، يعيد رسم رسالة الجدول التي تعمل عليها بدل رسالة جديدة. بدء التتابع ونهايته يُقالان على الشاشة نفسها. ولا تُرسل رسالة جديدة إلا إن تعذّر تعديل القديمة، فتصير هي الشاشة.'
                     ) }

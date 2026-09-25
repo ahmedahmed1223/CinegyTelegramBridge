@@ -621,6 +621,18 @@ function Get-VerifiedCinegyShowIdentity {
     return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
 }
 
+function Send-PreShowValues {
+    <# The story into the postbox before its scene loads, under the same
+       setting as the write after. A failure is logged and does not stop
+       the SHOW: the post-show write is still coming. #>
+    param([string]$Key = '', [hashtable]$Variables = @{})
+    if (-not (Get-Setting 'SetValuesAfterShow') -or -not $Variables -or $Variables.Count -lt 1) { return }
+    $primed = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Values $Variables -TimeoutSec (Get-AirTimeout)
+    if (-not $primed.Success) { Write-BridgeLog "Pre-show postbox write failed for '$Key': $([string](Get-JsonProp $primed 'Error'))" 'WARN' }
+    elseif (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -755,6 +767,12 @@ function Invoke-ShowTemplateResult {
     if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
 
     if (-not $operationStarted) { Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId }
+    # Primed before the scene comes up, not only written after it. A scene
+    # that honours the postbox initialises from what the postbox holds -
+    # the previous story - and the post-show write only reaches it a tick
+    # later, so an operator watched the old headline for a second or two
+    # on every new urgent. The write after SHOW stays as belt and braces.
+    Send-PreShowValues -Key $Key -Variables $Variables
     $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)

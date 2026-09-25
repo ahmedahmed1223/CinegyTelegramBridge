@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.8
+
+`Send-PreShowValues` writes the variables to the postbox immediately before SHOW, in the general pipeline and in the board's re-show, under the same `SetValuesAfterShow` setting: a postbox-driven scene initialises from what the postbox holds, so a new urgent flashed the previous story until the post-show write landed a tick later.
+
 ## Version 8.71.7
 
 The urgent board works on one message: every urgent callback prefix rides the refresh mark, and a new `Send-UrgentScreen` anchors the board, item and timing screens to a per-chat home message that typed replies come back to; a new message is sent only when the old one cannot be edited, and it becomes the home. Rich sends now record their message id. The end of a run is said on the board rather than as a separate message.

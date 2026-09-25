@@ -617,6 +617,10 @@ function Show-UrgentBoardScene {
     if (-not $clear.Success) {
         Write-BridgeLog "Urgent board: could not clear layer $layer before the next line; the scene may keep its previous text: $([string]$clear.Error)" 'WARN'
     }
+    # The layer is clear now, so the previous line is off screen; prime the
+    # postbox with this line before its scene loads, or the scene comes up
+    # wearing the previous line until the post-show write lands.
+    Send-PreShowValues -Key $script:MojazUrgentKey -Variables $Values
     $shown = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $layer -TemplatePath ([string]$Template.Path) -Variables $Values -TimeoutSec (Get-AirTimeout) `
             -Device ([string](Get-JsonProp $Template 'Device'))

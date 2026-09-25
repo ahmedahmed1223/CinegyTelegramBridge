@@ -210,7 +210,6 @@ function Add-BridgeTextSettings {
     $catalogue['setting.UrgentBoardMode.label'] = @{ ar = 'نمط عرض العواجل'; en = 'Urgent display mode' }
     $catalogue['setting.UrgentBoardRepeatMode.label'] = @{ ar = 'ترتيب التكرار'; en = 'Repeat order' }
     $catalogue['setting.UrgentBoardTotalSeconds.label'] = @{ ar = 'المدة الكلية للعواجل'; en = 'Total urgent run time' }
-    $catalogue['setting.UrgentManualAutoHideSeconds.label'] = @{ ar = 'إخفاء الخبر الواحد'; en = 'Hide a story shown alone' }
     $catalogue['setting.UrgentBoardMaxItems.label'] = @{ ar = 'حدّ عدد العواجل'; en = 'Maximum urgent items' }
     $catalogue['setting.UrgentMinIntervalSeconds.label'] = @{ ar = 'أقصر فاصل للعواجل'; en = 'Shortest urgent interval' }
     $catalogue['setting.UrgentExitGapSeconds.label'] = @{ ar = 'الفاصل بين الأخبار'; en = 'Gap between stories' }
@@ -448,7 +447,6 @@ function Add-BridgeTextSettings {
     $catalogue['setting.UrgentBoardMode.description'] = @{ ar = 'نمط العرض الافتراضي: text يحدّث النصّ، exit يُخرج المشهد قبل هذا العاجل، auto_hide يُخرجه عند انتهاء مدة هذا العاجل'; en = 'Default display mode: text updates the text, exit takes the scene out before this item, auto_hide takes it out when this item ends' }
     $catalogue['setting.UrgentBoardRepeatMode.description'] = @{ ar = 'ترتيب التكرار: cycle يعيد الجدول كاملًا (١ ٢ ٣ · ١ ٢ ٣)، وitem يكرّر كل عاجل ثم ينتقل (١ ١ · ٢ ٢)'; en = 'Repeat order: cycle replays the whole board (1 2 3 . 1 2 3), item repeats each one then moves on (1 1 . 2 2)' }
     $catalogue['setting.UrgentBoardTotalSeconds.description'] = @{ ar = 'سقف زمني للتشغيل كلّه، يقصّ التكرارات إن لزم. صفر يعني بلا سقف'; en = 'A ceiling on the whole run, trimming repeats if needed. Zero means no ceiling' }
-    $catalogue['setting.UrgentManualAutoHideSeconds.description'] = @{ ar = 'الخبر المعروض وحده يُخفى تلقائيًا بعد هذه المدة. صفر يعني لا يُخفى إلا بالزر'; en = 'A story shown alone hides itself after this long. Zero means only the hide button does' }
     $catalogue['setting.UrgentBoardMaxItems.description'] = @{ ar = 'أقصى عدد عواجل في الجدول. الحدّ الأعلى هو حدّ صفوف الجداول الثرية'; en = 'Maximum urgent items on the board. The upper bound is the rich table row limit' }
     $catalogue['setting.UrgentMinIntervalSeconds.description'] = @{ ar = 'أقصر فاصل مسموح حين يتعذّر قراءة توقيت المشهد. حين يُقرأ المشهد فأرضيته هي حركتا الدخول والخروج'; en = 'Shortest interval allowed when the scene timing cannot be read. When it can, the floor is the entrance and exit animations' }
     $catalogue['setting.UrgentExitGapSeconds.description'] = @{ ar = 'فاصل شاشة فارغة بين خبر وآخر في وضع حركة الخروج (0 = حركة المشهد وحدها). يرفع أقصر فاصل مسموح بالقدر نفسه'; en = 'A blank gap between stories in exit mode (0 = the scene motion alone). It raises the shortest allowed interval by the same amount' }

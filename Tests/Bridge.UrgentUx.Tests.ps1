@@ -91,7 +91,7 @@ Describe 'Urgent board rendered operator screens' {
         Should -Invoke Send-TelegramMessage -Times 0 -Exactly
     }
 
-    It 'explains the effective ceiling consistently on review and fallback for <Policy>' -ForEach @(
+    It 'explains the effective ceiling on review for <Policy>, and the board screen stays quiet' -ForEach @(
         @{ Policy = 'template'; Maximum = 100; Sensitive = ''; SensitiveSeconds = 30; Expected = 'الحد الأقصى للقالب'; Seconds = 100 }
         @{ Policy = 'sensitive'; Maximum = 200; Sensitive = 'Urgent'; SensitiveSeconds = 100; Expected = 'للقالب الحسّاس'; Seconds = 100 }
     ) {
@@ -104,15 +104,13 @@ Describe 'Urgent board rendered operator screens' {
         $review | Should -Match "سقف التشغيل: $Seconds ث.*$Expected"
         $review | Should -Match 'الفاصل الفعلي: 8 ث'
         $review | Should -Match 'قصّ التكرار من 3 إلى 1'
+        # The ceiling is a template policy: the review explains it, the board
+        # screen no longer shows it as a button or a warning (8.71.4).
         $fallback = Get-UrgentBoardText -ChatId 100
         $rich = ((Get-UrgentBoardBlocks -ChatId 100 | Where-Object type -eq 'paragraph').text -join "`n")
-        $fallback | Should -Match $Expected
-        $rich | Should -Match $Expected
-        if ($Policy -eq 'template') {
-            $review | Should -Not -Match 'حسّاس'
-            $fallback | Should -Not -Match 'حسّاس'
-            $rich | Should -Not -Match 'حسّاس'
-        }
+        $fallback | Should -Not -Match $Expected
+        $rich | Should -Not -Match $Expected
+        if ($Policy -eq 'template') { $review | Should -Not -Match 'حسّاس' }
     }
 
     It 'clamps page <Page> consistently in fallback text and stable-id keyboards' -ForEach @(

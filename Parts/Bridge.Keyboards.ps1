@@ -2405,17 +2405,22 @@ function Format-Duration {
 
 function Get-DurationKeyboard {
     <# Shared duration picker. Prefix 'dur' targets a template about to be
-       shown; 'tlay' targets a layer that is already on air. The default is
-       marked so the common case stays one tap. #>
+       shown; 'tlay' targets a layer that is already on air; 'urgt' a story
+       from the urgent board shown alone. The default is marked so the
+       common case stays one tap, and a default that is not among the
+       presets is offered too rather than silently losing its star. #>
     param(
-        [Parameter(Mandatory)][ValidateSet('dur', 'tlay')][string]$Prefix,
+        [Parameter(Mandatory)][ValidateSet('dur', 'tlay', 'urgt')][string]$Prefix,
         [Parameter(Mandatory)][string]$Token,
-        [string]$BackData = 'menu'
+        [string]$BackData = 'menu',
+        [int]$DefaultSeconds = -1
     )
-    $default = Get-SettingInt 'AutoHideDefaultSeconds' 0
+    $default = if ($DefaultSeconds -ge 0) { $DefaultSeconds } else { Get-SettingInt 'AutoHideDefaultSeconds' 0 }
+    $choices = @(Get-AutoHideChoices)
+    if ($default -gt 0 -and $choices -notcontains $default) { $choices = @($choices + $default | Sort-Object -Unique) }
     $rows = @()
     $row = @()
-    foreach ($sec in (Get-AutoHideChoices)) {
+    foreach ($sec in $choices) {
         $mark = if ($sec -eq $default) { "⭐ " } else { "" }
         $row += (New-Button "$mark$(Format-Duration -Seconds $sec)" "$Prefix`:$Token`:$sec")
         if ($row.Count -eq 3) { $rows += , $row; $row = @() }

@@ -57,11 +57,19 @@ Describe 'Full urgent reader and manual single story' {
             $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
             @{ Success=$true }
         }
-        $config.Settings | Add-Member UrgentManualAutoHideSeconds 90 -Force
+        # The story holds the screen 90 s in a sequence, so the picker stars 90.
+        $script:UrgentBoard.Items[0].IntervalSeconds = 90
         try {
             $id = $script:UrgentBoard.Items[0].Id
             $row = @((Get-UrgentItemKeyboard -Position 0).inline_keyboard[0])
             @($row | ForEach-Object { $_['callback_data'] }) | Should -Be @("urgsingle:$id", "urgsingle:${id}:t")
+
+            # The timed button opens the template presets, starring the story's own gap.
+            Show-UrgentTimedPicker -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
+            $picks = @($script:ManualPayload.Markup.inline_keyboard | ForEach-Object { $_ })
+            @($picks | Where-Object { $_['callback_data'] -eq "urgt:${id}:90" -and $_['text'] -like '*⭐*' }).Count | Should -Be 1
+            @($picks | Where-Object { $_['callback_data'] -eq "urgt:${id}:c" }).Count | Should -Be 1
+            @($picks | Where-Object { $_['callback_data'] -eq "urgentb:item:$id" }).Count | Should -Be 1 -Because 'back returns to the story'
 
             # The plain button: no timer, as before.
             Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
@@ -72,22 +80,26 @@ Describe 'Full urgent reader and manual single story' {
 
             # The timed button: the board's duration, said on the review and on the live message.
             $script:OnAir = @{}; $script:UrgentManualLive = @{}
-            Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9 -Timed
+            Invoke-UrgentTimedPick -ChatId 100 -UserId 101 -Argument "${id}:90" -MessageId 9 | Should -BeTrue
             $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
             $state = Get-PendingState -ChatId 100
             Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$($state.Token)" | Should -BeTrue
             Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $AutoHideSeconds -eq 90 }
             $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 90)))
-            $buttons = @((Get-UrgentTimingKeyboard).inline_keyboard | ForEach-Object { $_ })
-            @($buttons | Where-Object callback_data -eq 'urgentb:dmanualhide').Count | Should -Be 1
         }
-        finally { $config.Settings.PSObject.Properties.Remove('UrgentManualAutoHideSeconds') }
+        finally { $script:UrgentBoard.Items[0].IntervalSeconds = 0 }
     }
-    It 'hides the timed button when neither the board nor the bridge has a duration' {
-        $config.Settings | Add-Member AutoHideDefaultSeconds 0 -Force
+    It 'takes a typed duration for the timed show, and asks again for a bad one' {
+        Mock Test-Authorized { $true }
         $id = $script:UrgentBoard.Items[0].Id
-        $row = @((Get-UrgentItemKeyboard -Position 0).inline_keyboard[0])
-        @($row | ForEach-Object { $_['callback_data'] }) | Should -Be @("urgsingle:$id")
+        Invoke-UrgentTimedPick -ChatId 100 -UserId 101 -Argument "${id}:c" | Should -BeTrue
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'urgent_timed_custom'
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value 'abc' | Should -BeFalse
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'urgent_timed_custom' -Because 'a wrong number keeps the flow open'
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value '45' | Should -BeTrue
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'urgent_manual_confirm'
+        (Get-PendingState -ChatId 100).AutoHideSeconds | Should -Be 45
+        $script:ManualPayload.Text | Should -Match ([regex]::Escape((Format-DurationSeconds -Seconds 45)))
     }
     It 'keeps each user their own manual or sequence choice, across a restart' {
         Mock Test-Authorized { $true }

@@ -270,6 +270,15 @@ function Update-OnAirStateFromCinegy {
             $script:OnAirDirty = $true
         }
         elseif ($decision.Action -eq 'remove') {
+            # A board run whose layer went empty gets its line back first;
+            # only when that is refused does the layer count as taken.
+            $restoredId = Restore-UrgentBoardLine -Layer ([int]$layer)
+            if ($restoredId) {
+                Set-JsonProp $record 'ActiveId' $restoredId
+                Update-OnAirLayerRecord -Layer ([int]$layer) -Record $record
+                $script:OnAirDirty = $true
+                continue
+            }
             # Genuinely hidden (IsEmpty) or replaced off air: drop from the
             # on-air record so onair.json reflects what is live now.
             $changes.Add($decision.Change)

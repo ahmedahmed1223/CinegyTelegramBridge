@@ -186,17 +186,16 @@ function Add-BridgeTextContent {
     $catalogue['urgent.deleteExpired'] = @{ ar = '⚠️ انتهت صلاحية تأكيد الحذف. حدّد العواجل وأكّد من جديد.'; en = '⚠️ The delete confirmation has expired. Select the items and confirm again.' }
     $catalogue['urgent.pickNumberButton'] = @{ ar = 'اختر قيمة رقمية صحيحة من الأزرار.'; en = 'Choose a whole number from the buttons.' }
     $catalogue['urgent.settingSaveFailed'] = @{ ar = 'تعذّر حفظ الإعداد؛ بقيت القيمة السابقة.'; en = 'Could not save the setting; the previous value stands.' }
-    $catalogue['urgent.num.itemInterval'] = @{ ar = 'فاصل هذا العاجل (ثانية)'; en = 'This items interval (seconds)' }
+    $catalogue['urgent.num.itemInterval'] = @{ ar = 'مدة الإخفاء التلقائي لهذا العاجل (ثانية)'; en = 'This story''s auto-hide time (seconds)' }
     $catalogue['urgent.num.inherited'] = @{ ar = 'من الجدول'; en = 'from the board' }
     $catalogue['urgent.num.itemRepeats'] = @{ ar = 'تكرار هذا العاجل'; en = 'This items repeats' }
-    $catalogue['urgent.num.boardInterval'] = @{ ar = 'فاصل الجدول (ثانية)'; en = 'The board interval (seconds)' }
+    $catalogue['urgent.num.boardInterval'] = @{ ar = 'مدة الإخفاء التلقائي للجدول (ثانية)'; en = 'The board''s auto-hide time (seconds)' }
     $catalogue['urgent.num.boardRepeats'] = @{ ar = 'تكرار الجدول'; en = 'The board repeats' }
     $catalogue['urgent.num.total'] = @{ ar = 'المدة الكلية (ثانية)'; en = 'Total time (seconds)' }
     $catalogue['urgent.num.gap'] = @{ ar = 'الفاصل بين الأخبار (ثانية)'; en = 'Gap between stories (seconds)' }
     $catalogue['urgent.num.sceneOnly'] = @{ ar = 'حركة المشهد وحدها'; en = 'the scene motion alone' }
-    $catalogue['urgent.num.manualHide'] = @{ ar = 'إخفاء الخبر الواحد تلقائيًا (ثانية)'; en = 'Hide a story shown alone after (seconds)' }
-    $catalogue['urgent.num.hideButtonOnly'] = @{ ar = 'بالزر فقط'; en = 'the hide button only' }
-    $catalogue['urgent.manualHideNone'] = @{ ar = '⏱ إخفاء الخبر الواحد: بالزر فقط'; en = '⏱ A story shown alone: hidden by the button only' }
+    $catalogue['urgent.runOnAirTimed'] = @{ ar = '⏱ تشغيل مؤقت'; en = '⏱ On air for a while' }
+    $catalogue['urgent.timedPickDuration'] = @{ ar = '⏱ المدة قبل إخفاء الخبر:'; en = '⏱ How long before the story is hidden:' }
     $catalogue['urgent.num.doneBack'] = @{ ar = '✅ تمّ / رجوع'; en = '✅ Done / back' }
     $catalogue['urgent.num.expired'] = @{ ar = '⚠️ انتهت صلاحية هذه الأزرار. افتح شاشة الرقم من جديد.'; en = '⚠️ These buttons have expired. Open the number screen again.' }
     $catalogue['urgent.manualSingle'] = @{ ar = '🚨 عرض خبر واحد فقط — دون انتقال تلقائي.'; en = '🚨 Showing one story only — with no automatic advance.' }

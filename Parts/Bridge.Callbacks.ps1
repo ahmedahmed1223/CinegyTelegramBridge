@@ -192,10 +192,15 @@ function Invoke-CallbackQuery {
             break
         }
         'urgsingle:*' {
-            # ':t' is the timed button - the same review, with a hide time.
+            # ':t' is the timed button: pick a duration first, then the same review.
             if ((Get-CallbackArg $data 'urgsingle:') -match '^(u_[a-f0-9]{8})(:t)?$') {
-                Show-UrgentManualConfirm -ChatId $chatId -UserId $userId -ItemId $Matches[1] -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Timed:([bool]$Matches[2])
+                if ($Matches[2]) { Show-UrgentTimedPicker -ChatId $chatId -UserId $userId -ItemId $Matches[1] -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
+                else { Show-UrgentManualConfirm -ChatId $chatId -UserId $userId -ItemId $Matches[1] -MessageId ([int](Get-JsonProp $msgObj 'message_id')) }
             }
+            break
+        }
+        'urgt:*' {
+            Invoke-UrgentTimedPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'urgt:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null
             break
         }
         'urgmanual:*' {
@@ -892,10 +897,6 @@ function Invoke-CallbackQuery {
         }
         'urgentb:dtotal' {
             Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dtotal -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
-            break
-        }
-        'urgentb:dmanualhide' {
-            Start-UrgentNumberPicker -ChatId $chatId -UserId $userId -Kind dmanualhide -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'urgentb:num:*' { Invoke-UrgentNumberPick -ChatId $chatId -UserId $userId -Argument (Get-CallbackArg $data 'urgentb:num:') -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }

@@ -31,6 +31,11 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.4'; Items = @(
+                        '⏱ **The timed button picks its duration** — "⏱ on air for a while" beside "put it on air" now opens the same presets a template''s timed show offers, with the story''s own gap starred and "another duration" for a typed number. The plain button is unchanged, and the "hide a story shown alone" setting from 8.71.2 is gone: in a sequence the gap already decides. The board''s "hides after 1800 s" button is gone too: it only opened the timing screen, where nothing edits it.'
+                        '🔁 **A sequence puts its line back** — if the layer goes empty in the middle of a run, the board re-shows the current story once and carries on; only if the same story is cleared again does the run stop and raise the external-change alarm.'
+                        '⏱ **The gap button now says "auto-hide"** — same button, same number: in a sequence a story stays for its gap and is then hidden.'
+                    ) }
                 @{ Version = '8.71.3'; Items = @(
                         '⏱ **Two buttons to put a story on air** — on a story''s screen, beside "put it on air", a "⏱ on air for N s" button. The plain one stays up until you hide it, as before; the timed one goes off by itself after the board''s "hide a story shown alone" time, or the bridge''s default hide time when the board has none. The review and the live message say which you chose.'
                         '👤 **Manual or sequence is yours, not the chat''s** — the urgent board remembers your choice by who you are, keeps it across a restart, and writes a log line each time it changes.'
@@ -243,6 +248,11 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.4'; Items = @(
+                        '⏱ **زرّ التشغيل المؤقت يختار مدته** — «⏱ تشغيل مؤقت» بجانب «تشغيل على الهواء» يفتح الآن المدد نفسها التي يعرضها التشغيل المؤقت للقالب، وفاصل الخبر نفسه عليه نجمة، و«مدة أخرى» لرقم تكتبه. الزرّ العادي كما هو، وأُزيل إعداد «إخفاء الخبر الواحد» من توقيتات الجدول: في التتابع الفاصل هو الذي يقرّر. وأُزيل من شاشة الجدول زرّ «يُخفى تلقائيًا بعد 1800 ث»: كان يفتح شاشة التوقيتات حيث لا شيء يعدّله.'
+                        '🔁 **التتابع يعيد سطره** — إن فرغت الطبقة في منتصف التشغيل، يعيد الجدول الخبر الحالي مرة واحدة ويكمل؛ ولا يتوقف ويرفع إنذار التغيير الخارجي إلا إن فُرّغ الخبر نفسه مرة ثانية.'
+                        '⏱ **زرّ الفاصل صار «الإخفاء التلقائي»** — الزرّ نفسه والرقم نفسه: في التتابع يبقى الخبر بقدر فاصله ثم يُخفى.'
+                    ) }
                 @{ Version = '8.71.3'; Items = @(
                         '⏱ **زرّان لرفع الخبر** — في شاشة الخبر، بجانب «تشغيل على الهواء»، زرّ «⏱ تشغيل مؤقت N ث». الأول يبقى حتى تخفيه كما كان، والثاني يخرج وحده بعد مدة «إخفاء الخبر الواحد» من توقيتات الجدول، أو مدة الإخفاء الافتراضية في الجسر إن لم يُضبط الجدول. شاشة المراجعة ورسالة «عُرض» تقولان أيّهما اخترت.'
                         '👤 **يدوي أو تتابع: اختيارك أنت لا اختيار المحادثة** — جدول العواجل يتذكّر اختيارك باسمك، ويبقيه بعد إعادة التشغيل، ويكتب سطرًا في السجلّ كلّما تغيّر.'

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.4
+
+The urgent story's timed button now opens the shared duration picker (a new `urgt` prefix on `Get-DurationKeyboard`) with the story's own gap (its effective hold time in a sequence) starred and added to the presets when absent; the `UrgentManualAutoHideSeconds` setting and its timing-screen button from 8.71.2 are removed; "another duration" takes a typed number through the urgent text completer. The review takes the seconds as a number instead of a switch. The board screen no longer shows the template's 30-minute ceiling as a button or warning: the button only opened the timing screen, where nothing edits it; the ceiling stays a template policy enforced by the tick. The gap buttons are relabelled "auto-hide", which is what the gap is in a sequence, and every line the board re-shows now logs the item id and duration Cinegy made for it, because two runs lost their layer shortly after the third line with nothing in Cinegy's own logs. When the on-air sync finds the board's layer empty mid-run it now re-shows the current line once (`Restore-UrgentBoardLine`) and keeps the run and its record; a second emptying of the same line ends the run as before.
+
 ## Version 8.71.3
 
 A story's screen now has two ways on air: the plain button with no timer, as before, and a timed button that passes the board's manual auto-hide (or the bridge's default hide time) into the show; the review carries the chosen duration in its state. The urgent board's manual/sequence choice is keyed by user instead of chat, migrates old chat-keyed files, and logs each change; the state import no longer drops negative (group) chat ids. AGENTS.md documents the fifth registration door for a new setting.

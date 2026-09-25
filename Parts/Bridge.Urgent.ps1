@@ -286,15 +286,6 @@ function Get-UrgentRunCeiling {
     return [pscustomobject]@{ Seconds = $seconds; Reason = $reason; AutoHideSeconds = $autoHide }
 }
 
-function Get-UrgentManualAutoHideSeconds {
-    <# How long a story shown by the timed button stays up: the board's own
-       number, or the bridge-wide auto-hide default when the board has none.
-       Zero means the timed button is not offered at all. #>
-    $seconds = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
-    if ($seconds -le 0) { $seconds = Get-SettingInt 'AutoHideDefaultSeconds' 0 }
-    return [int][math]::Max(0, $seconds)
-}
-
 function Get-UrgentAutoHideLabel {
     param([int]$Seconds)
     # The shared duration helper is authoritative; identify which configured
@@ -519,10 +510,10 @@ function Get-UrgentBoardKeyboard {
     if (-not (Test-UrgentSceneLoop)) {
         $rows += , @( (New-Button (T 'urgent.noLoopFixNow') 'urgentb:timing' -Style primary) )
     }
-    $ceiling = Get-UrgentRunCeiling -Items $items
-    if ([int]$ceiling.AutoHideSeconds -gt 0) {
-        $rows += , @( (New-Button (T 'urg.autoHideAfter' $($ceiling.AutoHideSeconds)) 'urgentb:timing' -Style primary) )
-    }
+    # The template's 30-minute ceiling used to sit here as a button that
+    # opened the timing screen, where nothing edits it. It is a template
+    # policy, kept in settings; a story's own time on air is its gap in a
+    # sequence and the timed button's pick when shown alone.
 
     if ($items.Count -gt 0) {
         $rows += , @((New-Button (T 'urgent.rowsDivider') 'urgentb:noop'))
@@ -644,11 +635,6 @@ function Get-UrgentBoardBlocks {
     if (-not (Test-UrgentSceneLoop)) {
         $blocks += @{ type = 'paragraph'; text = (T 'urgent.noLoopUseExit') }
     }
-    $ceiling = Get-UrgentRunCeiling -Items $items
-    if ([int]$ceiling.AutoHideSeconds -gt 0) {
-        $blocks += @{ type = 'paragraph'; text = (T 'urg.autoHideWarning' $(Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds) $([int]$ceiling.AutoHideSeconds)) }
-    }
-
     if ($items.Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = (T 'urgent.emptyPress') }
         return $blocks
@@ -708,10 +694,6 @@ function Get-UrgentBoardText {
     if ($runStatus) { $lines += (ConvertTo-TelegramHtmlText -Text $runStatus) }
     $lines += (T 'urg.defaultsShort' $([int](Get-UrgentProperty $defaults 'IntervalSeconds' 8)) $([int](Get-UrgentProperty $defaults 'Repeats' 1)))
     if (-not (Test-UrgentSceneLoop)) { $lines += (T 'urgent.noLoopShort') }
-    $ceiling = Get-UrgentRunCeiling -Items $items
-    if ([int]$ceiling.AutoHideSeconds -gt 0) {
-        $lines += (T 'urg.autoHideWarning' $(Get-UrgentAutoHideLabel -Seconds $ceiling.AutoHideSeconds) $([int]$ceiling.AutoHideSeconds))
-    }
     if ($items.Count -eq 0) {
         $lines += (T 'urgent.empty')
         return ($lines -join "`n")
@@ -769,12 +751,11 @@ function Get-UrgentItemKeyboard {
         $rows += , @( (New-Button (T 'urgent.liveNow') 'urgentb:noop' -Style primary), (New-Button (T 'urgent.stopThis') 'urgentb:hide' -Style danger) )
     }
     else {
-        # Two ways on air, side by side: as long as it takes, or for the
-        # board's timed duration - the one an operator forgot to hide.
-        $runRow = @( (New-Button (T 'urgent.runOnAir') "urgsingle:$itemId" -Style success) )
-        $timedSeconds = Get-UrgentManualAutoHideSeconds
-        if ($timedSeconds -gt 0) { $runRow += (New-Button (T 'urg.runOnAirTimed' $timedSeconds) "urgsingle:${itemId}:t") }
-        $rows += , $runRow
+        # Two ways on air, side by side: as long as it takes, or for a
+        # duration picked from the same presets a template's timed show
+        # offers - the way an operator already knows.
+        $rows += , @( (New-Button (T 'urgent.runOnAir') "urgsingle:$itemId" -Style success),
+                      (New-Button (T 'urgent.runOnAirTimed') "urgsingle:${itemId}:t") )
     }
     # The title button is offered only where the scene can carry one - or where
     # a title is already stored, so one written before the scene was simplified
@@ -814,14 +795,14 @@ function Get-UrgentLiveStamp {
 }
 
 function Show-UrgentManualConfirm {
-    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$MessageId = 0, [switch]$Timed)
+    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$MessageId = 0, [int]$AutoHideSeconds = 0)
     if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return }
     $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $ItemId } | Select-Object -First 1
     $template = Get-UrgentTemplate
     if (-not $template -or -not $item -or -not [bool](Get-JsonProp $item 'Enabled')) { return }
     # Decided here and carried in the state, so the show does exactly what
     # the confirmation said even if the setting changes in between.
-    $manualHide = if ($Timed) { Get-UrgentManualAutoHideSeconds } else { 0 }
+    $manualHide = [math]::Max(0, $AutoHideSeconds)
     $state = @{ Mode='urgent_manual_confirm'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
         UserId=$UserId; StartedAt=Get-Date; ItemId=$ItemId; Layer=[int]$template.Layer
         Key=[string]$template.Key; Text=[string](Get-JsonProp $item 'Text'); Title=[string](Get-JsonProp $item 'Title')
@@ -847,6 +828,39 @@ function Show-UrgentManualConfirm {
     ) }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
+}
+
+function Show-UrgentTimedPicker {
+    <# The presets a template's timed show offers, for one story. The star
+       is the story's own gap - the time it holds the screen in a sequence,
+       its interval or the board's - so shown alone it is offered the same
+       stay. Back returns to the story's screen, not the menu. #>
+    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$MessageId = 0)
+    if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return }
+    $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $ItemId } | Select-Object -First 1
+    if (-not $item -or -not [bool](Get-JsonProp $item 'Enabled')) { return }
+    $timing = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
+    $star = [int][math]::Ceiling([double](Get-UrgentProperty $timing 'HoldSeconds' 0))
+    $markup = Get-DurationKeyboard -Prefix 'urgt' -Token $ItemId -BackData "urgentb:item:$ItemId" -DefaultSeconds $star
+    $text = (T 'urgent.timedPickDuration')
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
+}
+
+function Invoke-UrgentTimedPick {
+    <# One tap on the picker: a preset goes straight to the review with that
+       duration; "another duration" asks for a number, answered through
+       Complete-UrgentBoardText like every other typed urgent value. #>
+    param([long]$ChatId, [long]$UserId, [string]$Argument, [int]$MessageId = 0)
+    if ($Argument -notmatch '^(u_[a-f0-9]{8}):(c|[0-9]{1,5})$') { return $false }
+    $itemId = $Matches[1]
+    if ($Matches[2] -eq 'c') {
+        Set-PendingState -ChatId $ChatId -State @{ Mode = 'urgent_timed_custom'; ItemId = $itemId; UserId = $UserId; StartedAt = (Get-Date) } | Out-Null
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'reply.sendSeconds') -ReplyMarkup (Get-CancelKeyboard)
+        return $true
+    }
+    Show-UrgentManualConfirm -ChatId $ChatId -UserId $UserId -ItemId $itemId -MessageId $MessageId -AutoHideSeconds ([int]$Matches[2])
+    return $true
 }
 
 function Invoke-UrgentManualAction {
@@ -1030,11 +1044,6 @@ function Get-UrgentTimingKeyboard {
     $gap = Get-SettingInt 'UrgentExitGapSeconds' 0
     $gapLabel = if ($gap -gt 0) { (T 'urg.gapBetween' $gap) } else { (T 'urgent.gapSceneOnly') }
     $rows += , @( (New-Button $gapLabel 'urgentb:dgap') )
-    # The one timing the board's run does not use: it belongs to the story
-    # shown alone, which until now stayed up until somebody pressed hide.
-    $manualHide = Get-SettingInt 'UrgentManualAutoHideSeconds' 0
-    $manualHideLabel = if ($manualHide -gt 0) { (T 'urg.manualHideAfter' $manualHide) } else { (T 'urgent.manualHideNone') }
-    $rows += , @( (New-Button $manualHideLabel 'urgentb:dmanualhide') )
     $rows += , @( (New-Button (T 'urgent.back') 'urgentb:open') )
     return @{ inline_keyboard = $rows }
 }
@@ -1263,7 +1272,7 @@ function Set-UrgentBoardSetting {
     try {
         # Set-Setting checks bounds only when TryParse succeeds. Never persist
         # numeric text it cannot parse: Get-SettingInt would silently read 8.
-        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds', 'UrgentManualAutoHideSeconds')) {
+        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds')) {
             $number = 0
             if (-not [int]::TryParse([string]$Value, [ref]$number)) { throw (T 'urgent.pickNumberButton') }
             $Value = $number
@@ -1307,7 +1316,7 @@ function Invoke-UrgentDefaultSwitch {
 # ------------------------------------------------------------- numeric input
 
 function Get-UrgentNumberSpec {
-    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap', 'dmanualhide')][string]$Kind)
+    param([Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind)
     $spec = @{ Field = 'IntervalSeconds'; Setting = ''; Label = (T 'urgent.num.itemInterval'); Minimum = 0; Maximum = 3600; Zero = (T 'urgent.num.inherited') }
     switch ($Kind) {
         'repeats' { $spec.Field = 'Repeats'; $spec.Label = (T 'urgent.num.itemRepeats'); $spec.Maximum = 99 }
@@ -1319,7 +1328,6 @@ function Get-UrgentNumberSpec {
         # way from the table it governs - and an operator looking for it in
         # إدارة العواجل did not find it, which is how this was reported.
         'dgap' { $spec.Setting = 'UrgentExitGapSeconds'; $spec.Field = ''; $spec.Label = (T 'urgent.num.gap'); $spec.Zero = (T 'urgent.num.sceneOnly') }
-        'dmanualhide' { $spec.Setting = 'UrgentManualAutoHideSeconds'; $spec.Field = ''; $spec.Label = (T 'urgent.num.manualHide'); $spec.Zero = (T 'urgent.num.hideButtonOnly') }
     }
     if ($spec.Setting) {
         $bounds = Get-SettingBounds -Name $spec.Setting
@@ -1364,7 +1372,7 @@ function Show-UrgentNumberPicker {
 
 function Start-UrgentNumberPicker {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
-        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap', 'dmanualhide')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('interval', 'repeats', 'dinterval', 'drepeats', 'dtotal', 'dgap')][string]$Kind,
         [int]$Position = -1, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     Clear-PendingState -ChatId $ChatId
@@ -1487,6 +1495,18 @@ function Complete-UrgentBoardText {
             $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardRepeats' -Value $Value
             Show-UrgentTimingScreen -ChatId $ChatId
             return $saved
+        }
+        'urgent_timed_custom' {
+            $seconds = 0
+            if (-not [int]::TryParse($Value.Trim(), [ref]$seconds) -or $seconds -le 0) {
+                # Asked again rather than dropped: the state was cleared above,
+                # and a wrong number should not cost the operator the flow.
+                Set-PendingState -ChatId $ChatId -State $state | Out-Null
+                Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendPositiveSeconds') -ReplyMarkup (Get-CancelKeyboard)
+                return $false
+            }
+            Show-UrgentManualConfirm -ChatId $ChatId -UserId $UserId -ItemId $savedItemId -AutoHideSeconds $seconds
+            return $true
         }
         'urgent_default_total' {
             $saved = Set-UrgentBoardSetting -ChatId $ChatId -Name 'UrgentBoardTotalSeconds' -Value $Value

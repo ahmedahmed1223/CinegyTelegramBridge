@@ -322,6 +322,46 @@ function Stop-UrgentBoardRun {
     return $true
 }
 
+function Restore-UrgentBoardLine {
+    <#
+        The layer went empty in the middle of a run: put the current line
+        back, once per line.
+
+        Two runs on 2026-09-25 lost their layer 5 s and 43 s after the third
+        line went up, with no client attached and nothing in Cinegy's own
+        logs, and each time the board gave up and raised the external-change
+        alarm. Whatever empties the layer, the operator started a sequence
+        and wants it on air; so the line is re-shown with its own values and
+        the run keeps its clock. Once per line only - a layer emptied twice
+        during the same line belongs to whoever is clearing it, and the run
+        ends as before.
+
+        Returns the engine's id for the line put back, or '' when nothing
+        was done and the caller should end the run.
+    #>
+    param([Parameter(Mandatory)][int]$Layer)
+    $run = $script:UrgentBoardRun
+    if (-not $run -or [bool](Get-JsonProp $run 'Paused') -or (Get-JsonProp $run 'PendingShow')) { return '' }
+    $template = Get-UrgentTemplate
+    if (-not $template -or [int]$template.Layer -ne $Layer) { return '' }
+    $step = [int]$run.Step
+    $healed = Get-JsonProp $run 'HealedStep'
+    if ($null -ne $healed -and [int]$healed -eq $step) {
+        Write-BridgeLog "Urgent board: layer $Layer went empty again during line $($step + 1); leaving it to whoever is clearing it." 'WARN'
+        return ''
+    }
+    $run.HealedStep = $step
+    $shown = Show-UrgentBoardScene -Template $template -Values (Get-UrgentItemVariables -Item @($run.Steps)[$step])
+    if (-not $shown.Success) {
+        Write-BridgeLog "Urgent board: layer $Layer went empty during line $($step + 1) and could not be put back: $([string](Get-JsonProp $shown 'Error'))" 'WARN'
+        return ''
+    }
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+    if (-not $status.Success -or -not $status.IsOnAir) { return '' }
+    Write-BridgeLog "Urgent board: layer $Layer went empty during line $($step + 1) of $(@($run.Steps).Count); the line was put back as item $($status.ActiveId)." 'WARN'
+    return [string]$status.ActiveId
+}
+
 function Stop-UrgentBoardForLayer {
     <#
         The board's layer is being taken off air by something that is not this
@@ -521,9 +561,23 @@ function Show-UrgentBoardScene {
     if (-not $clear.Success) {
         Write-BridgeLog "Urgent board: could not clear layer $layer before the next line; the scene may keep its previous text: $([string]$clear.Error)" 'WARN'
     }
-    return (Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+    $shown = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $layer -TemplatePath ([string]$Template.Path) -Variables $Values -TimeoutSec (Get-AirTimeout) `
-            -Device ([string](Get-JsonProp $Template 'Device')))
+            -Device ([string](Get-JsonProp $Template 'Device'))
+    # The same line the first SHOW writes, for every line after it. Two runs
+    # today lost their layer 5 s and 43 s after the third line went up, with
+    # nothing in Cinegy's own logs; the item the engine actually made - its
+    # id and duration - was never written down for these re-shows.
+    if ($shown.Success) {
+        try {
+            $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec (Get-AirTimeout)
+            if ($status.Success) {
+                Write-BridgeLog "Urgent board line is up on layer $layer as item $($status.ActiveId); engine duration ""$([int](Get-JsonProp $status 'ActiveDurationSeconds'))s"", manual end $([bool](Get-JsonProp $status 'ActiveManualEnd'))"
+            }
+        }
+        catch { Write-BridgeLog "Urgent board: could not read layer $layer after the line: $($_.Exception.Message)" 'DEBUG' }
+    }
+    return $shown
 }
 
 function Restore-UrgentBoardRun {

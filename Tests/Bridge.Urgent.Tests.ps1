@@ -93,11 +93,6 @@ Describe 'The breaking-news board and the fixed urgent template' {
         Get-UrgentBoardText -ChatId 100 | Should -Match '⛔'
     }
 
-    It 'warns about the sensitive template ceiling in fallback text' {
-        Mock Get-UrgentRunCeiling { @{ AutoHideSeconds = 30; Seconds = 30; Reason = 'autohide' } }
-        Get-UrgentBoardText -ChatId 100 | Should -Match 'حسّاس.*30'
-    }
-
     It 'leaves the fixed urgent template exactly where it was' {
         # The board is a second consumer of this scene, not a replacement. With
         # the board switched off the old path must still be the same call it
@@ -346,6 +341,26 @@ Describe 'Running the breaking-news board' {
         Stop-UrgentBoardForLayer -Layer 4 | Should -BeFalse
 
         $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
+    }
+
+    It 'puts the current line back once when its layer goes empty mid-run, then gives up' {
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{BACK}'; ActiveDurationSeconds = 86400; ActiveManualEnd = $true; Error = '' } }
+        Mock Write-BridgeLog { }
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        $line = [string](Get-JsonProp @($script:UrgentBoardRun.Steps)[0] 'Text')
+
+        Restore-UrgentBoardLine -Layer 7 | Should -Be '{BACK}'
+
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 -and ($Variables.Values -contains $line) }
+        $script:UrgentBoardRun | Should -Not -BeNullOrEmpty -Because 'the run keeps its clock'
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter { $Message -like '*went empty during line 1 of*put back as item {BACK}*' }
+
+        # The same line emptied again: leave it, so the run ends as before.
+        Restore-UrgentBoardLine -Layer 7 | Should -Be ''
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
+        Restore-UrgentBoardLine -Layer 4 | Should -Be ''
     }
 
     It 'writes a text-mode line into the running scene and never shows it again' {

@@ -136,9 +136,9 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.showing'] = @{ ar = 'المعروض: {0}–{1} · صفحة {2} من {3}'; en = 'Showing: {0}–{1} · page {2} of {3}' }
     $catalogue['urg.secondsStar'] = @{ ar = '{0} ث ✱'; en = '{0} s ✱' }
     $catalogue['urg.titleHtml'] = @{ ar = '🚨 <b>العواجل</b> — {0} عاجلًا'; en = '🚨 <b>The urgents</b> — {0} of them' }
-    $catalogue['urg.defaultsShort'] = @{ ar = 'الافتراضي: فاصل {0} ث · {1} دورة'; en = 'The default: a {0} s gap · {1} rounds' }
+    $catalogue['urg.defaultsShort'] = @{ ar = 'الافتراضي: إخفاء بعد {0} ث · {1} دورة'; en = 'The default: hide after {0} s · {1} rounds' }
     $catalogue['urg.row'] = @{ ar = '{0} {1} {2}. {3} {4} — {5} ث · {6}'; en = '{0} {1} {2}. {3} {4} — {5} s · {6}' }
-    $catalogue['urg.gap'] = @{ ar = '⏱ الفاصل: {0} ث'; en = '⏱ The gap: {0} s' }
+    $catalogue['urg.gap'] = @{ ar = '⏱ الإخفاء التلقائي: {0} ث'; en = '⏱ Auto-hide: {0} s' }
     $catalogue['urg.repeat'] = @{ ar = '🔁 التكرار: {0}'; en = '🔁 The repeat: {0}' }
     $catalogue['urg.willReplaceHeadline'] = @{ ar = "`n⚠️ سيتم استبدال الخبر الحالي:`n«{0}»`nبالخبر:`n«{1}»"; en = "`n⚠️ The headline on air will be replaced:`n`"{0}`"`nwith:`n`"{1}`"" }
     $catalogue['urg.readFull'] = @{ ar = "👁 الخبر {0} من {1}`nقراءة النص الكامل — التصفّح لا يغيّر الهواء.`n`n{2}"; en = "👁 Headline {0} of {1}`nReading the whole text — paging through changes nothing on air.`n`n{2}" }
@@ -153,8 +153,6 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.totalDuration'] = @{ ar = '⏳ المدة الكلية: {0} ث'; en = '⏳ In all it lasts: {0} s' }
     $catalogue['urg.defaultMode'] = @{ ar = '🎬 النمط الافتراضي: {0}'; en = '🎬 The default mode: {0}' }
     $catalogue['urg.gapBetween'] = @{ ar = '⏳ الفاصل بين الأخبار: {0} ث'; en = '⏳ The gap between headlines: {0} s' }
-    $catalogue['urg.manualHideAfter'] = @{ ar = '⏱ إخفاء الخبر الواحد بعد: {0} ث'; en = '⏱ A story shown alone hides after: {0} s' }
-    $catalogue['urg.runOnAirTimed'] = @{ ar = '⏱ تشغيل مؤقت {0} ث'; en = '⏱ On air for {0} s' }
     $catalogue['urg.showThisOneTimed'] = @{ ar = 'عرض هذا الخبر لمدة {0} ث'; en = 'Show this story for {0} s' }
     $catalogue['urg.shortestGap'] = @{ ar = 'أقصر فاصل يسمح به هذا المشهد: {0} ث.'; en = 'The shortest gap this scene allows: {0} s.' }
     $catalogue['urg.didNotStart'] = @{ ar = '⚠️ لم يبدأ التشغيل: {0}'; en = '⚠️ It did not start: {0}' }

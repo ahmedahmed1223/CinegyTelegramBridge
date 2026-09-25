@@ -2967,6 +2967,18 @@ Describe 'An engine stops with the layer Cinegy took' {
         Should -Invoke Stop-UrgentBoardForLayer -Times 1 -ParameterFilter { $Layer -eq 5 }
     }
 
+    It 'keeps the record and the run when the board puts its line back' {
+        Mock Restore-UrgentBoardLine { '{BACK}' }
+
+        $result = Update-OnAirStateFromCinegy -Reason 'watchdog'
+
+        Should -Invoke Stop-UrgentBoardForLayer -Times 0 -Exactly
+        $OnAir.ContainsKey(5) | Should -BeTrue
+        $OnAir[5].ActiveId | Should -Be '{BACK}'
+        @($result.Removed).Count | Should -Be 0
+        Should -Invoke Send-OwnGraphicLeftNotice -Times 0 -Exactly
+    }
+
     It 'leaves a run alone while its layer is still on air' {
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{

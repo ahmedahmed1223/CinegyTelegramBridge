@@ -63,6 +63,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Show-SettingTimePicker'            = 'twenty-four hours and four quarters, both fixed'
             'Get-OperationLogKeyboard'          = 'one button per window in $script:OperationLogWindows, a fixed list of three'
             'Get-SettingsGroupPickerKeyboard'   = 'one button per group of one category, a fixed list in the source of at most five'
+            'Test-RefreshButtonPress'           = 'builds no keyboard; it reads the one on a message already sent'
             'Show-NewsPasteReview'              = 'two fixed buttons, add and cancel; the pasted items are text lines, cut at five and three'
             'Get-OperationLogFilterKeyboard'    = 'one button per choice from Get-OperationLogFilterOptions, which caps both lists at its Limit and reports what it left out'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'

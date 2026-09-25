@@ -84,6 +84,11 @@ function Invoke-CallbackQuery {
     $msgObj = Get-JsonProp $CallbackQuery 'message'
     $chatId = if ($msgObj) { [long]$msgObj.chat.id } else { $userId }
     $data = [string](Get-JsonProp $CallbackQuery 'data')
+    # Set per press and cleared by the next press and by every tick, so it
+    # can never outlive the reply it is for.
+    $script:RefreshTarget = if ($msgObj -and (Test-RefreshButtonPress -Message $msgObj -Data $data)) {
+        @{ ChatId = $chatId; MessageId = [int](Get-JsonProp $msgObj 'message_id') }
+    } else { $null }
 
     # The guards run BEFORE the acknowledgement, and every one of them still
     # answers the query on its way out.

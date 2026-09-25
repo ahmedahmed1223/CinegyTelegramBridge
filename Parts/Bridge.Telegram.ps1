@@ -262,6 +262,38 @@ function Get-TelegramMessagePhotoId {
     return [string](Get-JsonProp $sizes[-1] 'file_id')
 }
 
+function Test-RefreshButtonPress {
+    <#
+        Was the button pressed a 🔄 refresh? Read from the pressed message's own
+        keyboard, which Telegram sends with every press, so no screen has to
+        declare it and a screen added later is covered on its first day.
+
+        Both languages: the message may have been drawn before the language
+        was switched.
+    #>
+    param($Message, [string]$Data)
+    if (-not $Message -or -not $Data) { return $false }
+    $labels = @('🔄 تحديث', '🔄 Refresh')
+    foreach ($row in @(Get-JsonProp (Get-JsonProp $Message 'reply_markup') 'inline_keyboard')) {
+        foreach ($button in @($row)) {
+            if ([string](Get-JsonProp $button 'callback_data') -ceq $Data -and [string](Get-JsonProp $button 'text') -in $labels) { return $true }
+        }
+    }
+    return $false
+}
+
+function Clear-RefreshTarget { $script:RefreshTarget = $null }
+
+function Use-RefreshTarget {
+    <# The marked message for this chat, once. Unsolicited notices never take
+       it: an alert must arrive as a message, not overwrite a screen. #>
+    param([long]$ChatId)
+    $target = $script:RefreshTarget
+    if (-not $target -or [long]$target.ChatId -ne $ChatId) { return 0 }
+    $script:RefreshTarget = $null
+    return [int]$target.MessageId
+}
+
 function Send-TelegramMessage {
     param(
         [Parameter(Mandatory)][long]$ChatId,
@@ -280,6 +312,16 @@ function Send-TelegramMessage {
     if (Test-DeadChat -ChatId $ChatId) {
         Write-BridgeLog "Skipping send to quarantined dead chat $ChatId"
         return
+    }
+    # A 🔄 press redraws its own message. Tried once; anything the edit cannot
+    # carry - a photo under the button, a text too long - falls through to a
+    # plain send below, as before.
+    if (-not $Cause) {
+        $refreshId = Use-RefreshTarget -ChatId $ChatId
+        if ($refreshId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $refreshId -Text $Text -ReplyMarkup $ReplyMarkup -ParseMode $ParseMode)) {
+            $script:LastTelegramMessageId = $refreshId
+            return
+        }
     }
     # A split lands wherever the budget runs out, which for HTML can be the
     # middle of a tag - and Telegram rejects that outright. Callers asking for
@@ -724,6 +766,12 @@ function Send-TelegramRichMessage {
         [hashtable]$ReplyMarkup
     )
     if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
+    # A 🔄 press redraws its own message, rich screens included.
+    $refreshId = Use-RefreshTarget -ChatId $ChatId
+    if ($refreshId -gt 0 -and (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $refreshId -Blocks $Blocks -ReplyMarkup $ReplyMarkup)) {
+        $script:LastTelegramMessageId = $refreshId
+        return $true
+    }
     $rich = ConvertTo-RichMessagePayload -Blocks $Blocks
     # Not sent at all when it is far larger than anything that renders here.
     # The text fallback covers this screen, and no block type is blamed for
@@ -799,7 +847,8 @@ function Edit-TelegramRichMessage {
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
-    if ($request.Success) {
+    # Unchanged is redrawn, as in Edit-TelegramMessageText.
+    if ($request.Success -or [string]$request.Error -like '*message is not modified*') {
         Register-RichBlocksAccepted -Blocks $Blocks
         return $true
     }

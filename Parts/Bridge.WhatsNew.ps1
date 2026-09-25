@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.70.3'; Items = @(
+                        '🔄 **Every Refresh button now updates the message it is on**, on every screen, instead of sending a new copy. An unchanged screen stays as it is rather than being sent again.'
+                    ) }
                 @{ Version = '8.70.2'; Items = @(
                         '🚨 **Fixed: a graphic left on air all night raised no alarm.** An urgent stayed up eleven hours with the one-hour alert set. Every graphic from this station goes to Cinegy as "until stopped", and the alert took that as "meant to stay". It no longer does; the ticker and the logo, marked long-running, stay quiet as before.'
                         '🗂 **➕ Add row on a programme board takes a paste** — several lines add several rows. It used to keep the first line and drop the rest without saying so.'
@@ -204,6 +207,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.70.3'; Items = @(
+                        '🔄 **كل زرّ «تحديث» صار يحدّث الرسالة التي هو فيها**، في كل الشاشات، بدل إرسال نسخة جديدة. والشاشة التي لم يتغيّر فيها شيء تبقى كما هي ولا تُرسل مرّة أخرى.'
+                    ) }
                 @{ Version = '8.70.2'; Items = @(
                         '🚨 **إصلاح: رسمٌ بقي على الهواء طوال الليل دون تنبيه.** عاجلٌ بقي إحدى عشرة ساعة والتنبيه مضبوط على ساعة. كل رسم من هذه المحطة يصل Cinegy «حتى الإيقاف»، والتنبيه كان يفهم ذلك «مقصودًا أن يبقى». لم يعد كذلك؛ والشريط والشعار، المعلَّمان «طويلا البقاء»، يبقيان بلا تنبيه كما كانا.'
                         '🗂 **«➕ إضافة صفّ» في جداول البرامج يقبل اللصق** — عدّة أسطر تضيف عدّة صفوف. كان يأخذ السطر الأول ويُسقط الباقي دون أن يقول.'

@@ -1034,6 +1034,10 @@ function Edit-TelegramMessageText {
     if ($ReplyMarkup) { $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup) }
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/editMessageText" -Method Post -Body $body `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
+    # Unchanged is redrawn: refreshing a screen nothing has changed on is the
+    # common case, and treating Telegram's refusal as failure made the caller
+    # send a duplicate copy instead.
+    if (-not $request.Success -and [string]$request.Error -like '*message is not modified*') { return $true }
     if (-not $request.Success) { Write-BridgeLog "Failed to edit Telegram message ${MessageId}: $($request.Error)" "WARN"; return $false }
     return $true
 }

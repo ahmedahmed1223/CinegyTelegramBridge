@@ -2781,3 +2781,63 @@ Describe 'Every setting has a name in both languages' {
         finally { $config.Settings | Add-Member -NotePropertyName 'Language' -NotePropertyValue $original -Force }
     }
 }
+
+Describe 'A refresh button redraws its own message, everywhere' {
+    <#
+        Refresh sent a new copy of the screen on most screens - a column of
+        stale states whose buttons still looked live. Fixed once, where every
+        screen's send passes: a press whose button reads "🔄 Refresh" marks its
+        message, and the first message the press produces edits it instead.
+    #>
+    BeforeEach {
+        $script:RefreshTarget = $null
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $true; Data = [pscustomobject]@{ result = [pscustomobject]@{ message_id = 900 } }; Error = '' } }
+    }
+    AfterEach { $script:RefreshTarget = $null }
+
+    It 'knows a refresh press from the button that was pressed' {
+        $message = [pscustomobject]@{ message_id = 5; chat = [pscustomobject]@{ id = 1 }
+            reply_markup = [pscustomobject]@{ inline_keyboard = @(, @([pscustomobject]@{ text = (T 'common.refresh'); callback_data = 'menu:healthcenter' })) } }
+        Test-RefreshButtonPress -Message $message -Data 'menu:healthcenter' | Should -BeTrue
+        Test-RefreshButtonPress -Message $message -Data 'menu:other' | Should -BeFalse
+    }
+
+    It 'edits the marked message instead of sending a new one' {
+        $script:RefreshTarget = @{ ChatId = 1; MessageId = 5 }
+        Send-TelegramMessage -ChatId 1 -Text 'حالة'
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 1 -Exactly -ParameterFilter { $Uri -like '*/editMessageText' -and $Body.message_id -eq 5 }
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly -ParameterFilter { $Uri -like '*/sendMessage' }
+        $script:RefreshTarget | Should -BeNullOrEmpty -Because 'only the first message of the press replaces the screen'
+    }
+
+    It 'leaves an unsolicited notice alone' {
+        $script:RefreshTarget = @{ ChatId = 1; MessageId = 5 }
+        Mock Test-BridgeNoticeSuppressed { $false }
+        Send-TelegramMessage -ChatId 1 -Text 'تنبيه' -Cause 'x'
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly -ParameterFilter { $Uri -like '*/editMessageText' }
+    }
+
+    It 'counts an unchanged screen as redrawn, not as a reason to send a copy' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; Error = 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same'; StatusCode = 400 } } -ParameterFilter { $Uri -like '*/editMessageText' }
+        Edit-TelegramMessageText -ChatId 1 -MessageId 5 -Text 'نفسه' | Should -BeTrue
+    }
+
+    It 'marks the message when a real refresh press reaches the handler' {
+        Mock Confirm-TelegramCallback { }
+        Mock Test-Authorized { $true }
+        Mock Test-CallbackAdmin { $true }
+        Mock Invoke-HealthCenterCommand { $script:seenTarget = $script:RefreshTarget }
+        $script:seenTarget = $null
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{ id = 'r'; from = [pscustomobject]@{ id = 101 }; data = 'menu:healthcenter'
+                message = [pscustomobject]@{ message_id = 77; chat = [pscustomobject]@{ id = 101; type = 'private' }
+                    reply_markup = [pscustomobject]@{ inline_keyboard = @(, @([pscustomobject]@{ text = '🔄 تحديث'; callback_data = 'menu:healthcenter' })) } } })
+        $script:seenTarget.MessageId | Should -Be 77
+    }
+
+    It 'clears the mark when the tick runs, so a later alert never edits an old screen' {
+        $script:RefreshTarget = @{ ChatId = 1; MessageId = 5 }
+        Mock Write-BridgeLog { }
+        Clear-RefreshTarget
+        $script:RefreshTarget | Should -BeNullOrEmpty
+    }
+}

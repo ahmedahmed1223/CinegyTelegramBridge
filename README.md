@@ -15,6 +15,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.3
+
+Every 🔄 Refresh button redraws the message it is on. Fixed once at the send:
+a press whose button reads Refresh marks its message, and the first reply -
+text or rich - edits it instead of sending another. The mark is per press and
+cleared every tick, notices never take it, and Telegram's "message is not
+modified" now counts as redrawn rather than triggering a duplicate.
+
 ## Version 8.70.2
 
 The stale on-air alert exempted any graphic whose Cinegy duration had not run

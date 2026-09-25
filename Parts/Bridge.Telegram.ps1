@@ -782,10 +782,14 @@ function Send-TelegramRichMessage {
         [hashtable]$ReplyMarkup
     )
     if (-not (Test-RichBlocksSendable -Blocks $Blocks)) { return $false }
-    # A 🔄 press redraws its own message, rich screens included.
-    $refreshId = Use-RefreshTarget -ChatId $ChatId
-    if ($refreshId -gt 0 -and (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $refreshId -Blocks $Blocks -ReplyMarkup $ReplyMarkup)) {
-        $script:LastTelegramMessageId = $refreshId
+    # A 🔄 press redraws its own message, rich screens included. The mark is
+    # only taken when the rich edit lands: a screen whose rich version is
+    # refused falls back to text, and that text must redraw the same message.
+    $refreshTarget = $script:RefreshTarget
+    if ($refreshTarget -and [long]$refreshTarget.ChatId -eq $ChatId -and
+        (Edit-TelegramRichMessage -ChatId $ChatId -MessageId ([int]$refreshTarget.MessageId) -Blocks $Blocks -ReplyMarkup $ReplyMarkup)) {
+        Clear-RefreshTarget
+        $script:LastTelegramMessageId = [int]$refreshTarget.MessageId
         return $true
     }
     $rich = ConvertTo-RichMessagePayload -Blocks $Blocks

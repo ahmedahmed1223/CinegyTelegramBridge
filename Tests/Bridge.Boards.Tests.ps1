@@ -410,3 +410,17 @@ Describe 'Adding several rows through the add button' {
         @($script:ContentBoards[$script:BoardAddId].Items).Count | Should -Be 1
     }
 }
+
+Describe 'A board as a table' {
+    It 'lays its rows out with their first two fields and whether they are on' {
+        Mock Get-BoardTextFields { @('title.Text', 'sub.Text', 'third.Text') }
+        $board = [pscustomobject]@{ Id = 'b'; Name = 'ن'; TemplateKey = 'Econ'; Items = @(
+                [pscustomobject]@{ Id = 'i1'; Enabled = $true; Values = @{ 'title.Text' = 'ضيف'; 'sub.Text' = 'موضوع' } }
+                [pscustomobject]@{ Id = 'i2'; Enabled = $false; Values = @{ 'title.Text' = 'ثان'; 'sub.Text' = '' } }) }
+        $table = @(Get-BoardScreenBlocks -Board $board -Header 'رأس' | Where-Object { $_.type -eq 'table' })[0]
+        @($table.cells).Count | Should -Be 3
+        @($table.cells[0]).Count | Should -Be 4 -Because 'number, two fields, on/off'
+        $table.cells[1][1].text | Should -Be 'ضيف'
+        $table.cells[2][3].text | Should -Be '🚫'
+    }
+}

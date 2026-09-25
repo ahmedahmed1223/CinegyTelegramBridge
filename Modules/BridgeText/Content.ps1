@@ -348,6 +348,11 @@ function Add-BridgeTextContent {
     $catalogue['news.atStart'] = @{ ar = 'في أول الشريط'; en = 'at the start of the ticker' }
 
     $catalogue['news.atEnd'] = @{ ar = 'في آخر الشريط'; en = 'at the end of the ticker' }
+    $catalogue['news.table.title'] = @{ ar = '📰 شريط الأخبار'; en = '📰 The news ticker' }
+    $catalogue['news.table.headline'] = @{ ar = 'الخبر'; en = 'Headline' }
+    $catalogue['news.table.state'] = @{ ar = 'الحالة'; en = 'State' }
+    $catalogue['news.table.onAir'] = @{ ar = 'على الهواء'; en = 'on air' }
+    $catalogue['news.table.firstOnly'] = @{ ar = 'يظهر أول {0} فقط، و{1} بعدها في شاشة الترتيب.'; en = 'The first {0} shown; {1} more are on the ordering screen.' }
     $catalogue['rows.paste.found'] = @{ ar = '📋 <b>وُجد في اللصق {0} صفّ</b>'; en = '📋 <b>{0} row(s) found in the paste</b>' }
     $catalogue['rows.paste.confirm'] = @{ ar = '➕ أضف {0} صفّ'; en = '➕ Add {0} row(s)' }
     $catalogue['mjz.pasteRows'] = @{ ar = '📋 لصق صفوف'; en = '📋 Paste rows' }

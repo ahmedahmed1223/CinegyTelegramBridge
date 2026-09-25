@@ -1666,6 +1666,31 @@ function Get-NewsScreenLine { param([string]$Text, [int]$Length = 80)
     return $elements.SubstringByTextElements(0, $Length) + '…'
 }
 
+function Get-NewsTickerManagementBlocks {
+    <#
+        The management screen as a table, as the bulletin's is: number,
+        headline, and - for the draft's owner - whether it is new against the
+        air. The first forty in ticker order, not the last: on a ticker the
+        order is what goes out, and the trim note says what was left off.
+    #>
+    param([string]$Header, [object[]]$Items, [object[]]$Live, [switch]$Mine)
+    $blocks = @(@{ type = 'heading'; text = (T 'news.table.title'); size = 3 })
+    $blocks += @{ type = 'paragraph'; text = (ConvertFrom-TelegramHtmlText $Header) }
+    $all = @($Items)
+    if ($all.Count -eq 0) { return $blocks }
+    $shown = @($all | Select-Object -First 40)
+    $cells = @(, @( @{ text = '#'; is_header = $true }, @{ text = (T 'news.table.headline'); is_header = $true } ))
+    if ($Mine) { $cells[0] += @{ text = (T 'news.table.state'); is_header = $true } }
+    for ($i = 0; $i -lt $shown.Count; $i++) {
+        $row = @( @{ text = [string]($i + 1) }, @{ text = (Get-NewsScreenLine -Text ([string]$shown[$i]) -Length 60) } )
+        if ($Mine) { $row += @{ text = $(if (@($Live) -contains [string]$shown[$i]) { (T 'news.table.onAir') } else { '🆕' }) } }
+        $cells += , $row
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    if ($all.Count -gt $shown.Count) { $blocks += @{ type = 'paragraph'; text = (T 'news.table.firstOnly' $shown.Count ($all.Count - $shown.Count)) } }
+    return $blocks
+}
+
 function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId,[int]$MessageId=0)
     <#
         Whoever holds the draft sees the draft - what they are about to
@@ -1703,6 +1728,7 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId,[in
             "$header`n`n$body$tail"
         } else { (T 'news.tickerEmpty' $header) }
     }
+    $beforeDraftLines = $text
     if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) {
         $by = [long](Get-JsonProp $script:NewsTickerDraft 'HandedOverBy')
         $byText = if ($by -gt 0) { (T 'news.handedOverBy' $(Get-UserDisplayName -UserId $by)) } else { '' }
@@ -1710,7 +1736,14 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId,[in
     }
     elseif($script:NewsTickerDraft -and -not $mine){$text+=(T 'news.lockedDraftLine' $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) $(@($script:NewsTickerDraft.Items).Count))}
     $keyboard = Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard)) { return }
+    # The pressed message is redrawn by whichever version lands - the table,
+    # or its text - through the one refresh mark every screen uses.
+    if ($MessageId -gt 0) { $script:RefreshTarget = @{ ChatId = $ChatId; MessageId = $MessageId } }
+    if ($snapshot.Success) {
+        $tableItems = if ($mine) { @($mine.Items) } else { @($snapshot.Items) }
+        $blocks = Get-NewsTickerManagementBlocks -Header ("$header$($text.Substring($beforeDraftLines.Length))") -Items $tableItems -Live @($snapshot.Items) -Mine:([bool]$mine)
+        if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $keyboard) { return }
+    }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard
 }
 

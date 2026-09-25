@@ -1595,10 +1595,33 @@ Describe 'The news management screen shows what is being worked on' {
     }
     AfterEach { $script:NewsTickerDraft = $null }
 
-    It 'redraws the screen it was pressed on' {
+    It 'redraws the screen it was pressed on, as text when the table is refused' {
+        # The refresh mark must survive a refused table so the text fallback
+        # still lands on the same message.
+        Mock Send-TelegramRichMessage { $false }
+        Mock Send-TelegramMessage { $script:targetAtText = $script:RefreshTarget }
+        $script:targetAtText = $null
         Show-NewsTickerManagementScreen -ChatId 42 -UserId 42 -MessageId 7
-        Should -Invoke Edit-TelegramMessageText -Times 1 -ParameterFilter { $MessageId -eq 7 }
+        $script:targetAtText.MessageId | Should -Be 7 -Because 'the text version is what consumes the mark and edits message 7'
+        $script:RefreshTarget = $null
+    }
+
+    It 'redraws the screen it was pressed on as a table' {
+        Mock Edit-TelegramRichMessage { $true }
+        Show-NewsTickerManagementScreen -ChatId 42 -UserId 42 -MessageId 7
+        Should -Invoke Edit-TelegramRichMessage -Times 1 -ParameterFilter { $MessageId -eq 7 -and @($Blocks | Where-Object { $_.type -eq 'table' }).Count -eq 1 }
         Should -Invoke Send-TelegramMessage -Times 0
+    }
+
+    It 'keeps the refresh mark when a rich edit is refused, for the text that follows' {
+        Mock Edit-TelegramRichMessage { $false }
+        Mock Test-RichBlocksSendable { $true }
+        Mock ConvertTo-RichMessagePayload { '{}' }
+        Mock Test-RichPayloadSize { $false }
+        $script:RefreshTarget = @{ ChatId = 42; MessageId = 7 }
+        Send-TelegramRichMessage -ChatId 42 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeFalse
+        $script:RefreshTarget.MessageId | Should -Be 7
+        $script:RefreshTarget = $null
     }
 
     It 'shows the owner their draft, marking what is new against the air' {

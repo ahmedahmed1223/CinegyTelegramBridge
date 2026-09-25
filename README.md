@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.70.8
+
+The ticker's management screen and the programme board screen are now rich tables with their text kept as fallback; the ticker's shows its first forty in air order. A refused rich edit no longer consumes the refresh mark, so the text fallback still redraws the pressed message. And, merged with 8.70.7 from another session: the watchdog's removal log line now quotes Cinegy's Client node and active item XML.
+
 ## Version 8.70.7
 
 Programme boards and the bulletin now review a paste before adding it, as the ticker has since 8.69.8, through one shared review with a parser per kind. The bulletin gains a Paste rows button ("title | story" per line, built-in design only); boards' immediate-add paste path is removed in favour of the review.

@@ -371,6 +371,31 @@ function Get-BoardScreenKeyboard {
     return @{ inline_keyboard = $rows }
 }
 
+function Get-BoardScreenBlocks {
+    <# A board's rows as a table - number, its first two fields, on or off -
+       where the buttons below could each show only the first field. #>
+    param([Parameter(Mandatory)]$Board, [string]$Header)
+    $blocks = @(@{ type = 'paragraph'; text = (ConvertFrom-TelegramHtmlText $Header) })
+    $items = @(Get-BoardProperty $Board 'Items' @())
+    if ($items.Count -eq 0) { return $blocks }
+    $fields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $Board 'TemplateKey' '')) | Select-Object -First 2)
+    $head = @( @{ text = '#'; is_header = $true } )
+    foreach ($field in $fields) { $head += @{ text = [string]$field; is_header = $true } }
+    $head += @{ text = '✅'; is_header = $true }
+    $cells = @(, $head)
+    $shown = @($items | Select-Object -First 40)
+    for ($i = 0; $i -lt $shown.Count; $i++) {
+        $values = Get-BoardProperty $shown[$i] 'Values' $null
+        $row = @( @{ text = [string]($i + 1) } )
+        foreach ($field in $fields) { $row += @{ text = (Get-NewsScreenLine -Text ([string](Get-BoardProperty $values $field '')) -Length 40) } }
+        $row += @{ text = $(if ([bool](Get-BoardProperty $shown[$i] 'Enabled' $true)) { '✅' } else { '🚫' }) }
+        $cells += , $row
+    }
+    $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    if ($items.Count -gt $shown.Count) { $blocks += @{ type = 'paragraph'; text = (T 'news.table.firstOnly' $shown.Count ($items.Count - $shown.Count)) } }
+    return $blocks
+}
+
 function Show-BoardScreen {
     param([Parameter(Mandatory)][string]$BoardId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$Page = 0, [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -400,7 +425,8 @@ function Show-BoardScreen {
     }
     $text = $lines -join "`n"
     $keyboard = Get-BoardScreenKeyboard -Board $board -ChatId $ChatId -UserId $UserId -Page $Page
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }
+    if ($MessageId -gt 0) { $script:RefreshTarget = @{ ChatId = $ChatId; MessageId = $MessageId } }
+    if ($template -and (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-BoardScreenBlocks -Board $board -Header $text) -ReplyMarkup $keyboard)) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
 }
 

@@ -46,6 +46,7 @@ function Save-UrgentRunState {
         BoardRevision = [int]$run.BoardRevision
         OperationId = [string]$run.OperationId
         Summary = [string]$run.Summary
+        Scope = [string](Get-JsonProp $run 'Scope')
     }
     if (-not (Write-BridgeValidatedJson -Path (Get-UrgentRunFile) -Json ($state | ConvertTo-Json -Depth 12))) {
         Write-BridgeLog 'Could not write the urgent board run state.' 'WARN'
@@ -245,6 +246,9 @@ function Start-UrgentBoardRun {
         StartedAt = (Get-Date).ToString('o')
         Summary = $summary
         OperationId = "urgent-$([guid]::NewGuid().ToString('N'))"
+        # 'all' takes a story added mid-run onto its end; 'selected' was a
+        # hand-picked list and does not grow by itself.
+        Scope = if ($SelectedOnly) { 'selected' } else { 'all' }
     }
     Write-AuditRecord -OperationId ([string]$script:UrgentBoardRun.OperationId) -EventName urgent_board_run -Result started `
         -UserId $UserId -UserName (Get-UserDisplayName -UserId $UserId) -ChatId $ChatId -Action START `
@@ -322,6 +326,56 @@ function Stop-UrgentBoardRun {
     # redrew read as a board that had not heard the button.
     if (-not $Quiet -and $ChatId -gt 0) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -MessageId $MessageId -Notice (T 'urgp.stoppedByYou') }
     return $true
+}
+
+function Add-UrgentRunStep {
+    <#
+        A story added while the board is on air joins the end of the run.
+
+        The run works from a plan and never reads the board again - the
+        rule that keeps an edit from changing the line on air now - so a new
+        story used to wait for the next run, and an operator typing it in
+        during a live sequence watched it not appear. Appended as one more
+        moment after the last, the way the plan would have placed it: the
+        transition an exit-mode line costs, then its hold. Under the same
+        ceiling the plan was cut to; over it, the story is refused with the
+        reason.
+
+        Returns the new step's number (1-based) or 0 when nothing was added.
+    #>
+    param([Parameter(Mandatory)]$Item)
+    $run = $script:UrgentBoardRun
+    if (-not $run -or [string](Get-JsonProp $run 'Scope') -eq 'selected') { return 0 }
+    if (-not [bool](Get-UrgentProperty $Item 'Enabled' $true)) { return 0 }
+    $steps = @($run.Steps)
+    if ($steps.Count -lt 1) { return 0 }
+    $timing = Get-UrgentEffectiveTiming -Item $Item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
+    $last = $steps[-1]
+    $transition = 0.0
+    if ($timing.Mode -eq 'exit' -or [string](Get-JsonProp $last 'Mode') -eq 'auto_hide') { $transition = [math]::Max(0.0, (Get-UrgentTransitionSeconds)) }
+    $at = [double]$run.ExitAtSeconds
+    $exitAt = $at + $transition + [double]$timing.HoldSeconds
+    $ceiling = Get-UrgentRunCeiling -Items @($Item)
+    if ([double]$ceiling.Seconds -gt 0 -and $exitAt -gt [double]$ceiling.Seconds) {
+        Write-BridgeLog "Urgent board: a story added mid-run was not appended; the run would reach $([int][math]::Ceiling($exitAt)) s past its $([int]$ceiling.Seconds) s ceiling."
+        return 0
+    }
+    $run.Steps = @($steps + [pscustomobject]@{
+        Step = $steps.Count
+        Position = -1
+        ItemId = [string](Get-UrgentProperty $Item 'Id' '')
+        Text = [string](Get-UrgentProperty $Item 'Text' '')
+        Title = [string](Get-UrgentProperty $Item 'Title' '')
+        Mode = $timing.Mode
+        AtSeconds = [math]::Round($at, 3)
+        TransitionSeconds = [math]::Round($transition, 3)
+        VisibleAtSeconds = [math]::Round($at + $transition, 3)
+        HoldSeconds = $timing.HoldSeconds
+    })
+    $run.ExitAtSeconds = [math]::Round($exitAt, 3)
+    Save-UrgentRunState | Out-Null
+    Write-BridgeLog "Urgent board: a story added mid-run joined the run as line $($steps.Count + 1); the run now ends at $([int][math]::Ceiling($exitAt)) s."
+    return $steps.Count + 1
 }
 
 function Restore-UrgentBoardLine {
@@ -672,6 +726,7 @@ function Restore-UrgentBoardRun {
         Steps = $steps
         ExitAtSeconds = $exitAt
         BoardRevision = [int](Get-JsonProp $state 'BoardRevision')
+        Scope = [string](Get-JsonProp $state 'Scope')
         StartedAt = $startedAt.ToString('o')
         Summary = [string](Get-JsonProp $state 'Summary')
         OperationId = [string](Get-JsonProp $state 'OperationId')

@@ -205,6 +205,41 @@ Describe 'Running the breaking-news board' {
     }
     AfterEach { $script:UrgentBoardRun = $null; $script:MojazPlayback = $null }
 
+    It 'takes a story added mid-run onto the end of the run, and plays it' {
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+        $before = @($script:UrgentBoardRun.Steps).Count
+        $exitBefore = [double]$script:UrgentBoardRun.ExitAtSeconds
+        $added = (Add-UrgentItem -Board $script:UrgentBoard -Text 'عاجل جديد' -UserId 101).Value
+        $script:UrgentBoard = $added
+        $item = @($added.Items)[-1]
+
+        Add-UrgentRunStep -Item $item | Should -Be ($before + 1)
+
+        $steps = @($script:UrgentBoardRun.Steps)
+        $steps.Count | Should -Be ($before + 1)
+        $steps[-1].Text | Should -Be 'عاجل جديد'
+        $steps[-1].AtSeconds | Should -Be $exitBefore -Because 'it starts where the run used to end'
+        [double]$script:UrgentBoardRun.ExitAtSeconds | Should -BeGreaterThan $exitBefore
+        (Get-UrgentRunStatusText) | Should -Match "من $($before + 1)"
+
+        # A hand-picked run does not grow by itself.
+        $script:UrgentBoardRun.Scope = 'selected'
+        Add-UrgentRunStep -Item $item | Should -Be 0
+    }
+
+    It 'plays in the order the newest-first view shows' {
+        $items = @($script:UrgentBoard.Items)
+        $items[0].UpdatedAt = (Get-Date).AddMinutes(-30).ToString('o')
+        $items[1].UpdatedAt = (Get-Date).AddMinutes(-10).ToString('o')
+        $items[2].UpdatedAt = (Get-Date).ToString('o')
+        Set-UrgentBoardFilter -ChatId 100 -Filter 'latest' | Out-Null
+        try {
+            $plan = (New-UrgentBoardPlan -ChatId 100).Value
+            @($plan.Steps | ForEach-Object { $_.Text }) | Should -Be @('عاجل 3', 'عاجل 2', 'عاجل 1')
+        }
+        finally { Set-UrgentBoardFilter -ChatId 100 -Filter 'all' | Out-Null }
+    }
+
     It 'sends the next line before moving the skip pointer' {
         Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
         Move-UrgentBoardNext -ChatId 100 | Should -BeTrue

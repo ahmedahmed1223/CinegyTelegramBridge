@@ -309,6 +309,12 @@ function New-UrgentBoardPlan {
     #>
     param([Parameter(Mandatory)][long]$ChatId, [switch]$SelectedOnly)
     $board = $script:UrgentBoard
+    # The order on air is the order on the screen. With the "newest" view
+    # the table is sorted newest first and numbered that way, and a run
+    # that then played the stored order looked like no order at all.
+    if ((Get-UrgentBoardFilter -ChatId $ChatId) -eq 'latest') {
+        $board = [pscustomobject]@{ Items = @(Get-UrgentVisibleItems -ChatId $ChatId) }
+    }
     $items = @(Get-UrgentPlayableItems -Board $board -SelectedIds (Get-UrgentSelectedIds -ChatId $ChatId) -SelectedOnly:$SelectedOnly)
     $ceiling = Get-UrgentRunCeiling -Items $items
     $result = New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults) `
@@ -1528,6 +1534,15 @@ function Complete-UrgentBoardText {
         Show-UrgentItemScreen -ChatId $ChatId -Position $position
         return $true
     }
-    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId
+    # Said on the board that comes back: a story typed in during a live
+    # sequence either joined that sequence, or waits - and which one is the
+    # difference between an operator watching the air and one retyping it.
+    $notice = ''
+    if ($mode -eq 'urgent_add_text' -and $script:UrgentBoardRun) {
+        $added = @(Get-UrgentProperty $result.Value 'Items' @()) | Select-Object -Last 1
+        $line = if ($added) { Add-UrgentRunStep -Item $added } else { 0 }
+        $notice = if ($line -gt 0) { (T 'urg.addedJoinedRun' $line $(@($script:UrgentBoardRun.Steps).Count)) } else { (T 'urgent.addedWaitsNextRun') }
+    }
+    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice $notice
     return $true
 }

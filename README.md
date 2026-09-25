@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.6
+
+A story added while the board is on air is appended to the live run (`Add-UrgentRunStep`) as one more moment after the last, under the same ceiling, persisted with the run; a selected-only run keeps its scope. The board says which headline number the story became, or that it waits for the next run. With the newest-first view the run plays in the order the table shows.
+
 ## Version 8.71.5
 
 Every line the board re-shows is now also written through the post-show postbox queue, with the on-air record moved to the engine's new item id: the scene honours the postbox rather than SHOW variables, and the postbox is channel-wide state, so exit-mode lines came up with the first line's text. Stop, pause, resume and skip redraw the pressed message with a one-line notice above the board.

@@ -194,6 +194,7 @@ function Add-BridgeTextContent {
     $catalogue['urgent.num.total'] = @{ ar = 'المدة الكلية (ثانية)'; en = 'Total time (seconds)' }
     $catalogue['urgent.num.gap'] = @{ ar = 'الفاصل بين الأخبار (ثانية)'; en = 'Gap between stories (seconds)' }
     $catalogue['urgent.num.sceneOnly'] = @{ ar = 'حركة المشهد وحدها'; en = 'the scene motion alone' }
+    $catalogue['urgent.addedWaitsNextRun'] = @{ ar = '➕ أُضيف الخبر؛ التتابع الجاري على المحدد فقط أو بلغ سقفه، فيُعرض في التشغيل التالي.'; en = '➕ The story was added; the live sequence is a hand-picked one or at its ceiling, so it plays next run.' }
     $catalogue['urgent.runOnAirTimed'] = @{ ar = '⏱ تشغيل مؤقت'; en = '⏱ On air for a while' }
     $catalogue['urgent.timedPickDuration'] = @{ ar = '⏱ المدة قبل إخفاء الخبر:'; en = '⏱ How long before the story is hidden:' }
     $catalogue['urgent.num.doneBack'] = @{ ar = '✅ تمّ / رجوع'; en = '✅ Done / back' }

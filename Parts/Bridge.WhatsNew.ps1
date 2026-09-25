@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.6'; Items = @(
+                        '➕ **A story added during a live sequence joins it** — type a new story while the board is on air and it plays after the last one; the board tells you which headline number it became. A hand-picked (selected-only) run does not grow by itself, and the board says so.'
+                        '🔢 **The sequence plays in the order you see** — with the "newest" view the table is numbered newest first, and the run now follows that order instead of the stored one.'
+                    ) }
                 @{ Version = '8.71.5'; Items = @(
                         '📝 **Every story in a sequence now shows its own text** — from the second story on, the scene kept the first story''s words. The board now writes each story through the same channel the first one uses.'
                         '⏹ **Stop, pause, resume and skip answer on the message you pressed** — one line above the board says what happened, and the board redraws in place instead of sending a new copy.'
@@ -252,6 +256,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.6'; Items = @(
+                        '➕ **خبر يُضاف والتتابع حيّ يلتحق به** — اكتب خبرًا جديدًا والجدول على الهواء فيُعرض بعد آخر خبر، ويقول لك الجدول رقمه في التتابع. التشغيل على المحدد فقط لا يكبر وحده، ويقول الجدول ذلك.'
+                        '🔢 **التتابع يعرض بالترتيب الذي تراه** — في عرض «الأحدث» يُرقَّم الجدول من الأحدث، وصار التشغيل يتبع هذا الترتيب لا الترتيب المخزّن.'
+                    ) }
                 @{ Version = '8.71.5'; Items = @(
                         '📝 **كل خبر في التتابع يعرض نصّه هو** — من الخبر الثاني فصاعدًا كان المشهد يحتفظ بكلمات الخبر الأول. صار الجدول يكتب كل خبر عبر القناة نفسها التي يستعملها الخبر الأول.'
                         '⏹ **الإيقاف والإيقاف المؤقت والاستئناف والتخطي تجيب على الرسالة التي ضغطتها** — سطر فوق الجدول يقول ما حدث، والجدول يُعاد رسمه في مكانه بدل رسالة جديدة.'

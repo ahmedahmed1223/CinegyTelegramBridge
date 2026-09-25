@@ -589,8 +589,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.71.5'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.71.5'
+        $script:BridgeVersion | Should -Be '8.71.6'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.71.6'
     }
 
     It 'presents the operational setting categories in a stable order' {

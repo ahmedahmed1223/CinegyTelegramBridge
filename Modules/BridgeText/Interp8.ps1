@@ -125,6 +125,7 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.autoMode'] = @{ ar = '{0}تلقائي — بالتتابع'; en = '{0}automatic — one after another' }
     $catalogue['urg.autoHideAfter'] = @{ ar = '⏱ إخفاء تلقائي بعد {0} ث — تغيير'; en = '⏱ Hides by itself after {0} s — change' }
     $catalogue['urg.playChosen'] = @{ ar = '▶️ تشغيل المحدَّد ({0})'; en = '▶️ Play the chosen ({0})' }
+    $catalogue['urg.addedJoinedRun'] = @{ ar = '➕ أُضيف الخبر إلى التتابع الجاري: الخبر {0} من {1}.'; en = '➕ The story joined the live sequence as headline {0} of {1}.' }
     $catalogue['urg.headlineOf'] = @{ ar = 'الخبر {0} من {1}'; en = 'Headline {0} of {1}' }
     $catalogue['urg.current'] = @{ ar = 'الحالي: {0}'; en = 'Now: {0}' }
     $catalogue['urg.next'] = @{ ar = 'التالي: {0}'; en = 'Next: {0}' }

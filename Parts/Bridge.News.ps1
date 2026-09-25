@@ -1084,8 +1084,11 @@ function Import-NewsPaused {
 
 function Save-NewsPaused {
     $payload = [pscustomobject]@{ SchemaVersion = 1; Items = @($script:NewsPaused) }
-    try { return [bool](Write-BridgeValidatedJson -Path $script:newsPausedFile -Json ($payload | ConvertTo-Json -Depth 3)) }
-    catch { Write-BridgeLog "Could not write news-paused.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN'; return $false }
+    # The writer never throws - it returns false - so the catch this once
+    # had could not fire, and a full disk lost the shelf without a line.
+    if (Write-BridgeValidatedJson -Path $script:newsPausedFile -Json ($payload | ConvertTo-Json -Depth 3)) { return $true }
+    Write-BridgeLog "Could not write news-paused.json; what is on screen will not survive a restart" 'WARN'
+    return $false
 }
 
 function Suspend-NewsTickerDraftItem {
@@ -1237,8 +1240,11 @@ function Import-NewsSets {
 
 function Save-NewsSets {
     $payload = [pscustomobject]@{ SchemaVersion = 1; Sets = @($script:NewsSets) }
-    try { return [bool](Write-BridgeValidatedJson -Path $script:newsSetsFile -Json ($payload | ConvertTo-Json -Depth 5)) }
-    catch { Write-BridgeLog "Could not write news-sets.json: $(Protect-SensitiveText -Text $_.Exception.Message)" 'WARN'; return $false }
+    # The writer never throws - it returns false - so the catch this once
+    # had could not fire, and a full disk lost the shelf without a line.
+    if (Write-BridgeValidatedJson -Path $script:newsSetsFile -Json ($payload | ConvertTo-Json -Depth 5)) { return $true }
+    Write-BridgeLog "Could not write news-sets.json; what is on screen will not survive a restart" 'WARN'
+    return $false
 }
 
 function Save-NewsSetFromDraft {

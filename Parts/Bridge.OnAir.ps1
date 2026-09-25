@@ -301,7 +301,7 @@ function Update-OnAirStateFromCinegy {
             # the command that made it. Both were read and thrown away.
             $engineWords = if ($decision.Change) {
                 @(
-                    "client $(if ([string]::IsNullOrWhiteSpace([string]$decision.Change.ClientXml)) { '(none)' } else { [string]$decision.Change.ClientXml })"
+                    "client $(if ([string]::IsNullOrWhiteSpace([string]$decision.Change.ClientXml)) { '(none)' } else { ([string]$decision.Change.ClientXml) -replace '\s+', ' ' })"
                     "active $(if ([string]::IsNullOrWhiteSpace([string]$decision.Change.ActiveXml)) { '(none)' } else { ([string]$decision.Change.ActiveXml) -replace '\s+', ' ' })"
                 ) -join ', '
             } else { '' }

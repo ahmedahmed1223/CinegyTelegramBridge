@@ -1690,6 +1690,12 @@ Describe 'Pausing a headline without deleting it' {
         @($script:NewsPaused) | Should -Be @('ب')
     }
 
+    It 'says so in the log when the shelf cannot be written' {
+        Mock Write-BridgeValidatedJson { $false }
+        Save-NewsPaused | Should -BeFalse
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter { $Message -like '*news-paused.json*' -and $Level -eq 'WARN' }
+    }
+
     It 'brings a paused headline back into a draft' {
         Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Out-Null
         $config.Settings | Add-Member NewNewsItemAtTop $true -Force

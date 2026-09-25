@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.1
+
+Pre-release audit of 8.70.5 through 8.71.0. Three silent failures fixed: a refresh mark left pointing at a table message that had just been replaced by a new one, so the next screen in that chat arrived as a duplicate; the watchdog's external-change log line now quotes Cinegy's Client node and the replacing item, whitespace-collapsed; and the paused-headline and saved-set writers logged nothing on a failed write because their catch blocks guarded a function that returns false instead of throwing.
+
 ## Version 8.71.0
 
 Saved ticker sets: a draft can be saved under a name in `logs/news-sets.json` (up to twenty) and loaded back into a draft through the import path, never touching air until published. This completes the ticker/bulletin/boards review begun in 8.70.4.

@@ -1200,6 +1200,18 @@ Describe 'Rich sending never becomes a dependency' {
         Should -Invoke Send-TelegramPagedText -Times 1 -Exactly
     }
 
+    It 'drops the refresh mark once a refused edit was replaced by a new message' {
+        Reset-RichBlockCapabilities
+        Mock Edit-TelegramRichMessage { $false }
+        Mock Invoke-BridgeTelegramRequest { @{ Success = $true } }
+        $script:RefreshTarget = @{ ChatId = 101; MessageId = 7 }
+
+        Send-TelegramRichMessage -ChatId 101 -Blocks @(@{ type = 'paragraph'; text = 'x' }) | Should -BeTrue
+
+        $script:RefreshTarget | Should -BeNullOrEmpty -Because 'the next screen must not chase message 7, which a new message has replaced'
+        $script:RefreshTarget = $null
+    }
+
     It 'stops trying once the method itself is missing' {
         # A 404 is the method not existing here, so nothing built from blocks
         # will ever work and every screen may as well stop asking.

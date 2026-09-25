@@ -1169,7 +1169,7 @@ Describe 'Update-OnAirStateFromCinegy' {
         Mock Get-TitlerLayerStatus {
             [pscustomobject]@{
                 Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'; ActiveId = '{NEW}'
-                ClientXml = '<Client Connected="y" Identity="Air UI" />'
+                ClientXml = "<Client Connected=`"y`"`r`n  Identity=`"Air UI`" />"
                 ActiveXml = "<Item Id=`"{NEW}`"`n  IsEmpty=`"y`" />"
             }
         }

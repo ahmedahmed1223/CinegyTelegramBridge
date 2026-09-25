@@ -31,6 +31,11 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.1'; Items = @(
+                        '🔄 **Refresh stays on one message** — when a table screen could not be edited in place and came as a new message, the next screen in that chat kept chasing the old one and arrived as a duplicate. It now redraws the new one.'
+                        '🔍 **Who cleared the graphic** — when a template leaves air from outside the bot, the log now quotes Cinegy''s own words: the connected client and the item that took the layer.'
+                        '💾 **A shelf that could not be saved says so** — pausing a headline or saving a ticker set now leaves a warning in the log if the file could not be written, instead of vanishing after a restart.'
+                    ) }
                 @{ Version = '8.71.0'; Items = @(
                         '🗂 **Saved ticker sets** — 🗂 on the news screen: save your draft under a name (a normal ticker, an election one) and load it back into a draft later. Loading changes only your draft; nothing reaches air until you publish. Up to 20 sets; a set is deleted, after a confirmation, only by whoever saved it or an administrator.'
                     ) }
@@ -231,6 +236,11 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.1'; Items = @(
+                        '🔄 **التحديث يبقى على رسالة واحدة** — حين تعذّر تعديل شاشة جدول في مكانها وجاءت رسالةً جديدة، كانت الشاشة التالية في المحادثة نفسها تطارد الرسالة القديمة فتصل نسخةً مكرّرة. صارت تُعاد على الجديدة.'
+                        '🔍 **من أزال القالب** — حين يخرج قالب من الهواء من خارج البوت، يقتبس السجلّ كلام Cinegy نفسه: العميل المتصل والعنصر الذي أخذ الطبقة.'
+                        '💾 **رفّ لم يُحفظ يقول ذلك** — إيقاف خبر أو حفظ مجموعة شريط يترك الآن تحذيرًا في السجلّ إن تعذّرت كتابة الملف، بدل أن يختفي بعد إعادة التشغيل.'
+                    ) }
                 @{ Version = '8.71.0'; Items = @(
                         '🗂 **مجموعات الشريط المحفوظة** — «🗂» في شاشة الأخبار: احفظ مسودتك باسم (شريط عادي، شريط انتخابات) وحمّلها في مسودة لاحقًا. التحميل يغيّر مسودتك وحدها، ولا يصل شيء إلى الهواء حتى تنشر. حتى 20 مجموعة، ولا يحذف المجموعة — بعد تأكيد — إلا من حفظها أو مشرف.'
                     ) }

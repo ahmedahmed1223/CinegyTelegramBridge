@@ -807,6 +807,10 @@ function Send-TelegramRichMessage {
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 2
     if ($request.Success) {
         Register-RichBlocksAccepted -Blocks $Blocks
+        # A new message went out, so a refresh mark left over from a refused
+        # edit above would send the next screen chasing a message id that
+        # has already been replaced.
+        if ($refreshTarget -and [long]$refreshTarget.ChatId -eq $ChatId) { Clear-RefreshTarget }
         return $true
     }
     if ([int](Get-JsonProp $request 'StatusCode') -eq 429) {

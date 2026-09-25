@@ -790,6 +790,7 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        'urgmenu:open' { Clear-PendingState -ChatId $chatId; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -Fresh; break }
         # The dispatcher acknowledges every admitted callback before entering
         # the action switch. A noop must not answer the same query twice.
         'urgentb:noop' { break }
@@ -835,7 +836,12 @@ function Invoke-CallbackQuery {
         }
         'urgentb:add' {
             Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_add_text'; UserId = $userId; StartedAt = (Get-Date) }
-            Send-TelegramMessage -ChatId $chatId -Text (T 'reply.sendNewUrgent')
+            # The prompt takes the board's place on the same message, so it
+            # carries the way back: a bare prompt left the operator with no
+            # board and no button until they typed something.
+            Send-TelegramMessage -ChatId $chatId -Text "$(T 'reply.sendNewUrgent')`n$(T 'urgent.addHint')" -ReplyMarkup @{
+                inline_keyboard = @(, @((New-Button (T 'urgent.back') 'urgentb:open')))
+            }
             break
         }
         'urgentb:item:*' {
@@ -921,9 +927,13 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:hide' {
-            if (-not (Stop-UrgentCurrentAir -ChatId $chatId -UserId $userId)) {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noRunToStop')
+            # One redraw with the answer on it. The HIDE's own confirmation
+            # has taken the pressed message by now; the board comes back over
+            # it and says what happened.
+            if (Stop-UrgentCurrentAir -ChatId $chatId -UserId $userId -Quiet) {
+                Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Notice (T 'urgent.hiddenByYou')
             }
+            else { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noRunToStop') }
             break
         }
         'mojaz:hide' { Clear-PendingState -ChatId $chatId; Hide-MojazOnAir -ChatId $chatId -UserId $userId | Out-Null; break }

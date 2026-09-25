@@ -740,9 +740,13 @@ function Send-UrgentScreen {
         The home id is taken only from a send that reported one, so a stale
         id can never point a later edit at somebody else's message.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [int]$MessageId = 0, [Parameter(Mandatory)][string]$Text, $Keyboard, [object[]]$Blocks = $null)
+    param([Parameter(Mandatory)][long]$ChatId, [int]$MessageId = 0, [Parameter(Mandatory)][string]$Text, $Keyboard, [object[]]$Blocks = $null, [switch]$Fresh)
     $homeChat = [long]$ChatId
-    if ($MessageId -le 0 -and $script:UrgentHomeMessage.ContainsKey($homeChat)) { $MessageId = [int]$script:UrgentHomeMessage[$homeChat] }
+    # -Fresh: entering the board from outside it. The screen goes to the
+    # bottom of the chat as a new message and becomes the home; editing
+    # the old home would put it wherever that message had scrolled to.
+    if ($Fresh) { $MessageId = 0; Clear-RefreshTarget }
+    elseif ($MessageId -le 0 -and $script:UrgentHomeMessage.ContainsKey($homeChat)) { $MessageId = [int]$script:UrgentHomeMessage[$homeChat] }
     if ($Blocks -and -not $script:RichMessagesUnavailable) {
         if ($MessageId -gt 0) {
             if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $Blocks -ReplyMarkup $Keyboard) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
@@ -764,14 +768,14 @@ function Send-UrgentScreen {
 function Show-UrgentBoardScreen {
     <# -Notice is one line above the board - what the button just did - so
        the answer and the state arrive on the same message. #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '')
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '', [switch]$Fresh)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
     $blocks = @(Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page)
     if ($Notice) { $blocks = @(@{ type = 'paragraph'; text = $Notice }) + $blocks }
     $text = Get-UrgentBoardText -ChatId $ChatId -Page $Page
     if ($Notice) { $text = "$(ConvertTo-TelegramHtmlText -Text $Notice)`n$text" }
-    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text $text -Keyboard $keyboard -Blocks $blocks
+    Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text $text -Keyboard $keyboard -Blocks $blocks -Fresh:$Fresh
 }
 
 function Get-UrgentItemKeyboard {
@@ -950,19 +954,25 @@ function Invoke-UrgentManualAction {
     Save-UrgentManualState | Out-Null
     $shownText = (T 'urgent.shownAlone')
     if ($manualHide -gt 0) { $shownText += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
-    Send-TelegramMessage -ChatId $ChatId -Text $shownText -ReplyMarkup @{
+    $shownText += "`n`n" + (ConvertTo-TelegramHtmlText -Text ([string](Get-JsonProp $state 'Text')))
+    # On the board message, like every other urgent screen: the SHOW's own
+    # confirmation has already taken that message, and this is the one that
+    # carries the hide button for what is now on air.
+    Send-UrgentScreen -ChatId $ChatId -Text $shownText -Keyboard @{
         inline_keyboard = @(
             , @((New-Button (T 'urgent.hideShown') "urgmanual:hide:$($liveState.Token)" -Style danger))
-            , @((New-Button (T 'urgent.pickAnother') "urgread:$($state.ItemId):0"))
+            , @((New-Button (T 'urgent.pickAnother') "urgread:$($state.ItemId):0"), (New-Button (T 'urgent.back') 'urgentb:open'))
         )
     }
     return $true
 }
 
 function Stop-UrgentCurrentAir {
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    <# -Quiet leaves the screen to the caller, which redraws the board once
+       with a notice instead of this and the run each drawing their own. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Quiet)
     if ($script:UrgentBoardRun) {
-        return (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Reason 'manual_hide')
+        return (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Reason 'manual_hide' -Quiet:$Quiet)
     }
     foreach ($entry in @($script:UrgentManualLive.GetEnumerator())) {
         $liveState = $entry.Value

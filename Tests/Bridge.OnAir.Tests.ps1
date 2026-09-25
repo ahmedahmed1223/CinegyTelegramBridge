@@ -1568,8 +1568,8 @@ Describe 'Main menu on-air priority' {
             Should -Be @('menu:news')
         @((& $rowOf 'menu:mojaz') | ForEach-Object { $_['callback_data'] }) |
             Should -Be @('menu:mojaz')
-        @((& $rowOf 'urgentb:open') | ForEach-Object { $_['callback_data'] }) |
-            Should -Be @('urgentb:open')
+        @((& $rowOf 'urgmenu:open') | ForEach-Object { $_['callback_data'] }) |
+            Should -Be @('urgmenu:open')
         @((& $rowOf 'boards:open') | ForEach-Object { $_['callback_data'] }) |
             Should -Be @('boards:open')
     }

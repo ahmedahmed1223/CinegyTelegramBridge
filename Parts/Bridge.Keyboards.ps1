@@ -230,7 +230,12 @@ function Get-MainMenuKeyboard {
     # full-width target is easier to hit than half of one.
     if (Get-Setting 'EnableNewsTickerManagement') { $rows += , @( (New-Button (T 'menu.news') 'menu:news') ) }
     if (Test-MojazAvailable) { $rows += , @( (New-Button (T 'menu.mojaz') 'menu:mojaz') ) }
-    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button (T 'menu.urgent') 'urgentb:open') ) }
+    # 'urgmenu:open', not the in-screen 'urgentb:open': entering from the
+    # menu sends a fresh board at the bottom of the chat, while the back
+    # buttons inside the board redraw the screen they sit on. Sharing the
+    # callback made the menu edit a menu message that had long scrolled
+    # away, and the board "did not appear".
+    if (Test-UrgentBoardAvailable) { $rows += , @( (New-Button (T 'menu.urgent') 'urgmenu:open') ) }
     # One door however many programmes there are: a button per board would
     # grow this menu without a bound.
     if (Test-BoardsAvailable) { $rows += , @( (New-Button (T 'menu.boards') 'boards:open') ) }

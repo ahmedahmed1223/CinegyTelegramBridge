@@ -31,6 +31,11 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.9'; Items = @(
+                        '📍 **The board appears where you are** — opening it from the main menu sends a fresh board at the bottom of the chat; since 8.71.7 it had been editing the old menu message wherever that had scrolled to. Inside the board, buttons still redraw in place.'
+                        '✍️ **Adding a story keeps a way back** — the "send the story" prompt now carries a back button and says what to type; a story shown alone answers on the board with its hide button.'
+                        '✅ **Show and hide say so** — starting a sequence says which story is up and how many follow; hiding from the board says the urgent is off air. Both on the board message.'
+                    ) }
                 @{ Version = '8.71.8'; Items = @(
                         '⚡ **No flash of the previous story** — a new urgent came up wearing the previous story''s text for a second or two, then changed. The text is now written to the scene''s postbox before the scene loads, on every show and every line of a sequence.'
                     ) }
@@ -262,6 +267,11 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.9'; Items = @(
+                        '📍 **الجدول يظهر حيث أنت** — فتحه من القائمة الرئيسية يرسل جدولًا جديدًا في أسفل المحادثة؛ منذ 8.71.7 كان يعدّل رسالة القائمة القديمة حيثما صعدت. وداخل الجدول تبقى الأزرار تعيد الرسم في مكانها.'
+                        '✍️ **إضافة خبر تحتفظ بطريق العودة** — طلب «أرسل نصّ العاجل» صار يحمل زرّ رجوع ويقول ما تكتب؛ والخبر المعروض وحده يجيب على الجدول بزرّ إخفائه.'
+                        '✅ **العرض والإخفاء يقولان ذلك** — بدء التتابع يقول أيّ خبر على الهواء وكم يليه؛ والإخفاء من الجدول يقول إن العاجل خرج عن الهواء. كلاهما على رسالة الجدول.'
+                    ) }
                 @{ Version = '8.71.8'; Items = @(
                         '⚡ **لا ومضة للخبر السابق** — كان العاجل الجديد يظهر بنصّ الخبر السابق ثانية أو اثنتين ثم يتغيّر. صار النصّ يُكتب في postbox المشهد قبل تحميل المشهد، في كل عرض وكل سطر من التتابع.'
                     ) }

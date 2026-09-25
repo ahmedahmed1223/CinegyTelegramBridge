@@ -77,8 +77,25 @@ Describe 'The breaking-news board and the fixed urgent template' {
         $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $false -Force
         $off = ConvertTo-Json (Get-MainMenuKeyboard -ChatId 100 -UserId 100) -Depth 8
 
-        $on | Should -Match 'urgentb:open'
-        $off | Should -Not -Match 'urgentb:open'
+        $on | Should -Match 'urgmenu:open'
+        $off | Should -Not -Match 'urgmenu:open'
+    }
+
+    It 'sends a fresh board when entered from the menu, even with an older board on record' {
+        $script:UrgentHomeMessage[[long]100] = 55
+        $script:RefreshTarget = @{ ChatId = 100; MessageId = 55 }
+        Mock Send-TelegramRichMessage { $script:LastTelegramMessageId = 77; $true }
+        Mock Edit-TelegramRichMessage { $true }
+        Mock Edit-TelegramMessageText { $true }
+        try {
+            Show-UrgentBoardScreen -ChatId 100 -UserId 100 -Fresh
+            Should -Invoke Edit-TelegramRichMessage -Times 0 -Exactly
+            Should -Invoke Edit-TelegramMessageText -Times 0 -Exactly
+            Should -Invoke Send-TelegramRichMessage -Times 1 -Exactly
+            $script:UrgentHomeMessage[[long]100] | Should -Be 77 -Because 'the fresh screen is the one the chat works on now'
+            $script:RefreshTarget | Should -BeNullOrEmpty
+        }
+        finally { $script:UrgentHomeMessage.Clear(); $script:RefreshTarget = $null }
     }
 
     It 'clears the previous kicker when the next story has no title' {
@@ -243,6 +260,21 @@ Describe 'Running the breaking-news board' {
             Test-RedrawInPlacePress -Data 'menu:main' | Should -BeFalse
         }
         finally { $script:UrgentHomeMessage.Clear() }
+    }
+
+    It 'answers a hide from the board with one redraw that says so' {
+        Mock Test-Authorized { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserNameFromTelegram {}
+        Mock Update-UserLastActivity {}
+        Mock Stop-UrgentCurrentAir { $true }
+        Mock Show-UrgentBoardScreen {}
+        $q = @{ id='h'; from=@{ id=101 }; message=@{ message_id=9; chat=@{ id=100; type='private' } }; data='urgentb:hide' }
+
+        Invoke-CallbackQuery $q
+
+        Should -Invoke Stop-UrgentCurrentAir -Times 1 -Exactly -ParameterFilter { $Quiet }
+        Should -Invoke Show-UrgentBoardScreen -Times 1 -Exactly -ParameterFilter { $MessageId -eq 9 -and $Notice -eq (T 'urgent.hiddenByYou') }
     }
 
     It 'records a new rich message as home only when the send reported an id' {

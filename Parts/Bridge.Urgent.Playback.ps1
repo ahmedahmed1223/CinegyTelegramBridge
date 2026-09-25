@@ -258,7 +258,11 @@ function Start-UrgentBoardRun {
     Write-BridgeLog "Urgent board run started by $UserId - $summary"
     foreach ($note in @(Get-UrgentProperty $plan 'Notes' @())) { Write-BridgeLog "Urgent board plan: $note" 'WARN' }
     Add-AuditEntry (T 'urgp.boardStarted' $($steps.Count) $(Format-UserAuditActor -UserId $UserId))
-    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId
+    # The SHOW's confirmation took the pressed message; the board comes back
+    # over it and says the sequence is up and with which story.
+    $first = [string](Get-JsonProp $steps[0] 'Text')
+    if ($first.Length -gt 80) { $first = $first.Substring(0, 79) + '…' }
+    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice (T 'urg.runStartedNotice' $($steps.Count) $first)
     return $true
 }
 

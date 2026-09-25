@@ -721,17 +721,21 @@ function Get-UrgentBoardText {
 }
 
 function Show-UrgentBoardScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0)
+    <# -Notice is one line above the board - what the button just did - so
+       the answer and the state arrive on the same message. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [int]$MessageId = 0, [int]$Page = 0, [string]$Notice = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     $keyboard = Get-UrgentBoardKeyboard -ChatId $ChatId -UserId $UserId -Page $Page
     if (-not $script:RichMessagesUnavailable) {
-        $blocks = Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page
+        $blocks = @(Get-UrgentBoardBlocks -ChatId $ChatId -Page $Page)
+        if ($Notice) { $blocks = @(@{ type = 'paragraph'; text = $Notice }) + $blocks }
         if ($MessageId -gt 0) {
             if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $blocks -ReplyMarkup $keyboard) { return }
         }
         elseif (Send-TelegramRichMessage -ChatId $ChatId -Blocks $blocks -ReplyMarkup $keyboard) { return }
     }
     $text = Get-UrgentBoardText -ChatId $ChatId -Page $Page
+    if ($Notice) { $text = "$(ConvertTo-TelegramHtmlText -Text $Notice)`n$text" }
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML')) { return }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $keyboard -ParseMode 'HTML'
 }

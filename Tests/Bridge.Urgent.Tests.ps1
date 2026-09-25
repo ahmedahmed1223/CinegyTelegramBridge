@@ -343,6 +343,39 @@ Describe 'Running the breaking-news board' {
         $script:UrgentBoardRun | Should -Not -BeNullOrEmpty
     }
 
+    It 'writes every re-shown line through the postbox and moves the record to the new item' {
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{NEW}'; ActiveDurationSeconds = 86400; ActiveManualEnd = $true; Error = '' } }
+        Mock Write-BridgeLog { }
+        $config.Settings | Add-Member SetValuesAfterShow $true -Force
+        $script:PostShowQueue.Clear()
+        $script:OnAir[7] = @{ Key = $script:MojazUrgentKey; At = (Get-Date); UserId = 101; ActiveId = '{FIRST}'; Source = 'bridge' }
+        try {
+            $shown = Show-UrgentBoardScene -Template (Get-UrgentTemplate) -Values @{ Text = 'الخبر الثاني' }
+
+            $shown.Success | Should -BeTrue
+            $script:OnAir[7].ActiveId | Should -Be '{NEW}' -Because 'the watchdog must expect the item the engine made for this line'
+            $script:PostShowQueue.Count | Should -Be 1 -Because 'the scene honours the postbox, not SHOW variables'
+            $script:PostShowQueue[0].ActiveId | Should -Be '{NEW}'
+            $script:PostShowQueue[0].Values.Text | Should -Be 'الخبر الثاني'
+        }
+        finally { $script:PostShowQueue.Clear(); $script:OnAir.Remove(7) }
+    }
+
+    It 'confirms a manual stop on the pressed message' {
+        Mock Invoke-ExitLayer { $true }
+        Mock Edit-TelegramRichMessage { $script:StopBlocks = $Blocks; $true }
+        $script:StopBlocks = $null
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 | Out-Null
+
+        Stop-UrgentBoardRun -ChatId 100 -UserId 101 -Reason 'manual' -MessageId 9 | Should -BeTrue
+
+        Should -Invoke Edit-TelegramRichMessage -Times 1 -ParameterFilter { $MessageId -eq 9 }
+        @($script:StopBlocks)[0].text | Should -Be (T 'urgp.stoppedByYou')
+        $script:UrgentBoardRun | Should -BeNullOrEmpty
+    }
+
     It 'puts the current line back once when its layer goes empty mid-run, then gives up' {
         Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }

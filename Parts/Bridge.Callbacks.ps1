@@ -906,10 +906,11 @@ function Invoke-CallbackQuery {
         'urgentb:review:all' { Show-UrgentReviewScreen -ChatId $chatId -UserId $userId | Out-Null; break }
         'urgentb:play:sel' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
         'urgentb:play:all' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; break }
-        'urgentb:stop' { Stop-UrgentBoardRun -ChatId $chatId -UserId $userId -Reason 'manual' | Out-Null; break }
-        'urgentb:pause' { Suspend-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
-        'urgentb:resume' { Resume-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
-        'urgentb:skip' { Move-UrgentBoardNext -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId; break }
+        # Every run control answers on the message it was pressed on.
+        'urgentb:stop' { Stop-UrgentBoardRun -ChatId $chatId -UserId $userId -Reason 'manual' -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }
+        'urgentb:pause' { Suspend-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Notice (T 'urgp.pausedByYou'); break }
+        'urgentb:resume' { Resume-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Notice (T 'urgp.resumedByYou'); break }
+        'urgentb:skip' { Move-UrgentBoardNext -ChatId $chatId -UserId $userId | Out-Null; Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Notice (T 'urgp.skippedByYou'); break }
         'urgentb:next' {
             $ready = @(Get-UrgentVisibleItems -ChatId $chatId | Where-Object { [bool](Get-UrgentProperty $_ 'Enabled' $true) -and -not (Test-UrgentItemOnAir -Item $_) })
             if ($ready.Count -eq 0) { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noReadyUrgent') }

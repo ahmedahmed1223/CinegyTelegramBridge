@@ -288,7 +288,7 @@ function Stop-UrgentBoardRun {
         themselves: a hide, an exit, a manual urgent replacing this one. Exiting
         again there would play an outro over whatever took its place.
     #>
-    param([long]$ChatId = 0, [long]$UserId = 0, [string]$Reason = 'stopped', [switch]$Quiet, [switch]$NoExit)
+    param([long]$ChatId = 0, [long]$UserId = 0, [string]$Reason = 'stopped', [switch]$Quiet, [switch]$NoExit, [int]$MessageId = 0)
     if (-not $script:UrgentBoardRun) { return $false }
     $run = $script:UrgentBoardRun
     # Detach only in memory to avoid Invoke-ExitLayer's recursive stop callback.
@@ -318,7 +318,9 @@ function Stop-UrgentBoardRun {
     Clear-UrgentRunState
     Write-UrgentRunEnd -Run $run -Reason $Reason -UserId $UserId -ChatId $ChatId
     Write-BridgeLog "Urgent board run ended ($Reason) after $([int]$run.Step + 1) step(s)."
-    if (-not $Quiet -and $ChatId -gt 0) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId }
+    # Said, and said on the message that was pressed: a board that simply
+    # redrew read as a board that had not heard the button.
+    if (-not $Quiet -and $ChatId -gt 0) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -MessageId $MessageId -Notice (T 'urgp.stoppedByYou') }
     return $true
 }
 
@@ -569,13 +571,34 @@ function Show-UrgentBoardScene {
     # nothing in Cinegy's own logs; the item the engine actually made - its
     # id and duration - was never written down for these re-shows.
     if ($shown.Success) {
+        $newId = ''
         try {
             $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $layer -TimeoutSec (Get-AirTimeout)
             if ($status.Success) {
-                Write-BridgeLog "Urgent board line is up on layer $layer as item $($status.ActiveId); engine duration ""$([int](Get-JsonProp $status 'ActiveDurationSeconds'))s"", manual end $([bool](Get-JsonProp $status 'ActiveManualEnd'))"
+                $newId = [string](Get-JsonProp $status 'ActiveId')
+                Write-BridgeLog "Urgent board line is up on layer $layer as item $newId; engine duration ""$([int](Get-JsonProp $status 'ActiveDurationSeconds'))s"", manual end $([bool](Get-JsonProp $status 'ActiveManualEnd'))"
             }
         }
         catch { Write-BridgeLog "Urgent board: could not read layer $layer after the line: $($_.Exception.Message)" 'DEBUG' }
+        # The record follows the item the engine actually made, so the
+        # watchdog and the post-show write below address this line, not the
+        # first line's id from the start of the run.
+        if ($newId -and $script:OnAir.ContainsKey($layer) -and
+            [string](Get-JsonProp $script:OnAir[$layer] 'Key') -eq $script:MojazUrgentKey) {
+            Set-JsonProp $script:OnAir[$layer] 'ActiveId' $newId
+            $script:OnAirDirty = $true
+        }
+        # The same belt and braces the first SHOW gets: this scene honours the
+        # postbox, not SHOW's variables, and the postbox is channel-wide state
+        # that keeps the last values written. Re-shown without this, every
+        # exit-mode line came up wearing the first line's text - which is what
+        # "only the first story was shown" meant.
+        if ((Get-Setting 'SetValuesAfterShow') -and $Values.Count -gt 0) {
+            $script:PostShowQueue.Add(@{
+                    At = (Get-Date).AddMilliseconds((Get-SettingInt 'PostShowDelayMs' 0)); Values = $Values
+                    Layer = $layer; Key = $script:MojazUrgentKey; ActiveId = $newId
+                })
+        }
     }
     return $shown
 }

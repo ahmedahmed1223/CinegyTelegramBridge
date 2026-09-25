@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.5'; Items = @(
+                        '📝 **Every story in a sequence now shows its own text** — from the second story on, the scene kept the first story''s words. The board now writes each story through the same channel the first one uses.'
+                        '⏹ **Stop, pause, resume and skip answer on the message you pressed** — one line above the board says what happened, and the board redraws in place instead of sending a new copy.'
+                    ) }
                 @{ Version = '8.71.4'; Items = @(
                         '⏱ **The timed button picks its duration** — "⏱ on air for a while" beside "put it on air" now opens the same presets a template''s timed show offers, with the story''s own gap starred and "another duration" for a typed number. The plain button is unchanged, and the "hide a story shown alone" setting from 8.71.2 is gone: in a sequence the gap already decides. The board''s "hides after 1800 s" button is gone too: it only opened the timing screen, where nothing edits it.'
                         '🔁 **A sequence puts its line back** — if the layer goes empty in the middle of a run, the board re-shows the current story once and carries on; only if the same story is cleared again does the run stop and raise the external-change alarm.'
@@ -248,6 +252,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.5'; Items = @(
+                        '📝 **كل خبر في التتابع يعرض نصّه هو** — من الخبر الثاني فصاعدًا كان المشهد يحتفظ بكلمات الخبر الأول. صار الجدول يكتب كل خبر عبر القناة نفسها التي يستعملها الخبر الأول.'
+                        '⏹ **الإيقاف والإيقاف المؤقت والاستئناف والتخطي تجيب على الرسالة التي ضغطتها** — سطر فوق الجدول يقول ما حدث، والجدول يُعاد رسمه في مكانه بدل رسالة جديدة.'
+                    ) }
                 @{ Version = '8.71.4'; Items = @(
                         '⏱ **زرّ التشغيل المؤقت يختار مدته** — «⏱ تشغيل مؤقت» بجانب «تشغيل على الهواء» يفتح الآن المدد نفسها التي يعرضها التشغيل المؤقت للقالب، وفاصل الخبر نفسه عليه نجمة، و«مدة أخرى» لرقم تكتبه. الزرّ العادي كما هو، وأُزيل إعداد «إخفاء الخبر الواحد» من توقيتات الجدول: في التتابع الفاصل هو الذي يقرّر. وأُزيل من شاشة الجدول زرّ «يُخفى تلقائيًا بعد 1800 ث»: كان يفتح شاشة التوقيتات حيث لا شيء يعدّله.'
                         '🔁 **التتابع يعيد سطره** — إن فرغت الطبقة في منتصف التشغيل، يعيد الجدول الخبر الحالي مرة واحدة ويكمل؛ ولا يتوقف ويرفع إنذار التغيير الخارجي إلا إن فُرّغ الخبر نفسه مرة ثانية.'

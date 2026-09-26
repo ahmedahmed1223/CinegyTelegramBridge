@@ -210,7 +210,7 @@ function Add-UrgentPastedRows {
         the way a single typed story joins it. Stops at the first refusal
         (a full board, a story too long) and says how far it got.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [object[]]$Rows = @())
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [object[]]$Rows = @(), [int]$MessageId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $board = $script:UrgentBoard
     $maxItems = Get-SettingInt 'UrgentBoardMaxItems' 40
@@ -234,7 +234,7 @@ function Add-UrgentPastedRows {
     $notice = @((T 'board.rowsAdded' $added))
     if ($stopped) { $notice += (T 'board.stopped' $stopped) }
     if ($joined -gt 0) { $notice += (T 'urg.pastedJoinedRun' $joined $(@($script:UrgentBoardRun.Steps).Count)) }
-    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice ($notice -join "`n")
+    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -MessageId $MessageId -Notice ($notice -join "`n")
 }
 
 function Invoke-UrgentEdit {

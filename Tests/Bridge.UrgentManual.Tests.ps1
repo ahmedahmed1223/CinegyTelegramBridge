@@ -170,10 +170,12 @@ Describe 'Full urgent reader and manual single story' {
 
     It 'pastes several lines as several stories, reviewed first, in order' {
         Mock Test-Authorized { $true }
-        Mock Show-UrgentBoardScreen { $script:PasteNotice = $Notice }
+        Mock Show-UrgentBoardScreen { $script:PasteNotice = $Notice; $script:PasteMessageId = $MessageId }
         Mock Add-AuditEntry { }
         Mock Write-BridgeValidatedJson { $true }
-        $script:PasteNotice = ''
+        # The review lands as message 77; the board must come back on it.
+        Mock Send-TelegramMessage { $script:LastTelegramMessageId = 77 }
+        $script:PasteNotice = ''; $script:PasteMessageId = 0
         $before = @($script:UrgentBoard.Items).Count
         Start-UrgentRowPaste -ChatId 100 -UserId 101
         (Get-PendingState -ChatId 100).Mode | Should -Be 'row_paste_review'
@@ -185,7 +187,16 @@ Describe 'Full urgent reader and manual single story' {
 
         @($script:UrgentBoard.Items | Select-Object -Last 3 | ForEach-Object { [string]$_.Text }) | Should -Be @('الأول', 'الثاني', 'الثالث')
         $script:PasteNotice | Should -Match '3'
+        $script:PasteMessageId | Should -Be 77 -Because 'the board returns on the review message the operator is looking at'
         Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+
+        # Cancelling a review returns to the board the same way.
+        Start-UrgentRowPaste -ChatId 100 -UserId 101
+        Add-RowPasteChunk -ChatId 100 -UserId 101 -Value 'خبر'
+        $script:PasteMessageId = 0
+        Complete-RowPaste -ChatId 100 -UserId 101 -Cancel
+        $script:PasteMessageId | Should -Be 77
+        $script:PasteNotice | Should -Be (T 'news.paste.cancelled')
     }
 
     It 'treats several lines typed into the single-story prompt as a paste' {

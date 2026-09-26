@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.14
+
+Confirming or cancelling an urgent paste review redraws the board on the review message (`$state.MessageId`) rather than on the recorded board message, which had scrolled up past the paste.
+
 ## Version 8.71.13
 
 The shared paste review gains a third kind, `urgent`: `ConvertFrom-UrgentPasteText` takes one story per line, a 📋 button on the board (or several lines typed into the add prompt) opens the review, and `Add-UrgentPastedRows` adds the confirmed lines in order with one save, appending each to a live sequence.

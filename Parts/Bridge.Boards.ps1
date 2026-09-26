@@ -735,12 +735,20 @@ function Complete-RowPaste {
     $state = Get-PendingState -ChatId $ChatId
     $mine = $state -and [string]$state.Mode -eq 'row_paste_review' -and [long]$state.UserId -eq $UserId
     if ($mine) { Clear-PendingState -ChatId $ChatId }
+    # The urgent board answers on the review message itself, which is the
+    # one the operator is looking at; its old board message has scrolled
+    # up past the paste and the review by now.
+    $reviewMessageId = if ($mine) { [int](Get-JsonProp $state 'MessageId') } else { 0 }
     if ($Cancel -or -not $mine) {
+        if ($mine -and [string]$state.Kind -eq 'urgent') {
+            Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -MessageId $reviewMessageId -Notice (T 'news.paste.cancelled')
+            return
+        }
         Send-TelegramMessage -ChatId $ChatId -Text $(if ($Cancel) { (T 'news.paste.cancelled') } else { (T 'news.paste.gone') })
         return
     }
     $rows = @($state.Rows)
-    if ([string]$state.Kind -eq 'urgent') { Add-UrgentPastedRows -ChatId $ChatId -UserId $UserId -Rows $rows; return }
+    if ([string]$state.Kind -eq 'urgent') { Add-UrgentPastedRows -ChatId $ChatId -UserId $UserId -Rows $rows -MessageId $reviewMessageId; return }
     if ([string]$state.Kind -eq 'mojaz') {
         $bulletinId = [string]$state.Target
         $library = $script:MojazLibrary; $added = 0; $failed = ''

@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.14'; Items = @(
+                        '↩️ **After a paste, the board comes back where you are** — confirming or cancelling the paste review redraws the board on the review message itself, not on the old board message that had scrolled up.'
+                    ) }
                 @{ Version = '8.71.13'; Items = @(
                         '📋 **Paste several stories at once** — 📋 on the urgent board, or several lines typed into "add": one story per line, shown for review first, then added in order with one tap. If a sequence is live, they join its end too.'
                     ) }
@@ -279,6 +282,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.14'; Items = @(
+                        '↩️ **بعد اللصق يعود الجدول حيث أنت** — تأكيد مراجعة اللصق أو إلغاؤها يعيد رسم الجدول على رسالة المراجعة نفسها، لا على رسالة الجدول القديمة التي صعدت.'
+                    ) }
                 @{ Version = '8.71.13'; Items = @(
                         '📋 **لصق عدة أخبار دفعة واحدة** — «📋 لصق» في جدول العواجل، أو عدة أسطر تكتبها في «إضافة»: خبر في كل سطر، تُعرض للمراجعة أولًا ثم تُضاف بترتيبها بضغطة واحدة. وإن كان تتابع حيًّا التحقت بنهايته.'
                     ) }

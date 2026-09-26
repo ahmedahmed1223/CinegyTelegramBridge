@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.16
+
+The personal reminder's "hide the template" button carried `hidego:<layer>`, but that handler expects a removal ticket id, so every press answered that the confirmation had expired. It now carries `hide:<layer>` and takes the ordinary hide road.
+
 ## Version 8.71.15
 
 `Get-UrgentLiveStamp` is now key plus engine item id only, so it survives the timestamp's change of shape across a restart; `Test-UrgentSceneUnchanged` lets "show this story" proceed over a live sequence as long as the layer still holds the board's scene, since the sequence's line changes rewrote the item id and made the exact stamp stale within a minute.

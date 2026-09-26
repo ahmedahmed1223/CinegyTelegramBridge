@@ -650,7 +650,12 @@ function Update-TemplateReminderQueue {
         if (-not [string]::IsNullOrWhiteSpace($onAirCopy)) {
             $reminderText += (T 'tick.theText' $onAirCopy)
         }
-        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'tick.remindLater') "remsnooze:$reminderId"), (New-Button (T 'tick.hideTemplate') "hidego:$($item.Layer)"))) }
+        # 'hide:<layer>', the same road every hide button takes: access check,
+        # then the confirmation with a fresh ticket when the station asks for
+        # one. It carried 'hidego:<layer>', and hidego wants a ticket id, so
+        # every press answered "the confirmation has expired" - the test
+        # that refuses a layer-only hidego had been documenting this button.
+        $ackKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'tick.remindLater') "remsnooze:$reminderId"), (New-Button (T 'tick.hideTemplate') "hide:$($item.Layer)"))) }
         Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text $reminderText -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
         $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))

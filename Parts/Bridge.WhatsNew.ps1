@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.16'; Items = @(
+                        '🔔 **The reminder''s "hide the template" button works** — the "still showing after N minutes" reminder answered every press with "the confirmation ended or the scene changed". Its button now takes the same road as every other hide button: the access check, then the confirmation if your station asks for one.'
+                    ) }
                 @{ Version = '8.71.15'; Items = @(
                         '✅ **"Show this story" no longer refuses while a sequence runs** — the review said the board would be stopped first, but a line change on air made the bot answer "the confirmation ended or the scene changed". A moved line is not a changed scene. The hide button of a story shown alone also survives a bridge restart now.'
                     ) }
@@ -285,6 +288,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.16'; Items = @(
+                        '🔔 **زرّ «إخفاء القالب» في التنبيه يعمل** — تنبيه «ما زال معروضًا منذ N دقيقة» كان يجيب على كل ضغطة بـ«انتهى التأكيد أو تغيّر المشهد». صار زرّه يسلك طريق كل أزرار الإخفاء: فحص الصلاحية ثم التأكيد إن كانت المحطة تطلبه.'
+                    ) }
                 @{ Version = '8.71.15'; Items = @(
                         '✅ **«عرض هذا الخبر» لا يرفض أثناء التتابع** — كانت المراجعة تقول إن الجدول سيتوقف أولًا، ثم يجيب البوت «انتهى التأكيد أو تغيّر المشهد» لأن الجدول رفع سطرًا جديدًا في الأثناء. سطر تحرّك ليس مشهدًا تغيّر. وزرّ إخفاء الخبر المعروض وحده صار يصمد بعد إعادة تشغيل الجسر.'
                     ) }

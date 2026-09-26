@@ -817,7 +817,7 @@ Describe 'Persistent personal template reminders' {
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
             $ChatId -eq 2 -and $Text -match '15' -and $Text -match 'Urgent' -and
             @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) -match '^remsnooze:' -and
-            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) -match '^hidego:7'
+            @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object callback_data) -match '^hide:7$'
         }
     }
 

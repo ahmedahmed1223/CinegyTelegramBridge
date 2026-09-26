@@ -400,10 +400,23 @@ function Get-UrgentCurrentItemId {
             return [string](Get-JsonProp $steps[$step] 'Id')
         }
     }
-    foreach ($entry in @($script:UrgentManualLive.Values)) {
-        if ([int](Get-UrgentProperty $entry 'Layer' 0) -eq [int]$template.Layer) {
-            return [string](Get-JsonProp $entry 'ItemId')
+    # Believed only while its stamp still matches the layer - the same test
+    # the hide button applies. A record restored from disk after the story
+    # had already left, or outlived by any road the layer's record did not
+    # take, read "on air" with a red mark and a stop button that could only
+    # refuse; here it is dropped instead, and the screen tells the truth.
+    $layer = [int]$template.Layer
+    $stamp = Get-UrgentLiveStamp -Layer $layer
+    foreach ($chatId in @($script:UrgentManualLive.Keys)) {
+        $entry = $script:UrgentManualLive[$chatId]
+        if ([int](Get-UrgentProperty $entry 'Layer' 0) -ne $layer) { continue }
+        if ([string](Get-UrgentProperty $entry 'LiveStamp' '') -cne $stamp) {
+            $script:UrgentManualLive.Remove($chatId) | Out-Null
+            Save-UrgentManualState | Out-Null
+            Write-BridgeLog "Urgent: dropped a stale 'shown alone' record for chat $chatId; its scene is no longer what is on layer $layer."
+            continue
         }
+        return [string](Get-JsonProp $entry 'ItemId')
     }
     return ''
 }

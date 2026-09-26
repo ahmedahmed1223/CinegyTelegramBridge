@@ -143,6 +143,20 @@ Describe 'Full urgent reader and manual single story' {
         @($row | ForEach-Object { $_['callback_data'] })[0] | Should -Be "urgsingle:$id"
     }
 
+    It 'does not believe a shown-alone record whose scene is no longer on the layer' {
+        Mock Write-BridgeLog { }
+        # As restored from disk after a restart: the story left air yesterday,
+        # the record stayed, and the layer holds nothing now.
+        $script:UrgentManualLive[[long]122238225] = @{ Mode='urgent_manual_live'; Token='083871dd6b70'; ItemId=$script:UrgentBoard.Items[0].Id
+            StartedAt=(Get-Date).AddHours(-17); UserId=122238225; Layer=7
+            LiveStamp='["Urgent","{7F56594D-B8FC-11F1-96C5-C85EA97266A8}","2026-09-25T19:16:44.6232242+03:00"]' }
+        $script:OnAir = @{}
+
+        Test-UrgentItemOnAir -Item $script:UrgentBoard.Items[0] | Should -BeFalse
+        $script:UrgentManualLive.Count | Should -Be 0 -Because 'a record the layer contradicts is dropped, not shown'
+        Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter { $Message -like '*stale*shown alone*122238225*' }
+    }
+
     It 'remembers each chat''s board message across a restart' {
         $script:UrgentHomeMessage.Clear()
         try {

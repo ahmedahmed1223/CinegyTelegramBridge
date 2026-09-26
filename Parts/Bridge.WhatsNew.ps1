@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.12'; Items = @(
+                        '🔴 **The red "on air" mark is believed only while it is true** — a story shown alone is marked on air only while its scene is still what the layer holds; a record left over from before a restart, or from a story that left by any road, is dropped instead of shown with a stop button that can only refuse.'
+                    ) }
                 @{ Version = '8.71.11'; Items = @(
                         '⏹ **No stop button left hanging** — a story shown alone that left air by its timer, by another operator or from outside kept reading "on air" with a stop button that could only refuse. It now goes off the moment the layer does, and open boards remember their message across a restart.'
                     ) }
@@ -273,6 +276,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.12'; Items = @(
+                        '🔴 **العلامة الحمراء «على الهواء» تُصدَّق ما دامت صادقة فقط** — الخبر المعروض وحده يُعلَّم على الهواء ما دام مشهده هو ما تحمله الطبقة؛ وسجل بقي من قبل إعادة التشغيل أو من خبر خرج بأي طريق يُسقَط بدل أن يُعرض بزرّ إيقاف لا يفعل إلا الرفض.'
+                    ) }
                 @{ Version = '8.71.11'; Items = @(
                         '⏹ **لا زرّ إيقاف معلّقًا** — الخبر المعروض وحده الذي خرج بمؤقّته أو بيد مشغّل آخر أو من الخارج كان يبقى «على الهواء» بزرّ إيقاف لا يفعل إلا الرفض. صار يخرج لحظة تخرج الطبقة، والجداول المفتوحة تتذكّر رسالتها بعد إعادة التشغيل.'
                     ) }

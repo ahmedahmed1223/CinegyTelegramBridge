@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.12
+
+`Get-UrgentCurrentItemId` believes a "shown alone" record only while its `LiveStamp` still matches the layer, the same test the hide button applies; a record restored from disk after the story had left, as found in `urgent-manual.json` this morning, is dropped and logged instead of marking the story on air.
+
 ## Version 8.71.11
 
 The manual "shown alone" record is dropped from `Remove-OnAirLayerScenes`, the one door every on-air record removal passes through, so a story that left air by its timer, another operator or the engine no longer reads "on air" with a stop button that can only refuse. Each chat's board message id is persisted in `urgent-manual.json` and restored at startup.

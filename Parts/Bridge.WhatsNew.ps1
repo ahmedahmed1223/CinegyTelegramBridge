@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.15'; Items = @(
+                        '✅ **"Show this story" no longer refuses while a sequence runs** — the review said the board would be stopped first, but a line change on air made the bot answer "the confirmation ended or the scene changed". A moved line is not a changed scene. The hide button of a story shown alone also survives a bridge restart now.'
+                    ) }
                 @{ Version = '8.71.14'; Items = @(
                         '↩️ **After a paste, the board comes back where you are** — confirming or cancelling the paste review redraws the board on the review message itself, not on the old board message that had scrolled up.'
                     ) }
@@ -282,6 +285,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.15'; Items = @(
+                        '✅ **«عرض هذا الخبر» لا يرفض أثناء التتابع** — كانت المراجعة تقول إن الجدول سيتوقف أولًا، ثم يجيب البوت «انتهى التأكيد أو تغيّر المشهد» لأن الجدول رفع سطرًا جديدًا في الأثناء. سطر تحرّك ليس مشهدًا تغيّر. وزرّ إخفاء الخبر المعروض وحده صار يصمد بعد إعادة تشغيل الجسر.'
+                    ) }
                 @{ Version = '8.71.14'; Items = @(
                         '↩️ **بعد اللصق يعود الجدول حيث أنت** — تأكيد مراجعة اللصق أو إلغاؤها يعيد رسم الجدول على رسالة المراجعة نفسها، لا على رسالة الجدول القديمة التي صعدت.'
                     ) }

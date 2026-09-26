@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.15
+
+`Get-UrgentLiveStamp` is now key plus engine item id only, so it survives the timestamp's change of shape across a restart; `Test-UrgentSceneUnchanged` lets "show this story" proceed over a live sequence as long as the layer still holds the board's scene, since the sequence's line changes rewrote the item id and made the exact stamp stale within a minute.
+
 ## Version 8.71.14
 
 Confirming or cancelling an urgent paste review redraws the board on the review message (`$state.MessageId`) rather than on the recorded board message, which had scrolled up past the paste.

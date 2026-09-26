@@ -143,6 +143,41 @@ Describe 'Full urgent reader and manual single story' {
         @($row | ForEach-Object { $_['callback_data'] })[0] | Should -Be "urgsingle:$id"
     }
 
+    It 'keeps the live stamp stable across the ways a record is written and read back' {
+        $shown = [datetime]::new(2026, 9, 26, 18, 15, 42, 123, [System.DateTimeKind]::Local)
+        $script:OnAir[7] = @{ Key='Urgent'; At=$shown; ActiveId='{SAME}' }
+        $before = Get-UrgentLiveStamp -Layer 7
+        # As read back from onair.json after a restart: a string, no fraction.
+        $script:OnAir[7] = @{ Key='Urgent'; At=$shown.ToString('MM/dd/yyyy HH:mm:ss'); ActiveId='{SAME}' }
+        Get-UrgentLiveStamp -Layer 7 | Should -Be $before -Because 'the show time changes shape after a restart; the scene has not'
+        $script:OnAir[7] = @{ Key='Urgent'; At=$shown.ToString('o'); ActiveId='{SAME}' }
+        Get-UrgentLiveStamp -Layer 7 | Should -Be $before
+        $script:OnAir[7].ActiveId = '{OTHER}'
+        Get-UrgentLiveStamp -Layer 7 | Should -Not -Be $before
+    }
+
+    It 'shows a story alone over a live sequence even after the board has moved a line' {
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Stop-UrgentBoardRun { $script:UrgentBoardRun = $null; $true }
+        Mock Invoke-ShowTemplateResult {
+            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='{ALONE}' }
+            @{ Success=$true }
+        }
+        $script:OnAir[7] = @{ Key=[string](Get-UrgentTemplate).Key; At=(Get-Date); ActiveId='{LINE-1}' }
+        $script:UrgentBoardRun = @{ Step = 0; Steps = @(@{ Id = 'u_other'; Text = 'x' }); ChatId = 100; UserId = 101 }
+        $id = $script:UrgentBoard.Items[0].Id
+        Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
+        $token = (Get-PendingState -ChatId 100).Token
+        # The board moves to its next line: a new item id on the layer.
+        $script:OnAir[7].ActiveId = '{LINE-2}'
+
+        Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$token" | Should -BeTrue -Because 'the confirmation said the board would be stopped first; a moved line is not a changed scene'
+
+        Should -Invoke Stop-UrgentBoardRun -Times 1 -Exactly
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+    }
+
     It 'does not believe a shown-alone record whose scene is no longer on the layer' {
         Mock Write-BridgeLog { }
         # As restored from disk after a restart: the story left air yesterday,

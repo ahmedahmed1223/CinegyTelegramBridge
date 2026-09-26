@@ -932,13 +932,45 @@ function Get-UrgentItemKeyboard {
 }
 
 function Get-UrgentLiveStamp {
+    <# What is on the layer: the template, the engine's item id, and the
+       show time to the second in UTC. The time keeps a re-show that reuses
+       an id from passing for the old one; to the whole second in UTC
+       because the record's time changes shape - fractional seconds,
+       offset, even a locale format - each time it is written and read
+       back, so a stamp taken before a restart never matched after one and
+       the hide button refused a story that was plainly still up. #>
     param([int]$Layer)
     if (-not $script:OnAir.ContainsKey($Layer)) { return '' }
     $live = $script:OnAir[$Layer]
-    # Serialize the original timestamp without dropping sub-second precision.
     $at = Get-JsonProp $live 'At'
-    $when = if ($at -is [datetime] -or $at -is [datetimeoffset]) { $at.ToString('o') } else { [string]$at }
+    $when = [string]$at
+    $parsed = [datetimeoffset]::MinValue
+    if ($at -is [datetimeoffset]) { $parsed = $at }
+    elseif ($at -is [datetime]) { $parsed = [datetimeoffset]::new($at) }
+    elseif (-not [datetimeoffset]::TryParse([string]$at, [ref]$parsed)) { $parsed = [datetimeoffset]::MinValue }
+    if ($parsed -ne [datetimeoffset]::MinValue) { $when = $parsed.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss') }
     return (@([string](Get-JsonProp $live 'Key'),[string](Get-JsonProp $live 'ActiveId'),$when) | ConvertTo-Json -Compress)
+}
+
+function Test-UrgentSceneUnchanged {
+    <#
+        Is the layer still what the confirmation screen described?
+
+        While a sequence is running the item id changes with every line the
+        board puts up, so an exact stamp went stale within a minute and the
+        operator who pressed "show this story" was told the scene had
+        changed. It had not, in any sense that matters: the confirmation
+        already said the board would be stopped first. With a run live,
+        it is enough that the layer still holds the board's scene.
+    #>
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][int]$Layer)
+    if ([bool](Get-JsonProp $State 'HadRun') -and $script:UrgentBoardRun) {
+        if (-not $script:OnAir.ContainsKey($Layer)) { return $true }
+        $template = Get-UrgentTemplate
+        $key = if ($template) { [string]$template.Key } else { $script:MojazUrgentKey }
+        return ([string](Get-JsonProp $script:OnAir[$Layer] 'Key') -ceq $key)
+    }
+    return ([string](Get-JsonProp $State 'LiveStamp') -ceq (Get-UrgentLiveStamp -Layer $Layer))
 }
 
 function Show-UrgentManualConfirm {
@@ -1036,7 +1068,7 @@ function Invoke-UrgentManualAction {
     if (-not $item -or -not $template -or -not [bool](Get-JsonProp $item 'Enabled') -or
         [string](Get-JsonProp $item 'Text') -cne $state.Text -or [string](Get-JsonProp $item 'Title') -cne $state.Title -or
         [int]$template.Layer -ne [int]$state.Layer -or [string]$template.Key -cne $state.Key -or
-        $state.LiveStamp -cne (Get-UrgentLiveStamp -Layer ([int]$state.Layer)) -or
+        -not (Test-UrgentSceneUnchanged -State $state -Layer ([int]$state.Layer)) -or
         [bool]$state.HadRun -ne [bool]$script:UrgentBoardRun) { return $false }
     $access = Test-TemplateAccess -Key ([string]$template.Key) -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
     $policy = Test-TemplateShowPolicy -Key ([string]$template.Key) -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)

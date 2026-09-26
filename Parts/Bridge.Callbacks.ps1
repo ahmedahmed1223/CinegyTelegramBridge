@@ -834,6 +834,7 @@ function Invoke-CallbackQuery {
             Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int]$msgObj.message_id) -Page ([int](Get-CallbackArg $data 'urgentb:none:'))
             break
         }
+        'urgentb:paste' { Start-UrgentRowPaste -ChatId $chatId -UserId $userId; break }
         'urgentb:add' {
             Set-PendingState -ChatId $chatId -State @{ Mode = 'urgent_add_text'; UserId = $userId; StartedAt = (Get-Date) }
             # The prompt takes the board's place on the same message, so it

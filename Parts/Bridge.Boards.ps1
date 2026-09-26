@@ -664,6 +664,7 @@ function ConvertFrom-RowPasteText {
     <# One parser per kind, one review for both. #>
     param([Parameter(Mandatory)][hashtable]$State, [AllowEmptyString()][string]$Text)
     if ([string]$State.Kind -eq 'mojaz') { return (ConvertFrom-MojazPasteText -Text $Text) }
+    if ([string]$State.Kind -eq 'urgent') { return (ConvertFrom-UrgentPasteText -Text $Text) }
     $board = Get-ContentBoard -BoardId ([string]$State.Target)
     $fields = if ($board) { @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' ''))) } else { @() }
     return (ConvertFrom-BoardPasteText -Text $Text -TextFields $fields)
@@ -677,7 +678,7 @@ function Start-RowPasteReview {
         somebody's chat on a board. Text that arrives while it is open joins
         it, because Telegram splits a paste past 4096 characters.
     #>
-    param([long]$ChatId, [long]$UserId, [ValidateSet('board', 'mojaz')][string]$Kind, [string]$Target, [AllowEmptyString()][string]$Text = '')
+    param([long]$ChatId, [long]$UserId, [ValidateSet('board', 'mojaz', 'urgent')][string]$Kind, [string]$Target = '', [AllowEmptyString()][string]$Text = '')
     $state = @{ Mode = 'row_paste_review'; Kind = $Kind; Target = $Target; UserId = $UserId; StartedAt = (Get-Date); Rows = @(); Skipped = @(); MessageId = 0 }
     Set-PendingState -ChatId $ChatId -State $state | Out-Null
     if ($Text) { Add-RowPasteChunk -ChatId $ChatId -UserId $UserId -Value $Text }
@@ -739,6 +740,7 @@ function Complete-RowPaste {
         return
     }
     $rows = @($state.Rows)
+    if ([string]$state.Kind -eq 'urgent') { Add-UrgentPastedRows -ChatId $ChatId -UserId $UserId -Rows $rows; return }
     if ([string]$state.Kind -eq 'mojaz') {
         $bulletinId = [string]$state.Target
         $library = $script:MojazLibrary; $added = 0; $failed = ''

@@ -119,6 +119,22 @@ function Get-UrgentItemIndex {
     return -1
 }
 
+function ConvertFrom-UrgentPasteText {
+    <# Pasted breaking lines: one story per line, cleaned like every story.
+       Lines that say nothing are skipped and counted rather than lost. #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Text = '')
+    $rows = [System.Collections.Generic.List[hashtable]]::new()
+    $skipped = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in ([string]$Text -split '\r?\n')) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $story = ConvertTo-UrgentText -Text $line
+        if (-not $story) { $skipped.Add('سطر فارغ') | Out-Null; continue }
+        $rows.Add(@{ Text = $story }) | Out-Null
+    }
+    return [pscustomobject]@{ Rows = @($rows.ToArray()); Skipped = @($skipped.ToArray()) }
+}
+
 function Add-UrgentItem {
     [CmdletBinding()]
     param(
@@ -540,7 +556,7 @@ function Get-UrgentPlanSummary {
     return ($parts -join ' · ')
 }
 
-Export-ModuleMember -Function New-UrgentBoard, New-UrgentDefaults, New-UrgentId, Get-UrgentProperty,
+Export-ModuleMember -Function New-UrgentBoard, New-UrgentDefaults, New-UrgentId, Get-UrgentProperty, ConvertFrom-UrgentPasteText,
     Add-UrgentItem, Set-UrgentItem, Remove-UrgentItem, Clear-UrgentItems, Move-UrgentItem,
     Get-UrgentItem, Get-UrgentItemIndex, Get-UrgentEffectiveTiming, Get-UrgentPlayableItems,
     New-UrgentRunPlan, Get-UrgentPlanSummary, Test-UrgentMode, Test-UrgentRepeatMode, ConvertTo-UrgentText

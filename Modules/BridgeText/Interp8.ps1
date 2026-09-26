@@ -128,6 +128,8 @@ function Add-BridgeTextInterp8 {
     $catalogue['urg.airShownBy'] = @{ ar = '🚨 عاجل على الهواء الآن — رفعه {0}.'; en = '🚨 An urgent is on air now — put up by {0}.' }
     $catalogue['urg.airHiddenBy'] = @{ ar = '⏹ خرج العاجل عن الهواء — أخفاه {0}.'; en = '⏹ The urgent is off air — hidden by {0}.' }
     $catalogue['urg.runStartedNotice'] = @{ ar = '▶️ بدأ التتابع ({0} أخبار). على الهواء الآن: {1}'; en = '▶️ The sequence is up ({0} stories). On air now: {1}' }
+    $catalogue['urg.pastedAudit'] = @{ ar = 'لُصق {0} عاجلًا على الجدول ({1})'; en = '{0} urgent line(s) pasted onto the board ({1})' }
+    $catalogue['urg.pastedJoinedRun'] = @{ ar = '▶️ التحق {0} منها بالتتابع الجاري، فصار {1} خبرًا.'; en = '▶️ {0} of them joined the live sequence, now {1} stories.' }
     $catalogue['urg.addedJoinedRun'] = @{ ar = '➕ أُضيف الخبر إلى التتابع الجاري: الخبر {0} من {1}.'; en = '➕ The story joined the live sequence as headline {0} of {1}.' }
     $catalogue['urg.headlineOf'] = @{ ar = 'الخبر {0} من {1}'; en = 'Headline {0} of {1}' }
     $catalogue['urg.current'] = @{ ar = 'الحالي: {0}'; en = 'Now: {0}' }

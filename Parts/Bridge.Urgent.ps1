@@ -192,6 +192,51 @@ function Import-UrgentBoard {
     catch { Write-BridgeLog "Could not read the urgent board: $($_.Exception.Message)" 'WARN' }
 }
 
+function Start-UrgentRowPaste {
+    <# Several stories at once, one a line, reviewed before any is added -
+       the same review the programme boards and the bulletin use. #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    Start-RowPasteReview -ChatId $ChatId -UserId $UserId -Kind urgent
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'urgent.pastePrompt') -ParseMode HTML -ReplyMarkup @{
+        inline_keyboard = @(, @((New-Button (T 'urgent.back') 'urgentb:open')))
+    }
+}
+
+function Add-UrgentPastedRows {
+    <#
+        The confirmed paste onto the board: every story in order, one save,
+        and - when a sequence is live - each one onto the end of that run,
+        the way a single typed story joins it. Stops at the first refusal
+        (a full board, a story too long) and says how far it got.
+    #>
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [object[]]$Rows = @())
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $board = $script:UrgentBoard
+    $maxItems = Get-SettingInt 'UrgentBoardMaxItems' 40
+    $maxLength = Get-SettingInt 'UrgentBoardMaxTextLength' 300
+    $added = 0; $stopped = ''
+    foreach ($row in @($Rows)) {
+        $attempt = Add-UrgentItem -Board $board -Text ([string]$row.Text) -MaxItems $maxItems -MaxLength $maxLength -UserId $UserId
+        if (-not $attempt.Success) { $stopped = [string]$attempt.Error; break }
+        $board = $attempt.Value; $added++
+    }
+    if ($added -gt 0 -and -not (Invoke-UrgentEdit -Result ([pscustomobject]@{ Success = $true; Value = $board; Error = '' }) -ChatId $ChatId)) { $added = 0 }
+    $joined = 0
+    if ($added -gt 0) {
+        Add-AuditEntry (T 'urg.pastedAudit' $added $(Format-UserAuditActor -UserId $UserId))
+        if ($script:UrgentBoardRun) {
+            foreach ($item in @(@(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Select-Object -Last $added)) {
+                if ((Add-UrgentRunStep -Item $item) -gt 0) { $joined++ }
+            }
+        }
+    }
+    $notice = @((T 'board.rowsAdded' $added))
+    if ($stopped) { $notice += (T 'board.stopped' $stopped) }
+    if ($joined -gt 0) { $notice += (T 'urg.pastedJoinedRun' $joined $(@($script:UrgentBoardRun.Steps).Count)) }
+    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice ($notice -join "`n")
+}
+
 function Invoke-UrgentEdit {
     <#
         The one place an edit becomes a saved fact.
@@ -574,6 +619,7 @@ function Get-UrgentBoardKeyboard {
     # Table-level controls
     $rows += , @(
         (New-Button (T 'urgent.add') 'urgentb:add')
+        (New-Button (T 'urgent.paste') 'urgentb:paste')
         (New-Button (T 'urgent.selectAll') "urgentb:all:$($window.Page)")
         (New-Button (T 'urgent.clearSelection') "urgentb:none:$($window.Page)")
     )
@@ -1569,6 +1615,12 @@ function Complete-UrgentBoardText {
     $result = $null
     switch ($mode) {
         'urgent_add_text' {
+            # Several lines typed into the single-story prompt are a paste,
+            # and go to the same review a paste gets: one story per line.
+            if (@(([string]$Value -split '\r?\n') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 1) {
+                Start-RowPasteReview -ChatId $ChatId -UserId $UserId -Kind urgent -Text $Value
+                return $true
+            }
             $result = Add-UrgentItem -Board $board -Text $Value -MaxItems (Get-SettingInt 'UrgentBoardMaxItems' 40) -MaxLength $maxLength -UserId $UserId
         }
         'urgent_item_text' {

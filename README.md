@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.13
+
+The shared paste review gains a third kind, `urgent`: `ConvertFrom-UrgentPasteText` takes one story per line, a 📋 button on the board (or several lines typed into the add prompt) opens the review, and `Add-UrgentPastedRows` adds the confirmed lines in order with one save, appending each to a live sequence.
+
 ## Version 8.71.12
 
 `Get-UrgentCurrentItemId` believes a "shown alone" record only while its `LiveStamp` still matches the layer, the same test the hide button applies; a record restored from disk after the story had left, as found in `urgent-manual.json` this morning, is dropped and logged instead of marking the story on air.

@@ -168,6 +168,39 @@ Describe 'Full urgent reader and manual single story' {
         finally { $script:UrgentHomeMessage.Clear(); Save-UrgentManualState | Out-Null }
     }
 
+    It 'pastes several lines as several stories, reviewed first, in order' {
+        Mock Test-Authorized { $true }
+        Mock Show-UrgentBoardScreen { $script:PasteNotice = $Notice }
+        Mock Add-AuditEntry { }
+        Mock Write-BridgeValidatedJson { $true }
+        $script:PasteNotice = ''
+        $before = @($script:UrgentBoard.Items).Count
+        Start-UrgentRowPaste -ChatId 100 -UserId 101
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'row_paste_review'
+        Add-RowPasteChunk -ChatId 100 -UserId 101 -Value "الأول`n`n  الثاني  `nالثالث"
+        @($script:UrgentBoard.Items).Count | Should -Be $before -Because 'nothing is added before the review is confirmed'
+        @((Get-PendingState -ChatId 100).Rows).Count | Should -Be 3
+
+        Complete-RowPaste -ChatId 100 -UserId 101
+
+        @($script:UrgentBoard.Items | Select-Object -Last 3 | ForEach-Object { [string]$_.Text }) | Should -Be @('الأول', 'الثاني', 'الثالث')
+        $script:PasteNotice | Should -Match '3'
+        Get-PendingState -ChatId 100 | Should -BeNullOrEmpty
+    }
+
+    It 'treats several lines typed into the single-story prompt as a paste' {
+        Mock Show-RowPasteReview { }
+        Set-PendingState -ChatId 100 -State @{ Mode = 'urgent_add_text'; UserId = 101; StartedAt = (Get-Date) } | Out-Null
+        $before = @($script:UrgentBoard.Items).Count
+
+        Complete-UrgentBoardText -ChatId 100 -UserId 101 -Value "خبر أ`nخبر ب" | Should -BeTrue
+
+        @($script:UrgentBoard.Items).Count | Should -Be $before
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'row_paste_review'
+        @((Get-PendingState -ChatId 100).Rows | ForEach-Object { $_.Text }) | Should -Be @('خبر أ', 'خبر ب')
+        Clear-PendingState -ChatId 100
+    }
+
     It 'reads a manual-mode file written before 8.71.3, keyed by private chat' {
         $legacy = '{"SchemaVersion":2,"SavedAt":"2026-09-21T10:31:39+03:00","States":[],"ManualMode":[{"ChatId":122238225,"Mode":true}],"Selections":[]}'
         Set-Content -LiteralPath (Get-UrgentManualFile) -Value $legacy -Encoding utf8

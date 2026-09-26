@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.13'; Items = @(
+                        '📋 **Paste several stories at once** — 📋 on the urgent board, or several lines typed into "add": one story per line, shown for review first, then added in order with one tap. If a sequence is live, they join its end too.'
+                    ) }
                 @{ Version = '8.71.12'; Items = @(
                         '🔴 **The red "on air" mark is believed only while it is true** — a story shown alone is marked on air only while its scene is still what the layer holds; a record left over from before a restart, or from a story that left by any road, is dropped instead of shown with a stop button that can only refuse.'
                     ) }
@@ -276,6 +279,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.13'; Items = @(
+                        '📋 **لصق عدة أخبار دفعة واحدة** — «📋 لصق» في جدول العواجل، أو عدة أسطر تكتبها في «إضافة»: خبر في كل سطر، تُعرض للمراجعة أولًا ثم تُضاف بترتيبها بضغطة واحدة. وإن كان تتابع حيًّا التحقت بنهايته.'
+                    ) }
                 @{ Version = '8.71.12'; Items = @(
                         '🔴 **العلامة الحمراء «على الهواء» تُصدَّق ما دامت صادقة فقط** — الخبر المعروض وحده يُعلَّم على الهواء ما دام مشهده هو ما تحمله الطبقة؛ وسجل بقي من قبل إعادة التشغيل أو من خبر خرج بأي طريق يُسقَط بدل أن يُعرض بزرّ إيقاف لا يفعل إلا الرفض.'
                     ) }

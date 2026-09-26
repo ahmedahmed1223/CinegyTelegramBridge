@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.11'; Items = @(
+                        '⏹ **No stop button left hanging** — a story shown alone that left air by its timer, by another operator or from outside kept reading "on air" with a stop button that could only refuse. It now goes off the moment the layer does, and open boards remember their message across a restart.'
+                    ) }
                 @{ Version = '8.71.10'; Items = @(
                         '🔄 **Every open board follows the air** — when the urgent is hidden by another operator, put up by another operator, or dropped from outside the bot, each chat''s board message is redrawn with a line saying so and by whom. Boards that can no longer be edited are left alone; the next open sends a fresh one.'
                     ) }
@@ -270,6 +273,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.11'; Items = @(
+                        '⏹ **لا زرّ إيقاف معلّقًا** — الخبر المعروض وحده الذي خرج بمؤقّته أو بيد مشغّل آخر أو من الخارج كان يبقى «على الهواء» بزرّ إيقاف لا يفعل إلا الرفض. صار يخرج لحظة تخرج الطبقة، والجداول المفتوحة تتذكّر رسالتها بعد إعادة التشغيل.'
+                    ) }
                 @{ Version = '8.71.10'; Items = @(
                         '🔄 **كل جدول مفتوح يتبع الهواء** — حين يُخفي العاجلَ مشغّلٌ آخر، أو يرفعه مشغّل آخر، أو يسقط من خارج البوت، تُعاد رسم رسالة الجدول في كل محادثة مع سطر يقول ما حدث ومن فعله. الجداول التي تعذّر تعديلها تُترك، والفتح التالي يرسل جديدًا.'
                     ) }

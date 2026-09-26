@@ -120,6 +120,40 @@ Describe 'Full urgent reader and manual single story' {
         Import-UrgentManualState
         $script:UrgentManualMode[[long]101] | Should -BeTrue -Because 'the choice survives a restart'
     }
+    It 'withdraws the stop button when the story shown alone leaves air by any road' {
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Invoke-ShowTemplateResult {
+            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
+            @{ Success=$true }
+        }
+        Mock Write-BridgeLog { }
+        $id = $script:UrgentBoard.Items[0].Id
+        Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
+        Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
+        Test-UrgentItemOnAir -Item $script:UrgentBoard.Items[0] | Should -BeTrue
+
+        # The timer, another operator or the engine takes the layer: the
+        # record goes through the one door, and the story is off air with it.
+        Remove-OnAirLayerScenes -Layer 7
+
+        Test-UrgentItemOnAir -Item $script:UrgentBoard.Items[0] | Should -BeFalse -Because 'a stop button for a story that is gone can only refuse'
+        $script:UrgentManualLive.Count | Should -Be 0
+        $row = @((Get-UrgentItemKeyboard -Position 0).inline_keyboard[0])
+        @($row | ForEach-Object { $_['callback_data'] })[0] | Should -Be "urgsingle:$id"
+    }
+
+    It 'remembers each chat''s board message across a restart' {
+        $script:UrgentHomeMessage.Clear()
+        try {
+            Set-UrgentHomeMessage -ChatId 100 -MessageId 55
+            $script:UrgentHomeMessage.Clear()
+            Import-UrgentManualState
+            $script:UrgentHomeMessage[[long]100] | Should -Be 55
+        }
+        finally { $script:UrgentHomeMessage.Clear(); Save-UrgentManualState | Out-Null }
+    }
+
     It 'reads a manual-mode file written before 8.71.3, keyed by private chat' {
         $legacy = '{"SchemaVersion":2,"SavedAt":"2026-09-21T10:31:39+03:00","States":[],"ManualMode":[{"ChatId":122238225,"Mode":true}],"Selections":[]}'
         Set-Content -LiteralPath (Get-UrgentManualFile) -Value $legacy -Encoding utf8

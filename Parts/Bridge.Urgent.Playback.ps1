@@ -63,6 +63,29 @@ function Clear-UrgentRunState {
     }
 }
 
+function Clear-UrgentManualLiveForLayer {
+    <#
+        The "shown alone" record for a layer, dropped with the layer's
+        on-air record.
+
+        It was cleared only by its own hide button. A story taken off by its
+        timer, by another operator, or by the engine left the record behind,
+        so the story still read "on air" with a stop button that could only
+        refuse - the live stamp it checks was already gone. Called from the
+        one door every removal of an on-air record passes through.
+    #>
+    param([Parameter(Mandatory)][int]$Layer)
+    $gone = @()
+    foreach ($chatId in @($script:UrgentManualLive.Keys)) {
+        if ([int](Get-UrgentProperty $script:UrgentManualLive[$chatId] 'Layer' 0) -eq $Layer) { $gone += $chatId }
+    }
+    if ($gone.Count -eq 0) { return 0 }
+    foreach ($chatId in $gone) { $script:UrgentManualLive.Remove($chatId) | Out-Null }
+    Save-UrgentManualState | Out-Null
+    Write-BridgeLog "Urgent: the story shown alone on layer $Layer is no longer on air; its stop button is withdrawn for $($gone.Count) chat(s)."
+    return $gone.Count
+}
+
 function Save-UrgentManualState {
     <# Persist the live manual show identity to disk so the hide button
        survives a restart. The operator was told a story is live and how
@@ -74,7 +97,8 @@ function Save-UrgentManualState {
        manual show is active. #>
     $hasContent = ($script:UrgentManualLive -and $script:UrgentManualLive.Count -gt 0) -or
                   ($script:UrgentManualMode -and $script:UrgentManualMode.Count -gt 0) -or
-                  ($script:UrgentSelections -and $script:UrgentSelections.Count -gt 0)
+                  ($script:UrgentSelections -and $script:UrgentSelections.Count -gt 0) -or
+                  ($script:UrgentHomeMessage -and $script:UrgentHomeMessage.Count -gt 0)
 
     if (-not $hasContent) {
         $path = Get-UrgentManualFile
@@ -95,6 +119,11 @@ function Save-UrgentManualState {
         })
         Selections = @($script:UrgentSelections.GetEnumerator() | ForEach-Object {
             [pscustomobject]@{ ChatId = [string]$_.Key; Ids = @($_.Value) }
+        })
+        # The board message each chat works on, so a restart does not leave
+        # open boards unrefreshed until somebody reopens them.
+        HomeMessages = @($script:UrgentHomeMessage.GetEnumerator() | ForEach-Object {
+            [pscustomobject]@{ ChatId = [long]$_.Key; MessageId = [int]$_.Value }
         })
     }
     if (-not (Write-BridgeValidatedJson -Path (Get-UrgentManualFile) -Json ($payload | ConvertTo-Json -Depth 8))) {
@@ -143,6 +172,14 @@ function Import-UrgentManualState {
         foreach ($entry in @($selections)) {
             $cid = [string](Get-JsonProp $entry 'ChatId')
             if ($cid) { $script:UrgentSelections[$cid] = @(Get-JsonProp $entry 'Ids') }
+        }
+    }
+    $homes = Get-JsonProp $payload 'HomeMessages'
+    if ($homes) {
+        foreach ($entry in @($homes)) {
+            $cid = [long](Get-JsonProp $entry 'ChatId')
+            $mid = [int](Get-JsonProp $entry 'MessageId')
+            if ($cid -ne 0 -and $mid -gt 0) { $script:UrgentHomeMessage[$cid] = $mid }
         }
     }
 }

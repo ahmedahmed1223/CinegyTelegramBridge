@@ -749,24 +749,33 @@ function Send-UrgentScreen {
     elseif ($MessageId -le 0 -and $script:UrgentHomeMessage.ContainsKey($homeChat)) { $MessageId = [int]$script:UrgentHomeMessage[$homeChat] }
     if ($Blocks -and -not $script:RichMessagesUnavailable) {
         if ($MessageId -gt 0) {
-            if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $Blocks -ReplyMarkup $Keyboard) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
+            if (Edit-TelegramRichMessage -ChatId $ChatId -MessageId $MessageId -Blocks $Blocks -ReplyMarkup $Keyboard) { Set-UrgentHomeMessage -ChatId $homeChat -MessageId $MessageId; return }
         }
         else {
             $script:LastTelegramMessageId = 0
             if (Send-TelegramRichMessage -ChatId $ChatId -Blocks $Blocks -ReplyMarkup $Keyboard) {
-                if ([int]$script:LastTelegramMessageId -gt 0) { $script:UrgentHomeMessage[$homeChat] = [int]$script:LastTelegramMessageId }
+                if ([int]$script:LastTelegramMessageId -gt 0) { Set-UrgentHomeMessage -ChatId $homeChat -MessageId ([int]$script:LastTelegramMessageId) }
                 return
             }
         }
     }
-    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML')) { $script:UrgentHomeMessage[$homeChat] = $MessageId; return }
+    if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML')) { Set-UrgentHomeMessage -ChatId $homeChat -MessageId $MessageId; return }
     # -EditOnly is a refresh nobody in this chat asked for: a board that can
     # no longer be edited is forgotten, not replaced by a new message pushed
     # at an operator who was not looking. The next open sends a fresh one.
-    if ($EditOnly) { $script:UrgentHomeMessage.Remove($homeChat) | Out-Null; return }
+    if ($EditOnly) { $script:UrgentHomeMessage.Remove($homeChat) | Out-Null; Save-UrgentManualState | Out-Null; return }
     $script:LastTelegramMessageId = 0
     Send-TelegramMessage -ChatId $ChatId -Text $Text -ReplyMarkup $Keyboard -ParseMode 'HTML'
-    if ([int]$script:LastTelegramMessageId -gt 0) { $script:UrgentHomeMessage[$homeChat] = [int]$script:LastTelegramMessageId }
+    if ([int]$script:LastTelegramMessageId -gt 0) { Set-UrgentHomeMessage -ChatId $homeChat -MessageId ([int]$script:LastTelegramMessageId) }
+}
+
+function Set-UrgentHomeMessage {
+    <# Written to disk only when it changes: the map is touched on every
+       screen, and most screens land on the message already on record. #>
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][int]$MessageId)
+    if ($script:UrgentHomeMessage.ContainsKey($ChatId) -and [int]$script:UrgentHomeMessage[$ChatId] -eq $MessageId) { return }
+    $script:UrgentHomeMessage[$ChatId] = $MessageId
+    Save-UrgentManualState | Out-Null
 }
 
 function Show-UrgentBoardScreen {

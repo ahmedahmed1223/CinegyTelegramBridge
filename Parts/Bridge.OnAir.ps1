@@ -138,6 +138,9 @@ function Remove-OnAirLayerScenes {
         }
     }
     [void]$script:OnAir.Remove($Layer)
+    # Whatever took the layer - a hide, an exit, a timer, the engine - the
+    # story shown alone on it is off air with it.
+    Clear-UrgentManualLiveForLayer -Layer $Layer | Out-Null
 }
 
 function Sync-OnAirCanonicalFromProjection {

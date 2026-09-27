@@ -15,6 +15,11 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.17
+
+The usage digest's outcome block and the health centre's counters block carried a literal line break and a ` 
+ ` between every two lines, doubling each gap; the digest also added an unconditional blank line after the weekly figure and rendered the capped-list tail as `•  (+N أخرى)`. Literal breaks removed, blank line dropped, tail trimmed.
+
 ## Version 8.71.16
 
 The personal reminder's "hide the template" button carried `hidego:<layer>`, but that handler expects a removal ticket id, so every press answered that the confirmation had expired. It now carries `hide:<layer>` and takes the ordinary hide road.

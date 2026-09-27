@@ -1548,10 +1548,10 @@ function Get-WeeklyNoticesText {
                 @($changed | ForEach-Object { "• <code>$(ConvertTo-TelegramHtmlText ([string]$_))</code>" })
             }
             if ($AsPlain) {
-                $found.Add((T 'tick.changedSettings' $($safe -join "`n") $(if ($tail) { "`n• $tail" })))
+                $found.Add((T 'tick.changedSettings' $($safe -join "`n") $(if ($tail) { "`n• $($tail.Trim())" })))
             }
             else {
-                $found.Add((T 'tick.changedSettingsHtml' $($safe -join "`n") $(if ($tail) { "`n• $tail" })))
+                $found.Add((T 'tick.changedSettingsHtml' $($safe -join "`n") $(if ($tail) { "`n• $($tail.Trim())" })))
             }
         }
     }
@@ -1625,7 +1625,6 @@ function Get-UsageDigestText {
     }
     $weekOps = Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations'
     $lines.Add((T 'tick.lastSevenDays' $weekOps $dailyAverage))
-    $lines.Add('')
     if ($script:CancelReasons.Count -gt 0) {
         $lines.Add('')
         $lines.Add((T 'tick.undoReasonsHtml'))

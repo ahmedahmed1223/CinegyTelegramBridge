@@ -1,4 +1,4 @@
-﻿#requires -Version 7
+#requires -Version 7
 <#
     Bridge.Admin.Tests.ps1 - Administrator tools, diagnostics, audit, and reports.
 
@@ -963,6 +963,19 @@ Describe 'Usage digest' {
         $text | Should -Match '<b>إعدادات معدّلة عن الافتراضي</b>'
         $text | Should -Match '<blockquote>• <code>'
         $text | Should -Not -Match 'إعدادات معدّلة عن الافتراضي: .*<code>.*<code>'
+    }
+
+    It 'keeps the outcome lines together and the hidden-count bullet tidy' {
+        # The catalogue entry carried a literal line break AND `n between the
+        # outcome lines, so the live digest showed a blank line after each;
+        # and the cap tail's leading space doubled behind its bullet.
+        $script:UsageCounts = @{ 'urgent' = 3 }
+        $script:AirOperationCounters = @{ Success = 2; Failed = 0; Blocked = 0 }
+        $text = Get-UsageDigestText
+        $text | Should -Not -Match "ناجحة — 2\r?\n\r?\n"
+        $text | Should -Not -Match "فاشلة — 0\r?\n\r?\n"
+        $text | Should -Not -Match '•  '
+        $text | Should -Not -Match "يوميًا\r?\n\r?\n\r?\n"
     }
 
     It 'names an expired access request in Arabic, never by its state key' {

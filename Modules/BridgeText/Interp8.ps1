@@ -40,17 +40,7 @@ function Add-BridgeTextInterp8 {
     $catalogue['tick.uptime'] = @{ ar = '⏱ <b>مدة التشغيل</b> — {0} ي {1} س {2} د'; en = '⏱ <b>Running for</b> — {0} d {1} h {2} min' }
     $catalogue['tick.since'] = @{ ar = '📅 <b>منذ</b> — {0}'; en = '📅 <b>Since</b> — {0}' }
     $catalogue['tick.airOps'] = @{ ar = '🎬 <b>عمليات الهواء</b> — {0} · ✅ {1} · ❌ {2} · ⛔ {3}'; en = '🎬 <b>Air operations</b> — {0} · ✅ {1} · ❌ {2} · ⛔ {3}' }
-    $catalogue['tick.countersBlock'] = @{ ar = "<blockquote>🚦 حدّ تيليجرام (429) — {0}
-`n📭 رسائل أُسقطت من الطابور — {1}
-`n📡 اتصال Telegram — {2}
-`n🎛 صحة Cinegy — {3}
-`n💚 آخر نبضة يومية — {4}
-`n🔴 مشاهد على الهواء — {5}{6}</blockquote>"; en = "<blockquote>🚦 The Telegram limit (429) — {0}
-`n📭 Messages dropped from the queue — {1}
-`n📡 The Telegram connection — {2}
-`n🎛 Cinegy health — {3}
-`n💚 The last daily heartbeat — {4}
-`n🔴 Scenes on air — {5}{6}</blockquote>" }
+    $catalogue['tick.countersBlock'] = @{ ar = "<blockquote>🚦 حدّ تيليجرام (429) — {0}`n📭 رسائل أُسقطت من الطابور — {1}`n📡 اتصال Telegram — {2}`n🎛 صحة Cinegy — {3}`n💚 آخر نبضة يومية — {4}`n🔴 مشاهد على الهواء — {5}{6}</blockquote>"; en = "<blockquote>🚦 The Telegram limit (429) — {0}`n📭 Messages dropped from the queue — {1}`n📡 The Telegram connection — {2}`n🎛 Cinegy health — {3}`n💚 The last daily heartbeat — {4}`n🔴 Scenes on air — {5}{6}</blockquote>" }
     $catalogue['tick.airState'] = @{ ar = 'حالة الهواء — {0}'; en = 'the state of the air — {0}' }
     $catalogue['tick.agoParen'] = @{ ar = ' (منذ {0})'; en = ' ({0} ago)' }
     $catalogue['tick.layerRow'] = @{ ar = '- طبقة {0}: {1}{2}'; en = '- layer {0}: {1}{2}' }
@@ -83,11 +73,7 @@ function Add-BridgeTextInterp8 {
     $catalogue['tick.changedSettingsHtml'] = @{ ar = "⚙️ <b>إعدادات معدّلة عن الافتراضي</b>`n<blockquote>{0}{1}</blockquote>"; en = "⚙️ <b>Settings changed from their default</b>`n<blockquote>{0}{1}</blockquote>" }
     $catalogue['tick.lastTime'] = @{ ar = ' · آخر مرة {0}'; en = ' · the last time {0}' }
     $catalogue['tick.sinceLastRunHtml'] = @{ ar = '🎬 <b>منذ آخر تشغيل</b> — {0}'; en = '🎬 <b>Since the last run</b> — {0}' }
-    $catalogue['tick.outcomeBlock'] = @{ ar = "<blockquote>✅ ناجحة — {0}
-`n❌ فاشلة — {1}
-`n⛔ مرفوضة — {2}</blockquote>"; en = "<blockquote>✅ Passed — {0}
-`n❌ Failed — {1}
-`n⛔ Refused — {2}</blockquote>" }
+    $catalogue['tick.outcomeBlock'] = @{ ar = "<blockquote>✅ ناجحة — {0}`n❌ فاشلة — {1}`n⛔ مرفوضة — {2}</blockquote>"; en = "<blockquote>✅ Passed — {0}`n❌ Failed — {1}`n⛔ Refused — {2}</blockquote>" }
     $catalogue['tick.lastSevenDays'] = @{ ar = '📆 <b>آخر 7 أيام</b> — {0} · متوسط {1} يوميًا'; en = '📆 <b>The last 7 days</b> — {0} · {1} a day on average' }
     $catalogue['tick.meanSeconds'] = @{ ar = '{0} — متوسط {1} ث ({2})'; en = '{0} — {1} s on average ({2})' }
     $catalogue['tick.slowestToAir'] = @{ ar = '🐢 الأبطأ وصولًا للهواء: {0}'; en = '🐢 The slowest to reach air: {0}' }

@@ -45,13 +45,7 @@ function Add-BridgeTextScreens2 {
     $catalogue['mjd.noFields'] = @{ ar = 'بلا حقول'; en = 'no fields' }
     $catalogue['mjd.manyHeadlines'] = @{ ar = 'عدة أخبار'; en = 'several headlines' }
     $catalogue['mjd.oneHeadline'] = @{ ar = 'خبر واحد'; en = 'one headline' }
-    $catalogue['mjd.screen'] = @{ ar = "🎬 <b>تصميم الموجز</b>
-`n
-`nاختر التصميم الذي تُبثّ عليه هذه النشرة.
-`n<i>الحقول تُقرأ من المشهد نفسه، فما يطلبه التصميم هو ما ستُسأل عنه.</i>"; en = "🎬 <b>The bulletin design</b>
-`n
-`nChoose the design this bulletin goes out on.
-`n<i>The fields are read from the scene itself, so what the design asks for is what you will be asked.</i>" }
+    $catalogue['mjd.screen'] = @{ ar = "🎬 <b>تصميم الموجز</b>`n`nاختر التصميم الذي تُبثّ عليه هذه النشرة.`n<i>الحقول تُقرأ من المشهد نفسه، فما يطلبه التصميم هو ما ستُسأل عنه.</i>"; en = "🎬 <b>The bulletin design</b>`n`nChoose the design this bulletin goes out on.`n<i>The fields are read from the scene itself, so what the design asks for is what you will be asked.</i>" }
     $catalogue['mjd.notWhileOnAir'] = @{ ar = '⛔ لا يُبدَّل تصميم موجز وهو على الهواء. أوقفه أولًا.'; en = '⛔ A bulletin design is not swapped while it is on air. Stop it first.' }
     $catalogue['mjd.designGone'] = @{ ar = '⛔ هذا التصميم غير صالح أو لم يعد موجودًا.'; en = '⛔ That design is not valid, or is no longer there.' }
     $catalogue['mjd.syncOff'] = @{ ar = '<b>🎬 المزامنة متوقّفة</b>: يتغيّر الصف في منتصف الثبات، بلا حركة تُخفيه.'; en = '<b>🎬 The sync is off</b>: the row changes mid-hold, with no motion to cover it.' }

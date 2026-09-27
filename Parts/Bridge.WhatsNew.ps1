@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.17'; Items = @(
+                        '📊 **The usage digest reads cleanly again** — the outcome lines (passed, failed, refused) sat a blank line apart, the weekly figure was followed by two, and the "+N more" under the changed settings had a stray double space after its bullet. The same doubled gap is gone from the health centre''s counters.'
+                    ) }
                 @{ Version = '8.71.16'; Items = @(
                         '🔔 **The reminder''s "hide the template" button works** — the "still showing after N minutes" reminder answered every press with "the confirmation ended or the scene changed". Its button now takes the same road as every other hide button: the access check, then the confirmation if your station asks for one.'
                     ) }
@@ -288,6 +291,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.17'; Items = @(
+                        '📊 **ملخص الاستخدام صار مرتّبًا** — أسطر النتائج (ناجحة، فاشلة، مرفوضة) كان بينها سطر فارغ، وبعد سطر الأسبوع سطران فارغان، و«+N أخرى» تحت الإعدادات المعدّلة كانت بمسافة مزدوجة بعد نقطتها. الفراغ المضاعف نفسه زال من عدّادات مركز الصحة.'
+                    ) }
                 @{ Version = '8.71.16'; Items = @(
                         '🔔 **زرّ «إخفاء القالب» في التنبيه يعمل** — تنبيه «ما زال معروضًا منذ N دقيقة» كان يجيب على كل ضغطة بـ«انتهى التأكيد أو تغيّر المشهد». صار زرّه يسلك طريق كل أزرار الإخفاء: فحص الصلاحية ثم التأكيد إن كانت المحطة تطلبه.'
                     ) }

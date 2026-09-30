@@ -974,8 +974,22 @@ function Get-MissedEventsBlocks {
     }
 
     $blocks += @{ type = 'divider' }
-    $blocks += @{ type = 'paragraph'; text = "Cinegy: $($script:RuntimeState.Monitoring.CinegyHealthState) · Telegram: $($script:RuntimeState.Monitoring.TelegramConnectionState)" }
+    $blocks += @{ type = 'paragraph'; text = (Get-OperatorConnectionSummary) }
     return $blocks
+}
+
+function Get-OperatorConnectionSummary {
+    $cinegy = switch ([string]$script:RuntimeState.Monitoring.CinegyHealthState) {
+        'healthy' { T 'hl.healthy' }
+        'unhealthy' { T 'hl.unhealthy' }
+        default { T 'hl.stateUnknown' }
+    }
+    $telegram = switch ([string]$script:RuntimeState.Monitoring.TelegramConnectionState) {
+        'connected' { T 'hl.connected' }
+        'disconnected' { T 'hl.disconnected' }
+        default { T 'hl.undecided' }
+    }
+    return "Cinegy: $cinegy · Telegram: $telegram"
 }
 
 function Get-MissedEventsRecords {
@@ -1118,7 +1132,7 @@ function Get-MissedEventsText {
         (T 'tick.onAirHtml' $($live -join (T 'common.comma')))
     }
     $lines.Add("<blockquote>$nowLine
-Cinegy: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState))</code> · Telegram: <code>$(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState))</code></blockquote>")
+$(ConvertTo-TelegramHtmlText -Text (Get-OperatorConnectionSummary))</blockquote>")
     return ($lines -join "`n")
 }
 

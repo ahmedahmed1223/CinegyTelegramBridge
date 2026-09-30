@@ -1839,7 +1839,9 @@ function Get-NewsTickerBackupsText {
         holds is what an editor recognises a copy by, next to how long ago it
         was saved.
     #>
+    param([int]$Page = 0)
     $files = @(Get-NewsTickerBackupFiles)
+    $window = Get-BridgePageWindow -ItemCount $files.Count -Page $Page -PageSize 8
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'news.backupsTitle'))
     if ($files.Count -eq 0) {
@@ -1849,7 +1851,7 @@ function Get-NewsTickerBackupsText {
     $lines.Add((T 'news.backupCount' $($files.Count)))
     $lines.Add('')
     $separator = [string](Get-Setting 'NewsItemSeparator')
-    for ($i = 0; $i -lt $files.Count; $i++) {
+    for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
         $file = $files[$i]
         $age = [int]([math]::Max(0, ((Get-Date) - $file.LastWriteTime).TotalMinutes))
         $count = ''
@@ -1869,8 +1871,18 @@ function Get-NewsTickerBackupsText {
 }
 
 function Get-NewsTickerBackupsKeyboard {
-    $rows=@();$files=@(Get-NewsTickerBackupFiles)
-    for($i=0;$i-lt $files.Count;$i++){$rows+=,@(@{text="$($i+1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))";callback_data="news:restore:$i"})};$rows+=,@(@{text=(T 'news.backToManage');callback_data='news:refresh'});return @{inline_keyboard=$rows}
+    param([int]$Page = 0)
+    $rows = @(); $files = @(Get-NewsTickerBackupFiles)
+    $window = Get-BridgePageWindow -ItemCount $files.Count -Page $Page -PageSize 8
+    if ($files.Count -gt 0) {
+        for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
+            $rows += , @((New-Button "$($i + 1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "news:restore:$i"))
+        }
+    }
+    $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'newsbackpage')
+    if ($pager.Count -gt 0) { $rows += , $pager }
+    $rows += , @((New-Button (T 'news.backToManage') 'news:refresh'))
+    return @{ inline_keyboard = $rows }
 }
 
 function Get-NewsScreenLine { param([string]$Text, [int]$Length = 80)

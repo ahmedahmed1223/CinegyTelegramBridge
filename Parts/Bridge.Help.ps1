@@ -211,8 +211,8 @@ function Get-HelpChaptersAr {
                 '↳ الحذف يُلغي مواعيد الموجز معه، ويُمنع وهو على الهواء.'
                 ''
                 '➕ إضافة صف: صورة ثم عنوان ثم نص.'
-                '✏️ برقم الصف: تعديل صورته أو عنوانه أو نصه دون حذفه.'
-                '⬆️ ⬇️ لترتيب الصفوف · 🗑 لحذف صف · 🧹 لمسح الجدول.'
+                '📄 تفاصيل الصف: تعديل وترتيب وحذف ومعاينة الصورة بلا تغيير الهواء.'
+                '⚙️ أدوات الموجز: التوقيت والتسمية والنسخ والحذف ومسح الجدول.'
                 ''
                 '🖼 لكل صف ثلاثة اختيارات للصورة:'
                 '↳ 🖼 صورة خاصة: ترفعها من الجوال أو تكتب مسارها.'
@@ -293,7 +293,7 @@ function Get-HelpChaptersAr {
         @{ Key = 'track'; Title = '🔍 المتابعة والتحقق'; AdminOnly = $false; Body = @(
                 'ℹ️ الحالة: ملخص سريع لخادم Air والقناة والقوالب المتابعة.'
                 '🎞 جدول المواد: ما يعرضه جدول Cinegy اليوم، بلا تحرير — قراءة فقط.'
-                '🤝 تسليم: ما على الهواء والمواعيد القادمة والفشل غير المعالَج في'
+                '📋 المتابعة والمساعدة ← 🤝 تسليم: الهواء والمواعيد والفشل في'
                 '   شاشة واحدة، مع سطر ملاحظة حرّ وإقرار استلام من المُستلِم.'
                 '🎚 الطبقات: يفحص Cinegy مباشرة ويقارنه بسجل الجسر.'
                 '↳ لكل طبقة: ظاهر أو خارجي أو مخفي أو غير معروف.'
@@ -310,7 +310,7 @@ function Get-HelpChaptersAr {
                 '↳ وللمشرف زر 👥 كل المشغّلين لرؤية عمليات الجميع في المدة نفسها.'
                 '🕘 ماذا فاتني: ما جرى أثناء غيابك ومَن نفّذه.'
                 '📊 تقارير: البنرات والأخبار خلال فترة، مع تحميل ملف.'
-                '🆕 ما الجديد: ملخص تغييرات الإصدارات الأخيرة.'
+                '📋 المتابعة والمساعدة تجمع التقارير وعملياتي وماذا فاتني والمساعدة والجديد.'
                 ''
                 '⚠️ السطر أعلى القائمة يذكر متى تحقّق الجسر آخر مرة.'
                 '↳ إن ظهر تحذير هناك فالمعلومة قد لا تطابق الشاشة — تأكد بلقطة.'
@@ -560,7 +560,7 @@ function Get-HelpRichBlocks {
     $used = (ConvertTo-RichMessagePayload -Blocks $blocks).Length
     foreach ($chapter in $chapters) {
         $body = @(@($chapter.Body) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-                ForEach-Object { @{ type = 'paragraph'; text = [string]$_ } })
+                ForEach-Object { @{ type = 'paragraph'; text = (ConvertFrom-OperatorGuideMarkup -Text ([string]$_)) } })
         # A details block with nothing in it renders as a control that opens
         # onto blank space, which reads as a chapter that failed to load.
         if ($body.Count -eq 0) { continue }
@@ -689,6 +689,14 @@ function Get-MyOperationsBlocks {
     return $blocks
 }
 
+function ConvertFrom-OperatorGuideMarkup {
+    # Only for repository-authored prose, never user copy. Rich block text
+    # does not parse HTML or Markdown; strip authoring markers before escaping.
+    param([string]$Text)
+    $plain = ConvertFrom-TelegramHtmlText -Text $Text
+    return $plain.Replace('**', '').Replace('+++', '')
+}
+
 function Format-HelpHtmlLine {
     <#
         One line of the manual, formatted.
@@ -704,7 +712,7 @@ function Format-HelpHtmlLine {
         boundaries and Telegram refuses a message with half a tag in it.
     #>
     param([string]$Line)
-    $text = ConvertTo-TelegramHtmlText -Text ([string]$Line)
+    $text = ConvertTo-TelegramHtmlText -Text (ConvertFrom-OperatorGuideMarkup -Text $Line)
     if ([string]::IsNullOrWhiteSpace($text)) { return $text }
     if (-not $script:HelpCodeTermPattern) {
         # Longest first, so SceneMode inside a longer name is not matched

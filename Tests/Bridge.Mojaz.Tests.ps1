@@ -314,9 +314,11 @@ Describe 'The Mojaz screen is reachable and complete' {
         $bulletin = New-TestMojazLibrary -Rows @((New-TestMojazRow))
         $callbacks = @((Get-MojazKeyboard -Bulletin $bulletin).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
 
-        foreach ($expected in @('mojaz:back', 'mojaz:add', 'mojaz:rename', 'mojaz:copy', 'mojaz:drop', 'mojaz:times', 'mojaz:play')) {
+        foreach ($expected in @('mojaz:back', 'mojaz:add', 'mojaz:tools', 'mojaz:times', 'mojaz:play')) {
             $callbacks | Should -Contain $expected
         }
+        $tools = @((Get-MojazKeyboard -Bulletin $bulletin -Tools).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        foreach ($expected in @('mojaz:rename', 'mojaz:copy', 'mojaz:drop', 'mojaz:delay')) { $tools | Should -Contain $expected }
     }
 }
 
@@ -1667,9 +1669,9 @@ Describe 'Reading the bulletin back before it goes out' {
     It 'says which picture each row will really show' {
         $preview = Get-MojazPreviewText -Bulletin (Get-MojazSelected -ChatId 100)
 
-        $preview | Should -Match 'a\.jpg'
-        # The second row inherits, so it shows the first row's picture.
-        @([regex]::Matches($preview, 'a\.jpg')).Count | Should -Be 2
+        $preview | Should -Not -Match 'a\.jpg'
+        # The text preview directs both own and inherited images to details.
+        @([regex]::Matches($preview, [regex]::Escape((T 'mjz.imagePreviewHint')))).Count | Should -Be 2
     }
 
     It 'is offered from the bulletin screen, and pages itself' {
@@ -2222,21 +2224,21 @@ Describe 'A paged rundown keeps the operators place' {
         # zero, which was invisible while the rundown was one page and became
         # a lost place the moment it was paged.
         Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-0'  | Should -Be 0
-        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-24' | Should -Be 0
-        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-25' | Should -Be 1
-        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-59' | Should -Be 2
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-7' | Should -Be 0
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-8' | Should -Be 1
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-59' | Should -Be 7
     }
 
     It 'follows a row across the page boundary it was moved over' {
-        # Row 24 is the last on page one; moving it down puts it on page two,
+        # Row 7 is the last on page one; moving it down puts it on page two,
         # and the redraw has to go with it.
-        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-25' | Should -Be 1
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-8' | Should -Be 1
     }
 
     It 'lands beside the gap when the row it was given is gone' {
         # A delete names a row that no longer exists; the fallback is where it
         # was, not the top of a sixty-row table.
-        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-deleted' -FallbackIndex 40 | Should -Be 1
+        Get-MojazRowPage -Rows $script:PagedRows -RowId 'row-deleted' -FallbackIndex 40 | Should -Be 5
     }
 
     It 'answers zero for an empty rundown instead of dividing by nothing' {
@@ -2245,7 +2247,7 @@ Describe 'A paged rundown keeps the operators place' {
     }
 
     It 'clamps a fallback past the end rather than paging past the table' {
-        Get-MojazRowPage -Rows $script:PagedRows -RowId '' -FallbackIndex 999 | Should -Be 2
+        Get-MojazRowPage -Rows $script:PagedRows -RowId '' -FallbackIndex 999 | Should -Be 7
     }
 }
 
@@ -2546,8 +2548,8 @@ Describe 'The bulletin screens show a row sitting out' {
                 [pscustomobject]@{ Id = 'r2'; Title = 'ب'; Text = 'خ'; Image = ''; Skipped = $true }) }
         (Get-MojazText -Bulletin $bulletin) | Should -Match '⏸ 2\.'
         $labels = @((Get-MojazKeyboard -Bulletin $bulletin).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['text'] })
-        $labels | Should -Contain '⏸ 2'
-        $labels | Should -Contain '✏️ 1'
+        @($labels | Where-Object { $_ -like '⏸ 2.*' }).Count | Should -Be 1
+        @($labels | Where-Object { $_ -like '📄 1.*' }).Count | Should -Be 1
     }
 }
 
@@ -2586,6 +2588,8 @@ Describe 'Pasting rows into a bulletin' {
         $data = @((Get-MojazKeyboard -Bulletin $script:MojazLibrary.Bulletins[0]).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
         $data | Should -Contain 'mojaz:paste'
         $data | Should -Contain 'mojaz:add'
-        $data | Should -Contain 'mojaz:delay'
+        $data | Should -Contain 'mojaz:tools'
+        $tools = @((Get-MojazKeyboard -Bulletin $script:MojazLibrary.Bulletins[0] -Tools).inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $tools | Should -Contain 'mojaz:delay'
     }
 }

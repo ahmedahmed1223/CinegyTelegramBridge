@@ -114,13 +114,13 @@ Describe 'Urgent board rendered operator screens' {
     }
 
     It 'clamps page <Page> consistently in fallback text and stable-id keyboards' -ForEach @(
-        @{ Page = -10; First = 1; Last = 8; ExpectedPage = 0 }
-        @{ Page = 99; First = 9; Last = 12; ExpectedPage = 1 }
+        @{ Page = -10; First = 1; Last = 4; ExpectedPage = 0 }
+        @{ Page = 99; First = 9; Last = 12; ExpectedPage = 2 }
     ) {
         Show-UrgentBoardScreen -ChatId 100 -MessageId 77 -Page $Page
         $script:RichMessagesUnavailable = $true
         Show-UrgentBoardScreen -ChatId 100 -MessageId 77 -Page $Page
-        $pageText = "المعروض: $First–$Last · صفحة $($ExpectedPage + 1) من 2"
+        $pageText = "المعروض: $First–$Last · صفحة $($ExpectedPage + 1) من 3"
         $script:UrgentUxPayload.Text | Should -Match ([regex]::Escape($pageText))
         ($script:UrgentUxRichPayload.Blocks | Where-Object type -eq 'paragraph').text | Should -Contain $pageText
         $buttons = @($script:UrgentUxPayload.ReplyMarkup.inline_keyboard | ForEach-Object { $_ })
@@ -160,19 +160,10 @@ Describe 'Urgent board rendered operator screens' {
         $keyboard = Get-UrgentBoardKeyboard -ChatId 100
         $rows = @($keyboard.inline_keyboard)
         $summaryIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -like '📊 *' })[0]))
-        $filterHeadingIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -eq '🔎 قسم التصفية' })[0]))
-
         $summaryIndex | Should -Be 0
-        $filterHeadingIndex | Should -Be 1
-        $rows[$filterHeadingIndex][0].callback_data | Should -Be 'urgentb:noop'
-        $rows[$filterHeadingIndex + 1][0].callback_data | Should -Be 'urgentb:filter:all'
-
-        $filterDividerIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -eq '━━━━━━━━━━━━━━━━' })[0]))
-        $newsDividerIndex = [array]::IndexOf($rows, (@($rows | Where-Object { $_[0].text -like '*صفوف الأخبار*' })[0]))
-        $filterDividerIndex | Should -BeGreaterThan ($filterHeadingIndex + 1)
-        $newsDividerIndex | Should -BeGreaterThan $filterDividerIndex
-        $rows[$filterDividerIndex][0].callback_data | Should -Be 'urgentb:noop'
-        $rows[$newsDividerIndex][0].callback_data | Should -Be 'urgentb:noop'
+        $rows[1][0].callback_data | Should -Be 'urgentb:filter:all'
+        $rows[2][0].callback_data | Should -Be 'urgentb:filter:selected'
+        @($rows | ForEach-Object { @($_) } | Where-Object { $_.text -eq '━━━━━━━━━━━━━━━━' -or $_.text -eq '🔎 قسم التصفية' }).Count | Should -Be 0
     }
 
     It 'sorts malformed update timestamps last in the latest filter' {
@@ -192,7 +183,7 @@ Describe 'Urgent board rendered operator screens' {
         $script:UrgentUxPayload.Method | Should -Be 'editMessageText'
         $script:UrgentUxPayload.MessageId | Should -Be 77
         $buttons = @($script:UrgentUxPayload.ReplyMarkup.inline_keyboard | ForEach-Object { $_ })
-        $buttons.callback_data | Should -Contain 'urgentb:page:1'
+        $buttons.callback_data | Should -Contain 'urgentb:page:2'
         $id = $script:UrgentBoard.Items[10].Id
         @($buttons | Where-Object callback_data -eq "urgentb:mode:$id")[0].text | Should -Be '🎬 نمط العرض'
         $buttons.callback_data | Should -Contain "urgentb:text:$id"

@@ -257,7 +257,7 @@ Describe 'Running the breaking-news board' {
             # Every urgent button rides the refresh mark, so its answer edits the pressed message.
             Test-RedrawInPlacePress -Data 'urgentb:add' | Should -BeTrue
             Test-RedrawInPlacePress -Data 'urgsingle:u_0000000a:t' | Should -BeTrue
-            Test-RedrawInPlacePress -Data 'menu:main' | Should -BeFalse
+        Test-RedrawInPlacePress -Data 'menu:main' | Should -BeTrue
         }
         finally { $script:UrgentHomeMessage.Clear() }
     }
@@ -941,7 +941,7 @@ Describe 'Editing the board from its buttons' {
         $targetId = [string](Get-JsonProp $target 'Id')
         Invoke-TestUrgentNumberCallback "urgentb:pick:$targetId"
 
-        $script:SelectedUrgentPage | Should -Be 0
+        $script:SelectedUrgentPage | Should -Be 1
     }
 
     It 'reports a failed default save and restores the previous value' {

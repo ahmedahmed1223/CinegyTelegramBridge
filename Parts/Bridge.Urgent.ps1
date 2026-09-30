@@ -413,7 +413,9 @@ function Get-UrgentModeLabel {
 }
 
 function Get-UrgentBoardPageSize {
-    return [math]::Max(1, [math]::Min(10, (Get-SettingInt 'NewsListPageSize' 8)))
+    # Each story needs both selection and read/actions rows; four leaves room
+    # for run controls. Respect a smaller station preference without enlarging.
+    return [math]::Max(1, [math]::Min(4, (Get-SettingInt 'NewsListPageSize' 8)))
 }
 
 function Get-UrgentBoardFilter {
@@ -551,7 +553,6 @@ function Get-UrgentBoardKeyboard {
         'ready' { (T 'urgent.filter.ready') }; 'selected' { (T 'urgent.filter.selected') }; 'air' { (T 'urgent.filter.onAir') };         'disabled' { (T 'urgent.filter.disabled') }; 'latest' { (T 'urgent.filter.newest') }; default { (T 'urgent.filter.all') }
     }
     $rows += , @((New-Button "📊 $filterLabel — $([string](Get-UrgentBoardSummary -ChatId $ChatId))" 'urgentb:noop'))
-    $rows += , @((New-Button (T 'urgent.filter.section') 'urgentb:noop'))
     $rows += , @(
         (New-Button (T 'urgent.filter.all') 'urgentb:filter:all' -Style $(if ($filter -eq 'all') { 'primary' } else { '' }))
         (New-Button (T 'urgent.state.ready') 'urgentb:filter:ready' -Style $(if ($filter -eq 'ready') { 'primary' } else { '' }))
@@ -562,10 +563,6 @@ function Get-UrgentBoardKeyboard {
         (New-Button (T 'urgent.state.disabled') 'urgentb:filter:disabled' -Style $(if ($filter -eq 'disabled') { 'primary' } else { '' }))
         (New-Button (T 'urgent.filter.newestButton') 'urgentb:filter:latest' -Style $(if ($filter -eq 'latest') { 'primary' } else { '' }))
     )
-    # Telegram has no divider or disabled-button primitive in InlineKeyboardMarkup.
-    # A noop row is the compatible visual separator; its callback is answered
-    # immediately so tapping the rule never leaves a loading spinner.
-    $rows += , @((New-Button '━━━━━━━━━━━━━━━━' 'urgentb:noop'))
 
     # Mode selector — single button toggles between manual and auto
     $rows += , @((New-Button (T 'urg.manualMode' $(if($manual){'✅ '})) 'urgmode:manual'), (New-Button (T 'urg.autoMode' $(if(-not $manual){'✅ '})) 'urgmode:auto'))
@@ -580,7 +577,6 @@ function Get-UrgentBoardKeyboard {
     # sequence and the timed button's pick when shown alone.
 
     if ($items.Count -gt 0) {
-        $rows += , @((New-Button (T 'urgent.rowsDivider') 'urgentb:noop'))
         for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
             $item = $items[$index]
             $id = [string](Get-UrgentProperty $item 'Id' '')

@@ -17,6 +17,8 @@ function Add-BridgeTextFeed {
     $catalogue = $Catalogue
 
     $catalogue['feed.title'] = @{ ar = '📡 <b>مراقبة البثّ</b>'; en = '📡 <b>The feed watch</b>' }
+    $catalogue['feed.details'] = @{ ar = '🔎 التفاصيل التقنية'; en = '🔎 Technical details' }
+    $catalogue['feed.summary'] = @{ ar = '↩️ ملخص البث'; en = '↩️ Feed summary' }
     $catalogue['feed.stateGood'] = @{ ar = '🟢 <b>البثّ يصل</b>'; en = '🟢 <b>The feed is arriving</b>' }
     $catalogue['feed.stateBlack'] = @{ ar = '🖤 <b>الشاشة سوداء</b>'; en = '🖤 <b>The screen is black</b>' }
     $catalogue['feed.stateDown'] = @{ ar = '🔴 <b>البثّ لا يصل</b>'; en = '🔴 <b>The feed is not arriving</b>' }

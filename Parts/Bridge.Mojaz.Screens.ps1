@@ -46,7 +46,7 @@ function Switch-MojazRowSkip {
 function Get-MojazBlocks {
     <# The table the operator asked for: a row per story, four columns, with
        the copy itself trimmed to fit beside them. #>
-    param($Bulletin)
+    param($Bulletin, [int]$Page = 0)
     $name = if ($Bulletin) { [string]$Bulletin.Name } else { (T 'mojaz.word') }
     $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $blocks = @(@{ type = 'heading'; text = "📑 $name"; size = 3 })
@@ -61,7 +61,10 @@ function Get-MojazBlocks {
             @{ text = (T 'mojaz.col.title'); is_header = $true }
             @{ text = (T 'mojaz.col.story'); is_header = $true }
         ))
-    for ($i = 0; $i -lt $rows.Count; $i++) {
+    $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page -PageSize 8
+    $trimmed = Select-RichTableRows -Items @($rows[$window.StartIndex..$window.EndIndex])
+    if ($window.PageCount -gt 1) { $blocks += @{ type = 'paragraph'; text = (T 'urg.showing' ($window.StartIndex + 1) ($window.EndIndex + 1) ($window.Page + 1) $window.PageCount) } }
+    for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
         $cells += , @(
             @{ text = "$(Get-MojazRowSkipMark -Row $rows[$i])$($i + 1)" }
             @{ text = (Get-MojazImageMark -Row $rows[$i] -Index $i) }
@@ -70,6 +73,8 @@ function Get-MojazBlocks {
         )
     }
     $blocks += @{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true }
+    $trimNote = Get-RichTableTrimNote -Hidden ([int]$trimmed.Hidden) -Shown @($trimmed.Rows).Count
+    if ($trimNote) { $blocks += @{ type = 'paragraph'; text = $trimNote } }
     $blocks += @{ type = 'paragraph'; text = (T 'mojaz.imageLegend') }
     if (Test-MojazOnAir -Bulletin $Bulletin) {
         $blocks += @{ type = 'paragraph'; text = (T 'mjz.runningRow' $([int]$script:MojazPlayback.Index + 1) $(@($script:MojazPlayback.Rows).Count)) }
@@ -81,7 +86,7 @@ function Get-MojazBlocks {
 
 function Get-MojazText {
     <# The same table as text, for a Telegram that refuses rich blocks. #>
-    param($Bulletin)
+    param($Bulletin, [int]$Page = 0)
     $name = if ($Bulletin) { [string]$Bulletin.Name } else { (T 'mojaz.word') }
     $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -92,7 +97,9 @@ function Get-MojazText {
     }
     $lines.Add((T 'mjz.rowsAndHtml' $($rows.Count) $(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText -Bulletin $Bulletin))))
     $lines.Add('')
-    for ($i = 0; $i -lt $rows.Count; $i++) {
+    $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page -PageSize 8
+    if ($window.PageCount -gt 1) { $lines.Add((T 'urg.showing' ($window.StartIndex + 1) ($window.EndIndex + 1) ($window.Page + 1) $window.PageCount)) }
+    for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
         $picture = Get-MojazImageLabel -Row $rows[$i] -Index $i
         $lines.Add("$(Get-MojazRowSkipMark -Row $rows[$i])$($i + 1). <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 40))</b> · $picture")
         $lines.Add("   $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$rows[$i].Text) -Limit 90))")
@@ -124,7 +131,7 @@ function Get-MojazRowPage {
         Falls back to the last page when the row is gone - a delete leaves the
         operator beside what it removed, not at the top of a long table.
     #>
-    param([AllowEmptyCollection()]$Rows, [string]$RowId, [int]$PageSize = 25, [int]$FallbackIndex = -1)
+    param([AllowEmptyCollection()]$Rows, [string]$RowId, [int]$PageSize = 8, [int]$FallbackIndex = -1)
     $list = @($Rows)
     $index = -1
     if (-not [string]::IsNullOrWhiteSpace($RowId)) {
@@ -139,9 +146,19 @@ function Get-MojazRowPage {
 }
 
 function Get-MojazKeyboard {
-    param($Bulletin, [int]$Page = 0)
+    param($Bulletin, [int]$Page = 0, [switch]$Tools)
     $rows = @(if ($Bulletin) { @(Get-JsonProp $Bulletin 'Rows') })
     $keyboard = @()
+    if ($Tools) {
+        $keyboard += , @((New-Button (T 'mjz.durationFrames' $(Get-MojazDelayFrames -Bulletin $Bulletin)) 'mojaz:delay'))
+        $keyboard += , @((New-Button (T 'mjz.firstPlus' $(Get-MojazIntroFrames -Bulletin $Bulletin)) 'mojaz:intro'), (New-Button (T 'mjz.lastFrames' $(Get-MojazLastRowFrames -Bulletin $Bulletin)) 'mojaz:last'))
+        $keyboard += , @((New-Button (T 'mjz.syncWithReveal' $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { T 'mjz.paceFromLoop' } else { T 'mjz.paceFromDuration' })) 'mojaz:sync'))
+        if ($rows.Count -gt 0) { $keyboard += , @((New-Button (T 'mojaz.clearTable') 'mojaz:clear' -Style danger)) }
+        $keyboard += , @((New-Button (T 'mojaz.rename') 'mojaz:rename'), (New-Button (T 'mojaz.duplicate') 'mojaz:copy'))
+        $keyboard += , @((New-Button (T 'mojaz.delete') 'mojaz:drop' -Style danger))
+        $keyboard += , @((New-Button (T 'mojaz.backToTable') 'mojaz:refresh'))
+        return @{ inline_keyboard = $keyboard }
+    }
     if (Test-MojazOnAir -Bulletin $Bulletin) {
         $keyboard += , @((New-Button (T 'mojaz.stopExit') 'mojaz:stop' -Style danger))
     }
@@ -155,14 +172,6 @@ function Get-MojazKeyboard {
         (New-Button (T 'mojaz.addRow') 'mojaz:add')
         (New-Button (T 'mjz.pasteRows') 'mojaz:paste')
     )
-    $keyboard += , @( (New-Button (T 'mjz.durationFrames' $(Get-MojazDelayFrames -Bulletin $Bulletin)) 'mojaz:delay') )
-    $keyboard += , @(
-        (New-Button (T 'mjz.firstPlus' $(Get-MojazIntroFrames -Bulletin $Bulletin)) 'mojaz:intro')
-        (New-Button (T 'mjz.lastFrames' $(Get-MojazLastRowFrames -Bulletin $Bulletin)) 'mojaz:last')
-    )
-    $keyboard += , @(
-        (New-Button (T 'mjz.syncWithReveal' $(if (Test-MojazSyncToLoop -Bulletin $Bulletin) { (T 'mjz.paceFromLoop') } else { (T 'mjz.paceFromDuration') })) 'mojaz:sync')
-    )
     # T-12: a warning that already computed the fix should not make the
     # operator retype it. Shown only beside the warning it answers - silent
     # exactly when Get-MojazBulletinLoopFitNote is silent.
@@ -171,33 +180,21 @@ function Get-MojazKeyboard {
         $loopFrames = [int](Get-JsonProp (Get-MojazSceneTiming) 'LoopFrames')
         $keyboard += , @((New-Button (T 'mjz.makeItFrames' $loopFrames) 'mojaz:matchloop' -Style success))
     }
-    # A line per row: delete it, or move it up or down the rundown. Numbered
-    # like the table above, so the button and the story line up by eye.
-    # Twenty-five to a page. A bulletin that long is already past what a
-    # phone can work with, so every real one renders exactly as before - the
-    # pager row appears only when there is a second page. The numbers stay
-    # the rundown's own, not the page's, so button 26 is story 26.
-    $rowWindow = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page -PageSize 25
+    # Eight full-width row labels fit beside playback controls. Destructive
+    # actions and ordering live in details so a clipped headline is readable.
+    $rowWindow = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page -PageSize 8
     $rowStart = if ($rowWindow.EndIndex -ge $rowWindow.StartIndex) { [int]$rowWindow.StartIndex } else { 0 }
     $rowEnd = if ($rowWindow.EndIndex -ge $rowWindow.StartIndex) { [int]$rowWindow.EndIndex } else { -1 }
     for ($i = $rowStart; $i -le $rowEnd; $i++) {
         $rowId = [string]$rows[$i].Id
         $line = @(
-            (New-Button "$(if (Test-MojazRowSkipped -Row $rows[$i]) { '⏸' } else { '✏️' }) $($i + 1)" "mojaz:row:$rowId")
-            (New-Button '🗑' "mojaz:del:$rowId" -Style danger)
+            (New-Button "$(if (Test-MojazRowSkipped -Row $rows[$i]) { '⏸' } else { '📄' }) $($i + 1). $(Format-MojazCell -Text ([string]$rows[$i].Title) -Limit 32)" "mojaz:row:$rowId")
         )
-        if ($i -gt 0) { $line += (New-Button '⬆️' "mojaz:up:$rowId") }
-        if ($i -lt ($rows.Count - 1)) { $line += (New-Button '⬇️' "mojaz:down:$rowId") }
         $keyboard += , $line
     }
     $rowPager = @(Get-BridgePagerButtons -Window $rowWindow -Prefix 'mojazpage')
     if ($rowPager.Count -gt 0) { $keyboard += , $rowPager }
-    if ($rows.Count -gt 0) { $keyboard += , @((New-Button (T 'mojaz.clearTable') 'mojaz:clear' -Style danger)) }
-    $keyboard += , @(
-        (New-Button (T 'mojaz.rename') 'mojaz:rename')
-        (New-Button (T 'mojaz.duplicate') 'mojaz:copy')
-        (New-Button (T 'mojaz.delete') 'mojaz:drop' -Style danger)
-    )
+    $keyboard += , @((New-Button (T 'mjz.tools') 'mojaz:tools'))
     if ($rows.Count -gt 0) {
         # The table is an index, four columns that fit a phone; this is where
         # the copy can actually be read back before it goes out.
@@ -237,12 +234,39 @@ function Get-MojazPreviewText {
         $lines.Add("📝 <b>$(ConvertTo-TelegramHtmlText -Text ([string]$rows[$i].Title))</b>")
         $lines.Add("📰 $(ConvertTo-TelegramHtmlText -Text ([string]$rows[$i].Text))")
         if ($effective.Count -gt $i -and $effective[$i]) {
-            $lines.Add("🖼 $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$i] -Leaf))")
+            $lines.Add((T 'mjz.imagePreviewHint'))
         }
     }
     $lines.Add('')
     $lines.Add("<i>$(ConvertTo-TelegramHtmlText -Text (Get-MojazPlanText -Bulletin $Bulletin))</i>")
     return ($lines -join "`n")
+}
+
+function Show-MojazToolsScreen {
+    param([Parameter(Mandatory)][long]$ChatId)
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId; return }
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.toolsTitle' $(ConvertTo-TelegramHtmlText -Text ([string]$bulletin.Name))) -ParseMode HTML -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin -Tools)
+}
+
+function Show-MojazRowImage {
+    # Resolve the effective inherited image, never a path from callback data.
+    # A scene may reference a file on another machine: fail visibly if absent.
+    param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId)
+    $bulletin = Get-MojazSelected -ChatId $ChatId
+    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId; return }
+    $index = (Get-MojazRowNumber -Bulletin $bulletin -RowId $RowId) - 1
+    $keyboard = @{ inline_keyboard = @(, @((New-Button (T 'mjz.backToRow') "mojaz:row:$RowId"))) }
+    $path = ''
+    if ($index -ge 0) {
+        $images = @(Get-MojazEffectiveImages -Rows @(Get-JsonProp $bulletin 'Rows') -TemplateImage (Get-MojazTemplateImage))
+        if ($images.Count -gt $index) { $path = [string]$images[$index] }
+    }
+    if (-not $path -or [IO.Path]::GetExtension($path) -notin @('.png', '.jpg', '.jpeg', '.webp', '.bmp') -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.imageUnavailable') -ReplyMarkup $keyboard
+        return
+    }
+    Send-TelegramPhoto -ChatId $ChatId -FilePath $path -Caption (T 'mjz.imageCaption' ($index + 1)) -ReplyMarkup $keyboard
 }
 
 function Show-MojazPreviewScreen {
@@ -273,8 +297,8 @@ function Show-MojazScreen {
         $Page = Get-MojazRowPage -Rows @(Get-JsonProp $bulletin 'Rows') -RowId $FocusRowId
     }
     $keyboard = Get-MojazKeyboard -Bulletin $bulletin -Page $Page
-    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks -Bulletin $bulletin) -ReplyMarkup $keyboard) { return }
-    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText -Bulletin $bulletin) -ParseMode HTML -ReplyMarkup $keyboard
+    if (Send-TelegramRichMessage -ChatId $ChatId -Blocks (Get-MojazBlocks -Bulletin $bulletin -Page $Page) -ReplyMarkup $keyboard) { return }
+    Send-TelegramMessage -ChatId $ChatId -Text (Get-MojazText -Bulletin $bulletin -Page $Page) -ParseMode HTML -ReplyMarkup $keyboard
 }
 
 # ---------------------------------------------------------------- the library
@@ -638,13 +662,13 @@ function Show-MojazRowScreen {
         (T 'mjz.rowOf' $($index + 1) $(ConvertTo-TelegramHtmlText -Text ([string]$bulletin.Name)))
         ''
         "🖼 $(ConvertTo-TelegramHtmlText -Text (Get-MojazImageLabel -Row $row -Index $index))"
-        "📝 <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Title) -Limit 60))</b>"
-        "📰 $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Text) -Limit 200))"
+        "📝 <b>$(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Title) -Limit 300))</b>"
+        "📰 $(ConvertTo-TelegramHtmlText -Text (Format-MojazCell -Text ([string]$row.Text) -Limit 1800))"
     )
     if (Test-MojazRowSkipped -Row $row) { $lines += (T 'mjz.rowSkipped') }
     $effective = @(Get-MojazEffectiveImages -Rows $rows -TemplateImage (Get-MojazTemplateImage))
     if ($effective.Count -gt $index -and $effective[$index]) {
-        $lines += (T 'mjz.willShow' $(ConvertTo-TelegramHtmlText -Text (Split-Path -Path $effective[$index] -Leaf)))
+        $lines += (T 'mjz.imagePreviewHint')
     }
     # A comma before EVERY row, the way every other keyboard here is written:
     # @() flattens nested arrays, so a row without it is spread into bare
@@ -661,6 +685,13 @@ function Show-MojazRowScreen {
                 (New-Button (T 'mojaz.backToTable') 'mojaz:refresh')
             )
         ) }
+    $orderButtons = @()
+    if ($index -gt 0) { $orderButtons += (New-Button (T 'urgent.moveUp') "mojaz:up:$RowId") }
+    if ($index -lt $rows.Count - 1) { $orderButtons += (New-Button (T 'urgent.moveDown') "mojaz:down:$RowId") }
+    if ($orderButtons.Count -gt 0) { $keyboard.inline_keyboard += , $orderButtons }
+    if ($effective.Count -gt $index -and $effective[$index]) {
+        $keyboard.inline_keyboard += , @((New-Button (T 'mjz.viewImage') "mojaz:image:$RowId"))
+    }
     Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ParseMode HTML -ReplyMarkup $keyboard
 }
 

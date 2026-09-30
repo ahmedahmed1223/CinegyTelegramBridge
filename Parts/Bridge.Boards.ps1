@@ -321,7 +321,7 @@ function Show-BoardsScreen {
         $lines += (T 'boards.empty')
         $lines += ''
         $lines += (T 'boards.empty.bound')
-        $lines += (T 'boards.empty.steps')
+        $lines += $(if (Test-Admin -ChatId $ChatId -UserId $UserId) { T 'boards.empty.steps' } else { T 'boards.empty.askAdmin' })
         $lines += (T 'boards.empty.then')
     }
     else {

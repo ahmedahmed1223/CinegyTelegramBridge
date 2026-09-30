@@ -295,10 +295,12 @@ function Test-RedrawInPlacePress {
     # The urgent board as a whole: an operator works it for minutes, and
     # asked for one screen that changes rather than a column of copies.
     foreach ($prefix in @('mojaz:up:', 'mojaz:down:', 'mojaz:del:', 'mojaz:skip:', 'mojazpage:', 'mojazlib:',
-            'urgentb:', 'urgmode:', 'urgsingle:', 'urgt:', 'urgmanual:', 'urgread:')) {
+              'urgentb:', 'urgmode:', 'urgsingle:', 'urgt:', 'urgmanual:', 'urgread:',
+              'help:ch:', 'mojaz:row:', 'newsbackpage:')) {
         if ($Data.StartsWith($prefix, [StringComparison]::Ordinal)) { return $true }
     }
-    return $Data -in @('mojaz:sync', 'mojaz:matchloop')
+    return $Data -in @('mojaz:sync', 'mojaz:matchloop', 'menu:main', 'menu:more', 'menu:templates',
+        'help:home', 'help:quickstart', 'news:backups', 'menu:feedwatch', 'menu:feedwatch:details', 'mojaz:tools')
 }
 
 function Clear-RefreshTarget { $script:RefreshTarget = $null }
@@ -1755,7 +1757,7 @@ function Show-MainMenuScreen {
        the rich-then-text decision is made in a single place. #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId -Compact
     if (Send-TelegramRichMessage -ChatId $ChatId -Blocks @(Get-MainMenuIntroBlocks -UserId $UserId) -ReplyMarkup $keyboard) { return }
     Send-TelegramMessage -ChatId $ChatId -Text (Get-MainMenuIntro -UserId $UserId) -ParseMode HTML -ReplyMarkup $keyboard
 }
@@ -1782,7 +1784,7 @@ function Show-MainMenu {
     # stop showing, and /بدء and /إلغاء were the two doors still leading to it.
     $status = Get-MainMenuIntro -UserId $UserId
     $text = if ([string]::IsNullOrWhiteSpace($Intro)) { $status } else { "$Intro`n`n$status" }
-    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    $keyboard = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId -Compact
     # Table first, text as the fallback - the shape every other screen uses.
     # An -Intro leads the blocks the way it leads the text, so /بدء and /إلغاء
     # keep their greeting above the state rather than instead of it.

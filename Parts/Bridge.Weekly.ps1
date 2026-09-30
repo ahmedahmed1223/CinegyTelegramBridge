@@ -169,7 +169,7 @@ function Get-WeeklyReportBlocks {
         $blocks += @{ type = 'paragraph'; text = (T 'wk.noChangedSettings') }
     }
     else {
-        $safe = @($changed | Select-Object -First 8 | ForEach-Object { "<code>$(ConvertTo-HtmlText ([string]$_))</code>" })
+        $safe = @($changed | Select-Object -First 8 | ForEach-Object { ConvertTo-HtmlText ([string]$_) })
         $extra = $changed.Count - 8
         $tail = if ($extra -gt 0) { (T 'wk.plusOthers2' $extra) } else { '' }
         $blocks += @{ type = 'paragraph'; text = (T 'wk.changedSettings' $($safe -join ' ') $tail) }

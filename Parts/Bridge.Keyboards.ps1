@@ -77,7 +77,7 @@ function New-Button {
 }
 
 function Get-MainMenuKeyboard {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$Compact, [switch]$Secondary)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $rows = @()
 
@@ -269,6 +269,22 @@ function Get-MainMenuKeyboard {
         # and five permanent rows of it pushed the live controls off screen.
         $rows += , @( (New-Button (T 'menu.settings') "menu:settings"), (New-Button $pendingLabel "menu:pending") )
         $rows += , @( (New-Button (T 'menu.adminTools') "menu:admintools") )
+    }
+    if ($Compact -or $Secondary) {
+        # Build once with the existing role/feature gates, then partition only
+        # navigation. Live controls and full-width content doors stay on home.
+        $secondaryCallbacks = @('menu:material', 'menu:handover', 'menu:reports', 'menu:myops', 'menu:digest', 'menu:help', 'menu:whatsnew')
+        $selectedRows = @()
+        foreach ($menuRow in $rows) {
+            $selectedButtons = @($menuRow | Where-Object {
+                $isSecondary = [string](Get-JsonProp $_ 'callback_data') -in $secondaryCallbacks
+                if ($Secondary) { $isSecondary } else { -not $isSecondary }
+            })
+            if ($selectedButtons.Count -gt 0) { $selectedRows += , $selectedButtons }
+        }
+        if ($Secondary) { $selectedRows += , @((New-Button (T 'common.home') 'menu:main')) }
+        else { $selectedRows += , @((New-Button (T 'menu.more') 'menu:more')) }
+        $rows = $selectedRows
     }
     return @{ inline_keyboard = $rows }
 }
@@ -2020,7 +2036,7 @@ function Get-SettingsListKeyboard {
             $name = [string]$record.Name
             $value = Get-Setting $name
             $action = if ($script:DefaultSettings[$name] -is [bool]) { "cfg:t:$name" } elseif ($name -eq 'TemplateMaxAirSeconds' -or $script:DefaultSettings[$name] -is [string]) { "cfg:s:$name" } else { "cfg:v:$name" }
-            $rows += , @((New-Button "$($record.Label) = $(Protect-SettingDisplayValue -Name $name -Value $value)" $action), (New-Button '↩️' "cfgr:$name"))
+            $rows += , @((New-Button "$($record.Label) = $(Protect-SettingDisplayValue -Name $name -Value $value)" $action), (New-Button (T 'cfg.resetOneLabel') "cfgr:$name"))
         }
     }
     if ($window.PageCount -gt 1) {

@@ -19,7 +19,18 @@ function Add-BridgeTextContent {
 
     # --- Programme content boards ---------------------------------------
     $catalogue['boards.title'] = @{ ar = '🗂 محتوى البرامج'; en = '🗂 Programme content' }
+    $catalogue['mjz.tools'] = @{ ar = '⚙️ أدوات الموجز'; en = '⚙️ Bulletin tools' }
+    $catalogue['cfg.resetOneLabel'] = @{ ar = '♻️ الافتراضي'; en = '♻️ Reset default' }
+    $catalogue['menu.more'] = @{ ar = '📋 المتابعة والمساعدة'; en = '📋 Reports and help' }
+    $catalogue['menu.moreTitle'] = @{ ar = '📋 المتابعة والمساعدة — اختر القسم المطلوب.'; en = '📋 Reports and help — choose a section.' }
+    $catalogue['mjz.toolsTitle'] = @{ ar = '<b>⚙️ أدوات «{0}»</b>'; en = '<b>⚙️ Tools for "{0}"</b>' }
+    $catalogue['mjz.viewImage'] = @{ ar = '🖼 معاينة الصورة'; en = '🖼 Preview image' }
+    $catalogue['mjz.backToRow'] = @{ ar = '↩️ تفاصيل الصف'; en = '↩️ Row details' }
+    $catalogue['mjz.imagePreviewHint'] = @{ ar = '🖼 لمعاينة الصورة: افتح تفاصيل الصف ← معاينة الصورة.'; en = '🖼 To preview the image: open row details → Preview image.' }
+    $catalogue['mjz.imageUnavailable'] = @{ ar = '⚠️ الصورة غير متاحة على جهاز الجسر. تحقّق من ملف الصورة ومساره؛ لم يتغيّر محتوى الموجز.'; en = '⚠️ The image is unavailable on the bridge computer. Check the image file and its path; the bulletin is unchanged.' }
+    $catalogue['mjz.imageCaption'] = @{ ar = '🖼 معاينة صورة الصف {0} — لا تغيّر الهواء.'; en = '🖼 Image preview for row {0} — does not change air.' }
     $catalogue['boards.empty'] = @{ ar = 'لا جدول بعد.'; en = 'No board yet.' }
+    $catalogue['boards.empty.askAdmin'] = @{ ar = 'اطلب من المشرف إنشاء جدول واختيار قالبه، ثم افتحه لإعداد النصوص.'; en = 'Ask an administrator to create a board and choose its template, then open it to prepare the texts.' }
     $catalogue['boards.empty.bound'] = @{
         ar = '<b>كل جدول مبنيّ على قالب تختاره أنت</b>، والقالب هو الذي يقرّر حقول كل صفّ والطبقة.'
         en = '<b>Every board is bound to a template you choose</b>, and the template decides each row''s fields and the layer.'

@@ -494,6 +494,13 @@ function Invoke-CallbackQuery {
             break
         }
         'news:backups' { Send-TelegramMessage -ChatId $chatId -Text (Get-NewsTickerBackupsText) -ParseMode HTML -ReplyMarkup (Get-NewsTickerBackupsKeyboard);break }
+        'newsbackpage:*' {
+            $backupPage = 0
+            if ([int]::TryParse((Get-CallbackArg $data 'newsbackpage:'), [ref]$backupPage) -and $backupPage -ge 0) {
+                Send-TelegramMessage -ChatId $chatId -Text (Get-NewsTickerBackupsText -Page $backupPage) -ParseMode HTML -ReplyMarkup (Get-NewsTickerBackupsKeyboard -Page $backupPage)
+            }
+            break
+        }
         'news:restore:*' {
             if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }
             $i = [int](Get-CallbackArg $data 'news:restore:')
@@ -569,6 +576,8 @@ function Invoke-CallbackQuery {
             break
         }
         'mojaz:row:*' { Clear-PendingState -ChatId $chatId; Show-MojazRowScreen -RowId (Get-CallbackArg $data 'mojaz:row:') -ChatId $chatId -UserId $userId; break }
+        'mojaz:image:*' { Show-MojazRowImage -RowId (Get-CallbackArg $data 'mojaz:image:') -ChatId $chatId; break }
+        'mojaz:tools' { Show-MojazToolsScreen -ChatId $chatId; break }
         'mojaz:editimg:*' { Start-MojazRowEdit -Which image -RowId (Get-CallbackArg $data 'mojaz:editimg:') -ChatId $chatId -UserId $userId; break }
         'mojaz:edittitle:*' { Start-MojazRowEdit -Which title -RowId (Get-CallbackArg $data 'mojaz:edittitle:') -ChatId $chatId -UserId $userId; break }
         'mojaz:edittext:*' { Start-MojazRowEdit -Which text -RowId (Get-CallbackArg $data 'mojaz:edittext:') -ChatId $chatId -UserId $userId; break }
@@ -1378,7 +1387,12 @@ function Invoke-CallbackQuery {
         }
         'menu:snapshot' { Start-SnapshotJob -ChatId $chatId -UserId $userId; break }
         'menu:clip' { Start-SnapshotJob -ChatId $chatId -UserId $userId -Kind clip; break }
+        'menu:more' {
+            Send-TelegramMessage -ChatId $chatId -Text (T 'menu.moreTitle') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId -Secondary)
+            break
+        }
         'menu:feedwatch' { Show-FeedWatchScreen -ChatId $chatId; break }
+        'menu:feedwatch:details' { Show-FeedWatchScreen -ChatId $chatId -Details; break }
         # The probe costs one frame grab, so it is a press rather than
         # something the plain open does on every visit.
         'menu:feedwatch:probe' { Show-FeedWatchScreen -ChatId $chatId -Probe -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }

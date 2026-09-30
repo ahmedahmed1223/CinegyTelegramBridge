@@ -1539,7 +1539,8 @@ Describe 'The feed watch screen' {
         @($script:StreamOutages.Outages).Count | Should -Be 1 -Because 'a row whose start or end does not parse is refused on the way in'
         $text = Get-FeedWatchText
         $text | Should -BeLike '*09-20 10:00*'
-        $text | Should -BeLike '*timeout*'
+        $text | Should -Not -BeLike '*timeout*'
+        Get-FeedWatchText -Details | Should -BeLike '*timeout*'
     }
 
     It 'redraws the screen Refresh was pressed on instead of posting another' {

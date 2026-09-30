@@ -1196,7 +1196,7 @@ function Get-FeedWatchText {
         Cinegy and nothing on air is touched.
     #>
     [CmdletBinding()]
-    param([switch]$Probe)
+    param([switch]$Probe, [switch]$Details)
 
     $now = Get-Date
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -1267,8 +1267,12 @@ function Get-FeedWatchText {
             $kind = if ([string]$outage.Kind -eq 'black') { (T 'feed.kind.black') } else { (T 'feed.kind.unreachable') }
             $length = if ([string]::IsNullOrWhiteSpace([string]$outage.EndedAt)) { (T 'feed.stillDown') }
             else { Format-DurationSeconds -Seconds (Get-BridgeOutageDurationSeconds -Outage $outage -Now $now) }
-            $detail = if ([string]::IsNullOrWhiteSpace([string]$outage.Cause)) { [string]$outage.Source }
-            else { [string]$outage.Cause }
+            $detail = ''
+            if ($Details) {
+                $detail = if ([string]::IsNullOrWhiteSpace([string]$outage.Cause)) { [string]$outage.Source }
+                else { [string]$outage.Cause }
+                $detail = Get-NewsScreenLine -Text $detail -Length 300
+            }
             $tail = ConvertTo-TelegramHtmlText -Text "$length$(if ($detail) { " · $detail" })"
             $lines.Add((T 'feed.outageRow' $glyph $($started.ToString('MM-dd HH:mm')) $kind $tail))
         }
@@ -1304,6 +1308,7 @@ function Get-FeedWatchKeyboard {
     <# A snapshot and a refresh, then back where the operator came from.
        The rows are the same for everyone who can reach this screen, so it
        takes no chat and no user: the door is what decides who gets in. #>
+    param([switch]$Details)
     $rows = @()
     # 📺 opens the channel's own output inside Telegram, above the stills: a
     # snapshot answers "what is on screen" and this answers "what is it
@@ -1321,6 +1326,7 @@ function Get-FeedWatchKeyboard {
     # Home, not the administration tools: the screen is opened from the main
     # menu now, and a back button that lands somewhere the operator never
     # was is worse than none.
+    $rows += , @((New-Button $(if ($Details) { T 'feed.summary' } else { T 'feed.details' }) $(if ($Details) { 'menu:feedwatch' } else { 'menu:feedwatch:details' })))
     $rows += , @( (New-Button (T 'common.home') 'menu:main') )
     return @{ inline_keyboard = $rows }
 }
@@ -1328,9 +1334,9 @@ function Get-FeedWatchKeyboard {
 function Show-FeedWatchScreen {
     <# The screen, drawn from the ledger and the monitor. -Probe costs one
        frame grab; the plain open costs nothing. #>
-    param([Parameter(Mandatory)][long]$ChatId, [switch]$Probe, [int]$MessageId = 0)
-    $text = Get-FeedWatchText -Probe:$Probe
-    $keyboard = Get-FeedWatchKeyboard
+    param([Parameter(Mandatory)][long]$ChatId, [switch]$Probe, [int]$MessageId = 0, [switch]$Details)
+    $text = Get-FeedWatchText -Probe:$Probe -Details:$Details
+    $keyboard = Get-FeedWatchKeyboard -Details:$Details
     # Refresh redraws the screen it was pressed on: a new message per press
     # left a column of stale states whose buttons still looked live.
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $keyboard -ParseMode HTML)) { return }

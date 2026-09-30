@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 function Get-CinegyStateProperty {
     param($Object,[Parameter(Mandatory)][string]$Name)
     if($null -eq $Object){return $null}
-    if($Object -is [hashtable]){if($Object.ContainsKey($Name)){return $Object[$Name]};return $null}
+    if($Object -is [System.Collections.IDictionary]){if($Object.Contains($Name)){return $Object[$Name]};return $null}
     if($Object.PSObject.Properties.Match($Name).Count -gt 0){return $Object.$Name}
     return $null
 }

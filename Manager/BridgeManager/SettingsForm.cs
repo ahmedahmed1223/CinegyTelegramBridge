@@ -165,6 +165,11 @@ public sealed class SettingsForm : Form
         _bridgeRunning = bridgeRunning;
         _stopBeforeSave = stopBeforeSave;
 
+        _botToken.AccessibleName = "رمز البوت";
+        _airServer.AccessibleName = "عنوان محرك Air Pro";
+        _airChannel.AccessibleName = "رقم القناة";
+        _newId.AccessibleName = "الرقم التعريفي للحساب الجديد";
+
         Text = "إعدادات الجسر";
         Width = 780;
         Height = 900;
@@ -289,6 +294,7 @@ public sealed class SettingsForm : Form
         _accounts.Columns.Add("الرقم التعريفي", 190);
         _accounts.Columns.Add("النوع", 110);
         _accounts.Columns.Add("الصلاحيات", 380);
+        _accounts.AccessibleName = "الحسابات والصلاحيات";
         _accounts.SelectedIndexChanged += (_, _) => SyncChipsToSelection();
         _accounts.KeyDown += (_, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
         layout.Controls.Add(_accounts);
@@ -311,6 +317,11 @@ public sealed class SettingsForm : Form
         layout.Controls.Add(_permissionsRow);
         layout.Controls.Add(_accountsSummary);
         layout.Controls.Add(_ownerSummary);
+
+        // TopDown flow does not stretch children. Fixed 700px rows forced a
+        // horizontal scrollbar at the supported 620px minimum window width.
+        layout.SizeChanged += (_, _) => ResizeSettingsContent(layout, _accounts, _permissionsRow);
+        ResizeSettingsContent(layout, _accounts, _permissionsRow);
 
         if (_bridgeRunning)
         {
@@ -373,6 +384,20 @@ public sealed class SettingsForm : Form
             var workingArea = Screen.FromControl(this).WorkingArea;
             Size = new Size(Math.Min(Width, workingArea.Width), Math.Min(Height, workingArea.Height));
         };
+    }
+
+    internal static void ResizeSettingsContent(FlowLayoutPanel content, ListView accounts, FlowLayoutPanel permissions)
+    {
+        var width = Math.Max(1, content.ClientSize.Width - content.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth);
+        accounts.Width = width;
+        permissions.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        permissions.MaximumSize = new Size(width, 0);
+        permissions.Width = width;
+        // Keep the id readable; permissions take the remaining column width.
+        accounts.Columns[0].Width = Math.Min(190, width / 3);
+        accounts.Columns[1].Width = Math.Min(110, width / 5);
+        accounts.Columns[2].Width = Math.Max(1, width - accounts.Columns[0].Width - accounts.Columns[1].Width - SystemInformation.VerticalScrollBarWidth - 4);
+        foreach (var hint in content.Controls.OfType<Label>()) hint.MaximumSize = new Size(width, 0);
     }
 
     protected override void OnHandleCreated(EventArgs e)

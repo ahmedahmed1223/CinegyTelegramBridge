@@ -102,9 +102,16 @@ function Save-UrgentManualState {
 
     if (-not $hasContent) {
         $path = Get-UrgentManualFile
-        if (Test-Path -LiteralPath $path) {
-            try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
-            catch { Write-BridgeLog "Could not remove urgent-manual.json: $($_.Exception.Message)" 'WARN' }
+        # Backup-only startup is recoverable, so an intentional clear must
+        # delete the backup first. If that fails, retain the primary and report
+        # failure instead of leaving an old backup ready to resurrect itself.
+        foreach ($manualPath in @("$path.bak", $path)) {
+            if (-not (Test-Path -LiteralPath $manualPath)) { continue }
+            try { Remove-Item -LiteralPath $manualPath -Force -ErrorAction Stop }
+            catch {
+                Write-BridgeLog "Could not clear urgent manual state: $($_.Exception.Message)" 'WARN'
+                return $false
+            }
         }
         return $true
     }
@@ -138,10 +145,12 @@ function Import-UrgentManualState {
        $script:UrgentManualLive (hide button tokens) and
        $script:UrgentManualMode (per-chat manual/auto preference). #>
     $path = Get-UrgentManualFile
-    if (-not (Test-Path -LiteralPath $path)) { return }
+    if (-not (Test-Path -LiteralPath $path) -and -not (Test-Path -LiteralPath "$path.bak")) { return }
     try {
-        $json = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
-        $payload = $json | ConvertFrom-Json -ErrorAction Stop
+        # Save already maintains a validated backup. Use it on a torn primary
+        # so a restart does not discard the operator's manual controls.
+        $manualRead = Read-BridgeValidatedJson -Path $path
+        $payload = if ($manualRead) { $manualRead.Data } else { $null }
     }
     catch {
         Write-BridgeLog "Could not read urgent-manual.json: $($_.Exception.Message)" 'WARN'
@@ -153,8 +162,11 @@ function Import-UrgentManualState {
     $states = Get-JsonProp $payload 'States'
     if ($states) {
         foreach ($entry in @($states)) {
-            $cid = [long](Get-JsonProp $entry 'ChatId')
-            if ($cid -ne 0) { $script:UrgentManualLive[$cid] = $entry.State }
+            $cid = 0L
+            $manualState = Get-JsonProp $entry 'State'
+            if ([long]::TryParse([string](Get-JsonProp $entry 'ChatId'), [ref]$cid) -and $cid -ne 0 -and $manualState) {
+                $script:UrgentManualLive[$cid] = $manualState
+            }
         }
     }
     $modes = Get-JsonProp $payload 'ManualMode'
@@ -162,8 +174,9 @@ function Import-UrgentManualState {
         foreach ($entry in @($modes)) {
             # Keyed by user since 8.71.3; a file from before carries ChatId,
             # which for the private chats it was written from is the user.
-            $uid = [long](Get-JsonProp $entry 'UserId')
-            if ($uid -eq 0) { $uid = [long](Get-JsonProp $entry 'ChatId') }
+            $uid = 0L
+            [long]::TryParse([string](Get-JsonProp $entry 'UserId'), [ref]$uid) | Out-Null
+            if ($uid -eq 0) { [long]::TryParse([string](Get-JsonProp $entry 'ChatId'), [ref]$uid) | Out-Null }
             if ($uid -gt 0) { $script:UrgentManualMode[$uid] = [bool](Get-JsonProp $entry 'Mode') }
         }
     }
@@ -177,9 +190,12 @@ function Import-UrgentManualState {
     $homes = Get-JsonProp $payload 'HomeMessages'
     if ($homes) {
         foreach ($entry in @($homes)) {
-            $cid = [long](Get-JsonProp $entry 'ChatId')
-            $mid = [int](Get-JsonProp $entry 'MessageId')
-            if ($cid -ne 0 -and $mid -gt 0) { $script:UrgentHomeMessage[$cid] = $mid }
+            $cid = 0L
+            $mid = 0
+            if ([long]::TryParse([string](Get-JsonProp $entry 'ChatId'), [ref]$cid) -and
+                [int]::TryParse([string](Get-JsonProp $entry 'MessageId'), [ref]$mid) -and $cid -ne 0 -and $mid -gt 0) {
+                $script:UrgentHomeMessage[$cid] = $mid
+            }
         }
     }
 }

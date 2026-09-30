@@ -5,6 +5,28 @@ BeforeAll {
 }
 
 Describe 'Validated JSON storage module' {
+    It 'removes its recovery staging file when the primary cannot be replaced' {
+        $path = Join-Path $TestDrive 'blocked-recovery.json'
+        Set-Content -LiteralPath $path -Value '{broken' -Encoding utf8
+        Set-Content -LiteralPath "$path.bak" -Value '{"active":true}' -Encoding utf8
+        $recoveryLock = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            { Read-BridgeValidatedJson -Path $path } | Should -Throw
+            @(Get-ChildItem -LiteralPath $TestDrive -Filter '*restore*.tmp').Count | Should -Be 0
+            (Get-Content -LiteralPath "$path.bak" -Raw | ConvertFrom-Json).active | Should -BeTrue
+        }
+        finally { $recoveryLock.Dispose() }
+    }
+
+    It 'does not overwrite a recovery staging file owned by another reader' {
+        $path = Join-Path $TestDrive 'independent-recovery.json'
+        Set-Content -LiteralPath $path -Value '{broken' -Encoding utf8
+        Set-Content -LiteralPath "$path.bak" -Value '{"active":true}' -Encoding utf8
+        Set-Content -LiteralPath "$path.restore.tmp" -Value 'other reader' -Encoding utf8
+        (Read-BridgeValidatedJson -Path $path).Recovered | Should -BeTrue
+        (Get-Content -LiteralPath "$path.restore.tmp" -Raw).Trim() | Should -BeExactly 'other reader'
+    }
+
     It 'writes a validated primary and matching backup atomically' {
         $path = Join-Path $TestDrive 'state\sample.json'
 

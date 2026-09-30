@@ -23,6 +23,12 @@ BeforeAll {
 }
 
 Describe 'Mojaz bulletin library domain' {
+    It 'finds a bulletin in a library loaded as an ordered dictionary' {
+        $library = [ordered]@{ Bulletins = @([ordered]@{ Id = 'b_fixture'; Name = 'Morning' }) }
+        $found = Get-MojazBulletin -Library $library -BulletinId 'b_fixture'
+        $found | Should -Not -BeNullOrEmpty
+        $found.Name | Should -Be 'Morning'
+    }
     It 'creates named bulletins with stable ids and normalized unique names' {
         $library = New-MojazLibrary
         $first = Add-MojazBulletin -Library $library -Name '  الموجز   الصباحي  ' -Now ([datetimeoffset]'2026-09-02T08:00:00+03:00') -UserId 11

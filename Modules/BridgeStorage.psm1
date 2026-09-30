@@ -58,18 +58,19 @@ function Read-BridgeValidatedJson {
         if ($primaryError) { throw "Primary JSON is invalid and no backup exists: $primaryError" }
         return $null
     }
+    $restoreTemporary = "$Path.restore.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         $backupText = Get-Content -LiteralPath $backup -Raw -ErrorAction Stop
         $data = if ($AsHashtable) {
             $backupText | ConvertFrom-Json -AsHashtable -ErrorAction Stop
         }
         else { $backupText | ConvertFrom-Json -ErrorAction Stop }
-        $restoreTemporary = "$Path.restore.tmp"
         Set-Content -LiteralPath $restoreTemporary -Value $backupText -Encoding utf8 -ErrorAction Stop
         Move-Item -LiteralPath $restoreTemporary -Destination $Path -Force -ErrorAction Stop
         return [pscustomobject]@{ Data=$data; Recovered=$true }
     }
     catch { throw "Primary and backup JSON are invalid: primary=$primaryError; backup=$($_.Exception.Message)" }
+    finally { Remove-Item -LiteralPath $restoreTemporary -Force -ErrorAction SilentlyContinue }
 }
 
 Export-ModuleMember -Function Write-BridgeValidatedJson, Read-BridgeValidatedJson

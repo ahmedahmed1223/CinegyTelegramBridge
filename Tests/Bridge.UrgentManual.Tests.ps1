@@ -436,6 +436,67 @@ Describe 'Full urgent reader and manual single story' {
         $script:UrgentManualMode.Count | Should -Be 0
         if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
     }
+    It 'ignores a manual record without state and continues restoring valid chats' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'missing-manual-state.json' }
+        Set-Content -LiteralPath (Get-UrgentManualFile) -Value '{"States":[{"ChatId":100},{"ChatId":200,"State":{"Token":"valid"}}]}'
+        { Import-UrgentManualState } | Should -Not -Throw
+        $script:UrgentManualLive.ContainsKey(100L) | Should -BeFalse
+        $script:UrgentManualLive[200L].Token | Should -Be 'valid'
+    }
+    It 'restores manual controls from the validated backup after a torn primary' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'backup-manual-state.json' }
+        Set-Content -LiteralPath (Get-UrgentManualFile) -Value '{broken'
+        Set-Content -LiteralPath "$(Get-UrgentManualFile).bak" -Value '{"States":[{"ChatId":200,"State":{"Token":"backup"}}]}'
+        Import-UrgentManualState
+        $script:UrgentManualLive.ContainsKey(200L) | Should -BeTrue
+        $script:UrgentManualLive[200L].Token | Should -Be 'backup'
+    }
+    It 'restores manual controls when only their validated backup survives' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'backup-only-manual-state.json' }
+        Set-Content -LiteralPath "$(Get-UrgentManualFile).bak" -Value '{"States":[{"ChatId":200,"State":{"Token":"backup-only"}}]}'
+        Import-UrgentManualState
+        $script:UrgentManualLive.ContainsKey(200L) | Should -BeTrue
+        Test-Path -LiteralPath (Get-UrgentManualFile) | Should -BeTrue
+    }
+    It 'removes the backup when manual state is intentionally cleared so startup cannot resurrect it' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'cleared-manual-state.json' }
+        $script:UrgentManualLive[200L] = @{ Token = 'old' }
+        Save-UrgentManualState | Should -BeTrue
+        Test-Path -LiteralPath "$(Get-UrgentManualFile).bak" | Should -BeTrue
+        $script:UrgentManualLive.Clear()
+        $script:UrgentManualMode.Clear()
+        $script:UrgentSelections.Clear()
+        $script:UrgentHomeMessage.Clear()
+        Save-UrgentManualState | Should -BeTrue
+        Test-Path -LiteralPath (Get-UrgentManualFile) | Should -BeFalse
+        Test-Path -LiteralPath "$(Get-UrgentManualFile).bak" | Should -BeFalse
+        Import-UrgentManualState
+        $script:UrgentManualLive.Count | Should -Be 0
+    }
+    It 'reports a failed clear and retains the primary when the manual backup is locked' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'locked-manual-backup.json' }
+        $script:UrgentManualLive[200L] = @{ Token = 'old' }
+        Save-UrgentManualState | Should -BeTrue
+        $script:UrgentManualLive.Clear()
+        $script:UrgentManualMode.Clear()
+        $script:UrgentSelections.Clear()
+        $script:UrgentHomeMessage.Clear()
+        $manualBackupLock = [IO.File]::Open("$(Get-UrgentManualFile).bak", [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            Save-UrgentManualState | Should -BeFalse
+            Test-Path -LiteralPath (Get-UrgentManualFile) | Should -BeTrue
+        }
+        finally { $manualBackupLock.Dispose() }
+    }
+    It 'skips malformed numeric manual entries while restoring the valid entries' {
+        Mock Get-UrgentManualFile { Join-Path $TestDrive 'malformed-manual-ids.json' }
+        Set-Content -LiteralPath (Get-UrgentManualFile) -Value '{"States":[{"ChatId":"bad","State":{"Token":"bad"}},{"ChatId":200,"State":{"Token":"valid"}}],"ManualMode":[{"UserId":"bad","Mode":true},{"UserId":201,"Mode":true}],"HomeMessages":[{"ChatId":"bad","MessageId":5},{"ChatId":202,"MessageId":"bad"},{"ChatId":203,"MessageId":6}]}'
+        { Import-UrgentManualState } | Should -Not -Throw
+        $script:UrgentManualLive[200L].Token | Should -Be 'valid'
+        $script:UrgentManualMode[201L] | Should -BeTrue
+        $script:UrgentHomeMessage[203L] | Should -Be 6
+        $script:UrgentHomeMessage.ContainsKey(202L) | Should -BeFalse
+    }
     It 'shows T-12 fix buttons in the board keyboard when warnings apply' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentSceneLoop { $false }

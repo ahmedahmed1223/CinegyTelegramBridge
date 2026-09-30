@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.18'; Items = @(
+                        '🖥 **The manager fits a smaller window** — secondary buttons wrap, the account list fits the settings window, and fields are named for screen readers. A warning stays visible when preferences cannot be saved.'
+                        '🔄 **Manual urgent controls survive a damaged state file** — startup can restore the valid backup and skip an incomplete record without losing the other chats. Ordered settings and schedules keep their saved values; installation checks no longer mistake a name ending in SYSTEM for the service account.'
+                    ) }
                 @{ Version = '8.71.17'; Items = @(
                         '📊 **The usage digest reads cleanly again** — the outcome lines (passed, failed, refused) sat a blank line apart, the weekly figure was followed by two, and the "+N more" under the changed settings had a stray double space after its bullet. The same doubled gap is gone from the health centre''s counters.'
                     ) }
@@ -291,6 +295,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.18'; Items = @(
+                        '🖥 **المدير يتكيّف مع النافذة الصغيرة** — الأزرار الثانوية تلتفّ، وقائمة الحسابات تتّسع داخل نافذة الإعدادات، والحقول مسمّاة لقارئ الشاشة. يظهر تحذير مستمر إذا تعذّر حفظ تفضيلات المدير.'
+                        '🔄 **تحكّم العاجل اليدوي ينجو من تلف ملف الحالة** — يستعيد بدء التشغيل النسخة الاحتياطية السليمة ويتجاوز السجل الناقص دون فقد بقية المحادثات. الإعدادات والجداول المرتّبة تحتفظ بقيمها، وفحص التثبيت لا يخلط اسمًا ينتهي بـSYSTEM مع حساب الخدمة.'
+                    ) }
                 @{ Version = '8.71.17'; Items = @(
                         '📊 **ملخص الاستخدام صار مرتّبًا** — أسطر النتائج (ناجحة، فاشلة، مرفوضة) كان بينها سطر فارغ، وبعد سطر الأسبوع سطران فارغان، و«+N أخرى» تحت الإعدادات المعدّلة كانت بمسافة مزدوجة بعد نقطتها. الفراغ المضاعف نفسه زال من عدّادات مركز الصحة.'
                     ) }

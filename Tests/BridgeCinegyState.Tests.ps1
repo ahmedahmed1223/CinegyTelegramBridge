@@ -5,6 +5,11 @@ BeforeAll {
 }
 
 Describe 'Cinegy layer reconciliation policy' {
+    It 'recognizes a confirmed hidden layer supplied as an ordered status' {
+        $tracked = @{ Key = 'headline'; ActiveId = 'old'; UserId = 10 }
+        $status = [ordered]@{ Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' }
+        (Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $tracked -Status $status).Action | Should -Be 'remove'
+    }
     It 'keeps a tracked record when live status is unavailable' {
         $tracked=@{Key='headline';ActiveId='old';UserId=10;At='2026-08-22T10:00:00Z';Source='bridge'}
         $status=[pscustomobject]@{Success=$false;IsOnAir=$null;ActiveId='';Error='timeout';Layer=7}

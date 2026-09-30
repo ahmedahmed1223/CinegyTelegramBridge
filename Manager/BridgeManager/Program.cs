@@ -164,6 +164,64 @@ internal static class SelfTest
             if (!ok) failures.Add(label);
         }
 
+        // Exercise the actual settings layout without showing a window or
+        // loading station credentials. A 620px form used to hold 700px rows.
+        var layoutFixture = Path.Combine(Path.GetTempPath(), "BridgeManager-layout-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(layoutFixture);
+        try
+        {
+            var configFixture = Path.Combine(layoutFixture, "config.json");
+            File.WriteAllText(configFixture, "{}");
+            using var settingsView = new SettingsForm(configFixture, layoutFixture);
+            settingsView.Size = settingsView.MinimumSize;
+            settingsView.PerformLayout();
+            var content = settingsView.Controls.OfType<FlowLayoutPanel>().Single();
+            var accountList = content.Controls.OfType<ListView>().Single();
+            var permissions = content.Controls.OfType<FlowLayoutPanel>().Single(p => p.Controls.OfType<CheckBox>().Count() > 1);
+            var available = content.ClientSize.Width - content.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth;
+            Check("account list fits the smallest settings window", accountList.Width <= available);
+            Check("permission chips wrap within the smallest settings window", permissions.Width <= available);
+            Check("token and engine address are named for assistive technology",
+                content.Controls.OfType<TextBox>().All(t => !string.IsNullOrWhiteSpace(t.AccessibleName))
+                && content.Controls.OfType<FlowLayoutPanel>().SelectMany(p => p.Controls.OfType<TextBox>()).All(t => !string.IsNullOrWhiteSpace(t.AccessibleName)));
+        }
+        finally { Directory.Delete(layoutFixture, recursive: true); }
+
+        using (var actions = MainForm.CreateUtilityActions())
+        {
+            actions.MaximumSize = new Size(700, 0);
+            for (var i = 0; i < 6; i++)
+            {
+                var button = Theme.QuietButton("إجراء");
+                button.Width = 136;
+                actions.Controls.Add(button);
+            }
+            actions.PerformLayout();
+            Check("all utility buttons remain inside a narrow action group",
+                actions.Controls.Cast<Control>().All(c => c.Right <= actions.ClientSize.Width));
+            Check("secondary actions wrap rather than disappear at minimum width",
+                actions.Controls.Cast<Control>().Select(c => c.Top).Distinct().Count() > 1);
+        }
+
+        Directory.CreateDirectory(layoutFixture);
+        try
+        {
+            var preferenceFile = Path.Combine(layoutFixture, "preferences.json");
+            var preferences = new ManagerSettings { AutoRestart = false };
+            Check("manager preferences save successfully", preferences.Save(preferenceFile));
+            Check("manager preferences preserve the chosen restart policy",
+                !System.Text.Json.JsonSerializer.Deserialize<ManagerSettings>(File.ReadAllText(preferenceFile))!.AutoRestart);
+            using (var preferencesLock = File.Open(preferenceFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                preferences.AutoRestart = true;
+                Check("a locked preferences file reports save failure", !preferences.Save(preferenceFile));
+                Check("failed preference replacement preserves the previous choice",
+                    !System.Text.Json.JsonSerializer.Deserialize<ManagerSettings>(File.ReadAllText(preferenceFile))!.AutoRestart);
+                Check("failed preference replacement removes staging files", Directory.GetFiles(layoutFixture, "*.tmp").Length == 0);
+            }
+        }
+        finally { Directory.Delete(layoutFixture, recursive: true); }
+
         // --- DPAPI reference detection -------------------------------------
         Check("spots a dpapi reference", SettingsForm.LooksLikeDpapiReference("dpapi:BotToken"));
         Check("a real token is not a reference", SettingsForm.LooksLikeDpapiReference("123456:AAErandomlookingtokentext") == false);

@@ -3,12 +3,26 @@ Set-StrictMode -Version Latest
 function Get-BridgeObjectProperty {
     param($Object, [Parameter(Mandatory)][string]$Name)
     if ($null -eq $Object) { return $null }
-    if ($Object -is [hashtable]) {
-        if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
         return $null
     }
     if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }
     return $null
+}
+
+function Test-BridgeObjectProperty {
+    param($Object, [Parameter(Mandatory)][string]$Name)
+    if ($Object -is [System.Collections.IDictionary]) { return $Object.Contains($Name) }
+    return $Object.PSObject.Properties.Match($Name).Count -gt 0
+}
+
+function Set-BridgeObjectProperty {
+    # Add-Member on a dictionary creates a note property that JSON discards.
+    # Defaults and identity arrays must survive the next settings save.
+    param($Object, [Parameter(Mandatory)][string]$Name, $Value)
+    if ($Object -is [System.Collections.IDictionary]) { $Object[$Name] = $Value; return }
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
 }
 
 function Get-BridgeSetting {
@@ -50,20 +64,20 @@ function Initialize-BridgeSettings {
     )
     $settings = Get-BridgeObjectProperty -Object $Config -Name Settings
     $changed = $false
-    if (-not $settings) {
+    if ($null -eq $settings) {
         $settings = [pscustomobject]@{}
-        $Config | Add-Member -NotePropertyName Settings -NotePropertyValue $settings -Force
+        Set-BridgeObjectProperty -Object $Config -Name Settings -Value $settings
         $changed = $true
     }
     foreach ($name in $Defaults.Keys) {
-        if ($settings.PSObject.Properties.Match([string]$name).Count -eq 0) {
-            $settings | Add-Member -NotePropertyName ([string]$name) -NotePropertyValue $Defaults[$name] -Force
+        if (-not (Test-BridgeObjectProperty -Object $settings -Name ([string]$name))) {
+            Set-BridgeObjectProperty -Object $settings -Name ([string]$name) -Value $Defaults[$name]
             $changed = $true
         }
     }
     foreach ($name in @('AllowedUserIds', 'AdminUserIds')) {
-        if ($Config.PSObject.Properties.Match($name).Count -eq 0) {
-            $Config | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
+        if (-not (Test-BridgeObjectProperty -Object $Config -Name $name)) {
+            Set-BridgeObjectProperty -Object $Config -Name $name -Value @()
             $changed = $true
         }
     }

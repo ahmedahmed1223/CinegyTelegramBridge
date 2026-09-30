@@ -15,8 +15,8 @@ function Copy-MojazValue {
 function Get-MojazProperty {
     param($Object, [Parameter(Mandatory)][string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
-    if ($Object -is [hashtable]) {
-        if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
         return $Default
     }
     if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }

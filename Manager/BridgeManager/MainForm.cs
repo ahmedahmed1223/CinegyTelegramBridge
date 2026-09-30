@@ -71,14 +71,23 @@ internal sealed class ManagerSettings
         return new ManagerSettings();
     }
 
-    public void Save()
+    public bool Save(string? path = null)
     {
+        var target = path ?? SettingsFilePath;
+        var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(SettingsFilePath, json);
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, target, overwrite: true);
+            return true;
         }
-        catch { /* e.g. exe sitting in a write-protected folder - worst case, ask again next launch */ }
+        catch { return false; }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch { /* a failed cleanup must not hide the save result */ }
+        }
     }
 }
 
@@ -130,6 +139,7 @@ public sealed class MainForm : Form
     private const int MenuSwitchWidth = 210;
 
     private readonly Label _activityLabel;
+    private readonly Label _preferencesWarning;
     private ContextMenuStrip? _optionsMenu;
     // The last thing that reached air, and when the last hour's errors landed.
     private string _lastAirSummary = string.Empty;
@@ -352,14 +362,16 @@ public sealed class MainForm : Form
         onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new OnAirForm(BridgeRoot); form.ShowDialog(this); } };
         reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new ReportsForm(BridgeRoot, () => { PruneRecentErrors(); return _recentErrors.Count; }); form.ShowDialog(this); } };
 
-        // Keep each group intact when the manager reaches its minimum width.
-        // A lone "clear" control beside a live stop button is too easy to misread
-        // during an on-air incident.
+        // Keep start/stop/restart together. Secondary actions may wrap within
+        // their own group, so resizing never mixes a clear button into the
+        // operational controls during an on-air incident.
         var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
         operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
-        var utilityActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 6) };
+        var utilityActions = CreateUtilityActions();
         utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, onAirButton, reportsButton, clearButton });
         _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
+        _actionBar.SizeChanged += (_, _) =>
+            utilityActions.MaximumSize = new Size(Math.Max(1, _actionBar.ClientSize.Width - _actionBar.Padding.Horizontal), 0);
 
         // ---- options: switches, which are not actions ----------------------
         _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
@@ -410,6 +422,14 @@ public sealed class MainForm : Form
             AutoEllipsis = true,
             Text = "▶ آخر عملية: لا عملية بعد     ⚠ بلا أخطاء"
         };
+        _preferencesWarning = Theme.Hint("⚠ تعذّر حفظ تفضيلات المدير. ستُطبّق هنا حتى الإغلاق فقط. تحقّق من صلاحية الكتابة في مجلد البرنامج.");
+        _preferencesWarning.Dock = DockStyle.Top;
+        _preferencesWarning.AutoSize = false;
+        _preferencesWarning.Height = 40;
+        _preferencesWarning.Padding = new Padding(16, 4, 16, 4);
+        _preferencesWarning.Visible = false;
+        _preferencesWarning.AccessibleName = "تعذّر حفظ تفضيلات المدير";
+        _preferencesWarning.Tag = (Action)(() => _preferencesWarning.ForeColor = Theme.Pending);
 
         // ---- filter row, sitting directly on top of what it filters --------
         _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
@@ -474,12 +494,12 @@ public sealed class MainForm : Form
             _output.WordWrap = _wordWrapCheck.Checked;
             _output.ScrollBars = _wordWrapCheck.Checked ? RichTextBoxScrollBars.Vertical : RichTextBoxScrollBars.Both;
             _settings.WordWrap = _wordWrapCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
         };
         _followTailCheck.CheckedChanged += (_, _) =>
         {
             _settings.FollowTail = _followTailCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
             LogEvent($"تتبع الجديد في السجل: {(_followTailCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
         _filterTimer = new System.Windows.Forms.Timer { Interval = 250 };
@@ -508,6 +528,7 @@ public sealed class MainForm : Form
         Controls.Add(_output);
         Controls.Add(_filterBar);
         Controls.Add(_activityLabel);
+        Controls.Add(_preferencesWarning);
         Controls.Add(_optionsBar);
         Controls.Add(_actionBar);
         Controls.Add(_header);
@@ -527,7 +548,7 @@ public sealed class MainForm : Form
             if (_autoClearCheck.Checked) _autoClearTimer.Start();
             else _autoClearTimer.Stop();
             _settings.AutoClearDaily = _autoClearCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
         };
         if (_autoClearCheck.Checked) _autoClearTimer.Start();
 
@@ -537,7 +558,7 @@ public sealed class MainForm : Form
                     "إن توقّف الجسر فلن يُعاد تشغيله تلقائيًا، وستبقى الرسومات بلا تحكّم حتى ينتبه أحد.\n\nإيقاف إعادة التشغيل التلقائي؟")) return;
             _settings.AutoRestart = _autoRestartCheck.Checked;
             if (!_autoRestartCheck.Checked) _restartTimer.Stop();
-            _settings.Save();
+            SaveManagerSettings();
             LogEvent($"إعادة التشغيل التلقائي: {(_autoRestartCheck.Checked ? "مفعّلة" : "معطّلة")}.");
         };
         _watchdogCheck.CheckedChanged += (_, _) =>
@@ -545,14 +566,14 @@ public sealed class MainForm : Form
             if (!ConfirmSafetyOff(_watchdogCheck,
                     "لن يُكتشف الجسر المعلّق بعد الآن: سيبدو «يعمل» وهو لا يستجيب.\n\nإيقاف كشف التعليق؟")) return;
             _settings.HangWatchdog = _watchdogCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
             UpdateStatusBar();
             LogEvent($"كشف التعليق: {(_watchdogCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
         _darkModeCheck.CheckedChanged += (_, _) =>
         {
             _settings.DarkMode = _darkModeCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
             ApplyTheme();
             LogEvent($"المظهر: {(_darkModeCheck.Checked ? "ليلي" : "فاتح")}.");
         };
@@ -564,7 +585,7 @@ public sealed class MainForm : Form
         _startBridgeOnOpenCheck.CheckedChanged += (_, _) =>
         {
             _settings.StartBridgeOnOpen = _startBridgeOnOpenCheck.Checked;
-            _settings.Save();
+            SaveManagerSettings();
             LogEvent($"تشغيل الجسر عند فتح البرنامج: {(_startBridgeOnOpenCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
 
@@ -658,6 +679,23 @@ public sealed class MainForm : Form
         Theme.ApplyTitleBar(Handle);
         SetStatus(_running);
         RenderAll();
+    }
+
+    internal static FlowLayoutPanel CreateUtilityActions() => new()
+    {
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        WrapContents = true,
+        FlowDirection = FlowDirection.LeftToRight,
+        Margin = new Padding(0, 0, 0, 6)
+    };
+
+    private void SaveManagerSettings()
+    {
+        var saved = _settings.Save();
+        if (!saved && !_preferencesWarning.Visible)
+            LogEvent("⚠ تعذّر حفظ تفضيلات المدير؛ التعديلات لهذه الجلسة فقط.");
+        _preferencesWarning.Visible = !saved;
     }
 
     /// <summary>
@@ -789,7 +827,7 @@ public sealed class MainForm : Form
         if (File.Exists(besideExe))
         {
             _settings.BridgeScriptPath = besideExe;
-            _settings.Save();
+            SaveManagerSettings();
             return true;
         }
 
@@ -806,7 +844,7 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             _settings.BridgeScriptPath = dialog.FileName;
-            _settings.Save();
+            SaveManagerSettings();
             return true;
         }
         return false;
@@ -2107,7 +2145,7 @@ public sealed class MainForm : Form
         zoom = ClampZoom(zoom);
         _output.ZoomFactor = zoom;
         _settings.LogZoom = zoom;
-        _settings.Save();
+        SaveManagerSettings();
         UpdateZoomLabel();
     }
 
@@ -2256,7 +2294,7 @@ public sealed class MainForm : Form
         if (!_settings.TrayHintShown)
         {
             _settings.TrayHintShown = true;
-            _settings.Save();
+            SaveManagerSettings();
             _trayIcon.ShowBalloonTip(4000, "لا يزال يعمل",
                 "المدير يتابع الجسر من شريط النظام. للإغلاق نهائيًا: زر يمين على الأيقونة ← إغلاق البرنامج.",
                 ToolTipIcon.Info);

@@ -24,6 +24,15 @@ BeforeAll {
 }
 
 Describe 'Install readiness' {
+    It 'does not mistake an account name ending with SYSTEM for SYSTEM' {
+        $config = New-ReadyConfig -Settings @{ EnableDpapiSecrets = $true }
+        (Invoke-Readiness -Config $config -Overrides @{ ProtectedBy = 'PLAYOUT\NOTSYSTEM' }).Ok | Should -BeFalse
+    }
+
+    It 'accepts a complete ordered configuration without losing its keys' {
+        $config = [ordered]@{ BotToken = 'fixture-token'; AdminChatIds = @(10); AllowedChatIds = @(10); Settings = [ordered]@{ EnableDpapiSecrets = $false } }
+        (Invoke-Readiness -Config $config).Ok | Should -BeTrue
+    }
     It 'accepts a complete configuration' {
         $report = Invoke-Readiness -Config (New-ReadyConfig)
         $report.Ok | Should -BeTrue

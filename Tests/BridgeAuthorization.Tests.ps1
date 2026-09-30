@@ -5,6 +5,14 @@ BeforeAll {
 }
 
 Describe 'Private user authorization policy' {
+    It 'recognizes a private chat supplied as an ordered dictionary' {
+        Test-BridgePrivateChat -Chat ([ordered]@{ id = 10; type = 'private' }) | Should -BeTrue
+    }
+
+    It 'keeps an explicit group type authoritative even with a positive id' {
+        Test-BridgePrivateChat -Chat ([ordered]@{ id = 10; type = 'group' }) | Should -BeFalse
+    }
+
     It 'authorizes an explicitly allowed user and denies a disabled user' {
         Test-BridgeAuthorized -ChatId 101 -UserId 101 -AllowedUserIds @(101) -AllowedChatIds @() `
             -DisabledUserIds @() -RequireUserLevelAuth | Should -BeTrue

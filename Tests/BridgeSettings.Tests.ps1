@@ -9,6 +9,31 @@ Describe 'Bridge settings module' {
         $script:defaults = [ordered]@{ Enabled=$false; Limit=12; Label='default' }
     }
 
+    It 'reads ordered settings without silently substituting defaults' {
+        $config = [ordered]@{ Settings = [ordered]@{ Enabled = $true; Limit = 7 } }
+        Get-BridgeSetting -Config $config -Defaults $script:defaults -Name Enabled | Should -BeTrue
+        Get-BridgeSettingInt -Config $config -Defaults $script:defaults -Name Limit | Should -Be 7
+    }
+
+    It 'persists missing settings as dictionary keys and preserves identities' {
+        $config = [ordered]@{ Settings = [ordered]@{ Enabled = $true }; AllowedUserIds = @(10); AdminUserIds = @(20) }
+        Initialize-BridgeSettings -Config $config -Defaults $script:defaults | Should -BeTrue
+        $saved = $config | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $saved.Settings.Enabled | Should -BeTrue
+        $saved.Settings.Limit | Should -Be 12
+        @($saved.AllowedUserIds) | Should -Be @(10)
+        @($saved.AdminUserIds) | Should -Be @(20)
+        Initialize-BridgeSettings -Config $config -Defaults $script:defaults | Should -BeFalse
+    }
+
+    It 'creates missing settings and identities as serializable keys on a dictionary' {
+        $config = @{}
+        Initialize-BridgeSettings -Config $config -Defaults $script:defaults | Should -BeTrue
+        $config.ContainsKey('Settings') | Should -BeTrue
+        $config.ContainsKey('AllowedUserIds') | Should -BeTrue
+        $config.ContainsKey('AdminUserIds') | Should -BeTrue
+    }
+
     It 'uses configured values and falls back to schema defaults for missing values' {
         $config = [pscustomobject]@{ Settings=[pscustomobject]@{ Enabled=$true } }
 

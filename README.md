@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.18
+
+BridgeManager wraps secondary actions within smaller windows, resizes the settings account list and permission controls, and explicitly names fields for assistive technology. Preferences are saved through a unique staging file and atomic replacement; a persistent warning explains when a change could only be applied for the current session.
+
+The deeper bot review fixes ordered dictionary handling across settings, authorization, scheduling, Cinegy reconciliation, bulletin lookup and install readiness. Settings initialization now writes serializable dictionary keys while preserving configured values and identities. Manual urgent state recovers from its validated backup and skips incomplete records. JSON recovery uses an isolated temporary file with cleanup on failure, and DPAPI readiness compares account name boundaries rather than accepting any matching suffix.
+
 ## Version 8.71.17
 
 The usage digest's outcome block and the health centre's counters block carried a literal line break and a ` 

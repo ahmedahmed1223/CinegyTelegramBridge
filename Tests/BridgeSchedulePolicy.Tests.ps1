@@ -5,6 +5,13 @@ BeforeAll {
 }
 
 Describe 'Schedule execution policy' {
+    It 'preserves a completed occurrence read from an ordered schedule document' {
+        $scheduled = [datetimeoffset]'2026-08-22T10:00:00+00:00'
+        $entry = [ordered]@{ Id = 'ordered-event'; ScheduledAt = $scheduled.ToString('o'); CompletedExecutionKey = "ordered-event|$($scheduled.ToString('o'))" }
+        $decision = Get-BridgeScheduleDueState -ScheduleEntry $entry -Now $scheduled.AddHours(1)
+        $decision.Completed | Should -BeTrue
+        $decision.IsDue | Should -BeFalse
+    }
     It 'uses the scheduled time before a retry and blocks a completed occurrence' {
         $scheduled=[datetimeoffset]'2026-08-22T10:00:00+00:00'
         $scheduleEntry=@{Id='evt-1';ScheduledAt=$scheduled.ToString('o');NextAttemptAt='';CompletedExecutionKey=''}

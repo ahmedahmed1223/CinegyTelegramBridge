@@ -5,8 +5,8 @@ function Get-BridgeInstallProperty {
        hashtables and ConvertFrom-Json objects. #>
     param($Object, [Parameter(Mandatory)][string]$Name)
     if ($null -eq $Object) { return $null }
-    if ($Object -is [hashtable]) {
-        if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
         return $null
     }
     if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }
@@ -70,8 +70,13 @@ function Get-BridgeReadinessReport {
     $settings = Get-BridgeInstallProperty -Object $Config -Name 'Settings'
     if ([bool](Get-BridgeInstallProperty -Object $settings -Name 'EnableDpapiSecrets')) {
         $serviceAccount = if ([string]::IsNullOrWhiteSpace($RunAsAccount)) { 'SYSTEM' } else { $RunAsAccount }
+        # A suffix alone also accepts NOTSYSTEM for SYSTEM. Qualified account
+        # names must match exactly; unqualified names need a separator boundary.
+        $accountName = $serviceAccount.Trim()
         $sameAccount = -not [string]::IsNullOrWhiteSpace($ProtectedBy) -and
-            $ProtectedBy.Trim().EndsWith($serviceAccount.Trim(), [System.StringComparison]::OrdinalIgnoreCase)
+            ($ProtectedBy.Trim().Equals($accountName, [System.StringComparison]::OrdinalIgnoreCase) -or
+            (-not $accountName.Contains('\') -and
+                $ProtectedBy.Trim().EndsWith("\$accountName", [System.StringComparison]::OrdinalIgnoreCase)))
         if (-not $sameAccount) {
             $errors.Add("DPAPI secrets are protected for '$ProtectedBy' but the service will run as '$serviceAccount'. " +
                 'A CurrentUser DPAPI secret cannot be read by another account, so the bridge would start, fail to decrypt its token, and be restarted for ever. ' +

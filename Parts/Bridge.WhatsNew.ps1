@@ -31,6 +31,9 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.71.20'; Items = @(
+                        '🖼 Bulletin image preview now finds uploaded and inherited images beside the selected scene, even when their saved path is relative. Preview does not change air or rewrite your bulletin.'
+                    ) }
                 @{ Version = '8.71.19'; Items = @(
                         '📋 A shorter home menu — reports, handover and help are under Reports and help; content and live controls stay on home. Bulletin rows and ticker backups show eight entries per page.'
                         '🖼 Bulletin row details now include image preview and ordering; timing and deletion tools are under Bulletin tools. Help and weekly reports display clean text, programme instructions respect your role, and feed errors are behind Technical details.'
@@ -299,6 +302,9 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.71.20'; Items = @(
+                        '🖼 معاينة صورة الموجز تجد الصور المرفوعة والموروثة بجانب القالب المختار حتى لو كان مسارها نسبيًا؛ المعاينة لا تغيّر الهواء ولا تعيد حفظ الموجز.'
+                    ) }
                 @{ Version = '8.71.19'; Items = @(
                         '📋 قائمة أقصر — التقارير والتسليم والمساعدة تحت «المتابعة والمساعدة»، وأزرار المحتوى والتحكم الحي تبقى في الرئيسية. صفوف الموجز ونسخ شريط الأخبار ثمانية في الصفحة.'
                         '🖼 تفاصيل صف الموجز تضم معاينة الصورة والترتيب، والتوقيت والحذف في «أدوات الموجز». المساعدة والتقرير الأسبوعي بلا رموز تنسيق خام، وتعليمات البرامج تراعي صلاحيتك، وأخطاء البث في «التفاصيل التقنية».'

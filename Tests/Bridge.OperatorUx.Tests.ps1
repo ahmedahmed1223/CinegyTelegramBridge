@@ -2,6 +2,21 @@
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
 Describe 'Operator screens after the desktop usability review' {
+    It 'resolves an uploaded relative image beside its bulletin template instead of the bridge' {
+        $script:PreviewSceneRoot = Join-Path $TestDrive 'scene'
+        $script:PreviewImagePath = Join-Path $script:PreviewSceneRoot 'Mojaz\bot\preview.png'
+        New-Item -ItemType Directory -Path (Split-Path $script:PreviewImagePath) -Force | Out-Null
+        Set-Content -LiteralPath $script:PreviewImagePath -Value 'test'
+        Mock Get-MojazSelected { [pscustomobject]@{ Id = 'b1'; TemplateKey = 'Other'; Rows = @([pscustomobject]@{ Id = 'r1' }) } }
+        Mock Get-TemplateStore { @{ Map = @{ Other = @{ Path = (Join-Path $script:PreviewSceneRoot 'Other.cintitle') } } } }
+        Mock Get-MojazTemplateImage { '' }
+        Mock Get-MojazEffectiveImages { '.\Mojaz\bot\preview.png' }
+        Mock Send-TelegramPhoto {}
+        Mock Send-TelegramMessage {}
+        Show-MojazRowImage -RowId 'r1' -ChatId 100
+        Should -Invoke Send-TelegramPhoto -Times 1 -Exactly -ParameterFilter { $FilePath -eq $script:PreviewImagePath }
+        Should -Invoke Send-TelegramMessage -Times 0
+    }
     It 'shows the same eight bulletin stories in the table and its buttons' {
         Mock Get-MojazSceneTiming { $null }
         Mock Get-MojazTemplateImage { '' }

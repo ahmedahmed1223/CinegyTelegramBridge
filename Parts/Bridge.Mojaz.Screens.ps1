@@ -251,7 +251,7 @@ function Show-MojazToolsScreen {
 
 function Show-MojazRowImage {
     # Resolve the effective inherited image, never a path from callback data.
-    # A scene may reference a file on another machine: fail visibly if absent.
+    # Uploaded paths are relative to the selected scene, not the bridge cwd.
     param([Parameter(Mandatory)][string]$RowId, [Parameter(Mandatory)][long]$ChatId)
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId; return }
@@ -259,8 +259,19 @@ function Show-MojazRowImage {
     $keyboard = @{ inline_keyboard = @(, @((New-Button (T 'mjz.backToRow') "mojaz:row:$RowId"))) }
     $path = ''
     if ($index -ge 0) {
-        $images = @(Get-MojazEffectiveImages -Rows @(Get-JsonProp $bulletin 'Rows') -TemplateImage (Get-MojazTemplateImage))
+        $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
+        $scene = Get-JsonProp (Get-JsonProp (Get-TemplateStore) 'Map') $designKey
+        $scenePath = [string](Get-JsonProp $scene 'Path')
+        $templateImage = if ($scenePath) { Get-MojazTemplateImage -Path $scenePath } else { '' }
+        $images = @(Get-MojazEffectiveImages -Rows @(Get-JsonProp $bulletin 'Rows') -TemplateImage $templateImage)
         if ($images.Count -gt $index) { $path = [string]$images[$index] }
+        if ($path) {
+            $path = [Environment]::ExpandEnvironmentVariables($path.Trim())
+            if (-not [IO.Path]::IsPathRooted($path)) {
+                $sceneRoot = if ($scenePath) { Split-Path -Path $scenePath -Parent } else { '' }
+                $path = if ($sceneRoot -and [IO.Path]::IsPathRooted($sceneRoot)) { [IO.Path]::GetFullPath([IO.Path]::Combine($sceneRoot, $path)) } else { '' }
+            }
+        }
     }
     if (-not $path -or [IO.Path]::GetExtension($path) -notin @('.png', '.jpg', '.jpeg', '.webp', '.bmp') -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.imageUnavailable') -ReplyMarkup $keyboard

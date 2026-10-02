@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.71.20
+
+Bulletin image previews resolve relative image paths beside the selected scene, matching uploaded image storage rather than the bridge working directory. Inherited template images are read from that same design. Absolute paths remain supported, and preview does not change air or save the bulletin.
+
 ## Version 8.71.19
 
 Telegram home keeps content and live controls visible while reports, handover and help move under Reports and help. Bulletin rows and ticker backups are paged in groups of eight; breaking news uses at most four stories and drops decorative button rows. Row details expose ordering and a read-only preview of the effective image, including inherited images; timing and bulletin maintenance are under Bulletin tools. An unavailable local image produces an explicit message without altering the rundown.

@@ -631,6 +631,7 @@ function Invoke-HideLayer {
     Start-AirOperation -Operation $operation -Action HIDE -Layer $Layer -UserId $UserId
     $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
+        Stop-GraphicRecoveryForLayer -Layer $Layer
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         $actor = Format-UserAuditActor -UserId $UserId
@@ -708,6 +709,7 @@ function Invoke-ExitLayer {
     $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
     if ($result.Success) {
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
+        Stop-GraphicRecoveryForLayer -Layer $Layer
         # Dropped directly rather than reconciled: Cinegy keeps the playlist
         # item Active after EXIT_SCENE_LOOP, so a status read here cannot tell
         # an exited scene from a live one and would preserve the record for

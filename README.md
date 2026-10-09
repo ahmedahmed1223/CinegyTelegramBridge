@@ -15,6 +15,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.72.0
+
+Permanent graphic recovery is enabled by default for templates marked `longRunning`. Each confirmed missing graphic gets a separate delivered warning with Show now and Keep hidden buttons. After one minute without a reply, one recovery attempt is allowed only on a freshly verified empty layer, through the normal access and maintenance gates. Data-driven templates require values from their last successful show.
+
+Deliberate hide/exit, hide-all, and Keep hidden cancel recovery until the graphic returns or the bridge restarts. Pending incidents are in memory; a restart starts a fresh warning and countdown. No live SHOW/HIDE commands are used by the release checks.
+
+## Version 8.71.21
+
+Scheduled weekly summaries now pass HTML formatting through the administrator broadcast path, preventing literal tags in usage figures and setting names. Notices held during quiet hours are converted to readable plain text for the morning digest.
+
 ## Version 8.71.20
 
 Bulletin image previews resolve relative image paths beside the selected scene, matching uploaded image storage rather than the bridge working directory. Inherited template images are read from that same design. Absolute paths remain supported, and preview does not change air or save the bulletin.

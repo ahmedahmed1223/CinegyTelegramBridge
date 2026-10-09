@@ -172,6 +172,13 @@ function Invoke-CallbackQuery {
     }
 
     switch -Wildcard ($data) {
+        'recover:*' {
+            $recoveryParts = $data -split ':'
+            if ($recoveryParts.Count -eq 3 -and $recoveryParts[1] -in @('show','keep')) {
+                Resolve-GraphicRecoveryResponse -Token $recoveryParts[2] -Action $recoveryParts[1] -ChatId $chatId -UserId $userId
+            }
+            break
+        }
         'urgmode:*' {
             $mode = Get-CallbackArg $data 'urgmode:'
             if ($mode -in @('manual','auto')) {

@@ -15,6 +15,14 @@ function Add-BridgeTextAlerts {
     <# Fills the shared dictionary in place; see the sibling files. #>
     param([Parameter(Mandatory)]$Catalogue)
     $catalogue = $Catalogue
+    $catalogue['tick.recoverNow'] = @{ ar = '▶️ إظهار الآن'; en = '▶️ Show now' }
+    $catalogue['tick.recoverKeepHidden'] = @{ ar = '⏸ إبقاء مخفيًا'; en = '⏸ Keep hidden' }
+    $catalogue['tick.recoveryOffer'] = @{ ar = '⚠️ القالب المستمر <b>{0}</b> غائب عن الطبقة {1}. سيُعاد عرضه بعد دقيقة بلا رد، فقط إذا بقيت الطبقة فارغة. اختر إبقاءه مخفيًا لإلغاء الاستعادة.'; en = '⚠️ Permanent graphic <b>{0}</b> is missing from layer {1}. It will be restored after one minute without a reply, only if the layer stays empty. Choose keep hidden to cancel recovery.' }
+    $catalogue['tick.recoveryNoValues'] = @{ ar = '⚠️ لم يُعد عرض {0}: قيم آخر عرض غير متاحة. أظهره يدويًا من قائمته.'; en = '⚠️ {0} was not restored: its last shown values are unavailable. Show it manually from its menu.' }
+    $catalogue['tick.recoverySucceeded'] = @{ ar = '✅ أُرسل أمر استعادة القالب المستمر {0}.'; en = '✅ Recovery command sent for permanent graphic {0}.' }
+    $catalogue['tick.recoveryFailed'] = @{ ar = '⚠️ تعذرت استعادة {0}. افحص الحالة وأظهره يدويًا؛ لن تتكرر المحاولة لهذا الغياب.'; en = '⚠️ Could not restore {0}. Check its status and show it manually; this incident will not be retried.' }
+    $catalogue['tick.recoveryKeptHidden'] = @{ ar = '⏸ أُلغيت استعادة {0} حتى عودته إلى الهواء أو إعادة تشغيل الجسر.'; en = '⏸ Recovery of {0} cancelled until it returns to air or the bridge restarts.' }
+    $catalogue['tick.recoveryExpired'] = @{ ar = 'ℹ️ انتهى هذا التنبيه أو حُسم بالفعل.'; en = 'ℹ️ This recovery notice has expired or was already resolved.' }
 
     # --- Alerts, digests and the tick screens ---------------------------
     $catalogue['tick.uncategorised'] = @{ ar = 'غير مصنّف'; en = 'Uncategorised' }

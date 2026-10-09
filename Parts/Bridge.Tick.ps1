@@ -1707,7 +1707,7 @@ function Update-UsageDigest {
     if ([int]$now.DayOfWeek -ne (Get-SettingInt 'UsageDigestDayOfWeek' 0)) { return }
     if ($now.Hour -ne (Get-SettingInt 'HeartbeatHour' 0)) { return }
     $script:LastUsageDigestDate = $now.Date
-    Send-AdminBroadcast -Text (Get-UsageDigestText)
+    Send-AdminBroadcast -Text (Get-UsageDigestText) -ParseMode HTML
     Write-BridgeLog 'Usage digest sent to admins'
 }
 
@@ -2011,7 +2011,7 @@ function Update-MissingGraphicWatchdog {
         dealing with is noise.
     #>
     param([object[]]$LayerStatuses = @())
-    if (-not (Get-Setting 'NotifyAdminsOnMissingGraphic')) { return }
+    if (-not (Get-Setting 'NotifyAdminsOnMissingGraphic') -and -not (Get-Setting 'PermanentGraphicRecoveryEnabled')) { return }
     $required = @(Get-BridgePermanentGraphics)
     if ($required.Count -eq 0) { return }
     # Reuse the sweep the layer watchdog has already paid for; read again only
@@ -2039,14 +2039,102 @@ function Update-MissingGraphicWatchdog {
             $script:MissingGraphicState[$key] = @{ Misses = 0; Alerted = $false }
             continue
         }
+        if ([bool](Get-JsonProp $state 'Suppressed')) { continue }
         $state.Misses = [int]$state.Misses + 1
         if (-not [bool]$state.Alerted -and [int]$state.Misses -ge $threshold) {
             $state.Alerted = $true
             Write-BridgeLog "The permanent graphic '$key' is not on air on layer $($graphic.Layer) after $($state.Misses) check(s)." 'WARN'
-            Send-AdminBroadcast -Text (T 'tick.notOnAirShouldBe' $key $(Get-LayerDisplayName -Layer ([int]$graphic.Layer))) | Out-Null
+            if (Get-Setting 'PermanentGraphicRecoveryEnabled') {
+                $scene = Get-JsonProp (Get-JsonProp (Get-TemplateStore) 'Map') $key
+                $token = [guid]::NewGuid().ToString('N')
+                $buttons = @{ inline_keyboard = @(, @(
+                    (New-Button (T 'tick.recoverNow') "recover:show:$token"),
+                    (New-Button (T 'tick.recoverKeepHidden') "recover:keep:$token")
+                )) }
+                $delivered = $false
+                foreach ($adminId in @(Get-AdminNotifyIds)) {
+                    $script:LastTelegramMessageId = 0
+                    Send-TelegramMessage -ChatId $adminId -Text (T 'tick.recoveryOffer' (ConvertTo-TelegramHtmlText ($key.Substring(0, [math]::Min(100, $key.Length)))) $graphic.Layer) -ParseMode HTML -ReplyMarkup $buttons -Cause 'permanent-graphic-recovery'
+                    if ($script:LastTelegramMessageId -gt 0) { $delivered = $true }
+                }
+                # A queued or failed notice is not a delivered warning. Never
+                # start an automatic air change without a delivered countdown.
+                if ($delivered) {
+                    $state.RecoveryToken = $token
+                    $state.RecoveryDue = (Get-Date).AddMinutes(1)
+                    $state.RecoveryLayer = [int]$graphic.Layer
+                    $state.RecoveryPath = [string](Get-JsonProp $scene 'Path')
+                }
+                else { $state.Alerted = $false }
+            }
+            else { Send-AdminBroadcast -Text (T 'tick.notOnAirShouldBe' $key $(Get-LayerDisplayName -Layer ([int]$graphic.Layer))) | Out-Null }
         }
         $script:MissingGraphicState[$key] = $state
     }
+}
+
+function Stop-GraphicRecoveryForLayer {
+    # An accepted deliberate removal must not be undone by the watchdog.
+    param([int]$Layer)
+    foreach ($graphic in @(Get-BridgePermanentGraphics | Where-Object { $_.Layer -eq $Layer })) {
+        $script:MissingGraphicState[[string]$graphic.Key] = @{ Misses = 0; Alerted = $false; Suppressed = $true }
+    }
+}
+
+function Invoke-GraphicRecovery {
+    param([Parameter(Mandatory)][string]$Key, [long]$ChatId, [long]$UserId)
+    $state = Get-JsonProp $script:MissingGraphicState $Key
+    if (-not $state -or -not (Get-JsonProp $state 'RecoveryToken')) { return }
+    # Consume before any network work: one incident permits one attempt only.
+    $state.RecoveryToken = ''
+    $state.RecoveryDue = $null
+    if (-not (Get-Setting 'PermanentGraphicRecoveryEnabled') -or [bool](Get-JsonProp $state 'Suppressed')) { return }
+    $template = Get-JsonProp (Get-JsonProp (Get-TemplateStore) 'Map') $Key
+    if (-not $template -or -not [bool](Get-JsonProp $template 'LongRunning') -or
+        [int](Get-JsonProp $template 'Layer') -ne [int](Get-JsonProp $state 'RecoveryLayer') -or
+        [string](Get-JsonProp $template 'Path') -ne [string](Get-JsonProp $state 'RecoveryPath')) { return }
+    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer ([int](Get-JsonProp $template 'Layer')) -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    if (-not [bool](Get-JsonProp $status 'Success') -or $null -eq (Get-JsonProp $status 'IsOnAir') -or [bool](Get-JsonProp $status 'IsOnAir')) { return }
+    $variables = @{}
+    $lastShow = $script:LastSuccessfulLayerShows[[int](Get-JsonProp $template 'Layer')]
+    if ($lastShow -and [string](Get-JsonProp $lastShow 'Key') -eq $Key) { $variables = Copy-ShowVariables -Variables (Get-JsonProp $lastShow 'Variables') }
+    elseif (@(Get-JsonProp $template 'Fields').Count -gt 0) {
+        Send-AdminBroadcast -Urgent -Text (T 'tick.recoveryNoValues' $Key)
+        return
+    }
+    $result = Invoke-ShowTemplateResult -Key $Key -Variables $variables -ChatId $ChatId -UserId $UserId -RequireEmptyLayer
+    $outcome = if ([bool](Get-JsonProp $result 'Success')) { T 'tick.recoverySucceeded' $Key } else { T 'tick.recoveryFailed' $Key }
+    Send-AdminBroadcast -Urgent -Text $outcome
+}
+
+function Update-GraphicRecoveryQueue {
+    param([datetime]$Now = (Get-Date))
+    foreach ($key in @($script:MissingGraphicState.Keys)) {
+        $state = $script:MissingGraphicState[$key]
+        if (-not (Get-JsonProp $state 'RecoveryToken')) { continue }
+        if (-not (Get-Setting 'PermanentGraphicRecoveryEnabled')) { $state.RecoveryToken = ''; $state.RecoveryDue = $null; continue }
+        if ($Now -lt [datetime](Get-JsonProp $state 'RecoveryDue')) { continue }
+        $adminIds = @(Get-AdminNotifyIds)
+        if ($adminIds.Count -eq 0) { $state.RecoveryToken = ''; $state.RecoveryDue = $null; continue }
+        Invoke-GraphicRecovery -Key $key -ChatId $adminIds[0] -UserId $adminIds[0]
+    }
+}
+
+function Resolve-GraphicRecoveryResponse {
+    param([string]$Token, [ValidateSet('show','keep')][string]$Action, [long]$ChatId, [long]$UserId)
+    if (-not (Test-CallbackAdmin -ChatId $ChatId -UserId $UserId)) { return }
+    foreach ($key in @($script:MissingGraphicState.Keys)) {
+        $state = $script:MissingGraphicState[$key]
+        if ([string](Get-JsonProp $state 'RecoveryToken') -ne $Token -or -not $Token) { continue }
+        if ($Action -eq 'show') { Invoke-GraphicRecovery -Key $key -ChatId $ChatId -UserId $UserId }
+        else {
+            $state.RecoveryToken = ''; $state.RecoveryDue = $null; $state.Suppressed = $true
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'tick.recoveryKeptHidden' $key)
+        }
+        return
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'tick.recoveryExpired')
 }
 
 function Update-CinegyStateWatchdog {
@@ -2359,7 +2447,7 @@ function Invoke-BridgeTick {
        kill the loop. #>
     # Nothing the clock sends may land on a screen a person refreshed.
     Clear-RefreshTarget
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-GraphicRecoveryQueue', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -2414,6 +2502,7 @@ function Get-EffectivePollTimeout {
     # the millisecond being called up to thirty seconds late. Every test still
     # passed - the arithmetic was right, and nothing in the process was wrong
     # except when it ran.
+    if (@($script:MissingGraphicState.Values | Where-Object { Get-JsonProp $_ 'RecoveryToken' }).Count -gt 0) { return 1 }
     if (Test-AirRunActive) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout

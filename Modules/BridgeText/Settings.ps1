@@ -16,6 +16,8 @@ function Add-BridgeTextSettings {
        is one ordered map assembled from four files, not four maps. #>
     param([Parameter(Mandatory)]$Catalogue)
     $catalogue = $Catalogue
+    $catalogue['setting.PermanentGraphicRecoveryEnabled.label'] = @{ ar = 'استعادة القوالب المستمرة'; en = 'Permanent graphic recovery' }
+    $catalogue['setting.PermanentGraphicRecoveryEnabled.description'] = @{ ar = 'تنبيه مستقل لكل قالب مستمر غائب وإعادته بعد دقيقة بلا رد، فقط إذا كانت طبقته فارغة ومؤكدة. الإخفاء المتعمد يلغي الاستعادة حتى عودة القالب أو إعادة تشغيل الجسر'; en = 'Warn separately for each missing permanent graphic and restore it after a minute without a reply, only on a verified empty layer. Deliberate hiding cancels recovery until the graphic returns or the bridge restarts' }
 
     # --- The thirteen settings doors --------------------------------------
     $catalogue['settingCategory.security.label'] = @{ ar = 'الأمان والصلاحيات'; en = 'Security and permissions' }

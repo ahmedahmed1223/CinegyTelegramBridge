@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.72.0'; Items = @('🛟 Permanent graphic recovery is enabled by default: a separate warning offers Show now or Keep hidden for each missing logo or ticker. After one minute without a reply it attempts recovery only on a verified empty layer. Deliberate removal cancels recovery until the graphic returns or the bridge restarts.') },
+                @{ Version = '8.71.21'; Items = @('📊 Weekly summaries now render their formatting; notices held during quiet hours remain readable without HTML tags.') },
                 @{ Version = '8.71.20'; Items = @(
                         '🖼 Bulletin image preview now finds uploaded and inherited images beside the selected scene, even when their saved path is relative. Preview does not change air or rewrite your bulletin.'
                     ) }
@@ -302,6 +304,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.72.0'; Items = @('🛟 استعادة القوالب المستمرة مفعّلة افتراضيًا: تنبيه مستقل لكل شعار أو شريط غائب مع إظهار الآن أو إبقاء مخفيًا. بعد دقيقة بلا رد تُحاول استعادته على طبقة فارغة مؤكدة فقط. الإخفاء المتعمد يلغي الاستعادة حتى عودة القالب أو إعادة تشغيل الجسر.') },
+                @{ Version = '8.71.21'; Items = @('📊 الملخص الأسبوعي يعرض التنسيق بصورة صحيحة؛ وإذا احتُجز أثناء ساعات الهدوء يصل نصًا واضحًا بلا وسوم HTML.') },
                 @{ Version = '8.71.20'; Items = @(
                         '🖼 معاينة صورة الموجز تجد الصور المرفوعة والموروثة بجانب القالب المختار حتى لو كان مسارها نسبيًا؛ المعاينة لا تغيّر الهواء ولا تعيد حفظ الموجز.'
                     ) }

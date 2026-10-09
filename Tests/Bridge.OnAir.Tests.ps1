@@ -44,6 +44,15 @@ Describe 'Safe in-memory layer rollback' {
         $script:RollbackCandidates.ContainsKey(5) | Should -BeFalse
     }
 
+    It 'refuses recovery when a layer became occupied after the countdown check' {
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = 'external-event'; Error = '' } }
+        Mock Hide-TitlerTemplate { throw 'recovery must not clear a replacement' }
+        $result = Invoke-ShowTemplateResult -Key beta -ChatId 10 -UserId 10 -RequireEmptyLayer
+        $result.Success | Should -BeFalse
+        Should -Invoke Show-TitlerTemplate -Times 0
+        Should -Invoke Hide-TitlerTemplate -Times 0
+    }
+
     It 'creates a rollback candidate only when the previous bot scene correlates with live ActiveId' {
         $script:LastSuccessfulLayerShows[5]=@{ Key='alpha'; Variables=@{Title='old'}; ActiveId='event-old'; UserId=10; ChatId=10; At=(Get-Date) }
         Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success=$true; IsOnAir=$true; ActiveId='event-old'; Error='' } }
@@ -2408,6 +2417,7 @@ Describe 'What came off air is named and quoted' {
 
 Describe 'Noticing that the logo or the strip is gone' {
     BeforeEach {
+        $config.Settings | Add-Member -NotePropertyName 'PermanentGraphicRecoveryEnabled' -NotePropertyValue $false -Force
         Mock Write-BridgeLog { }
         Mock Send-AdminBroadcast { $true }
         Mock Get-LayerDisplayName { "طبقة $Layer" }

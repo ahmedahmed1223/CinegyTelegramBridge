@@ -642,7 +642,8 @@ function Invoke-ShowTemplateResult {
         [hashtable]$Variables = @{},
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
-        [int]$AutoHideSeconds = 0
+        [int]$AutoHideSeconds = 0,
+        [switch]$RequireEmptyLayer
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
@@ -690,6 +691,10 @@ function Invoke-ShowTemplateResult {
         return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
+    if ($RequireEmptyLayer -and ($null -eq (Get-JsonProp $layerStatus 'IsOnAir') -or [bool](Get-JsonProp $layerStatus 'IsOnAir'))) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText 'recovery layer is occupied'
+        return [pscustomobject]@{ Success = $false; Error = 'recovery layer is occupied' }
+    }
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
     $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
@@ -857,6 +862,7 @@ function Invoke-ShowTemplateResult {
             ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
+        $script:MissingGraphicState.Remove($Key) | Out-Null
         Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
             ActiveIdConfirmed = $activeIdConfirmed

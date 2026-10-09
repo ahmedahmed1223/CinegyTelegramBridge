@@ -1296,7 +1296,8 @@ function Send-AdminBroadcast {
         muted, and a muted bot is worse than a silent one, because the alert
         that mattered then arrives to a muted chat.
     #>
-    param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent)
+    param([Parameter(Mandatory)][string]$Text, [hashtable]$ReplyMarkup, [switch]$Urgent,
+        [ValidateSet('', 'HTML')][string]$ParseMode = '')
     # Counted here rather than at each of the twenty call sites that raise an
     # alarm: they all pass through this one function, and a guard in one place
     # cannot be forgotten by the twenty-first.
@@ -1309,7 +1310,9 @@ function Send-AdminBroadcast {
         $repeatCause = Get-BridgeAlertCause -Text $Text
     }
     if (-not $Urgent -and (Test-QuietHoursActive)) {
-        $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $Text }) | Out-Null
+        # Morning digests are plain text; never retain literal HTML tags there.
+        $heldText = if ($ParseMode -eq 'HTML') { ConvertFrom-TelegramHtmlText -Text $Text } else { $Text }
+        $script:QuietHoursQueue.Add(@{ At = (Get-Date); Text = $heldText }) | Out-Null
         # Capped, because the digest is one Telegram message and Telegram stops
         # at 4096 characters. A long night with a chatty source would otherwise
         # grow both the file and a message that cannot be delivered at all. The
@@ -1330,7 +1333,7 @@ function Send-AdminBroadcast {
     if (Test-BridgeNoticeSuppressed -Cause (Get-BridgeAlertCause -Text $Text)) { return }
     $sentIds = @{}
     foreach ($adminId in @(Get-AdminNotifyIds)) {
-        Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup | Out-Null
+        Send-TelegramMessage -ChatId $adminId -Text $Text -ReplyMarkup $ReplyMarkup -ParseMode $ParseMode | Out-Null
         $sentIds[$adminId] = [int]$script:LastTelegramMessageId
     }
     # The first line names the notice without its detail. Without this the

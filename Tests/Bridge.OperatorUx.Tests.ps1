@@ -2,6 +2,28 @@
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
 Describe 'Operator screens after the desktop usability review' {
+    It 'waits a full minute before recovering a missing permanent graphic' {
+        Mock Get-Setting { $true }
+        Mock Get-TemplateStore { @{ Map = @{ logo = @{ Layer = 9; LongRunning = $true; Fields = @() } } } }
+        Mock Get-TitlerLayerStatus { @{ Success = $true; IsOnAir = $false } }
+        Mock Get-AdminNotifyIds { 100 }
+        Mock Invoke-ShowTemplateResult { @{ Success = $true } }
+        Mock Send-AdminBroadcast {}
+        $script:MissingGraphicState = @{ logo = @{ RecoveryToken = 'test'; RecoveryDue = [datetime]'2026-10-09T12:01:00'; RecoveryLayer = 9; RecoveryPath = ''; Suppressed = $false } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:00:59')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Key -eq 'logo' }
+    }
+    It 'renders HTML administrator notices instead of exposing their tags' {
+        Mock Test-QuietHoursActive { $false }
+        Mock Add-BridgeAlertOccurrence { '' }
+        Mock Test-BridgeNoticeSuppressed { $false }
+        Mock Get-AdminNotifyIds { 100 }
+        Mock Send-TelegramMessage {}
+        Send-AdminBroadcast -Text '<b>📊 ملخص الاستخدام</b>' -ParseMode HTML
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ParseMode -eq 'HTML' -and $Text -eq '<b>📊 ملخص الاستخدام</b>' }
+    }
     It 'resolves an uploaded relative image beside its bulletin template instead of the bridge' {
         $script:PreviewSceneRoot = Join-Path $TestDrive 'scene'
         $script:PreviewImagePath = Join-Path $script:PreviewSceneRoot 'Mojaz\bot\preview.png'
@@ -124,5 +146,101 @@ Describe 'Operator screens after the desktop usability review' {
         $record = [pscustomobject]@{ Action = ''; Message = ''; Result = ''; When = [datetime]'2026-09-30'; Target = ''; UserId = '0' }
         $json = @(Get-MissedEventsBlocks -Records @($record)) | ConvertTo-Json -Depth 12
         $json | Should -Not -Match 'healthy|connected'
+    }
+}
+
+Describe 'Permanent graphic recovery guards' {
+    BeforeEach {
+        Mock Get-Setting { $true }
+        Mock Get-TemplateStore { @{ Order = @('logo'); Map = @{ logo = @{ Layer = 9; Path = 'logo.cintitle'; LongRunning = $true; Fields = @() } } } }
+        Mock Get-TitlerLayerStatus { @{ Success = $true; IsOnAir = $false } }
+        Mock Get-AdminNotifyIds { 100 }
+        Mock Invoke-ShowTemplateResult { @{ Success = $true } }
+        Mock Send-AdminBroadcast {}
+        Mock Send-TelegramMessage {}
+        Mock Test-CallbackAdmin { $true }
+        $script:LastSuccessfulLayerShows = @{}
+        $script:MissingGraphicState = @{ logo = @{ Misses = 2; Alerted = $true; RecoveryToken = 'current'; RecoveryDue = [datetime]'2026-10-09T12:01:00'; RecoveryLayer = 9; RecoveryPath = 'logo.cintitle'; Suppressed = $false } }
+    }
+    It 'never replaces an occupied layer' {
+        Mock Get-TitlerLayerStatus { @{ Success = $true; IsOnAir = $true } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'does not treat an unreachable engine as an empty layer' {
+        Mock Get-TitlerLayerStatus { @{ Success = $false; IsOnAir = $false } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'requires an explicit empty status rather than an absent field' {
+        Mock Get-TitlerLayerStatus { @{ Success = $true } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'honours the keep-hidden reply and ignores a second press' {
+        Resolve-GraphicRecoveryResponse -Token current -Action keep -ChatId 100 -UserId 100
+        Resolve-GraphicRecoveryResponse -Token current -Action show -ChatId 100 -UserId 100
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:02:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'ignores old incident buttons' {
+        Resolve-GraphicRecoveryResponse -Token old -Action show -ChatId 100 -UserId 100
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'does not let an operator cancel or force recovery' {
+        Mock Test-CallbackAdmin { $false }
+        Resolve-GraphicRecoveryResponse -Token current -Action keep -ChatId 200 -UserId 200
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 1
+    }
+    It 'drops pending recovery when the setting is disabled' {
+        Mock Get-Setting { $false }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'cancels after deliberate layer removal' {
+        Stop-GraphicRecoveryForLayer -Layer 9
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'refuses changed template paths rather than showing a replacement design' {
+        Mock Get-TemplateStore { @{ Map = @{ logo = @{ Layer = 9; Path = 'changed.cintitle'; LongRunning = $true; Fields = @() } } } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'does not invent values for a data-driven permanent graphic' {
+        Mock Get-TemplateStore { @{ Map = @{ logo = @{ Layer = 9; Path = 'logo.cintitle'; LongRunning = $true; Fields = @('Headline') } } } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'reuses the last successful values for a data-driven graphic' {
+        $script:LastSuccessfulLayerShows[9] = @{ Key = 'logo'; Variables = @{ Headline = 'last approved' } }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -ParameterFilter { $Variables.Headline -eq 'last approved' -and $RequireEmptyLayer }
+    }
+    It 'keeps each incident independent and attempts it only once' {
+        $script:MissingGraphicState['other'] = @{ RecoveryToken = 'other'; RecoveryDue = [datetime]'2026-10-09T12:03:00'; RecoveryLayer = 8; RecoveryPath = ''; Suppressed = $false }
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:01:00')
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:02:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
+    }
+    It 'never arms a countdown for an undelivered warning' {
+        $script:MissingGraphicState = @{}
+        Mock Get-SettingInt { 1 }
+        Update-MissingGraphicWatchdog -LayerStatuses @(@{ Layer = 9; Success = $true; IsOnAir = $false })
+        Update-GraphicRecoveryQueue -Now ([datetime]'2099-01-01')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+    }
+    It 'arms only after delivery and cancels when the graphic returns' {
+        $script:MissingGraphicState = @{}
+        Mock Get-SettingInt { 1 }
+        Mock Get-Date { [datetime]'2026-10-09T12:00:00' }
+        Mock Send-TelegramMessage { $script:LastTelegramMessageId = 42 }
+        Update-MissingGraphicWatchdog -LayerStatuses @(@{ Layer = 9; Success = $true; IsOnAir = $false })
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:00:59')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
+        Update-MissingGraphicWatchdog -LayerStatuses @(@{ Layer = 9; Success = $true; IsOnAir = $true })
+        Update-GraphicRecoveryQueue -Now ([datetime]'2026-10-09T12:02:00')
+        Should -Invoke Invoke-ShowTemplateResult -Times 0
     }
 }

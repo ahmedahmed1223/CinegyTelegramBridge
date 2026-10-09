@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.71.20'
+$script:BridgeVersion = '8.72.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -165,6 +165,7 @@ $script:DefaultSettings = [ordered]@{
     NotifyAdminsOnBlockedChat  = $true   # and when the guard blocks one, which is otherwise silent
     NotifyAdminsOnMissingGraphic = $true # and when a permanently-on-air graphic (logo, strip) is not on air
     MissingGraphicConfirmChecks = 2      # consecutive checks before saying so, so a swap does not raise one
+    PermanentGraphicRecoveryEnabled = $true # restore missing permanent graphics after a delivered one-minute warning
     BlockRejectedRequesters    = $true   # a rejected chat may not queue up again
     JoinSecret                 = ''      # when set, a stranger must send it before any admin sees a request
     JoinSecretMaxAttempts      = 3       # wrong codes allowed in a day before the chat is blocked
@@ -563,6 +564,7 @@ $script:SettingDisplayMetadata = @{
     NotifyAdminsOnAccessRequest = @{ Unit = ''; Description = 'إشعار المشرفين بكل طلب وصول جديد. أطفئه لتقرأ الطلبات من 👤 طلبات الوصول وحدها' }
     NotifyAdminsOnMissingGraphic = @{ Unit = ''; Description = 'تنبيه المشرفين حين لا يكون قالب دائم (اللوغو، الشريط) على الهواء. يُسأل Cinegy مباشرة، فيُكشف الغياب سواء أُخفي من البوت أو من خارجه' }
     MissingGraphicConfirmChecks = @{ Unit = 'فحص'; Description = 'عدد الفحوص المتتالية قبل الإبلاغ عن غياب قالب دائم، حتى لا يُنبَّه أثناء استبدال يستغرق ثوانٍ' }
+    PermanentGraphicRecoveryEnabled = @{ Unit = ''; Description = 'تنبيه مستقل لكل قالب مستمر غائب وإعادته بعد دقيقة بلا رد، فقط إذا كانت طبقته فارغة ومؤكدة. الإخفاء المتعمد يلغي الاستعادة حتى عودة القالب أو إعادة تشغيل الجسر' }
     NotifyAdminsOnBlockedChat = @{ Unit = ''; Description = 'إشعار المشرفين حين يحظر الحارس محادثة تلقائيًا. والحظر يبقى صامتًا تجاه المحظور دائمًا' }
     BlockRejectedRequesters = @{ Unit = ''; Description = 'رفض الطلب يحظر المحادثة نهائيًا فلا تستطيع الطلب مجددًا. ارفع الحظر من 🚫 المحظورون' }
     JoinSecret = @{ Unit = ''; Description = 'رمز يُطلب من الغريب قبل أن يصل طلبه إلى المشرفين. اتركه فارغًا لتعطيل الرمز، وأرسل - لمسحه' }
@@ -1481,7 +1483,7 @@ $script:SettingGroupDefinitions = @(
                     'QuietHoursEnabled', 'QuietHoursStart', 'QuietHoursEnd', 'AlertMaxPerCausePerHour', 'RepeatAlertWindowHours', 'StartupStormThreshold'
                 ) }
             [pscustomobject]@{ Key = 'admins'; Label = 'ما يصل المشرفين'; Names = @(
-                    'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat', 'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks', 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange', 'NotifyAdminsOnCinegyHealth', 'HealthFailureAlertThreshold', 'OutputMonitorFailureAlertThreshold', 'OutputMonitorFlapAlertCount', 'StaleOnAirAlertHours', 'MissedEventsHours', 'NewsSheetFailureAlertAfter'
+                    'NotifyAdminsOnAccessRequest', 'NotifyAdminsOnBlockedChat', 'NotifyAdminsOnMissingGraphic', 'MissingGraphicConfirmChecks', 'PermanentGraphicRecoveryEnabled', 'NotifyAdminsOnRelayFailure', 'NotifyAdminsOnExternalChange', 'NotifyAdminsOnCinegyHealth', 'HealthFailureAlertThreshold', 'OutputMonitorFailureAlertThreshold', 'OutputMonitorFlapAlertCount', 'StaleOnAirAlertHours', 'MissedEventsHours', 'NewsSheetFailureAlertAfter'
                 ) }
             [pscustomobject]@{ Key = 'operators'; Label = 'ما يصل المشغّلين'; Names = @(
                     'NotifyOperatorsOnBlackOutput', 'TemplateNotifyRules', 'TemplateReminderFollowUpMinutes', 'NotifyOnScheduleOverwrite', 'SchedulePreNotifyMinutes', 'MojazNotifyOnFinish', 'MojazScheduleNoticeSeconds', 'NewsSheetNotifyScope'
@@ -1583,6 +1585,7 @@ $script:SettingNavigationLabels = @{
     NotifyAdminsOnBlockedChat = 'إشعار الحظر التلقائي'
     NotifyAdminsOnMissingGraphic = 'تنبيه غياب قالب دائم'
     MissingGraphicConfirmChecks = 'فحوص تأكيد الغياب'
+    PermanentGraphicRecoveryEnabled = 'استعادة القوالب المستمرة'
     BlockRejectedRequesters = 'حظر من رُفض طلبه'
     JoinSecret = 'رمز الانضمام'
     JoinSecretMaxAttempts = 'محاولات رمز الانضمام'

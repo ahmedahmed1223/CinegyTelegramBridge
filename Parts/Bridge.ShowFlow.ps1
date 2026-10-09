@@ -929,6 +929,10 @@ function Set-LayerAutoHide {
         return
     }
     $currentKey = [string](Get-JsonProp $current 'Key')
+    if (Test-PermanentGraphicAutoHideProtected -Layer $Layer -Key $currentKey) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.permanentNoTimer') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        return
+    }
     $templatePath = ''
     $store = Get-TemplateStore
     if ($store.Map.ContainsKey($currentKey)) { $templatePath = [string](Get-JsonProp $store.Map[$currentKey] 'Path') }

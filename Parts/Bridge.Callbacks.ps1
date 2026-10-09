@@ -57,6 +57,20 @@ function Get-CallbackRefusal {
         always been that a button is both not drawn and not honoured.
     #>
     param([string]$Data, [long]$ChatId, [long]$UserId)
+    $timerMatch = [regex]::Match($Data, '^(timer|tlay|timeradd):(\d+)(:|$)')
+    if ($timerMatch.Success) {
+        $timerLayer = [int]$timerMatch.Groups[2].Value
+        if (Test-PermanentGraphicAutoHideProtected -Layer $timerLayer -Key ([string](Get-JsonProp $script:OnAir[$timerLayer] 'Key'))) {
+            return (T 'flow.permanentNoTimer')
+        }
+    }
+    $templateTimerMatch = [regex]::Match($Data, '^(tplT|dur):(\d+)(:|$)')
+    if ($templateTimerMatch.Success) {
+        $timerTemplate = Get-TemplateByIndex -Index ([int]$templateTimerMatch.Groups[2].Value)
+        if ($timerTemplate -and (Test-PermanentGraphicAutoHideProtected -Key ([string]$timerTemplate.Key))) {
+            return (T 'flow.permanentNoTimer')
+        }
+    }
     if ($Data -like 'news:sheet*') {
         if (-not (Test-NewsSheetPullAccess -ChatId $ChatId -UserId $UserId)) {
             return (T 'reply.sheetPullDenied')
@@ -2471,6 +2485,11 @@ function Invoke-CallbackQuery {
         }
         'timer:*' {
             $layer = [int]((Get-CallbackArg $data 'timer:'))
+            $timerScene = $script:OnAir[$layer]
+            if (Test-PermanentGraphicAutoHideProtected -Layer $layer -Key ([string](Get-JsonProp $timerScene 'Key'))) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'flow.permanentNoTimer')
+                break
+            }
             Send-TelegramMessage -ChatId $chatId -Text (T 'cb.autoHideLayer' $layer) -ReplyMarkup (Get-DurationKeyboard -Prefix 'tlay' -Token "$layer")
             break
         }

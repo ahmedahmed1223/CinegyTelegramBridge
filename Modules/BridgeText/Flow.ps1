@@ -15,6 +15,7 @@ function Add-BridgeTextFlow {
     <# Fills the shared dictionary in place; see the sibling files. #>
     param([Parameter(Mandatory)]$Catalogue)
     $catalogue = $Catalogue
+    $catalogue['flow.permanentNoTimer'] = @{ ar = 'ℹ️ هذا قالب مستمر؛ لا يقبل مؤقّت إخفاء عاديًا. يمكنك إخفاؤه يدويًا عند الحاجة.'; en = 'ℹ️ This is a permanent graphic; ordinary auto-hide timers are disabled. You can hide it manually when needed.' }
 
     # --- Commands, scheduling, the show flow, and the output --------------
     $catalogue['cmd.enabled'] = @{ ar = 'مفعّل'; en = 'on' }

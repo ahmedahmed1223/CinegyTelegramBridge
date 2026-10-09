@@ -244,3 +244,48 @@ Describe 'Permanent graphic recovery guards' {
         Should -Invoke Invoke-ShowTemplateResult -Times 0
     }
 }
+
+Describe 'Permanent graphics cannot acquire ordinary hide timers' {
+    BeforeEach {
+        Mock Get-TemplateStore { @{ Order = @('logo','News-Ticker','urgent'); Map = @{ logo = @{ Layer = 9; LongRunning = $true }; 'News-Ticker' = @{ Layer = 8; LongRunning = $true }; urgent = @{ Layer = 7; LongRunning = $false } } } }
+        Mock Save-AutoHideQueue { $true }
+        Mock Send-TelegramMessage {}
+        Mock Get-VerifiedCinegyShowIdentity { @{ Success = $true; ActiveId = 'scene' } }
+        $script:AutoHideQueue = [Collections.Generic.List[hashtable]]::new()
+        $script:OnAir = @{ 9 = @{ Key = 'Cinegy Type Logo On'; ActiveId = 'scene'; At = (Get-Date) }; 8 = @{ Key = 'ticker'; ActiveId = 'scene'; At = (Get-Date) } }
+    }
+    It 'rejects a two-minute timer for the external logo name recorded in the incident' {
+        Set-AutoHideTimer -Layer 9 -Seconds 120 -ChatId 100 -TemplateKey 'Cinegy Type Logo On' -ActiveId scene | Should -BeFalse
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
+    It 'rejects a two-minute timer for the external ticker name recorded in the incident' {
+        Set-AutoHideTimer -Layer 8 -Seconds 120 -ChatId 100 -TemplateKey ticker -ActiveId scene | Should -BeFalse
+    }
+    It 'does not offer or save a manual layer timer for a permanent graphic' {
+        Set-LayerAutoHide -Layer 9 -Seconds 120 -ChatId 100
+        Should -Invoke Get-VerifiedCinegyShowIdentity -Times 0
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
+    It 'discards a persisted timer even when its live identity still matches' {
+        $timer = @{ Layer = 9; TemplateKey = 'Cinegy Type Logo On'; ActiveId = 'scene' }
+        (Get-AutoHideTargetDecision -Timer $timer -LiveStatus @{ Success = $true; IsOnAir = $true; ActiveId = 'scene' }).ShouldHide | Should -BeFalse
+    }
+    It 'ignores requested timed-show duration for a declared permanent template' {
+        Get-EffectiveAutoHideSeconds -Key logo -RequestedSeconds 120 | Should -Be 0
+    }
+    It 'removes a restored future timer without waiting for its deadline or touching air' {
+        Mock Write-BridgeLog {}
+        Mock Invoke-HideLayer {}
+        $script:AutoHideQueue.Add(@{ Layer = 8; TemplateKey = 'ticker'; At = [datetimeoffset]'2099-01-01' })
+        Update-AutoHideQueue -Now ([datetimeoffset]'2026-10-09T12:00:00Z')
+        $script:AutoHideQueue.Count | Should -Be 0
+        Should -Invoke Save-AutoHideQueue -Times 1 -Exactly
+        Should -Invoke Invoke-HideLayer -Times 0
+    }
+    It 'refuses timer buttons from previously delivered messages' {
+        Get-CallbackRefusal -Data 'tlay:9:120' -ChatId 100 -UserId 100 | Should -Be (T 'flow.permanentNoTimer')
+    }
+    It 'still accepts ordinary timers for temporary graphics' {
+        Set-AutoHideTimer -Layer 7 -Seconds 120 -ChatId 100 -TemplateKey urgent -ActiveId scene | Should -BeTrue
+    }
+}

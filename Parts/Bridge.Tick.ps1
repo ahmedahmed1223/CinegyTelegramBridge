@@ -223,6 +223,20 @@ function Import-AutoHideQueue {
     catch { Write-BridgeLog "Could not read autohide.json: $($_.Exception.Message)" 'WARN' }
 }
 
+function Test-PermanentGraphicAutoHideProtected {
+    # External scene names differ from registry keys (ticker / News-Ticker).
+    # For an unrecognised name, the declared permanent layer is authoritative.
+    param([int]$Layer = 0, [string]$Key = '')
+    $store = Get-TemplateStore
+    $template = if ($Key) { Get-JsonProp (Get-JsonProp $store 'Map') $Key } else { $null }
+    if ($template) { return [bool](Get-JsonProp $template 'LongRunning') }
+    if ($Layer -le 0) { return $false }
+    foreach ($graphic in @(Get-BridgePermanentGraphics)) {
+        if ([int]$graphic.Layer -eq $Layer) { return $true }
+    }
+    return $false
+}
+
 function Set-AutoHideTimer {
     param(
         [Parameter(Mandatory)][int]$Layer,
@@ -239,6 +253,7 @@ function Set-AutoHideTimer {
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
     $maximum = if ($key) { Get-EffectiveAutoHideSeconds -Key $key } else { 0 }
+    if ((Test-PermanentGraphicAutoHideProtected -Layer $Layer -Key $key) -and $maximum -le 0) { return $false }
     if ($maximum -gt 0) {
         $shownAt = [datetimeoffset]::MinValue
         if (-not $current -or -not [datetimeoffset]::TryParse([string](Get-JsonProp $current 'At'), [ref]$shownAt)) {
@@ -278,6 +293,11 @@ function Get-AutoHideTargetDecision {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerNotOnAir' $layer) }
     }
     $current = $script:OnAir[$layer]
+    $protectedKey = [string](Get-JsonProp $current 'Key')
+    if ((Test-PermanentGraphicAutoHideProtected -Layer $layer -Key $protectedKey) -and
+        (Get-EffectiveAutoHideSeconds -Key $protectedKey) -le 0) {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'flow.permanentNoTimer') }
+    }
     $timerId = [string](Get-JsonProp $Timer 'ActiveId')
     $currentId = [string](Get-JsonProp $current 'ActiveId')
     if ($timerId -and $currentId -and
@@ -403,6 +423,21 @@ function Show-TemplateAirExtensionOffer {
 
 function Update-AutoHideQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
+    # Remove legacy timers before their deadline, including timers restored
+    # after restart. The execution gate below remains the final safeguard.
+    $removedPermanentTimers = $false
+    foreach ($legacyTimer in @($script:AutoHideQueue)) {
+        $legacyLayer = [int](Get-JsonProp $legacyTimer 'Layer')
+        $legacyScene = $script:OnAir[$legacyLayer]
+        $legacyKey = if ($legacyScene) { [string](Get-JsonProp $legacyScene 'Key') } else { [string](Get-JsonProp $legacyTimer 'TemplateKey') }
+        if ((Test-PermanentGraphicAutoHideProtected -Layer $legacyLayer -Key $legacyKey) -and
+            (-not $legacyKey -or (Get-EffectiveAutoHideSeconds -Key $legacyKey) -le 0)) {
+            $script:AutoHideQueue.Remove($legacyTimer) | Out-Null
+            $removedPermanentTimers = $true
+            Write-BridgeLog "Removed ordinary auto-hide timer from permanent graphic on layer $legacyLayer." 'WARN'
+        }
+    }
+    if ($removedPermanentTimers) { Save-AutoHideQueue | Out-Null }
     $due = @($script:AutoHideQueue | Where-Object {
         [datetimeoffset]$_.At -le $Now -and
         (-not (Get-JsonProp $_ 'RetryAt') -or [datetimeoffset]$_.RetryAt -le $Now)

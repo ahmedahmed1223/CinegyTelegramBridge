@@ -97,7 +97,7 @@ function Get-MainMenuKeyboard {
             }
             $liveRow += (New-Button $hideLabel "hide:$layer" -Style danger)
             # Quick +30s extension button for live layers
-            if (Get-Setting 'EnableTimedShow') {
+            if ((Get-Setting 'EnableTimedShow') -and -not (Test-PermanentGraphicAutoHideProtected -Layer $layer -Key $onAirKey)) {
                 $pending = @($script:AutoHideQueue | Where-Object { [int]$_.Layer -eq [int]$layer })
                 $timerLabel = if ($pending.Count -gt 0) {
                     # Counted when the menu is drawn, so an old menu - or a queue
@@ -682,6 +682,7 @@ function Get-TemplatesKeyboard {
     # and 29 KB of reply_markup, which Telegram will not send.
     $qualified = @(for ($i = 0; $i -lt $store.Order.Count; $i++) {
             $candidate = $store.Map[$store.Order[$i]]
+            if ($Prefix -eq 'tplT' -and [bool](Get-JsonProp $candidate 'LongRunning')) { continue }
             if ($Category -and -not ([string]$candidate.Category).Equals($Category, [StringComparison]::OrdinalIgnoreCase)) { continue }
             if ($Query) {
                 $haystack = "$($candidate.Key) $($candidate.Description) $($candidate.Category)"

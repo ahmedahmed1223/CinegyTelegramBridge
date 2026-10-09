@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.72.1
+
+Permanent graphics reject ordinary auto-hide timers, including external Cinegy scene names and buttons in older messages. Restored ordinary timers are removed before their deadline. Manual hiding and explicitly configured safety lifetime limits remain available.
+
 ## Version 8.72.0
 
 Permanent graphic recovery is enabled by default for templates marked `longRunning`. Each confirmed missing graphic gets a separate delivered warning with Show now and Keep hidden buttons. After one minute without a reply, one recovery attempt is allowed only on a freshly verified empty layer, through the normal access and maintenance gates. Data-driven templates require values from their last successful show.

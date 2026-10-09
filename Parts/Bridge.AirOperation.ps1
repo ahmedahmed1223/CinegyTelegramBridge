@@ -486,6 +486,9 @@ function Get-EffectiveAutoHideSeconds {
         ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $isSensitive = @($sensitiveKeys | Where-Object { $_.Equals($Key, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
     $seconds = [math]::Max(0, $RequestedSeconds)
+    # Long-running intent cancels an ordinary requested timer, never a forced
+    # sensitive-template or maximum-air limit applied below.
+    if (Test-PermanentGraphicAutoHideProtected -Key $Key) { $seconds = 0 }
     $templateMaximum = 0
     $rawMaximum = Get-JsonProp (Get-Setting 'TemplateMaxAirSeconds') $Key
     if (-not [int]::TryParse([string]$rawMaximum, [ref]$templateMaximum)) { $templateMaximum = 0 }

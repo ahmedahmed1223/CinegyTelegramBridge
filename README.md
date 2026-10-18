@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.72.3
+
+Settings exports now omit options whose names contain `token`, `secret`, `password`, or `apikey`, including the join code; importing an export leaves those destination settings unchanged. Import review displays the proposed changes again and masks secret values. Integer settings are checked against the same safety bounds used by the settings controls before an import can be confirmed.
+
 ## Version 8.72.2
 
 Output monitor test stills and transient error captures (`monitor-*.jpg`, `monitor-*.err`) are now automatically swept by the snapshot retention cleaner alongside operator snapshots, and frame luminance probes ensure prompt cleanup even if analysis fails.

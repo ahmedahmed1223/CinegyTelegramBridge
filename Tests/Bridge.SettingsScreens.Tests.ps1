@@ -472,9 +472,37 @@ Describe 'Settings export and import' {
 
         $body = Get-Content -LiteralPath $script:ExportedPath -Raw
         $body | Should -Not -Match 'BotToken'
+        $body | Should -Not -Match '"JoinSecret"\s*:'
         $body | Should -Not -Match 'AllowedChatIds'
         $body | Should -Not -Match 'AdminChatIds'
         ($body | ConvertFrom-Json).Kind | Should -Be 'CinegyTelegramBridge.Settings'
+    }
+
+    It 'refuses imported numeric settings outside their declared safety bounds' -TestCases @(
+        @{ Value = 0 }
+        @{ Value = 4001 }
+    ) {
+        param($Value)
+        $path = Join-Path $TestDrive 'unsafe-range.json'
+        @{ Kind = 'CinegyTelegramBridge.Settings'; Settings = @{ MaxFieldLength = $Value } } |
+            ConvertTo-Json | Set-Content -LiteralPath $path
+        (Test-SettingsImport -Path $path).Success | Should -BeFalse
+    }
+
+    It 'shows a usable import review without exposing the join secret' {
+        Mock Receive-TelegramDocument { }
+        Mock Test-SettingsImport {
+            [pscustomobject]@{ Success = $true; Changes = @(
+                [pscustomobject]@{ Name = 'MaxFieldLength'; From = 400; To = 999 }
+                [pscustomobject]@{ Name = 'JoinSecret'; From = 'old-private-code'; To = 'new-private-code' }
+            ) }
+        }
+        Receive-SettingsImport -Document ([pscustomobject]@{ file_id = 'review' }) -ChatId 100 -UserId 100
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $Text -match 'MaxFieldLength' -and $Text -match '999' -and
+            $Text -match 'JoinSecret' -and $Text -notmatch 'private-code' -and
+            $ReplyMarkup.inline_keyboard[0][0].callback_data -eq 'cfgimport:apply'
+        }
     }
 
     It 'refuses a document that is not one of ours' {
@@ -589,8 +617,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.72.2'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.72.2'
+        $script:BridgeVersion | Should -Be '8.72.3'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.72.3'
     }
 
     It 'presents the operational setting categories in a stable order' {

@@ -14,7 +14,7 @@ function Add-BridgeTextInterp3 {
     $catalogue = $Catalogue
 
     $catalogue['cfg.exportFailed'] = @{ ar = '❌ تعذّر تجهيز ملف الإعدادات: {0}'; en = '❌ Could not prepare the settings file: {0}' }
-    $catalogue['cfg.exportNote2'] = @{ ar = '📤 نسخة الإعدادات ({0} خيارًا). لا تحتوي التوكن ولا قائمة المستخدمين.'; en = '📤 A copy of the settings ({0} options). It carries neither the token nor the user list.' }
+    $catalogue['cfg.exportNote2'] = @{ ar = '📤 نسخة الإعدادات ({0} خيارًا). لا تحتوي الخيارات ذات أسماء الأسرار ولا قائمة المستخدمين.'; en = '📤 A copy of the settings ({0} options). It omits secret-named options and the user list.' }
     $catalogue['cfg.exportAudit'] = @{ ar = '📤 تصدير الإعدادات - بواسطة {0}'; en = '📤 Settings exported - by {0}' }
     $catalogue['cfg.mustBeBool'] = @{ ar = 'الخيار {0} يجب أن يكون true أو false.'; en = 'The option {0} has to be true or false.' }
     $catalogue['cfg.mustBeInt'] = @{ ar = 'الخيار {0} يجب أن يكون رقمًا صحيحًا.'; en = 'The option {0} has to be a whole number.' }

@@ -932,14 +932,10 @@ function Get-SettingPromptText {
     return (T 'core.sendWholeNumber' $(ConvertTo-TelegramHtmlText $description) $(ConvertTo-TelegramHtmlText ([string]$current)) $(ConvertTo-TelegramHtmlText ([string]$default)))
 }
 
-function Set-Setting {
+function Assert-SettingRange {
+    # Imports commit as one transaction instead of calling Set-Setting for each
+    # key. Both paths must use the same range check before modifying state.
     param([Parameter(Mandatory)][string]$Name, $Value)
-    # The range, checked here because this is the one door: two screens, an
-    # import and a restore all arrive through it, and a rule enforced at one
-    # of them is a rule with three ways round it. Refused rather than
-    # clamped - a caller that means "as high as it goes" says so by asking
-    # for the maximum, and silently changing a number somebody typed is worse
-    # than telling them it is out of range.
     if ($script:SettingConstraints -and $script:SettingConstraints.ContainsKey($Name)) {
         $bounds = $script:SettingConstraints[$Name]
         $number = 0
@@ -948,6 +944,11 @@ function Set-Setting {
             if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) { throw (T 'core.atMost' $Name $($bounds.Maximum)) }
         }
     }
+}
+
+function Set-Setting {
+    param([Parameter(Mandatory)][string]$Name, $Value)
+    Assert-SettingRange -Name $Name -Value $Value
     $settings = Get-JsonProp $config 'Settings'
     if (-not $settings) {
         $settings = [pscustomobject]@{}

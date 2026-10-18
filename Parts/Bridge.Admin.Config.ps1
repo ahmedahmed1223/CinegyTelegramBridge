@@ -24,7 +24,12 @@ function Invoke-SettingsExport {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     $payload = [ordered]@{}
-    foreach ($name in $script:DefaultSettings.Keys) { $payload[$name] = Get-Setting $name }
+    foreach ($name in $script:DefaultSettings.Keys) {
+        # Exported documents can be forwarded; omit credentials rather than
+        # importing a redaction placeholder back over the station's secret.
+        if ($name -match 'token|secret|password|apikey') { continue }
+        $payload[$name] = Get-Setting $name
+    }
     $document = [ordered]@{
         Kind          = 'CinegyTelegramBridge.Settings'
         BridgeVersion = $script:BridgeVersion
@@ -62,6 +67,7 @@ function ConvertTo-ImportedSettingValue {
     if ($default -is [int]) {
         if ($Value -isnot [int] -and $Value -isnot [long]) { throw (T 'cfg.mustBeInt' $Name) }
         if ([long]$Value -lt 0 -or [long]$Value -gt [int]::MaxValue) { throw (T 'cfg.outOfRange' $Name) }
+        Assert-SettingRange -Name $Name -Value $Value
         return [int]$Value
     }
     if ($default -is [double]) {
@@ -71,21 +77,7 @@ function ConvertTo-ImportedSettingValue {
     }
     if ($Value -isnot [string]) { throw (T 'cfg.mustBeText' $Name) }
     if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw (T 'cfg.valueNotAllowed' $Name) }
-    # Refused here rather than at the screen: a setting can be changed by an
-    # import, by a restore, and by two screens, and a rule enforced at one
-    # door is a rule with three ways round it.
-    if ($script:SettingConstraints.ContainsKey($Name)) {
-        $bounds = $script:SettingConstraints[$Name]
-        $number = 0
-        if ([int]::TryParse([string]$Value, [ref]$number)) {
-            if ($null -ne $bounds.Minimum -and $number -lt [int]$bounds.Minimum) {
-                throw (T 'cfg.atLeast' $Name $($bounds.Minimum))
-            }
-            if ($null -ne $bounds.Maximum -and $number -gt [int]$bounds.Maximum) {
-                throw (T 'cfg.atMost' $Name $($bounds.Maximum))
-            }
-        }
-    }
+    Assert-SettingRange -Name $Name -Value $Value
     return [string]$Value
 }
 
@@ -152,7 +144,8 @@ function Receive-SettingsImport {
             return
         }
         $script:PendingSettingsImport = @{ Path = $staged; UserId = $UserId; Changes = @($validation.Changes) }
-        # Masked by name like every other settings screen. Today nothing in`r`n        # Settings is a real credential, so this is a latch for the next one`r`n        # rather than a leak being closed - the single-setting change screen`r`n        # already masks and this one did not, and a rule enforced in one of two`r`n        # equivalent places is the rule that drifts.`r`n        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $(Protect-SettingDisplayValue -Name $_.Name -Value $_.From) ← $(Protect-SettingDisplayValue -Name $_.Name -Value $_.To)" })
+        # Mask secrets before composing the review shown in chat.
+        $preview = @($validation.Changes | Select-Object -First 20 | ForEach-Object { "• $($_.Name): $(Protect-SettingDisplayValue -Name $_.Name -Value $_.From) ← $(Protect-SettingDisplayValue -Name $_.Name -Value $_.To)" })
         $more = if (@($validation.Changes).Count -gt 20) { (T 'cfg.andMoreOptions' $(@($validation.Changes).Count - 20)) } else { '' }
         Send-TelegramMessage -ChatId $ChatId -Text ((T 'cfg.importReview' $(@($validation.Changes).Count)) + ($preview -join "`n") + $more) `
             -ReplyMarkup @{ inline_keyboard = @(, @(

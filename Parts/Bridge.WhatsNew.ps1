@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.72.2'; Items = @('🧹 Output monitor test frames and error logs are now swept automatically alongside snapshots to prevent disk accumulation.') },
                 @{ Version = '8.72.1'; Items = @('🛡 Permanent logos and tickers no longer accept ordinary hide timers. Old timers are cancelled automatically, and old timer buttons explain the restriction. Manual removal and explicit safety lifetime limits remain available.') },
                 @{ Version = '8.72.0'; Items = @('🛟 Permanent graphic recovery is enabled by default: a separate warning offers Show now or Keep hidden for each missing logo or ticker. After one minute without a reply it attempts recovery only on a verified empty layer. Deliberate removal cancels recovery until the graphic returns or the bridge restarts.') },
                 @{ Version = '8.71.21'; Items = @('📊 Weekly summaries now render their formatting; notices held during quiet hours remain readable without HTML tags.') },
@@ -305,6 +306,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.72.2'; Items = @('🧹 تنظيف دوري شامل لملفات صور واختبارات مراقبة البث المؤقتة لمنع تراكمها في مجلد السجلات.') },
                 @{ Version = '8.72.1'; Items = @('🛡 الشعار والشريط المستمران لا يقبلان مؤقّت إخفاء عاديًا؛ تُلغى المؤقّتات القديمة تلقائيًا وتوضح الأزرار القديمة السبب. يبقى الإخفاء اليدوي وحدود مدة العرض الأمنية الصريحة متاحة.') },
                 @{ Version = '8.72.0'; Items = @('🛟 استعادة القوالب المستمرة مفعّلة افتراضيًا: تنبيه مستقل لكل شعار أو شريط غائب مع إظهار الآن أو إبقاء مخفيًا. بعد دقيقة بلا رد تُحاول استعادته على طبقة فارغة مؤكدة فقط. الإخفاء المتعمد يلغي الاستعادة حتى عودة القالب أو إعادة تشغيل الجسر.') },
                 @{ Version = '8.71.21'; Items = @('📊 الملخص الأسبوعي يعرض التنسيق بصورة صحيحة؛ وإذا احتُجز أثناء ساعات الهدوء يصل نصًا واضحًا بلا وسوم HTML.') },

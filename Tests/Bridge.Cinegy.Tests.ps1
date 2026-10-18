@@ -1015,6 +1015,42 @@ Describe 'Capture failure logging' {
     }
 }
 
+Describe 'Snapshot and output monitor cleanup' {
+    It 'sweeps expired monitor files as well as snapshots and leaves fresh files alone' {
+        Mock Write-BridgeLog { }
+        $oldLogDir = $script:logDir
+        $testLogDir = Join-Path $TestDrive "cleanup-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $testLogDir -Force | Out-Null
+        $script:logDir = $testLogDir
+        try {
+            $oldSnapshot = Join-Path $testLogDir 'snapshot-old.jpg'
+            $oldMonitor = Join-Path $testLogDir 'monitor-old.jpg'
+            $oldErr = Join-Path $testLogDir 'monitor-old.err'
+            $freshMonitor = Join-Path $testLogDir 'monitor-fresh.jpg'
+
+            Set-Content -LiteralPath $oldSnapshot -Value 'data'
+            Set-Content -LiteralPath $oldMonitor -Value 'data'
+            Set-Content -LiteralPath $oldErr -Value 'err'
+            Set-Content -LiteralPath $freshMonitor -Value 'fresh'
+
+            (Get-Item -LiteralPath $oldSnapshot).LastWriteTime = (Get-Date).AddHours(-2)
+            (Get-Item -LiteralPath $oldMonitor).LastWriteTime = (Get-Date).AddHours(-2)
+            (Get-Item -LiteralPath $oldErr).LastWriteTime = (Get-Date).AddHours(-2)
+            (Get-Item -LiteralPath $freshMonitor).LastWriteTime = (Get-Date)
+
+            Update-SnapshotCleanup -Force
+
+            Test-Path -LiteralPath $oldSnapshot | Should -BeFalse
+            Test-Path -LiteralPath $oldMonitor | Should -BeFalse
+            Test-Path -LiteralPath $oldErr | Should -BeFalse
+            Test-Path -LiteralPath $freshMonitor | Should -BeTrue
+        }
+        finally {
+            $script:logDir = $oldLogDir
+        }
+    }
+}
+
 Describe 'RTMP destination is scheme-locked' {
     <#
         ffmpeg resolves its output protocol from the URL scheme itself, so a

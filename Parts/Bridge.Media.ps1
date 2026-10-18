@@ -619,8 +619,9 @@ function Update-OutputBlackWatchdog {
         $script:OutputMonitorFailureAlerted = $false
         $script:LastCaptureErrorDetail = ''
     }
-    $first = Get-BridgeFrameLuminance -Path $firstPath
-    Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue
+    $first = $null
+    try { $first = Get-BridgeFrameLuminance -Path $firstPath }
+    finally { Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue }
     if ($null -eq $first) { return }
 
     if ($first -gt $threshold) {
@@ -655,8 +656,9 @@ function Complete-OutputBlackConfirmation {
     # which on a source that needs ten seconds to open is worse.
     $secondPath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
     if (-not $secondPath) { return }
-    $second = Get-BridgeFrameLuminance -Path $secondPath
-    Remove-Item -LiteralPath $secondPath -Force -ErrorAction SilentlyContinue
+    $second = $null
+    try { $second = Get-BridgeFrameLuminance -Path $secondPath }
+    finally { Remove-Item -LiteralPath $secondPath -Force -ErrorAction SilentlyContinue }
     if ($null -eq $second -or $second -gt $threshold) {
         Write-BridgeLog "Output monitor: first frame dark (luma $first) but second was not (luma $second) - treated as a transition"
         return
@@ -840,8 +842,9 @@ function Update-SnapshotCleanup {
     $cutoff = (Get-Date).AddMinutes(-$retention)
     $active = @($script:SnapshotJobs | ForEach-Object { $_.OutPath })
     $removed = 0
-    foreach ($pattern in @('snapshot-*.jpg', 'snapshot-*.err')) {
-        foreach ($file in @(Get-ChildItem -Path $logDir -Filter $pattern -File -ErrorAction SilentlyContinue)) {
+    $dir = if ($script:logDir) { $script:logDir } else { $logDir }
+    foreach ($pattern in @('snapshot-*.jpg', 'snapshot-*.err', 'monitor-*.jpg', 'monitor-*.err')) {
+        foreach ($file in @(Get-ChildItem -Path $dir -Filter $pattern -File -ErrorAction SilentlyContinue)) {
             if ($active -contains $file.FullName) { continue }          # capture in flight
             if ($file.LastWriteTime -ge $cutoff) { continue }           # still fresh / cached
             Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
@@ -849,7 +852,7 @@ function Update-SnapshotCleanup {
         }
     }
     # Drop the stale legacy shared error log from earlier versions.
-    $legacy = Join-Path $logDir 'snapshot-stderr.log'
+    $legacy = Join-Path $dir 'snapshot-stderr.log'
     if (Test-Path $legacy) { Remove-Item $legacy -Force -ErrorAction SilentlyContinue }
 
     if ($removed -gt 0) { Write-BridgeLog "Snapshot cleanup removed $removed stale file(s)" }

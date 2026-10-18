@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.72.2
+
+Output monitor test stills and transient error captures (`monitor-*.jpg`, `monitor-*.err`) are now automatically swept by the snapshot retention cleaner alongside operator snapshots, and frame luminance probes ensure prompt cleanup even if analysis fails.
+
 ## Version 8.72.1
 
 Permanent graphics reject ordinary auto-hide timers, including external Cinegy scene names and buttons in older messages. Restored ordinary timers are removed before their deadline. Manual hiding and explicitly configured safety lifetime limits remain available.

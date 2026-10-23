@@ -62,8 +62,8 @@ public sealed class ReportsForm : Form
         RightToLeft = RightToLeft.Yes;
         RightToLeftLayout = true;
 
-        var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
-        var headerHint = new Label { Dock = DockStyle.Top, Height = 18, Text = "من ملفات هذا الجهاز نفسها — عرض فقط.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
+        var header = new Panel { Dock = DockStyle.Top, Height = 68, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
+        var headerHint = new Label { Dock = DockStyle.Top, Height = 24, Text = "من ملفات هذا الجهاز نفسها — عرض فقط.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
         var headerTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "📊 تقارير التشغيل", Font = Theme.SectionHeading, ForeColor = Theme.Text };
         header.Controls.Add(headerHint);
         header.Controls.Add(headerTitle);
@@ -112,6 +112,7 @@ public sealed class ReportsForm : Form
         var closeButton = Theme.QuietButton("إغلاق");
         closeButton.Width = 100;
         closeButton.DialogResult = DialogResult.Cancel;
+        closeButton.Click += (_, _) => Close();
         buttonFlow.Controls.AddRange(new Control[] { refreshButton, closeButton });
         buttons.Controls.Add(buttonFlow);
 
@@ -122,6 +123,21 @@ public sealed class ReportsForm : Form
         Controls.Add(header);
 
         CancelButton = closeButton;
+        Tag = (Action)(() =>
+        {
+            BackColor = _usagePage.BackColor = _healthPage.BackColor = switchRow.BackColor = Theme.Background;
+            ForeColor = headerTitle.ForeColor = liveHealthHeading.ForeColor = Theme.Text;
+            header.BackColor = buttons.BackColor = chartScroll.BackColor = Theme.Surface;
+            headerHint.ForeColor = usageHint.ForeColor = healthHint.ForeColor = _usageFootnote.ForeColor = Theme.TextMuted;
+            foreach (Control tile in statsFlow.Controls)
+            {
+                tile.BackColor = Theme.Surface;
+                foreach (var label in tile.Controls.OfType<Label>()) label.ForeColor = Theme.Text;
+            }
+            Reload();
+            _chart.Invalidate();
+            Theme.ApplyTitleBar(Handle);
+        });
         Load += (_, _) => Reload();
         Disposed += (_, _) => _tips.Dispose();
     }

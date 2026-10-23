@@ -25,6 +25,8 @@ public sealed class OnAirForm : Form
     private readonly ListView _list;
     private readonly Label _emptyLabel;
     private readonly Label _readStatus;
+    private readonly TextBox _copyDetails;
+    private bool _updatingRows;
     private DateTime? _lastRead;
     private readonly System.Windows.Forms.Timer _refreshTimer;
 
@@ -46,8 +48,8 @@ public sealed class OnAirForm : Form
         RightToLeft = RightToLeft.Yes;
         RightToLeftLayout = true;
 
-        var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
-        var headerHint = new Label { Dock = DockStyle.Top, Height = 18, Text = "يُقرأ من سجل الجسر كل 5 ثوانٍ — عرض فقط، ولا زرّ هواء هنا.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
+        var header = new Panel { Dock = DockStyle.Top, Height = 68, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
+        var headerHint = new Label { Dock = DockStyle.Top, Height = 24, Text = "يُقرأ من سجل الجسر كل 5 ثوانٍ — عرض فقط، ولا زرّ هواء هنا.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
         var headerTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "📡 على الهواء الآن", Font = Theme.SectionHeading, ForeColor = Theme.Text };
         header.Controls.Add(headerHint);
         header.Controls.Add(headerTitle);
@@ -57,6 +59,7 @@ public sealed class OnAirForm : Form
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
+            MultiSelect = false,
             HideSelection = false,
             BackColor = Theme.Surface,
             ForeColor = Theme.Text,
@@ -70,6 +73,17 @@ public sealed class OnAirForm : Form
         _list.Columns.Add("منذ", 110);
         _list.Columns.Add("الناشر", 130);
         _list.Columns.Add("المصدر", 80);
+        _list.AccessibleName = "المشاهد المسجلة على الهواء";
+        _list.SizeChanged += (_, _) => ResizeColumns();
+        _copyDetails = new TextBox
+        {
+            Dock = DockStyle.Bottom, Height = 88, Multiline = true, ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical, WordWrap = true, Font = Theme.Ui,
+            BackColor = Theme.SurfaceAlt, ForeColor = Theme.Text,
+            AccessibleName = "النص الكامل للمشهد المحدد",
+            PlaceholderText = "حدّد مشهدًا لقراءة نصّه الكامل ونسخه."
+        };
+        _list.SelectedIndexChanged += (_, _) => { if (!_updatingRows && !Disposing && !IsDisposed) UpdateCopyDetails(); };
 
         _emptyLabel = new Label
         {
@@ -89,6 +103,7 @@ public sealed class OnAirForm : Form
         var closeButton = Theme.QuietButton("إغلاق");
         closeButton.Width = 100;
         closeButton.DialogResult = DialogResult.Cancel;
+        closeButton.Click += (_, _) => Close();
         buttonFlow.Controls.AddRange(new Control[] { refreshButton, closeButton });
         buttons.Controls.Add(buttonFlow);
 
@@ -96,11 +111,24 @@ public sealed class OnAirForm : Form
             Text = "لم تُقرأ الحالة بعد.", Font = Theme.UiSmall, ForeColor = Theme.Pending };
         Controls.Add(_list);
         Controls.Add(_emptyLabel);
+        Controls.Add(_copyDetails);
         Controls.Add(_readStatus);
         Controls.Add(buttons);
         Controls.Add(header);
 
         CancelButton = closeButton;
+        Tag = (Action)(() =>
+        {
+            BackColor = Theme.Background;
+            ForeColor = Theme.Text;
+            header.BackColor = buttons.BackColor = Theme.Surface;
+            headerHint.ForeColor = _emptyLabel.ForeColor = Theme.TextMuted;
+            headerTitle.ForeColor = _list.ForeColor = Theme.Text;
+            _list.BackColor = Theme.Surface;
+            _emptyLabel.BackColor = Theme.Background;
+            if (IsHandleCreated) Theme.ApplyTitleBar(Handle);
+            Reload();
+        });
 
         _refreshTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         _refreshTimer.Tick += (_, _) => Reload();
@@ -123,25 +151,43 @@ public sealed class OnAirForm : Form
             var layers = ReadLayerNames(ReadBridgeSetting("LayerNames"));
             var aliases = ReadAliases(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "user-aliases.json")));
 
+            var topLayer = _list.TopItem?.Tag is OnAirRow topRow ? topRow.Layer : (int?)null;
+            _updatingRows = true;
             _list.BeginUpdate();
             try
             {
-            _list.Items.Clear();
+            // One scene owns each layer (Set-OnAirLayerRecord replaces that layer).
+            // Keep native items alive so polling does not discard selection/focus.
+            var liveLayers = rows.Select(r => r.Layer).ToHashSet();
+            foreach (var obsolete in _list.Items.Cast<ListViewItem>().Where(i => i.Tag is OnAirRow r && !liveLayers.Contains(r.Layer)).ToArray())
+                _list.Items.Remove(obsolete);
             foreach (var row in rows.OrderBy(r => r.Layer))
             {
                 var layerName = layers.TryGetValue(row.Layer, out var nick) ? $" · {nick}" : "";
                 var template = names.TryGetValue(row.Key, out var friendly) ? friendly : row.Key;
                 var since = row.AtLocal is null ? "—" : "منذ " + MainForm.FormatSpan(DateTime.Now - row.AtLocal.Value);
-                var item = new ListViewItem($"الطبقة {row.Layer}{layerName}");
-                item.SubItems.Add(template);
-                item.SubItems.Add(row.AirCopy);
-                item.SubItems.Add(since);
-                item.SubItems.Add(ResolveActor(row.UserId, aliases));
-                item.SubItems.Add(string.Equals(row.Source, "bridge", StringComparison.OrdinalIgnoreCase) ? "الجسر" : "خارجي");
-                _list.Items.Add(item);
+                var item = _list.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Tag is OnAirRow previous && previous.Layer == row.Layer);
+                var cells = new[] { $"الطبقة {row.Layer}{layerName}", template, row.AirCopy, since,
+                    ResolveActor(row.UserId, aliases), string.Equals(row.Source, "bridge", StringComparison.OrdinalIgnoreCase) ? "الجسر" : "خارجي" };
+                if (item is null)
+                {
+                    item = new ListViewItem(cells);
+                    var index = _list.Items.Cast<ListViewItem>().Count(i => i.Tag is OnAirRow existing && existing.Layer < row.Layer);
+                    _list.Items.Insert(index, item);
+                }
+                else
+                    for (var column = 0; column < cells.Length; column++)
+                        if (item.SubItems[column].Text != cells[column]) item.SubItems[column].Text = cells[column];
+                item.Tag = row;
+            }
+            if (topLayer is int layer)
+            {
+                var top = _list.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Tag is OnAirRow r && r.Layer == layer);
+                if (top is not null) _list.TopItem = top;
             }
             }
-            finally { _list.EndUpdate(); }
+            finally { _list.EndUpdate(); _updatingRows = false; }
+            UpdateCopyDetails();
             _lastRead = DateTime.Now;
             var heartbeat = MainForm.ParseLiveness(ReadSharedFile(Path.Combine(_bridgeRoot, "logs", "bridge.liveness"))).Stamp;
             _readStatus.Text = ReadStatusText(true, _lastRead, heartbeat, DateTime.UtcNow);
@@ -156,6 +202,31 @@ public sealed class OnAirForm : Form
             _readStatus.Text = ReadStatusText(false, _lastRead, null, DateTime.UtcNow);
             _readStatus.ForeColor = Theme.Pending;
         }
+    }
+
+    private void UpdateCopyDetails()
+    {
+        var text = _list.SelectedItems.Count > 0 && _list.SelectedItems[0].Tag is OnAirRow row ? row.AirCopy : "";
+        // Do not reset the operator's text selection/scroll on an unchanged poll.
+        if (!string.Equals(_copyDetails.Text, text, StringComparison.Ordinal)) _copyDetails.Text = text;
+    }
+
+    internal static int[] GetColumnWidths(int availableWidth)
+    {
+        var width = Math.Max(6, availableWidth);
+        var weights = new[] { 15, 19, 26, 14, 16, 10 };
+        var columns = weights.Select(weight => Math.Max(1, width * weight / 100)).ToArray();
+        columns[2] += width - columns.Sum();
+        return columns;
+    }
+
+    private void ResizeColumns()
+    {
+        // Native list teardown raises SizeChanged; touching Columns there can
+        // recreate a disappearing handle and hang window disposal.
+        if (Disposing || IsDisposed || _list.Disposing || _list.IsDisposed) return;
+        var widths = GetColumnWidths(_list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
+        for (var column = 0; column < widths.Length; column++) _list.Columns[column].Width = widths[column];
     }
 
     private string? ReadBridgeSetting(string name)

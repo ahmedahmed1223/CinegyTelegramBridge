@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -214,8 +214,8 @@ public sealed class SettingsForm : Form
         }
 
         // ---- header --------------------------------------------------------
-        var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
-        var headerHint = new Label { Dock = DockStyle.Top, Height = 18, Text = "هنا فقط ما لا يمكن تعديله من داخل البوت. باقي الإعدادات في إعدادات تيليجرام.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
+        var header = new Panel { Dock = DockStyle.Top, Height = 68, BackColor = Theme.Surface, Padding = new Padding(18, 10, 18, 10) };
+        var headerHint = new Label { Dock = DockStyle.Top, Height = 24, Text = "هنا فقط ما لا يمكن تعديله من داخل البوت. باقي الإعدادات في إعدادات تيليجرام.", Font = Theme.UiSmall, ForeColor = Theme.TextMuted };
         var headerTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "إعدادات الجسر (config.json)", Font = Theme.SectionHeading, ForeColor = Theme.Text };
         header.Controls.Add(headerHint);
         header.Controls.Add(headerTitle);

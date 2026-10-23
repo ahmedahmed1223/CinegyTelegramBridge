@@ -45,7 +45,7 @@ internal static class Theme
     public static Color LogNormal => IsDark ? Color.FromArgb(206, 206, 214) : Color.FromArgb(36, 38, 43);
     public static Color LogError => IsDark ? Color.FromArgb(255, 122, 116) : Color.FromArgb(185, 38, 30);
     public static Color LogWarning => IsDark ? Color.FromArgb(240, 186, 88) : Color.FromArgb(148, 98, 8);
-    public static Color LogDebug => IsDark ? Color.FromArgb(126, 126, 138) : Color.FromArgb(132, 138, 148);
+    public static Color LogDebug => IsDark ? Color.FromArgb(140, 140, 152) : Color.FromArgb(106, 112, 122);
     public static Color LogManager => IsDark ? Color.FromArgb(112, 178, 255) : Color.FromArgb(28, 105, 216);
     public static Color LogTimestamp => IsDark ? Color.FromArgb(155, 155, 170) : Color.FromArgb(92, 98, 110);
     public static Color LogLevel => IsDark ? Color.FromArgb(183, 149, 255) : Color.FromArgb(103, 63, 178);
@@ -63,7 +63,9 @@ internal static class Theme
     // of GDI handles over a long session.
     public static readonly Font Ui = new("Segoe UI", 9.75f);
     public static readonly Font UiBold = new("Segoe UI Semibold", 9.75f);
-    public static readonly Font UiSmall = new("Segoe UI", 8.5f);
+    // Operational facts must remain readable alongside the main controls;
+    // hierarchy comes from muted colour rather than shrinking Arabic text.
+    public static readonly Font UiSmall = new("Segoe UI", 9.75f);
     public static readonly Font Title = new("Segoe UI Semibold", 16f);
     public static readonly Font SectionHeading = new("Segoe UI Semibold", 10.5f);
     public static readonly Font Mono = new("Segoe UI", 10f);

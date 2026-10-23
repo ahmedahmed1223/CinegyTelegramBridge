@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.72.4
+
+BridgeManager keeps live/paused log reading visible beside the filter, counts incoming matching lines while paused, and offers a jump back to the latest retained output. On-air monitoring preserves row selection during refresh and exposes full selectable scene text. Monitoring and reports open alongside the main window, while larger secondary text and clearer debug colors improve readability.
+
 ## Version 8.72.3
 
 Settings exports now omit options whose names contain `token`, `secret`, `password`, or `apikey`, including the join code; importing an export leaves those destination settings unchanged. Import review displays the proposed changes again and masks secret values. Integer settings are checked against the same safety bounds used by the settings controls before an import can be confirmed.

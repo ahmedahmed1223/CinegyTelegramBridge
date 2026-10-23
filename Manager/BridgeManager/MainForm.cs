@@ -129,6 +129,10 @@ public sealed class MainForm : Form
     private readonly Label _pathLabel;
     private readonly Label _zoomLabel;
     private readonly CheckBox _followTailCheck;
+    private readonly Button _latestButton;
+    private int _unseenLogLines;
+    private Form? _onAirWindow;
+    private Form? _reportsWindow;
     // One width for every button on the action row. Seven hand-set widths
     // between 118 and 140 read as seven different kinds of thing; the eye
     // groups by shape before it reads a word.
@@ -359,8 +363,8 @@ public sealed class MainForm : Form
         settingsButton.Click += (_, _) => OpenSettings();
         logsButton.Click += (_, _) => OpenLogsFolder();
         clearButton.Click += (_, _) => ClearOutput();
-        onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new OnAirForm(BridgeRoot); form.ShowDialog(this); } };
-        reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) { using var form = new ReportsForm(BridgeRoot, () => { PruneRecentErrors(); return _recentErrors.Count; }); form.ShowDialog(this); } };
+        onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) ShowMonitor(ref _onAirWindow, () => new OnAirForm(BridgeRoot)); };
+        reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) ShowMonitor(ref _reportsWindow, () => new ReportsForm(BridgeRoot, () => { PruneRecentErrors(); return _recentErrors.Count; })); };
 
         // Keep start/stop/restart together. Secondary actions may wrap within
         // their own group, so resizing never mixes a clear button into the
@@ -413,7 +417,7 @@ public sealed class MainForm : Form
         _activityLabel = new Label
         {
             Dock = DockStyle.Top,
-            Height = 26,
+            Height = 32,
             Font = Theme.UiSmall,
             ForeColor = Theme.TextMuted,
             BackColor = Theme.Background,
@@ -432,7 +436,7 @@ public sealed class MainForm : Form
         _preferencesWarning.Tag = (Action)(() => _preferencesWarning.ForeColor = Theme.Pending);
 
         // ---- filter row, sitting directly on top of what it filters --------
-        _filterBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
+        _filterBar = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
         var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false };
         _filterBox = Theme.Input(300);
         // Saying that a time works here, because it always did and nothing
@@ -446,6 +450,15 @@ public sealed class MainForm : Form
         _filterBox.Margin = new Padding(0, 5, 0, 0);
         filterFlow.Controls.AddRange(new Control[] { _filterBox, _errorsOnlyCheck });
         _filterBar.Controls.Add(filterFlow);
+        filterFlow.Dock = DockStyle.Top;
+        filterFlow.AutoSize = true;
+        filterFlow.WrapContents = true;
+        _latestButton = Theme.QuietButton("انتقل إلى الأحدث");
+        _latestButton.AutoSize = true;
+        _latestButton.Click += (_, _) => _followTailCheck.Checked = true;
+        filterFlow.Controls.Add(_followTailCheck);
+        filterFlow.Controls.Add(_latestButton);
+        UpdateLogFollowState();
 
         _output = new RichTextBox
         {
@@ -475,11 +488,13 @@ public sealed class MainForm : Form
         // ---- status bar: the facts nobody should have to hunt for ----------
         // A plain panel rather than a StatusStrip: the strip renderers fight a
         // dark palette and win.
-        _statusBar = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = Theme.Surface, Padding = new Padding(14, 5, 14, 5) };
-        var statusFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false, WrapContents = false };
+        _statusBar = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, Padding = new Padding(14, 5, 14, 5) };
+        var statusFlow = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = true };
         _lineCountLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
         _livenessLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0) };
         _pathLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 0, 0) };
+        _pathLabel.AutoEllipsis = true;
+        statusFlow.SizeChanged += (_, _) => _pathLabel.MaximumSize = new Size(Math.Max(1, statusFlow.ClientSize.Width), 0);
         // The shortcuts are named here, not only in code: Ctrl+Plus/Minus/0
         // existed nowhere on screen, which is the same as not having them.
         _zoomLabel = new Label { AutoSize = true, ForeColor = Theme.TextMuted, Font = Theme.UiSmall, Margin = new Padding(0, 2, 24, 0), Cursor = Cursors.Hand };
@@ -500,6 +515,8 @@ public sealed class MainForm : Form
         {
             _settings.FollowTail = _followTailCheck.Checked;
             SaveManagerSettings();
+            if (_followTailCheck.Checked) RenderAll();
+            UpdateLogFollowState();
             LogEvent($"تتبع الجديد في السجل: {(_followTailCheck.Checked ? "مفعّل" : "معطّل")}.");
         };
         _filterTimer = new System.Windows.Forms.Timer { Interval = 250 };
@@ -675,10 +692,12 @@ public sealed class MainForm : Form
         _zoomLabel.ForeColor = Theme.TextMuted;
         _stateDetail.ForeColor = Theme.TextMuted;
         Theme.Apply(this);
+        foreach (var monitor in OwnedForms) Theme.Apply(monitor);
         ResumeLayout();
         Theme.ApplyTitleBar(Handle);
         SetStatus(_running);
-        RenderAll();
+        if (_followTailCheck.Checked) RenderAll();
+        UpdateLogFollowState();
     }
 
     internal static FlowLayoutPanel CreateUtilityActions() => new()
@@ -968,7 +987,7 @@ public sealed class MainForm : Form
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(MakeSwitchGroupLabel("🖥  هذه النافذة"));
-        foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _followTailCheck, _darkModeCheck })
+        foreach (var box in new[] { _autoClearCheck, _wordWrapCheck, _darkModeCheck })
         {
             box.MinimumSize = new Size(MenuSwitchWidth, 0);
             menu.Items.Add(new ToolStripControlHost(box) { AutoSize = true, Margin = new Padding(14, 3, 14, 3) });
@@ -1977,6 +1996,9 @@ public sealed class MainForm : Form
             ApplyHealthLine(line);
             if (_lines.Count > MaxOutputLines) trimNeeded = true;
             if (!ShouldShow(line, filter, errorsOnly)) continue;
+            // Keep the visible text and selection untouched while reading history;
+            // ingestion and health monitoring continue in the bounded backing list.
+            if (!_followTailCheck.Checked) { _unseenLogLines++; continue; }
             // The pane is holding "لا سطر يطابق…" and a line just arrived that
             // does. Appending under the note would leave the note contradicting
             // the line right below it, so the pane is rebuilt once on the way
@@ -1989,7 +2011,8 @@ public sealed class MainForm : Form
         if (trimNeeded)
         {
             _lines.RemoveRange(0, _lines.Count - (MaxOutputLines * 3 / 4));
-            RenderAll();
+            if (_followTailCheck.Checked) RenderAll();
+            else { UpdateLogFollowState(); UpdateStatusBar(); }
             return;
         }
 
@@ -2006,14 +2029,38 @@ public sealed class MainForm : Form
         {
             var summary = $"--- خفّض المدير ضغط السجل: حُذفت {droppedInformational} {ArabicCountWord(droppedInformational, "رسالة", "رسالتان", "رسائل", "رسالة")} معلومات و{droppedPriority} {ArabicCountWord(droppedPriority, "رسالة", "رسالتان", "رسائل", "رسالة")} تحذير/خطأ قديمة من العرض. السجل الكامل محفوظ في bridge.log. ---";
             _lines.Add(summary);
-            if (ShouldShow(summary, filter, errorsOnly)) { WriteLine(summary); appended = true; }
+            if (ShouldShow(summary, filter, errorsOnly))
+            {
+                if (_followTailCheck.Checked) { WriteLine(summary); appended = true; }
+                else _unseenLogLines++;
+            }
         }
         if (appended && _followTailCheck.Checked)
         {
             _output.SelectionStart = _output.TextLength;
             _output.ScrollToCaret();
         }
+        UpdateLogFollowState();
         UpdateStatusBar();
+    }
+
+    internal static string LogFollowText(bool following, int unseen) => following
+        ? "تتبع مباشر"
+        : $"قراءة السابق — الجديد: {Math.Max(0, unseen)}";
+
+    private void UpdateLogFollowState()
+    {
+        _followTailCheck.Text = LogFollowText(_followTailCheck.Checked, _unseenLogLines);
+        _followTailCheck.AccessibleName = _followTailCheck.Text;
+        _latestButton.Visible = !_followTailCheck.Checked;
+    }
+
+    private void ShowMonitor(ref Form? window, Func<Form> create)
+    {
+        if (window is null || window.IsDisposed) window = create();
+        if (!window.Visible) window.Show(this);
+        if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
+        window.Activate();
     }
 
     internal static bool PriorityComesFirst(long? prioritySequence, long? informationalSequence) =>
@@ -2070,6 +2117,8 @@ public sealed class MainForm : Form
 
     private void RenderAll()
     {
+        _unseenLogLines = 0;
+        UpdateLogFollowState();
         // Trimmed once here rather than inside ShouldShow's hot loop below,
         // which used to re-trim the same string per line across up to
         // MaxOutputLines retained lines on every redraw.

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.72.4'; Items = @('🖥 The manager shows live/paused log reading and a jump-to-latest button. On-air text can be read in full without losing selection on refresh; monitoring and reports stay open alongside the log. Status text is larger and debug lines clearer.') },
                 @{ Version = '8.72.3'; Items = @('🛡 Settings exports omit secret-named options, including the join code. Import review works again, masks secrets, and rejects whole-number settings outside their allowed ranges.') },
                 @{ Version = '8.72.2'; Items = @('🧹 Output monitor test frames and error logs are now swept automatically alongside snapshots to prevent disk accumulation.') },
                 @{ Version = '8.72.1'; Items = @('🛡 Permanent logos and tickers no longer accept ordinary hide timers. Old timers are cancelled automatically, and old timer buttons explain the restriction. Manual removal and explicit safety lifetime limits remain available.') },
@@ -307,6 +308,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.72.4'; Items = @('🖥 مدير الجسر يوضح التتبع المباشر وقراءة السابق مع زر للعودة إلى الأحدث. اقرأ نص المشهد كاملًا دون فقد التحديد عند التحديث، وافتح مراقبة الهواء والتقارير بجانب السجل. نص الحالة أكبر وأسطر التشخيص أوضح.') },
                 @{ Version = '8.72.3'; Items = @('🛡 تصدير الإعدادات يستثني الخيارات ذات أسماء الأسرار، ومنها رمز الانضمام. معاينة الاستيراد تعمل مجددًا وتخفي الأسرار، وترفض القيم الصحيحة خارج حدودها المسموحة.') },
                 @{ Version = '8.72.2'; Items = @('🧹 تنظيف دوري شامل لملفات صور واختبارات مراقبة البث المؤقتة لمنع تراكمها في مجلد السجلات.') },
                 @{ Version = '8.72.1'; Items = @('🛡 الشعار والشريط المستمران لا يقبلان مؤقّت إخفاء عاديًا؛ تُلغى المؤقّتات القديمة تلقائيًا وتوضح الأزرار القديمة السبب. يبقى الإخفاء اليدوي وحدود مدة العرض الأمنية الصريحة متاحة.') },

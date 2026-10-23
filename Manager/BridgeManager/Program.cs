@@ -1,4 +1,4 @@
-﻿using System.Security.AccessControl;
+using System.Security.AccessControl;
 using System.Text;
 using System.Threading;
 
@@ -450,6 +450,51 @@ internal static class SelfTest
             OnAirForm.ReadAliases("{\"7275359265\":\"ابو حسام\"}")["7275359265"] == "ابو حسام");
         Check("a torn alias file means raw ids", OnAirForm.ReadAliases("{oops").Count == 0);
 
+        Check("live log state is explicit", MainForm.LogFollowText(true, 23) == "تتبع مباشر");
+        Check("paused log names unseen arrivals", MainForm.LogFollowText(false, 23).EndsWith("23", StringComparison.Ordinal));
+        Check("paused log cannot display a negative arrival count", MainForm.LogFollowText(false, -1).EndsWith("0", StringComparison.Ordinal));
+        Check("all narrow and wide on-air column layouts fit without negative widths",
+            Enumerable.Range(6, 1195).All(width =>
+            {
+                var columns = OnAirForm.GetColumnWidths(width);
+                return columns.Length == 6 && columns.All(column => column > 0) && columns.Sum() == width;
+            }));
+
+        var airFixture = Path.Combine(Path.GetTempPath(), "BridgeManager-air-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(airFixture, "logs"));
+        try
+        {
+            var fullCopy = string.Join("\r\n", Enumerable.Repeat("عاجل — نص طويل يجب أن يبقى كاملًا عند التحديث", 20));
+            var airPath = Path.Combine(airFixture, "logs", "onair.json");
+            void WriteAirFixture(bool removeSelected = false, bool addEarlier = false) => File.WriteAllText(airPath,
+                System.Text.Json.JsonSerializer.Serialize(new { Scenes = Enumerable.Range(addEarlier ? 0 : 1, addEarlier ? 31 : 30)
+                    .Where(layer => !removeSelected || layer != 15)
+                    .Select(layer => new { Layer = layer, Key = "fixture", AirCopy = layer == 15 ? fullCopy : "نص " + layer, UserId = 1 }) }));
+            WriteAirFixture();
+            using var airView = new OnAirForm(airFixture);
+            var airList = airView.Controls.OfType<ListView>().Single();
+            var details = airView.Controls.OfType<TextBox>().Single();
+            _ = airList.Handle;
+            var reloadAir = typeof(OnAirForm).GetMethod("Reload", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            reloadAir.Invoke(airView, null);
+            var selectedAir = airList.Items.Cast<ListViewItem>().Single(item => item.Tag is OnAirForm.OnAirRow row && row.Layer == 15);
+            selectedAir.Selected = true;
+            selectedAir.Focused = true;
+            airList.TopItem = airList.Items[10];
+            var topAir = airList.TopItem;
+            Check("on-air details expose the complete selectable copy", details.ReadOnly && details.Multiline && string.Equals(details.Text, fullCopy, StringComparison.Ordinal));
+            details.Select(2, 12);
+            WriteAirFixture(addEarlier: true);
+            reloadAir.Invoke(airView, null);
+            Check("polling retains the selected on-air row when an earlier layer appears", airList.SelectedItems.Count == 1 && ReferenceEquals(airList.SelectedItems[0], selectedAir));
+            Check("polling retains the top visible layer", ReferenceEquals(airList.TopItem, topAir));
+            Check("unchanged copy polling preserves the reader's text selection", details.SelectionStart == 2 && details.SelectionLength == 12);
+            WriteAirFixture(removeSelected: true);
+            reloadAir.Invoke(airView, null);
+            Check("a removed scene clears its detail copy", details.Text.Length == 0 && airList.SelectedItems.Count == 0);
+        }
+        finally { Directory.Delete(airFixture, recursive: true); }
+
         // One noun, four numbers: the rule behind every corrected screen line.
         Check("one takes the singular", MainForm.ArabicCountWord(1, "خطأ", "خطآن", "أخطاء", "خطأً") == "خطأ");
         Check("two takes the dual", MainForm.ArabicCountWord(2, "خطأ", "خطآن", "أخطاء", "خطأً") == "خطآن");
@@ -484,6 +529,10 @@ internal static class SelfTest
         foreach (var dark in new[] { false, true })
         {
             Theme.SetMode(dark);
+            var debugForeground = Luminance(Theme.LogDebug);
+            var debugBackground = Luminance(Theme.LogBackground);
+            Check("debug log text meets normal-text contrast in both palettes",
+                (Math.Max(debugForeground, debugBackground) + .05) / (Math.Min(debugForeground, debugBackground) + .05) >= 4.5);
             foreach (var fill in new Func<Color>[] { () => Theme.Running, () => Theme.Stopped, () => Theme.Pending, () => Theme.Accent })
             {
                 using var auditButton = Theme.PrimaryButton("Test", fill);
@@ -495,6 +544,7 @@ internal static class SelfTest
             }
         }
         Theme.SetMode(false);
+        Check("supporting UI text is at least 9.75 points", Theme.UiSmall.SizeInPoints >= 9.75f);
         var reportErrorCount = 1;
         var reportFixture = Path.Combine(Path.GetTempPath(), "BridgeManager-report-" + Guid.NewGuid().ToString("N"));
         using (var liveReport = new ReportsForm(reportFixture, () => reportErrorCount))

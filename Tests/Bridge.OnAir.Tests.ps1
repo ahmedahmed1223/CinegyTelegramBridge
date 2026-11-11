@@ -1521,6 +1521,8 @@ Describe 'Main menu on-air priority' {
     BeforeEach {
         $script:OnAir = @{}
         $script:AutoHideQueue = @()
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = [datetime]::MinValue
+        $script:RuntimeState.Monitoring.LastCinegyStateFailedCount = 0
         Mock Test-Admin { $false }
     }
     AfterAll { $script:OnAir = @{} }
@@ -1766,6 +1768,14 @@ Describe 'Main menu on-air priority' {
         $script:OnAir.Clear()
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = [datetime]::MinValue
         Get-MainMenuIntro | Should -Match 'تعذّر تأكيد الحالة'
+    }
+
+    It 'marks the fallback status unconfirmed if a recent layer read failed' {
+        $script:RuntimeState.Monitoring.LastCinegyStateSuccess = Get-Date
+        $script:RuntimeState.Monitoring.LastCinegyStateFailedCount = 1
+
+        Get-MainMenuIntro | Should -Match 'تعذّر تأكيد الحالة'
+        @(Get-MainMenuIntroBlocks)[0].text | Should -Match 'تعذّر تأكيد الحالة'
     }
 
     It 'names the operator the screen was built for' {

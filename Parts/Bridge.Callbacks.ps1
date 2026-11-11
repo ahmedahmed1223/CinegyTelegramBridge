@@ -103,7 +103,8 @@ function Invoke-CallbackQuery {
     $data = [string](Get-JsonProp $CallbackQuery 'data')
     # Set per press and cleared by the next press and by every tick, so it
     # can never outlive the reply it is for.
-    $script:RefreshTarget = if ($msgObj -and ((Test-RefreshButtonPress -Message $msgObj -Data $data) -or (Test-RedrawInPlacePress -Data $data))) {
+    $script:RefreshTarget = if ($msgObj -and -not (Get-JsonProp $msgObj 'widget') -and
+        ((Test-RefreshButtonPress -Message $msgObj -Data $data) -or (Test-RedrawInPlacePress -Data $data))) {
         @{ ChatId = $chatId; MessageId = [int](Get-JsonProp $msgObj 'message_id') }
     } else { $null }
 
@@ -148,6 +149,20 @@ function Invoke-CallbackQuery {
     # name is learned only for people this bridge works for - and a group
     # press should cost nothing at all before it is turned away.
     Update-UserNameFromTelegram -From $fromObj -UserId $userId -ChatId $chatId | Out-Null
+
+    if ($data -match '^(hide|timer):(\d{1,9}):menu$') {
+        $menuAction = $Matches[1]
+        $menuLayer = [int]$Matches[2]
+        $menuCard = $script:MainMenuWidgets[$chatId]
+        $fingerprint = if ($menuCard) { $menuCard.LayerFingerprints[$menuLayer] } else { '' }
+        if (-not $fingerprint -or $menuCard.ExpiresAt -le (Get-Date) -or
+            $menuCard.MessageId -ne [int](Get-JsonProp $msgObj 'message_id') -or
+            $fingerprint -cne (Get-LayerRemovalFingerprint -Layer $menuLayer)) {
+            Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id -Text (T 'airwidget.menuActionExpired') -Alert
+            return
+        }
+        $data = "${menuAction}:$menuLayer"
+    }
 
     $refusal = Get-CallbackRefusal -Data $data -ChatId $chatId -UserId $userId
     if ($refusal) {

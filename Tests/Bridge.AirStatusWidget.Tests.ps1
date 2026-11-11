@@ -4,6 +4,8 @@
 Describe 'Telegram air monitoring card' {
     BeforeEach {
         $script:AirStatusWidgets = @{}
+        $script:MainMenuWidgets = @{}
+        $script:AirStatusWidgetUnavailable = $false
         $script:AirStatusWidgetUpdate = $null
         $script:TelegramOutboxNotBefore = [datetime]::MinValue
         $script:RuntimeState = New-BridgeRuntimeState
@@ -139,5 +141,89 @@ Describe 'Telegram air monitoring card' {
         Should -Invoke Invoke-RestMethod -Exactly -Times 1 -ParameterFilter {
             [Uri]::UnescapeDataString([string]$Uri) -like '*allowed_updates=[[]"message","callback_query","widget_query"[]]'
         }
+    }
+
+    It 'puts a live header and the existing menu buttons in one message for a regular operator' {
+        Mock Test-StatusViewer { $false }
+        Mock Send-TelegramRichMessage { $true }
+        Show-MainMenuScreen -ChatId 101 -UserId 101 -Intro 'Welcome'
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
+            $Uri -like '*/sendWidget' -and $Body.html -match 'Welcome' -and
+                $Body.caption -match 'Urgent' -and $Body.reply_markup -match 'menu:status'
+        }
+        Should -Invoke Send-TelegramRichMessage -Exactly -Times 0
+        $script:MainMenuWidgets[[long]101].MessageId | Should -Be 76
+        $script:AirStatusWidgets.Count | Should -Be 0
+    }
+
+    It 'keeps the current menu screen as the fallback if Telegram refuses the live header' {
+        Mock Invoke-BridgeTelegramRequest { [pscustomobject]@{ Success = $false; StatusCode = 404 } }
+        Mock Send-TelegramRichMessage { $false }
+        Show-MainMenuScreen -ChatId 101 -UserId 101 -Intro 'Welcome'
+
+        Should -Invoke Send-TelegramMessage -Exactly -Times 1 -ParameterFilter {
+            $Text -match 'Welcome' -and $Text -match 'Urgent' -and
+                @($ReplyMarkup.inline_keyboard | ForEach-Object { $_ } | ForEach-Object callback_data) -contains 'menu:status'
+        }
+        $script:MainMenuWidgets.Count | Should -Be 0
+    }
+
+    It 'updates the menu header even without a status-viewer role and never replaces its keyboard' {
+        Mock Test-StatusViewer { $false }
+        Show-MainMenuScreen -ChatId 101 -UserId 101
+        $openedAt = $script:MainMenuWidgets[[long]101].ExpiresAt.AddMinutes(-30)
+        $script:OnAir[4].Key = 'Next'
+        Update-AirStatusWidgets -Now $openedAt.AddSeconds(6)
+
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/editMessageWidgetData' -and $Request.Body.message_id -eq 76 -and
+                $Request.Body.chat_data -match 'Next' -and -not $Request.Body.ContainsKey('reply_markup')
+        }
+        $query = @{ id = 'menu-refresh'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
+            message_id = 76; type = @{ type = 'data' }; data = 'refresh' }
+        Invoke-AirStatusWidgetQuery -Query $query -Now $openedAt.AddSeconds(7)
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
+            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'menu-refresh' -and $Body.data -match 'Next'
+        }
+    }
+
+    It 'continues updating both the main menu and the detailed card in the same chat' {
+        Mock Invoke-BridgeTelegramRequest {
+            [pscustomobject]@{ Success = $true; Response = @{ ok = $true; result = @{ message_id = 77 } } }
+        } -ParameterFilter { $Uri -like '*/sendWidget' -and $Body.reply_markup -match 'menu:more' }
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
+        $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101 -Compact
+        Send-MainMenuWidget -ChatId 101 -UserId 101 -Keyboard $keyboard -Now $script:widgetNow | Should -BeTrue
+
+        $script:OnAir[4].Key = 'Next'
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(5)
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(6)
+
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter { $Request.Body.message_id -eq 76 }
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter { $Request.Body.message_id -eq 77 }
+    }
+
+    It 'opens a menu action without trying to edit a widget as a text screen' {
+        Invoke-CallbackQuery @{ id = 'more'; from = @{ id = 101 }; message = @{
+                chat = @{ id = 101; type = 'private' }; message_id = 76; widget = @{ html = '<p>Menu</p>' }
+            }; data = 'menu:more' }
+
+        $script:RefreshTarget | Should -BeNullOrEmpty
+        Should -Invoke Send-TelegramMessage -Exactly -Times 1 -ParameterFilter { $Text -eq (T 'menu.moreTitle') }
+    }
+
+    It 'refuses an old hide button if the live header now shows a different scene' {
+        $script:OnAir[4].At = $script:widgetNow
+        Show-MainMenuScreen -ChatId 101 -UserId 101
+        $script:OnAir[4].Key = 'Replacement'
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Invoke-HideLayer { throw 'a stale press must not reach playout' }
+        Invoke-CallbackQuery @{ id = 'old-hide'; from = @{ id = 101 }; message = @{
+                chat = @{ id = 101; type = 'private' }; message_id = 76
+            }; data = 'hide:4:menu' }
+
+        Should -Invoke Invoke-HideLayer -Exactly -Times 0
+        Should -Invoke Confirm-TelegramCallback -Exactly -Times 1 -ParameterFilter { $CallbackQueryId -eq 'old-hide' -and $Alert }
     }
 }

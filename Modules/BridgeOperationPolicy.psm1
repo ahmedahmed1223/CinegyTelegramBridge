@@ -55,7 +55,7 @@ function Get-BridgeUpdateScope {
     if ($data -match '^(menu:hideall|hideall:)$') {
         return [pscustomobject]@{ Kind = 'global'; Layer = $null }
     }
-    if ($data -match '^(?:hide|hidego|exit|exitgo|showgo):(?<layer>\d+)$') {
+    if ($data -match '^(?:hide|hidego|exit|exitgo|showgo):(?<layer>\d+)(?::menu)?$') {
         return [pscustomobject]@{ Kind = 'layer'; Layer = [int]$Matches.layer }
     }
     return [pscustomobject]@{ Kind = 'unknown'; Layer = $null }

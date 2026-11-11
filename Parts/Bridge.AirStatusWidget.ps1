@@ -1,19 +1,23 @@
 #requires -Version 7
 
 function Get-AirStatusWidgetHtml {
+    param([switch]$ForMenu, [string]$Intro = '', [long]$UserId = 0)
     # Telegram runs this document inside its Widget SDK, without external assets.
     # Only translations are embedded here. Scene names enter the DOM as text.
     $copy = [ordered]@{
         direction = if ((Get-BridgeLanguage) -eq 'ar') { 'rtl' } else { 'ltr' }
-        title = T 'airwidget.title'
+        title = if ($ForMenu) { T 'airwidget.menuTitle' } else { T 'airwidget.title' }
+        intro = Format-AirStatusWidgetField -Text (ConvertFrom-TelegramHtmlText $Intro) -MaximumLength 128
+        channel = if ($ForMenu) { Format-AirStatusWidgetField -Text (T 'kb.engineChannel' $config.AirServerAddress $config.AirChannelNumber) -MaximumLength 112 } else { '' }
+        actor = if ($ForMenu) { "👤 $(Format-AirStatusWidgetField -Text (Format-UserAuditActor -UserId $UserId) -MaximumLength 96)" } else { '' }
         refresh = T 'airwidget.refresh'
         waiting = T 'airwidget.waiting'
-        denied = T 'airwidget.denied'
-        failed = T 'airwidget.refreshFailed'
+        denied = if ($ForMenu) { T 'airwidget.menuActionExpired' } else { T 'airwidget.denied' }
+        failed = if ($ForMenu) { T 'airwidget.menuRefreshFailed' } else { T 'airwidget.refreshFailed' }
         expired = T 'airwidget.expired'
         unconfirmed = T 'airwidget.unconfirmed'
         empty = T 'airwidget.empty'
-        more = T 'airwidget.more' '{0}'
+        more = if ($ForMenu) { T 'airwidget.menuMore' '{0}' } else { T 'airwidget.more' '{0}' }
         checked = T 'airwidget.checked' '{0}'
         healthy = T 'airwidget.healthy'
         unhealthy = T 'airwidget.unhealthy'
@@ -24,16 +28,22 @@ function Get-AirStatusWidgetHtml {
 <style>
   h3, p { margin: 0 0 8px; }
   .detail { color: var(--tg-theme-hint-color); font-size: .9em; }
-  #layers p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .row { display: flex; align-items: flex-start; gap: 8px; border-top: 1px solid var(--tg-theme-section-separator-color); padding: 5px 0; }
+  .number { color: var(--tg-theme-accent-text-color); font-weight: bold; min-width: 1.25em; }
+  .scene { min-width: 0; }
+  .scene p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 0; }
   #layers { margin: 10px 0; }
 </style>
 <section id="card">
+  <p id="intro" hidden></p>
   <h3 id="title"></h3>
   <p id="health"></p>
   <p id="checked" class="detail"></p>
   <p id="freshness"></p>
   <div id="layers"></div>
   <p id="more" class="detail"></p>
+  <p id="channel" class="detail" hidden></p>
+  <p id="actor" class="detail" hidden></p>
   <button id="refresh" type="button"></button>
   <p id="feedback" class="detail" hidden></p>
 </section>
@@ -65,8 +75,24 @@ function Get-AirStatusWidgetHtml {
     layers.textContent = '';
     if (state && state.rows.length) {
       for (const row of state.rows) {
-        const item = document.createElement('p');
-        item.textContent = `${row.layer} · ${row.name}`;
+        const item = document.createElement('div');
+        item.className = 'row';
+        const number = document.createElement('span');
+        number.className = 'number';
+        number.textContent = String(row.layer);
+        const scene = document.createElement('div');
+        scene.className = 'scene';
+        const name = document.createElement('p');
+        name.textContent = row.name;
+        scene.appendChild(name);
+        if (row.detail) {
+          const detail = document.createElement('p');
+          detail.className = 'detail';
+          detail.textContent = row.detail;
+          scene.appendChild(detail);
+        }
+        item.appendChild(number);
+        item.appendChild(scene);
         layers.appendChild(item);
       }
     }
@@ -81,6 +107,10 @@ function Get-AirStatusWidgetHtml {
   }
 
   element('card').dir = copy.direction;
+  for (const id of ['intro', 'channel', 'actor']) {
+    fill(id, copy[id]);
+    element(id).hidden = !copy[id];
+  }
   fill('title', copy.title);
   fill('refresh', copy.refresh);
   element('refresh').addEventListener('click', async () => {
@@ -110,8 +140,15 @@ function Get-AirStatusWidgetHtml {
     return $html.Replace('WIDGET_COPY', ($copy | ConvertTo-Json -Compress -EscapeHandling EscapeHtml))
 }
 
+function Format-AirStatusWidgetField {
+    param([AllowEmptyString()][string]$Text, [int]$MaximumLength)
+    $clean = ($Text -replace '[\p{Cc}\u202A-\u202E\u2066-\u2069]', ' ').Trim()
+    if ($clean.Length -le $MaximumLength) { return $clean }
+    return $clean.Substring(0, (Get-SafeTextPrefixLength -Text $clean -MaximumCodeUnits $MaximumLength)) + '…'
+}
+
 function Get-AirStatusWidgetData {
-    param([Parameter(Mandatory)][datetime]$ExpiresAt)
+    param([Parameter(Mandatory)][datetime]$ExpiresAt, [switch]$ForMenu)
     $monitoring = $script:RuntimeState.Monitoring
     $snapshot = [ordered]@{
         expires = ([datetimeoffset]$ExpiresAt).ToUnixTimeMilliseconds()
@@ -129,11 +166,31 @@ function Get-AirStatusWidgetData {
             $snapshot.freshUntil = ([datetimeoffset]$lastRead.AddSeconds($staleAfter)).ToUnixTimeMilliseconds()
         }
     }
-    foreach ($layer in ($script:OnAir.Keys | Sort-Object | Select-Object -First 5)) {
-        $sceneName = ([string](Get-JsonProp $script:OnAir[$layer] 'Key') -replace '[\p{Cc}\u202A-\u202E\u2066-\u2069]', ' ').Trim()
-        if ($sceneName.Length -gt 48) { $sceneName = $sceneName.Substring(0, (Get-SafeTextPrefixLength -Text $sceneName -MaximumCodeUnits 48)) + '…' }
+    $maximumRows = if ($ForMenu) { 4 } else { 5 }
+    foreach ($layer in ($script:OnAir.Keys | Sort-Object | Select-Object -First $maximumRows)) {
+        $record = $script:OnAir[$layer]
+        $sceneName = Format-AirStatusWidgetField -Text ([string](Get-JsonProp $record 'Key')) -MaximumLength 48
         if (-not $sceneName) { $sceneName = '—' }
-        $snapshot.rows += @{ layer = [int]$layer; name = $sceneName }
+        $row = @{ layer = [int]$layer; name = $sceneName }
+        if ($ForMenu) {
+            $started = Get-JsonProp $record 'At'
+            $operator = switch ([string](Get-JsonProp $record 'Source')) {
+                'cinegy' { T 'onair.external' }
+                'BotTest' { T 'onair.templateTest' }
+                default {
+                    $actorId = [long](Get-JsonProp $record 'UserId')
+                    if ($actorId -gt 0) { Get-UserDisplayName -UserId $actorId }
+                }
+            }
+            $details = @()
+            if ($started -is [datetime]) {
+                if ($started.Kind -eq [DateTimeKind]::Utc) { $started = $started.ToLocalTime() }
+                $details += (T 'airwidget.menuSince' $started.ToString('HH:mm'))
+            }
+            if ($operator) { $details += (Format-AirStatusWidgetField -Text $operator -MaximumLength 28) }
+            if ($details.Count -gt 0) { $row.detail = $details -join ' · ' }
+        }
+        $snapshot.rows += $row
         $snapshot.hidden--
     }
     $json = $snapshot | ConvertTo-Json -Compress
@@ -144,6 +201,80 @@ function Get-AirStatusWidgetData {
         $json = $snapshot | ConvertTo-Json -Compress
     }
     return $json
+}
+
+function Send-AirStatusWidgetMessage {
+    param([long]$ChatId, [string]$Html, [string]$Data, [string]$Caption, [hashtable]$Keyboard)
+    if ($script:AirStatusWidgetUnavailable) { return 0 }
+    $body = @{
+        chat_id = $ChatId
+        html = $Html
+        chat_data = $Data
+        caption = $Caption
+        protect_content = $true
+        allow_queries = $true
+        reply_markup = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $Keyboard
+    }
+    # A retry after an ambiguous timeout could create two menus.
+    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendWidget" -Method Post -Body $body `
+        -TimeoutSec ([Math]::Min(3, (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)))
+    $response = Get-JsonProp $request 'Response'
+    $messageId = [int](Get-JsonProp (Get-JsonProp $response 'result') 'message_id')
+    if ($request.Success -and (Get-JsonProp $response 'ok') -and $messageId -gt 0) { return $messageId }
+
+    $statusCode = [int](Get-JsonProp $request 'StatusCode')
+    if ($statusCode -eq 404 -and (Get-JsonProp $request 'Error') -match 'not found') { $script:AirStatusWidgetUnavailable = $true }
+    Write-BridgeLog "Air status widget sendWidget failed for chat $ChatId (HTTP $statusCode); using the existing screen" 'WARN'
+    return 0
+}
+
+function Send-MainMenuWidget {
+    param([long]$ChatId, [long]$UserId, [string]$Intro = '', [hashtable]$Keyboard, [datetime]$Now = (Get-Date))
+    if ($script:AirStatusWidgetUnavailable -or $Now -lt $script:TelegramOutboxNotBefore -or $ChatId -le 0 -or $ChatId -ne $UserId -or
+        -not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return $false }
+
+    $expiresAt = $Now.AddMinutes(30)
+    $data = Get-AirStatusWidgetData -ExpiresAt $expiresAt -ForMenu
+    $snapshot = ConvertFrom-Json -InputObject $data
+    # Clients without widgets read the caption. Keep it short so clients that
+    # render the panel do not also show a second copy of every layer row.
+    $captionLines = @((T 'airwidget.menuCaption'))
+    if ($snapshot.freshUntil -le ([datetimeoffset]$Now).ToUnixTimeMilliseconds()) { $captionLines += (T 'airwidget.unconfirmed') }
+    elseif ($snapshot.rows.Count -eq 0) { $captionLines += (T 'airwidget.empty') }
+    if ($snapshot.rows.Count -gt 0) {
+        $firstLayer = $snapshot.rows[0]
+        $captionLines += "$($firstLayer.layer) · $($firstLayer.name)"
+        $otherLayers = $snapshot.rows.Count - 1 + $snapshot.hidden
+        if ($otherLayers -gt 0) { $captionLines += (T 'airwidget.menuMore' $otherLayers) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Intro)) {
+        $captionLines = @((Format-AirStatusWidgetField -Text (ConvertFrom-TelegramHtmlText $Intro) -MaximumLength 128)) + $captionLines
+    }
+    # The live panel and the keyboard have separate Telegram lifetimes. Pin
+    # layer actions to what their labels actually named when the menu opened.
+    $fingerprints = @{}
+    $widgetRows = @()
+    foreach ($keyboardRow in $Keyboard.inline_keyboard) {
+        $widgetRow = @()
+        foreach ($button in $keyboardRow) {
+            if ((Get-JsonProp $button 'callback_data') -match '^(?:hide|timer):(\d+)$') {
+                $layer = [int]$Matches[1]
+                if (-not $fingerprints.ContainsKey($layer)) { $fingerprints[$layer] = Get-LayerRemovalFingerprint -Layer $layer }
+                $button = $button.Clone()
+                $button.callback_data += ':menu'
+            }
+            $widgetRow += $button
+        }
+        $widgetRows += , $widgetRow
+    }
+    $html = Get-AirStatusWidgetHtml -ForMenu -Intro $Intro -UserId $UserId
+    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html $html -Data $data -Caption ($captionLines -join "`n") -Keyboard @{ inline_keyboard = $widgetRows }
+    if ($messageId -le 0) { return $false }
+    $script:MainMenuWidgets[$ChatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = $data
+        NextAt = $Now.AddSeconds(5); ForMenu = $true; LayerFingerprints = $fingerprints }
+    $script:LastTelegramMessageId = $messageId
+    if ($script:RefreshTarget -and $script:RefreshTarget.ChatId -eq $ChatId) { Clear-RefreshTarget }
+    return $true
 }
 
 function Show-AirStatusWidget {
@@ -163,28 +294,13 @@ function Show-AirStatusWidget {
     if ($snapshot.hidden -gt 0) { $lines += (T 'airwidget.more' $snapshot.hidden) }
     $textSnapshot = $lines -join "`n"
     $textStatusKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'airwidget.textStatus') 'menu:fullstatus'))) }
-    $body = @{
-        chat_id = $ChatId
-        html = Get-AirStatusWidgetHtml
-        chat_data = $data
-        caption = (T 'airwidget.caption') + "`n" + (T 'airwidget.initialSnapshot' $lastRead)
-        protect_content = $true
-        allow_queries = $true
-        reply_markup = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $textStatusKeyboard
-    }
-    # One attempt for this optional view. Retrying a send after an ambiguous
-    # timeout can create two cards, and the operator already has the text view.
-    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendWidget" -Method Post -Body $body `
-        -TimeoutSec ([Math]::Min(3, (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)))
-    $response = Get-JsonProp $request 'Response'
-    $messageId = [int](Get-JsonProp (Get-JsonProp $response 'result') 'message_id')
-    if ($request.Success -and (Get-JsonProp $response 'ok') -and $messageId -gt 0) {
-        $script:AirStatusWidgets[$ChatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = $data; NextAt = $Now.AddSeconds(5) }
+    $caption = (T 'airwidget.caption') + "`n" + (T 'airwidget.initialSnapshot' $lastRead)
+    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html (Get-AirStatusWidgetHtml) -Data $data -Caption $caption -Keyboard $textStatusKeyboard
+    if ($messageId -gt 0) {
+        $script:AirStatusWidgets[$ChatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = $data; NextAt = $Now.AddSeconds(5); ForMenu = $false }
         return
     }
 
-    $statusCode = [int](Get-JsonProp $request 'StatusCode')
-    Write-BridgeLog "Air status widget sendWidget failed for chat $ChatId (HTTP $statusCode); sending text snapshot" 'WARN'
     Send-TelegramMessage -ChatId $ChatId -Text ((T 'airwidget.textFallback') + "`n" + $textSnapshot) -ReplyMarkup $textStatusKeyboard
 }
 
@@ -197,13 +313,14 @@ function Invoke-AirStatusWidgetQuery {
     $chatId = [long](Get-JsonProp $chat 'id')
     $userId = [long](Get-JsonProp (Get-JsonProp $Query 'from') 'id')
     $messageId = [int](Get-JsonProp $Query 'message_id')
-    $card = $script:AirStatusWidgets[$chatId]
+    $card = $script:MainMenuWidgets[$chatId]
+    if (-not $card -or $card.MessageId -ne $messageId) { $card = $script:AirStatusWidgets[$chatId] }
     if ($card -and $card.ExpiresAt -gt $Now -and $card.MessageId -eq $messageId -and
         $chatId -eq $userId -and (Get-JsonProp $chat 'type') -ceq 'private' -and
         (Get-JsonProp (Get-JsonProp $Query 'type') 'type') -ceq 'data' -and
         (Get-JsonProp $Query 'data') -ceq 'refresh' -and
-        (Test-Authorized -ChatId $chatId -UserId $userId) -and (Test-StatusViewer -ChatId $chatId -UserId $userId)) {
-        $body.data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt
+        (Test-Authorized -ChatId $chatId -UserId $userId) -and ($card.ForMenu -or (Test-StatusViewer -ChatId $chatId -UserId $userId))) {
+        $body.data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt -ForMenu:$card.ForMenu
     }
     # An empty answer tells an expired or unauthorised card that it cannot refresh.
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerWidgetQuery" -Method Post -Body $body `
@@ -213,12 +330,15 @@ function Invoke-AirStatusWidgetQuery {
 
 function Update-AirStatusWidgets {
     param([datetime]$Now = (Get-Date))
-    if ($script:AirStatusWidgets.Count -eq 0 -and -not $script:AirStatusWidgetUpdate) { return }
-    foreach ($chatId in @($script:AirStatusWidgets.Keys)) {
-        if ($script:AirStatusWidgets[$chatId].ExpiresAt -le $Now -or
-            -not (Test-Authorized -ChatId $chatId -UserId $chatId) -or
-            -not (Test-StatusViewer -ChatId $chatId -UserId $chatId)) {
-            $script:AirStatusWidgets.Remove($chatId)
+    if ($script:AirStatusWidgets.Count -eq 0 -and $script:MainMenuWidgets.Count -eq 0 -and -not $script:AirStatusWidgetUpdate) { return }
+    foreach ($registry in @($script:AirStatusWidgets, $script:MainMenuWidgets)) {
+        foreach ($chatId in @($registry.Keys)) {
+            $card = $registry[$chatId]
+            if ($card.ExpiresAt -le $Now -or
+                -not (Test-Authorized -ChatId $chatId -UserId $chatId) -or
+                (-not $card.ForMenu -and -not (Test-StatusViewer -ChatId $chatId -UserId $chatId))) {
+                $registry.Remove($chatId)
+            }
         }
     }
     $update = $script:AirStatusWidgetUpdate
@@ -226,7 +346,8 @@ function Update-AirStatusWidgets {
         $request = Receive-BridgeTelegramRequestWorker -Worker $update.Worker
         if (-not $request) { return }
         $script:AirStatusWidgetUpdate = $null
-        $card = $script:AirStatusWidgets[$update.ChatId]
+        $registry = if ($update.ForMenu) { $script:MainMenuWidgets } else { $script:AirStatusWidgets }
+        $card = $registry[$update.ChatId]
         $statusCode = [int](Get-JsonProp $request 'StatusCode')
         if ($statusCode -eq 429) {
             $retryAt = $Now.AddMilliseconds([Math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
@@ -240,7 +361,7 @@ function Update-AirStatusWidgets {
             }
             elseif ($statusCode -eq 429) { $card.NextAt = $script:TelegramOutboxNotBefore }
             elseif ($statusCode -in @(400, 401, 403, 404)) {
-                $script:AirStatusWidgets.Remove($update.ChatId)
+                $registry.Remove($update.ChatId)
                 Write-BridgeLog "Air status widget editMessageWidgetData stopped for chat $($update.ChatId) (HTTP $statusCode)" 'DEBUG'
             }
             else { $card.NextAt = $Now.AddSeconds(30) }
@@ -250,12 +371,13 @@ function Update-AirStatusWidgets {
 
     # Keep one edit in flight. The polling thread can keep servicing the air
     # clock, and a retry re-reads the newest state rather than replaying an old one.
-    $due = @($script:AirStatusWidgets.GetEnumerator() | Where-Object { $_.Value.NextAt -le $Now } |
+    $entries = @($script:AirStatusWidgets.GetEnumerator()) + @($script:MainMenuWidgets.GetEnumerator())
+    $due = @($entries | Where-Object { $_.Value.NextAt -le $Now } |
         Sort-Object { $_.Value.NextAt })
     foreach ($entry in $due) {
         $card = $entry.Value
         $card.NextAt = $Now.AddSeconds(5)
-        $data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt
+        $data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt -ForMenu:$card.ForMenu
         if ([string]::Equals($data, $card.LastData, [StringComparison]::Ordinal)) { continue }
         $worker = Start-BridgeTelegramRequestWorker -Request @{
             Uri = "$apiBase/editMessageWidgetData"
@@ -263,7 +385,7 @@ function Update-AirStatusWidgets {
             TimeoutSec = Get-SettingInt 'TelegramRequestTimeoutSeconds' 1
             Body = @{ chat_id = $entry.Key; message_id = $card.MessageId; chat_data = $data }
         }
-        $script:AirStatusWidgetUpdate = @{ Worker = $worker; ChatId = $entry.Key; MessageId = $card.MessageId; Data = $data }
+        $script:AirStatusWidgetUpdate = @{ Worker = $worker; ChatId = $entry.Key; MessageId = $card.MessageId; Data = $data; ForMenu = $card.ForMenu }
         break
     }
 }

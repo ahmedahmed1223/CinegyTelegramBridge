@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.74.0
+
+The main menu now shows a live HTML status panel above its buttons. It displays Cinegy health, the last successful layer read, and compact layer rows with the template, start time, and operator when known. The latest menu updates in place for up to 30 minutes or until the bridge restarts. If Telegram cannot send the widget, the rich or text menu offers a Refresh button.
+
+The panel updates independently of the administrator's full-status card. A layer button on a widget menu is tied to the scene it showed when the menu opened. If the scene changes, reopen the menu before using that layer button.
+
 ## Version 8.73.0
 
 Administrators and the owner can open **Live air status card** from **Full status** in their private Telegram chat. The native HTML widget shows active templates on monitored layers, Cinegy health, and the time of the last successful layer read. It updates in place and has a **Refresh now** button that retrieves the latest reading held by the bridge.

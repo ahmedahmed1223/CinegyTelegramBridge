@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.73.0'
+$script:BridgeVersion = '8.74.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1095,7 +1095,9 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 # Video Chat's RTMP ingestion endpoint.
 $script:RuntimeState = New-BridgeRuntimeState
 $script:AirStatusWidgets = @{}
+$script:MainMenuWidgets = @{}
 $script:AirStatusWidgetUpdate = $null
+$script:AirStatusWidgetUnavailable = $false
 # Older Bot API servers ignore unrecognised names in allowed_updates. Include
 # widget_query from the first poll so a quick tap on the first card is admitted.
 $script:TelegramAllowedUpdates = [Uri]::EscapeDataString('["message","callback_query","widget_query"]')

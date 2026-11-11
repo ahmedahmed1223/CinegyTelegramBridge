@@ -15,6 +15,12 @@ function Add-BridgeTextAdmin {
     # --- Readiness, handover, health -------------------------------------
     $catalogue['airwidget.open'] = @{ ar = '📺 بطاقة الهواء المباشرة'; en = '📺 Live air status card' }
     $catalogue['airwidget.title'] = @{ ar = 'مراقبة الهواء'; en = 'On-air monitoring' }
+    $catalogue['airwidget.menuTitle'] = @{ ar = 'حالة الهواء'; en = 'On-air status' }
+    $catalogue['airwidget.menuSince'] = @{ ar = 'على الهواء منذ {0}'; en = 'On air since {0}' }
+    $catalogue['airwidget.menuMore'] = @{ ar = '+ {0} طبقات أخرى في «الحالة»'; en = '+ {0} more in Status' }
+    $catalogue['airwidget.menuCaption'] = @{ ar = 'حالة الهواء عند فتح القائمة'; en = 'On-air snapshot when this menu opened' }
+    $catalogue['airwidget.menuActionExpired'] = @{ ar = 'تغيّرت الطبقة أو انتهت صلاحية هذه القائمة. افتح القائمة من جديد.'; en = 'The layer changed or this menu expired. Open the menu again.' }
+    $catalogue['airwidget.menuRefreshFailed'] = @{ ar = 'تعذّر التحديث. حاول مجددًا أو أعد فتح القائمة.'; en = 'Refresh failed. Try again or reopen the menu.' }
     $catalogue['airwidget.refresh'] = @{ ar = 'تحديث الآن'; en = 'Refresh now' }
     $catalogue['airwidget.waiting'] = @{ ar = 'جارٍ جلب أحدث قراءة…'; en = 'Getting the latest reading…' }
     $catalogue['airwidget.denied'] = @{ ar = 'انتهت صلاحية هذه البطاقة. افتح بطاقة جديدة من الحالة الكاملة.'; en = 'This card is no longer active. Open a new one from Full status.' }

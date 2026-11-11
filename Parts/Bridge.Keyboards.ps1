@@ -314,6 +314,13 @@ function Get-BridgeReadinessSummary {
     return [pscustomobject]@{ Ready = $ready; Text = (T 'kb.readinessLine' $label $telegram $cinegy $diskFree) }
 }
 
+function Get-MainMenuCinegyFreshness {
+    $monitoring = $script:RuntimeState.Monitoring
+    $lastRead = if ($monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $monitoring.LastCinegyStateSuccess } else { $null }
+    return Get-CinegyStateFreshness -LastSuccessfulAt $lastRead -FailedCount $monitoring.LastCinegyStateFailedCount `
+        -StaleAfterSeconds (Get-SettingInt 'CinegyStateStaleSeconds' 45)
+}
+
 function Get-MainMenuIntroBlocks {
     <#
         The menu screen as a table, one row per live layer.
@@ -332,9 +339,7 @@ function Get-MainMenuIntroBlocks {
         only hide a live graphic for no gain.
     #>
     param([long]$UserId = 0)
-    $freshness = Get-CinegyStateFreshness `
-        -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
-        -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
+    $freshness = Get-MainMenuCinegyFreshness
     $age = switch ($freshness.State) {
         'connected' { (T 'kb.checkedAgo' $($freshness.AgeSeconds)) }
         'stale' { (T 'kb.lastCheckAgo' $($freshness.AgeSeconds)) }
@@ -415,9 +420,7 @@ function Get-MainMenuIntro {
         Telegram reject the whole menu with a 400, which reads on the phone
         as the menu button doing nothing.
     #>
-    $freshness = Get-CinegyStateFreshness `
-        -LastSuccessfulAt $(if ($script:RuntimeState.Monitoring.LastCinegyStateSuccess -gt [datetime]::MinValue) { $script:RuntimeState.Monitoring.LastCinegyStateSuccess } else { $null }) `
-        -StaleAfterSeconds ([math]::Max(1, (Get-SettingInt 'CinegyStateCheckSeconds' 1) * 3))
+    $freshness = Get-MainMenuCinegyFreshness
     # How old the claim is matters as much as the claim: a stale 'on air' that
     # looks identical to a fresh one is what let an exited scene go unnoticed.
     $age = switch ($freshness.State) {

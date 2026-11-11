@@ -85,6 +85,9 @@ function Get-CallbackRefusal {
             -and -not (Get-Setting 'AllowOperatorsRestoreNews')) {
         return (T 'reply.newsRestoreAdminOnly')
     }
+    if ($Data -eq 'menu:airwidget' -and -not (Test-StatusViewer -ChatId $ChatId -UserId $UserId)) {
+        return (T 'reply.checkAdminOwner')
+    }
     return ''
 }
 
@@ -1432,6 +1435,7 @@ function Invoke-CallbackQuery {
             if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }
             break
         }
+        'menu:airwidget' { Show-AirStatusWidget -ChatId $chatId -UserId $userId; break }
         'menu:health' {
             # Backward-compatible callback for messages created before 3.0.
             if (Test-CallbackStatusViewer -ChatId $chatId -UserId $userId) { Invoke-FullStatusCommand -ChatId $chatId -UserId $userId }

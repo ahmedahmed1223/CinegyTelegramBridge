@@ -13,6 +13,25 @@ function Add-BridgeTextAdmin {
     $catalogue = $Catalogue
 
     # --- Readiness, handover, health -------------------------------------
+    $catalogue['airwidget.open'] = @{ ar = '📺 بطاقة الهواء المباشرة'; en = '📺 Live air status card' }
+    $catalogue['airwidget.title'] = @{ ar = 'مراقبة الهواء'; en = 'On-air monitoring' }
+    $catalogue['airwidget.refresh'] = @{ ar = 'تحديث الآن'; en = 'Refresh now' }
+    $catalogue['airwidget.waiting'] = @{ ar = 'جارٍ جلب أحدث قراءة…'; en = 'Getting the latest reading…' }
+    $catalogue['airwidget.denied'] = @{ ar = 'انتهت صلاحية هذه البطاقة. افتح بطاقة جديدة من الحالة الكاملة.'; en = 'This card is no longer active. Open a new one from Full status.' }
+    $catalogue['airwidget.refreshFailed'] = @{ ar = 'تعذّر التحديث. حاول مجددًا أو افتح الحالة الكاملة.'; en = 'Refresh failed. Try again or open Full status.' }
+    $catalogue['airwidget.expired'] = @{ ar = 'انتهى التحديث التلقائي. البيانات أدناه لقطة سابقة.'; en = 'Automatic updates ended. The data below is a previous snapshot.' }
+    $catalogue['airwidget.unconfirmed'] = @{ ar = '⚠️ حالة الطبقات غير مؤكدة حاليًا'; en = '⚠️ Current layer status is unconfirmed' }
+    $catalogue['airwidget.empty'] = @{ ar = 'لا توجد قوالب نشطة في الطبقات المتابَعة.'; en = 'No active templates on monitored layers.' }
+    $catalogue['airwidget.more'] = @{ ar = '+ {0} طبقات أخرى في الحالة الكاملة'; en = '+ {0} more in Full status' }
+    $catalogue['airwidget.checked'] = @{ ar = 'آخر قراءة ناجحة للطبقات (وقت المحطة) {0}'; en = 'Last successful layer read (station time) {0}' }
+    $catalogue['airwidget.healthy'] = @{ ar = '🟢 Cinegy متصل وحالته سليمة'; en = '🟢 Cinegy connected and healthy' }
+    $catalogue['airwidget.unhealthy'] = @{ ar = '🟠 Cinegy متصل مع تحذير'; en = '🟠 Cinegy connected with a warning' }
+    $catalogue['airwidget.unreachable'] = @{ ar = '🔴 تعذّر الاتصال بـ Cinegy'; en = '🔴 Cinegy is unreachable' }
+    $catalogue['airwidget.unknown'] = @{ ar = '⚪ حالة اتصال Cinegy غير معروفة'; en = '⚪ Cinegy connection is unknown' }
+    $catalogue['airwidget.caption'] = @{ ar = 'بطاقة مراقبة الهواء. التحديث لآخر بطاقة فتحتها، حتى ٣٠ دقيقة أو إعادة تشغيل الجسر. التفاصيل في «الحالة الكاملة».'; en = 'On-air monitoring. Your newest card updates for up to 30 minutes or until the bridge restarts. See Full status for details.' }
+    $catalogue['airwidget.initialSnapshot'] = @{ ar = 'آخر قراءة عند فتح البطاقة (وقت المحطة) {0}'; en = 'Last read when this card opened (station time) {0}' }
+    $catalogue['airwidget.textStatus'] = @{ ar = '📊 الحالة الكاملة'; en = '📊 Full status' }
+    $catalogue['airwidget.textFallback'] = @{ ar = '📺 لقطة مراقبة الهواء (تحديث تلقائي غير متاح)'; en = '📺 On-air snapshot (automatic updates unavailable)' }
     $catalogue['adm.activeScenes'] = @{ ar = '📺 المشاهد النشطة'; en = '📺 Active scenes' }
     $catalogue['adm.unknown'] = @{ ar = 'غير معروف'; en = 'Unknown' }
     $catalogue['adm.nothingOnAir'] = @{ ar = '⚫️ لا شيء على الهواء'; en = '⚫️ Nothing on air' }

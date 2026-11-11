@@ -2482,7 +2482,7 @@ function Invoke-BridgeTick {
        kill the loop. #>
     # Nothing the clock sends may land on a screen a person refreshed.
     Clear-RefreshTarget
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-GraphicRecoveryQueue', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-GraphicRecoveryQueue', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AirStatusWidgets', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -2541,6 +2541,7 @@ function Get-EffectivePollTimeout {
     if (Test-AirRunActive) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
     $base = Get-BasePollTimeout
+    if ($script:AirStatusWidgets.Count -gt 0 -or $script:AirStatusWidgetUpdate) { $base = [Math]::Min($base, 5) }
     $upcoming = @(Get-UpcomingScheduleEvents)
     if ($upcoming.Count -gt 0) {
         $secondsToEvent = [int][Math]::Ceiling((([datetimeoffset]$upcoming[0].ScheduledAt) - [datetimeoffset]::Now).TotalSeconds)

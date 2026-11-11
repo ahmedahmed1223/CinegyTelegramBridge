@@ -381,7 +381,8 @@ Describe 'Simple and full status reports' {
                 $rendered -match '📺 المشاهد النشطة' -and $rendered -match '🎛 اتصال Cinegy' -and
                 $rendered -match '🩺 صحة الخدمات' -and $rendered -match '⚙️ التشغيل والجدولة' -and $rendered -match '👥 الوصول' -and
                 $rendered -match 'وضع المشاهد المختار: Single' -and
-                $Text -match '<b>🎛 اتصال Cinegy</b>'
+                $Text -match '<b>🎛 اتصال Cinegy</b>' -and
+                $ReplyMarkup.inline_keyboard[0][0].callback_data -eq 'menu:airwidget'
         }
     }
 

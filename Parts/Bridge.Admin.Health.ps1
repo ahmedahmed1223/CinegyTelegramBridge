@@ -169,6 +169,8 @@ function Invoke-FullStatusCommand {
     else { $lines.Add((T 'hl.cinegySynced')) }
     if ($store.Errors.Count -gt 0) { $lines.Add("⚠️ " + (ConvertTo-TelegramHtmlText ($store.Errors -join "`n⚠️ "))) }
     $statusMenu = Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId
+    $widgetRow = @(, @((New-Button (T 'airwidget.open') 'menu:airwidget')))
+    $statusMenu.inline_keyboard = $widgetRow + @($statusMenu.inline_keyboard)
     # The same lines, reshaped: the verdict and the identity as the header,
     # the programme and the on-air layers next, and the rest in the sections
     # the text screen already names - unfolded, because this screen is read

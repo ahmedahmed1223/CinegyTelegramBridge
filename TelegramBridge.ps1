@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.72.4'
+$script:BridgeVersion = '8.73.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -116,6 +116,7 @@ foreach ($part in @(
         'Bridge.Admin'
         'Bridge.Admin.Templates'
         'Bridge.Admin.Health'
+        'Bridge.AirStatusWidget'
         'Bridge.Admin.Config'
         'Bridge.Admin.Diagnostics'
         'Bridge.Media'
@@ -1093,6 +1094,11 @@ $script:PostShowQueue = [System.Collections.Generic.List[hashtable]]::new()
 # push continuous video to a chat; the supported route is a Group/Channel
 # Video Chat's RTMP ingestion endpoint.
 $script:RuntimeState = New-BridgeRuntimeState
+$script:AirStatusWidgets = @{}
+$script:AirStatusWidgetUpdate = $null
+# Older Bot API servers ignore unrecognised names in allowed_updates. Include
+# widget_query from the first poll so a quick tap on the first card is admitted.
+$script:TelegramAllowedUpdates = [Uri]::EscapeDataString('["message","callback_query","widget_query"]')
 $script:RelayState = $script:RuntimeState.Relay
 
 $script:CancelReasons = @{}
@@ -2180,6 +2186,13 @@ try {
                     continue
                 }
 
+                $widgetQuery = Get-JsonProp $update 'widget_query'
+                if ($widgetQuery) {
+                    try { Invoke-AirStatusWidgetQuery -Query $widgetQuery }
+                    catch { Write-BridgeLog 'Failed to process an air status widget query' 'WARN' }
+                    continue
+                }
+
                 $callback = Get-JsonProp $update 'callback_query'
                 if ($callback) {
                     try { Invoke-CallbackQuery -CallbackQuery $callback | Out-Null }
@@ -2375,6 +2388,10 @@ finally {
     # log folder honest about what is actually running.
     if ($script:livenessFile) { Remove-Item -LiteralPath $script:livenessFile -Force -ErrorAction SilentlyContinue }
     Clear-TelegramOutbox
+    if ($script:AirStatusWidgetUpdate) {
+        try { Stop-BridgeTelegramRequestWorker -Worker $script:AirStatusWidgetUpdate.Worker }
+        catch { Write-BridgeLog 'Could not cancel the air status widget worker during shutdown.' 'WARN' }
+    }
     Save-UsageCounts -Force
     foreach ($job in @($script:SnapshotJobs)) {
         if ($job.Proc -and -not $job.Proc.HasExited) { Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue }

@@ -532,7 +532,11 @@ Describe 'Upcoming events carry the instant, not a rendering of it' {
 }
 
 Describe 'Entering a schedule time the way an operator types it' {
-    BeforeAll { $script:Ref = [datetimeoffset]::new(2026, 9, 1, 14, 0, 0, [datetimeoffset]::Now.Offset) }
+    BeforeAll {
+        # Resolve the offset at the fixture date, which may be in a different DST season.
+        $referenceTime = [datetime]::new(2026, 9, 1, 14, 0, 0)
+        $script:Ref = [datetimeoffset]::new($referenceTime, [TimeZoneInfo]::Local.GetUtcOffset($referenceTime))
+    }
 
     It 'takes a bare time as today' {
         $parsed = ConvertFrom-OperatorScheduleTime -Text '21:45' -Now $script:Ref
@@ -605,7 +609,10 @@ Describe 'Entering a schedule time the way an operator types it' {
 }
 
 Describe 'Picking a date and time instead of typing one' {
-    BeforeAll { $script:Ref = [datetimeoffset]::new(2026, 9, 15, 14, 30, 0, [datetimeoffset]::Now.Offset) }
+    BeforeAll {
+        $referenceTime = [datetime]::new(2026, 9, 15, 14, 30, 0)
+        $script:Ref = [datetimeoffset]::new($referenceTime, [TimeZoneInfo]::Local.GetUtcOffset($referenceTime))
+    }
 
     It 'lays the month out as weeks under a weekday header' {
         $rows = @((Get-ScheduleCalendarKeyboard -Month '2026-09' -Now $script:Ref).inline_keyboard)

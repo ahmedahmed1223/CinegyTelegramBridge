@@ -366,6 +366,9 @@ function Update-OnAirStateFromCinegy {
     if ($templateReminderDirty) { Save-TemplateReminderQueue | Out-Null }
 
     $suppliedCount = @($LayerStatuses).Count
+    if ($failed.Count -gt 0 -or $checked.Count -gt 0 -or $suppliedCount -gt 0) {
+        $script:RuntimeState.Monitoring.LastCinegyStateFailedCount = $failed.Count
+    }
     if ($failed.Count -eq 0 -and ($checked.Count -gt 0 -or $suppliedCount -gt 0)) {
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = Get-Date
     }

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.73.0'; Items = @('📺 From Full status, open the live air status card to see active graphics and the last successful Cinegy read. It updates in place and has its own Refresh now button.') },
                 @{ Version = '8.72.4'; Items = @('🖥 The manager shows live/paused log reading and a jump-to-latest button. On-air text can be read in full without losing selection on refresh; monitoring and reports stay open alongside the log. Status text is larger and debug lines clearer.') },
                 @{ Version = '8.72.3'; Items = @('🛡 Settings exports omit secret-named options, including the join code. Import review works again, masks secrets, and rejects whole-number settings outside their allowed ranges.') },
                 @{ Version = '8.72.2'; Items = @('🧹 Output monitor test frames and error logs are now swept automatically alongside snapshots to prevent disk accumulation.') },
@@ -308,6 +309,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.73.0'; Items = @('📺 افتح «بطاقة الهواء المباشرة» من «الحالة الكاملة» لترى القوالب النشطة وآخر قراءة ناجحة من Cinegy. تتحدّث في مكانها وفيها زر «تحديث الآن».') },
                 @{ Version = '8.72.4'; Items = @('🖥 مدير الجسر يوضح التتبع المباشر وقراءة السابق مع زر للعودة إلى الأحدث. اقرأ نص المشهد كاملًا دون فقد التحديد عند التحديث، وافتح مراقبة الهواء والتقارير بجانب السجل. نص الحالة أكبر وأسطر التشخيص أوضح.') },
                 @{ Version = '8.72.3'; Items = @('🛡 تصدير الإعدادات يستثني الخيارات ذات أسماء الأسرار، ومنها رمز الانضمام. معاينة الاستيراد تعمل مجددًا وتخفي الأسرار، وترفض القيم الصحيحة خارج حدودها المسموحة.') },
                 @{ Version = '8.72.2'; Items = @('🧹 تنظيف دوري شامل لملفات صور واختبارات مراقبة البث المؤقتة لمنع تراكمها في مجلد السجلات.') },

@@ -67,6 +67,7 @@ Describe 'Every screen built from a growing list is paged' {
             'Test-RefreshButtonPress'           = 'builds no keyboard; it reads the one on a message already sent'
             'Show-RowPasteReview'               = 'two fixed buttons, add and cancel; the pasted rows are text lines, cut at five'
             'Show-NewsPasteReview'              = 'two fixed buttons, add and cancel; the pasted items are text lines, cut at five and three'
+            'Show-AirStatusWidget'             = 'one fixed Full status button; the loop prints at most five snapshot lines'
             'Get-OperationLogFilterKeyboard'    = 'one button per choice from Get-OperationLogFilterOptions, which caps both lists at its Limit and reports what it left out'
             'Get-ScheduleCalendarKeyboard'      = 'one month of days'
             'Get-BoardItemKeyboard'             = 'one row per text field the bound scene declares - a .cintitle contract, not a collection that grows with the station''s data'

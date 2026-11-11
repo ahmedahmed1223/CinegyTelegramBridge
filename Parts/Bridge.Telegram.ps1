@@ -1039,7 +1039,7 @@ function Get-TelegramUpdates {
        square the delay and stall the bridge on a transient blip. It therefore
        throws and lets the loop decide. #>
     param([long]$Offset, [int]$TimeoutSeconds)
-    $allowed = '%5B%22message%22%2C%22callback_query%22%5D'
+    $allowed = $script:TelegramAllowedUpdates
     $uri = "$apiBase/getUpdates?timeout=$TimeoutSeconds&offset=$Offset&allowed_updates=$allowed"
     # The transport deadline has to clear the long poll with room to spare,
     # because it also covers connection setup and the trip home. Ten seconds
@@ -1063,7 +1063,7 @@ function Clear-PendingTelegramUpdates {
 
        Returns the offset to start polling from. #>
     try {
-        $allowed = '%5B%22message%22%2C%22callback_query%22%5D'
+        $allowed = $script:TelegramAllowedUpdates
         $probe = Invoke-RestMethod -Uri "$apiBase/getUpdates?offset=-1&timeout=0&allowed_updates=$allowed" -Method Get -TimeoutSec 20
         $pending = @(Get-JsonProp $probe 'result')
         if ($pending.Count -eq 0) { return 0 }

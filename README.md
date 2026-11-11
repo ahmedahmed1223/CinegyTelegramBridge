@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.73.0
+
+Administrators and the owner can open **Live air status card** from **Full status** in their private Telegram chat. The native HTML widget shows active templates on monitored layers, Cinegy health, and the time of the last successful layer read. It updates in place and has a **Refresh now** button that retrieves the latest reading held by the bridge.
+
+The newest card in each chat updates for up to 30 minutes or until the bridge restarts. The card marks unconfirmed readings, and **Full status** opens the existing detailed view. When the Bot API refuses the widget, the bridge sends a text snapshot. The card uses [Telegram Bot API 10.4 and the Telegram Widget SDK](https://core.telegram.org/bots/widgets).
+
 ## Version 8.72.4
 
 BridgeManager keeps live/paused log reading visible beside the filter, counts incoming matching lines while paused, and offers a jump back to the latest retained output. On-air monitoring preserves row selection during refresh and exposes full selectable scene text. Monitoring and reports open alongside the main window, while larger secondary text and clearer debug colors improve readability.

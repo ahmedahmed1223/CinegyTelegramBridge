@@ -11,6 +11,7 @@ function New-BridgeRuntimeState {
         Monitoring=[pscustomobject]@{
             CinegyHealthState='unknown';TelegramConnectionState='unknown'
             LastCinegyStateCheck=[datetime]::MinValue;LastCinegyStateSuccess=[datetime]::MinValue
+            LastCinegyStateFailedCount=0
             LastCinegyHealthCheck=[datetime]::MinValue
             CinegyStateBackoffSeconds=0
             LastStaleOnAirCheck=[datetime]::MinValue

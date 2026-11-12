@@ -15,9 +15,15 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.75.0
+
+The live status panel and the live air status card now carry instants instead of rendered text, and count from them on the device every second: how long each layer has been on air, how long until its auto-hide timer fires, and how old the last successful Cinegy read is. A running counter costs no Telegram traffic, because the widget state only changes when the air does. Counters stop while a reading is unconfirmed.
+
+A card no longer dies after 30 minutes or a bridge restart. When a card that is showing stale data comes back on screen it asks the bridge once, without a tap, and the bridge resumes updating it for another 30 minutes; **Refresh now** does the same. An older message never takes over from a newer card that is still live, and layer buttons on a revived menu stay refused until the menu is reopened. Verified against the [Telegram Widgets guide](https://core.telegram.org/bots/widgets) published with Bot API 10.4.
+
 ## Version 8.74.0
 
-The main menu now shows a live HTML status panel above its buttons. It displays Cinegy health, the last successful layer read, and compact layer rows with the template, start time, and operator when known. The latest menu updates in place for up to 30 minutes or until the bridge restarts. If Telegram cannot send the widget, the rich or text menu offers a Refresh button.
+The main menu now shows a live HTML status panel above its buttons. It displays Cinegy health, the last successful layer read, and compact layer rows with the template, start time, and operator when known. The latest menu updates in place (see 8.75.0 for how a paused panel resumes). If Telegram cannot send the widget, the rich or text menu offers a Refresh button.
 
 The panel updates independently of the administrator's full-status card. A layer button on a widget menu is tied to the scene it showed when the menu opened. If the scene changes, reopen the menu before using that layer button.
 
@@ -25,7 +31,7 @@ The panel updates independently of the administrator's full-status card. A layer
 
 Administrators and the owner can open **Live air status card** from **Full status** in their private Telegram chat. The native HTML widget shows active templates on monitored layers, Cinegy health, and the time of the last successful layer read. It updates in place and has a **Refresh now** button that retrieves the latest reading held by the bridge.
 
-The newest card in each chat updates for up to 30 minutes or until the bridge restarts. The card marks unconfirmed readings, and **Full status** opens the existing detailed view. When the Bot API refuses the widget, the bridge sends a text snapshot. The card uses [Telegram Bot API 10.4 and the Telegram Widget SDK](https://core.telegram.org/bots/widgets).
+The newest card in each chat updates in place. The card marks unconfirmed readings, and **Full status** opens the existing detailed view. When the Bot API refuses the widget, the bridge sends a text snapshot. The card uses [Telegram Bot API 10.4 and the Telegram Widget SDK](https://core.telegram.org/bots/widgets).
 
 ## Version 8.72.4
 

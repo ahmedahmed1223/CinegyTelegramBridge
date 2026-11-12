@@ -10,6 +10,7 @@ function Get-AirStatusWidgetHtml {
         intro = Format-AirStatusWidgetField -Text (ConvertFrom-TelegramHtmlText $Intro) -MaximumLength 128
         channel = if ($ForMenu) { Format-AirStatusWidgetField -Text (T 'kb.engineChannel' $config.AirServerAddress $config.AirChannelNumber) -MaximumLength 112 } else { '' }
         actor = if ($ForMenu) { "👤 $(Format-AirStatusWidgetField -Text (Format-UserAuditActor -UserId $UserId) -MaximumLength 96)" } else { '' }
+        kind = if ($ForMenu) { 'r:m' } else { 'r:c' }
         refresh = T 'airwidget.refresh'
         waiting = T 'airwidget.waiting'
         denied = if ($ForMenu) { T 'airwidget.menuActionExpired' } else { T 'airwidget.denied' }
@@ -19,6 +20,9 @@ function Get-AirStatusWidgetHtml {
         empty = T 'airwidget.empty'
         more = if ($ForMenu) { T 'airwidget.menuMore' '{0}' } else { T 'airwidget.more' '{0}' }
         checked = T 'airwidget.checked' '{0}'
+        age = T 'airwidget.age' '{0}'
+        onAirFor = T 'airwidget.onAirFor' '{0}'
+        hidesIn = T 'airwidget.hidesIn' '{0}'
         healthy = T 'airwidget.healthy'
         unhealthy = T 'airwidget.unhealthy'
         unreachable = T 'airwidget.unreachable'
@@ -27,7 +31,8 @@ function Get-AirStatusWidgetHtml {
     $html = @'
 <style>
   h3, p { margin: 0 0 8px; }
-  .detail { color: var(--tg-theme-hint-color); font-size: .9em; }
+  .detail { color: var(--tg-theme-hint-color); font-size: .9em; font-variant-numeric: tabular-nums; }
+  #freshness { color: var(--tg-theme-destructive-text-color); }
   .row { display: flex; align-items: flex-start; gap: 8px; border-top: 1px solid var(--tg-theme-section-separator-color); padding: 5px 0; }
   .number { color: var(--tg-theme-accent-text-color); font-weight: bold; min-width: 1.25em; }
   .scene { min-width: 0; }
@@ -55,24 +60,50 @@ function Get-AirStatusWidgetHtml {
   const format = (text, value) => text.replace('{0}', () => String(value));
   let state = null;
   let pending = false;
+  let live = [];
 
-  function showFreshness() {
+  function clock(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const two = (n) => String(n).padStart(2, '0');
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total % 3600 / 60);
+    return (hours ? hours + ':' + two(minutes) : String(minutes)) + ':' + two(total % 60);
+  }
+
+  function put(node, text) {
+    if (node.textContent !== text) node.textContent = text;
+    node.hidden = !text;
+  }
+
+  // Runs every second from the device clock. The bridge sends instants, not
+  // rendered durations, so a ticking counter costs no Telegram traffic.
+  function tick() {
     const now = Date.now();
     const expired = state && now >= state.expires;
     const fresh = state && now < state.freshUntil && !expired;
-    const warning = expired ? copy.expired : (fresh ? '' : copy.unconfirmed);
-    fill('freshness', warning);
-    element('freshness').hidden = !warning;
+    put(element('freshness'), expired ? copy.expired : (fresh ? '' : copy.unconfirmed));
+    const age = state && state.lastAt ? ' · ' + format(copy.age, clock(now - state.lastAt)) : '';
+    put(element('checked'), format(copy.checked, state && state.last ? state.last : '—') + age);
     if (state && !state.rows.length) fill('layers', fresh ? copy.empty : '');
-    element('refresh').disabled = pending || expired || !widget;
+    for (const [node, row] of live) {
+      const parts = [];
+      // A counter that keeps running over an unconfirmed reading would claim
+      // more than the bridge knows.
+      if (fresh && row.at) parts.push(format(copy.onAirFor, clock(now - row.at)));
+      if (fresh && row.hide > now) parts.push(format(copy.hidesIn, clock(row.hide - now)));
+      if (row.by) parts.push(row.by);
+      put(node, parts.join(' · '));
+    }
+    element('refresh').disabled = pending || !widget;
+    return !fresh;
   }
 
   function draw(data) {
     state = data ? JSON.parse(data) : null;
     fill('health', state ? (copy[state.health] || copy.unknown) : copy.unknown);
-    fill('checked', format(copy.checked, state && state.last ? state.last : '—'));
     const layers = element('layers');
     layers.textContent = '';
+    live = [];
     if (state && state.rows.length) {
       for (const row of state.rows) {
         const item = document.createElement('div');
@@ -84,13 +115,11 @@ function Get-AirStatusWidgetHtml {
         scene.className = 'scene';
         const name = document.createElement('p');
         name.textContent = row.name;
+        const detail = document.createElement('p');
+        detail.className = 'detail';
         scene.appendChild(name);
-        if (row.detail) {
-          const detail = document.createElement('p');
-          detail.className = 'detail';
-          detail.textContent = row.detail;
-          scene.appendChild(detail);
-        }
+        scene.appendChild(detail);
+        live.push([detail, row]);
         item.appendChild(number);
         item.appendChild(scene);
         layers.appendChild(item);
@@ -98,12 +127,48 @@ function Get-AirStatusWidgetHtml {
     }
     fill('more', state && state.hidden ? format(copy.more, state.hidden) : '');
     element('more').hidden = !state || !state.hidden;
-    showFreshness();
+    tick();
   }
 
   function showFeedback(text) {
     fill('feedback', text);
     element('feedback').hidden = !text;
+  }
+
+  function buzz(type) {
+    try { widget.HapticFeedback.notificationOccurred(type); } catch {}
+  }
+
+  // Telegram allows the private-chat original one request when it appears on
+  // screen without a tap. A tap must reach widget.request synchronously, so
+  // nothing before it in this function may await.
+  async function ask(tapped) {
+    if (pending || !widget) return;
+    pending = true;
+    tick();
+    if (tapped) showFeedback(copy.waiting);
+    try {
+      const answer = await widget.request(copy.kind);
+      if (answer.result) draw(answer.result);
+      if (tapped) {
+        showFeedback(answer.result ? '' : copy.denied);
+        buzz(answer.result ? 'success' : 'error');
+      }
+    } catch {
+      if (tapped) {
+        showFeedback(copy.failed);
+        buzz('error');
+      }
+    } finally {
+      pending = false;
+      tick();
+    }
+  }
+
+  // Only a card that is showing something stale asks on its own; a card the
+  // bridge is still pushing to already has the newest state.
+  function wake() {
+    if (tick()) ask(false);
   }
 
   element('card').dir = copy.direction;
@@ -113,28 +178,15 @@ function Get-AirStatusWidgetHtml {
   }
   fill('title', copy.title);
   fill('refresh', copy.refresh);
-  element('refresh').addEventListener('click', async () => {
-    pending = true;
-    showFreshness();
-    showFeedback(copy.waiting);
-    try {
-      const answer = await widget.request('refresh');
-      if (answer.result) draw(answer.result);
-      showFeedback(answer.result ? '' : copy.denied);
-    } catch {
-      showFeedback(copy.failed);
-    } finally {
-      pending = false;
-      showFreshness();
-    }
-  });
+  element('refresh').addEventListener('click', () => { ask(true); });
   if (widget) {
     widget.onEvent('chatDataChanged', () => draw(widget.chatData));
-    widget.onEvent('activated', showFreshness);
+    widget.onEvent('activated', wake);
   }
   draw(widget ? widget.chatData : null);
   if (widget) widget.ready();
-  setInterval(showFreshness, 1000);
+  wake();
+  setInterval(tick, 1000);
 </script>
 '@
     return $html.Replace('WIDGET_COPY', ($copy | ConvertTo-Json -Compress -EscapeHandling EscapeHtml))
@@ -147,6 +199,20 @@ function Format-AirStatusWidgetField {
     return $clean.Substring(0, (Get-SafeTextPrefixLength -Text $clean -MaximumCodeUnits $MaximumLength)) + '…'
 }
 
+function ConvertTo-AirStatusWidgetEpoch {
+    param($Moment)
+    # Show and timer instants arrive as DateTime, DateTimeOffset, or the 'o'
+    # string a restored state file left behind. Zero means "not known".
+    $instant = [datetimeoffset]::MinValue
+    try {
+        if ($Moment -is [datetimeoffset]) { $instant = $Moment }
+        elseif ($Moment -is [datetime]) { $instant = [datetimeoffset]$Moment }
+        elseif (-not [datetimeoffset]::TryParse([string]$Moment, [ref]$instant)) { return 0 }
+    }
+    catch { return 0 }
+    return [Math]::Max(0L, $instant.ToUnixTimeMilliseconds())
+}
+
 function Get-AirStatusWidgetData {
     param([Parameter(Mandatory)][datetime]$ExpiresAt, [switch]$ForMenu)
     $monitoring = $script:RuntimeState.Monitoring
@@ -154,6 +220,7 @@ function Get-AirStatusWidgetData {
         expires = ([datetimeoffset]$ExpiresAt).ToUnixTimeMilliseconds()
         freshUntil = 0
         last = ''
+        lastAt = 0
         health = [string]$monitoring.CinegyHealthState
         rows = @()
         hidden = $script:OnAir.Count
@@ -161,6 +228,7 @@ function Get-AirStatusWidgetData {
     $lastRead = $monitoring.LastCinegyStateSuccess
     if ($lastRead -gt [datetime]::MinValue) {
         $snapshot.last = $lastRead.ToString('yyyy-MM-dd HH:mm:ss')
+        $snapshot.lastAt = ConvertTo-AirStatusWidgetEpoch $lastRead
         if ($monitoring.LastCinegyStateFailedCount -eq 0) {
             $staleAfter = Get-SettingInt 'CinegyStateStaleSeconds' 45
             $snapshot.freshUntil = ([datetimeoffset]$lastRead.AddSeconds($staleAfter)).ToUnixTimeMilliseconds()
@@ -172,8 +240,15 @@ function Get-AirStatusWidgetData {
         $sceneName = Format-AirStatusWidgetField -Text ([string](Get-JsonProp $record 'Key')) -MaximumLength 48
         if (-not $sceneName) { $sceneName = '—' }
         $row = @{ layer = [int]$layer; name = $sceneName }
+        # Instants rather than rendered text: the card counts from them every
+        # second on the device, and the state stays byte-identical between
+        # real changes, so no edit is spent on a clock.
+        $startedAt = ConvertTo-AirStatusWidgetEpoch (Get-JsonProp $record 'At')
+        if ($startedAt -gt 0) { $row.at = $startedAt }
+        $layerTimer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq [int]$layer }) | Select-Object -First 1
+        $hideAt = if ($layerTimer) { ConvertTo-AirStatusWidgetEpoch (Get-JsonProp $layerTimer 'At') } else { 0 }
+        if ($hideAt -gt 0) { $row.hide = $hideAt }
         if ($ForMenu) {
-            $started = Get-JsonProp $record 'At'
             $operator = switch ([string](Get-JsonProp $record 'Source')) {
                 'cinegy' { T 'onair.external' }
                 'BotTest' { T 'onair.templateTest' }
@@ -182,13 +257,7 @@ function Get-AirStatusWidgetData {
                     if ($actorId -gt 0) { Get-UserDisplayName -UserId $actorId }
                 }
             }
-            $details = @()
-            if ($started -is [datetime]) {
-                if ($started.Kind -eq [DateTimeKind]::Utc) { $started = $started.ToLocalTime() }
-                $details += (T 'airwidget.menuSince' $started.ToString('HH:mm'))
-            }
-            if ($operator) { $details += (Format-AirStatusWidgetField -Text $operator -MaximumLength 28) }
-            if ($details.Count -gt 0) { $row.detail = $details -join ' · ' }
+            if ($operator) { $row.by = Format-AirStatusWidgetField -Text $operator -MaximumLength 28 }
         }
         $snapshot.rows += $row
         $snapshot.hidden--
@@ -313,16 +382,35 @@ function Invoke-AirStatusWidgetQuery {
     $chatId = [long](Get-JsonProp $chat 'id')
     $userId = [long](Get-JsonProp (Get-JsonProp $Query 'from') 'id')
     $messageId = [int](Get-JsonProp $Query 'message_id')
-    $card = $script:MainMenuWidgets[$chatId]
-    if (-not $card -or $card.MessageId -ne $messageId) { $card = $script:AirStatusWidgets[$chatId] }
-    if ($card -and $card.ExpiresAt -gt $Now -and $card.MessageId -eq $messageId -and
-        $chatId -eq $userId -and (Get-JsonProp $chat 'type') -ceq 'private' -and
+    $kind = [string](Get-JsonProp $Query 'data')
+    $forMenu = $kind -ceq 'r:m'
+    if ($chatId -gt 0 -and $chatId -eq $userId -and $messageId -gt 0 -and
+        (Get-JsonProp $chat 'type') -ceq 'private' -and
         (Get-JsonProp (Get-JsonProp $Query 'type') 'type') -ceq 'data' -and
-        (Get-JsonProp $Query 'data') -ceq 'refresh' -and
-        (Test-Authorized -ChatId $chatId -UserId $userId) -and ($card.ForMenu -or (Test-StatusViewer -ChatId $chatId -UserId $userId))) {
-        $body.data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt -ForMenu:$card.ForMenu
+        ($forMenu -or $kind -ceq 'r:c') -and
+        (Test-Authorized -ChatId $chatId -UserId $userId) -and ($forMenu -or (Test-StatusViewer -ChatId $chatId -UserId $userId))) {
+        $registry = if ($forMenu) { $script:MainMenuWidgets } else { $script:AirStatusWidgets }
+        $card = $registry[$chatId]
+        # A card the bridge stopped tracking - expired, or forgotten by a
+        # restart - comes back when its owner looks at it or taps refresh.
+        # An older message never takes the slot from a newer card that is
+        # still live: one card per chat keeps the edit traffic bounded.
+        if (-not $card -or $card.MessageId -eq $messageId -or $card.ExpiresAt -le $Now) {
+            $expiresAt = $Now.AddMinutes(30)
+            if ($card -and $card.MessageId -eq $messageId) {
+                $card.ExpiresAt = $expiresAt
+                $card.NextAt = $Now
+            }
+            else {
+                # No fingerprints: a revived menu's hide and timer buttons stay
+                # refused, because nothing recorded what their labels named.
+                $registry[$chatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = ''
+                    NextAt = $Now; ForMenu = $forMenu; LayerFingerprints = @{} }
+            }
+            $body.data = Get-AirStatusWidgetData -ExpiresAt $expiresAt -ForMenu:$forMenu
+        }
     }
-    # An empty answer tells an expired or unauthorised card that it cannot refresh.
+    # An empty answer tells an unauthorised or superseded card that it cannot refresh.
     $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerWidgetQuery" -Method Post -Body $body `
         -TimeoutSec ([Math]::Min(3, (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)))
     if (-not $request.Success) { Write-BridgeLog "Air status widget answerWidgetQuery failed for chat $chatId" 'DEBUG' }

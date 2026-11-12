@@ -16,16 +16,19 @@ function Add-BridgeTextAdmin {
     $catalogue['airwidget.open'] = @{ ar = '📺 بطاقة الهواء المباشرة'; en = '📺 Live air status card' }
     $catalogue['airwidget.title'] = @{ ar = 'مراقبة الهواء'; en = 'On-air monitoring' }
     $catalogue['airwidget.menuTitle'] = @{ ar = 'حالة الهواء'; en = 'On-air status' }
-    $catalogue['airwidget.menuSince'] = @{ ar = 'على الهواء منذ {0}'; en = 'On air since {0}' }
+    # {0} is a running m:ss or h:mm:ss counter drawn on the device.
+    $catalogue['airwidget.onAirFor'] = @{ ar = 'على الهواء منذ {0}'; en = 'On air for {0}' }
+    $catalogue['airwidget.hidesIn'] = @{ ar = 'يُخفى بعد {0}'; en = 'Hides in {0}' }
+    $catalogue['airwidget.age'] = @{ ar = 'قبل {0}'; en = '{0} ago' }
     $catalogue['airwidget.menuMore'] = @{ ar = '+ {0} طبقات أخرى في «الحالة»'; en = '+ {0} more in Status' }
     $catalogue['airwidget.menuCaption'] = @{ ar = 'حالة الهواء عند فتح القائمة'; en = 'On-air snapshot when this menu opened' }
     $catalogue['airwidget.menuActionExpired'] = @{ ar = 'تغيّرت الطبقة أو انتهت صلاحية هذه القائمة. افتح القائمة من جديد.'; en = 'The layer changed or this menu expired. Open the menu again.' }
     $catalogue['airwidget.menuRefreshFailed'] = @{ ar = 'تعذّر التحديث. حاول مجددًا أو أعد فتح القائمة.'; en = 'Refresh failed. Try again or reopen the menu.' }
     $catalogue['airwidget.refresh'] = @{ ar = 'تحديث الآن'; en = 'Refresh now' }
     $catalogue['airwidget.waiting'] = @{ ar = 'جارٍ جلب أحدث قراءة…'; en = 'Getting the latest reading…' }
-    $catalogue['airwidget.denied'] = @{ ar = 'انتهت صلاحية هذه البطاقة. افتح بطاقة جديدة من الحالة الكاملة.'; en = 'This card is no longer active. Open a new one from Full status.' }
+    $catalogue['airwidget.denied'] = @{ ar = 'هذه بطاقة قديمة، والتحديث لأحدث بطاقة في المحادثة. افتح بطاقة جديدة من الحالة الكاملة.'; en = 'This is an older card; updates go to the newest one in this chat. Open a new one from Full status.' }
     $catalogue['airwidget.refreshFailed'] = @{ ar = 'تعذّر التحديث. حاول مجددًا أو افتح الحالة الكاملة.'; en = 'Refresh failed. Try again or open Full status.' }
-    $catalogue['airwidget.expired'] = @{ ar = 'انتهى التحديث التلقائي. البيانات أدناه لقطة سابقة.'; en = 'Automatic updates ended. The data below is a previous snapshot.' }
+    $catalogue['airwidget.expired'] = @{ ar = 'توقّف التحديث التلقائي. البيانات أدناه لقطة سابقة؛ اضغط «تحديث الآن».'; en = 'Automatic updates paused. The data below is a previous snapshot; tap Refresh now.' }
     $catalogue['airwidget.unconfirmed'] = @{ ar = '⚠️ حالة الطبقات غير مؤكدة حاليًا'; en = '⚠️ Current layer status is unconfirmed' }
     $catalogue['airwidget.empty'] = @{ ar = 'لا توجد قوالب نشطة في الطبقات المتابَعة.'; en = 'No active templates on monitored layers.' }
     $catalogue['airwidget.more'] = @{ ar = '+ {0} طبقات أخرى في الحالة الكاملة'; en = '+ {0} more in Full status' }
@@ -34,7 +37,7 @@ function Add-BridgeTextAdmin {
     $catalogue['airwidget.unhealthy'] = @{ ar = '🟠 Cinegy متصل مع تحذير'; en = '🟠 Cinegy connected with a warning' }
     $catalogue['airwidget.unreachable'] = @{ ar = '🔴 تعذّر الاتصال بـ Cinegy'; en = '🔴 Cinegy is unreachable' }
     $catalogue['airwidget.unknown'] = @{ ar = '⚪ حالة اتصال Cinegy غير معروفة'; en = '⚪ Cinegy connection is unknown' }
-    $catalogue['airwidget.caption'] = @{ ar = 'بطاقة مراقبة الهواء. التحديث لآخر بطاقة فتحتها، حتى ٣٠ دقيقة أو إعادة تشغيل الجسر. التفاصيل في «الحالة الكاملة».'; en = 'On-air monitoring. Your newest card updates for up to 30 minutes or until the bridge restarts. See Full status for details.' }
+    $catalogue['airwidget.caption'] = @{ ar = 'بطاقة مراقبة الهواء. تتحدّث آخر بطاقة فتحتها تلقائيًا، وتعود إلى التحديث كلما ظهرت على الشاشة. التفاصيل في «الحالة الكاملة».'; en = 'On-air monitoring. Your newest card updates on its own and resumes whenever it is back on screen. See Full status for details.' }
     $catalogue['airwidget.initialSnapshot'] = @{ ar = 'آخر قراءة عند فتح البطاقة (وقت المحطة) {0}'; en = 'Last read when this card opened (station time) {0}' }
     $catalogue['airwidget.textStatus'] = @{ ar = '📊 الحالة الكاملة'; en = '📊 Full status' }
     $catalogue['airwidget.textFallback'] = @{ ar = '📺 لقطة مراقبة الهواء (تحديث تلقائي غير متاح)'; en = '📺 On-air snapshot (automatic updates unavailable)' }

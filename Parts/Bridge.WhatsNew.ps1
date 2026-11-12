@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.75.0'; Items = @('⏱ The on-air panel and the live status card now count on their own: how long each layer has been on air, how long until its auto-hide, and how old the last reading is. A card that stopped updating resumes when it is back on screen, even after a bridge restart; Refresh now works on it too.') },
                 @{ Version = '8.74.0'; Items = @('📺 The on-air status above the main menu updates in place. Each row shows a layer, its template, and the start time and operator when known. Open the menu again if an old layer button no longer matches.') },
                 @{ Version = '8.73.0'; Items = @('📺 From Full status, open the live air status card to see active graphics and the last successful Cinegy read. It updates in place and has its own Refresh now button.') },
                 @{ Version = '8.72.4'; Items = @('🖥 The manager shows live/paused log reading and a jump-to-latest button. On-air text can be read in full without losing selection on refresh; monitoring and reports stay open alongside the log. Status text is larger and debug lines clearer.') },
@@ -310,6 +311,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.75.0'; Items = @('⏱ حالة الهواء أعلى القائمة وبطاقة الهواء المباشرة تعدّان وحدهما: كم مضى على كل طبقة على الهواء، وكم بقي على إخفائها التلقائي، وكم مضى على آخر قراءة. والبطاقة التي توقّف تحديثها تعود إليه حين تظهر على الشاشة، حتى بعد إعادة تشغيل الجسر؛ وزر «تحديث الآن» يعمل عليها أيضًا.') },
                 @{ Version = '8.74.0'; Items = @('📺 حالة الهواء أعلى القائمة الرئيسية تتحدّث في مكانها. لكل طبقة صف يعرض القالب ووقت بدء العرض والمشغّل عند توفرهما. افتح القائمة مجددًا إذا تغيّرت الطبقة التي يشير إليها زر قديم.') },
                 @{ Version = '8.73.0'; Items = @('📺 افتح «بطاقة الهواء المباشرة» من «الحالة الكاملة» لترى القوالب النشطة وآخر قراءة ناجحة من Cinegy. تتحدّث في مكانها وفيها زر «تحديث الآن».') },
                 @{ Version = '8.72.4'; Items = @('🖥 مدير الجسر يوضح التتبع المباشر وقراءة السابق مع زر للعودة إلى الأحدث. اقرأ نص المشهد كاملًا دون فقد التحديد عند التحديث، وافتح مراقبة الهواء والتقارير بجانب السجل. نص الحالة أكبر وأسطر التشخيص أوضح.') },

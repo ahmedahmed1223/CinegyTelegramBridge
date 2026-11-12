@@ -10,6 +10,7 @@ Describe 'Telegram air monitoring card' {
         $script:TelegramOutboxNotBefore = [datetime]::MinValue
         $script:RuntimeState = New-BridgeRuntimeState
         $script:OnAir = @{ 4 = @{ Key = 'Urgent' } }
+        $script:AutoHideQueue = [Collections.Generic.List[hashtable]]::new()
         $script:widgetNow = [datetime]'2026-11-11T14:00:00'
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = $script:widgetNow
         $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
@@ -32,7 +33,7 @@ Describe 'Telegram air monitoring card' {
 
         Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
             $Uri -like '*/sendWidget' -and $Body.chat_id -eq 101 -and $Body.protect_content -and
-                $Body.html -match 'chatDataChanged' -and $Body.html -match "widget.request\('refresh'\)" -and
+                $Body.html -match 'chatDataChanged' -and $Body.html -match 'widget\.request\(copy\.kind\)' -and $Body.html -match '"kind":"r:c"' -and
                 $Body.caption -and $Body.allow_queries -and -not $Body.ContainsKey('public_data')
         }
         $script:AirStatusWidgets[[long]101].MessageId | Should -Be 76
@@ -114,7 +115,7 @@ Describe 'Telegram air monitoring card' {
         Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
         $script:OnAir[4].Key = 'Current title'
         $query = @{ id = 'refresh-1'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
-            message_id = 76; type = @{ type = 'data' }; data = 'refresh' }
+            message_id = 76; type = @{ type = 'data' }; data = 'r:c' }
 
         Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow.AddSeconds(5)
         $query.id = 'refresh-2'
@@ -181,7 +182,7 @@ Describe 'Telegram air monitoring card' {
                 $Request.Body.chat_data -match 'Next' -and -not $Request.Body.ContainsKey('reply_markup')
         }
         $query = @{ id = 'menu-refresh'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
-            message_id = 76; type = @{ type = 'data' }; data = 'refresh' }
+            message_id = 76; type = @{ type = 'data' }; data = 'r:m' }
         Invoke-AirStatusWidgetQuery -Query $query -Now $openedAt.AddSeconds(7)
         Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
             $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'menu-refresh' -and $Body.data -match 'Next'
@@ -225,5 +226,102 @@ Describe 'Telegram air monitoring card' {
 
         Should -Invoke Invoke-HideLayer -Exactly -Times 0
         Should -Invoke Confirm-TelegramCallback -Exactly -Times 1 -ParameterFilter { $CallbackQueryId -eq 'old-hide' -and $Alert }
+    }
+
+    It 'brings a menu the bridge forgot back to life when it asks, without trusting its old layer buttons' {
+        Mock Test-StatusViewer { $false }
+        $query = @{ id = 'revive'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
+            message_id = 90; type = @{ type = 'data' }; data = 'r:m' }
+        Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
+            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'revive' -and $Body.data -match 'Urgent'
+        }
+        $script:MainMenuWidgets[[long]101].MessageId | Should -Be 90
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(1)
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/editMessageWidgetData' -and $Request.Body.message_id -eq 90
+        }
+
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Invoke-HideLayer { throw 'a revived menu must not reach playout' }
+        Invoke-CallbackQuery @{ id = 'revived-hide'; from = @{ id = 101 }; message = @{
+                chat = @{ id = 101; type = 'private' }; message_id = 90
+            }; data = 'hide:4:menu' }
+        Should -Invoke Invoke-HideLayer -Exactly -Times 0
+        Should -Invoke Confirm-TelegramCallback -Exactly -Times 1 -ParameterFilter { $CallbackQueryId -eq 'revived-hide' -and $Alert }
+    }
+
+    It 'resumes an expired card on its own request and keeps it for another half hour' {
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
+        $later = $script:widgetNow.AddMinutes(45)
+        $query = @{ id = 'resume'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
+            message_id = 76; type = @{ type = 'data' }; data = 'r:c' }
+        Invoke-AirStatusWidgetQuery -Query $query -Now $later
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
+            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'resume' -and $Body.ContainsKey('data')
+        }
+        $script:AirStatusWidgets[[long]101].ExpiresAt | Should -Be $later.AddMinutes(30)
+        Update-AirStatusWidgets -Now $later.AddSeconds(1)
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter { $Request.Body.message_id -eq 76 }
+    }
+
+    It 'gives no data and tracks nothing for a request it cannot place' {
+        $base = @{ from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }; message_id = 90; type = @{ type = 'data' }; data = 'r:c' }
+        $legacy = $base.Clone(); $legacy.id = 'legacy'; $legacy.data = 'refresh'
+        $group = $base.Clone(); $group.id = 'group'; $group.chat = @{ id = -100101; type = 'supergroup' }
+        $other = $base.Clone(); $other.id = 'other'; $other.from = @{ id = 202 }
+        $wallet = $base.Clone(); $wallet.id = 'wallet'; $wallet.type = @{ type = 'sign_data' }
+        foreach ($query in @($legacy, $group, $other, $wallet)) { Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow }
+        Mock Test-StatusViewer { $false }
+        $operator = $base.Clone(); $operator.id = 'operator'
+        Invoke-AirStatusWidgetQuery -Query $operator -Now $script:widgetNow
+        Mock Test-Authorized { $false }
+        $stranger = $base.Clone(); $stranger.id = 'stranger'; $stranger.data = 'r:m'
+        Invoke-AirStatusWidgetQuery -Query $stranger -Now $script:widgetNow
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 6 -ParameterFilter {
+            $Uri -like '*/answerWidgetQuery' -and -not $Body.ContainsKey('data')
+        }
+        $script:AirStatusWidgets.Count | Should -Be 0
+        $script:MainMenuWidgets.Count | Should -Be 0
+    }
+
+    It 'sends instants for the on-air and auto-hide counters, so a running clock never costs an edit' {
+        $shownAt = [datetimeoffset]'2026-11-11T13:58:00+00:00'
+        $script:OnAir = @{
+            4 = @{ Key = 'Urgent'; At = $shownAt.LocalDateTime }
+            5 = @{ Key = 'Ticker'; At = $shownAt.ToString('o') }
+            6 = @{ Key = 'Logo' }
+        }
+        $script:AutoHideQueue.Add(@{ Layer = 4; At = $shownAt.AddMinutes(5) })
+        $script:AutoHideQueue.Add(@{ Layer = 5; At = 'not a time' })
+        $first = Get-AirStatusWidgetData -ExpiresAt $script:widgetNow.AddMinutes(30)
+        $rows = @(($first | ConvertFrom-Json).rows)
+
+        $rows[0].at | Should -Be $shownAt.ToUnixTimeMilliseconds()
+        $rows[0].hide | Should -Be $shownAt.AddMinutes(5).ToUnixTimeMilliseconds()
+        $rows[1].at | Should -Be $shownAt.ToUnixTimeMilliseconds()
+        $rows[1].PSObject.Properties.Name | Should -Not -Contain 'hide'
+        $rows[2].PSObject.Properties.Name | Should -Not -Contain 'at'
+        ($first | ConvertFrom-Json).lastAt | Should -Be ([datetimeoffset]$script:widgetNow).ToUnixTimeMilliseconds()
+        Get-AirStatusWidgetData -ExpiresAt $script:widgetNow.AddMinutes(30) | Should -BeExactly $first
+    }
+
+    It 'keeps the HTML inside the limits Telegram enforces, with the longest Arabic header a menu can carry' {
+        Mock Get-BridgeLanguage { 'ar' }
+        $html = Get-AirStatusWidgetHtml -ForMenu -Intro ('مرحبًا ' * 40) -UserId 101
+        $bytes = [Text.Encoding]::UTF8.GetBytes($html)
+        $packed = [IO.MemoryStream]::new()
+        $zlib = [IO.Compression.ZLibStream]::new($packed, [IO.Compression.CompressionLevel]::SmallestSize)
+        $zlib.Write($bytes, 0, $bytes.Length)
+        $zlib.Dispose()
+
+        $html | Should -Not -Match "`0"
+        $bytes.Length | Should -BeLessOrEqual 32768
+        # ponytail: .NET's SmallestSize stands in for the server's zlib level 9;
+        # the margin below covers the difference between the two encoders.
+        $packed.ToArray().Length | Should -BeLessOrEqual 3900
     }
 }

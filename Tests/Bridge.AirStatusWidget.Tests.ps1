@@ -7,6 +7,7 @@ Describe 'Telegram air monitoring card' {
         $script:MainMenuWidgets = @{}
         $script:AirStatusWidgetUnavailable = $false
         $script:AirStatusWidgetUpdate = $null
+        $script:AirStatusWidgetAnswers = [Collections.Generic.List[hashtable]]::new()
         $script:TelegramOutboxNotBefore = [datetime]::MinValue
         $script:RuntimeState = New-BridgeRuntimeState
         $script:OnAir = @{ 4 = @{ Key = 'Urgent' } }
@@ -33,7 +34,7 @@ Describe 'Telegram air monitoring card' {
 
         Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
             $Uri -like '*/sendWidget' -and $Body.chat_id -eq 101 -and $Body.protect_content -and
-                $Body.html -match 'chatDataChanged' -and $Body.html -match 'widget\.request\(copy\.kind\)' -and $Body.html -match '"kind":"r:c"' -and
+                $Body.html -match 'chatDataChanged' -and $Body.html -match "showFeedback\(''\)" -and $Body.html -match 'widget\.request\(copy\.kind\)' -and $Body.html -match '"kind":"r:c"' -and
                 $Body.caption -and $Body.allow_queries -and -not $Body.ContainsKey('public_data')
         }
         $script:AirStatusWidgets[[long]101].MessageId | Should -Be 76
@@ -126,12 +127,12 @@ Describe 'Telegram air monitoring card' {
         Mock Test-StatusViewer { $false }
         Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow.AddSeconds(5)
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'refresh-1' -and $Body.data -match 'Current title'
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.Body.widget_query_id -eq 'refresh-1' -and $Request.Body.data -match 'Current title'
         }
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 2 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -in @('refresh-2', 'refresh-3') -and
-                -not $Body.ContainsKey('data')
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 2 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.Body.widget_query_id -in @('refresh-2', 'refresh-3') -and
+                -not $Request.Body.ContainsKey('data')
         }
     }
 
@@ -184,8 +185,8 @@ Describe 'Telegram air monitoring card' {
         $query = @{ id = 'menu-refresh'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
             message_id = 76; type = @{ type = 'data' }; data = 'r:m' }
         Invoke-AirStatusWidgetQuery -Query $query -Now $openedAt.AddSeconds(7)
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'menu-refresh' -and $Body.data -match 'Next'
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.Body.widget_query_id -eq 'menu-refresh' -and $Request.Body.data -match 'Next'
         }
     }
 
@@ -234,8 +235,8 @@ Describe 'Telegram air monitoring card' {
             message_id = 90; type = @{ type = 'data' }; data = 'r:m' }
         Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'revive' -and $Body.data -match 'Urgent'
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.Body.widget_query_id -eq 'revive' -and $Request.Body.data -match 'Urgent'
         }
         $script:MainMenuWidgets[[long]101].MessageId | Should -Be 90
         Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(1)
@@ -259,8 +260,8 @@ Describe 'Telegram air monitoring card' {
             message_id = 76; type = @{ type = 'data' }; data = 'r:c' }
         Invoke-AirStatusWidgetQuery -Query $query -Now $later
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and $Body.widget_query_id -eq 'resume' -and $Body.ContainsKey('data')
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.Body.widget_query_id -eq 'resume' -and $Request.Body.ContainsKey('data')
         }
         $script:AirStatusWidgets[[long]101].ExpiresAt | Should -Be $later.AddMinutes(30)
         Update-AirStatusWidgets -Now $later.AddSeconds(1)
@@ -281,8 +282,8 @@ Describe 'Telegram air monitoring card' {
         $stranger = $base.Clone(); $stranger.id = 'stranger'; $stranger.data = 'r:m'
         Invoke-AirStatusWidgetQuery -Query $stranger -Now $script:widgetNow
 
-        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 6 -ParameterFilter {
-            $Uri -like '*/answerWidgetQuery' -and -not $Body.ContainsKey('data')
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 6 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and -not $Request.Body.ContainsKey('data')
         }
         $script:AirStatusWidgets.Count | Should -Be 0
         $script:MainMenuWidgets.Count | Should -Be 0
@@ -402,5 +403,38 @@ Describe 'Telegram air monitoring card' {
         $timer.Count | Should -Be 1
         $timer[0].text | Should -BeExactly (T 'menu.timerExtendLive')
         $timer[0].text | Should -Not -Match '\d{2}\s'
+    }
+
+    It 'answers from a worker so a slow Telegram never holds the polling thread, and says why an answer failed' {
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
+        Mock Receive-BridgeTelegramRequestWorker {
+            [pscustomobject]@{ Success = $false; StatusCode = 400; Error = 'Bad Request: query is too old' }
+        }
+        $query = @{ id = 'slow'; from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
+            message_id = 76; type = @{ type = 'data' }; data = 'r:c' }
+        Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow.AddSeconds(1)
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 0 -ParameterFilter { $Uri -like '*/answerWidgetQuery' }
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/answerWidgetQuery' -and $Request.TimeoutSec -ge 1 -and $Request.TimeoutSec -le 10
+        }
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(2)
+        Should -Invoke Write-BridgeLog -Exactly -Times 1 -ParameterFilter {
+            $Level -eq 'WARN' -and $Message -match 'answerWidgetQuery failed' -and $Message -match 'HTTP 400' -and
+                $Message -match 'query is too old' -and $Message -match "request 'r:c'"
+        }
+        $script:AirStatusWidgetAnswers.Count | Should -Be 0
+    }
+
+    It 'never writes a widget''s own request text to the log, and stops at four answers in flight' {
+        Mock Receive-BridgeTelegramRequestWorker { $null }
+        $query = @{ from = @{ id = 101 }; chat = @{ id = 101; type = 'private' }
+            message_id = 76; type = @{ type = 'data' }; data = "x`n2026-01-01 [ERROR] forged" }
+        foreach ($index in 1..5) { $query.id = "q$index"; Invoke-AirStatusWidgetQuery -Query $query -Now $script:widgetNow }
+
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 4
+        $script:AirStatusWidgetAnswers.Kind | Sort-Object -Unique | Should -Be 'other'
+        Should -Invoke Write-BridgeLog -Exactly -Times 1 -ParameterFilter { $Level -eq 'WARN' -and $Message -match 'left unanswered' }
+        Should -Invoke Write-BridgeLog -Exactly -Times 0 -ParameterFilter { $Message -match 'forged' }
     }
 }

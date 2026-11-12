@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.76.1
+
+Reviewing the station log after 8.75.0 and 8.76.0 showed every `answerWidgetQuery` call failing, logged at DEBUG without a status or reason. The answer is now sent from a background worker with a 10-second timeout instead of a 3-second synchronous call on the polling thread, and a failure is logged as a warning with the HTTP status, Telegram's description, the request kind, and the payload size. The cause was not reproduced; if the warning returns, the log now says whether it is a timeout or a refusal.
+
 ## Version 8.76.0
 
 On the live main menu, a layer's **Hide** and **Timer** buttons are now disabled in place as soon as that layer's scene changes or the menu expires, using `editMessageReplyMarkup` and Bot API 10.3's disabled buttons. Before, they stayed red and live above a panel showing a different scene and only refused after the press. Rows, order, and labels never change, so nothing moves under the thumb and no button is ever retargeted; reopen the menu for working buttons. The press-time check remains the actual lock. The timer button on a live menu no longer carries a seconds count frozen at send time, because the panel above counts it down.

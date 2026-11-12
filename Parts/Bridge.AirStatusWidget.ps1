@@ -180,7 +180,9 @@ function Get-AirStatusWidgetHtml {
   fill('refresh', copy.refresh);
   element('refresh').addEventListener('click', () => { ask(true); });
   if (widget) {
-    widget.onEvent('chatDataChanged', () => draw(widget.chatData));
+    // A pushed state is the newest word: a "refresh failed" left over from
+    // an answer that never arrived would contradict the data under it.
+    widget.onEvent('chatDataChanged', () => { draw(widget.chatData); if (!pending) showFeedback(''); });
     widget.onEvent('activated', wake);
   }
   draw(widget ? widget.chatData : null);
@@ -463,13 +465,55 @@ function Invoke-AirStatusWidgetQuery {
         }
     }
     # An empty answer tells an unauthorised or superseded card that it cannot refresh.
-    $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/answerWidgetQuery" -Method Post -Body $body `
-        -TimeoutSec ([Math]::Min(3, (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1)))
-    if (-not $request.Success) { Write-BridgeLog "Air status widget answerWidgetQuery failed for chat $chatId" 'DEBUG' }
+    #
+    # Sent from a worker, not from here. This runs on the polling thread, and
+    # a card now asks on its own whenever it appears on screen: a slow answer
+    # must not hold the air clock. The longer timeout is affordable for the
+    # same reason; Telegram accepts an answer for fifteen seconds.
+    Receive-AirStatusWidgetAnswers -Now $Now
+    # ponytail: four answers in flight. A fifth query goes unanswered and its
+    # card reports a failed refresh; raise the cap if one chat ever needs more.
+    if ($script:AirStatusWidgetAnswers.Count -ge 4) {
+        Write-BridgeLog "Air status widget query from chat $chatId left unanswered: four answers are already in flight" 'WARN'
+        return
+    }
+    $worker = Start-BridgeTelegramRequestWorker -Request @{
+        Uri = "$apiBase/answerWidgetQuery"
+        Method = 'Post'
+        TimeoutSec = [Math]::Min(10, (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1))
+        Body = $body
+    }
+    # The request text is the widget's own and untrusted: only a known value is
+    # ever written to the log.
+    $script:AirStatusWidgetAnswers.Add(@{
+            Worker = $worker; ChatId = $chatId; StartedAt = $Now
+            Kind = if ($kind -cin @('r:m', 'r:c', 'refresh')) { $kind } else { 'other' }
+            DataBytes = if ($body.ContainsKey('data')) { [Text.Encoding]::UTF8.GetByteCount($body.data) } else { 0 }
+        })
+}
+
+function Receive-AirStatusWidgetAnswers {
+    <#
+        Collects finished answers and says why one failed. Three failed in a
+        row on the station with a log line that named neither the status nor
+        Telegram's reason, so the cause could not be told from a timeout.
+    #>
+    param([datetime]$Now = (Get-Date))
+    foreach ($answer in @($script:AirStatusWidgetAnswers)) {
+        $request = Receive-BridgeTelegramRequestWorker -Worker $answer.Worker
+        if (-not $request) { continue }
+        $script:AirStatusWidgetAnswers.Remove($answer) | Out-Null
+        if ($request.Success) { continue }
+        $elapsed = [int]($Now - $answer.StartedAt).TotalMilliseconds
+        Write-BridgeLog ("Air status widget answerWidgetQuery failed for chat $($answer.ChatId) " +
+            "(HTTP $([int](Get-JsonProp $request 'StatusCode')), request '$($answer.Kind)', $($answer.DataBytes) data byte(s), " +
+            "collected ${elapsed} ms after the query): $(Get-JsonProp $request 'Error')") 'WARN'
+    }
 }
 
 function Update-AirStatusWidgets {
     param([datetime]$Now = (Get-Date))
+    Receive-AirStatusWidgetAnswers -Now $Now
     if ($script:AirStatusWidgets.Count -eq 0 -and $script:MainMenuWidgets.Count -eq 0 -and -not $script:AirStatusWidgetUpdate) { return }
     foreach ($registry in @($script:AirStatusWidgets, $script:MainMenuWidgets)) {
         foreach ($chatId in @($registry.Keys)) {

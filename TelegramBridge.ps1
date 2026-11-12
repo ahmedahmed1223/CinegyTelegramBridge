@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.76.0'
+$script:BridgeVersion = '8.76.1'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1097,6 +1097,7 @@ $script:RuntimeState = New-BridgeRuntimeState
 $script:AirStatusWidgets = @{}
 $script:MainMenuWidgets = @{}
 $script:AirStatusWidgetUpdate = $null
+$script:AirStatusWidgetAnswers = [System.Collections.Generic.List[hashtable]]::new()
 $script:AirStatusWidgetUnavailable = $false
 # Older Bot API servers ignore unrecognised names in allowed_updates. Include
 # widget_query from the first poll so a quick tap on the first card is admitted.
@@ -2393,6 +2394,10 @@ finally {
     if ($script:AirStatusWidgetUpdate) {
         try { Stop-BridgeTelegramRequestWorker -Worker $script:AirStatusWidgetUpdate.Worker }
         catch { Write-BridgeLog 'Could not cancel the air status widget worker during shutdown.' 'WARN' }
+    }
+    foreach ($answer in @($script:AirStatusWidgetAnswers)) {
+        try { Stop-BridgeTelegramRequestWorker -Worker $answer.Worker }
+        catch { Write-BridgeLog 'Could not cancel an air status widget answer during shutdown.' 'WARN' }
     }
     Save-UsageCounts -Force
     foreach ($job in @($script:SnapshotJobs)) {

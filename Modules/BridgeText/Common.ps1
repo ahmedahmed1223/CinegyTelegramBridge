@@ -44,7 +44,9 @@ function Add-BridgeTextCommon {
     $catalogue['menu.hideLive'] = @{ ar = '🔴 إخفاء {0} · {1}'; en = '🔴 Hide {0} · {1}' }
     $catalogue['menu.hideLive.copy'] = @{ ar = '🔴 إخفاء {0} · {1} — {2}'; en = '🔴 Hide {0} · {1} — {2}' }
     $catalogue['menu.timerExtend'] = @{ ar = '⏱ +30ث ({0} ث)'; en = '⏱ +30s ({0}s)' }
-    $catalogue['menu.timer'] = @{ ar = '⏱ مؤقت'; en = '⏱ Timer' }
+    # On the live menu, where the panel above already counts the timer down.
+    $catalogue['menu.timerExtendLive'] = @{ ar = '⏱ +30ث'; en = '⏱ +30s' }
+    $catalogue['menu.timer'] =@{ ar = '⏱ مؤقت'; en = '⏱ Timer' }
     $catalogue['menu.reshow'] = @{ ar = '↩️ إعادة عرض {0}'; en = '↩️ Show {0} again' }
     $catalogue['menu.hideAll'] = @{ ar = '🚨 إخفاء الكل'; en = '🚨 Hide everything' }
     $catalogue['menu.clearLayers'] = @{ ar = '🧹 تنظيف الطبقات'; en = '🧹 Clear the layers' }

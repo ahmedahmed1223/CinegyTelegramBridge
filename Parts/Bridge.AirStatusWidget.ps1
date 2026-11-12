@@ -297,6 +297,45 @@ function Send-AirStatusWidgetMessage {
     return 0
 }
 
+function Get-MainMenuWidgetStaleLayers {
+    <#
+        The layers whose menu buttons no longer name what is on air, plus the
+        ones already greyed out: a disabled button never comes back to life,
+        because the operator has to reopen the menu to see what it would do.
+    #>
+    param([Parameter(Mandatory)][hashtable]$Card, [Parameter(Mandatory)][datetime]$Now)
+    $stale = @($Card.StaleLayers)
+    foreach ($layer in @($Card.LayerFingerprints.Keys)) {
+        $recorded = [string]$Card.LayerFingerprints[$layer]
+        if ($layer -notin $stale -and
+            (-not $recorded -or $Card.ExpiresAt -le $Now -or $recorded -cne (Get-LayerRemovalFingerprint -Layer $layer))) {
+            $stale += [int]$layer
+        }
+    }
+    return @($stale | Sort-Object)
+}
+
+function Get-MainMenuWidgetKeyboard {
+    <#
+        The menu's keyboard with the stale layers' buttons disabled in place.
+        Same rows, same order, same labels: nothing moves under the thumb, and
+        no button is ever pointed at a scene other than the one it named.
+    #>
+    param([Parameter(Mandatory)][hashtable]$Card, [AllowEmptyCollection()][int[]]$StaleLayers = @())
+    $rows = @()
+    foreach ($keyboardRow in $Card.Keyboard.inline_keyboard) {
+        $row = @()
+        foreach ($button in $keyboardRow) {
+            if ((Get-JsonProp $button 'callback_data') -match '^(?:hide|timer):(\d+):menu$' -and [int]$Matches[1] -in $StaleLayers) {
+                $button = New-BridgeButton -Text $button.text -Disabled
+            }
+            $row += $button
+        }
+        $rows += , $row
+    }
+    return @{ inline_keyboard = $rows }
+}
+
 function Send-MainMenuWidget {
     param([long]$ChatId, [long]$UserId, [string]$Intro = '', [hashtable]$Keyboard, [datetime]$Now = (Get-Date))
     if ($script:AirStatusWidgetUnavailable -or $Now -lt $script:TelegramOutboxNotBefore -or $ChatId -le 0 -or $ChatId -ne $UserId -or
@@ -326,21 +365,34 @@ function Send-MainMenuWidget {
     foreach ($keyboardRow in $Keyboard.inline_keyboard) {
         $widgetRow = @()
         foreach ($button in $keyboardRow) {
-            if ((Get-JsonProp $button 'callback_data') -match '^(?:hide|timer):(\d+)$') {
-                $layer = [int]$Matches[1]
+            if ((Get-JsonProp $button 'callback_data') -match '^(hide|timer):(\d+)$') {
+                $layerAction = $Matches[1]
+                $layer = [int]$Matches[2]
                 if (-not $fingerprints.ContainsKey($layer)) { $fingerprints[$layer] = Get-LayerRemovalFingerprint -Layer $layer }
                 $button = $button.Clone()
                 $button.callback_data += ':menu'
+                # The panel above counts the timer down live; a number frozen
+                # into the label at send time would contradict it within a second.
+                if ($layerAction -eq 'timer' -and
+                    @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $layer -and (ConvertTo-AirStatusWidgetEpoch (Get-JsonProp $_ 'At')) -gt ([datetimeoffset]$Now).ToUnixTimeMilliseconds() }).Count -gt 0) {
+                    $button.text = T 'menu.timerExtendLive'
+                }
             }
             $widgetRow += $button
         }
         $widgetRows += , $widgetRow
     }
+    $card = @{ MessageId = 0; ExpiresAt = $expiresAt; LastData = $data; NextAt = $Now.AddSeconds(5); ForMenu = $true
+        LayerFingerprints = $fingerprints; Keyboard = @{ inline_keyboard = $widgetRows }; StaleLayers = @() }
+    # A layer with no fingerprint can never be confirmed, so its buttons would
+    # be refused on every press. They are sent disabled instead.
+    $card.StaleLayers = @(Get-MainMenuWidgetStaleLayers -Card $card -Now $Now)
     $html = Get-AirStatusWidgetHtml -ForMenu -Intro $Intro -UserId $UserId
-    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html $html -Data $data -Caption ($captionLines -join "`n") -Keyboard @{ inline_keyboard = $widgetRows }
+    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html $html -Data $data -Caption ($captionLines -join "`n") `
+        -Keyboard (Get-MainMenuWidgetKeyboard -Card $card -StaleLayers $card.StaleLayers)
     if ($messageId -le 0) { return $false }
-    $script:MainMenuWidgets[$ChatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = $data
-        NextAt = $Now.AddSeconds(5); ForMenu = $true; LayerFingerprints = $fingerprints }
+    $card.MessageId = $messageId
+    $script:MainMenuWidgets[$ChatId] = $card
     $script:LastTelegramMessageId = $messageId
     if ($script:RefreshTarget -and $script:RefreshTarget.ChatId -eq $ChatId) { Clear-RefreshTarget }
     return $true
@@ -422,7 +474,12 @@ function Update-AirStatusWidgets {
     foreach ($registry in @($script:AirStatusWidgets, $script:MainMenuWidgets)) {
         foreach ($chatId in @($registry.Keys)) {
             $card = $registry[$chatId]
-            if ($card.ExpiresAt -le $Now -or
+            $expired = $card.ExpiresAt -le $Now
+            # An expired menu is kept a few minutes longer, only to grey out
+            # the layer buttons it would now refuse.
+            $owesKeyboard = $expired -and $card.ContainsKey('Keyboard') -and $card.ExpiresAt.AddMinutes(5) -gt $Now -and
+                @($card.LayerFingerprints.Keys).Count -gt @($card.StaleLayers).Count
+            if (($expired -and -not $owesKeyboard) -or
                 -not (Test-Authorized -ChatId $chatId -UserId $chatId) -or
                 (-not $card.ForMenu -and -not (Test-StatusViewer -ChatId $chatId -UserId $chatId))) {
                 $registry.Remove($chatId)
@@ -445,12 +502,13 @@ function Update-AirStatusWidgets {
         if ($card -and $card.MessageId -eq $update.MessageId) {
             if (($request.Success -and (Get-JsonProp (Get-JsonProp $request 'Response') 'ok')) -or
                 ((Get-JsonProp $request 'Error') -match 'message is not modified|MESSAGE_NOT_MODIFIED')) {
-                $card.LastData = $update.Data
+                if ($update.ContainsKey('StaleLayers')) { $card.StaleLayers = $update.StaleLayers }
+                else { $card.LastData = $update.Data }
             }
             elseif ($statusCode -eq 429) { $card.NextAt = $script:TelegramOutboxNotBefore }
             elseif ($statusCode -in @(400, 401, 403, 404)) {
                 $registry.Remove($update.ChatId)
-                Write-BridgeLog "Air status widget editMessageWidgetData stopped for chat $($update.ChatId) (HTTP $statusCode)" 'DEBUG'
+                Write-BridgeLog "Air status widget edit stopped for chat $($update.ChatId) (HTTP $statusCode)" 'DEBUG'
             }
             else { $card.NextAt = $Now.AddSeconds(30) }
         }
@@ -465,15 +523,36 @@ function Update-AirStatusWidgets {
     foreach ($entry in $due) {
         $card = $entry.Value
         $card.NextAt = $Now.AddSeconds(5)
-        $data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt -ForMenu:$card.ForMenu
-        if ([string]::Equals($data, $card.LastData, [StringComparison]::Ordinal)) { continue }
-        $worker = Start-BridgeTelegramRequestWorker -Request @{
-            Uri = "$apiBase/editMessageWidgetData"
-            Method = 'Post'
-            TimeoutSec = Get-SettingInt 'TelegramRequestTimeoutSeconds' 1
-            Body = @{ chat_id = $entry.Key; message_id = $card.MessageId; chat_data = $data }
+        $pendingUpdate = @{ ChatId = $entry.Key; MessageId = $card.MessageId; ForMenu = $card.ForMenu }
+        $request = $null
+        # The keyboard before the panel: a button that still looks pressable
+        # over a scene it no longer names matters more than a late counter.
+        if ($card.ContainsKey('Keyboard')) {
+            $staleLayers = @(Get-MainMenuWidgetStaleLayers -Card $card -Now $Now)
+            if ($staleLayers.Count -gt @($card.StaleLayers).Count) {
+                $request = @{
+                    Uri = "$apiBase/editMessageReplyMarkup"
+                    Body = @{ chat_id = $entry.Key; message_id = $card.MessageId
+                        reply_markup = ConvertTo-TelegramReplyMarkupJson -ReplyMarkup (Get-MainMenuWidgetKeyboard -Card $card -StaleLayers $staleLayers) }
+                }
+                $pendingUpdate.StaleLayers = $staleLayers
+                $card.NextAt = $Now.AddSeconds(1)
+            }
         }
-        $script:AirStatusWidgetUpdate = @{ Worker = $worker; ChatId = $entry.Key; MessageId = $card.MessageId; Data = $data; ForMenu = $card.ForMenu }
+        if (-not $request) {
+            if ($card.ExpiresAt -le $Now) { continue }
+            $data = Get-AirStatusWidgetData -ExpiresAt $card.ExpiresAt -ForMenu:$card.ForMenu
+            if ([string]::Equals($data, $card.LastData, [StringComparison]::Ordinal)) { continue }
+            $request = @{
+                Uri = "$apiBase/editMessageWidgetData"
+                Body = @{ chat_id = $entry.Key; message_id = $card.MessageId; chat_data = $data }
+            }
+            $pendingUpdate.Data = $data
+        }
+        $request.Method = 'Post'
+        $request.TimeoutSec = Get-SettingInt 'TelegramRequestTimeoutSeconds' 1
+        $pendingUpdate.Worker = Start-BridgeTelegramRequestWorker -Request $request
+        $script:AirStatusWidgetUpdate = $pendingUpdate
         break
     }
 }

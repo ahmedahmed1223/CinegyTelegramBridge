@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.76.0
+
+On the live main menu, a layer's **Hide** and **Timer** buttons are now disabled in place as soon as that layer's scene changes or the menu expires, using `editMessageReplyMarkup` and Bot API 10.3's disabled buttons. Before, they stayed red and live above a panel showing a different scene and only refused after the press. Rows, order, and labels never change, so nothing moves under the thumb and no button is ever retargeted; reopen the menu for working buttons. The press-time check remains the actual lock. The timer button on a live menu no longer carries a seconds count frozen at send time, because the panel above counts it down.
+
 ## Version 8.75.0
 
 The live status panel and the live air status card now carry instants instead of rendered text, and count from them on the device every second: how long each layer has been on air, how long until its auto-hide timer fires, and how old the last successful Cinegy read is. A running counter costs no Telegram traffic, because the widget state only changes when the air does. Counters stop while a reading is unconfirmed.

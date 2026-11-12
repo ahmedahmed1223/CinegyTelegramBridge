@@ -324,4 +324,83 @@ Describe 'Telegram air monitoring card' {
         # the margin below covers the difference between the two encoders.
         $packed.ToArray().Length | Should -BeLessOrEqual 3900
     }
+
+    It 'greys out a layer''s buttons in place when its scene changes, and moves nothing else' {
+        Mock Test-StatusViewer { $false }
+        $script:OnAir = @{ 4 = @{ Key = 'Urgent'; At = $script:widgetNow }; 5 = @{ Key = 'Ticker'; At = $script:widgetNow } }
+        $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101 -Compact
+        Send-MainMenuWidget -ChatId 101 -UserId 101 -Keyboard $keyboard -Now $script:widgetNow | Should -BeTrue
+        $sent = $script:MainMenuWidgets[[long]101].Keyboard.inline_keyboard
+
+        $script:OnAir[4].Key = 'Replacement'
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(5)
+
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/editMessageReplyMarkup' -and $Request.Body.message_id -eq 76
+        }
+        $edited = (Get-MainMenuWidgetKeyboard -Card $script:MainMenuWidgets[[long]101] -StaleLayers 4).inline_keyboard
+        $edited.Count | Should -Be $sent.Count
+        for ($rowIndex = 0; $rowIndex -lt $sent.Count; $rowIndex++) {
+            @($edited[$rowIndex]).Count | Should -Be @($sent[$rowIndex]).Count
+            for ($cell = 0; $cell -lt @($sent[$rowIndex]).Count; $cell++) {
+                $before = @($sent[$rowIndex])[$cell]
+                $after = @($edited[$rowIndex])[$cell]
+                $after.text | Should -BeExactly $before.text
+                if ($before.callback_data -match '^(hide|timer):4:menu$') {
+                    $after.ContainsKey('disabled') | Should -BeTrue
+                    $after.ContainsKey('callback_data') | Should -BeFalse
+                }
+                else { $after.callback_data | Should -BeExactly $before.callback_data }
+            }
+        }
+        @($sent | ForEach-Object { $_ } | Where-Object { $_.callback_data -match '^(hide|timer):4:menu$' }).Count | Should -Be 2
+
+        # The panel follows on the next pass, and the keyboard is not sent twice.
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(6)
+        Update-AirStatusWidgets -Now $script:widgetNow.AddSeconds(7)
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter { $Request.Uri -like '*/editMessageReplyMarkup' }
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/editMessageWidgetData' -and $Request.Body.chat_data -match 'Replacement'
+        }
+        $script:MainMenuWidgets[[long]101].StaleLayers | Should -Be @(4)
+    }
+
+    It 'greys out every layer button once when the menu expires, then lets the menu go' {
+        Mock Test-StatusViewer { $false }
+        $script:OnAir = @{ 4 = @{ Key = 'Urgent'; At = $script:widgetNow } }
+        Show-MainMenuScreen -ChatId 101 -UserId 101
+        $expiresAt = $script:MainMenuWidgets[[long]101].ExpiresAt
+
+        Update-AirStatusWidgets -Now $expiresAt.AddSeconds(1)
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1 -ParameterFilter {
+            $Request.Uri -like '*/editMessageReplyMarkup' -and $Request.Body.reply_markup -match '"disabled"' -and
+                $Request.Body.reply_markup -notmatch 'hide:4'
+        }
+        Update-AirStatusWidgets -Now $expiresAt.AddSeconds(2)
+        Update-AirStatusWidgets -Now $expiresAt.AddSeconds(3)
+        $script:MainMenuWidgets.Count | Should -Be 0
+        Should -Invoke Start-BridgeTelegramRequestWorker -Exactly -Times 1
+    }
+
+    It 'sends a layer button disabled from the start when nothing could ever confirm it' {
+        Mock Test-StatusViewer { $false }
+        Show-MainMenuScreen -ChatId 101 -UserId 101
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter {
+            $Uri -like '*/sendWidget' -and $Body.reply_markup -match '"disabled"' -and $Body.reply_markup -notmatch 'hide:4'
+        }
+    }
+
+    It 'leaves the countdown to the panel instead of freezing a number into the timer button' {
+        Mock Test-StatusViewer { $false }
+        $script:OnAir = @{ 4 = @{ Key = 'Urgent'; At = (Get-Date) } }
+        $script:AutoHideQueue.Add(@{ Layer = 4; At = (Get-Date).AddSeconds(90) })
+        Show-MainMenuScreen -ChatId 101 -UserId 101
+
+        $timer = @($script:MainMenuWidgets[[long]101].Keyboard.inline_keyboard | ForEach-Object { $_ } |
+            Where-Object { $_.callback_data -eq 'timer:4:menu' })
+        $timer.Count | Should -Be 1
+        $timer[0].text | Should -BeExactly (T 'menu.timerExtendLive')
+        $timer[0].text | Should -Not -Match '\d{2}\s'
+    }
 }

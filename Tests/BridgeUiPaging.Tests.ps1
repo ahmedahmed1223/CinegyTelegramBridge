@@ -52,7 +52,8 @@ Describe 'Every screen built from a growing list is paged' {
         $script:BoundedScreens = @{
             'Update-MissingGraphicWatchdog'     = 'a separate message per missing graphic, each with exactly two fixed buttons: show now and keep hidden; no collection is rendered into a keyboard'
             'Get-MainMenuKeyboard'              = 'one row per on-air layer, and layers come from the registry'
-            'Get-LayersKeyboard'                = 'one button per known layer'
+            'Get-MainMenuWidgetKeyboard'        = 'a copy of the main menu keyboard already sent, row for row, with stale layer buttons disabled; it adds no row of its own'
+            'Get-LayersKeyboard'                ='one button per known layer'
             'Get-LayerDashboardKeyboard'        = 'one button per known layer, two to a row'
             'Get-LayerNamesKeyboard'            = 'one button per known layer'
             'Get-HideAllLayerSettingsKeyboard'  = 'one button per known layer'

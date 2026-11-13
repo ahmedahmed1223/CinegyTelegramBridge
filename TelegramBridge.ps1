@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.77.0'
+$script:BridgeVersion = '8.77.1'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1099,6 +1099,7 @@ $script:MainMenuWidgets = @{}
 $script:AirStatusWidgetUpdate = $null
 $script:AirStatusWidgetAnswers = [System.Collections.Generic.List[hashtable]]::new()
 $script:AirStatusWidgetUnavailable = $false
+$script:AirStatusWidgetRetryAt = [datetime]::MinValue
 # Older Bot API servers ignore unrecognised names in allowed_updates. Include
 # widget_query from the first poll so a quick tap on the first card is admitted.
 $script:TelegramAllowedUpdates = [Uri]::EscapeDataString('["message","callback_query","widget_query"]')

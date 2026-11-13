@@ -280,8 +280,8 @@ function Get-AirStatusWidgetData {
 }
 
 function Send-AirStatusWidgetMessage {
-    param([long]$ChatId, [string]$Html, [string]$Data, [string]$Caption, [hashtable]$Keyboard)
-    if ($script:AirStatusWidgetUnavailable) { return 0 }
+    param([long]$ChatId, [string]$Html, [string]$Data, [string]$Caption, [hashtable]$Keyboard, [datetime]$Now = (Get-Date))
+    if ($script:AirStatusWidgetUnavailable -or $Now -lt $script:AirStatusWidgetRetryAt) { return 0 }
     $body = @{
         chat_id = $ChatId
         html = $Html
@@ -300,6 +300,17 @@ function Send-AirStatusWidgetMessage {
 
     $statusCode = [int](Get-JsonProp $request 'StatusCode')
     if ($statusCode -eq 404 -and (Get-JsonProp $request 'Error') -match 'not found') { $script:AirStatusWidgetUnavailable = $true }
+    # Telegram's own refusal of widgets from this bot, whatever the chat: the
+    # station got it on every send from 2026-11-13 17:22, after a day of
+    # widgets that were delivered. Asking again on each menu costs a round
+    # trip before the menu the operator is waiting for, and a warning a time.
+    # ponytail: one hour, fixed. Shorten it if Telegram is seen to lift the
+    # refusal sooner; a restart also clears it.
+    if ($statusCode -eq 400 -and (Get-JsonProp $request 'Error') -match 'WIDGET_NOT_ALLOWED') {
+        $script:AirStatusWidgetRetryAt = $Now.AddHours(1)
+        Write-BridgeLog "Telegram refuses widgets from this bot (INPUT_MEDIA_WIDGET_NOT_ALLOWED); the ordinary screens are used until $($script:AirStatusWidgetRetryAt.ToString('HH:mm')), then one more try" 'WARN'
+        return 0
+    }
     # With Telegram's own reason and the sizes it limits. Two HTTP 400s on the
     # station said neither, so a refusal could not be told from a size.
     $packed = [IO.MemoryStream]::new()
@@ -404,7 +415,7 @@ function Send-MainMenuWidget {
     # be refused on every press. They are sent disabled instead.
     $card.StaleLayers = @(Get-MainMenuWidgetStaleLayers -Card $card -Now $Now)
     $html = Get-AirStatusWidgetHtml -ForMenu -Intro $Intro -UserId $UserId
-    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html $html -Data $data -Caption ($captionLines -join "`n") `
+    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html $html -Data $data -Caption ($captionLines -join "`n") -Now $Now `
         -Keyboard (Get-MainMenuWidgetKeyboard -Card $card -StaleLayers $card.StaleLayers)
     if ($messageId -le 0) { return $false }
     $card.MessageId = $messageId
@@ -432,7 +443,7 @@ function Show-AirStatusWidget {
     $textSnapshot = $lines -join "`n"
     $textStatusKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'airwidget.textStatus') 'menu:fullstatus'))) }
     $caption = (T 'airwidget.caption') + "`n" + (T 'airwidget.initialSnapshot' $lastRead)
-    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html (Get-AirStatusWidgetHtml) -Data $data -Caption $caption -Keyboard $textStatusKeyboard
+    $messageId = Send-AirStatusWidgetMessage -ChatId $ChatId -Html (Get-AirStatusWidgetHtml) -Data $data -Caption $caption -Keyboard $textStatusKeyboard -Now $Now
     if ($messageId -gt 0) {
         $script:AirStatusWidgets[$ChatId] = @{ MessageId = $messageId; ExpiresAt = $expiresAt; LastData = $data; NextAt = $Now.AddSeconds(5); ForMenu = $false }
         return

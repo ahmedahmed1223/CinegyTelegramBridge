@@ -6,6 +6,7 @@ Describe 'Telegram air monitoring card' {
         $script:AirStatusWidgets = @{}
         $script:MainMenuWidgets = @{}
         $script:AirStatusWidgetUnavailable = $false
+        $script:AirStatusWidgetRetryAt = [datetime]::MinValue
         $script:AirStatusWidgetUpdate = $null
         $script:AirStatusWidgetAnswers = [Collections.Generic.List[hashtable]]::new()
         $script:TelegramOutboxNotBefore = [datetime]::MinValue
@@ -458,5 +459,21 @@ Describe 'Telegram air monitoring card' {
             $Level -eq 'WARN' -and $Message -match 'sendWidget failed' -and $Message -match 'HTTP 400' -and
                 $Message -match 'INPUT_MEDIA_WIDGET_TOO_LARGE' -and $Message -match 'html \d+ bytes' -and $Message -match 'state \d+ bytes'
         }
+    }
+
+    It 'stops asking for an hour once Telegram refuses widgets from this bot, then tries once more' {
+        Mock Invoke-BridgeTelegramRequest {
+            [pscustomobject]@{ Success = $false; StatusCode = 400; Error = 'Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED' }
+        }
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow.AddMinutes(5)
+        Show-AirStatusWidget -ChatId 102 -UserId 102 -Now $script:widgetNow.AddMinutes(59)
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 1 -ParameterFilter { $Uri -like '*/sendWidget' }
+        Should -Invoke Send-TelegramMessage -Exactly -Times 3
+        Should -Invoke Write-BridgeLog -Exactly -Times 1 -ParameterFilter { $Level -eq 'WARN' -and $Message -match 'refuses widgets' }
+
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow.AddMinutes(61)
+        Should -Invoke Invoke-BridgeTelegramRequest -Exactly -Times 2 -ParameterFilter { $Uri -like '*/sendWidget' }
     }
 }

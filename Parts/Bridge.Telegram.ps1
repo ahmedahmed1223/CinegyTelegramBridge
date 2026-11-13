@@ -325,7 +325,12 @@ function Send-TelegramMessage {
         # the operator having asked. A screen, a reply, or a confirmation of
         # something they just pressed must never carry one, or a busy hour on
         # air would start hiding itself. See Test-BridgeNoticeSuppressed.
-        [AllowEmptyString()][string]$Cause = ''
+        [AllowEmptyString()][string]$Cause = '',
+        # Queued for the outbox worker instead of sent from this thread. For a
+        # message nobody is waiting on - a notice to the room - where the
+        # sender must not be held while every chat is told in turn. The
+        # message id is not known afterwards.
+        [switch]$Deferred
     )
     if ($Cause -and (Test-BridgeNoticeSuppressed -Cause $Cause -ChatId $ChatId)) { return }
     # D1: a quarantined chat already proved undeliverable three times. Trying
@@ -337,7 +342,7 @@ function Send-TelegramMessage {
     # A 🔄 press redraws its own message. Tried once; anything the edit cannot
     # carry - a photo under the button, a text too long - falls through to a
     # plain send below, as before.
-    if (-not $Cause) {
+    if (-not $Cause -and -not $Deferred) {
         $refreshId = Use-RefreshTarget -ChatId $ChatId
         if ($refreshId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $refreshId -Text $Text -ReplyMarkup $ReplyMarkup -ParseMode $ParseMode)) {
             $script:LastTelegramMessageId = $refreshId
@@ -372,6 +377,12 @@ function Send-TelegramMessage {
         # Only the final chunk carries the keyboard.
         if ($ReplyMarkup -and $i -eq ($chunks.Count - 1)) {
             $body.reply_markup = (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup)
+        }
+        if ($Deferred) {
+            if (-not (Add-TelegramOutboxItem -Body $body -DueAt (Get-Date) -Attempts 0)) {
+                Write-BridgeLog "Deferred Telegram message to $ChatId was not queued: the outbox is full" 'WARN'
+            }
+            continue
         }
         $request = Invoke-BridgeTelegramRequest -Uri "$apiBase/sendMessage" -Method Post -Body $body `
             -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 3
@@ -514,9 +525,21 @@ function Update-TelegramOutbox {
         if ($flooded) {
             $script:TelegramOutboxNotBefore = (Get-Date).AddMilliseconds([math]::Max(1000, [int](Get-JsonProp $request 'RetryAfterMs')))
         }
+        # A timeout or a gateway error is the network, not the message: one
+        # more try. A direct send gets three attempts, and a notice moved here
+        # so it would not block must not become easier to lose.
+        # ponytail: a timed-out request may have been delivered, so the retry
+        # can repeat a message - the same exposure the direct path always had.
+        $outboxStatus = [int](Get-JsonProp $request 'StatusCode')
+        $transient = -not $request.Success -and ($outboxStatus -eq 0 -or $outboxStatus -ge 500) -and [int]$item.Attempts -lt 1
         if (-not $request.Success -and $flooded -and [int]$item.Attempts -lt 4 -and $script:TelegramOutbox.Count -lt 200) {
             $item.Attempts++
             $item.DueAt = $script:TelegramOutboxNotBefore
+            $script:TelegramOutbox.Add($item) | Out-Null
+        }
+        elseif ($transient -and $script:TelegramOutbox.Count -lt 200) {
+            $item.Attempts++
+            $item.DueAt = (Get-Date).AddSeconds(2)
             $script:TelegramOutbox.Add($item) | Out-Null
         }
         else {
@@ -1045,7 +1068,16 @@ function Get-TelegramUpdates {
     # because it also covers connection setup and the trip home. Ten seconds
     # over a fifteen-second poll was cutting live requests off mid-answer.
     $margin = [Math]::Max(5, (Get-SettingInt 'TelegramPollMarginSeconds' 10))
-    $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec ($TimeoutSeconds + $margin)
+    # The same kept connection poll after poll, instead of a new handshake for
+    # every one. Dropped on any failure, so a dead connection costs one poll.
+    $pollDeadline = $TimeoutSeconds + $margin
+    try {
+        $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec $pollDeadline -WebSession (Get-BridgeTelegramSession -TimeoutSec $pollDeadline)
+    }
+    catch {
+        Reset-BridgeTelegramSession -TimeoutSec $pollDeadline
+        throw
+    }
     if (-not (Get-JsonProp $response 'ok')) {
         $desc = [string](Get-JsonProp $response 'description')
         throw "Telegram getUpdates rejected the request: $desc"

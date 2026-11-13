@@ -2527,6 +2527,9 @@ function Get-EffectivePollTimeout {
        whenever async work is outstanding so a finished snapshot or a dead
        relay is noticed within a second instead of up to 30. #>
     if ($script:PostShowQueue.Count -gt 0) { return 1 }
+    # The outbox sends one message per pass. Left on the long poll, a queued
+    # notice went out once every half minute.
+    if ($script:TelegramOutbox.Count -gt 0 -or $script:TelegramOutboxWorker) { return 1 }
     # A bulletin or a breaking-news board on air has a moment to hit every few
     # seconds, and the write has to land inside a fade that lasts about a
     # second. Polling for the configured half-minute would miss every one of

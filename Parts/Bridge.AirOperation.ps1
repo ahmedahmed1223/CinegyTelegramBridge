@@ -256,7 +256,10 @@ function Send-AirNoticeOrHold {
     #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Text, [hashtable]$Markup)
     if (-not (Get-PendingState -ChatId $ChatId)) {
-        Send-TelegramMessage -ChatId $ChatId -Text $Text -ParseMode HTML -ReplyMarkup $Markup
+        # Deferred: this runs inside the show or hide that caused it. Sent from
+        # here, twelve chats in turn held the polling thread for 5 to 55
+        # seconds after every graphic - no button answered, no timer fired.
+        Send-TelegramMessage -ChatId $ChatId -Text $Text -ParseMode HTML -ReplyMarkup $Markup -Deferred
         return $true
     }
     if (-not $script:AirNoticeHeld.ContainsKey($ChatId)) {

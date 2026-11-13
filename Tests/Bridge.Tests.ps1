@@ -1340,6 +1340,33 @@ Describe 'An overlong HTML message loses its markup, not its meaning' {
     }
 }
 
+Describe 'Telegram transport keeps its connection' {
+    BeforeEach {
+        $script:seenSessions = [System.Collections.Generic.List[object]]::new()
+        InModuleScope BridgeTelegram { $script:TelegramSessions = @{} }
+    }
+
+    It 'reuses one session per timeout, so a second call needs no new handshake' {
+        Mock Invoke-RestMethod -ModuleName BridgeTelegram { $script:seenSessions.Add($WebSession); @{ ok = $true } }
+        foreach ($timeout in 7, 7, 3, 7) {
+            Invoke-BridgeTelegramRequest -Uri 'https://api.example/sendMessage' -Method Post -Body @{} -TimeoutSec $timeout | Out-Null
+        }
+
+        $script:seenSessions[0] | Should -Not -BeNullOrEmpty
+        [object]::ReferenceEquals($script:seenSessions[0], $script:seenSessions[1]) | Should -BeTrue
+        [object]::ReferenceEquals($script:seenSessions[0], $script:seenSessions[3]) | Should -BeTrue
+        [object]::ReferenceEquals($script:seenSessions[0], $script:seenSessions[2]) | Should -BeFalse
+    }
+
+    It 'starts a new connection after a failure that never reached Telegram' {
+        Mock Invoke-RestMethod -ModuleName BridgeTelegram { $script:seenSessions.Add($WebSession); throw 'connection reset' }
+        Invoke-BridgeTelegramRequest -Uri 'https://api.example/sendMessage' -Method Post -Body @{} -TimeoutSec 7 | Out-Null
+        Invoke-BridgeTelegramRequest -Uri 'https://api.example/sendMessage' -Method Post -Body @{} -TimeoutSec 7 | Out-Null
+
+        [object]::ReferenceEquals($script:seenSessions[0], $script:seenSessions[1]) | Should -BeFalse
+    }
+}
+
 Describe 'Telegram flood-limit outbox' {
     BeforeEach {
         $script:TelegramOutbox = [System.Collections.Generic.List[hashtable]]::new()
@@ -1377,6 +1404,66 @@ Describe 'Telegram flood-limit outbox' {
         Should -Invoke Start-BridgeTelegramRequestWorker -Times 1 -Exactly
         $script:TelegramOutbox.Count | Should -Be 3
         $script:TelegramOutboxActiveItem.Body.text | Should -Be 'ordinary 1'
+    }
+
+    It 'queues a deferred message instead of sending it from the calling thread' {
+        Mock Invoke-BridgeTelegramRequest { throw 'a deferred message must not be sent from here' }
+        Mock Test-DeadChat { $false }
+        Send-TelegramMessage -ChatId 101 -Text '<b>on air</b>' -ParseMode HTML -Deferred `
+            -ReplyMarkup @{ inline_keyboard = @(, @(@{ text = 'mute'; callback_data = 'x' })) }
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+        $script:TelegramOutbox.Count | Should -Be 1
+        $script:TelegramOutbox[0].Body.chat_id | Should -Be 101
+        $script:TelegramOutbox[0].Body.parse_mode | Should -Be 'HTML'
+        $script:TelegramOutbox[0].Body.reply_markup | Should -Match 'mute'
+    }
+
+    It 'tells the room about a graphic without holding the thread that put it on air' {
+        Mock Invoke-BridgeTelegramRequest { throw 'an air notice must not be sent from here' }
+        Mock Test-DeadChat { $false }
+        Mock Get-PendingState { $null }
+        foreach ($chat in 201..212) { Send-AirNoticeOrHold -ChatId $chat -Text 'on air' | Should -BeTrue }
+
+        Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+        $script:TelegramOutbox.Count | Should -Be 12
+    }
+
+    It 'wakes every second while anything is queued, instead of once per long poll' {
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = 'queued' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        Get-EffectivePollTimeout | Should -Be 1
+        Update-TelegramOutbox
+        $script:TelegramOutbox.Count | Should -Be 0
+        Get-EffectivePollTimeout | Should -Be 1
+    }
+
+    It 'tries once more after a timeout, then drops the message and says which' {
+        Mock Register-TelegramSendFailure { }
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = 'notice' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        Update-TelegramOutbox
+        Mock Receive-BridgeTelegramRequestWorker { @{ Success = $false; StatusCode = 0; RetryAfterMs = 0; Error = 'timeout' } }
+        Update-TelegramOutbox
+
+        $script:TelegramOutbox.Count | Should -Be 1
+        $script:TelegramOutbox[0].Attempts | Should -Be 1
+        $script:TelegramOutbox[0].DueAt | Should -BeGreaterThan (Get-Date)
+        Should -Invoke Write-BridgeLog -Times 0 -Exactly -ParameterFilter { $Level -eq 'ERROR' }
+
+        $script:TelegramOutbox[0].DueAt = (Get-Date).AddSeconds(-1)
+        Update-TelegramOutbox
+        Update-TelegramOutbox
+        $script:TelegramOutbox.Count | Should -Be 0
+        Should -Invoke Write-BridgeLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'ERROR' -and $Message -match 'chat 101' }
+    }
+
+    It 'does not retry a message Telegram itself refused' {
+        Mock Register-TelegramSendFailure { }
+        Add-TelegramOutboxItem -Body @{ chat_id = 101; text = 'bad' } -DueAt (Get-Date).AddMinutes(-1) -Attempts 0 | Out-Null
+        Update-TelegramOutbox
+        Mock Receive-BridgeTelegramRequestWorker { @{ Success = $false; StatusCode = 400; RetryAfterMs = 0; Error = 'Bad Request' } }
+        Update-TelegramOutbox
+
+        $script:TelegramOutbox.Count | Should -Be 0
     }
 
     It 'sends a due warning ahead of ordinary deferred navigation' {

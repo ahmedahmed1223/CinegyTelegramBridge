@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.77.0
+
+A stability and speed pass driven by a week of station logs. Showing or hiding a graphic took a median of 5.5 seconds and up to 55, although Cinegy accepted each command in under a second: the rest was the on-air notice being sent to twelve chats in turn on the polling thread, during which no button was answered and no timer fired. The notice now goes through the background outbox, so the operation ends when Cinegy does.
+
+Telegram requests from the main thread and the long poll now reuse their HTTPS connection instead of opening one per call (about 700 ms versus 150-450 ms measured from the station). The outbox wakes the loop every second while it holds anything, where it used to send one deferred message per long poll, and it retries once after a network failure.
+
 ## Version 8.76.2
 
 A day of station logs settled the `answerWidgetQuery` failures as network timeouts to Telegram, not refusals. Two `sendWidget` calls were refused with HTTP 400 and the log did not carry Telegram's reason; the warning now includes the description and every size the server limits (raw and packed HTML, state, caption, keyboard). The cause of those two refusals is still unknown. The on-air counter now parses a stored show time month-first regardless of the station culture.

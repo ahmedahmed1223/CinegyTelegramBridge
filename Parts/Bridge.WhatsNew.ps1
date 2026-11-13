@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.77.0'; Items = @('⚡ The bot no longer freezes after a graphic goes on or off air. Telling the other chats now happens in the background, so buttons answer straight away; the notice reaches each chat a moment later, one after another. Messages to Telegram are also quicker in general.') },
                 @{ Version = '8.76.2'; Items = @('🛠 The on-air counter on the live panel reads a stored show time correctly on stations whose date format puts the day first.') },
                 @{ Version = '8.76.1'; Items = @('🛠 Refresh now on the live panel and the air status card no longer waits on a slow Telegram, and a "refresh failed" note clears itself as soon as newer data arrives.') },
                 @{ Version = '8.76.0'; Items = @('🔘 On the live main menu, a layer''s Hide and Timer buttons turn grey on their own when that layer''s graphic changes or the menu gets old, instead of answering with a refusal after you press. Nothing else on the menu moves. Open the menu again for working buttons. The timer button no longer shows a frozen number of seconds; the panel above counts it down.') },
@@ -314,6 +315,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.77.0'; Items = @('⚡ البوت لم يعد يتجمّد بعد عرض قالب أو إخفائه. إبلاغ بقية المحادثات يجري في الخلفية، فتستجيب الأزرار فورًا؛ ويصل الإشعار إلى كل محادثة بعد لحظات، واحدة تلو الأخرى. والرسائل إلى Telegram أسرع عمومًا.') },
                 @{ Version = '8.76.2'; Items = @('🛠 عدّاد «على الهواء منذ» في اللوحة الحيّة يقرأ وقت العرض المحفوظ صحيحًا على المحطات التي تكتب اليوم قبل الشهر.') },
                 @{ Version = '8.76.1'; Items = @('🛠 زر «تحديث الآن» في اللوحة الحيّة وبطاقة الهواء لم يعد ينتظر Telegram البطيء، وملاحظة «تعذّر التحديث» تختفي وحدها فور وصول بيانات أحدث.') },
                 @{ Version = '8.76.0'; Items = @('🔘 في القائمة الرئيسية الحيّة، زرّا «إخفاء» و«مؤقت» لأي طبقة يصيران معطَّلين وحدهما حين يتغيّر قالب تلك الطبقة أو تقدُم القائمة، بدل أن يردّا بالرفض بعد الضغط. لا يتحرّك شيء آخر في القائمة. افتح القائمة من جديد لأزرار تعمل. وزر المؤقت لم يعد يحمل عدد ثوانٍ مجمَّدًا؛ العدّ في اللوحة فوقه.') },

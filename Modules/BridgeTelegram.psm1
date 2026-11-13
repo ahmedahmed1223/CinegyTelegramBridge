@@ -73,6 +73,30 @@ function Get-BridgeTelegramErrorText {
     return "$message - $description"
 }
 
+# One session per timeout value. PowerShell builds a new HttpClient - a new TCP
+# and TLS handshake - for every Invoke-RestMethod without one, and rebuilds a
+# session's client whenever its timeout changes. Measured from the station on
+# 2026-11-13: about 700 ms a call on a new connection, about 150-450 ms on a
+# kept one, and alternating two timeouts on one session lost the gain.
+$script:TelegramSessions = @{}
+
+function Get-BridgeTelegramSession {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$TimeoutSec)
+    if (-not $script:TelegramSessions.ContainsKey($TimeoutSec)) {
+        $script:TelegramSessions[$TimeoutSec] = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+    }
+    return $script:TelegramSessions[$TimeoutSec]
+}
+
+function Reset-BridgeTelegramSession {
+    <# After a failure that never reached Telegram. A pooled connection that
+       died quietly would otherwise fail the next request too. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$TimeoutSec)
+    $script:TelegramSessions.Remove($TimeoutSec)
+}
+
 function Invoke-BridgeTelegramRequest {
     [CmdletBinding(DefaultParameterSetName='Body')]
     param(
@@ -87,7 +111,7 @@ function Invoke-BridgeTelegramRequest {
     )
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
-            $request = @{ Uri=$Uri; Method=$Method; TimeoutSec=$TimeoutSec }
+            $request = @{ Uri=$Uri; Method=$Method; TimeoutSec=$TimeoutSec; WebSession=(Get-BridgeTelegramSession -TimeoutSec $TimeoutSec) }
             if ($PSCmdlet.ParameterSetName -eq 'Form' -and $null -ne $Form) { $request.Form=$Form }
             elseif ($null -ne $Body) { $request.Body=$Body }
             if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $request.ContentType=$ContentType }
@@ -97,6 +121,7 @@ function Invoke-BridgeTelegramRequest {
         catch {
             $status = 0
             try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = 0 }
+            if ($status -eq 0) { Reset-BridgeTelegramSession -TimeoutSec $TimeoutSec }
             if ($status -eq 429) {
                 $delay = Get-BridgeTelegramRetryDelayMs -ErrorRecord $_ -DefaultDelayMs $RetryDelayMs -MaximumDelayMs 300000
                 return [pscustomobject]@{ Success=$false; Response=$null; Error=(Get-BridgeTelegramErrorText -ErrorRecord $_); Attempts=$attempt; StatusCode=429; RetryAfterMs=$delay }
@@ -150,4 +175,4 @@ function Stop-BridgeTelegramRequestWorker {
     finally { $Worker.Pipeline.Dispose(); $Worker.Disposed = $true }
 }
 
-Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker, Get-BridgeTelegramErrorText
+Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramSession, Reset-BridgeTelegramSession, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker, Get-BridgeTelegramErrorText

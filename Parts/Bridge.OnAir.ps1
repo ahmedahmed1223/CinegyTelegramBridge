@@ -207,7 +207,6 @@ function Remove-OnAirRecord {
 
 function Save-OnAirState {
     try {
-        Write-BridgeLog "Save-OnAirState invoked (in-memory layers: $($script:OnAir.Keys.Count))" "DEBUG"
         $parentDir = Split-Path $onAirFile -Parent
         if (-not (Test-Path -LiteralPath $parentDir)) {
             New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction SilentlyContinue | Out-Null
@@ -216,9 +215,10 @@ function Save-OnAirState {
         $canonical = ConvertTo-BridgeLiveSceneState -Document ([pscustomobject]@{ Scenes = @($script:OnAirScenes) })
         if (-not $canonical.Success) { throw "invalid live-scene state: $($canonical.Error)" }
         $json = [ordered]@{ SchemaVersion = 1; Scenes = @($canonical.Scenes) } | ConvertTo-Json -Depth 6
-        Write-BridgeLog "Writing validated onair payload (size: $($json.Length) chars)" "DEBUG"
         if (-not (Write-ValidatedJsonState -Path $onAirFile -Json $json)) { throw 'validated state write failed' }
-        Write-BridgeLog "Wrote onair.json ($($canonical.Scenes.Count) scene(s)) to $onAirFile" "INFO"
+        # One line, at DEBUG. A successful save was three lines - 30% of the
+        # station log in a week - and the failure below is the one that matters.
+        Write-BridgeLog "Wrote onair.json ($($canonical.Scenes.Count) scene(s), $($json.Length) chars)" "DEBUG"
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
 }

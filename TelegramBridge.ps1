@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.76.2'
+$script:BridgeVersion = '8.77.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -2359,7 +2359,10 @@ try {
             $script:PollTimeoutStreak = if ($timedOut) { [int]$script:PollTimeoutStreak + 1 } else { 0 }
             $tolerated = Get-SettingInt 'TelegramPollTimeoutTolerance' 0
             if ($timedOut -and $script:PollTimeoutStreak -le $tolerated) {
-                Write-BridgeLog "Long-poll timed out ($($script:PollTimeoutStreak) of $tolerated tolerated) - re-polling without backoff" 'WARN'
+                # DEBUG: tolerated is the setting's own word for it. As a WARN
+                # it was 140 lines a week and half of every warning in the log;
+                # the timeout past the tolerance still takes the ERROR path.
+                Write-BridgeLog "Long-poll timed out ($($script:PollTimeoutStreak) of $tolerated tolerated) - re-polling without backoff" 'DEBUG'
             }
             else {
                 Write-BridgeLog "Polling error: $pollError" "ERROR"

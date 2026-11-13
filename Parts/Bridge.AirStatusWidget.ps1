@@ -209,7 +209,12 @@ function ConvertTo-AirStatusWidgetEpoch {
     try {
         if ($Moment -is [datetimeoffset]) { $instant = $Moment }
         elseif ($Moment -is [datetime]) { $instant = [datetimeoffset]$Moment }
-        elseif (-not [datetimeoffset]::TryParse([string]$Moment, [ref]$instant)) { return 0 }
+        # Invariant first: a stored show time is PowerShell's own string cast,
+        # month before day. Read with the station's culture, 11/12 becomes the
+        # eleventh of December and the on-air counter starts a month ahead.
+        elseif (-not [datetimeoffset]::TryParse([string]$Moment, [cultureinfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeLocal, [ref]$instant) -and
+            -not [datetimeoffset]::TryParse([string]$Moment, [ref]$instant)) { return 0 }
     }
     catch { return 0 }
     return [Math]::Max(0L, $instant.ToUnixTimeMilliseconds())
@@ -295,7 +300,16 @@ function Send-AirStatusWidgetMessage {
 
     $statusCode = [int](Get-JsonProp $request 'StatusCode')
     if ($statusCode -eq 404 -and (Get-JsonProp $request 'Error') -match 'not found') { $script:AirStatusWidgetUnavailable = $true }
-    Write-BridgeLog "Air status widget sendWidget failed for chat $ChatId (HTTP $statusCode); using the existing screen" 'WARN'
+    # With Telegram's own reason and the sizes it limits. Two HTTP 400s on the
+    # station said neither, so a refusal could not be told from a size.
+    $packed = [IO.MemoryStream]::new()
+    $zlib = [IO.Compression.ZLibStream]::new($packed, [IO.Compression.CompressionLevel]::SmallestSize)
+    $htmlBytes = [Text.Encoding]::UTF8.GetBytes($Html)
+    $zlib.Write($htmlBytes, 0, $htmlBytes.Length)
+    $zlib.Dispose()
+    Write-BridgeLog ("Air status widget sendWidget failed for chat $ChatId (HTTP $statusCode; html $($htmlBytes.Length) bytes, " +
+        "about $($packed.ToArray().Length) packed; state $([Text.Encoding]::UTF8.GetByteCount($Data)) bytes; caption $($Caption.Length) chars; " +
+        "keyboard $($body.reply_markup.Length) chars); using the existing screen: $(Get-JsonProp $request 'Error')") 'WARN'
     return 0
 }
 
@@ -552,7 +566,8 @@ function Update-AirStatusWidgets {
             elseif ($statusCode -eq 429) { $card.NextAt = $script:TelegramOutboxNotBefore }
             elseif ($statusCode -in @(400, 401, 403, 404)) {
                 $registry.Remove($update.ChatId)
-                Write-BridgeLog "Air status widget edit stopped for chat $($update.ChatId) (HTTP $statusCode)" 'DEBUG'
+                $editKind = if ($update.ContainsKey('StaleLayers')) { 'editMessageReplyMarkup' } else { 'editMessageWidgetData' }
+                Write-BridgeLog "Air status widget $editKind stopped for chat $($update.ChatId) (HTTP $statusCode): $(Get-JsonProp $request 'Error')" 'WARN'
             }
             else { $card.NextAt = $Now.AddSeconds(30) }
         }

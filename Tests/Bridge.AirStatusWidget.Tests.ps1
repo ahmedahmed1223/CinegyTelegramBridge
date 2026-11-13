@@ -437,4 +437,26 @@ Describe 'Telegram air monitoring card' {
         Should -Invoke Write-BridgeLog -Exactly -Times 1 -ParameterFilter { $Level -eq 'WARN' -and $Message -match 'left unanswered' }
         Should -Invoke Write-BridgeLog -Exactly -Times 0 -ParameterFilter { $Message -match 'forged' }
     }
+
+    It 'reads a stored show time month-first whatever the station culture is' {
+        $previous = [cultureinfo]::CurrentCulture
+        try {
+            [cultureinfo]::CurrentCulture = [cultureinfo]'en-GB'
+            $expected = ([datetimeoffset][datetime]::new(2026, 11, 12, 11, 6, 48, [DateTimeKind]::Local)).ToUnixTimeMilliseconds()
+            ConvertTo-AirStatusWidgetEpoch '11/12/2026 11:06:48' | Should -Be $expected
+        }
+        finally { [cultureinfo]::CurrentCulture = $previous }
+    }
+
+    It 'says why Telegram refused a widget, with the sizes it limits' {
+        Mock Invoke-BridgeTelegramRequest {
+            [pscustomobject]@{ Success = $false; StatusCode = 400; Error = 'Bad Request: INPUT_MEDIA_WIDGET_TOO_LARGE' }
+        }
+        Show-AirStatusWidget -ChatId 101 -UserId 101 -Now $script:widgetNow
+
+        Should -Invoke Write-BridgeLog -Exactly -Times 1 -ParameterFilter {
+            $Level -eq 'WARN' -and $Message -match 'sendWidget failed' -and $Message -match 'HTTP 400' -and
+                $Message -match 'INPUT_MEDIA_WIDGET_TOO_LARGE' -and $Message -match 'html \d+ bytes' -and $Message -match 'state \d+ bytes'
+        }
+    }
 }

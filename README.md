@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.76.2
+
+A day of station logs settled the `answerWidgetQuery` failures as network timeouts to Telegram, not refusals. Two `sendWidget` calls were refused with HTTP 400 and the log did not carry Telegram's reason; the warning now includes the description and every size the server limits (raw and packed HTML, state, caption, keyboard). The cause of those two refusals is still unknown. The on-air counter now parses a stored show time month-first regardless of the station culture.
+
 ## Version 8.76.1
 
 Reviewing the station log after 8.75.0 and 8.76.0 showed every `answerWidgetQuery` call failing, logged at DEBUG without a status or reason. The answer is now sent from a background worker with a 10-second timeout instead of a 3-second synchronous call on the polling thread, and a failure is logged as a warning with the HTTP status, Telegram's description, the request kind, and the payload size. The cause was not reproduced; if the warning returns, the log now says whether it is a timeout or a refusal.

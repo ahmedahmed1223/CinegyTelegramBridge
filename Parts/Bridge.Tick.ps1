@@ -2482,7 +2482,7 @@ function Invoke-BridgeTick {
        kill the loop. #>
     # Nothing the clock sends may land on a screen a person refreshed.
     Clear-RefreshTarget
-    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-GraphicRecoveryQueue', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AirStatusWidgets', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
+    foreach ($step in @('Update-TelegramOutbox', 'Update-PostShowQueue', 'Update-SnapshotJobs', 'Update-RelayWatchdog', 'Update-AutoHideQueue', 'Update-TemplateReminderQueue', 'Update-ScheduleQueue', 'Update-MojazScheduleQueue', 'Update-MojazPlayback', 'Update-UrgentBoardRun', 'Update-UrgentHomeRefresh', 'Update-MojazTickerReturn', 'Update-PendingExpiry', 'Update-NewsDraftExpiry', 'Update-NewsScheduledPublish', 'Update-PinnedRecurrenceSweep', 'Update-DeadChatsSweep', 'Update-NewsLockRequest', 'Update-NewsSheetSync', 'Update-SnapshotCleanup', 'Update-UploadCleanup', 'Update-MojazImageCleanup', 'Update-OutputBlackWatchdog', 'Update-MaterialProxyWatchdog', 'Update-MaterialEndWatchdog', 'Save-UsageCounts', 'Save-UserProfiles', 'Save-HealthSnapshot', 'Update-ScheduleExecutionLogTrim', 'Update-ScheduleHistoryTrim', 'Update-AccessGuardSweep', 'Update-CinegyStateWatchdog', 'Update-GraphicRecoveryQueue', 'Update-StaleOnAirWatchdog', 'Update-CinegyHealthWatchdog', 'Update-AirStatusWidgets', 'Update-AlertSuppressionSweep', 'Update-QuietHoursQueue', 'Update-AnnouncementQueue', 'Update-Heartbeat', 'Update-UsageDigest')) {
         try { & $step | Out-Null }
         catch { Write-BridgeLog "Tick step $step failed: $($_.Exception.Message)" "ERROR" }
     }
@@ -2529,7 +2529,7 @@ function Get-EffectivePollTimeout {
     if ($script:PostShowQueue.Count -gt 0) { return 1 }
     # The outbox sends one message per pass. Left on the long poll, a queued
     # notice went out once every half minute.
-    if ($script:TelegramOutbox.Count -gt 0 -or $script:TelegramOutboxWorker) { return 1 }
+    if ($script:TelegramOutbox.Count -gt 0 -or $script:TelegramOutboxWorker -or $script:UrgentHomeRefresh.Count -gt 0) { return 1 }
     # A bulletin or a breaking-news board on air has a moment to hit every few
     # seconds, and the write has to land inside a fade that lasts about a
     # second. Polling for the configured half-minute would miss every one of

@@ -288,7 +288,17 @@ Describe 'Running the breaking-news board' {
         Mock Send-TelegramMessage { }
         Mock Get-TemplateNoticeAudience { @() }
         try {
+            $script:UrgentHomeRefresh.Clear()
             Send-TemplateAirNotice -Key $script:MojazUrgentKey -Layer 7 -ActorChatId 100 -ActorName 'أحمد' -Action 'hide' | Out-Null
+
+            # Not from inside the operation: eight boards redrawn there held
+            # every urgent SHOW for seconds after Cinegy had taken it.
+            $script:Redrawn.Count | Should -Be 0 -Because 'the operation that changed the air must not wait on other chats'
+            Get-EffectivePollTimeout | Should -Be 1 -Because 'a waiting board must not sit out a long poll'
+            Update-UrgentHomeRefresh
+            $script:Redrawn.Count | Should -Be 1 -Because 'one board per tick, so buttons are answered in between'
+            Update-UrgentHomeRefresh
+            Update-UrgentHomeRefresh
 
             @($script:Redrawn | Sort-Object) | Should -Be @('100/55', '200/66') -Because 'the actor is redrawn too; a hide pressed on an air notice has no other road to its board'
             Should -Invoke Send-TelegramRichMessage -Times 0 -Exactly

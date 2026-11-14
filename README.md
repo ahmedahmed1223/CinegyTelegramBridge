@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.77.2
+
+After 8.77.0 an urgent SHOW still took about five seconds. The log placed the gap between two adjacent lines of code: every open breaking-news board in every chat (eight on the station) was being redrawn with a synchronous message edit inside the operation. Those redraws are now queued and done one per tick, so the operation returns once Cinegy has accepted it. Not yet measured on the station.
+
 ## Version 8.77.1
 
 The improved logging named the reason for the refused widgets: Telegram answers `sendWidget` with `INPUT_MEDIA_WIDGET_NOT_ALLOWED` for this bot, on every send since 2026-11-13 17:22, with all sizes within limits. The error is not in the Widgets guide. After that refusal the bridge now skips widgets for an hour and opens the ordinary screen directly, instead of spending a round trip and a warning on every menu.

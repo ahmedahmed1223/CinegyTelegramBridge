@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.77.2'; Items = @('⚡ Putting a breaking-news line on air or taking it off answers in about a second. Other people''s open breaking-news boards now update one after another in the background, a moment later.') },
                 @{ Version = '8.77.1'; Items = @('🛠 While Telegram is refusing live panels from the bot, the main menu opens straight away as the ordinary screen instead of trying the panel first each time.') },
                 @{ Version = '8.77.0'; Items = @('⚡ The bot no longer freezes after a graphic goes on or off air. Telling the other chats now happens in the background, so buttons answer straight away; the notice reaches each chat a moment later, one after another. Messages to Telegram are also quicker in general.') },
                 @{ Version = '8.76.2'; Items = @('🛠 The on-air counter on the live panel reads a stored show time correctly on stations whose date format puts the day first.') },
@@ -316,6 +317,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.77.2'; Items = @('⚡ عرض العاجل أو إخفاؤه يُجاب في نحو ثانية. لوحات العواجل المفتوحة عند الآخرين تتحدّث واحدة تلو الأخرى في الخلفية، بعد لحظات.') },
                 @{ Version = '8.77.1'; Items = @('🛠 ما دام Telegram يرفض اللوحات الحيّة من البوت، تُفتح القائمة الرئيسية مباشرةً بشاشتها العادية بدل محاولة اللوحة أولًا في كل مرة.') },
                 @{ Version = '8.77.0'; Items = @('⚡ البوت لم يعد يتجمّد بعد عرض قالب أو إخفائه. إبلاغ بقية المحادثات يجري في الخلفية، فتستجيب الأزرار فورًا؛ ويصل الإشعار إلى كل محادثة بعد لحظات، واحدة تلو الأخرى. والرسائل إلى Telegram أسرع عمومًا.') },
                 @{ Version = '8.76.2'; Items = @('🛠 عدّاد «على الهواء منذ» في اللوحة الحيّة يقرأ وقت العرض المحفوظ صحيحًا على المحطات التي تكتب اليوم قبل الشهر.') },

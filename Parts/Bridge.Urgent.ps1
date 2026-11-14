@@ -868,15 +868,32 @@ function Update-UrgentHomeScreens {
     $notice = if ($Action -eq 'show') { if ($ActorName) { (T 'urg.airShownBy' $ActorName) } else { (T 'urgent.airShown') } }
         elseif ($EndedOutside) { (T 'urgent.airEndedOutside') }
         elseif ($ActorName) { (T 'urg.airHiddenBy' $ActorName) } else { (T 'urgent.airHidden') }
-    $count = 0
-    foreach ($chatId in @($script:UrgentHomeMessage.Keys)) {
-        try {
-            Show-UrgentBoardScreen -ChatId ([long]$chatId) -UserId ([long]$chatId) -MessageId ([int]$script:UrgentHomeMessage[$chatId]) -Notice $notice -EditOnly
-            $count++
-        }
-        catch { Write-BridgeLog "Could not refresh the urgent board for chat $chatId : $($_.Exception.Message)" 'WARN' }
+    # Queued, one board per tick. Redrawn here, eight open boards held every
+    # urgent SHOW for five to seven seconds after Cinegy had already taken it
+    # (station log, 2026-11-14) - each edit is a round trip to Telegram on the
+    # thread that answers buttons. A later change replaces a waiting notice:
+    # the board is drawn from current state, so only the newest words matter.
+    foreach ($chatId in @($script:UrgentHomeMessage.Keys)) { $script:UrgentHomeRefresh[[long]$chatId] = $notice }
+    return $script:UrgentHomeMessage.Count
+}
+
+# Boards waiting to be redrawn: chat id -> the notice to show on them.
+$script:UrgentHomeRefresh = @{}
+
+function Update-UrgentHomeRefresh {
+    <# Tick step: redraws one waiting board, by edit only.
+       ponytail: one per pass on the polling thread, about a second each. Move
+       the edit to a request worker if a station keeps dozens of boards open. #>
+    if ($script:UrgentHomeRefresh.Count -eq 0) { return }
+    $chatId = [long](@($script:UrgentHomeRefresh.Keys | Sort-Object)[0])
+    $notice = [string]$script:UrgentHomeRefresh[$chatId]
+    $script:UrgentHomeRefresh.Remove($chatId)
+    # Closed or replaced since it was queued: nothing to redraw.
+    if (-not $script:UrgentHomeMessage.ContainsKey($chatId)) { return }
+    try {
+        Show-UrgentBoardScreen -ChatId $chatId -UserId $chatId -MessageId ([int]$script:UrgentHomeMessage[$chatId]) -Notice $notice -EditOnly
     }
-    return $count
+    catch { Write-BridgeLog "Could not refresh the urgent board for chat $chatId : $($_.Exception.Message)" 'WARN' }
 }
 
 function Get-UrgentItemKeyboard {

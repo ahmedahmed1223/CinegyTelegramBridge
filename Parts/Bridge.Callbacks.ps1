@@ -173,6 +173,12 @@ function Invoke-CallbackQuery {
     Confirm-TelegramCallback -CallbackQueryId $CallbackQuery.id
     Update-UserLastActivity -UserId $userId | Out-Null
 
+    if ($data -match '^web:(ok|no):(\d{6})$') {
+        $webMessageId = if ($msgObj) { [int](Get-JsonProp $msgObj 'message_id') } else { 0 }
+        Complete-WebLoginApproval -Code $Matches[2] -Approve ($Matches[1] -eq 'ok') -ChatId $chatId -UserId $userId -MessageId $webMessageId
+        return
+    }
+
     if ($data -match '^urgentb:(all|none|page)(?::|$)') {
         if ($data -notmatch '^urgentb:(all|none|page)(?::([0-9]{1,6}))?$') {
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.urgentExpired')

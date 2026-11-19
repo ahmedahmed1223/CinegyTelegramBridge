@@ -1,0 +1,953 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "CinegyBridge.Web | v1",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/me/password": {
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Locked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/telegram": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramSignInResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/telegram/{flowId}": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "parameters": [
+          {
+            "name": "flowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramPollResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status/stream": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/accounts": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/accounts/{username}": {
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/accounts/{username}/password": {
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionInfoResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountsResponse": {
+        "required": [
+          "accounts",
+          "bridgeUsers"
+        ],
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebAccountResponse"
+            }
+          },
+          "bridgeUsers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BridgeUserResponse"
+            }
+          }
+        }
+      },
+      "BridgeStatus": {
+        "required": [
+          "version",
+          "startedAt",
+          "publishedAt",
+          "telegram",
+          "cinegy",
+          "layers"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "publishedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "telegram": {
+            "$ref": "#/components/schemas/TelegramStatus"
+          },
+          "cinegy": {
+            "$ref": "#/components/schemas/CinegyStatus"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LayerStatus"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "BridgeUserResponse": {
+        "required": [
+          "id",
+          "name",
+          "role",
+          "webOnly",
+          "username"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "webOnly": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string"
+          }
+        }
+      },
+      "CinegyStatus": {
+        "required": [
+          "address",
+          "channel",
+          "health",
+          "lastReadAt",
+          "freshUntil"
+        ],
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "health": {
+            "type": "string"
+          },
+          "lastReadAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "freshUntil": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "CreateAccountRequest": {
+        "required": [
+          "kind",
+          "username",
+          "password",
+          "displayName",
+          "userId",
+          "role"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "CurrentUser": {
+        "required": [
+          "id",
+          "name",
+          "role",
+          "method",
+          "webOnly"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "webOnly": {
+            "type": "boolean"
+          }
+        },
+        "nullable": true
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "LayerStatus": {
+        "required": [
+          "layer",
+          "key",
+          "name",
+          "at",
+          "hideAt",
+          "source",
+          "by"
+        ],
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hideAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source": {
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          }
+        }
+      },
+      "PasswordSignInRequest": {
+        "required": [
+          "username",
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "SessionInfoResponse": {
+        "required": [
+          "id",
+          "userId",
+          "name",
+          "method",
+          "address",
+          "agent",
+          "createdAt",
+          "lastSeenAt",
+          "current"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SessionResponse": {
+        "required": [
+          "user",
+          "csrfToken"
+        ],
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/CurrentUser"
+          },
+          "csrfToken": {
+            "type": "string"
+          }
+        }
+      },
+      "SetPasswordRequest": {
+        "required": [
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "StatusEnvelope": {
+        "required": [
+          "online",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "online": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BridgeStatus"
+          }
+        }
+      },
+      "TelegramPollResponse": {
+        "required": [
+          "state"
+        ],
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramSignInResponse": {
+        "required": [
+          "flowId",
+          "code",
+          "botUsername",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "flowId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "botUsername": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TelegramStatus": {
+        "required": [
+          "state",
+          "failures"
+        ],
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "WebAccountResponse": {
+        "required": [
+          "username",
+          "userId",
+          "displayName",
+          "webOnly",
+          "role",
+          "createdAt",
+          "lastLoginAt",
+          "lockedUntil"
+        ],
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "webOnly": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lockedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Accounts"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Status"
+    },
+    {
+      "name": "Sessions"
+    }
+  ]
+}

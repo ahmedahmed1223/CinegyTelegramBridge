@@ -34,3 +34,14 @@ bridge-run.log
 # BridgeManager (.NET) build output - published exe goes to dist/ instead.
 Manager/BridgeManager/bin/
 Manager/BridgeManager/obj/
+
+# Web interface build output (the client builds into the server's wwwroot).
+Web/Server/bin/
+Web/Server/obj/
+Web/Server/wwwroot/
+Web/Server.Tests/bin/
+Web/Server.Tests/obj/
+Web/Client/node_modules/
+Web/Client/dist/
+Web/Client/test-results/
+Web/Client/playwright-report/

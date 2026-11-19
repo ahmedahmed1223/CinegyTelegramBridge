@@ -335,6 +335,9 @@ function Send-TelegramMessage {
     if ($Cause -and (Test-BridgeNoticeSuppressed -Cause $Cause -ChatId $ChatId)) { return }
     # D1: a quarantined chat already proved undeliverable three times. Trying
     # again on every alert is how forty-one failures filled a week of log.
+    # A browser-only account has no Telegram chat to reach. Skipped quietly:
+    # an administrator made in the browser is on every notice list.
+    if (Test-WebOnlyUserId -UserId $ChatId) { return }
     if (Test-DeadChat -ChatId $ChatId) {
         Write-BridgeLog "Skipping send to quarantined dead chat $ChatId"
         return
@@ -936,6 +939,7 @@ function Send-TelegramPhoto {
         [string]$Caption,
         [hashtable]$ReplyMarkup
     )
+    if (Test-WebOnlyUserId -UserId $ChatId) { return }
     if (Test-DeadChat -ChatId $ChatId) {
         Write-BridgeLog "Skipping photo send to quarantined dead chat $ChatId"
         return
@@ -977,6 +981,7 @@ function Send-TelegramVideo {
         [string]$Caption,
         [hashtable]$ReplyMarkup
     )
+    if (Test-WebOnlyUserId -UserId $ChatId) { return }
     if (Test-DeadChat -ChatId $ChatId) {
         Write-BridgeLog "Skipping video send to quarantined dead chat $ChatId"
         return
@@ -1071,12 +1076,19 @@ function Get-TelegramUpdates {
     # The same kept connection poll after poll, instead of a new handshake for
     # every one. Dropped on any failure, so a dead connection costs one poll.
     $pollDeadline = $TimeoutSeconds + $margin
-    try {
-        $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec $pollDeadline -WebSession (Get-BridgeTelegramSession -TimeoutSec $pollDeadline)
+    if (Test-WebChannelActive) {
+        # Same request, same kept connection (on the poll runspace), same
+        # errors thrown - but this thread stays free for the browser.
+        $response = Invoke-TelegramPollWithPump -Uri $uri -DeadlineSeconds $pollDeadline -TimeoutSeconds $TimeoutSeconds
     }
-    catch {
-        Reset-BridgeTelegramSession -TimeoutSec $pollDeadline
-        throw
+    else {
+        try {
+            $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec $pollDeadline -WebSession (Get-BridgeTelegramSession -TimeoutSec $pollDeadline)
+        }
+        catch {
+            Reset-BridgeTelegramSession -TimeoutSec $pollDeadline
+            throw
+        }
     }
     if (-not (Get-JsonProp $response 'ok')) {
         $desc = [string](Get-JsonProp $response 'description')

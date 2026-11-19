@@ -126,6 +126,7 @@ foreach ($part in @(
         'Bridge.Reports'
         'Bridge.Weekly'
         'Bridge.Announcements'
+        'Bridge.WebChannel'
     )) {
     . (Join-Path $scriptRoot "Parts/$part.ps1")
 }
@@ -349,6 +350,7 @@ $script:DefaultSettings = [ordered]@{
     MaterialProxyLeadMinutes   = 30      # how long before air the local copy is checked
     MaterialEndAlertMinutes    = 0       # warn this many minutes before the active material ends (0 disables)
     EnableEngineHealth         = $false  # engine-health screen from /metrics; measures the box, off unless asked
+    WebAccessEnabled           = $false  # opens the local pipe CinegyBridge.Web talks to; off means the bridge runs exactly as before
     OutputMonitorFailureAlertThreshold = 2 # consecutive unavailable captures before alerting when no backup is configured
     OutputMonitorFlapAlertCount = 4      # failed captures within six hours before reporting a flapping source (0 disables)
     OutputBlackLuminance       = 6       # mean luma at or below this counts as black (0-255)
@@ -465,6 +467,7 @@ $script:SettingDisplayMetadata = @{
     AlertMaxPerCausePerHour = @{ Unit = 'تنبيه'; Description = 'أقصى عدد تنبيهات من السبب الواحد في الساعة؛ ما بعده يُكتم ويُلخَّص في رسالة واحدة (0 لرفع السقف)' }
     MaterialProxyLeadMinutes = @{ Unit = 'دقيقة'; Description = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية' }
     MaterialEndAlertMinutes = @{ Unit = 'دقيقة'; Description = 'التنبيه قبل نهاية المادة الجارية بهذه الدقائق لتجهيز غرافيك الختام (0 للتعطيل)' }
+    WebAccessEnabled = @{ Unit = ''; Description = 'يفتح القناة المحلية لواجهة الويب: صفحات المتصفح تعمل مع البوت على الحالة نفسها. يشغّلها برنامج التحكم ويغلقها' }
     EnableEngineHealth = @{ Unit = ''; Description = 'شاشة صحة المحرك من عدادات Cinegy (إطارات مسقطة وترخيص) — معطلة افتراضيًا ويفعّلها المشرف' }
     OutputMonitorFailureAlertThreshold = @{ Unit = 'محاولة'; Description = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)' }
     OutputMonitorFlapAlertCount = @{ Unit = 'مرة'; Description = 'عدد مرات فشل الالتقاط خلال ست ساعات قبل الإبلاغ عن مصدر متذبذب (0 للتعطيل)' }
@@ -1378,7 +1381,7 @@ $script:SettingGroupDefinitions = @(
                     'RequireUserLevelAuth', 'UserActivityRecentMinutes', 'DormantUserDays', 'AutoDisableDormantUsers'
                 ) }
             [pscustomobject]@{ Key = 'doors'; Label = 'الأبواب الإدارية'; Names = @(
-                    'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets'
+                    'EnableRawCommand', 'EnableFullTemplateManagement', 'EnableDpapiSecrets', 'WebAccessEnabled'
                 ) }
         ) }
     [pscustomobject]@{ Category = 'onair'; Groups = @(
@@ -1735,6 +1738,7 @@ $script:SettingNavigationLabels = @{
     UsageDigestEnabled = 'الملخص الأسبوعي'
     MaterialEndAlertMinutes = 'تنبيه نهاية المادة'
     EnableEngineHealth = 'صحة المحرك'
+    WebAccessEnabled = 'واجهة الويب'
 }
 
 # What a number may be.
@@ -2368,7 +2372,7 @@ try {
             else {
                 Write-BridgeLog "Polling error: $pollError" "ERROR"
                 Set-TelegramConnectionState -Connected:$false -ErrorMessage $pollError
-                Start-Sleep -Seconds $backoffSeconds
+                Wait-BridgeBackoff -Seconds $backoffSeconds
                 $backoffSeconds = [Math]::Min($backoffSeconds * 2, 60)
             }
         }
@@ -2395,6 +2399,7 @@ finally {
     # log folder honest about what is actually running.
     if ($script:livenessFile) { Remove-Item -LiteralPath $script:livenessFile -Force -ErrorAction SilentlyContinue }
     Clear-TelegramOutbox
+    try { Stop-WebChannel } catch { Write-BridgeLog "Could not close the web channel during shutdown: $($_.Exception.Message)" 'WARN' }
     if ($script:AirStatusWidgetUpdate) {
         try { Stop-BridgeTelegramRequestWorker -Worker $script:AirStatusWidgetUpdate.Worker }
         catch { Write-BridgeLog 'Could not cancel the air status widget worker during shutdown.' 'WARN' }

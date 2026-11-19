@@ -621,6 +621,13 @@ function Invoke-BridgeCommand {
     # Telegram appends @BotName to commands in groups.
     $command = ($Matches[1] -replace '@.*$', '').ToLowerInvariant()
     $argText = $Matches[2]
+    # Before the menu: '/start web-123456' is the sign-in page's t.me link,
+    # and answering it with the main menu would leave the browser waiting.
+    $webCode = Get-WebLoginCodeFromCommand -Command $command -ArgText $argText
+    if ($webCode) {
+        Request-WebLoginApproval -Code $webCode -ChatId $ChatId -UserId $UserId
+        return
+    }
 
     switch ($command) {
         { $_ -in @('بدء', 'start') } { Show-MainMenu -ChatId $ChatId -UserId $UserId -Intro (T 'cmd.welcome') }

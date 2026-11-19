@@ -321,6 +321,7 @@ function Add-BridgeTextSettings {
     $catalogue['setting.UsageDigestEnabled.label'] = @{ ar = 'الملخص الأسبوعي'; en = 'Weekly digest' }
     $catalogue['setting.MaterialEndAlertMinutes.label'] = @{ ar = 'تنبيه نهاية المادة'; en = 'Material ending alert' }
     $catalogue['setting.EnableEngineHealth.label'] = @{ ar = 'صحة المحرك'; en = 'Engine health' }
+    $catalogue['setting.WebAccessEnabled.label'] = @{ ar = 'واجهة الويب'; en = 'Web interface' }
 
     # --- Every setting description, resolved through TF at read time ----
     # Same contract as the labels: the Arabic here is the Arabic the
@@ -369,6 +370,7 @@ function Add-BridgeTextSettings {
     $catalogue['setting.AlertMaxPerCausePerHour.description'] = @{ ar = 'أقصى عدد تنبيهات من السبب الواحد في الساعة؛ ما بعده يُكتم ويُلخَّص في رسالة واحدة (0 لرفع السقف)'; en = 'Alerts per cause per hour; beyond it they are muted and summarised in one message (0 removes the ceiling)' }
     $catalogue['setting.MaterialProxyLeadMinutes.description'] = @{ ar = 'قبل كم دقيقة من موعد المادة تُفحص نسختها المحلية'; en = 'How long before material is due its local copy is checked' }
     $catalogue['setting.MaterialEndAlertMinutes.description'] = @{ ar = 'التنبيه قبل نهاية المادة الجارية بهذه الدقائق لتجهيز غرافيك الختام (0 للتعطيل)'; en = 'Warn this many minutes before the current material ends, to prepare the closing graphic (0 disables it)' }
+    $catalogue['setting.WebAccessEnabled.description'] = @{ ar = 'يفتح القناة المحلية لواجهة الويب: صفحات المتصفح تعمل مع البوت على الحالة نفسها. يشغّلها برنامج التحكم ويغلقها'; en = 'Opens the local channel for the web interface: browser pages work alongside the bot on the same state. The control program turns it on and off' }
     $catalogue['setting.EnableEngineHealth.description'] = @{ ar = 'شاشة صحة المحرك من عدادات Cinegy (إطارات مسقطة وترخيص) — معطلة افتراضيًا ويفعّلها المشرف'; en = 'Engine health from Cinegy counters (dropped frames and licence) - off by default, enabled by an administrator' }
     $catalogue['setting.OutputMonitorFailureAlertThreshold.description'] = @{ ar = 'عدد فشل التقاط المخرج المتتالي قبل تنبيه المشرف (من دون احتياط)'; en = 'Consecutive capture failures before an administrator is warned (with no fallback)' }
     $catalogue['setting.OutputMonitorFlapAlertCount.description'] = @{ ar = 'عدد مرات فشل الالتقاط خلال ست ساعات قبل الإبلاغ عن مصدر متذبذب (0 للتعطيل)'; en = 'Capture failures within six hours before reporting a flapping source (0 disables it)' }

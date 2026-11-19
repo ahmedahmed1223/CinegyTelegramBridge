@@ -175,4 +175,56 @@ function Stop-BridgeTelegramRequestWorker {
     finally { $Worker.Pipeline.Dispose(); $Worker.Disposed = $true }
 }
 
-Export-ModuleMember -Function Invoke-BridgeTelegramRequest, Get-BridgeTelegramSession, Reset-BridgeTelegramSession, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker, Get-BridgeTelegramErrorText
+$script:TelegramPollRunspace = $null
+
+function Start-BridgeTelegramPoll {
+    <# One getUpdates on a runspace that outlives it. Kept open so the module
+       state there - the kept-alive WebRequestSession - survives from poll to
+       poll; a fresh runspace per poll would pay a TLS handshake every second
+       while anything is on air. Holds no bridge state, like the workers above. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][ValidateRange(1, 300)][int]$TimeoutSec)
+    if (-not $script:TelegramPollRunspace -or $script:TelegramPollRunspace.RunspaceStateInfo.State -ne 'Opened') {
+        $sessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
+        $sessionState.ImportPSModule((Join-Path $PSScriptRoot 'BridgeTelegram.psm1'))
+        $script:TelegramPollRunspace = [runspacefactory]::CreateRunspace($sessionState)
+        $script:TelegramPollRunspace.Open()
+    }
+    $pipeline = [powershell]::Create()
+    $pipeline.Runspace = $script:TelegramPollRunspace
+    $pipeline.AddScript({
+            param($pollUri, $pollTimeout)
+            try {
+                $answer = Invoke-RestMethod -Uri $pollUri -Method Get -TimeoutSec $pollTimeout -WebSession (Get-BridgeTelegramSession -TimeoutSec $pollTimeout)
+                [pscustomobject]@{ Ok = $true; Response = $answer; Error = '' }
+            }
+            catch {
+                Reset-BridgeTelegramSession -TimeoutSec $pollTimeout
+                [pscustomobject]@{ Ok = $false; Response = $null; Error = [string]$_.Exception.Message }
+            }
+        }).AddArgument($Uri).AddArgument($TimeoutSec) | Out-Null
+    return @{ Pipeline = $pipeline; Handle = $pipeline.BeginInvoke() }
+}
+
+function Receive-BridgeTelegramPoll {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Poll)
+    try {
+        $results = @($Poll.Pipeline.EndInvoke($Poll.Handle))
+        if ($results.Count -eq 0) { return [pscustomobject]@{ Ok = $false; Response = $null; Error = 'Telegram poll returned no result.' } }
+        return $results[-1]
+    }
+    catch { return [pscustomobject]@{ Ok = $false; Response = $null; Error = [string]$_.Exception.Message } }
+    finally { $Poll.Pipeline.Dispose() }
+}
+
+function Stop-BridgeTelegramPoll {
+    <# Abandons a poll in flight. The runspace is dropped with it: a request
+       cancelled mid-read leaves the kept connection in an unknown state. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Poll)
+    try { $Poll.Pipeline.Stop() } finally { $Poll.Pipeline.Dispose() }
+    if ($script:TelegramPollRunspace) { $script:TelegramPollRunspace.Dispose(); $script:TelegramPollRunspace = $null }
+}
+
+Export-ModuleMember -Function Start-BridgeTelegramPoll, Receive-BridgeTelegramPoll, Stop-BridgeTelegramPoll, Invoke-BridgeTelegramRequest, Get-BridgeTelegramSession, Reset-BridgeTelegramSession, Get-BridgeTelegramRetryDelayMs, Start-BridgeTelegramRequestWorker, Receive-BridgeTelegramRequestWorker, Stop-BridgeTelegramRequestWorker, Get-BridgeTelegramErrorText

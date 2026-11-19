@@ -183,7 +183,7 @@ Describe 'Web channel: the pipe' {
         $client = [powershell]::Create()
         try {
             # Dynamic scope: Get-TelegramUpdates reads $apiBase from its caller.
-            $apiBase = "http://127.0.0.1:$($silent.LocalEndpoint.Port)/botTEST"
+            Set-Variable -Name apiBase -Value "http://127.0.0.1:$($silent.LocalEndpoint.Port)/botTEST"
             $client.AddScript({
                     param($name)
                     Start-Sleep -Milliseconds 700

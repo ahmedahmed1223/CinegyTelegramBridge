@@ -25,6 +25,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      # The web interface: the server is .NET 9 (as the control app), the
+      # client builds with Node and pnpm. Run-Checks verifies both.
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: Web/Client/pnpm-lock.yaml
       - name: Install analysis and test modules
         shell: pwsh
         run: |
@@ -65,6 +78,9 @@ jobs:
       - name: Build and self-test the control app
         shell: pwsh
         run: .\scripts\Build-BridgeManager.ps1 -OutputDirectory .\artifacts\BridgeManager
+      - name: Build the web interface
+        shell: pwsh
+        run: .\scripts\Build-BridgeWeb.ps1 -OutputDirectory .\artifacts\web
       - name: Build allow-listed release package
         shell: pwsh
         run: .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release

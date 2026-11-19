@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.78.0'; Items = @('🌐 A web interface for the bridge, working alongside the bot on the same state. An administrator turns it on from the control program (the 🌐 Web interface button). Sign in by sending the code shown on the page to the bot and approving the message it sends back, or with a password an administrator adds. This release shows what is on air live, accounts and sessions; controlling the air from the browser comes in the next releases.') },
                 @{ Version = '8.77.2'; Items = @('⚡ Putting a breaking-news line on air or taking it off answers in about a second. Other people''s open breaking-news boards now update one after another in the background, a moment later.') },
                 @{ Version = '8.77.1'; Items = @('🛠 While Telegram is refusing live panels from the bot, the main menu opens straight away as the ordinary screen instead of trying the panel first each time.') },
                 @{ Version = '8.77.0'; Items = @('⚡ The bot no longer freezes after a graphic goes on or off air. Telling the other chats now happens in the background, so buttons answer straight away; the notice reaches each chat a moment later, one after another. Messages to Telegram are also quicker in general.') },
@@ -317,6 +318,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.78.0'; Items = @('🌐 واجهة ويب للجسر، تعمل مع البوت في الوقت نفسه وعلى الحالة نفسها. يفتحها المشرف من برنامج التحكم (زر «🌐 واجهة الويب»). الدخول بإرسال الرمز الظاهر في الصفحة إلى البوت ثم الموافقة على الرسالة التي تصلك، أو بكلمة مرور يضيفها المشرف. في هذا الإصدار تعرض الصفحة ما على الهواء حيًّا، والحسابات، والجلسات؛ التحكم بالهواء من المتصفح يأتي في الإصدارات القادمة.') },
                 @{ Version = '8.77.2'; Items = @('⚡ عرض العاجل أو إخفاؤه يُجاب في نحو ثانية. لوحات العواجل المفتوحة عند الآخرين تتحدّث واحدة تلو الأخرى في الخلفية، بعد لحظات.') },
                 @{ Version = '8.77.1'; Items = @('🛠 ما دام Telegram يرفض اللوحات الحيّة من البوت، تُفتح القائمة الرئيسية مباشرةً بشاشتها العادية بدل محاولة اللوحة أولًا في كل مرة.') },
                 @{ Version = '8.77.0'; Items = @('⚡ البوت لم يعد يتجمّد بعد عرض قالب أو إخفائه. إبلاغ بقية المحادثات يجري في الخلفية، فتستجيب الأزرار فورًا؛ ويصل الإشعار إلى كل محادثة بعد لحظات، واحدة تلو الأخرى. والرسائل إلى Telegram أسرع عمومًا.') },

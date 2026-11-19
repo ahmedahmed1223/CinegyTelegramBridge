@@ -1,0 +1,68 @@
+import { Avatar, Badge, Group, Menu, Text, UnstyledButton, useMantineColorScheme } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
+import { IconKey, IconLogout, IconMoon, IconSun } from '@tabler/icons-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
+import { api, type CurrentUser } from '../api/client'
+import { roleLabel, sessionKey } from '../api/session'
+import { ChangePasswordModal } from '../components/ChangePasswordModal'
+
+export function UserMenu({ user }: { user: CurrentUser }) {
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const [passwordOpen, password] = useDisclosure()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const dark = colorScheme === 'dark'
+
+  async function signOut() {
+    await api.POST('/api/auth/logout')
+    queryClient.clear()
+    await queryClient.invalidateQueries({ queryKey: sessionKey })
+    navigate('/login', { replace: true })
+  }
+
+  return (
+    <>
+      <Menu position="bottom-end" width={240} shadow="md">
+        <Menu.Target>
+          <UnstyledButton aria-label="حسابي">
+            <Group gap="xs" wrap="nowrap">
+              <Avatar radius="xl" size={34} color="signal" name={user.name} />
+              <div style={{ lineHeight: 1.15 }}>
+                <Text size="sm" fw={600} visibleFrom="xs">
+                  {user.name}
+                </Text>
+                <Text size="xs" c="dimmed" visibleFrom="xs">
+                  {roleLabel[user.role] ?? user.role}
+                </Text>
+              </div>
+            </Group>
+          </UnstyledButton>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>
+            <Group justify="space-between">
+              <span>دخلت {user.method === 'telegram' ? 'عبر Telegram' : 'بكلمة مرور'}</span>
+              {user.webOnly && (
+                <Badge size="xs" variant="light">
+                  ويب فقط
+                </Badge>
+              )}
+            </Group>
+          </Menu.Label>
+          <Menu.Item leftSection={<IconKey size={16} />} onClick={password.open}>
+            تغيير كلمة المرور
+          </Menu.Item>
+          <Menu.Item leftSection={dark ? <IconSun size={16} /> : <IconMoon size={16} />} onClick={() => setColorScheme(dark ? 'light' : 'dark')}>
+            {dark ? 'المظهر الفاتح' : 'المظهر الداكن'}
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={signOut}>
+            تسجيل الخروج
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      <ChangePasswordModal opened={passwordOpen} onClose={password.close} />
+    </>
+  )
+}

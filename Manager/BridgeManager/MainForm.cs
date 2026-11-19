@@ -55,6 +55,11 @@ internal sealed class ManagerSettings
     // it new again every day.
     public bool TrayHintShown { get; set; }
 
+    // The web interface: its server and tunnel start with this window when
+    // set. Off by default - opening the station to a browser is a decision.
+    public bool WebAutoStart { get; set; }
+    public int WebPort { get; set; } = WebHost.DefaultPort;
+
     private static string SettingsFilePath => Path.Combine(AppContext.BaseDirectory, "BridgeManager.settings.json");
 
     public static ManagerSettings Load()
@@ -133,6 +138,8 @@ public sealed class MainForm : Form
     private int _unseenLogLines;
     private Form? _onAirWindow;
     private Form? _reportsWindow;
+    private Form? _webWindow;
+    private WebHost? _web;
     // One width for every button on the action row. Seven hand-set widths
     // between 118 and 140 read as seven different kinds of thing; the eye
     // groups by shape before it reads a word.
@@ -339,6 +346,8 @@ public sealed class MainForm : Form
         onAirButton.Width = ActionButtonWidth;
         var reportsButton = Theme.QuietButton("📊  التقارير");
         reportsButton.Width = ActionButtonWidth;
+        var webButton = Theme.QuietButton("🌐  واجهة الويب");
+        webButton.Width = ActionButtonWidth;
         var optionsButton = Theme.QuietButton("☰  خيارات");
         optionsButton.Width = ActionButtonWidth;
         optionsButton.AccessibleName = "خيارات التشغيل والعرض";
@@ -355,6 +364,7 @@ public sealed class MainForm : Form
         _tips.SetToolTip(clearButton, "يمسح المعروض هنا فقط — لا يمسّ logs\\bridge.log.  (Ctrl+L)");
         _tips.SetToolTip(onAirButton, "ماذا يبثّ الآن على كل طبقة — قراءة فقط.");
         _tips.SetToolTip(reportsButton, "استخدام القوالب واستقرار التشغيل من ملفات هذا الجهاز.");
+        _tips.SetToolTip(webButton, "خادم الويب ونفق Cloudflare وقناة الجسر لهما — من مكان واحد.");
         _tips.SetToolTip(optionsButton, "إعادة التشغيل التلقائية وكشف التعليق وبدء ويندوز، ومظهر هذه النافذة.");
 
         _startButton.Click += (_, _) => StartBridge(manual: true);
@@ -365,6 +375,7 @@ public sealed class MainForm : Form
         clearButton.Click += (_, _) => ClearOutput();
         onAirButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) ShowMonitor(ref _onAirWindow, () => new OnAirForm(BridgeRoot)); };
         reportsButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) ShowMonitor(ref _reportsWindow, () => new ReportsForm(BridgeRoot, () => { PruneRecentErrors(); return _recentErrors.Count; })); };
+        webButton.Click += (_, _) => { if (EnsureBridgeScriptResolved()) ShowMonitor(ref _webWindow, CreateWebForm); };
 
         // Keep start/stop/restart together. Secondary actions may wrap within
         // their own group, so resizing never mixes a clear button into the
@@ -372,7 +383,7 @@ public sealed class MainForm : Form
         var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
         operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
         var utilityActions = CreateUtilityActions();
-        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, onAirButton, reportsButton, clearButton });
+        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, onAirButton, reportsButton, webButton, clearButton });
         _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
         _actionBar.SizeChanged += (_, _) =>
             utilityActions.MaximumSize = new Size(Math.Max(1, _actionBar.ClientSize.Width - _actionBar.Padding.Horizontal), 0);
@@ -746,6 +757,11 @@ public sealed class MainForm : Form
         if (!startOnOpen) AppendLine("--- جاهز. اضغط تشغيل لبدء الجسر. ---");
         if (!EnsureBridgeScriptResolved()) return;
         UpdateStatusBar();
+        if (_settings.WebAutoStart && Web.StartServer())
+        {
+            Web.StartTunnel();
+            LogEvent("واجهة الويب: بدأ الخادم والنفق مع فتح المدير.");
+        }
         LogEvent($"تم فتح برنامج المدير (الإصدار v{Application.ProductVersion}){(_autoStartBridge ? " - بدء تلقائي مع ويندوز" : _settings.StartBridgeOnOpen ? " - تشغيل الجسر عند الفتح" : "")}.");
         // Adopt before starting: a bridge left running by a previous manager is
         // already on air, and launching a second one would take the graphics
@@ -2272,6 +2288,49 @@ public sealed class MainForm : Form
         }
     }
 
+    private WebHost Web => _web ??= new WebHost(BridgeRoot) { Port = _settings.WebPort };
+
+    private Form CreateWebForm() => new WebForm(Web, ConfigPath, _settings.WebAutoStart, SetWebAccessAsync, enabled =>
+    {
+        _settings.WebAutoStart = enabled;
+        SaveManagerSettings();
+        LogEvent($"واجهة الويب: التشغيل مع فتح المدير {(enabled ? "مفعّل" : "معطّل")}.");
+    });
+
+    /// <summary>
+    /// Opens or closes the bridge's web channel. The setting lives in
+    /// config.json, which the running bridge rewrites, so the bridge is
+    /// stopped first and started again after - the same path the settings
+    /// window takes, for the same reason.
+    /// </summary>
+    private async Task<bool> SetWebAccessAsync(bool enabled)
+    {
+        var verb = enabled ? "فتح" : "إغلاق";
+        var wasRunning = _bridgeProcess is { HasExited: false };
+        if (wasRunning && Ask($"{verb} قناة الويب يعيد تشغيل الجسر (ثوانٍ قليلة). ما على الهواء يبقى كما هو.\n\nمتابعة؟",
+                "قناة الويب", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return false;
+        }
+        if (wasRunning && !await StopForSettingsSave()) return false;
+        try
+        {
+            await Task.Run(() => SettingsForm.WithConfigLock(@"Global\CinegyTelegramBridge.Config", () =>
+                SettingsForm.WriteConfigFile(ConfigPath, WebHost.WithBridgeSetting(File.ReadAllText(ConfigPath), enabled))));
+            LogEvent($"واجهة الويب: {verb} قناة الجسر.");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            Ask($"لم يُحفظ الإعداد: {exception.Message}", "قناة الويب", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+        finally
+        {
+            if (wasRunning) StartBridge(manual: true);
+        }
+    }
+
     private void OpenLogsFolder()
     {
         if (!EnsureBridgeScriptResolved()) return;
@@ -2308,6 +2367,7 @@ public sealed class MainForm : Form
         _exiting = true;
         _trayIcon.Visible = false;
         StopBridge(manual: true);
+        _web?.Dispose();
         Application.Exit();
     }
 
@@ -2326,6 +2386,7 @@ public sealed class MainForm : Form
             _trayIcon.Visible = false;
             LogEvent($"إغلاق النظام ({e.CloseReason}) - يتم إيقاف الجسر.");
             StopBridge(manual: true);
+            _web?.Dispose();
             return;
         }
 

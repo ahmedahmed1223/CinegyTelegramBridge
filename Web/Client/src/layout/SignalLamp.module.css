@@ -1,0 +1,42 @@
+.lamp {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  cursor: default;
+}
+
+.lamp:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cgb-offline);
+  flex: none;
+}
+
+.lamp[data-state='ok'] .dot {
+  background: var(--cgb-healthy);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cgb-healthy) 22%, transparent);
+}
+
+.lamp[data-state='warn'] .dot {
+  background: var(--cgb-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cgb-warning) 25%, transparent);
+}
+
+.lamp[data-state='down'] .dot {
+  background: var(--cgb-on-air);
+  box-shadow: 0 0 0 3px var(--cgb-on-air-glow);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}

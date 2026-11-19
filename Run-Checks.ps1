@@ -17,6 +17,10 @@
 param(
     [switch]$SkipAnalyzer,
     [switch]$SkipTests,
+    # The web interface's checks need the .NET SDK and pnpm. A playout box
+    # that only runs the bridge may have neither; say so with this switch
+    # rather than have the gate pass by not looking.
+    [switch]$SkipWeb,
     [string]$TestResultPath = ''
 )
 
@@ -33,7 +37,7 @@ function Write-Section {
 }
 
 # ---------------------------------------------------------- files and JSON
-Write-Section "1/4  Required files and JSON"
+Write-Section "1/5  Required files and JSON"
 $files = @(
     'Parts\Bridge.AirStatusWidget.ps1', 'Tests\Bridge.AirStatusWidget.Tests.ps1',
     'Tests\Bridge.OperatorUx.Tests.ps1', 'Tests\Bridge.WebChannel.Tests.ps1', 'Parts\Bridge.WebChannel.ps1',
@@ -98,12 +102,13 @@ foreach ($file in $jsonFiles) {
 }
 
 # ---------------------------------------------------------------- parse check
-Write-Section "2/4  Syntax (PowerShell parser)"
+Write-Section "2/5  Syntax (PowerShell parser)"
 $powerShellFiles = @(
     'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1', 'Modules\BridgeTelegram.psm1', 'Modules\BridgeAuthorization.psm1', 'Modules\BridgeFlowState.psm1', 'Modules\BridgeCinegyState.psm1', 'Modules\BridgeSchedulePolicy.psm1', 'Modules\BridgeMedia.psm1', 'Modules\BridgeRelayPolicy.psm1', 'Modules\BridgeRuntimeState.psm1', 'Modules\BridgeNewsTicker.psm1', 'Modules\BridgeMojaz.psm1', 'Modules\BridgeUrgent.psm1', 'Modules\BridgeOperationPolicy.psm1', 'Modules\BridgeOperationLifecycle.psm1', 'Modules\BridgeSettingsSchema.psm1', 'Modules\BridgeUiPaging.psm1', 'Modules\BridgeLiveScenes.psm1', 'Modules\BridgeContentBoards.psm1', 'Modules\BridgeAirText.psm1',
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
-    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1', 'Run-Checks.ps1'
+    'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1', 'Run-Checks.ps1',
+    'scripts\Build-BridgeWeb.ps1', 'Web\dev\Start-DevBridge.ps1'
 )
 # Parts/ and Tests/ were in no list this stage read, so 32000 lines of the
 # bridge and 26000 lines of its tests were never parse-checked here at all -
@@ -135,7 +140,7 @@ foreach ($file in $parseTargets) {
 }
 
 # ------------------------------------------------------------------- analyzer
-Write-Section "3/4  PSScriptAnalyzer"
+Write-Section "3/5  PSScriptAnalyzer"
 if ($SkipAnalyzer) {
     Write-Host "  skipped (-SkipAnalyzer)" -ForegroundColor Yellow
 }
@@ -190,7 +195,7 @@ else {
 }
 
 # ----------------------------------------------------------------------- tests
-Write-Section "4/4  Pester tests"
+Write-Section "4/5  Pester tests"
 if ($SkipTests) {
     Write-Host "  skipped (-SkipTests)" -ForegroundColor Yellow
 }
@@ -218,6 +223,42 @@ else {
     }
     $result = Invoke-Pester -Configuration $cfg
     if ($result.FailedCount -gt 0 -or $result.Errors.Count -gt 0) { $failed = $true }
+}
+
+# ------------------------------------------------------------------------- web
+Write-Section "5/5  Web interface (server tests, API contract, client)"
+if ($SkipWeb) {
+    Write-Host "  skipped (-SkipWeb)" -ForegroundColor Yellow
+}
+elseif (-not (Get-Command dotnet -ErrorAction SilentlyContinue) -or -not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    $failed = $true
+    Write-Host "  The web checks need the .NET 9 SDK and pnpm (npm install -g pnpm)." -ForegroundColor Yellow
+    Write-Host "  On a machine that only runs the bridge:  .\Run-Checks.ps1 -SkipWeb" -ForegroundColor Yellow
+}
+else {
+    $contract = Join-Path $root 'Web\openapi.json'
+    $before = if (Test-Path -LiteralPath $contract) { Get-Content -LiteralPath $contract -Raw } else { '' }
+    # Building the server regenerates the contract; testing builds it.
+    dotnet test (Join-Path $root 'Web\Server.Tests\CinegyBridge.Web.Tests.csproj') --nologo -v q
+    if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "  FAIL  server tests" -ForegroundColor Red }
+    else { Write-Host "  ok    server tests" -ForegroundColor Green }
+    $after = if (Test-Path -LiteralPath $contract) { Get-Content -LiteralPath $contract -Raw } else { '' }
+    if ($before -cne $after) {
+        # The committed contract was stale: the client's types were being
+        # checked against an API the server no longer has.
+        $failed = $true
+        Write-Host "  FAIL  Web\openapi.json was out of date and has been regenerated - commit it, then run 'pnpm api:types' in Web\Client" -ForegroundColor Red
+    }
+    Push-Location (Join-Path $root 'Web\Client')
+    try {
+        if (-not (Test-Path -LiteralPath 'node_modules')) { pnpm install --frozen-lockfile }
+        foreach ($clientCheck in 'api:check', 'typecheck', 'lint', 'test') {
+            pnpm -s $clientCheck
+            if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "  FAIL  client $clientCheck" -ForegroundColor Red }
+            else { Write-Host "  ok    client $clientCheck" -ForegroundColor Green }
+        }
+    }
+    finally { Pop-Location }
 }
 
 Write-Section "Result"

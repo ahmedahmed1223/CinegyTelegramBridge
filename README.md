@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.78.0
+
+A web interface, foundation release. `CinegyBridge.Web` (ASP.NET Core, .NET 9, loopback only) serves a React/TypeScript/Mantine app and talks to the bridge over a local named pipe that only the current Windows user can open. The bridge stays the single writer to Cinegy and the single judge of permission: the web server carries requests, the bridge decides. Sign-in is by approving a code in the bot, or with a password an administrator creates; browser-only accounts get a bridge identity outside Telegram's id range and pass the same checks. This release shows the air state live, accounts and sessions. The control program starts the server and a Cloudflare quick tunnel from one window. Off by default (`WebAccessEnabled`); when off, the bridge runs exactly as before.
+
 ## Version 8.77.2
 
 After 8.77.0 an urgent SHOW still took about five seconds. The log placed the gap between two adjacent lines of code: every open breaking-news board in every chat (eight on the station) was being redrawn with a synchronous message edit inside the operation. Those redraws are now queued and done one per tick, so the operation returns once Cinegy has accepted it. Not yet measured on the station.

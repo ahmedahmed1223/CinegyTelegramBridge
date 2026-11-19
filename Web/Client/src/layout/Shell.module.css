@@ -1,0 +1,22 @@
+.header {
+  backdrop-filter: saturate(1.4) blur(10px);
+  background: color-mix(in srgb, var(--mantine-color-body) 86%, transparent);
+}
+
+.navbar {
+  background: var(--mantine-color-body);
+}
+
+/* The station's tally light: the brand is the thing it is about. */
+.mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 50%, var(--cgb-on-air) 0 34%, transparent 36%),
+    radial-gradient(circle at 50% 50%, transparent 0 52%, color-mix(in srgb, var(--cgb-on-air) 45%, transparent) 54% 62%, transparent 64%),
+    light-dark(#101418, #1b2128);
+}
+
+.link {
+  border-radius: var(--mantine-radius-md);
+}

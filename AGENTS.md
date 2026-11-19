@@ -306,9 +306,37 @@ dotnet build Manager/BridgeManager/BridgeManager.csproj
   دفعة محدودة في كل نبضة واجهة، وقدّم `WARN` و`ERROR` على `INFO` و`DEBUG`؛ لا
   تلوّن نصًا حساسًا ولا تسجله لهذا الغرض. أضف اختبار `SelfTest` لكل سياسة جديدة.
 
+## واجهة الويب (Web/)
+
+| المكوّن | ما هو |
+|---|---|
+| `Parts/Bridge.WebChannel.ps1` | قناة الجسر: أنبوب مسمّى `CinegyTelegramBridge.Web`، للمستخدم الحالي وحده، ومرفوض لأي دخول شبكي. |
+| `Web/Server/` | `CinegyBridge.Web` — ASP.NET Core ‏.NET 9 على `localhost` وحده. اختباراته xUnit في `Web/Server.Tests/`. |
+| `Web/Client/` | React 19 وTypeScript 5.9 وVite وMantine، عربي من اليمين. يُبنى في `Web/Server/wwwroot`. |
+| `Web/openapi.json` | **العقد العام.** يولّده بناء الخادم، وأنواع الواجهة (`src/api/schema.d.ts`) تولَّد منه بـ`pnpm api:types`. |
+| `Web/dev/Start-DevBridge.ps1` | جسر تطوير: كود القناة الحقيقي بحالة مصطنعة، ويوافق على دخول Telegram آليًا. لا تشغّل الخادم على قناة الجسر الحي أثناء التطوير. |
+
+- **الجسر الكاتب الوحيد إلى Cinegy والحَكَم الوحيد في الصلاحيات.** الخادم لا يكلّم Cinegy ولا Telegram إطلاقًا؛ يحمل الطلبات عبر الأنبوب، وكل عملية تغيّر شيئًا تُنفَّذ على خيط الجسر وتمرّ بالفحوص التي يمرّ بها زرّ البوت. فحص الخادم مبكر لتحسين التجربة، لا بديل.
+- **القراءات من نسخة منشورة، والأوامر من الطابور.** مستمعو الأنبوب لا يرون دوال الجسر ولا حالته؛ `status` و`identity` و`roster` تُجاب مما ينشره `Publish-WebChannelState`، وكل ما عداها في `Invoke-WebChannelOperation`. عملية جديدة = فرع هناك + اختبار يمرّ بالأنبوب الحقيقي.
+- **`WebAccessEnabled` معطّل يعني الجسر كما كان حرفًا** — لا أنبوب، ولا مسار استطلاع آخر. لا تُدخل سلوكًا يعمل والقناة مغلقة.
+- **مفعّلًا، الاستطلاع الطويل يجري في مساحة تشغيل** (`Start-BridgeTelegramPoll`) والخيط الرئيسي يضخّ الويب في أثنائه (`Invoke-WebChannelPump`). محرّك هواء جديد ما زال يُسجَّل في الموضعين المعروفين؛ المضخّة تستدعي `Invoke-BridgeTick` وتقرأ `Get-EffectivePollTimeout`.
+- **حسابات الويب وحده من النطاق ≥ `9000000000000000`** (`Test-WebOnlyUserId`، و`AccountsDocument.WebOnlyIdBase` في الخادم — يتغيّران معًا). مسارات الإرسال تتخطّاه بصمت. منحه وسحبه عبر `account.grant`/`account.revoke` فقط، ولا يمسّان حساب Telegram.
+- **ما يحمي حسابات المشرفين في البوت يحميها في الويب:** إنشاء مشرف، وإعادة تعيين كلمة مرور مشرف، وحذف حسابه — للمالك وحده.
+- **تغيير في API العام** يمرّ بالعقد: سجلّ في `Endpoints/Contracts.cs`، ثم بناء الخادم، ثم `pnpm api:types`، ثم الالتزام بالملفات الثلاثة. البوابة تسقط إن تأخّر أحدها.
+- **CSP صارم:** لا سكربت مضمّن ولا من مصدر خارجي، ولا `data:` للخطوط (`assetsInlineLimit: 0`). أصل جديد يُحزم مع التطبيق.
+- **TypeScript 5.9 لا 7:** الإصدار 7 لا يكشف واجهة المترجم التي يحتاجها `openapi-typescript`.
+
+```powershell
+pwsh -File Web/dev/Start-DevBridge.ps1
+dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev
+pnpm --dir Web/Client dev            # http://localhost:5173 ، و/api إلى الخادم
+.\scripts\Build-BridgeWeb.ps1        # dist\web\CinegyBridge.Web.exe
+pwsh -File Run-Checks.ps1 -SkipWeb   # جهاز بلا .NET وpnpm
+```
+
 ## قبل أن تقول «تم»
 
-- [ ] `pwsh -File Run-Checks.ps1` يمرّ كاملًا — لا تحذيرات Analyzer ولا اختبار فاشل.
+- [ ] `pwsh -File Run-Checks.ps1` يمرّ كاملًا — لا تحذيرات Analyzer ولا اختبار فاشل، وقسم الويب معه.
 - [ ] كل إعداد جديد مسجَّل في المواضع الأربعة.
 - [ ] كل نص غير موثوق مُهرَّب ومقصوص.
 - [ ] الرقم والـWhat's New وCHANGELOG وREADME والتثبيتان محدَّثة.

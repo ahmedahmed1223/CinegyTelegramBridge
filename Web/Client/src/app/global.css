@@ -1,0 +1,35 @@
+:root {
+  --cgb-on-air: #e5484d;
+  --cgb-on-air-glow: rgba(229, 72, 77, 0.35);
+  --cgb-healthy: #30a46c;
+  --cgb-warning: #f5a524;
+  --cgb-offline: #8b96a3;
+}
+
+body {
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-mantine-color-scheme='light'] body {
+  background: #f5f7f9;
+}
+
+[data-mantine-color-scheme='dark'] body {
+  background: #0d1115;
+}
+
+/* Timecodes and counters: digits that do not jitter while they tick. */
+.cgb-mono {
+  font-family: var(--mantine-font-family-monospace);
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

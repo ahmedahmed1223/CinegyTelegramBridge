@@ -222,6 +222,18 @@ internal static class SelfTest
         }
         finally { Directory.Delete(layoutFixture, recursive: true); }
 
+        // --- web interface ---------------------------------------------------
+        Check("reads the quick tunnel's address from cloudflared's log",
+            WebHost.ParseTunnelUrl("2026-11-19T20:00:00Z INF |  https://quiet-river-1234.trycloudflare.com  |") == "https://quiet-river-1234.trycloudflare.com");
+        Check("ignores cloudflared's own api endpoint", WebHost.ParseTunnelUrl("requesting https://api.trycloudflare.com/tunnel") is null);
+        Check("a line without an address yields none", WebHost.ParseTunnelUrl("INF Registered tunnel connection") is null);
+        var webConfig = WebHost.WithBridgeSetting("{\"BotToken\":\"keep\",\"Settings\":{\"LayerNames\":\"1=x\"}}", enabled: true);
+        Check("turning the web channel on keeps every other setting",
+            webConfig.Contains("\"WebAccessEnabled\": true") && webConfig.Contains("\"LayerNames\": \"1=x\"") && webConfig.Contains("\"BotToken\": \"keep\""));
+        Check("turning it on works on a config with no Settings block yet",
+            WebHost.WithBridgeSetting("{}", enabled: true).Contains("\"WebAccessEnabled\": true"));
+        Check("no web server is found where none was built", WebHost.ResolveServerPath(Path.GetTempPath(), Path.GetTempPath()) is null);
+
         // --- DPAPI reference detection -------------------------------------
         Check("spots a dpapi reference", SettingsForm.LooksLikeDpapiReference("dpapi:BotToken"));
         Check("a real token is not a reference", SettingsForm.LooksLikeDpapiReference("123456:AAErandomlookingtokentext") == false);

@@ -2468,6 +2468,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/bulletins/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    id: string;
+                    revision: number;
+                    page?: number;
+                    stamp?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulletinPreview"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/bulletins/editor": {
         parameters: {
             query?: never;
@@ -2868,6 +2944,38 @@ export interface components {
             preview: components["schemas"]["BulletinPastePreview"];
             /** Format: int32 */
             savedPage: number | null;
+        };
+        BulletinPreview: {
+            /** Format: int32 */
+            revision: number;
+            stamp: string;
+            fields: components["schemas"]["BulletinField"][];
+            rows: components["schemas"]["BulletinPreviewRow"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            /** Format: int32 */
+            total: number;
+            playbackSupported: boolean;
+            /** Format: int32 */
+            plannedCount: number;
+            /** Format: double */
+            exitSeconds: number | null;
+            imageField: string | null;
+        };
+        BulletinPreviewRow: {
+            id: string;
+            /** Format: int32 */
+            number: number;
+            values: {
+                [key: string]: string;
+            };
+            media: string[];
+            skipped: boolean;
+            imageMode: string | null;
+            /** Format: double */
+            startSeconds: number | null;
         };
         BulletinRow: {
             id: string;

@@ -358,6 +358,7 @@ function Invoke-WebChannelOperation {
         'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
+        'bulletin.preview' { return Get-WebBulletinPreview -Arguments $arguments }
         'bulletin.photo' { return Start-WebBulletinPhotoRequest -Entry $Entry }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -908,6 +909,20 @@ function Get-WebBulletinImageField {
     }
 }
 
+function Get-WebBulletinRowView {
+    param($Row, [object[]]$Fields, [string]$ImageField)
+    $values = @{}
+    $media = @(
+        foreach ($field in $Fields) {
+            $value = Get-MojazRowFieldValue -Row $Row -FieldName $field.name
+            if ($field.kind -eq 'text') { $values[$field.name] = $value }
+            elseif ($value) { $field.name }
+        }
+    )
+    return @{ id = [string](Get-JsonProp $Row 'Id'); values = $values; media = $media; skipped = Test-MojazRowSkipped -Row $Row
+        imageMode = $(if ($ImageField) { Get-MojazRowImageMode -Row $Row }) }
+}
+
 function Get-WebBulletinEditor {
     param([Parameter(Mandatory)]$Bulletin, [int]$Page)
     $fields = @(Get-WebBulletinFields -Bulletin $Bulletin)
@@ -927,17 +942,7 @@ function Get-WebBulletinEditor {
     $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page
     $items = @(
         for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
-            $row = $rows[$position]
-            $values = @{}
-            $media = @(
-                foreach ($field in $fields) {
-                    $value = Get-MojazRowFieldValue -Row $row -FieldName $field.name
-                    if ($field.kind -eq 'text') { $values[$field.name] = $value }
-                    elseif ($value) { $field.name }
-                }
-            )
-            @{ id = [string](Get-JsonProp $row 'Id'); values = $values; media = $media; skipped = Test-MojazRowSkipped -Row $row
-                imageMode = $(if ($imageField) { Get-MojazRowImageMode -Row $row }) }
+            Get-WebBulletinRowView -Row $rows[$position] -Fields $fields -ImageField $imageField
         }
     )
     $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
@@ -952,6 +957,59 @@ function Get-WebBulletinEditor {
         imageField = $imageField; imageChoices = $imageChoices
         canUploadPhoto = [bool]($imageField -and (Get-WebBulletinPhotoDestination -Bulletin $Bulletin))
     }
+}
+
+function Get-WebBulletinPreview {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    if (-not $id) { return @{ ok = $false; error = 'not_found' } }
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+    if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $bulletin 'Revision')) { return @{ ok = $false; error = 'bulletin_stale' } }
+    $fields = @(Get-WebBulletinFields -Bulletin $bulletin)
+    $imageField = Get-WebBulletinImageField -Fields $fields
+    $rows = @(Get-JsonProp $bulletin 'Rows' | Where-Object { $null -ne $_ })
+    $window = Get-BridgePageWindow -ItemCount $rows.Count -Page ([int](Get-JsonProp $Arguments 'page'))
+    $supported = Test-MojazBulletinPlaybackDesign -Bulletin $bulletin
+    $plan = if ($supported) { (Get-MojazResolvedRunSnapshot -Bulletin $bulletin).Value }
+    $stampJson = ConvertTo-Json -Compress -Depth 8 -InputObject @(
+        (Get-MojazBulletinDesignKey -Bulletin $bulletin),
+        @($fields | ForEach-Object { @($_.name, $_.kind, $_.label) }),
+        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds')
+    )
+    $stamp = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($stampJson)))
+    $expectedStamp = [string](Get-JsonProp $Arguments 'stamp')
+    if ($expectedStamp -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
+    $steps = @{}
+    foreach ($step in @(Get-JsonProp $plan 'Plan')) {
+        if ($step -and $step.RowId) { $steps[[string]$step.RowId] = $step }
+    }
+    $items = @(
+        for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
+            $row = $rows[$position]
+            $step = $steps[[string](Get-JsonProp $row 'Id')]
+            # Skipped rows can transfer their picture choice to the next
+            # played row. The shared run snapshot has already resolved it.
+            if ($step) { $row = $plan.Rows[$step.Index] }
+            $view = Get-WebBulletinRowView -Row $row -Fields $fields -ImageField $imageField
+            $view['number'] = $position + 1
+            $view['startSeconds'] = Get-JsonProp $step 'AtSeconds'
+            if ($step -and $imageField) {
+                $view.media = @($view.media | Where-Object { $_ -ne $imageField })
+                if ($view.imageMode -eq 'new' -and (Get-JsonProp $row 'Image')) { $view.media += $imageField }
+                if ($step.Index -eq 0 -and $view.imageMode -eq 'inherit') { $view.imageMode = 'template' }
+            }
+            $view
+        }
+    )
+    return @{ ok = $true; data = @{
+        revision = [int](Get-JsonProp $bulletin 'Revision'); stamp = $stamp; fields = $fields; rows = $items
+        page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
+        playbackSupported = $supported; plannedCount = $steps.Count; exitSeconds = Get-JsonProp $plan 'ExitAtSeconds'; imageField = $imageField
+    } }
 }
 
 function Get-WebBulletinTiming {

@@ -103,6 +103,12 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         BulletinPhotoEndpoints.Map(bulletin);
+        bulletin.MapGet("/preview", PreviewBulletin)
+            .Produces<BulletinPreview>()
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
         bulletin.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
                 EditBulletin(new("read", Id: id, Page: page), bridge, http))
             .Produces<BulletinEditor>()
@@ -166,6 +172,13 @@ public static class ContentEndpoints
             "urgent_save_failed" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
+    }
+
+    private static async Task<IResult> PreviewBulletin(string id, int revision, int? page, string? stamp, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("bulletin.preview", new { actor = http.User.UserId(), id, revision, page, stamp }, http.RequestAborted);
+        return reply.Ok ? TypedResults.Ok(reply.Data.Deserialize<BulletinPreview>(JsonDefaults.Options)) : BulletinError(reply);
     }
 
     private static async Task<IResult> EditBulletin(BulletinEditRequest request, IBridgeChannel bridge, HttpContext http)

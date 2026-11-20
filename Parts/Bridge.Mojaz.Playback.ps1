@@ -15,6 +15,18 @@
 
 # ------------------------------------------------------------------ playback
 
+function Get-MojazResolvedRunSnapshot {
+    param([Parameter(Mandatory)]$Bulletin, $Schedule)
+    # Resolve frames on a copy so rendering the plan and starting it share
+    # the same input without changing the saved editorial revision.
+    $resolved = $Bulletin | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    Set-JsonProp $resolved 'DelaySeconds' (Get-MojazDelaySeconds -Bulletin $Bulletin)
+    Set-JsonProp $resolved 'IntroExtraSeconds' (Get-MojazIntroSeconds -Bulletin $Bulletin)
+    Set-JsonProp $resolved 'LastRowSeconds' (Get-MojazLastRowSeconds -Bulletin $Bulletin)
+    return New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $Schedule `
+        -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
+}
+
 function Start-MojazPlayback {
     <#
         Shows the first row, then leaves the rest to the tick.
@@ -55,24 +67,7 @@ function Start-MojazPlayback {
         return $false
     }
     $schedule = if ($ScheduleId) { [pscustomobject]@{ Id = $ScheduleId } } else { $null }
-    $syncOffset = (Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0
-    # Resolve the two timings here rather than leaving the module to guess:
-    # these are the same numbers the screen printed, so what plays is what the
-    # plan line promised. The saved bulletin is not touched - the copy carries
-    # them into the snapshot, which owns the timing for this run alone.
-    $resolved = $bulletin | ConvertTo-Json -Depth 12 | ConvertFrom-Json
-    # Added rather than assigned: a bulletin stores frames now, so these
-    # seconds exist only on this copy, for the module to plan with.
-    foreach ($pair in @(
-            @('DelaySeconds', (Get-MojazDelaySeconds -Bulletin $bulletin)),
-            @('IntroExtraSeconds', (Get-MojazIntroSeconds -Bulletin $bulletin)),
-            @('LastRowSeconds', (Get-MojazLastRowSeconds -Bulletin $bulletin)))) {
-        if ($resolved.PSObject.Properties.Match($pair[0]).Count -eq 0) {
-            $resolved | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1]
-        }
-        else { $resolved.$($pair[0]) = $pair[1] }
-    }
-    $snapshotResult = New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $schedule -OffsetSeconds $syncOffset
+    $snapshotResult = Get-MojazResolvedRunSnapshot -Bulletin $bulletin -Schedule $schedule
     if (-not $snapshotResult.Success) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.boardEmpty') -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false

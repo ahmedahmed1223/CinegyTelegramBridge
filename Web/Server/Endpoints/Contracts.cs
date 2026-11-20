@@ -13,6 +13,10 @@ public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int
 public sealed record BulletinField(string Name, string Label, string Kind);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
 public sealed record BulletinImageChoice(string RowId, int RowNumber);
+public sealed record BulletinPreviewRow(string Id, int Number, Dictionary<string, string> Values, string[] Media, bool Skipped,
+    string? ImageMode, double? StartSeconds);
+public sealed record BulletinPreview(int Revision, string Stamp, BulletinField[] Fields, BulletinPreviewRow[] Rows, int Page, int PageCount, int Total,
+    bool PlaybackSupported, int PlannedCount, double? ExitSeconds, string? ImageField);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,
     BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing,
     string? ImageField = null, BulletinImageChoice[]? ImageChoices = null, bool CanUploadPhoto = false);

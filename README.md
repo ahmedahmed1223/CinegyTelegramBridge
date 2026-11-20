@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.100.0
+
+The bulletin editor has a read-only, paginated preview with the selected design fields, full editorial text, attachment indicators and excluded rows. On supported designs it shares the playback planner for row start times and the exit cue. Paging requires the same saved revision and timing plan.
+
 ## Version 8.99.0
 
 The bulletin image column uploads a picture to a saved row for designs using the shared Mojaz picture folder and field. The bridge accepts up to 10 MiB, decodes and resizes the image off the playout thread, and verifies the row revision again before updating the shared library. The web client receives the updated row without station file paths.

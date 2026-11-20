@@ -1704,6 +1704,52 @@ Describe 'Web channel: the pipe' {
         finally { $script:MojazLibrary = $previousLibrary }
     }
 
+    It 'previews saved bulletin fields without writing to air and uses the shared playback plan' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-MojazBulletinPlaybackDesign { (Get-MojazBulletinDesignKey -Bulletin $Bulletin) -eq $script:MojazTemplateKey }
+        Mock Get-WebBulletinFields {
+            @{ name = 'title.Text'; label = 'العنوان'; kind = 'text' }
+            @{ name = 'desk'; label = 'المكتب'; kind = 'text' }
+            @{ name = $script:MojazImageVariable; label = 'الصورة'; kind = 'media' }
+        }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Invoke-ShowTemplateResult { throw 'A preview must not call air' }
+        Mock Save-MojazLibrary { throw 'A preview must not write' }
+        $oldLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز المراجعة').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRows -Library $script:MojazLibrary -BulletinId $id -Rows @(
+                    @{ Title = 'خبر أول'; Image = 'D:\fixture\photo.png'; Fields = @{ desk = 'المكتب الأول' } },
+                    @{ Title = 'خبر مستبعد'; ImageMode = 'template' },
+                    @{ Title = 'متن كامل للمراجعة' }
+                )).Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $script:MojazLibrary = (Switch-MojazBulletinRowSkip -Library $script:MojazLibrary -BulletinId $id -RowId $bulletin.Rows[1].Id).Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $request = @{ op = 'bulletin.preview'; args = @{ actor = 4321; id = $id; revision = $bulletin.Revision } }
+            $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress) | ConvertFrom-Json
+            $preview.ok | Should -BeTrue
+            $preview.data.rows[0].values.desk | Should -Be 'المكتب الأول'
+            $preview.data.rows[1].skipped | Should -BeTrue
+            $preview.data.rows[1].startSeconds | Should -BeNullOrEmpty
+            $preview.data.rows[2].startSeconds | Should -BeGreaterThan 0
+            $preview.data.rows[2].imageMode | Should -Be 'template'
+            $preview.data.plannedCount | Should -Be 2
+            ($preview | ConvertTo-Json -Depth 9) | Should -Not -Match 'photo\.png'
+            $request.args.stamp = $preview.data.stamp
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress) | ConvertFrom-Json).ok | Should -BeTrue
+            Mock Get-MojazDelaySeconds { 113 }
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress) | ConvertFrom-Json).error | Should -Be 'bulletin_stale'
+            $request.args.revision--
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress) | ConvertFrom-Json).error | Should -Be 'bulletin_stale'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            Should -Invoke Save-MojazLibrary -Times 0 -Exactly
+        }
+        finally { $script:MojazLibrary = $oldLibrary }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

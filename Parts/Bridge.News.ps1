@@ -1308,10 +1308,10 @@ function Complete-NewsPublishAtMoment {
 function Import-NewsSets {
     <# The saved sets, read at start; unreadable is empty and a log line. #>
     $script:NewsSets = [System.Collections.Generic.List[object]]::new()
-    if (-not (Test-Path -LiteralPath $script:newsSetsFile)) { return }
+    if (-not (Test-Path -LiteralPath $script:newsSetsFile) -and -not (Test-Path -LiteralPath "$script:newsSetsFile.bak")) { return }
     try {
-        $raw = Get-Content -LiteralPath $script:newsSetsFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        foreach ($set in @(Get-JsonProp $raw 'Sets')) {
+        $storedSets = Read-ValidatedJsonState -Path $script:newsSetsFile
+        foreach ($set in @(Get-JsonProp (Get-JsonProp $storedSets 'Data') 'Sets')) {
             $name = [string](Get-JsonProp $set 'Name')
             if ([string]::IsNullOrWhiteSpace($name)) { continue }
             $script:NewsSets.Add([pscustomobject]@{
@@ -1323,12 +1323,37 @@ function Import-NewsSets {
 }
 
 function Save-NewsSets {
-    $payload = [pscustomobject]@{ SchemaVersion = 1; Sets = @($script:NewsSets) }
-    # The writer never throws - it returns false - so the catch this once
-    # had could not fire, and a full disk lost the shelf without a line.
+    param([System.Collections.Generic.List[object]]$Sets = $script:NewsSets)
+    $payload = [pscustomobject]@{ SchemaVersion = 1; Sets = @($Sets) }
     if (Write-BridgeValidatedJson -Path $script:newsSetsFile -Json ($payload | ConvertTo-Json -Depth 5)) { return $true }
-    Write-BridgeLog "Could not write news-sets.json; what is on screen will not survive a restart" 'WARN'
+    Write-BridgeLog "Could not write news-sets.json; the previous library is still saved" 'WARN'
     return $false
+}
+
+function Get-NormalizedNewsSetName {
+    param([string]$Name)
+    $clean = Get-CleanNewsItemText -Text $Name
+    return $clean.Substring(0, [math]::Min($clean.Length, 40))
+}
+
+function Get-NewsSetRevision {
+    param([Parameter(Mandatory)]$Set)
+    $reviewed = [ordered]@{
+        name = Get-JsonProp $Set 'Name'; items = @(Get-JsonProp $Set 'Items')
+        by = Get-JsonProp $Set 'SavedBy'; at = Get-JsonProp $Set 'SavedAt'
+    } | ConvertTo-Json -Compress
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
+}
+
+function Test-NewsSetReview {
+    param([int]$Index, [string]$Revision)
+    return $Index -ge 0 -and $Index -lt $script:NewsSets.Count -and $Revision -cmatch '^[A-F0-9]{20}$' -and
+        (Get-NewsSetRevision -Set $script:NewsSets[$Index]).Substring(0, 20) -ceq $Revision
+}
+
+function Test-NewsSetManageAccess {
+    param([Parameter(Mandatory)]$Set, [long]$ChatId, [long]$UserId)
+    return [long](Get-JsonProp $Set 'SavedBy') -eq $UserId -or (Test-Admin -ChatId $ChatId -UserId $UserId)
 }
 
 function Save-NewsSetFromDraft {
@@ -1339,17 +1364,27 @@ function Save-NewsSetFromDraft {
         doubled. Twenty at most - a library that is not pruned grows into a
         screen nobody reads.
     #>
-    param([long]$UserId, [string]$Name)
+    param([long]$UserId, [string]$Name, [int]$ReplaceIndex = -1, [long]$ChatId = $UserId)
     $draft = Get-NewsTickerDraft -UserId $UserId
-    $clean = Get-CleanNewsItemText -Text ([string]$Name)
-    if ($clean.Length -gt 40) { $clean = $clean.Substring(0, 40) }
+    $clean = Get-NormalizedNewsSetName -Name $Name
     if (-not $draft -or -not $clean -or @($draft.Items).Count -eq 0) { return $false }
-    $existing = -1
-    for ($i = 0; $i -lt $script:NewsSets.Count; $i++) { if ([string]$script:NewsSets[$i].Name -ceq $clean) { $existing = $i; break } }
+    if ($ReplaceIndex -ge $script:NewsSets.Count) { return $false }
+    $existing = $ReplaceIndex
+    if ($existing -ge 0) { $clean = [string]$script:NewsSets[$existing].Name }
+    else {
+        for ($i = 0; $i -lt $script:NewsSets.Count; $i++) { if ([string]$script:NewsSets[$i].Name -ceq $clean) { $existing = $i; break } }
+    }
     if ($existing -lt 0 -and $script:NewsSets.Count -ge $script:NewsSetsMax) { return $false }
-    $set = [pscustomobject]@{ Name = $clean; Items = @($draft.Items | ForEach-Object { [string]$_ }); SavedBy = $UserId; SavedAt = (Get-Date).ToString('o') }
-    if ($existing -ge 0) { $script:NewsSets[$existing] = $set } else { $script:NewsSets.Add($set) }
-    if (-not (Save-NewsSets)) { return $false }
+    $originalSaver = $UserId
+    if ($existing -ge 0) {
+        if (-not (Test-NewsSetManageAccess -Set $script:NewsSets[$existing] -ChatId $ChatId -UserId $UserId)) { return $false }
+        $originalSaver = [long]$script:NewsSets[$existing].SavedBy
+    }
+    $set = [pscustomobject]@{ Name = $clean; Items = @($draft.Items | ForEach-Object { [string]$_ }); SavedBy = $originalSaver; SavedAt = (Get-Date).ToString('o') }
+    $candidate = [System.Collections.Generic.List[object]]::new($script:NewsSets)
+    if ($existing -ge 0) { $candidate[$existing] = $set } else { $candidate.Add($set) }
+    if (-not (Save-NewsSets -Sets $candidate)) { return $false }
+    $script:NewsSets = $candidate
     Add-AuditEntry (T 'news.sets.savedAudit' $clean $(@($set.Items).Count) $(Format-UserAuditActor -UserId $UserId))
     return $true
 }
@@ -1361,19 +1396,27 @@ function Use-NewsSet {
     param([long]$UserId, [int]$Index)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft -or $Index -lt 0 -or $Index -ge $script:NewsSets.Count) { return $false }
-    $result = Import-NewsTickerTextToDraft -UserId $UserId -Mode replace `
-        -Text (ConvertTo-NewsTickerText -Items @($script:NewsSets[$Index].Items) -Separator ([string](Get-Setting 'NewsItemSeparator')))
-    return [bool]$result.Success
+    $items = @($script:NewsSets[$Index].Items)
+    $separator = [string](Get-Setting 'NewsItemSeparator')
+    $roundTrip = ConvertFrom-NewsTickerText -Text (ConvertTo-NewsTickerText -Items $items -Separator $separator) -Separator $separator `
+        -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    if (-not $roundTrip.Success -or $roundTrip.Items.Count -ne $items.Count) { return $false }
+    for ($rowIndex = 0; $rowIndex -lt $items.Count; $rowIndex++) {
+        if (-not [string]::Equals($items[$rowIndex], $roundTrip.Items[$rowIndex], [StringComparison]::Ordinal)) { return $false }
+    }
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
 }
 
 function Remove-NewsSet {
     <# The saver's or an administrator's to delete. #>
     param([long]$ChatId, [long]$UserId, [int]$Index)
     if ($Index -lt 0 -or $Index -ge $script:NewsSets.Count) { return $false }
-    if ([long]$script:NewsSets[$Index].SavedBy -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
+    if (-not (Test-NewsSetManageAccess -Set $script:NewsSets[$Index] -ChatId $ChatId -UserId $UserId)) { return $false }
     $name = [string]$script:NewsSets[$Index].Name
-    $script:NewsSets.RemoveAt($Index)
-    Save-NewsSets | Out-Null
+    $candidate = [System.Collections.Generic.List[object]]::new($script:NewsSets)
+    $candidate.RemoveAt($Index)
+    if (-not (Save-NewsSets -Sets $candidate)) { return $false }
+    $script:NewsSets = $candidate
     Add-AuditEntry (T 'news.sets.deletedAudit' $name $(Format-UserAuditActor -UserId $UserId))
     return $true
 }
@@ -1383,6 +1426,7 @@ function Show-NewsSetsScreen {
        and save the draft as a new one. #>
     param([long]$ChatId, [long]$UserId, [int]$Page = 0, [int]$MessageId = 0, [int]$ConfirmDelete = -1)
     $mine = Get-NewsTickerDraft -UserId $UserId
+    $draftToken = if ($mine) { (Get-NewsTickerDraftRevision -Draft $mine).Substring(0, 20) } else { '' }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'news.sets.title' $script:NewsSets.Count $script:NewsSetsMax))
     if (-not $mine) { $lines.Add((T 'news.sets.needDraft')) }
@@ -1391,20 +1435,22 @@ function Show-NewsSetsScreen {
     if ($window.EndIndex -ge $window.StartIndex) {
         foreach ($i in $window.StartIndex..$window.EndIndex) {
             $set = $script:NewsSets[$i]
+            $token = (Get-NewsSetRevision -Set $set).Substring(0, 20)
+            $canManage = Test-NewsSetManageAccess -Set $set -ChatId $ChatId -UserId $UserId
             $lines.Add("$($i + 1). $([string]$set.Name) — $(@($set.Items).Count)")
-            if ($ConfirmDelete -eq $i) {
-                $rows += , @( @{ text = (T 'news.sets.deleteYes' $([string]$set.Name)); callback_data = "news:setdel:$i"; style = 'danger' }, @{ text = (T 'reply.cancelWord'); callback_data = "news:setsp:$($window.Page)" } )
+            if ($canManage -and $ConfirmDelete -eq $i) {
+                $rows += , @( @{ text = (T 'news.sets.deleteYes' $([string]$set.Name)); callback_data = "news:setdel:${i}:$token"; style = 'danger' }, @{ text = (T 'reply.cancelWord'); callback_data = "news:setsp:$($window.Page)" } )
                 continue
             }
             $line = @()
-            if ($mine) { $line += @{ text = (T 'news.sets.load' ($i + 1)); callback_data = "news:setload:$i" } }
-            $line += @{ text = '🗑'; callback_data = "news:setdelask:$i" }
-            $rows += , $line
+            if ($mine) { $line += @{ text = (T 'news.sets.load' ($i + 1)); callback_data = "news:setload:${i}:${token}:$draftToken" } }
+            if ($canManage) { $line += @{ text = '🗑'; callback_data = "news:setdelask:${i}:$token" } }
+            if ($line.Count) { $rows += , $line }
         }
     }
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'news:setsp')
     if ($pager.Count -gt 0) { $rows += , $pager }
-    if ($mine) { $rows += , @( @{ text = (T 'news.sets.save'); callback_data = 'news:setsave' } ) }
+    if ($mine) { $rows += , @( @{ text = (T 'news.sets.save'); callback_data = "news:setsave:$draftToken" } ) }
     $rows += , @( @{ text = (T 'news.backToManage'); callback_data = 'news:refresh' } )
     $markup = @{ inline_keyboard = $rows }
     $text = $lines -join "`n"
@@ -1417,7 +1463,9 @@ function Complete-NewsSetName {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'news_set_name') { return }
     Clear-PendingState -ChatId $ChatId
-    $text = if (Save-NewsSetFromDraft -UserId $UserId -Name $Value) { (T 'news.sets.saved') } else { (T 'news.sets.saveRefused' $script:NewsSetsMax) }
+    $text = if ((Test-NewsTickerConfirmation -UserId $UserId -Token ([string](Get-JsonProp $state 'DraftToken'))) -and
+        (Save-NewsSetFromDraft -ChatId $ChatId -UserId $UserId -Name $Value)) { (T 'news.sets.saved') }
+    else { (T 'news.sets.saveRefused' $script:NewsSetsMax) }
     Send-TelegramMessage -ChatId $ChatId -Text $text
     Show-NewsSetsScreen -ChatId $ChatId -UserId $UserId
 }

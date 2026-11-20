@@ -379,7 +379,7 @@ function Add-BridgeTextContent {
     $catalogue['news.sets.save'] = @{ ar = '💾 احفظ المسودة كمجموعة'; en = '💾 Save the draft as a set' }
     $catalogue['news.sets.namePrompt'] = @{ ar = 'اكتب اسم المجموعة (حتى 40 حرفًا). اسمٌ موجود يستبدل مجموعته.'; en = 'Type the set''s name (up to 40 characters). An existing name replaces its set.' }
     $catalogue['news.sets.saved'] = @{ ar = '💾 حُفظت المجموعة.'; en = '💾 The set is saved.' }
-    $catalogue['news.sets.saveRefused'] = @{ ar = 'لم تُحفظ: الاسم فارغ، أو المسودة فارغة، أو بلغت المجموعات حدّها ({0}).'; en = 'Not saved: the name or the draft is empty, or the sets are at their limit ({0}).' }
+    $catalogue['news.sets.saveRefused'] = @{ ar = 'تعذّر حفظ المجموعة. راجع المسودة والاسم وسعة المكتبة ({0}) وصلاحية تحديث المجموعة الموجودة.'; en = 'Could not save the set. Check the draft, name, library capacity ({0}), and permission to update an existing set.' }
     $catalogue['news.sets.loaded'] = @{ ar = '📥 حُمّلت المجموعة في مسودتك بدل ما كان فيها. لم يتغيّر شيء على الهواء؛ راجع وانشر حين تريد.'; en = '📥 The set is in your draft, in place of what it held. Nothing changed on air; review and publish when ready.' }
     $catalogue['news.sets.loadRefused'] = @{ ar = 'لم تُحمَّل: تحتاج مسودة لك، أو لم تعد المجموعة موجودة.'; en = 'Not loaded: you need a draft of your own, or the set is gone.' }
     $catalogue['news.sets.deleteYes'] = @{ ar = '🗑 نعم، احذف «{0}»'; en = '🗑 Yes, delete "{0}"' }

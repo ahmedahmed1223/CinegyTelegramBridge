@@ -307,29 +307,33 @@ function Invoke-CallbackQuery {
             break
         }
         'news:setload:*' {
-            $setIndex = -1
-            [int]::TryParse((Get-CallbackArg $data 'news:setload:'), [ref]$setIndex) | Out-Null
-            $loaded = Use-NewsSet -UserId $userId -Index $setIndex
+            $loaded = $data -cmatch '^news:setload:(\d{1,9}):([A-F0-9]{20}):([A-F0-9]{20})$' -and
+                (Test-NewsSetReview -Index ([int]$Matches[1]) -Revision $Matches[2]) -and
+                (Test-NewsTickerConfirmation -UserId $userId -Token $Matches[3]) -and
+                (Use-NewsSet -UserId $userId -Index ([int]$Matches[1]))
             Send-TelegramMessage -ChatId $chatId -Text $(if ($loaded) { (T 'news.sets.loaded') } else { (T 'news.sets.loadRefused') }) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'news:setdelask:*' {
             $setIndex = -1
-            if ([int]::TryParse((Get-CallbackArg $data 'news:setdelask:'), [ref]$setIndex)) {
-                Show-NewsSetsScreen -ChatId $chatId -UserId $userId -Page ([math]::Floor([math]::Max(0, $setIndex) / 8)) -ConfirmDelete $setIndex -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
-            }
+            if ($data -cmatch '^news:setdelask:(\d{1,9}):([A-F0-9]{20})$' -and
+                (Test-NewsSetReview -Index ([int]$Matches[1]) -Revision $Matches[2])) { $setIndex = [int]$Matches[1] }
+            Show-NewsSetsScreen -ChatId $chatId -UserId $userId -Page ([math]::Floor([math]::Max(0, $setIndex) / 8)) -ConfirmDelete $setIndex -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
         'news:setdel:*' {
-            $setIndex = -1
-            [int]::TryParse((Get-CallbackArg $data 'news:setdel:'), [ref]$setIndex) | Out-Null
-            if (-not (Remove-NewsSet -ChatId $chatId -UserId $userId -Index $setIndex)) { Send-TelegramMessage -ChatId $chatId -Text (T 'news.sets.deleteRefused') }
+            $removed = $data -cmatch '^news:setdel:(\d{1,9}):([A-F0-9]{20})$' -and
+                (Test-NewsSetReview -Index ([int]$Matches[1]) -Revision $Matches[2]) -and
+                (Remove-NewsSet -ChatId $chatId -UserId $userId -Index ([int]$Matches[1]))
+            if (-not $removed) { Send-TelegramMessage -ChatId $chatId -Text (T 'news.sets.deleteRefused') }
             Show-NewsSetsScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }
-        'news:setsave' {
-            if (-not (Get-NewsTickerDraft -UserId $userId)) { Show-NewsSetsScreen -ChatId $chatId -UserId $userId; break }
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'news_set_name'; UserId = $userId; StartedAt = (Get-Date) }
+        'news:setsave*' {
+            if ($data -cnotmatch '^news:setsave:([A-F0-9]{20})$' -or -not (Test-NewsTickerConfirmation -UserId $userId -Token $Matches[1])) {
+                Show-NewsSetsScreen -ChatId $chatId -UserId $userId; break
+            }
+            Set-PendingState -ChatId $chatId -State @{ Mode = 'news_set_name'; UserId = $userId; StartedAt = (Get-Date); DraftToken = $Matches[1] }
             Send-TelegramMessage -ChatId $chatId -Text (T 'news.sets.namePrompt') -ReplyMarkup (Get-CancelKeyboard)
             break
         }

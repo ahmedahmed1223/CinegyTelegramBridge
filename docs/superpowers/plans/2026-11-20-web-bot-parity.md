@@ -9,7 +9,7 @@
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, automatic run preview and playback, pause, resume, advance and stop retry | Timing settings, rehearsal, single-story and timed manual playback |
 | Bulletins | Shared library and paginated design-field table, create and copy, revision-checked row editing and batch paste, built-in timing, on-air indicator | Attachments, design switching, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
-| Ticker | Paged published list, shared draft lock and handover, editing and reordering, reviewed publication and conflict resolution, paused headlines and scheduled publication controls | Sets, backups and Google Sheets sync controls |
+| Ticker | Paged published list, shared draft lock and handover, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication and saved sets | Backups and Google Sheets sync controls |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls, snapshots and clips | Template and material schedule, incident and operation history, notifications, reports and exports |
 | Administration | Web accounts and sessions | Bot access requests and roles, settings, health tools, audit and announcements |
@@ -18,7 +18,8 @@
 
 - [x] Map ticker draft, lock, reorder, handover and publish commands to `Parts/Bridge.News.ps1`. Test competing editors, stale edits, publication conflicts and a successful publish into temporary storage.
 - [x] Add controls for ticker scheduling and the shared paused headline list.
-- [ ] Add controls for saved sets, backup restore and sheet sync.
+- [x] Add controls for shared saved sets.
+- [ ] Add controls for backup restore and sheet sync.
 - [x] Use the template fields as urgent table columns. Save inline edits with the board revision and stable item IDs, and keep extra fields in playback.
 - [x] Use the existing urgent planner and playback engine for review, start and sequence controls. Test revoked access, a changed board between review and confirm, and a failed stop on a simulated scene.
 - [ ] Expose urgent timing settings, rehearsal and individual show actions through their existing bridge policies.

@@ -38,6 +38,9 @@ public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, i
 public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused);
 public sealed record TickerConflict(string Review, string[] Items);
 public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed);
+public sealed record TickerSetRequest(string Action, int? Index = null, string? Revision = null, string? DraftRevision = null, string? Name = null);
+public sealed record TickerSavedSet(int Index, string Name, string Revision, int Count, bool CanManage);
+public sealed record TickerSetsState(string? DraftRevision, int MaxSets, TickerSavedSet[] Items);
 
 public sealed record CurrentUser(long Id, string Name, string Role, string Method, bool WebOnly);
 

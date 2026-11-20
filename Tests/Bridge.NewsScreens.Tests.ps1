@@ -2010,6 +2010,46 @@ Describe 'Saved ticker sets' {
         $script:NewsSets.Count | Should -Be 0
     }
 
+    It 'keeps the saved headlines when writing a replacement or removal fails' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeTrue
+        $previousToken = (Get-NewsSetRevision -Set $script:NewsSets[0]).Substring(0, 20)
+        $script:NewsTickerDraft.Items = @('جديد')
+        Mock Save-NewsSets { $false }
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeFalse
+        Remove-NewsSet -ChatId 42 -UserId 42 -Index 0 | Should -BeFalse
+        Test-NewsSetReview -Index 0 -Revision $previousToken | Should -BeTrue
+        $script:NewsSets[0].Items | Should -Be @('أ', 'ب')
+    }
+
+    It 'keeps the current draft when the saved headlines cannot be written' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeTrue
+        $script:NewsTickerDraft.Items = @('المسودة الحالية')
+        Mock Save-NewsTickerDraft { $false }
+        Use-NewsSet -UserId 42 -Index 0 | Should -BeFalse
+        $script:NewsTickerDraft.Items | Should -Be @('المسودة الحالية')
+    }
+
+    It 'refuses to rewrite headlines if the current separator would split one' {
+        $script:NewsTickerDraft.Items = @('عنوان | وتفصيل')
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeTrue
+        $script:NewsTickerDraft.Items = @('المسودة الحالية')
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        Use-NewsSet -UserId 42 -Index 0 | Should -BeFalse
+        $script:NewsTickerDraft.Items | Should -Be @('المسودة الحالية')
+    }
+
+    It 'preserves the original saver and rejects another operator saving over the same name' {
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeTrue
+        $script:NewsTickerDraft.OwnerUserId = 7
+        $script:NewsTickerDraft.Items = @('جديد')
+        Save-NewsSetFromDraft -UserId 7 -Name 'عادي' | Should -BeFalse
+        $script:NewsSets[0].Items | Should -Be @('أ', 'ب')
+        Mock Test-Admin { $UserId -eq 7 }
+        Save-NewsSetFromDraft -UserId 7 -Name 'عادي' | Should -BeTrue
+        $script:NewsSets[0].SavedBy | Should -Be 42
+        $script:NewsSets[0].Items | Should -Be @('جديد')
+    }
+
     It 'refuses a twenty-first set, and an empty name' {
         1..20 | ForEach-Object { Save-NewsSetFromDraft -UserId 42 -Name "م $_" | Out-Null }
         Save-NewsSetFromDraft -UserId 42 -Name 'زائدة' | Should -BeFalse
@@ -2020,9 +2060,24 @@ Describe 'Saved ticker sets' {
         1..12 | ForEach-Object { $script:NewsSets.Add([pscustomobject]@{ Name = "م $_"; Items = @('x'); SavedBy = 42; SavedAt = '' }) }
         Show-NewsSetsScreen -ChatId 42 -UserId 42 -Page 0
         $data = @($script:setsMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
-        $data | Should -Contain 'news:setload:0'
-        $data | Should -Contain 'news:setdelask:0'
+        @($data -cmatch '^news:setload:0:[A-F0-9]{20}:[A-F0-9]{20}$').Count | Should -Be 1
+        @($data -cmatch '^news:setdelask:0:[A-F0-9]{20}$').Count | Should -Be 1
         $data | Should -Contain 'news:setsp:1'
-        $data | Should -Contain 'news:setsave'
+        @($data -cmatch '^news:setsave:[A-F0-9]{20}$').Count | Should -Be 1
+    }
+
+    It 'refuses a Telegram load after another surface edits the current draft' {
+        Mock Confirm-TelegramCallback {}
+        Mock Test-Authorized { $true }
+        Save-NewsSetFromDraft -UserId 42 -Name 'عادي' | Should -BeTrue
+        Show-NewsSetsScreen -ChatId 42 -UserId 42
+        $callbacks = @($script:setsMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
+        $staleLoad = $callbacks -cmatch '^news:setload:0:'
+        $script:NewsTickerDraft.Items = @('خبر أحدث في الويب')
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+            id = 'n'; from = [pscustomobject]@{ id = 42 }; data = [string]$staleLoad
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 42; type = 'private' } }
+        })
+        $script:NewsTickerDraft.Items | Should -Be @('خبر أحدث في الويب')
     }
 }

@@ -51,6 +51,19 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        var tickerSets = app.MapGroup("/api/content/ticker/sets").WithTags("Content").RequireAuthorization();
+        tickerSets.MapGet("", (IBridgeChannel bridge, HttpContext http) => TickerSets(new("status"), bridge, http))
+            .Produces<TickerSetsState>()
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(503);
+        tickerSets.MapPost("", TickerSets)
+            .Produces<TickerSetsState>()
+            .Produces<ErrorResponse>(400)
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         bulletin.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
                 EditBulletin(new("read", Id: id, Page: page), bridge, http))
@@ -159,6 +172,25 @@ public static class ContentEndpoints
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()
     };
+
+    private static async Task<IResult> TickerSets(TickerSetRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("ticker.sets", new
+        {
+            actor = http.User.UserId(), request.Action, request.Index, request.Revision, request.DraftRevision, request.Name
+        }, http.RequestAborted);
+        http.Response.Headers.CacheControl = "no-store";
+        if (reply.Ok) return TypedResults.Ok(reply.Data.Deserialize<TickerSetsState>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "ticker_set_invalid" or "ticker_set_full" => ApiErrors.Of(400, reply.Error),
+            "ticker_stale" or "ticker_locked" or "ticker_set_stale" or "ticker_set_exists" => ApiErrors.Of(409, reply.Error),
+            "ticker_set_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
 
     private static async Task<IResult> TickerEditor(TickerDraftRequest request, IBridgeChannel bridge, HttpContext http)
     {

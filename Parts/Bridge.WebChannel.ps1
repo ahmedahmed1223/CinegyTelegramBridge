@@ -329,6 +329,7 @@ function Invoke-WebChannelOperation {
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
+        'ticker.sets' { return Invoke-WebTickerSets -Arguments $arguments }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -1239,6 +1240,68 @@ function Invoke-WebUrgentWrite {
     if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
     Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
+}
+
+function Get-WebTickerSetsState {
+    param([long]$Actor)
+    $draft = Get-NewsTickerDraft -UserId $Actor
+    return @{
+        draftRevision = if ($draft) { Get-NewsTickerDraftRevision -Draft $draft } else { $null }
+        maxSets = $script:NewsSetsMax
+        items = @(for ($index = 0; $index -lt [math]::Min($script:NewsSets.Count, $script:NewsSetsMax); $index++) {
+                $set = $script:NewsSets[$index]
+                @{
+                    index = $index; name = Get-NewsScreenLine -Text ([string]$set.Name) -Length 40
+                    revision = Get-NewsSetRevision -Set $set; count = @($set.Items).Count
+                    canManage = Test-NewsSetManageAccess -Set $set -ChatId $Actor -UserId $Actor
+                }
+            })
+    }
+}
+
+function Invoke-WebTickerSets {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebTickerSetsState -Actor $actor } }
+    if ($action -notin 'save', 'replace', 'load', 'delete') { return @{ ok = $false; error = 'ticker_set_invalid' } }
+
+    if ($action -ne 'delete') {
+        $draft = Get-NewsTickerDraft -UserId $actor
+        if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_locked' } }
+        if ((Get-NewsTickerDraftRevision -Draft $draft) -cne [string](Get-JsonProp $Arguments 'draftRevision')) {
+            return @{ ok = $false; error = 'ticker_stale' }
+        }
+        if ($action -in 'save', 'replace' -and @($draft.Items).Count -eq 0) { return @{ ok = $false; error = 'ticker_set_invalid' } }
+    }
+    if ($action -eq 'save') {
+        $name = Get-NormalizedNewsSetName -Name ([string](Get-JsonProp $Arguments 'name'))
+        if (-not $name) { return @{ ok = $false; error = 'ticker_set_invalid' } }
+        if (@($script:NewsSets | Where-Object { $_.Name -ceq $name }).Count) { return @{ ok = $false; error = 'ticker_set_exists' } }
+        if ($script:NewsSets.Count -ge $script:NewsSetsMax) { return @{ ok = $false; error = 'ticker_set_full' } }
+        $saved = Save-NewsSetFromDraft -UserId $actor -Name $name
+    }
+    else {
+        $rawIndex = Get-JsonProp $Arguments 'index'
+        if (($rawIndex -isnot [int] -and $rawIndex -isnot [long]) -or $rawIndex -lt 0 -or $rawIndex -ge [math]::Min($script:NewsSetsMax, $script:NewsSets.Count)) {
+            return @{ ok = $false; error = 'ticker_set_stale' }
+        }
+        $index = [int]$rawIndex
+        $set = $script:NewsSets[$index]
+        if ((Get-NewsSetRevision -Set $set) -cne [string](Get-JsonProp $Arguments 'revision')) { return @{ ok = $false; error = 'ticker_set_stale' } }
+        if ($action -ne 'load' -and -not (Test-NewsSetManageAccess -Set $set -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+        switch ($action) {
+            'replace' { $saved = Save-NewsSetFromDraft -UserId $actor -Name ([string]$set.Name) -ReplaceIndex $index }
+            'load' { $saved = Use-NewsSet -UserId $actor -Index $index }
+            'delete' {
+                $saved = Remove-NewsSet -ChatId $actor -UserId $actor -Index $index
+            }
+        }
+    }
+    if (-not $saved) { return @{ ok = $false; error = 'ticker_set_save_failed' } }
+    return @{ ok = $true; data = Get-WebTickerSetsState -Actor $actor }
 }
 
 function Get-WebTickerEditorState {

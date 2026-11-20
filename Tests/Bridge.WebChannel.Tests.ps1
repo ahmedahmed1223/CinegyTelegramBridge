@@ -693,6 +693,60 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'shares saved ticker sets across channels and checks both reviewed revisions' {
+        $oldSets = $script:NewsSets
+        $oldSetsPath = $script:newsSetsFile
+        $oldDraft = $script:NewsTickerDraft
+        $oldDraftPath = $script:newsDraftFile
+        $script:NewsSets = [System.Collections.Generic.List[object]]::new()
+        $script:newsSetsFile = Join-Path $TestDrive 'web-sets.json'
+        $script:newsDraftFile = Join-Path $TestDrive 'web-set-draft.json'
+        $script:NewsTickerDraft = @{ OwnerUserId = 4321; OwnerChatId = 4321; Items = @('خبر المساء') }
+        Mock Test-Authorized { $UserId -in 4321, 4322, 4323 }
+        Mock Test-Admin { $UserId -eq 4323 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        $requestSet = {
+            param($arguments)
+            $line = @{ op = 'ticker.sets'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $requestSet @{ actor = 999; action = 'status' }).error | Should -Be 'forbidden'
+            $current = & $requestSet @{ actor = 4321; action = 'status' }
+            $current.ok | Should -BeTrue
+            $draftRevision = $current.data.draftRevision
+            $saved = & $requestSet @{ actor = 4321; action = 'save'; name = 'المساء'; draftRevision = $draftRevision }
+            $saved.data.items[0].name | Should -Be 'المساء'
+            $setRevision = $saved.data.items[0].revision
+            (& $requestSet @{ actor = 4322; action = 'status' }).data.items[0].canManage | Should -BeFalse
+            (& $requestSet @{ actor = 4321; action = 'save'; name = ' المساء '; draftRevision = $draftRevision }).error | Should -Be 'ticker_set_exists'
+            (& $requestSet @{ actor = 4322; action = 'delete'; index = 0; revision = $setRevision }).error | Should -Be 'forbidden'
+            $script:NewsTickerDraft.OwnerUserId = 4322
+            $otherRevision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft
+            (& $requestSet @{ actor = 4322; action = 'replace'; index = 0; revision = $setRevision; draftRevision = $otherRevision }).error | Should -Be 'forbidden'
+            $script:NewsTickerDraft.OwnerUserId = 4321
+            $script:NewsTickerDraft.Items = @('تغيير من البوت')
+            (& $requestSet @{ actor = 4321; action = 'load'; index = 0; revision = $setRevision; draftRevision = $draftRevision }).error | Should -Be 'ticker_stale'
+            $draftRevision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft
+            (& $requestSet @{ actor = 4321; action = 'load'; index = 0; revision = $setRevision; draftRevision = $draftRevision }).ok | Should -BeTrue
+            (Get-NewsTickerDraft -UserId 4321).Items | Should -Be @('خبر المساء')
+            $script:NewsTickerDraft.Items = @('نسخة أحدث')
+            Save-NewsSetFromDraft -UserId 4321 -Name 'المساء' | Should -BeTrue
+            (& $requestSet @{ actor = 4323; action = 'delete'; index = 0; revision = $setRevision }).error | Should -Be 'ticker_set_stale'
+            $reviewed = & $requestSet @{ actor = 4323; action = 'status' }
+            $reviewed.data.items[0].canManage | Should -BeTrue
+            (& $requestSet @{ actor = 4323; action = 'delete'; index = 0; revision = $reviewed.data.items[0].revision }).ok | Should -BeTrue
+            $script:NewsSets.Count | Should -Be 0
+        }
+        finally {
+            $script:NewsSets = $oldSets
+            $script:newsSetsFile = $oldSetsPath
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldDraftPath
+        }
+    }
+
     It 'edits the same bulletin as Telegram, rejects older revisions and preserves media paths on the bridge' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Get-MojazLibraryFile { Join-Path $TestDrive 'web-bulletins.json' }

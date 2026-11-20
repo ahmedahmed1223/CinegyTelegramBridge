@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.87.0
+
+The web ticker editor shares Telegram's named set library. Operators can save a draft and load a set into their current draft. Updating and deleting a set requires the saver or an administrator. Loading changes the draft, and any existing publication schedule still applies.
+
 ## Version 8.86.0
 
 The selected editorial theme uses warm neutral surfaces and blue for selection and primary actions across the web app. New browsers open in light mode, and the account menu offers a matching dark mode. The interface retains IBM Plex Sans Arabic and its distinct on-air and alert colors.

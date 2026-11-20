@@ -78,6 +78,16 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(503);
+        app.MapPost("/api/content/ticker/sheet", TickerSheet)
+            .WithTags("Content")
+            .RequireAuthorization()
+            .Produces<TickerSheetPreview>()
+            .Produces(204)
+            .Produces<ErrorResponse>(400)
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         bulletin.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
                 EditBulletin(new("read", Id: id, Page: page), bridge, http))
@@ -186,6 +196,25 @@ public static class ContentEndpoints
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()
     };
+
+    private static async Task<IResult> TickerSheet(TickerSheetRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (request.Action is not ("preview" or "apply") || request.Target is not ("draft" or "air"))
+            return ApiErrors.Of(400, "ticker_sheet_invalid");
+        var reply = await bridge.SendAsync("ticker.sheet", new { actor = http.User.UserId(), request.Action, request.Target, request.Review }, http.RequestAborted);
+        if (reply.Ok)
+            return request.Action == "apply" ? Results.NoContent() : TypedResults.Ok(reply.Data.Deserialize<TickerSheetPreview>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" or "ticker_sheet_unconfigured" => ApiErrors.Of(404, reply.Error),
+            "ticker_sheet_invalid" => ApiErrors.Of(400, reply.Error),
+            "ticker_locked" or "ticker_sheet_stale" or "ticker_sheet_busy" => ApiErrors.Of(409, reply.Error),
+            "content_unreadable" or "ticker_sheet_unavailable" or "ticker_sheet_save_failed" or "ticker_sheet_schedule_cancelled" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
 
     private static async Task<IResult> TickerBackups(TickerBackupRequest request, IBridgeChannel bridge, HttpContext http)
     {

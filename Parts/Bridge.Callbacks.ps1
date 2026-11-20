@@ -586,7 +586,7 @@ function Invoke-CallbackQuery {
                 $i = [int]$Matches[1]
                 $id = [string]$Matches[2]
                 $chosenBackup = Get-NewsTickerBackupByIndex -Index $i
-                if ($chosenBackup -and (Get-NewsTickerBackupToken "file:$($chosenBackup.FullName)").Substring(0, 20) -ceq $id) {
+                if ($chosenBackup -and (Get-NewsTickerReviewToken "file:$($chosenBackup.FullName)").Substring(0, 20) -ceq $id) {
                     $plan = Get-NewsTickerBackupReview -File $chosenBackup -Actor $userId
                 }
             }
@@ -613,7 +613,7 @@ function Invoke-CallbackQuery {
                 if ($chosenBackup) {
                     $plan = Get-NewsTickerBackupReview -File $chosenBackup -Actor $userId
                     if ($plan -and -not $plan.Preview.identical -and $plan.Preview.review.Substring(0, 20) -ceq $confirmation) {
-                        $outcome = Invoke-NewsTickerReviewedRestore -Plan $plan -Actor $userId
+                        $outcome = Invoke-NewsTickerReviewedPublish -Plan $plan -Actor $userId
                         $message = if (-not $outcome) { T 'reply.restored' }
                         elseif ($outcome -eq 'ticker_backup_schedule_cancelled') { T 'reply.newsRestoreScheduleCancelled' }
                         else { T 'reply.newsRestoreReviewAgain' }

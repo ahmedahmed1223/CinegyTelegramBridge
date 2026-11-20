@@ -132,6 +132,7 @@ function ConvertFrom-NewsSheetCsv {
     [CmdletBinding()]
     param([AllowEmptyString()][string]$Csv = '')
     if ([string]::IsNullOrWhiteSpace($Csv)) { return @() }
+    if ($Csv.TrimStart([char]0xFEFF) -match '^\s*<(?:!doctype\s+html\b|html\b|head\b|body\b|\?xml\b)') { return @() }
     $rows = @()
     try { $rows = @($Csv | ConvertFrom-Csv -Header 'Item' -ErrorAction Stop) }
     catch { return @() }

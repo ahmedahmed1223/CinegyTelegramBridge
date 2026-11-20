@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Modal, Pagination, ScrollArea, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
+import { Alert, Button, Group, Modal, Pagination, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -6,25 +6,11 @@ import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { formatDateTime } from '../../lib/time'
 import classes from './NewsroomPage.module.css'
+import { TickerReviewHeadlines } from './TickerReviewHeadlines'
 
 type Preview = Schemas['TickerBackupPreview']
 type Review = { id: string; preview: Preview }
 const number = new Intl.NumberFormat('ar')
-
-function HeadlineList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <Stack gap="xs">
-      <Title order={5}>{title} · {number.format(items.length)}</Title>
-      {items.length === 0 ? <Text c="dimmed" size="sm">لا توجد أخبار.</Text> : (
-        <ScrollArea.Autosize mah="27vh" type="auto" tabIndex={0} role="region" aria-label={title}>
-          <ol className={classes.reviewItems}>
-            {items.map((item, index) => <li key={index}><Text size="sm" dir="auto">{item}</Text></li>)}
-          </ol>
-        </ScrollArea.Autosize>
-      )}
-    </Stack>
-  )
-}
 
 export function TickerBackups({ onRestored, disabled }: { onRestored: () => Promise<unknown>; disabled: boolean }) {
   const [page, setPage] = useState(0)
@@ -97,9 +83,9 @@ export function TickerBackups({ onRestored, disabled }: { onRestored: () => Prom
         {review && <Stack gap="md">
           <Text size="sm" c="dimmed">النسخة المحفوظة في <bdi>{formatDateTime(review.preview.savedAt)}</bdi></Text>
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-            {review.preview.currentReadable ? <HeadlineList title="الشريط المنشور الآن" items={review.preview.currentItems} />
+            {review.preview.currentReadable ? <TickerReviewHeadlines title="الشريط المنشور الآن" items={review.preview.currentItems} />
               : <Alert color="orange" title="الشريط المنشور الآن">تعذّرت قراءة أخبار الملف الحالي.</Alert>}
-            <HeadlineList title="النسخة الاحتياطية" items={review.preview.items} />
+            <TickerReviewHeadlines title="النسخة الاحتياطية" items={review.preview.items} />
           </SimpleGrid>
           {review.preview.identical ? <Alert color="gray">الأخبار وترتيبها مطابقان للشريط المنشور.</Alert> : (
             <Alert color="orange">

@@ -9,6 +9,7 @@ import { messageFor } from '../../api/messages'
 import { formatDateTime } from '../../lib/time'
 import classes from './NewsroomPage.module.css'
 import { TickerBackups } from './TickerBackups'
+import { TickerSheet } from './TickerSheet'
 import { TickerSets } from './TickerSets'
 
 type Request = Schemas['TickerDraftRequest']
@@ -51,6 +52,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const [showPaused, setShowPaused] = useState(false)
   const [showSets, setShowSets] = useState(false)
   const [showBackups, setShowBackups] = useState(false)
+  const [showSheet, setShowSheet] = useState(false)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -299,11 +301,19 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
               {editor.canRestore && <Button variant="default" size="sm" leftSection={<IconHistory size={17} aria-hidden />}
                 aria-expanded={showBackups} aria-controls={showBackups ? 'ticker-backups' : undefined}
                 onClick={() => setShowBackups(!showBackups)}>النسخ الاحتياطية</Button>}
+              {editor.canPullSheet && <Button variant="default" size="sm"
+                aria-expanded={showSheet} aria-controls={showSheet ? 'ticker-sheet' : undefined}
+                onClick={() => setShowSheet(!showSheet)}>Google Sheets</Button>}
             </Group>
             {showSets && <TickerSets draft={draft ?? null} disabled={busy || !!edit}
               onLoad={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
             {editor.canRestore && showBackups && <TickerBackups disabled={busy || !!edit}
               onRestored={() => Promise.all([onPublished(), queryClient.invalidateQueries({ queryKey: draftKey })])} />}
+            {editor.canPullSheet && showSheet && <TickerSheet disabled={busy || !!edit}
+              onApplied={(target) => Promise.all([
+                queryClient.invalidateQueries({ queryKey: draftKey }),
+                target === 'air' ? onPublished() : Promise.resolve(),
+              ])} />}
           </>
         )}
       </Stack>

@@ -596,6 +596,7 @@ Describe 'Web channel: the pipe' {
         Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsDeleteNews' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'NewsSheetCsvUrl' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewNewsItemAtTop' }
         Mock Test-Authorized { $UserId -in @(4321, 4322) }
         Mock Test-Admin { $false }
@@ -691,6 +692,76 @@ Describe 'Web channel: the pipe' {
             $script:newsBackupDirectory = $previousBackup
             $script:NewsPaused = $previousShelf
             $script:newsPausedFile = $previousShelfFile
+        }
+    }
+
+    It 'imports only reviewed sheet headlines while the operator owns the ticker draft' {
+        $tickerPath = Join-Path $TestDrive 'sheet-import-ticker.txt'
+        Set-Content -LiteralPath $tickerPath -Value 'الشريط المنشور'
+        $previousSheetDraft = $script:NewsTickerDraft
+        $previousSheetDraftPath = $script:newsDraftFile
+        $previousSheetBackupPath = $script:newsBackupDirectory
+        $script:newsDraftFile = Join-Path $TestDrive 'sheet-import-draft.json'
+        $script:newsBackupDirectory = Join-Path $TestDrive 'sheet-import-backups'
+        $script:NewsTickerDraft = @{ Id = 'mock'; OwnerUserId = 4321; OwnerChatId = 4321; Items = @('مسودة حالية') }
+        $script:webSheetCsv = "خبر من الجدول,ملاحظات"
+        $script:webSheetPullAllowed = $true
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { $script:webSheetPullAllowed } -ParameterFilter { $Name -eq 'AllowOperatorsSheetPull' }
+        Mock Get-Setting { 'https://example.invalid/private-csv?secret=fixture' } -ParameterFilter { $Name -eq 'NewsSheetCsvUrl' }
+        Mock Get-Setting { $tickerPath } -ParameterFilter { $Name -eq 'NewsFilePath' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        $script:webSheetTransfer = [System.Threading.Tasks.TaskCompletionSource[bool]]::new()
+        Mock Start-NewsSheetCsvDownload { @{ Task = $script:webSheetTransfer.Task; FixtureCsv = $script:webSheetCsv; Error = '' } }
+        Mock Receive-NewsSheetCsvDownload { @{ Success = $true; Csv = $Transfer.FixtureCsv; Error = '' } }
+        Mock Send-NewsSheetNotice {}
+        Mock Write-NewsPublishRecord {}
+        $requestSheet = {
+            param($arguments)
+            $line = @{ op = 'ticker.sheet'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $requestSheet @{ actor = 4322; action = 'preview'; target = 'air' }).error | Should -Be 'ticker_locked'
+            Should -Invoke Start-NewsSheetCsvDownload -Times 0
+            $pendingPreview = @{
+                Request = @{ args = @{ actor = 4321; action = 'preview'; target = 'draft' } }
+                Deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 15 * [Diagnostics.Stopwatch]::Frequency
+                Reply = [System.Threading.Tasks.TaskCompletionSource[string]]::new()
+            }
+            Start-WebTickerSheetRequest -Entry $pendingPreview | Should -BeNullOrEmpty
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}' | ConvertFrom-Json).ok | Should -BeTrue
+            $pendingPreview.Reply.Task.IsCompleted | Should -BeFalse
+            $script:webSheetPullAllowed = $false
+            $script:webSheetTransfer.SetResult($true)
+            Update-WebTickerSheetRequest
+            ($pendingPreview.Reply.Task.Result | ConvertFrom-Json).error | Should -Be 'forbidden'
+            $script:webSheetPullAllowed = $true
+            $preview = (& $requestSheet @{ actor = 4321; action = 'preview'; target = 'draft' }).data
+            $preview.items | Should -Be @('خبر من الجدول')
+            $preview | ConvertTo-Json -Depth 4 | Should -Not -Match 'private-csv|fixture'
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('الشريط المنشور')
+            $script:webSheetCsv = "خبر تغيّر,ملاحظات"
+            $confirm = @{ actor = 4321; action = 'apply'; target = 'draft'; review = $preview.review }
+            (& $requestSheet $confirm).error | Should -Be 'ticker_sheet_stale'
+            $confirm.review = (& $requestSheet @{ actor = 4321; action = 'preview'; target = 'draft' }).data.review
+            (& $requestSheet $confirm).ok | Should -BeTrue
+            $script:NewsTickerDraft.Items | Should -Be @('خبر تغيّر')
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('الشريط المنشور')
+            $air = (& $requestSheet @{ actor = 4321; action = 'preview'; target = 'air' }).data
+            $confirm.target = 'air'; $confirm.review = $air.review
+            (& $requestSheet $confirm).ok | Should -BeTrue
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('خبر تغيّر')
+            $script:NewsTickerDraft.Items | Should -Be @('خبر تغيّر')
+            Should -Invoke Send-NewsSheetNotice -Times 1 -Exactly
+        }
+        finally {
+            Stop-WebTickerSheetRequest -ErrorCode 'channel_closed'
+            $script:NewsTickerDraft = $previousSheetDraft
+            $script:newsDraftFile = $previousSheetDraftPath
+            $script:newsBackupDirectory = $previousSheetBackupPath
         }
     }
 

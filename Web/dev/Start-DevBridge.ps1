@@ -20,7 +20,8 @@
 param(
     [string]$PipeName = 'CinegyTelegramBridge.Web.Dev',
     [long]$OwnerId = 1001,
-    [string]$CaptureFixtureDirectory
+    [string]$CaptureFixtureDirectory,
+    [string]$SheetFixturePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +38,20 @@ Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
+if ($SheetFixturePath) {
+    Set-JsonProp $config.Settings 'NewsSheetCsvUrl' 'https://example.invalid/fixture.csv'
+    function Start-NewsSheetCsvDownload {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The fixture accepts the download signature but never uses the network.')]
+        param([string]$Url, [int]$TimeoutSeconds, [int]$MaxBytes)
+        $file = Get-Item -LiteralPath $SheetFixturePath
+        if ($file.Length -gt $MaxBytes) { return @{ Error = 'Fixture too large' } }
+        return @{ Task = [System.Threading.Tasks.Task]::CompletedTask; FixtureCsv = [IO.File]::ReadAllText($file.FullName); Error = '' }
+    }
+    function Receive-NewsSheetCsvDownload {
+        param([hashtable]$Transfer)
+        return @{ Success = $true; Csv = $Transfer.FixtureCsv; Error = '' }
+    }
+}
 Set-JsonProp $config.Settings 'EnableLiveRelay' $true
 Set-JsonProp $config.Settings 'EnableSnapshot' ([bool]$CaptureFixtureDirectory)
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'

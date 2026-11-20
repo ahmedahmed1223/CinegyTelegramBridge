@@ -21,6 +21,7 @@
 #>
 
 $script:WebChannel = $null
+$script:WebTickerSheetRequest = $null
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
 $script:WebChannelListenerCount = 4
 $script:WebChannelPublishedAt = [datetime]::MinValue
@@ -148,6 +149,7 @@ function Stop-WebChannel {
     $channel = $script:WebChannel
     $script:WebChannel = $null
     $channel.Shared.Stop = $true
+    Stop-WebTickerSheetRequest -ErrorCode 'channel_closed'
     # Anyone still waiting gets an answer rather than a fifteen-second hang.
     $pending = $null
     while ($channel.Shared.Queue.TryDequeue([ref]$pending)) {
@@ -289,6 +291,7 @@ function Invoke-WebChannelRequests {
        requests cannot hold the air clock; the rest wait for the next pass. #>
     param([int]$Limit = 25)
     if (-not (Test-WebChannelActive)) { return }
+    Update-WebTickerSheetRequest
     $queue = $script:WebChannel.Shared.Queue
     $item = $null
     for ($handled = 0; $handled -lt $Limit -and $queue.TryDequeue([ref]$item); $handled++) {
@@ -301,7 +304,11 @@ function Invoke-WebChannelRequests {
         # the abandoned command must never reach the air-control thread.
         if (-not $item.Claim.TrySetResult($true)) { continue }
         $answer = $null
-        try { $answer = Invoke-WebChannelOperation -Request $item.Request }
+        try {
+            $answer = Invoke-WebChannelOperation -Request $item.Request -Entry $item
+            if ($null -eq $answer -and $script:WebTickerSheetRequest -and
+                [object]::ReferenceEquals($script:WebTickerSheetRequest.Entry, $item)) { continue }
+        }
         catch {
             Write-BridgeLog "Web channel operation failed: $($_.Exception.Message)" 'ERROR'
             $answer = @{ ok = $false; error = 'internal' }
@@ -311,7 +318,7 @@ function Invoke-WebChannelRequests {
 }
 
 function Invoke-WebChannelOperation {
-    param([Parameter(Mandatory)][System.Collections.IDictionary]$Request)
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Request, [hashtable]$Entry)
     $op = [string](Get-JsonProp $Request 'op')
     $arguments = Get-JsonProp $Request 'args'
     if ($arguments -isnot [System.Collections.IDictionary]) { $arguments = @{} }
@@ -331,6 +338,7 @@ function Invoke-WebChannelOperation {
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'ticker.sets' { return Invoke-WebTickerSets -Arguments $arguments }
         'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
+        'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -1243,6 +1251,138 @@ function Invoke-WebUrgentWrite {
     return @{ ok = $true }
 }
 
+function Get-WebTickerSheetAdmission {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor) -or
+        -not (Test-NewsSheetPullAccess -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $target = [string](Get-JsonProp $Arguments 'target')
+    if ($action -cnotin 'preview', 'apply' -or $target -cnotin 'draft', 'air') { return @{ ok = $false; error = 'ticker_sheet_invalid' } }
+    if ($action -eq 'apply' -and [string](Get-JsonProp $Arguments 'review') -cnotmatch '^[A-F0-9]{64}$') {
+        return @{ ok = $false; error = 'ticker_sheet_invalid' }
+    }
+    if (Get-NewsSheetPullLockDenial -ChatId $actor -UserId $actor) { return @{ ok = $false; error = 'ticker_locked' } }
+    $url = [string](Get-Setting 'NewsSheetCsvUrl')
+    $path = [string](Get-Setting 'NewsFilePath')
+    $separator = [string](Get-Setting 'NewsItemSeparator')
+    if (-not $path -or -not $separator -or -not $url) { return @{ ok = $false; error = 'ticker_sheet_unconfigured' } }
+    return @{
+        ok = $true; Actor = $actor; Url = $url; Path = $path; Separator = $separator
+        Action = $action; Target = $target; ByteLimit = Get-SettingInt 'NewsImportMaxBytes' 1
+    }
+}
+
+function Start-WebTickerSheetRequest {
+    param([Parameter(Mandatory)][hashtable]$Entry)
+    $arguments = Get-JsonProp $Entry.Request 'args'
+    if ($arguments -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'ticker_sheet_invalid' } }
+    $admission = Get-WebTickerSheetAdmission -Arguments $arguments
+    if (-not $admission.ok) { return $admission }
+    if ($script:WebTickerSheetRequest) { return @{ ok = $false; error = 'ticker_sheet_busy' } }
+    $transfer = Start-NewsSheetCsvDownload -Url $admission.Url -TimeoutSeconds ([math]::Min(8, (Get-SettingInt 'NewsSheetTimeoutSeconds' 1))) `
+        -MaxBytes $admission.ByteLimit
+    if ($transfer.Error) { return @{ ok = $false; error = 'ticker_sheet_unavailable' } }
+    $script:WebTickerSheetRequest = @{ Entry = $Entry; Arguments = $arguments; Transfer = $transfer; Admission = $admission }
+}
+
+function Stop-WebTickerSheetRequest {
+    param([string]$ErrorCode)
+    $pending = $script:WebTickerSheetRequest
+    if (-not $pending) { return }
+    $script:WebTickerSheetRequest = $null
+    $client = Get-JsonProp $pending.Transfer 'Client'
+    if ($client) {
+        if ($pending.Transfer.Task.IsCompletedSuccessfully) { $pending.Transfer.Task.Result.Dispose() }
+        $client.Dispose()
+    }
+    [void]$pending.Entry.Reply.TrySetResult((@{ ok = $false; error = $ErrorCode } | ConvertTo-Json -Compress))
+}
+
+function Update-WebTickerSheetRequest {
+    $pending = $script:WebTickerSheetRequest
+    if (-not $pending) { return }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $pending.Entry.Deadline) {
+        Stop-WebTickerSheetRequest -ErrorCode 'ticker_sheet_unavailable'
+        return
+    }
+    if (-not $pending.Transfer.Task.IsCompleted) { return }
+    $script:WebTickerSheetRequest = $null
+    try {
+        $download = Receive-NewsSheetCsvDownload -Transfer $pending.Transfer
+        $admission = Get-WebTickerSheetAdmission -Arguments $pending.Arguments
+        if (-not $admission.ok) { $answer = $admission }
+        elseif ($admission.Url -cne $pending.Admission.Url -or $admission.ByteLimit -ne $pending.Admission.ByteLimit) {
+            $answer = @{ ok = $false; error = 'ticker_sheet_stale' }
+        }
+        else {
+            $answer = Invoke-WebTickerSheet -Admission $admission -Arguments $pending.Arguments -Download $download -Deadline $pending.Entry.Deadline
+        }
+    }
+    catch {
+        Write-BridgeLog 'The web ticker sheet request could not be completed.' 'WARN'
+        $answer = @{ ok = $false; error = 'ticker_sheet_unavailable' }
+    }
+    [void]$pending.Entry.Reply.TrySetResult(($answer | ConvertTo-Json -Compress -Depth 6))
+}
+
+function Invoke-WebTickerSheet {
+    param([hashtable]$Admission, [System.Collections.IDictionary]$Arguments, $Download, [long]$Deadline)
+    $actor = $Admission.Actor
+    $draft = Get-NewsTickerDraft -UserId $actor
+    $target = $Admission.Target
+    $path = $Admission.Path
+    $separator = $Admission.Separator
+    if (-not $download.Success) { return @{ ok = $false; error = 'ticker_sheet_unavailable' } }
+    $source = @(ConvertFrom-NewsSheetCsv -Csv $download.Csv | ForEach-Object { Get-CleanNewsItemText -Text $_ } | Where-Object { $_ })
+    if (-not $source.Count -or @($source | Where-Object { $_.Contains($separator, [StringComparison]::Ordinal) }).Count) {
+        return @{ ok = $false; error = 'ticker_sheet_invalid' }
+    }
+    $limits = @{ Separator = $separator; MaxItemLength = Get-SettingInt 'NewsMaxItemLength' 1; MaxItems = Get-SettingInt 'NewsMaxItems' 1 }
+    $parsed = ConvertFrom-NewsTickerText -Text (ConvertTo-NewsTickerText -Items $source -Separator $separator) @limits
+    if (-not $parsed.Success -or -not $parsed.Items.Count) { return @{ ok = $false; error = 'ticker_sheet_invalid' } }
+
+    $current = Get-NewsTickerSnapshot -Path $path @limits -MaximumBytes 8MB
+    if (-not $current.Success -and $target -eq 'air') { return @{ ok = $false; error = 'content_unreadable' } }
+    $before = if ($target -eq 'air') { @($current.Items) } else { @($draft.Items) }
+    $summary = Get-NewsSheetChangeSummary -Before $before -After $parsed.Items
+    $draftRevision = Get-NewsTickerDraftRevision -Draft $draft
+    $reviewed = ConvertTo-Json -Compress -Depth 5 -InputObject @(
+        'sheet', $actor, $target, $Admission.Url, $path, $current.Hash, $draftRevision, $separator, $limits.MaxItemLength, $limits.MaxItems, $parsed.Items
+    )
+    $token = Get-NewsTickerReviewToken $reviewed
+    $scheduled = [bool](Get-NewsPublishAt -Draft $draft)
+    if ($Admission.Action -eq 'preview') {
+        return @{ ok = $true; data = @{
+                review = $token; items = @($parsed.Items); currentItems = @($before)
+                identical = -not $summary.Changed; cancelsSchedule = $scheduled
+            } }
+    }
+    if ($token -cne [string](Get-JsonProp $Arguments 'review') -or -not $summary.Changed) {
+        return @{ ok = $false; error = 'ticker_sheet_stale' }
+    }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'ticker_sheet_unavailable' } }
+    if ($target -eq 'draft') {
+        if (-not (Set-NewsTickerDraftItems -Draft $draft -Items $parsed.Items -ClearSchedule)) {
+            return @{ ok = $false; error = 'ticker_sheet_save_failed' }
+        }
+    }
+    else {
+        $plan = @{ Path = $path; ExpectedHash = $current.Hash; Limits = $limits; Preview = @{ items = $parsed.Items; cancelsSchedule = $scheduled } }
+        $outcome = Invoke-NewsTickerReviewedPublish -Plan $plan -Actor $actor -SheetSummary $summary
+        if ($outcome) {
+            $failure = switch ($outcome) {
+                'ticker_backup_stale' { 'ticker_sheet_stale' }
+                'ticker_backup_schedule_cancelled' { 'ticker_sheet_schedule_cancelled' }
+                default { 'ticker_sheet_save_failed' }
+            }
+            return @{ ok = $false; error = $failure }
+        }
+    }
+    return @{ ok = $true; data = @{} }
+}
+
 function Invoke-WebTickerBackups {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -1261,14 +1401,14 @@ function Invoke-WebTickerBackups {
                     total = $files.Count; page = $window.Page; pageCount = $window.PageCount
                     items = @(for ($row = $window.StartIndex; $row -le $window.EndIndex; $row++) {
                             $file = $files[$row]
-                            @{ id = Get-NewsTickerBackupToken "file:$($file.FullName)"; savedAt = ([datetimeoffset]$file.LastWriteTimeUtc).ToUnixTimeMilliseconds() }
+                            @{ id = Get-NewsTickerReviewToken "file:$($file.FullName)"; savedAt = ([datetimeoffset]$file.LastWriteTimeUtc).ToUnixTimeMilliseconds() }
                         })
                 }
             } }
     }
 
     $id = [string](Get-JsonProp $Arguments 'id')
-    $backupFile = $files | Where-Object { (Get-NewsTickerBackupToken "file:$($_.FullName)") -ceq $id } | Select-Object -First 1
+    $backupFile = $files | Where-Object { (Get-NewsTickerReviewToken "file:$($_.FullName)") -ceq $id } | Select-Object -First 1
     if (-not $backupFile) { return @{ ok = $false; error = 'ticker_backup_stale' } }
     $plan = Get-NewsTickerBackupReview -File $backupFile -Actor $actor
     if (-not $plan) { return @{ ok = $false; error = 'ticker_backup_unreadable' } }
@@ -1276,7 +1416,7 @@ function Invoke-WebTickerBackups {
     if ($plan.Preview.review -cne [string](Get-JsonProp $Arguments 'review') -or $plan.Preview.identical) {
         return @{ ok = $false; error = 'ticker_backup_stale' }
     }
-    $outcome = Invoke-NewsTickerReviewedRestore -Plan $plan -Actor $actor
+    $outcome = Invoke-NewsTickerReviewedPublish -Plan $plan -Actor $actor
     if ($outcome) { return @{ ok = $false; error = $outcome } }
     return @{ ok = $true; data = @{} }
 }
@@ -1349,6 +1489,7 @@ function Get-WebTickerEditorState {
     $data = @{
         state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1
         canRestore = Test-NewsTickerBackupAccess -ChatId $Actor -UserId $Actor
+        canPullSheet = $false
     }
     if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
         $owner = [long](Get-JsonProp $draft 'OwnerUserId')
@@ -1358,6 +1499,7 @@ function Get-WebTickerEditorState {
         }
         else {
             $data.state = 'editing'
+            $data.canPullSheet = [bool](Get-Setting 'NewsSheetCsvUrl') -and (Test-NewsSheetPullAccess -ChatId $Actor -UserId $Actor)
             $pausedTotal = $script:NewsPaused.Count
             $window = Get-BridgePageWindow -ItemCount $pausedTotal -Page ([math]::Max(1, $PausedPage) - 1) -PageSize 10
             $pausedItems = @(for ($pausedIndex = $window.StartIndex; $pausedIndex -le $window.EndIndex; $pausedIndex++) {

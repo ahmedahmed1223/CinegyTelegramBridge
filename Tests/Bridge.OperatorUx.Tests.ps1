@@ -143,13 +143,13 @@ Describe 'Operator screens after the desktop usability review' {
         Mock Get-NewsTickerManagementKeyboard { @{} }
         Mock Get-NewsTickerBackupByIndex { [pscustomobject]@{ FullName = 'another-backup.txt' } }
         Mock Get-NewsTickerBackupReview { @{ Preview = @{ review = 'B' * 64; identical = $false } } }
-        Mock Invoke-NewsTickerReviewedRestore { throw 'stale confirmation reached publication' }
+        Mock Invoke-NewsTickerReviewedPublish { throw 'stale confirmation reached publication' }
         Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
             id = 'n'; from = [pscustomobject]@{ id = 42 }; data = "news:restoreconfirm:0:$('A' * 20)"
             message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 42; type = 'private' } }
         })
         Should -Invoke Get-NewsTickerBackupReview -Times 1 -Exactly
-        Should -Invoke Invoke-NewsTickerReviewedRestore -Times 0 -Exactly
+        Should -Invoke Invoke-NewsTickerReviewedPublish -Times 0 -Exactly
     }
     It 'reuses the current message for read-only navigation but not an air command' {
         foreach ($data in @('menu:main', 'menu:templates', 'help:ch:boards', 'mojaz:row:r1', 'newsbackpage:1')) {

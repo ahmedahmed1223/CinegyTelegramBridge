@@ -215,6 +215,88 @@
         }
       }
     },
+    "/api/content/ticker/sheet": {
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickerSheetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerSheetPreview"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session": {
       "get": {
         "tags": [
@@ -3289,7 +3371,8 @@
           "draft",
           "conflict",
           "sheetFailed",
-          "canRestore"
+          "canRestore",
+          "canPullSheet"
         ],
         "type": "object",
         "properties": {
@@ -3313,6 +3396,9 @@
             "type": "boolean"
           },
           "canRestore": {
+            "type": "boolean"
+          },
+          "canPullSheet": {
             "type": "boolean"
           }
         }
@@ -3433,6 +3519,59 @@
             "items": {
               "$ref": "#/components/schemas/TickerSavedSet"
             }
+          }
+        }
+      },
+      "TickerSheetPreview": {
+        "required": [
+          "review",
+          "items",
+          "currentItems",
+          "identical",
+          "cancelsSchedule"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currentItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "identical": {
+            "type": "boolean"
+          },
+          "cancelsSchedule": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TickerSheetRequest": {
+        "required": [
+          "action",
+          "target"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         }
       },

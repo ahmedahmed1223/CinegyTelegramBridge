@@ -52,10 +52,11 @@ function Test-NewsTickerConfirmation {
 }
 
 function Set-NewsTickerDraftItems {
-    param([Parameter(Mandatory)][System.Collections.IDictionary]$Draft, [string[]]$Items)
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Draft, [string[]]$Items, [switch]$ClearSchedule)
     $candidate = Copy-NewsTickerDraft -Draft $Draft
     $candidate.Items = @($Items)
     $candidate.UpdatedAt = (Get-Date).ToString('o')
+    if ($ClearSchedule) { Remove-JsonProp $candidate 'PublishAt' }
     if (-not (Save-NewsTickerDraft -Draft $candidate)) { return $false }
     $script:NewsTickerDraft = $candidate
     return $true
@@ -782,7 +783,7 @@ function Test-NewsSheetPullAccess {
     return [bool](Get-Setting 'AllowOperatorsSheetPull')
 }
 
-function Get-NewsSheetCsvText {
+function Start-NewsSheetCsvDownload {
     <# Downloads the sheet's CSV export. The content ends up on air, so this is
        a trust boundary: https only, a byte cap so a runaway document cannot
        exhaust memory, and a bounded timeout so a hung request cannot stall
@@ -793,27 +794,54 @@ function Get-NewsSheetCsvText {
         [int]$MaxBytes = 1048576
     )
     if ([string]::IsNullOrWhiteSpace($Url)) {
-        return [pscustomobject]@{ Success = $false; Csv = ''; Error = (T 'news.sheetUrlUnset') }
+        return @{ Error = (T 'news.sheetUrlUnset') }
     }
     if ($Url -notmatch '^https://') {
-        return [pscustomobject]@{ Success = $false; Csv = ''; Error = (T 'news.sheetUrlHttps') }
+        return @{ Error = (T 'news.sheetUrlHttps') }
     }
+    $client = $null
     try {
-        $response = Invoke-WebRequest -Uri $Url -TimeoutSec ([math]::Max(1, $TimeoutSeconds)) `
-            -MaximumRedirection 5 -UseBasicParsing -ErrorAction Stop
-        $bytes = $response.Content -as [byte[]]
-        if ($null -eq $bytes) { $bytes = [Text.Encoding]::UTF8.GetBytes([string]$response.Content) }
-        if ($bytes.Length -gt $MaxBytes) {
-            return [pscustomobject]@{ Success = $false; Csv = ''; Error = (T 'news.sheetTooBig' $MaxBytes) }
-        }
-        # Sheets serves UTF-8; decoding explicitly keeps Arabic intact whatever
-        # the response headers claim.
-        $csv = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
-        return [pscustomobject]@{ Success = $true; Csv = $csv; Error = '' }
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.MaxAutomaticRedirections = 5
+        $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::All
+        $client = [System.Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds([math]::Max(1, $TimeoutSeconds))
+        $client.MaxResponseContentBufferSize = $MaxBytes
+        $download = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseContentRead)
+        return @{ Client = $client; Task = $download; Error = '' }
     }
     catch {
-        return [pscustomobject]@{ Success = $false; Csv = ''; Error = $_.Exception.Message }
+        if ($client) { $client.Dispose() }
+        return @{ Error = $_.Exception.GetBaseException().GetType().Name }
     }
+}
+
+function Receive-NewsSheetCsvDownload {
+    param([Parameter(Mandatory)][hashtable]$Transfer)
+    $response = $null
+    try {
+        $response = $Transfer.Task.GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { return @{ Success = $false; Csv = ''; Error = "HTTP $([int]$response.StatusCode)" } }
+        $contentType = $response.Content.Headers.ContentType
+        if ($contentType -and $contentType.MediaType -notin 'text/csv', 'text/plain', 'application/csv', 'application/octet-stream', 'application/vnd.ms-excel') {
+            return @{ Success = $false; Csv = ''; Error = 'Unexpected CSV response type.' }
+        }
+        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        $utf8 = [Text.UTF8Encoding]::new($false, $true)
+        return @{ Success = $true; Csv = $utf8.GetString($bytes).TrimStart([char]0xFEFF); Error = '' }
+    }
+    catch { return @{ Success = $false; Csv = ''; Error = $_.Exception.GetBaseException().GetType().Name } }
+    finally {
+        if ($response) { $response.Dispose() }
+        $Transfer.Client.Dispose()
+    }
+}
+
+function Get-NewsSheetCsvText {
+    param([AllowEmptyString()][string]$Url = '', [int]$TimeoutSeconds = 30, [int]$MaxBytes = 1048576)
+    $transfer = Start-NewsSheetCsvDownload -Url $Url -TimeoutSeconds $TimeoutSeconds -MaxBytes $MaxBytes
+    if ($transfer.Error) { return @{ Success = $false; Csv = ''; Error = $transfer.Error } }
+    return Receive-NewsSheetCsvDownload -Transfer $transfer
 }
 
 function Get-NewsSheetChangeSummary {
@@ -826,7 +854,7 @@ function Get-NewsSheetChangeSummary {
     $currentSet = [Collections.Generic.HashSet[string]]::new([string[]]$current, [StringComparer]::Ordinal)
     $added = @($current | Where-Object { -not $previousSet.Contains($_) }).Count
     $removed = @($previous | Where-Object { -not $currentSet.Contains($_) }).Count
-    $changed = ($previous -join [char]0x001F) -cne ($current -join [char]0x001F)
+    $changed = -not [string]::Equals(($previous -join [char]0x001F), ($current -join [char]0x001F), [StringComparison]::Ordinal)
     return [pscustomobject]@{ Added = $added; Removed = $removed; Changed = $changed; Total = $current.Count }
 }
 
@@ -890,9 +918,9 @@ function Get-NewsSheetNoticeAudience {
 }
 
 function Send-NewsSheetNotice {
-    param([Parameter(Mandatory)][string]$Text, [AllowEmptyString()][string]$Cause = '')
+    param([Parameter(Mandatory)][string]$Text, [AllowEmptyString()][string]$Cause = '', [switch]$Deferred)
     foreach ($chat in @(Get-NewsSheetNoticeAudience)) {
-        Send-TelegramMessage -ChatId ([long]$chat) -Text $Text -Cause $Cause
+        Send-TelegramMessage -ChatId ([long]$chat) -Text $Text -Cause $Cause -Deferred:$Deferred
     }
 }
 
@@ -1931,7 +1959,7 @@ function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb -ParseMode 'HTML'
 }
 
-function Get-NewsTickerBackupToken {
+function Get-NewsTickerReviewToken {
     param([string]$Value)
     return [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData(
             $script:NewsTickerBackupReviewKey, [Text.Encoding]::UTF8.GetBytes($Value)))
@@ -1956,15 +1984,15 @@ function Get-NewsTickerBackupReview {
     return @{
         Path = $path; ExpectedHash = $current.Hash; Limits = $limits
         Preview = @{
-            review = Get-NewsTickerBackupToken $reviewed
+            review = Get-NewsTickerReviewToken $reviewed
             items = @($saved.Items); currentItems = @($current.Items); currentReadable = $current.Success; identical = $identical
             savedAt = ([datetimeoffset]$File.LastWriteTimeUtc).ToUnixTimeMilliseconds(); cancelsSchedule = [bool]$scheduled
         }
     }
 }
 
-function Invoke-NewsTickerReviewedRestore {
-    param([Parameter(Mandatory)][hashtable]$Plan, [long]$Actor)
+function Invoke-NewsTickerReviewedPublish {
+    param([Parameter(Mandatory)][hashtable]$Plan, [long]$Actor, $SheetSummary)
     $previousDraft = Get-NewsTickerDraft
     if ($Plan.Preview.cancelsSchedule) {
         $draft = Copy-NewsTickerDraft -Draft $previousDraft
@@ -1981,9 +2009,17 @@ function Invoke-NewsTickerReviewedRestore {
         $result = Publish-NewsTickerFile -Path $Plan.Path -Items $Plan.Preview.items -ExpectedHash $Plan.ExpectedHash @limits `
             -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1)
     }
-    catch { Write-BridgeLog 'Ticker backup restore could not complete.' 'WARN' }
+    catch { Write-BridgeLog 'Reviewed ticker publication could not complete.' 'WARN' }
     if ($result -and $result.Success) {
-        Add-AuditEntry (T 'cb.tickerRestoreAudit' $(Format-UserAuditActor -UserId $Actor))
+        if ($SheetSummary) {
+            try {
+                Add-AuditEntry (T 'news.publishedFromSheetAudit' $(Format-UserAuditActor -UserId $Actor) $SheetSummary.Total)
+                Write-NewsPublishRecord -UserId $Actor -ItemCount $SheetSummary.Total -Source sheet
+                Send-NewsSheetNotice -Text (Get-NewsSheetNoticeText -Summary $SheetSummary -Trigger manual -UserId $Actor) -Deferred
+            }
+            catch { Write-BridgeLog 'The ticker was published from the sheet; recording its notice failed.' 'WARN' }
+        }
+        else { Add-AuditEntry (T 'cb.tickerRestoreAudit' $(Format-UserAuditActor -UserId $Actor)) }
         return ''
     }
     if ($result -and $result.Conflict) { $errorCode = 'ticker_backup_stale' }
@@ -2081,7 +2117,7 @@ function Get-NewsTickerBackupsKeyboard {
     $window = Get-BridgePageWindow -ItemCount $files.Count -Page $Page -PageSize 8
     if ($files.Count -gt 0) {
         for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
-            $token = (Get-NewsTickerBackupToken "file:$($files[$i].FullName)").Substring(0, 20)
+            $token = (Get-NewsTickerReviewToken "file:$($files[$i].FullName)").Substring(0, 20)
             $rows += , @((New-Button "$($i + 1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "news:restore:${i}:$token"))
         }
     }

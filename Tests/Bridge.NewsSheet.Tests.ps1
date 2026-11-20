@@ -9,6 +9,11 @@
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
 Describe 'Google Sheets CSV parsing' {
+    It 'refuses a Google sign-in or proxy document in place of CSV' {
+        @(ConvertFrom-NewsSheetCsv -Csv "`u{FEFF} `n<!doctype html><html><body>Sign in</body></html>") | Should -BeNullOrEmpty
+        @(ConvertFrom-NewsSheetCsv -Csv '<?xml version="1.0"?><error>Unavailable</error>') | Should -BeNullOrEmpty
+    }
+
     It 'takes one item per row from the first column' {
         $items = @(ConvertFrom-NewsSheetCsv -Csv "خبر أول`r`nخبر ثانٍ`r`nخبر ثالث")
         $items.Count | Should -Be 3

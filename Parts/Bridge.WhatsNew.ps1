@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.97.0'; Items = @('Use Change design in the web bulletin editor to switch the columns of an existing bulletin. Your saved rows and attachments remain available when you return to the previous design.') },
                 @{ Version = '8.96.0'; Items = @('Administrators can choose Rehearsal when reviewing an urgent story if the station has an isolated test layer.') },
                 @{ Version = '8.95.0'; Items = @('Use the play button beside an urgent story to review a single show, choose its duration, and hide the story you put on air.') },
                 @{ Version = '8.94.0'; Items = @('Use the clock beside an urgent row in the web editor to choose its duration, repeats and display mode, or return to the board defaults.') },
@@ -337,6 +338,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.97.0'; Items = @('استخدم «تغيير التصميم» في محرر الموجز على الويب لتبديل أعمدة موجز موجود. تبقى الصفوف والمرفقات المحفوظة متاحة عند الرجوع إلى التصميم السابق.') },
                 @{ Version = '8.96.0'; Items = @('يستطيع المشرف اختيار «البروفة» عند مراجعة عرض العاجل في الويب إذا أُعدّت طبقة تجربة معزولة.') },
                 @{ Version = '8.95.0'; Items = @('اضغط زر التشغيل بجوار العاجل لمراجعة عرضه منفردًا، واختيار مدته، وإخفائه بعد عرضه.') },
                 @{ Version = '8.94.0'; Items = @('اضغط رمز الساعة بجوار العاجل في الويب لتحديد مدة عرضه وعدد تكراراته ونمطه أو الرجوع إلى إعدادات الجدول.') },

@@ -256,25 +256,62 @@ function Show-MojazDesignScreen {
     Send-TelegramMessage -ChatId $ChatId -ParseMode HTML -ReplyMarkup (Get-MojazDesignKeyboard -Page $Page) -Text (T 'mjd.screen')
 }
 
-function Set-MojazBulletinDesign {
+function Get-MojazBulletinDesignChange {
     <# Binds a bulletin to a design, refusing while it is on air: changing the
        scene under a running bulletin would leave the rows being written into
        variables the new design has never heard of. #>
+    param([Parameter(Mandatory)][string]$BulletinId, [Parameter(Mandatory)][AllowEmptyString()][string]$TemplateKey, [long]$UserId)
+    if ([string](Get-JsonProp $script:MojazPlayback 'BulletinId') -eq $BulletinId) {
+        return [pscustomobject]@{ Success = $false; ErrorCode = 'on_air'; Error = (T 'mjd.notWhileOnAir') }
+    }
+    $designs = @(Get-MojazUsableDesigns)
+    $design = @($designs | Where-Object { $_.Key -eq $TemplateKey } | Select-Object -First 1)
+    if ($design.Count -eq 0) {
+        return [pscustomobject]@{ Success = $false; ErrorCode = 'design_missing'; Error = (T 'mjd.designGone') }
+    }
+    $savedBulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId
+    $rows = @(Get-JsonProp $savedBulletin 'Rows')
+    $fieldKinds = @{}
+    $savedKinds = Get-JsonProp $savedBulletin 'DesignFieldKinds'
+    if ($savedKinds -is [System.Collections.IDictionary]) {
+        foreach ($name in $savedKinds.Keys) { $fieldKinds[$name] = [string]$savedKinds[$name] }
+    }
+    elseif ($savedKinds) {
+        foreach ($property in $savedKinds.PSObject.Properties) {
+            $fieldKinds[$property.Name] = [string]$property.Value
+        }
+    }
+    # A value can survive several designs with no matching column. Remember its
+    # kind so a later text field cannot display an attachment path as text.
+    foreach ($field in Get-MojazRowFieldPrompts -TemplateKey (Get-MojazBulletinDesignKey -Bulletin $savedBulletin)) {
+        if (-not $fieldKinds.ContainsKey($field.Name)) { $fieldKinds[$field.Name] = $field.Kind }
+    }
+    $fieldKinds[$script:MojazImageVariable] = 'media'
+    foreach ($field in $design[0].Fields) {
+        if (-not $field.Consumed -or $fieldKinds[$field.Name] -eq $field.Kind) { continue }
+        $previousKind = $fieldKinds[$field.Name]
+        if (-not $previousKind) {
+            # Older bulletins may already have dormant fields whose kind was
+            # never saved. Only an unambiguous catalogue can identify them.
+            $otherKind = $designs.Fields | Where-Object { $_.Consumed -and $_.Name -eq $field.Name -and $_.Kind -ne $field.Kind } | Select-Object -First 1
+            if (-not $otherKind) { continue }
+        }
+        if ($rows | Where-Object { Get-MojazRowFieldValue -Row $_ -FieldName $field.Name } | Select-Object -First 1) {
+            return [pscustomobject]@{ Success = $false; ErrorCode = 'design_collision'; Error = (T 'mjd.fieldKindCollision') }
+        }
+        $fieldKinds.Remove($field.Name)
+    }
+    return Set-MojazBulletinTemplate -Library $script:MojazLibrary -BulletinId $BulletinId -TemplateKey $design[0].Key -DesignFieldKinds $fieldKinds -UserId $UserId
+}
+
+function Set-MojazBulletinDesign {
     param([Parameter(Mandatory)][string]$BulletinId, [Parameter(Mandatory)][string]$TemplateKey,
         [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if ($script:MojazPlayback -and [string]$script:MojazPlayback.BulletinId -eq $BulletinId) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjd.notWhileOnAir') | Out-Null
+    $result = Get-MojazBulletinDesignChange -BulletinId $BulletinId -TemplateKey $TemplateKey -UserId $UserId
+    if ($result.ErrorCode -in 'on_air', 'design_missing', 'design_collision') {
+        Send-TelegramMessage -ChatId $ChatId -Text $result.Error | Out-Null
         return $false
-    }
-    $design = @(Get-MojazUsableDesigns | Where-Object { $_.Key -eq $TemplateKey } | Select-Object -First 1)
-    if ($design.Count -eq 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjd.designGone') | Out-Null
-        return $false
-    }
-    $result = Update-MojazBulletinIn -Library $script:MojazLibrary -BulletinId $BulletinId -UserId $UserId -Change {
-        param($bulletin)
-        $bulletin | Add-Member -NotePropertyName TemplateKey -NotePropertyValue $TemplateKey -Force
     }
     Invoke-MojazEdit -Result $result -ChatId $ChatId | Out-Null
     return [bool]$result.Success

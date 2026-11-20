@@ -1119,6 +1119,12 @@ function Invoke-WebBulletinEdit {
         switch ($action) {
             'copy' { $result = Copy-MojazBulletin @editArgs -Name $name }
             'rename' { $result = Rename-MojazBulletin @editArgs -Name $name }
+            'design' {
+                if (-not (Get-Setting 'MojazMultiDesign')) { return @{ ok = $false; error = 'bulletin_invalid' } }
+                $result = Get-MojazBulletinDesignChange -BulletinId $id -TemplateKey ([string](Get-JsonProp $Arguments 'design')) -UserId $actor
+                if ($result.ErrorCode -eq 'on_air') { return @{ ok = $false; error = 'bulletin_on_air' } }
+                if ($result.ErrorCode -eq 'design_collision') { return @{ ok = $false; error = 'bulletin_design_collision' } }
+            }
             'timing' {
                 if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) {
                     return @{ ok = $false; error = 'bulletin_invalid' }

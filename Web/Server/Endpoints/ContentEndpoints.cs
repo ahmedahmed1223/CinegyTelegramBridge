@@ -205,7 +205,7 @@ public static class ContentEndpoints
         "not_found" or "content_disabled" => ApiErrors.Of(404, reply.Error),
         "bulletin_invalid" or "bulletin_paste_invalid" => ApiErrors.Of(400, reply.Error),
         "bulletin_refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
-        "bulletin_stale" => ApiErrors.Of(409, reply.Error),
+        "bulletin_stale" or "bulletin_on_air" or "bulletin_design_collision" => ApiErrors.Of(409, reply.Error),
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()
     };

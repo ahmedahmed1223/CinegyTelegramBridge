@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.97.0
+
+Web editors can change the design of an existing bulletin when multiple designs are enabled. The table adopts the selected design's columns while the shared library retains the saved rows and attachments. A stale edit or an on-air bulletin cannot be switched. Telegram uses the same library update.
+
 ## Version 8.96.0
 
 Administrators can rehearse an urgent story from its web review when full template management and a dedicated test layer are configured. The rehearsal uses the story's template fields, requires a fresh review and an empty test layer, and avoids programme playback and the shared postbox. The bridge binds auto-hide to the confirmed test scene and reports an unconfirmed timer.

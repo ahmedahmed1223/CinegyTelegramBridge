@@ -1351,8 +1351,17 @@ Describe 'Web channel: the pipe' {
         $scene = Join-Path $TestDrive 'bulletin.cintitle'
         '<Scene><Var Name="location.Text" Type="String" /><Var Name="title.Text" Type="String" /><Var Name="mojaz_img" Type="String" /><Plate File="${mojaz_img}" /><Title Text="${location.Text}" /><Title Text="${title.Text}" /></Scene>' |
             Set-Content -LiteralPath $scene
+        $alternate = Join-Path $TestDrive 'alternate.cintitle'
+        '<Scene><Var Name="title.Text" Type="String" /><Title Text="${title.Text}" /></Scene>' | Set-Content -LiteralPath $alternate
+        $collision = Join-Path $TestDrive 'collision.cintitle'
+        '<Scene><Var Name="mojaz_img" Type="String" /><Title Text="${mojaz_img}" /></Scene>' | Set-Content -LiteralPath $collision
+        $mediaCollision = Join-Path $TestDrive 'media-collision.cintitle'
+        '<Scene><Var Name="location.Text" Type="String" /><Plate File="${location.Text}" /></Scene>' | Set-Content -LiteralPath $mediaCollision
         @{
             Mojaz = @{ path = $scene; layer = 4 }
+            HeadlineBulletin = @{ path = $alternate; layer = 6; bulletin = $true }
+            ConflictingBulletin = @{ path = $collision; layer = 6; bulletin = $true }
+            ConflictingMedia = @{ path = $mediaCollision; layer = 6; bulletin = $true }
             StudioBulletin = @{
                 path = $scene; layer = 5; description = 'موجز الاستوديو'; bulletin = $true
                 fields = @(@{ name = 'title.Text'; label = 'العنوان' }, @{ name = 'location.Text'; label = 'الموقع' })
@@ -1411,6 +1420,10 @@ Describe 'Web channel: the pipe' {
             (Invoke-MojazEdit -Result $botTitle -ChatId 4321 -Quiet) | Should -BeTrue
             $again = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
             $again.data.rows[0].values.'title.Text' | Should -Be 'عنوان من البوت'
+            $edit.revision = $again.data.revision
+            $edit.values['title.Text'] = 'عنوان من البوت'
+            $edit.values['location.Text'] = 'الميدان'
+            $again = & $requestBulletin $edit
 
             $add.revision = $again.data.revision
             $add.values['title.Text'] = 'خبر ثانٍ'
@@ -1427,12 +1440,37 @@ Describe 'Web channel: the pipe' {
             $copy.data.id | Should -Not -Be $id
             $copy.data.rows[1].skipped | Should -BeTrue
 
+            $change = @{ actor = 4321; action = 'design'; id = $id; revision = $skipped.data.revision; design = 'HeadlineBulletin' }
+            $oldPlayback = $script:MojazPlayback
+            try {
+                $script:MojazPlayback = @{ BulletinId = $id }
+                (& $requestBulletin $change).error | Should -Be 'bulletin_on_air'
+            }
+            finally { $script:MojazPlayback = $oldPlayback }
+            $changed = & $requestBulletin $change
+            $changed.ok | Should -BeTrue
+            $changed.data.design | Should -Be 'HeadlineBulletin'
+            @($changed.data.fields).Name | Should -Be @('title.Text')
+            $changed.data.rows[1].id | Should -Be $rowId
+            (& $requestBulletin $change).error | Should -Be 'bulletin_stale'
+            Import-MojazLibrary
+            $change.revision = $changed.data.revision
+            $change.design = 'ConflictingBulletin'
+            (& $requestBulletin $change).error | Should -Be 'bulletin_design_collision'
+            $change.design = 'ConflictingMedia'
+            (& $requestBulletin $change).error | Should -Be 'bulletin_design_collision'
+            $change.design = 'StudioBulletin'
+            $restoredDesign = & $requestBulletin $change
+            $restoredDesign.data.rows[1].media | Should -Contain 'mojaz_img'
+            $restoredDesign.data.rows[1].values.'title.Text' | Should -Be 'عنوان من البوت'
+            $restoredDesign.data.rows[1].values.'location.Text' | Should -Be 'الميدان'
+
             Mock Write-BridgeValidatedJson { $false }
             $move.action = 'remove'
-            $move.revision = $skipped.data.revision
+            $move.revision = $restoredDesign.data.revision
             (& $requestBulletin $move).error | Should -Be 'bulletin_save_failed'
             $stillSaved = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
-            $stillSaved.data.revision | Should -Be $skipped.data.revision
+            $stillSaved.data.revision | Should -Be $restoredDesign.data.revision
             $stillSaved.data.rows[1].id | Should -Be $rowId
 
             Move-Item -LiteralPath $scene -Destination (Join-Path $TestDrive 'retired-bulletin.cintitle')

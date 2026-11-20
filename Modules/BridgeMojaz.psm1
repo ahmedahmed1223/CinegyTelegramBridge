@@ -294,6 +294,18 @@ function Update-MojazBulletinIn {
     return (New-MojazResult $true $copy)
 }
 
+function Set-MojazBulletinTemplate {
+    param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
+        [Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][hashtable]$DesignFieldKinds, [long]$UserId)
+    $replacementDesignKey = $TemplateKey
+    $retainedDesignKinds = [pscustomobject]$DesignFieldKinds
+    return Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -UserId $UserId -Change {
+        param($editableBulletin)
+        $editableBulletin | Add-Member -NotePropertyName TemplateKey -NotePropertyValue $replacementDesignKey -Force
+        $editableBulletin | Add-Member -NotePropertyName DesignFieldKinds -NotePropertyValue $retainedDesignKinds -Force
+    }
+}
+
 function Get-MojazRowImageMode {
     <# A row written before the modes existed says only whether it has a path,
        and that is exactly what the two original modes meant. #>
@@ -748,4 +760,4 @@ Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBul
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
     Add-MojazBulletinRow, Add-MojazBulletinRows, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip, ConvertFrom-MojazPasteText,
-    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues
+    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Set-MojazBulletinTemplate, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues

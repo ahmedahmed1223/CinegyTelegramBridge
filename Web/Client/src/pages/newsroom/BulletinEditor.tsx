@@ -28,6 +28,17 @@ async function applyEdit(request: EditRequest) {
   return data
 }
 
+function useBulletinDesigns(enabled: boolean) {
+  return useQuery({
+    queryKey: ['bulletin-designs'], enabled, retry: false,
+    queryFn: async ({ signal }) => {
+      const { data, error, response } = await api.GET('/api/content/bulletins/designs', { signal })
+      if (!data) throw new Error(messageFor(errorCode(error, response)))
+      return data.designs.map((item) => ({ value: item.key, label: item.label }))
+    },
+  })
+}
+
 export function BulletinNameForm({ mode, current, onCancel, onSave }: {
   mode: NameAction
   current?: Bulletin
@@ -36,16 +47,7 @@ export function BulletinNameForm({ mode, current, onCancel, onSave }: {
 }) {
   const [name, setName] = useState(mode === 'rename' ? current?.name ?? '' : '')
   const [design, setDesign] = useState<string | null>(null)
-  const designs = useQuery({
-    queryKey: ['bulletin-designs'],
-    enabled: mode === 'create',
-    retry: false,
-    queryFn: async ({ signal }) => {
-      const { data, error, response } = await api.GET('/api/content/bulletins/designs', { signal })
-      if (!data) throw new Error(messageFor(errorCode(error, response)))
-      return data.designs.map((item) => ({ value: item.key, label: item.label }))
-    },
-  })
+  const designs = useBulletinDesigns(mode === 'create')
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: onSave })
   return (
     <Paper withBorder p="md" radius="lg">
@@ -88,6 +90,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [nameMode, setNameMode] = useState<Exclude<NameAction, 'create'> | null>(null)
   const [pasting, setPasting] = useState(false)
   const [editingTiming, setEditingTiming] = useState(false)
+  const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
   const query = useQuery({
@@ -100,6 +103,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
       return data
     },
   })
+  const designs = useBulletinDesigns(!!query.data)
   function acceptSaved(value: Bulletin) {
     queryClient.setQueryData(bulletinKey(value.id, value.page), value)
     if (value.id === id) {
@@ -110,14 +114,16 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     setNameMode(null)
     setPasting(false)
     setEditingTiming(false)
+    setDesignChange(null)
     onSaved(value)
   }
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode || pasting || editingTiming
+  const editing = !!rowEdit || !!nameMode || !!designChange || pasting || editingTiming
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
+  const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
 
   function startRow(row: Row | null, revision: number) {
     edit.reset()
@@ -186,6 +192,10 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <Text size="sm" c="dimmed">{number.format(bulletin.total)} صف · النسخة {number.format(bulletin.revision)} · <bdi>{bulletin.design}</bdi></Text>
             </div>
             <Group gap="xs">
+              {availableDesigns.length > 0 && <Button variant="default" disabled={busy || editing || bulletin.onAir}
+                onClick={() => { edit.reset(); setSavedNote(''); setDesignChange({ key: null, revision: bulletin.revision }) }}>
+                تغيير التصميم
+              </Button>}
               {bulletin.timing && <Button variant="default" leftSection={<IconClock size={16} />} disabled={busy || editing}
                 onClick={() => { edit.reset(); setSavedNote(''); setEditingTiming(true) }}>التوقيت</Button>}
               <Button variant="default" leftSection={<IconEdit size={16} />} onClick={() => setNameMode('rename')} disabled={busy || editing}>إعادة تسمية</Button>
@@ -193,6 +203,24 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
+          {designChange && <Paper withBorder p="md" radius="lg">
+            <form onSubmit={(event) => {
+              event.preventDefault()
+              if (!designChange.key || busy) return
+              edit.mutate({ action: 'design', id, revision: designChange.revision, page: bulletin.page, design: designChange.key })
+            }}>
+              <Stack gap="sm">
+                <Text size="sm">يغيّر التصميم أعمدة الجدول. تُحفظ قيم الحقول عند الرجوع إلى التصميم السابق.</Text>
+                <Group align="flex-end" gap="sm">
+                  <Select<string> label="التصميم الجديد" data={availableDesigns} value={designChange.key} disabled={busy}
+                    onChange={(key) => setDesignChange({ ...designChange, key })} autoFocus />
+                  <Button type="submit" loading={edit.isPending} disabled={!designChange.key || busy}>حفظ التصميم</Button>
+                  <Button variant="subtle" disabled={busy} onClick={() => { setDesignChange(null); edit.reset() }}>إلغاء</Button>
+                </Group>
+                {edit.error && <Alert color="red" role="alert">{edit.error.message}</Alert>}
+              </Stack>
+            </form>
+          </Paper>}
           {editingTiming && bulletin.timing && (
             <BulletinTimingForm timing={bulletin.timing} busy={edit.isPending} error={edit.error?.message ?? ''}
               onCancel={() => { setEditingTiming(false); edit.reset() }}
@@ -217,7 +245,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           }} />}
           {bulletin.onAir && <Text size="sm" c="dimmed">تُستخدم النسخة المحفوظة عند بدء التشغيل التالي.</Text>}
           {savedNote && <Text size="sm" role="status">{savedNote}</Text>}
-          {edit.error && !editingTiming && <Alert color="red" role="alert">{edit.error.message}</Alert>}
+          {edit.error && !editingTiming && !designChange && <Alert color="red" role="alert">{edit.error.message}</Alert>}
           {!fields.length && <Alert color="gray">تعذّر قراءة حقول التصميم من الجسر.</Alert>}
           {!bulletin.total && !rowEdit && !pasting && <Text c="dimmed">لا توجد صفوف في الموجز. أضف صفًا أو الصق عدة صفوف.</Text>}
           {(bulletin.total > 0 || rowEdit) && (

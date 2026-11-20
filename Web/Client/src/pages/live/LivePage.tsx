@@ -11,6 +11,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { formatClock, formatDateTime } from '../../lib/time'
 import classes from './LivePage.module.css'
+import { CapturePanel } from './CapturePanel'
 import { RelayPanel } from './RelayPanel'
 
 type Feed = Schemas['FeedStatus']
@@ -212,45 +213,48 @@ export function LivePage({ active, watching, onWatchingChange }: {
     <Stack gap="xl" className={active ? classes.page : classes.floatingPage}>
       {active && <PageHeader title="البث المباشر" description="مشاهدة خرج القناة ومراقبة الإشارة." />}
       <div className={active ? classes.workspace : undefined}>
-        <Paper radius="lg" className={classes.monitor} data-floating-video={active ? undefined : nativePip ? 'native' : 'inline'}>
-          <Group gap="xs" justify="space-between" className={classes.monitorHeader}>
-            <Group gap="xs"><IconDeviceTv size={20} aria-hidden /><Title order={2}>مشاهدة الخرج</Title></Group>
-            {!active && <Button component={Link} to="/live" size="compact-xs" variant="subtle">فتح صفحة البث</Button>}
-          </Group>
-          {watching && url ? <LiveVideo url={url} key={url} floating={!active} nativePip={nativePip} onPipChange={setNativePip} onStop={() => {
-            restoreWatchFocus.current = true
-            setNativePip(false)
-            onWatchingChange(false)
-            if (!active) document.getElementById('bridge-main')?.focus({ preventScroll: true })
-          }} /> : (
-            <div className={classes.screen}>
-              {player.isPending ? <Skeleton className={classes.screenLoading} aria-label="جارٍ تحميل إعداد المشاهدة" /> : (
-                <Stack align="center" gap="sm" className={classes.idle}>
-                  <div className={classes.idleIcon}><IconAntenna size={35} stroke={1.4} aria-hidden /></div>
-                  {player.error ? (
-                    <>
-                      <Text size="sm" role="alert">{player.error.message}</Text>
-                      <Button size="sm" variant="light" onClick={() => void player.refetch()} leftSection={<IconRefresh size={16} />}>إعادة المحاولة</Button>
-                    </>
-                  ) : url ? (
-                    <Button size="md" onClick={() => onWatchingChange(true)} leftSection={<IconPlayerPlay size={19} />}
-                      ref={(button) => {
-                        if (button && restoreWatchFocus.current) {
-                          restoreWatchFocus.current = false
-                          button.focus({ preventScroll: true })
-                        }
-                      }}>مشاهدة البث</Button>
-                  ) : (
-                    <>
-                      <Text fw={600}>رابط المشاهدة غير مضبوط</Text>
-                      <Text size="sm">أضف رابط خرج مخصصًا للمشاهدة في إعداد <bdi className="cgb-mono">LivePlaybackUrl</bdi>.</Text>
-                    </>
-                  )}
-                </Stack>
-              )}
-            </div>
-          )}
-        </Paper>
+        <Stack gap="md" className={classes.monitorColumn}>
+          <Paper radius="lg" className={classes.monitor} data-floating-video={active ? undefined : nativePip ? 'native' : 'inline'}>
+            <Group gap="xs" justify="space-between" className={classes.monitorHeader}>
+              <Group gap="xs"><IconDeviceTv size={20} aria-hidden /><Title order={2}>مشاهدة الخرج</Title></Group>
+              {!active && <Button component={Link} to="/live" size="compact-xs" variant="subtle">فتح صفحة البث</Button>}
+            </Group>
+            {watching && url ? <LiveVideo url={url} key={url} floating={!active} nativePip={nativePip} onPipChange={setNativePip} onStop={() => {
+              restoreWatchFocus.current = true
+              setNativePip(false)
+              onWatchingChange(false)
+              if (!active) document.getElementById('bridge-main')?.focus({ preventScroll: true })
+            }} /> : (
+              <div className={classes.screen}>
+                {player.isPending ? <Skeleton className={classes.screenLoading} aria-label="جارٍ تحميل إعداد المشاهدة" /> : (
+                  <Stack align="center" gap="sm" className={classes.idle}>
+                    <div className={classes.idleIcon}><IconAntenna size={35} stroke={1.4} aria-hidden /></div>
+                    {player.error ? (
+                      <>
+                        <Text size="sm" role="alert">{player.error.message}</Text>
+                        <Button size="sm" variant="light" onClick={() => void player.refetch()} leftSection={<IconRefresh size={16} />}>إعادة المحاولة</Button>
+                      </>
+                    ) : url ? (
+                      <Button size="md" onClick={() => onWatchingChange(true)} leftSection={<IconPlayerPlay size={19} />}
+                        ref={(button) => {
+                          if (button && restoreWatchFocus.current) {
+                            restoreWatchFocus.current = false
+                            button.focus({ preventScroll: true })
+                          }
+                        }}>مشاهدة البث</Button>
+                    ) : (
+                      <>
+                        <Text fw={600}>رابط المشاهدة غير مضبوط</Text>
+                        <Text size="sm">أضف رابط خرج مخصصًا للمشاهدة في إعداد <bdi className="cgb-mono">LivePlaybackUrl</bdi>.</Text>
+                      </>
+                    )}
+                  </Stack>
+                )}
+              </div>
+            )}
+          </Paper>
+          <CapturePanel hidden={!active} />
+        </Stack>
         {active && <Stack gap="md">
           <SignalDetails feed={feed} fresh={fresh} />
           {admin && <RelayPanel />}

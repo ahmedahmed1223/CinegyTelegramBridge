@@ -58,6 +58,45 @@ public sealed class SignInTests : IDisposable
         Assert.Contains(_app.Bridge.Calls, call => call.Op == "relay.control" && call.Args.Contains("\"actor\":22") && call.Args.Contains("\"action\":\"start\""));
     }
 
+    [Fact]
+    public async Task Capture_bytes_are_private_seekable_and_never_expose_a_local_path()
+    {
+        var viewer = await _app.SignedInAsync("desk", WebApp.Operator);
+        var administrator = await _app.SignedInAsync("studio", WebApp.Admin);
+        var anonymous = await _app.BrowserAsync();
+        var path = Path.Combine(Path.GetTempPath(), $"snapshot-web-{_app.Bridge.CaptureId}.mp4");
+        var route = $"/api/live/captures/{_app.Bridge.CaptureId}/file";
+        await File.WriteAllBytesAsync(path, [1, 2, 3, 4]);
+        try
+        {
+            _app.Bridge.CapturePath = path;
+            using var denied = await anonymous.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            using var foreign = await administrator.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+            viewer.Client.DefaultRequestHeaders.Remove("X-XSRF-TOKEN");
+            using var missingToken = await viewer.PostAsync("/api/live/captures", new CaptureCreateRequest("clip"));
+            Assert.Equal(HttpStatusCode.BadRequest, missingToken.StatusCode);
+            await viewer.RefreshSessionAsync();
+            using var created = await viewer.PostAsync("/api/live/captures", new { kind = "clip", actor = WebApp.Admin });
+            created.EnsureSuccessStatusCode();
+            var capture = await created.Content.ReadFromJsonAsync<OutputCapture>();
+            Assert.Equal(_app.Bridge.CaptureId, capture!.Id);
+            Assert.DoesNotContain("path", await created.Content.ReadAsStringAsync());
+            using var range = new HttpRequestMessage(HttpMethod.Get, route);
+            range.Headers.Range = new(1, 2);
+            using var clip = await viewer.Client.SendAsync(range);
+            Assert.Equal(HttpStatusCode.PartialContent, clip.StatusCode);
+            Assert.Equal("video/mp4", clip.Content.Headers.ContentType!.MediaType);
+            Assert.True(clip.Headers.CacheControl!.NoStore);
+            Assert.Equal(new byte[] { 2, 3 }, await clip.Content.ReadAsByteArrayAsync());
+            _app.Bridge.CapturePath = path + ".other";
+            using var wrongFile = await viewer.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.NotFound, wrongFile.StatusCode);
+        }
+        finally { File.Delete(path); }
+    }
+
     [Theory]
     [InlineData("http://media.example.test/output/main.m3u8")]
     [InlineData("https://name:secret@media.example.test/output.m3u8")]

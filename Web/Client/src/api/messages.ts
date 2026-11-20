@@ -1,6 +1,15 @@
 // What each server error code means to the person in front of the screen.
 // Codes come from the server (ErrorResponse.error) and the bridge.
 const messages: Record<string, string> = {
+  capture_disabled: 'الالتقاط معطّل في إعدادات الجسر.',
+  capture_busy: 'هناك التقاط قيد التنفيذ. أعد المحاولة بعد انتهائه.',
+  capture_capacity: 'امتلأت مساحة الالتقاط المؤقتة. حاول بعد بضع دقائق.',
+  capture_actor_capacity: 'لديك أربعة ملفات التقاط مؤقتة. حاول بعد انتهاء صلاحية أحدها.',
+  capture_no_source: 'مصدر الالتقاط غير مضبوط في الجسر.',
+  capture_no_encoder: 'لم يعثر الجسر على FFmpeg.',
+  capture_bad_input: 'تعذّر فتح مصدر الالتقاط. راجع إعداداته في الجسر.',
+  capture_start_failed: 'تعذّر بدء الالتقاط. راجع سجل الجسر.',
+  capture_invalid: 'نوع الالتقاط غير صالح.',
   relay_stale: 'تغيّرت حالة الترحيل أثناء التأكيد. راجع الحالة ثم أعد الطلب.',
   relay_unavailable: 'هذا الإجراء غير متاح في حالة الترحيل الحالية.',
   relay_start_failed: 'تعذّر تشغيل الترحيل. تحقّق من إعدادات المصدر ووجهة Telegram وFFmpeg على جهاز الجسر.',

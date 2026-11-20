@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.85.0'; Items = @('Capture a still or record a short clip from Live Broadcast on the web. Review the source and download the file from the same page.') },
                 @{ Version = '8.84.0'; Items = @('Keep watching output while editing in Newsroom with picture-in-picture or the in-app floating player. Administrators can start and stop the Telegram relay from the web broadcast page.') },
                 @{ Version = '8.83.0'; Items = @('Open Live Broadcast to watch the configured output and check the signal and recent outages.', 'Paste bulletin rows into Newsroom and review which cells and rows will be saved. Set row, entrance and last-row timing on the built-in design.') },
                 @{ Version = '8.82.0'; Items = @('Open or create a bulletin in Newsroom. Edit the text columns, reorder stories, and exclude a row from playback. Refresh the bulletin if another operator saved a newer version.') },
@@ -325,6 +326,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.85.0'; Items = @('التقط صورة من الخرج أو سجّل مقطعًا قصيرًا في صفحة البث المباشر على الويب. راجع المصدر ونزّل الملف من الصفحة نفسها.') },
                 @{ Version = '8.84.0'; Items = @('تابع مشاهدة الخرج أثناء تحرير الأخبار في وضع صورة داخل صورة أو في المشغّل العائم داخل الموقع. يستطيع المشرف بدء ترحيل البث إلى Telegram وإيقافه من صفحة البث.') },
                 @{ Version = '8.83.0'; Items = @('افتح البث المباشر من قائمة الويب لمشاهدة الخرج المهيّأ ومتابعة الإشارة وآخر الانقطاعات.', 'الصق صفوف الموجز في غرفة الأخبار وراجع الأعمدة قبل إضافتها. اضبط مدة الصف والدخول والصف الأخير في التصميم الافتراضي.') },
                 @{ Version = '8.82.0'; Items = @('افتح الموجز أو أنشئه في غرفة الأخبار. عدّل الأعمدة النصية ورتّب الأخبار أو استبعد صفًا من التشغيل. حدّث الموجز إذا سبقك مشغّل آخر إلى حفظ نسخة أحدث.') },

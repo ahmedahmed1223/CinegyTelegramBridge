@@ -61,6 +61,76 @@ public static class StatusEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        var captures = app.MapGroup("/api/live/captures").WithTags("Status").RequireAuthorization();
+        captures.MapPost("", (CaptureCreateRequest request, IBridgeChannel bridge, HttpContext http) =>
+                request.Kind is "photo" or "clip"
+                    ? ReadCapture(bridge, http, "start", null, request.Kind)
+                    : Task.FromResult(ApiErrors.Of(400, "capture_invalid")))
+            .Produces<OutputCapture>()
+            .Produces<ErrorResponse>(400)
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(429)
+            .Produces<ErrorResponse>(503);
+        captures.MapGet("/{id}", (string id, IBridgeChannel bridge, HttpContext http) =>
+                ReadCapture(bridge, http, "status", id, null))
+            .Produces<OutputCapture>()
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(503);
+        captures.MapGet("/{id}/file", ReadCaptureFile)
+            .Produces(200, contentType: "image/jpeg", additionalContentTypes: ["video/mp4"])
+            .Produces(206, contentType: "video/mp4")
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(503);
+    }
+
+    private static IResult CaptureError(string? code) => code switch
+    {
+        "forbidden" => ApiErrors.Of(403, code),
+        "not_found" => ApiErrors.Of(404, code),
+        "capture_invalid" => ApiErrors.Of(400, code),
+        "capture_disabled" or "capture_busy" => ApiErrors.Of(409, code),
+        "capture_capacity" or "capture_actor_capacity" => ApiErrors.Of(429, code),
+        "capture_no_source" or "capture_no_encoder" or "capture_bad_input" or "capture_start_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, code),
+        _ => ApiErrors.BridgeUnavailable()
+    };
+
+    private static async Task<IResult> ReadCapture(IBridgeChannel bridge, HttpContext http, string action, string? id, string? kind)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (id is not null && !Guid.TryParseExact(id, "N", out _)) return CaptureError("not_found");
+        var reply = await bridge.SendAsync("media.capture", new { actor = http.User.UserId(), action, id, kind }, http.RequestAborted);
+        return reply.Ok ? TypedResults.Ok(reply.Data.Deserialize<OutputCapture>(JsonDefaults.Options)) : CaptureError(reply.Error);
+    }
+
+    private sealed record CaptureFile(string Kind, string Path);
+
+    private static async Task<IResult> ReadCaptureFile(string id, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (!Guid.TryParseExact(id, "N", out var captureId)) return CaptureError("not_found");
+        var reply = await bridge.SendAsync("media.capture", new { actor = http.User.UserId(), action = "file", id }, http.RequestAborted);
+        if (!reply.Ok) return CaptureError(reply.Error);
+        var file = reply.Data.Deserialize<CaptureFile>(JsonDefaults.Options);
+        var extension = file?.Kind switch { "photo" => "jpg", "clip" => "mp4", _ => null };
+        if (file is null || extension is null || string.IsNullOrEmpty(file.Path) || !Path.IsPathFullyQualified(file.Path) ||
+            !string.Equals(Path.GetFileName(file.Path), $"snapshot-web-{captureId:N}.{extension}", StringComparison.OrdinalIgnoreCase))
+            return CaptureError("not_found");
+        try
+        {
+            if ((File.GetAttributes(file.Path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                return CaptureError("not_found");
+            var stream = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (stream.Length is > 0 and <= 32 * 1024 * 1024)
+                return Results.File(stream, extension == "mp4" ? "video/mp4" : "image/jpeg", enableRangeProcessing: true);
+            stream.Dispose();
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return CaptureError("not_found");
     }
 
     private static async Task<IResult> ControlRelay(RelayRequest request, IBridgeChannel bridge, HttpContext http)

@@ -281,6 +281,67 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'captures and downloads only the requesting operators media through the shared job queue' {
+        $previousCaptureLog = $script:logDir
+        $previousCaptureJobs = $script:SnapshotJobs
+        $previousCaptureFallback = $script:OutputMonitorFallbackActive
+        $script:OutputMonitorFallbackActive = $false
+        $script:logDir = (New-Item -ItemType Directory -Path (Join-Path $TestDrive 'web-captures')).FullName
+        $script:SnapshotJobs = [System.Collections.Generic.List[hashtable]]::new()
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableSnapshot' }
+        Mock Get-ActiveLiveStreamConfig { @{ SourceType = 'hls'; SourceUrl = 'https://example.invalid/private-input' } }
+        Mock Get-BackupLiveStreamConfig { @{ SourceType = 'hls'; SourceUrl = 'https://example.invalid/backup-input' } }
+        Mock Set-OutputMonitorFallbackActive { throw 'A browser capture cannot change the station output source' }
+        Mock Get-FfmpegPath { 'ffmpeg' }
+        Mock Start-BridgeMediaProcess {
+            Set-Content -LiteralPath $Arguments[-1] -Value 'sample output'
+            $exitCode = if ($Arguments -contains 'https://example.invalid/backup-input') { 0 } else { 1 }
+            [pscustomobject]@{ HasExited = $true; ExitCode = $exitCode }
+        }
+        Mock Send-TelegramVideo { }
+        Mock Send-TelegramMessage { }
+        try {
+            $captureRequest = {
+                param($arguments)
+                $line = @{ op = 'media.capture'; args = $arguments } | ConvertTo-Json -Compress
+                return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json)
+            }
+            (& $captureRequest @{ actor = 99; action = 'start'; kind = 'clip' }).error | Should -Be 'forbidden'
+            $job = & $captureRequest @{ actor = 4321; action = 'start'; kind = 'clip' }
+            $job.data.state | Should -Be 'pending'
+            $job.data.id | Should -Match '^[a-f0-9]{32}$'
+            (& $captureRequest @{ actor = 4322; action = 'start'; kind = 'clip' }).error | Should -Be 'capture_busy'
+            (& $captureRequest @{ actor = 4322; action = 'status'; id = $job.data.id }).error | Should -Be 'not_found'
+            $script:SnapshotJobs.Count | Should -Be 1
+            Update-SnapshotJobs
+            $script:SnapshotJobs.Count | Should -Be 1
+            $script:SnapshotJobs[0].SourceIsPrimary | Should -BeFalse
+            $script:OutputMonitorFallbackActive | Should -BeFalse
+            Update-SnapshotJobs
+            $ready = & $captureRequest @{ actor = 4321; action = 'status'; id = $job.data.id }
+            $ready.data.state | Should -Be 'ready'
+            $ready.data.kind | Should -Be 'clip'
+            $ready.data.source | Should -Be 'backup'
+            $ready | ConvertTo-Json -Depth 5 | Should -Not -Match 'private-input|web-captures'
+            $file = & $captureRequest @{ actor = 4321; action = 'file'; id = $job.data.id }
+            $file.data.path | Should -Be (Join-Path $script:logDir "snapshot-web-$($job.data.id).mp4")
+            Test-Path -LiteralPath $file.data.path | Should -BeTrue
+            (& $captureRequest @{ actor = 4322; action = 'file'; id = $job.data.id }).error | Should -Be 'not_found'
+            $script:WebCaptureRecords[$job.data.id].ExpiresAt = (Get-Date).AddSeconds(-1)
+            (& $captureRequest @{ actor = 4321; action = 'status'; id = $job.data.id }).error | Should -Be 'not_found'
+            Test-Path -LiteralPath $file.data.path | Should -BeFalse
+            Should -Invoke Set-OutputMonitorFallbackActive -Times 0 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+            Should -Invoke Send-TelegramVideo -Times 0 -Exactly
+        }
+        finally {
+            $script:OutputMonitorFallbackActive = $previousCaptureFallback
+            $script:SnapshotJobs = $previousCaptureJobs
+            $script:logDir = $previousCaptureLog
+        }
+    }
+
     It 'carries a queued request to the bridge thread and its answer back' {
         $parsed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}') | ConvertFrom-Json
         $parsed.ok | Should -BeTrue

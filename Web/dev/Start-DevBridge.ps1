@@ -13,12 +13,14 @@
     this script.
 
         pwsh -File Web/dev/Start-DevBridge.ps1
+        # Supply -CaptureFixtureDirectory with output.jpg and output.mp4 to exercise capture.
         dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev --BridgeRoot (Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge')
         pnpm --dir Web/Client dev
 #>
 param(
     [string]$PipeName = 'CinegyTelegramBridge.Web.Dev',
-    [long]$OwnerId = 1001
+    [long]$OwnerId = 1001,
+    [string]$CaptureFixtureDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +38,7 @@ Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
 Set-JsonProp $config.Settings 'EnableLiveRelay' $true
+Set-JsonProp $config.Settings 'EnableSnapshot' ([bool]$CaptureFixtureDirectory)
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
 Set-JsonProp $config.Settings 'MojazMultiDesign' $true
 @{
@@ -103,6 +106,15 @@ function Save-Config { }
 function Save-UserAliases { $true }
 function Update-WebBotUsername { $script:WebBotUsername = 'cinegy_dev_bot' }
 function Send-TelegramMessage { }
+function Get-FfmpegPath { return 'fixture' }
+function Start-BridgeMediaProcess {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The fixture accepts the production signature without starting an external process.')]
+    param($FilePath, $Arguments, $WorkingDirectory, $StandardErrorPath)
+    $destination = $Arguments[-1]
+    $fixture = Join-Path $CaptureFixtureDirectory ('output' + [IO.Path]::GetExtension($destination))
+    Copy-Item -LiteralPath $fixture -Destination $destination -ErrorAction Stop
+    return @{ HasExited = $true; ExitCode = 0 }
+}
 function Save-NewsSheetItems { @{ Success = $false; Attempted = $false; Error = '' } }
 function Start-RelayProcess {
     $script:RelayState.Process = @{ Id = 1; StartTime = (Get-Date); HasExited = $false }
@@ -189,6 +201,7 @@ try {
         }
         Publish-WebChannelState
         Invoke-WebChannelRequests
+        Update-SnapshotJobs
         if ($script:RelayState.ShouldRun) { Update-RelayWatchdog }
         Update-UrgentBoardRun
         Wait-WebChannelSignal -Milliseconds 250

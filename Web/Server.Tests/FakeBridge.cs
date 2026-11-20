@@ -16,6 +16,8 @@ public sealed class FakeBridge : IBridgeChannel
     public ConcurrentQueue<(string Op, string Args)> Calls { get; } = new();
     public bool Online { get; set; } = true;
     public string LastLoginCode { get; private set; } = "";
+    public string? CapturePath { get; set; }
+    public string CaptureId { get; } = Guid.NewGuid().ToString("N");
 
     public Task<BridgeReply> SendAsync(string op, object? args = null, CancellationToken cancellationToken = default)
     {
@@ -38,6 +40,7 @@ public sealed class FakeBridge : IBridgeChannel
             "air.hide" => Reply("null"),
             "air.exit" => Reply("null"),
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
+            "media.capture" => Capture(a),
             "relay.control" => a.GetProperty("action").GetString() == "status"
                 ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
                 : Reply("""{"state":"starting","revision":"next","enabled":true,"configured":true,"canStart":false,"canStop":true,"outcome":"starting"}"""),
@@ -46,6 +49,15 @@ public sealed class FakeBridge : IBridgeChannel
                 : new BridgeReply(false, default, "urgent_stale"),
             _ => new BridgeReply(false, default, "unknown_op"),
         });
+    }
+
+    private BridgeReply Capture(JsonElement args)
+    {
+        if (args.GetProperty("actor").GetInt64() != WebApp.Operator)
+            return new BridgeReply(false, default, "not_found");
+        return args.GetProperty("action").GetString() == "file"
+            ? Reply(JsonSerializer.Serialize(new { kind = "clip", path = CapturePath }))
+            : Reply(JsonSerializer.Serialize(new { id = CaptureId, kind = "clip", state = "ready", source = "primary", completedAt = 1, expiresAt = 2 }));
     }
 
     public void Approve(string code, long userId)

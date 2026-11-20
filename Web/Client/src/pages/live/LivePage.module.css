@@ -17,6 +17,23 @@
   overflow: hidden;
 }
 
+.monitorColumn {
+  min-inline-size: 0;
+}
+
+.capturePanel {
+  padding: var(--mantine-spacing-md);
+}
+
+.capturePreview {
+  display: block;
+  inline-size: 100%;
+  max-block-size: 22rem;
+  object-fit: contain;
+  border-radius: var(--mantine-radius-md);
+  background: #081522;
+}
+
 .monitorHeader,
 .monitorFooter {
   padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);

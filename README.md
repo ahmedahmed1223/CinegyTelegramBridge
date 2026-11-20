@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.85.0
+
+Signed-in operators can capture a still or record a short clip from Live Broadcast, see the capture time and source, and download the result for five minutes. The bridge shares capture settings, the job queue, the still-photo cooldown, and standby input with the Telegram controls. Clip playback in the browser depends on the source codecs. The original recording is available for download.
+
 ## Version 8.84.0
 
 Watch the configured output in Picture-in-Picture while editing Newsroom data. The web app keeps playback running on navigation and provides an in-app floating player when a browser window is unavailable. Administrators can also review the Telegram relay state and confirm start or stop from Live Broadcast. Both interfaces use the same relay process and watchdog. Stopping browser playback affects only the current viewer.

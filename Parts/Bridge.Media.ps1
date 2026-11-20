@@ -150,7 +150,7 @@ function Get-FfmpegInputArguments {
     return Get-BridgeFfmpegInputArguments -SourceType $SourceType -SourceUrl $SourceUrl -Realtime:$Realtime
 }
 
-function Start-SnapshotJob {
+function Request-OutputCapture {
     <# Kicks off a one-frame ffmpeg grab and returns immediately. The result is
        delivered later by Update-SnapshotJobs. Within SnapshotCooldownSeconds
        the previous frame is re-sent instead of spawning ffmpeg again - but
@@ -166,57 +166,44 @@ function Start-SnapshotJob {
         # 'clip' asks ffmpeg for seconds instead of one frame and sends the
         # result as video. Everything else about the job is the same, which
         # is why it is a parameter rather than a second function.
-        [ValidateSet('photo', 'clip')][string]$Kind = 'photo'
+        [ValidateSet('photo', 'clip')][string]$Kind = 'photo',
+        [hashtable]$WebCapture,
+        [switch]$UseBackupSource
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
 
-    if (-not (Get-Setting 'EnableSnapshot')) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.snapshotsDisabled') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
+    if (-not (Get-Setting 'EnableSnapshot')) { return @{ Code = 'capture_disabled' } }
 
     # A clip is never re-sent from the cache. A still from ten seconds ago
     # still answers "what is on screen"; a clip from ten seconds ago
     # answers a question about a moment that has passed.
-    $cooldown = if ($Kind -eq 'clip') { 0 } else { Get-SettingInt 'SnapshotCooldownSeconds' 0 }
-    if ($cooldown -gt 0 -and $script:LastSnapshotFile -and (Test-Path $script:LastSnapshotFile) -and
+    $cooldown = if ($Kind -eq 'clip' -or $UseBackupSource) { 0 } else { Get-SettingInt 'SnapshotCooldownSeconds' 0 }
+    if ($cooldown -gt 0 -and $script:LastSnapshotFile -and (Test-Path -LiteralPath $script:LastSnapshotFile) -and
         ((Get-Date) - $script:LastSnapshotAt).TotalSeconds -lt $cooldown) {
-        Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
-            -Caption (T 'media.lastSnapshot' $([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)) `
-            -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
+        return @{ Code = 'cached' }
     }
 
-    if ($script:SnapshotJobs.Count -gt 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.snapshotBusy') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
+    if ($script:SnapshotJobs.Count -gt 0) { return @{ Code = 'capture_busy' } }
 
-    $ls = Get-ActiveLiveStreamConfig
-    $sourceUrl = [string]$ls.SourceUrl
-    if ([string]::IsNullOrWhiteSpace($sourceUrl)) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.sourceUrlUnset') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
+    $ls = if ($UseBackupSource) { Get-BackupLiveStreamConfig } else { Get-ActiveLiveStreamConfig }
+    $sourceUrl = [string](Get-JsonProp $ls 'SourceUrl')
+    if ([string]::IsNullOrWhiteSpace($sourceUrl)) { return @{ Code = 'capture_no_source' } }
     $ffmpeg = Get-FfmpegPath
-    if (-not $ffmpeg) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.ffmpegMissing') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
+    if (-not $ffmpeg) { return @{ Code = 'capture_no_encoder' } }
     try {
         $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string]$ls.SourceType) -SourceUrl $sourceUrl)
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
+        return @{ Code = 'capture_bad_input'; Detail = Protect-SensitiveText $_.Exception.Message }
     }
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $extension = if ($Kind -eq 'clip') { 'mp4' } else { 'jpg' }
-    $outPath = Join-Path $logDir "snapshot-$stamp.$extension"
+    $stem = if ($WebCapture) { "snapshot-web-work-$stamp" } else { "snapshot-$stamp" }
+    $outPath = Join-Path $script:logDir "$stem.$extension"
     # Per-job stderr file: a shared one would race between concurrent captures
     # and report the wrong error back to the wrong operator.
-    $errLog = Join-Path $logDir "snapshot-$stamp.err"
+    $errLog = Join-Path $script:logDir "$stem.err"
     $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
     $clipSeconds = [math]::Max(1, (Get-SettingInt 'ClipSeconds' 1))
 
@@ -232,23 +219,77 @@ function Start-SnapshotJob {
     # A clip cannot finish before its own length, so the deadline is that
     # plus the time the source takes to open - which on an HLS feed here
     # was measured at five to ten seconds.
-    if ($Kind -eq 'clip') { $timeout = $clipSeconds + ($timeout * 3) }
+    if ($Kind -eq 'clip') {
+        $timeout = $clipSeconds + ($timeout * 3)
+        if ($WebCapture) { $processArguments = @($processArguments[0..($processArguments.Count - 2)]) + @('-fs', '33554432', $outPath) }
+    }
     try {
         $proc = Start-BridgeMediaProcess -FilePath $ffmpeg -Arguments $processArguments `
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
     }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.ffmpegFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
+        return @{ Code = 'capture_start_failed'; Detail = Protect-SensitiveText $_.Exception.Message }
     }
 
     $script:SnapshotJobs.Add(@{
             Proc = $proc; ChatId = $ChatId; UserId = $UserId; OutPath = $outPath; ErrLog = $errLog
             Kind = $Kind
-            SourceIsPrimary = (-not $script:OutputMonitorFallbackActive)
+            SourceIsPrimary = (-not ($script:OutputMonitorFallbackActive -or $UseBackupSource))
+            WebCapture = $WebCapture
             Deadline = (Get-Date).AddSeconds($timeout)
         })
-    Send-TelegramMessage -ChatId $ChatId -Text $(if ($Kind -eq 'clip') { (T 'media.recording' $clipSeconds) } else { (T 'media.grabbing') })
+    return @{ Code = 'pending'; Duration = $clipSeconds }
+}
+
+function Start-SnapshotJob {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [ValidateSet('photo', 'clip')][string]$Kind = 'photo')
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $outcome = Request-OutputCapture -ChatId $ChatId -UserId $UserId -Kind $Kind
+    switch ($outcome.Code) {
+        'cached' {
+            Send-TelegramPhoto -ChatId $ChatId -FilePath $script:LastSnapshotFile `
+                -Caption (T 'media.lastSnapshot' $([int]((Get-Date) - $script:LastSnapshotAt).TotalSeconds) $(Get-SnapshotSourceLabel -SourceIsPrimary $script:LastSnapshotSourceIsPrimary)) `
+                -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            return
+        }
+        'pending' {
+            Send-TelegramMessage -ChatId $ChatId -Text $(if ($Kind -eq 'clip') { T 'media.recording' $outcome.Duration } else { T 'media.grabbing' })
+            return
+        }
+    }
+    $message = switch ($outcome.Code) {
+        'capture_disabled' { T 'media.snapshotsDisabled' }
+        'capture_busy' { T 'media.snapshotBusy' }
+        'capture_no_source' { T 'media.sourceUrlUnset' }
+        'capture_no_encoder' { T 'media.ffmpegMissing' }
+        'capture_bad_input' { "❌ $($outcome.Detail)" }
+        'capture_start_failed' { T 'media.ffmpegFailed' $outcome.Detail }
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+}
+
+function Get-WebCaptureFilePath {
+    param([Parameter(Mandatory)][hashtable]$Capture)
+    $extension = if ($Capture.Kind -eq 'clip') { 'mp4' } else { 'jpg' }
+    return (Join-Path $script:logDir "snapshot-web-$($Capture.Id).$extension")
+}
+
+function Complete-WebOutputCapture {
+    param([Parameter(Mandatory)][hashtable]$Capture, [string]$Path, [bool]$SourceIsPrimary)
+    $Capture.ExpiresAt = (Get-Date).AddMinutes(5)
+    $Capture.State = 'failed'
+    if (-not $Path) { return }
+    $target = Get-WebCaptureFilePath -Capture $Capture
+    try {
+        $file = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if ($file.Length -lt 1 -or $file.Length -gt 32MB) { return }
+        if ($Capture.Kind -eq 'clip') { Move-Item -LiteralPath $Path -Destination $target -ErrorAction Stop }
+        else { Copy-Item -LiteralPath $Path -Destination $target -ErrorAction Stop }
+        $Capture.CompletedAt = Get-Date
+        $Capture.Source = if ($SourceIsPrimary) { 'primary' } else { 'backup' }
+        $Capture.State = 'ready'
+    }
+    catch { Write-BridgeLog "Could not publish web capture $($Capture.Id)." 'WARN' }
 }
 
 function Update-SnapshotJobs {
@@ -258,6 +299,7 @@ function Update-SnapshotJobs {
     $done = @()
     $retryRequests = @()
     foreach ($job in $script:SnapshotJobs) {
+        $webCapture = Get-JsonProp $job 'WebCapture'
         $expired = (Get-Date) -gt $job.Deadline
         if (-not $job.Proc.HasExited -and -not $expired) { continue }
 
@@ -283,12 +325,14 @@ function Update-SnapshotJobs {
 
         if ($failed) {
             $backup = Get-BackupLiveStreamConfig
-            if ($job.SourceIsPrimary -and $backup -and (Set-OutputMonitorFallbackActive -Active $true)) {
-                # The operator asked for a picture, so do not make them wait for
-                # the hourly watchdog. Retry this same request from Cinegy's
-                # standby input after switching the active source.
-                $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId; Kind = [string]$job.Kind }
-                Send-TelegramMessage -ChatId $job.ChatId -Text (T 'media.tryingBackup')
+            if ($job.SourceIsPrimary -and $backup -and ($webCapture -or (Set-OutputMonitorFallbackActive -Active $true))) {
+                # A browser capture can retry its own input without moving the
+                # station relay when FFmpeg fails to write or remux the file.
+                $retryRequests += ,@{ ChatId = $job.ChatId; UserId = $job.UserId; Kind = [string]$job.Kind; WebCapture = $webCapture }
+                if (-not $webCapture) { Send-TelegramMessage -ChatId $job.ChatId -Text (T 'media.tryingBackup') }
+            }
+            elseif ($webCapture) {
+                Complete-WebOutputCapture -Capture $webCapture
             }
             else {
                 Send-TelegramMessage -ChatId $job.ChatId -Text $msg -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
@@ -298,9 +342,14 @@ function Update-SnapshotJobs {
             $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
             Write-BridgeLog "User $($job.UserId) recorded a clip from $sourceLabel"
             Add-AuditEntry (T 'media.clipAudit' $(Format-UserAuditActor -UserId ([long]$job.UserId)))
-            Send-TelegramVideo -ChatId $job.ChatId -FilePath $job.OutPath `
-                -Caption (T 'media.clipOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
-                -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            if ($webCapture) {
+                Complete-WebOutputCapture -Capture $webCapture -Path $job.OutPath -SourceIsPrimary ([bool]$job.SourceIsPrimary)
+            }
+            else {
+                Send-TelegramVideo -ChatId $job.ChatId -FilePath $job.OutPath `
+                    -Caption (T 'media.clipOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
+                    -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            }
             # Not kept: the cooldown cache is for stills, and a clip is
             # megabytes that answer a question already answered.
             Remove-Item $job.OutPath -Force -ErrorAction SilentlyContinue
@@ -317,9 +366,14 @@ function Update-SnapshotJobs {
             $sourceLabel = Get-SnapshotSourceLabel -SourceIsPrimary ([bool]$job.SourceIsPrimary)
             Write-BridgeLog "User $($job.UserId) captured a stream snapshot from $sourceLabel"
             Add-AuditEntry (T 'media.snapshotAudit' $(Format-UserAuditActor -UserId ([long]$job.UserId)))
-            Send-TelegramPhoto -ChatId $job.ChatId -FilePath $job.OutPath `
-                -Caption (T 'media.snapshotOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
-                -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            if ($webCapture) {
+                Complete-WebOutputCapture -Capture $webCapture -Path $job.OutPath -SourceIsPrimary ([bool]$job.SourceIsPrimary)
+            }
+            else {
+                Send-TelegramPhoto -ChatId $job.ChatId -FilePath $job.OutPath `
+                    -Caption (T 'media.snapshotOfAir' $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $sourceLabel) `
+                    -ReplyMarkup (Get-MainMenuKeyboard -ChatId $job.ChatId -UserId $job.UserId)
+            }
         }
         Remove-Item $job.ErrLog -Force -ErrorAction SilentlyContinue
         $done += $job
@@ -327,7 +381,11 @@ function Update-SnapshotJobs {
     foreach ($job in $done) { $script:SnapshotJobs.Remove($job) | Out-Null }
     foreach ($request in $retryRequests) {
         $kind = if ($request.Kind) { [string]$request.Kind } else { 'photo' }
-        Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId -Kind $kind
+        if ($request.WebCapture) {
+            $retry = Request-OutputCapture -ChatId $request.ChatId -UserId $request.UserId -Kind $kind -WebCapture $request.WebCapture -UseBackupSource
+            if ($retry.Code -ne 'pending') { Complete-WebOutputCapture -Capture $request.WebCapture }
+        }
+        else { Start-SnapshotJob -ChatId $request.ChatId -UserId $request.UserId -Kind $kind }
     }
 }
 
@@ -857,9 +915,13 @@ function Update-SnapshotCleanup {
     $retention = Get-SettingInt 'SnapshotRetentionMinutes' 1
     $cutoff = (Get-Date).AddMinutes(-$retention)
     $active = @($script:SnapshotJobs | ForEach-Object { $_.OutPath })
+    Remove-ExpiredWebCaptures
+    $active += @(foreach ($capture in $script:WebCaptureRecords.Values) {
+            if ($capture.State -eq 'ready') { Get-WebCaptureFilePath -Capture $capture }
+        })
     $removed = 0
     $dir = if ($script:logDir) { $script:logDir } else { $logDir }
-    foreach ($pattern in @('snapshot-*.jpg', 'snapshot-*.err', 'monitor-*.jpg', 'monitor-*.err')) {
+    foreach ($pattern in @('snapshot-*.jpg', 'snapshot-web-*.mp4', 'snapshot-*.err', 'monitor-*.jpg', 'monitor-*.err')) {
         foreach ($file in @(Get-ChildItem -Path $dir -Filter $pattern -File -ErrorAction SilentlyContinue)) {
             if ($active -contains $file.FullName) { continue }          # capture in flight
             if ($file.LastWriteTime -ge $cutoff) { continue }           # still fresh / cached

@@ -5,6 +5,8 @@ namespace CinegyBridge.Web.Endpoints;
 // change here that the client has not caught up with fails the gate.
 
 public sealed record ErrorResponse(string Error, string? Message = null);
+public sealed record CaptureCreateRequest(string Kind);
+public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values);
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);

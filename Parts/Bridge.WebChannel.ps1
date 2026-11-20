@@ -33,6 +33,7 @@ $script:WebLoginRequests = @{}
 $script:WebLoginLifetimeMinutes = 5
 $script:WebLoginMaxPending = 50
 $script:WebRelayReviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+$script:WebCaptureRecords = @{}
 $script:WebBotUsername = ''
 
 function Test-WebOnlyUserId {
@@ -331,8 +332,65 @@ function Invoke-WebChannelOperation {
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
+        'media.capture' { return Invoke-WebCapture -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
+}
+
+function Remove-ExpiredWebCaptures {
+    $now = Get-Date
+    foreach ($id in @($script:WebCaptureRecords.Keys)) {
+        $capture = $script:WebCaptureRecords[$id]
+        if ($capture.State -eq 'pending' -or $capture.ExpiresAt -gt $now) { continue }
+        Remove-Item -LiteralPath (Get-WebCaptureFilePath -Capture $capture) -Force -ErrorAction SilentlyContinue
+        $script:WebCaptureRecords.Remove($id)
+    }
+}
+
+function Invoke-WebCapture {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    Remove-ExpiredWebCaptures
+    $action = [string](Get-JsonProp $Arguments 'action')
+    switch ($action) {
+        'start' {
+            $kind = [string](Get-JsonProp $Arguments 'kind')
+            if ($kind -cnotin 'photo', 'clip') { return @{ ok = $false; error = 'capture_invalid' } }
+            $actorRecords = @($script:WebCaptureRecords.Values | Where-Object Actor -eq $actor)
+            if ($actorRecords.Count -ge 4) { return @{ ok = $false; error = 'capture_actor_capacity' } }
+            if ($script:WebCaptureRecords.Count -ge 12) { return @{ ok = $false; error = 'capture_capacity' } }
+            $capture = @{
+                Id = [guid]::NewGuid().ToString('N'); Actor = $actor; Kind = $kind
+                State = 'pending'; Source = ''; CompletedAt = $null; ExpiresAt = $null
+            }
+            $outcome = Request-OutputCapture -ChatId $actor -UserId $actor -Kind $kind -WebCapture $capture
+            if ($outcome.Code -eq 'cached') {
+                Complete-WebOutputCapture -Capture $capture -Path $script:LastSnapshotFile -SourceIsPrimary $script:LastSnapshotSourceIsPrimary
+                if ($capture.State -eq 'ready') { $capture.CompletedAt = $script:LastSnapshotAt }
+            }
+            elseif ($outcome.Code -ne 'pending') { return @{ ok = $false; error = $outcome.Code } }
+            $script:WebCaptureRecords[$capture.Id] = $capture
+        }
+        { $_ -in 'status', 'file' } {
+            $id = [string](Get-JsonProp $Arguments 'id')
+            $capture = $script:WebCaptureRecords[$id]
+            if (-not $capture -or $capture.Actor -ne $actor) { return @{ ok = $false; error = 'not_found' } }
+            if ($capture.State -eq 'ready' -and -not (Test-Path -LiteralPath (Get-WebCaptureFilePath -Capture $capture) -PathType Leaf)) {
+                return @{ ok = $false; error = 'not_found' }
+            }
+            if ($action -eq 'file') {
+                if ($capture.State -ne 'ready') { return @{ ok = $false; error = 'not_found' } }
+                return @{ ok = $true; data = @{ kind = $capture.Kind; path = Get-WebCaptureFilePath -Capture $capture } }
+            }
+        }
+        default { return @{ ok = $false; error = 'capture_invalid' } }
+    }
+    return @{ ok = $true; data = @{
+        id = $capture.Id; state = $capture.State; kind = $capture.Kind; source = $capture.Source
+        completedAt = ConvertTo-AirStatusWidgetEpoch $capture.CompletedAt
+        expiresAt = ConvertTo-AirStatusWidgetEpoch $capture.ExpiresAt
+    } }
 }
 
 function Get-WebRelayControlState {

@@ -1533,7 +1533,9 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    pausedPage?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -2288,6 +2290,7 @@ export interface components {
             canRemove: boolean;
             /** Format: int32 */
             maxItems: number;
+            paused: components["schemas"]["TickerPausedPage"];
         } | null;
         TickerDraftRequest: {
             action: string;
@@ -2302,6 +2305,16 @@ export interface components {
             text: string | null;
             /** @default null */
             review: string | null;
+            /**
+             * Format: int64
+             * @default null
+             */
+            publishAtMs: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            pausedPage: number | null;
         };
         TickerEditorState: {
             state: string;
@@ -2311,6 +2324,17 @@ export interface components {
             draft: components["schemas"]["TickerDraft"];
             conflict: components["schemas"]["TickerConflict"];
             sheetFailed: boolean;
+        };
+        TickerPausedPage: {
+            items: string[];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            /** Format: int32 */
+            total: number;
+            /** Format: int32 */
+            offset: number;
         };
         UrgentPlaybackRequest: {
             action: string;

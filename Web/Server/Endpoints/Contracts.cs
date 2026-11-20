@@ -32,8 +32,10 @@ public sealed record UrgentRunStatus(string Id, string State, int Step, int Step
 public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);
 public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps);
 public sealed record UrgentPlaybackResponse(UrgentRunStatus? Run, UrgentRunPreview? Preview);
-public sealed record TickerDraftRequest(string Action, string? Revision = null, int? Index = null, string? Text = null, string? Review = null);
-public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems);
+public sealed record TickerDraftRequest(string Action, string? Revision = null, int? Index = null, string? Text = null, string? Review = null,
+    long? PublishAtMs = null, int? PausedPage = null);
+public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, int Total, int Offset);
+public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused);
 public sealed record TickerConflict(string Review, string[] Items);
 public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed);
 

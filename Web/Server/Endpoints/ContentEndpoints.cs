@@ -38,7 +38,8 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
         var ticker = app.MapGroup("/api/content/ticker/draft").WithTags("Content").RequireAuthorization();
-        ticker.MapGet("", (IBridgeChannel bridge, HttpContext http) => TickerEditor(new("status"), bridge, http))
+        ticker.MapGet("", (int? pausedPage, IBridgeChannel bridge, HttpContext http) =>
+                TickerEditor(new("status", PausedPage: pausedPage), bridge, http))
             .Produces<TickerEditorState>()
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
@@ -163,7 +164,8 @@ public static class ContentEndpoints
     {
         var reply = await bridge.SendAsync("ticker.edit", new
         {
-            actor = http.User.UserId(), request.Action, request.Revision, request.Index, request.Text, request.Review
+            actor = http.User.UserId(), request.Action, request.Revision, request.Index, request.Text, request.Review,
+            request.PublishAtMs, request.PausedPage
         }, http.RequestAborted);
         if (reply.Ok)
         {
@@ -175,7 +177,7 @@ public static class ContentEndpoints
             "forbidden" => ApiErrors.Of(403, reply.Error),
             "content_disabled" => ApiErrors.Of(404, reply.Error),
             "ticker_stale" or "ticker_locked" or "ticker_conflict" => ApiErrors.Of(409, reply.Error),
-            "ticker_invalid" or "ticker_full" => ApiErrors.Of(400, reply.Error),
+            "ticker_invalid" or "ticker_full" or "ticker_schedule_invalid" => ApiErrors.Of(400, reply.Error),
             "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };

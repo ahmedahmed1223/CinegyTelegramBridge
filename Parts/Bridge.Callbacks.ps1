@@ -356,8 +356,9 @@ function Invoke-CallbackQuery {
             break
         }
         'news:pause:*' {
-            $pauseIndex = 0
-            if ([int]::TryParse((Get-CallbackArg $data 'news:pause:'), [ref]$pauseIndex) -and (Suspend-NewsTickerDraftItem -UserId $userId -Index $pauseIndex)) {
+            if ($data -cmatch '^news:pause:(\d{1,9}):([A-F0-9]{20})$' -and
+                (Test-NewsTickerConfirmation -UserId $userId -Token $Matches[2]) -and
+                (Suspend-NewsTickerDraftItem -UserId $userId -Index ([int]$Matches[1]))) {
                 Send-TelegramMessage -ChatId $chatId -Text (T 'news.paused.done') -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
             }
             else { Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId }
@@ -372,8 +373,10 @@ function Invoke-CallbackQuery {
         }
         'news:paused' { Show-NewsPausedScreen -ChatId $chatId -MessageId ([int](Get-JsonProp $msgObj 'message_id')); break }
         'news:unpause:*' {
-            $unpauseIndex = 0
-            if ([int]::TryParse((Get-CallbackArg $data 'news:unpause:'), [ref]$unpauseIndex)) { Resume-NewsPausedItem -UserId $userId -Index $unpauseIndex | Out-Null }
+            if ($data -cmatch '^news:unpause:(\d{1,9}):([A-F0-9]{20})$' -and
+                (Get-NewsPausedEntryToken -Index ([int]$Matches[1])) -ceq $Matches[2]) {
+                Resume-NewsPausedItem -UserId $userId -Index ([int]$Matches[1]) | Out-Null
+            }
             Show-NewsPausedScreen -ChatId $chatId -MessageId ([int](Get-JsonProp $msgObj 'message_id'))
             break
         }

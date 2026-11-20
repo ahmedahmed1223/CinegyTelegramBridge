@@ -1128,10 +1128,10 @@ function Import-NewsPaused {
     <# The shelf of paused headlines, read at start. An unreadable file is
        an empty shelf and a log line, never a bridge that will not start. #>
     $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
-    if (-not (Test-Path -LiteralPath $script:newsPausedFile)) { return }
+    if (-not (Test-Path -LiteralPath $script:newsPausedFile) -and -not (Test-Path -LiteralPath "$script:newsPausedFile.bak")) { return }
     try {
-        $raw = Get-Content -LiteralPath $script:newsPausedFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        foreach ($item in @(Get-JsonProp $raw 'Items')) {
+        $storedShelf = Read-ValidatedJsonState -Path $script:newsPausedFile
+        foreach ($item in @(Get-JsonProp (Get-JsonProp $storedShelf 'Data') 'Items')) {
             $text = [string]$item
             if (-not [string]::IsNullOrWhiteSpace($text) -and -not $script:NewsPaused.Contains($text)) { $script:NewsPaused.Add($text) }
         }
@@ -1140,11 +1140,12 @@ function Import-NewsPaused {
 }
 
 function Save-NewsPaused {
-    $payload = [pscustomobject]@{ SchemaVersion = 1; Items = @($script:NewsPaused) }
+    param([System.Collections.Generic.List[string]]$Items = $script:NewsPaused)
+    $payload = [pscustomobject]@{ SchemaVersion = 1; Items = @($Items) }
     # The writer never throws - it returns false - so the catch this once
     # had could not fire, and a full disk lost the shelf without a line.
     if (Write-BridgeValidatedJson -Path $script:newsPausedFile -Json ($payload | ConvertTo-Json -Depth 3)) { return $true }
-    Write-BridgeLog "Could not write news-paused.json; what is on screen will not survive a restart" 'WARN'
+    Write-BridgeLog "Could not write news-paused.json; the previous shelf is still saved" 'WARN'
     return $false
 }
 
@@ -1160,16 +1161,25 @@ function Suspend-NewsTickerDraftItem {
     param([long]$UserId, [int]$Index)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
-    $items = [System.Collections.Generic.List[string]]::new()
-    @($draft.Items) | ForEach-Object { $items.Add([string]$_) }
+    $items = [System.Collections.Generic.List[string]]::new([string[]]$draft.Items)
     $text = $items[$Index]
     $items.RemoveAt($Index)
-    $draft.Items = @($items)
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    if (-not $script:NewsPaused.Contains($text)) { $script:NewsPaused.Add($text) }
-    if (-not (Save-NewsTickerDraft)) { return $false }
-    Save-NewsPaused | Out-Null
-    return $true
+    if ($script:NewsPaused.Contains($text)) { return (Set-NewsTickerDraftItems -Draft $draft -Items @($items)) }
+    # Save the destination first. A failed second write can leave a duplicate,
+    # but can never remove the only saved copy of the headline.
+    $shelf = [System.Collections.Generic.List[string]]::new($script:NewsPaused)
+    $shelf.Add($text)
+    if (-not (Save-NewsPaused -Items $shelf)) { return $false }
+    $saved = Set-NewsTickerDraftItems -Draft $draft -Items @($items)
+    if ($saved -or -not (Save-NewsPaused -Items $script:NewsPaused)) { $script:NewsPaused = $shelf }
+    return $saved
+}
+
+function Get-NewsPausedEntryToken {
+    param([int]$Index)
+    if ($Index -lt 0 -or $Index -ge $script:NewsPaused.Count) { return '' }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($script:NewsPaused[$Index])
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).Substring(0, 20)
 }
 
 function Resume-NewsPausedItem {
@@ -1179,11 +1189,13 @@ function Resume-NewsPausedItem {
     param([long]$UserId, [int]$Index)
     if (-not (Get-NewsTickerDraft -UserId $UserId) -or $Index -lt 0 -or $Index -ge $script:NewsPaused.Count) { return $false }
     $text = $script:NewsPaused[$Index]
+    $inDraft = [Array]::IndexOf([string[]]@((Get-NewsTickerDraft -UserId $UserId).Items), $text) -ge 0
     $added = Add-NewsTickerDraftItems -UserId $UserId -Items @($text)
-    $inDraft = @((Get-NewsTickerDraft -UserId $UserId).Items) -contains $text
     if ($added -le 0 -and -not $inDraft) { return $false }
-    $script:NewsPaused.RemoveAt($Index)
-    Save-NewsPaused | Out-Null
+    $shelf = [System.Collections.Generic.List[string]]::new($script:NewsPaused)
+    $shelf.RemoveAt($Index)
+    if (-not (Save-NewsPaused -Items $shelf)) { return $false }
+    $script:NewsPaused = $shelf
     return $true
 }
 
@@ -1197,8 +1209,10 @@ function Set-NewsPublishAt {
     param([long]$UserId, [datetimeoffset]$At)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft) -or $At -le [datetimeoffset]::Now) { return $false }
-    $draft.PublishAt = $At.ToString('o')
-    if (-not (Save-NewsTickerDraft)) { $draft.Remove('PublishAt'); return $false }
+    $candidate = Copy-NewsTickerDraft -Draft $draft
+    $candidate.PublishAt = $At.ToString('o')
+    if (-not (Save-NewsTickerDraft -Draft $candidate)) { return $false }
+    $script:NewsTickerDraft = $candidate
     Add-AuditEntry (T 'news.later.audit' $($At.ToLocalTime().ToString('HH:mm')) $(Format-UserAuditActor -UserId $UserId))
     return $true
 }
@@ -1206,17 +1220,21 @@ function Set-NewsPublishAt {
 function Clear-NewsPublishAt {
     param([long]$UserId)
     $draft = Get-NewsTickerDraft -UserId $UserId
-    if (-not $draft -or -not $draft.ContainsKey('PublishAt')) { return $false }
-    $draft.Remove('PublishAt')
-    Save-NewsTickerDraft | Out-Null
+    if (-not $draft -or $null -eq (Get-NewsPublishAt -Draft $draft)) { return $false }
+    $candidate = Copy-NewsTickerDraft -Draft $draft
+    Remove-JsonProp $candidate 'PublishAt'
+    if (-not (Save-NewsTickerDraft -Draft $candidate)) { return $false }
+    $script:NewsTickerDraft = $candidate
     return $true
 }
 
 function Get-NewsPublishAt {
     <# The draft's publish time, or $null. #>
     param($Draft)
+    $stored = Get-JsonProp $Draft 'PublishAt'
+    if ($stored -is [datetime] -or $stored -is [datetimeoffset]) { return [datetimeoffset]$stored }
     $moment = [datetimeoffset]::MinValue
-    if ($Draft -and [datetimeoffset]::TryParse([string](Get-JsonProp $Draft 'PublishAt'), [ref]$moment)) { return $moment }
+    if ([datetimeoffset]::TryParse([string]$stored, [ref]$moment)) { return $moment }
     return $null
 }
 
@@ -1244,6 +1262,15 @@ function Update-NewsScheduledPublish {
         $notify = if ($chat -gt 0) { $chat } else { [long](Get-JsonProp $draft 'HandedOverChatId') }
         if ($notify -gt 0) { Send-TelegramMessage -ChatId $notify -Text (T 'news.later.openDraft') }
         Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label (T 'news.later.label') -ErrorText 'draft handed over' | Out-Null
+        return
+    }
+    $skipReason = if (-not (Get-Setting 'EnableNewsTickerManagement')) { 'ticker management disabled' }
+        elseif (-not (Test-Authorized -ChatId $chat -UserId $owner)) { 'draft owner no longer authorized' }
+        else { '' }
+    if ($skipReason) {
+        $draft.Remove('PublishAt')
+        Save-NewsTickerDraft | Out-Null
+        Write-BridgeExecutionRecord -Kind 'news' -Result 'failed' -Label (T 'news.later.label') -ErrorText $skipReason | Out-Null
         return
     }
     $result = Publish-NewsTickerDraft -UserId $owner -Source scheduled
@@ -1406,7 +1433,7 @@ function Show-NewsPausedScreen {
     if ($window.EndIndex -ge $window.StartIndex) {
         foreach ($i in $window.StartIndex..$window.EndIndex) {
             $lines.Add("$($i + 1). $(Get-NewsScreenLine -Text $script:NewsPaused[$i])")
-            $rows += , @( @{ text = (T 'news.paused.resume' ($i + 1)); callback_data = "news:unpause:$i" } )
+            $rows += , @( @{ text = (T 'news.paused.resume' ($i + 1)); callback_data = "news:unpause:${i}:$(Get-NewsPausedEntryToken -Index $i)" } )
         }
     }
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'news:pausedp')
@@ -1434,7 +1461,8 @@ function Show-NewsTickerItemScreen { param([long]$ChatId,[long]$UserId,[int]$Ind
     $rows=@(,@($up,$down))
     $rows+=,@((New-BridgeButton -Text (T 'news.edit') -CallbackData "news:edit:$Index"),
         (New-BridgeButton -Text (T 'common.delete') -CallbackData "news:delask:$Index" -Style 'danger'))
-    $rows+=,@((New-BridgeButton -Text (T 'news.pause') -CallbackData "news:pause:$Index"))
+    $revisionToken = (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20)
+    $rows+=,@((New-BridgeButton -Text (T 'news.pause') -CallbackData "news:pause:${Index}:$revisionToken"))
     $rows+=,@(@{text=(T 'news.backToOrder');callback_data='news:list'})
     $text=(T 'news.headlineOf' $($Index+1) ${count} $($draft.Items[$Index]))
     if($MessageId-gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup @{inline_keyboard=$rows})){return}
@@ -2054,9 +2082,8 @@ function Add-NewsTickerDraftItems {
     $room = [math]::Max(0, (Get-SettingInt 'NewsMaxItems' 1) - @($draft.Items).Count)
     $block = @(@($Items) | Where-Object { $existing.Add([string]$_) } | Select-Object -First $room)
     if ($block.Count -eq 0) { return 0 }
-    $draft.Items = if (Get-Setting 'NewNewsItemAtTop') { @($block) + @($draft.Items) } else { @($draft.Items) + @($block) }
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    if (-not (Save-NewsTickerDraft)) { return 0 }
+    $combined = if (Get-Setting 'NewNewsItemAtTop') { @($block) + @($draft.Items) } else { @($draft.Items) + @($block) }
+    if (-not (Set-NewsTickerDraftItems -Draft $draft -Items $combined)) { return 0 }
     return $block.Count
 }
 

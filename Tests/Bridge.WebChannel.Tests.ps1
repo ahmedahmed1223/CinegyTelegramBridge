@@ -595,6 +595,7 @@ Describe 'Web channel: the pipe' {
         Mock Get-Setting { $webTickerFile } -ParameterFilter { $Name -eq 'NewsFilePath' }
         Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsDeleteNews' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewNewsItemAtTop' }
         Mock Test-Authorized { $UserId -in @(4321, 4322) }
         Mock Test-Admin { $false }
         Mock Send-TelegramMessage {}
@@ -604,6 +605,8 @@ Describe 'Web channel: the pipe' {
         $previousDraft = $script:NewsTickerDraft
         $previousFile = $script:newsDraftFile
         $previousBackup = $script:newsBackupDirectory
+        $previousShelf = $script:NewsPaused
+        $previousShelfFile = $script:newsPausedFile
         $requestTicker = {
             param($arguments)
             $line = @{ op = 'ticker.edit'; args = $arguments } | ConvertTo-Json -Compress
@@ -613,6 +616,8 @@ Describe 'Web channel: the pipe' {
             $script:NewsTickerDraft = $null
             $script:newsDraftFile = Join-Path $TestDrive 'web-edit-draft.json'
             $script:newsBackupDirectory = Join-Path $TestDrive 'web-edit-backups'
+            $script:newsPausedFile = Join-Path $TestDrive 'web-paused.json'
+            $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
 
             $started = & $requestTicker @{ actor = 4321; action = 'start' }
             $started.ok | Should -BeTrue
@@ -631,7 +636,32 @@ Describe 'Web channel: the pipe' {
             $moved = & $requestTicker @{ actor = 4321; action = 'up'; revision = $mine.revision; index = 1 }
             $moved.data.draft.items | Should -Be @('حرره البوت', 'أول')
 
-            $released = & $requestTicker @{ actor = 4321; action = 'handover'; revision = $moved.data.draft.revision }
+            $paused = & $requestTicker @{ actor = 4321; action = 'pause'; revision = $moved.data.draft.revision; index = 1 }
+            $paused.data.draft.items | Should -Be @('حرره البوت')
+            $paused.data.draft.paused.items | Should -Be @('أول')
+            (Get-Content -LiteralPath $script:newsPausedFile -Raw | ConvertFrom-Json).Items | Should -Be @('أول')
+            $resume = @{ actor = 4321; action = 'resume'; revision = $paused.data.draft.revision; index = 0; text = 'خبر مختلف' }
+            (& $requestTicker $resume).error | Should -Be 'ticker_stale'
+            $resume.text = 'أول'
+            $restored = & $requestTicker $resume
+            $restored.data.draft.items | Should -Contain 'أول'
+            $restored.data.draft.paused.total | Should -Be 0
+            $reordered = $restored.data.draft
+            $schedule = @{ actor = 4321; action = 'schedule'; revision = $reordered.revision; publishAtMs = '2035-05-01T17:00:00' }
+            (& $requestTicker $schedule).error | Should -Be 'ticker_schedule_invalid'
+            $schedule.publishAtMs = [datetimeoffset]::UtcNow.AddHours(1).ToUnixTimeMilliseconds()
+            $scheduledFor = [datetimeoffset]::FromUnixTimeMilliseconds($schedule.publishAtMs)
+            $scheduled = & $requestTicker $schedule
+            $scheduled.ok | Should -BeTrue
+            (Get-NewsPublishAt -Draft (Get-NewsTickerDraft -UserId 4321)) | Should -Be $scheduledFor
+            (& $requestTicker @{ actor = 4322; action = 'unschedule'; revision = $scheduled.data.draft.revision }).error | Should -Be 'ticker_locked'
+            (& $requestTicker @{ actor = 4321; action = 'unschedule'; revision = $reordered.revision }).error | Should -Be 'ticker_stale'
+            $cancelled = & $requestTicker @{ actor = 4321; action = 'unschedule'; revision = $scheduled.data.draft.revision }
+            $cancelled.ok | Should -BeTrue
+            $cancelled.data.draft.scheduledAt | Should -BeNullOrEmpty
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('أول', 'ثاني')
+
+            $released = & $requestTicker @{ actor = 4321; action = 'handover'; revision = $cancelled.data.draft.revision }
             $released.data.state | Should -Be 'open'
             $taken = & $requestTicker @{ actor = 4322; action = 'start' }
             $taken.data.draft.items | Should -Be @('حرره البوت', 'أول')
@@ -658,6 +688,8 @@ Describe 'Web channel: the pipe' {
             $script:NewsTickerDraft = $previousDraft
             $script:newsDraftFile = $previousFile
             $script:newsBackupDirectory = $previousBackup
+            $script:NewsPaused = $previousShelf
+            $script:newsPausedFile = $previousShelfFile
         }
     }
 

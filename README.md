@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.86.0
+
+The selected editorial theme uses warm neutral surfaces and blue for selection and primary actions across the web app. New browsers open in light mode, and the account menu offers a matching dark mode. The interface retains IBM Plex Sans Arabic and its distinct on-air and alert colors.
+
+Web ticker editors can schedule, reschedule, or cancel publication of the shared draft. The bridge uses the same scheduled publication and conflict checks as the bot. Publication requires the draft owner to remain authorized. Editors can also move headlines to the shared paused list and restore them to a draft.
+
 ## Version 8.85.0
 
 Signed-in operators can capture a still or record a short clip from Live Broadcast, see the capture time and source, and download the result for five minutes. The bridge shares capture settings, the job queue, the still-photo cooldown, and standby input with the Telegram controls. Clip playback in the browser depends on the source codecs. The original recording is available for download.

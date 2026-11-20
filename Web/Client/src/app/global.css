@@ -7,35 +7,43 @@
 }
 
 body {
-  --cgb-canvas: light-dark(#eef3f7, #0a1423);
-  --cgb-panel: light-dark(#fff, #142238);
-  --cgb-sidebar: light-dark(#f8fbfd, #101d2f);
-  --cgb-line: light-dark(#d6e1eb, #2b3d55);
-  --cgb-tab-active: light-dark(#d8f0eb, #173f3f);
-  --cgb-tab-ink: light-dark(#075d54, #a7e8de);
+  --cgb-canvas: light-dark(#f7f5f0, #1b1d19);
+  --cgb-panel: light-dark(#fffefa, #272923);
+  --cgb-sidebar: light-dark(#eeebe3, #22241f);
+  --cgb-line: light-dark(#d7d2c6, #43463d);
+  --cgb-tab-active: light-dark(#d6e4fb, #273853);
+  --cgb-tab-ink: light-dark(#183568, #ccddfa);
+  --cgb-accent: light-dark(#214ea5, #9ab9ee);
+  --cgb-accent-ink: light-dark(#ffffff, #122748);
+  --mantine-color-text: light-dark(#202720, #edeee7);
+  --mantine-color-dimmed: light-dark(#565950, #bdc0b6);
+  --mantine-color-default: var(--cgb-panel);
+  --mantine-color-default-border: var(--cgb-line);
+  --mantine-color-default-hover: var(--cgb-sidebar);
   font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
   background: var(--cgb-canvas);
-}
-
-[data-mantine-color-scheme='light'] body {
-  --mantine-color-dimmed: #53647a;
-}
-
-[data-mantine-color-scheme='dark'] body {
-  --mantine-color-dimmed: #aebdd0;
+  color: var(--mantine-color-text);
+  caret-color: var(--cgb-accent);
 }
 
 ::selection {
-  background: light-dark(#b9e8df, #22554d);
-  color: light-dark(#12362f, #eefcf9);
+  background: var(--cgb-tab-active);
+  color: var(--cgb-tab-ink);
 }
 
-.mantine-Paper-root:where(:not(.mantine-Skeleton-root)) {
+:focus-visible {
+  outline-color: var(--cgb-accent);
+}
+
+.mantine-Paper-root:where(:not(.mantine-Skeleton-root)),
+.mantine-Card-root {
   --paper-bg: var(--cgb-panel);
+  background-color: var(--cgb-panel);
 }
 
-.mantine-Paper-root[data-with-border] {
+.mantine-Paper-root[data-with-border],
+.mantine-Card-root[data-with-border] {
   border-color: var(--cgb-line);
 }
 
@@ -46,7 +54,7 @@ body {
 
 .cgb-page-header {
   min-inline-size: 0;
-  padding-block-end: var(--mantine-spacing-lg);
+  padding-block-end: 1.25rem;
   border-block-end: 1px solid var(--cgb-line);
 }
 

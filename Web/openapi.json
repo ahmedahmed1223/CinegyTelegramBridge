@@ -1261,6 +1261,16 @@
         "tags": [
           "Content"
         ],
+        "parameters": [
+          {
+            "name": "pausedPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -2799,7 +2809,8 @@
           "items",
           "scheduledAt",
           "canRemove",
-          "maxItems"
+          "maxItems",
+          "paused"
         ],
         "type": "object",
         "properties": {
@@ -2823,6 +2834,9 @@
           "maxItems": {
             "type": "integer",
             "format": "int32"
+          },
+          "paused": {
+            "$ref": "#/components/schemas/TickerPausedPage"
           }
         },
         "nullable": true
@@ -2854,6 +2868,18 @@
           },
           "review": {
             "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "publishAtMs": {
+            "type": "integer",
+            "format": "int64",
+            "default": null,
+            "nullable": true
+          },
+          "pausedPage": {
+            "type": "integer",
+            "format": "int32",
             "default": null,
             "nullable": true
           }
@@ -2888,6 +2914,40 @@
           },
           "sheetFailed": {
             "type": "boolean"
+          }
+        }
+      },
+      "TickerPausedPage": {
+        "required": [
+          "items",
+          "page",
+          "pageCount",
+          "total",
+          "offset"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

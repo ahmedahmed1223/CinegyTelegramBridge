@@ -58,14 +58,14 @@
   block-size: 2.25rem;
   place-items: center;
   border-radius: var(--mantine-radius-md);
-  background: #073d36;
-  color: #c4f5ed;
+  background: var(--cgb-accent);
+  color: var(--cgb-accent-ink);
 }
 
 .link {
   border-radius: var(--mantine-radius-md);
   border: 1px solid transparent;
-  min-block-size: 3.375rem;
+  min-block-size: 3.0625rem;
   color: var(--mantine-color-text);
   padding-inline: 0.5rem;
 }
@@ -73,22 +73,19 @@
 .navIcon {
   display: grid;
   place-items: center;
-  inline-size: 2rem;
-  block-size: 2rem;
-  border-radius: var(--mantine-radius-sm);
-  background: light-dark(#eaf0f5, #1c2e46);
+  inline-size: 1.625rem;
+  block-size: 1.625rem;
   color: var(--mantine-color-dimmed);
 }
 
 .link[data-active] {
-  border-color: light-dark(#a1cfc6, #397669);
+  border-inline-start-color: var(--cgb-accent);
   background: var(--cgb-tab-active);
   color: var(--cgb-tab-ink);
   font-weight: 600;
 }
 
 .link[data-active] .navIcon {
-  background: light-dark(#c3e7df, #27534b);
   color: var(--cgb-tab-ink);
 }
 

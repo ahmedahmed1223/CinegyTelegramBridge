@@ -50,7 +50,7 @@ const router = createBrowserRouter([
 export function App() {
   return (
     <DirectionProvider initialDirection="rtl" detectDirection={false}>
-      <MantineProvider theme={theme} defaultColorScheme="auto">
+      <MantineProvider theme={theme} defaultColorScheme="light">
         <QueryClientProvider client={queryClient}>
           <ModalsProvider labels={{ confirm: 'تأكيد', cancel: 'إلغاء' }}>
             <Notifications position="bottom-left" />

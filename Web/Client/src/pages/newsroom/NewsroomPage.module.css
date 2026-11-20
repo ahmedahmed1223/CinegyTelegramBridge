@@ -3,10 +3,9 @@
 }
 
 .tabs {
-  max-inline-size: 34rem;
   border: 1px solid var(--cgb-line);
-  background: var(--cgb-sidebar);
-  border-radius: var(--mantine-radius-lg);
+  background: var(--cgb-canvas);
+  border-radius: var(--mantine-radius-md);
   padding: 0.25rem;
   gap: 0.25rem;
 }
@@ -65,7 +64,7 @@
 
 .urgentGrid thead,
 .editRow {
-  background: var(--mantine-color-default-hover);
+  background: var(--cgb-sidebar);
 }
 
 .urgentCell {
@@ -115,6 +114,14 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--mantine-spacing-xs);
+}
+
+.tickerTools {
+  padding-block: var(--mantine-spacing-sm);
+  padding-inline: var(--mantine-spacing-sm);
+  border: 1px solid var(--cgb-line);
+  border-radius: var(--mantine-radius-md);
+  background: var(--cgb-sidebar);
 }
 
 @media (max-width: 36em) {

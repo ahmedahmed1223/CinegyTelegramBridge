@@ -1739,10 +1739,26 @@ Describe 'Pausing a headline without deleting it' {
         @($script:NewsPaused) | Should -Be @('ب')
     }
 
+    It 'recovers the paused list from its backup when the primary was damaged' {
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Should -BeTrue
+        Copy-Item -LiteralPath $script:newsPausedFile -Destination "$script:newsPausedFile.bak" -Force
+        Set-Content -LiteralPath $script:newsPausedFile -Value '{broken'
+        Import-NewsPaused
+        @($script:NewsPaused) | Should -Be @('ب')
+    }
+
     It 'says so in the log when the shelf cannot be written' {
         Mock Write-BridgeValidatedJson { $false }
         Save-NewsPaused | Should -BeFalse
         Should -Invoke Write-BridgeLog -Times 1 -ParameterFilter { $Message -like '*news-paused.json*' -and $Level -eq 'WARN' }
+    }
+
+    It 'keeps the headline in the draft when the shelf cannot be saved' {
+        Mock Save-NewsPaused { $false }
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Should -BeFalse
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب', 'ج')
+        $script:NewsPaused.Count | Should -Be 0
+        Should -Invoke Save-NewsTickerDraft -Times 0
     }
 
     It 'brings a paused headline back into a draft' {
@@ -1751,6 +1767,15 @@ Describe 'Pausing a headline without deleting it' {
         Resume-NewsPausedItem -UserId 42 -Index 0 | Should -BeTrue
         $script:NewsTickerDraft.Items | Should -Be @('ب', 'أ', 'ج')
         @($script:NewsPaused).Count | Should -Be 0
+    }
+
+    It 'keeps a paused headline on the shelf when saving it to the draft fails' {
+        Suspend-NewsTickerDraftItem -UserId 42 -Index 1 | Should -BeTrue
+        Mock Save-NewsTickerDraft { $false }
+        Resume-NewsPausedItem -UserId 42 -Index 0 | Should -BeFalse
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ج')
+        @($script:NewsPaused) | Should -Be @('ب')
+        (Get-Content -LiteralPath $script:newsPausedFile -Raw | ConvertFrom-Json).Items | Should -Be @('ب')
     }
 
     It 'refuses to pause from a draft that is not yours' {
@@ -1770,7 +1795,29 @@ Describe 'Pausing a headline without deleting it' {
 
     It 'puts the pause button on a headline''s own screen' {
         Show-NewsTickerItemScreen -ChatId 42 -UserId 42 -Index 0
-        Should -Invoke Send-TelegramMessage -ParameterFilter { @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -contains 'news:pause:0' }
+        Should -Invoke Send-TelegramMessage -ParameterFilter { @($ReplyMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] }) -cmatch '^news:pause:0:[A-F0-9]{20}$' }
+    }
+
+    It 'refreshes old Telegram buttons after an editor changes the draft or shelf' {
+        Mock Confirm-TelegramCallback {}
+        Mock Test-Authorized { $true }
+        Mock Show-NewsTickerManagementScreen {}
+        Mock Show-NewsPausedScreen {}
+        $draftToken = (Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft).Substring(0, 20)
+        $script:NewsPaused.Add('خبر قديم')
+        $shelfToken = Get-NewsPausedEntryToken -Index 0
+        $script:NewsTickerDraft.Items = @('ج', 'ب', 'أ')
+        $script:NewsPaused[0] = 'خبر بديل'
+        foreach ($callback in "news:pause:0:$draftToken", "news:unpause:0:$shelfToken") {
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = 'n'; from = [pscustomobject]@{ id = 42 }; data = $callback
+                message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 42; type = 'private' } }
+            })
+        }
+        $script:NewsTickerDraft.Items | Should -Be @('ج', 'ب', 'أ')
+        @($script:NewsPaused) | Should -Be @('خبر بديل')
+        Should -Invoke Show-NewsTickerManagementScreen -Times 1 -Exactly
+        Should -Invoke Show-NewsPausedScreen -Times 1 -Exactly
     }
 }
 
@@ -1781,8 +1828,8 @@ Describe 'The paused shelf pages' {
         Mock Send-TelegramMessage { $script:pausedMarkup = $ReplyMarkup }
         Show-NewsPausedScreen -ChatId 42 -Page 1
         $data = @($script:pausedMarkup.inline_keyboard | ForEach-Object { @($_) } | ForEach-Object { $_['callback_data'] })
-        $data | Should -Contain 'news:unpause:10'
-        $data | Should -Not -Contain 'news:unpause:0'
+        @($data -cmatch '^news:unpause:10:[A-F0-9]{20}$').Count | Should -Be 1
+        @($data -cmatch '^news:unpause:0:').Count | Should -Be 0
         $data | Should -Contain 'news:pausedp:2'
         $script:NewsPaused = [System.Collections.Generic.List[string]]::new()
     }
@@ -1802,14 +1849,62 @@ Describe 'Publishing the ticker at a set time' {
         Mock Add-AuditEntry { }
         Mock Write-BridgeLog { }
         Mock Write-BridgeExecutionRecord { $true }
+        Mock Test-Authorized { $UserId -eq 42 }
+        $script:scheduledTickerEnabledBeforeTest = Get-JsonProp $config.Settings 'EnableNewsTickerManagement'
+        Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
     }
-    AfterEach { $script:NewsTickerDraft = $null }
+    AfterEach {
+        $script:NewsTickerDraft = $null
+        if ($null -eq $script:scheduledTickerEnabledBeforeTest) { Remove-JsonProp $config.Settings 'EnableNewsTickerManagement' }
+        else { Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $script:scheduledTickerEnabledBeforeTest }
+    }
 
     It 'sets a publish time on the owner''s draft, and only in the future' {
         Set-NewsPublishAt -UserId 42 -At ([datetimeoffset]::Now.AddMinutes(30)) | Should -BeTrue
         [string]$script:NewsTickerDraft.PublishAt | Should -Not -BeNullOrEmpty
         Set-NewsPublishAt -UserId 42 -At ([datetimeoffset]::Now.AddMinutes(-5)) | Should -BeFalse
         Set-NewsPublishAt -UserId 7 -At ([datetimeoffset]::Now.AddMinutes(30)) | Should -BeFalse -Because 'not their draft'
+    }
+
+    It 'keeps the previous saved time when replacing or cancelling it fails' {
+        $oldTime = [datetimeoffset]::UtcNow.AddMinutes(15).ToString('o')
+        $script:NewsTickerDraft.PublishAt = $oldTime
+        Mock Save-NewsTickerDraft { $false }
+        Set-NewsPublishAt -UserId 42 -At ([datetimeoffset]::UtcNow.AddMinutes(30)) | Should -BeFalse
+        Clear-NewsPublishAt -UserId 42 | Should -BeFalse
+        $script:NewsTickerDraft.PublishAt | Should -Be $oldTime
+    }
+
+    It 'keeps the draft and cancels the scheduled publication if the owner loses access' {
+        Mock Test-Authorized { $false }
+        Mock Publish-NewsTickerDraft { throw 'revoked owner reached publication' }
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')
+        Update-NewsScheduledPublish
+        $script:NewsTickerDraft.Items | Should -Be @('أ')
+        $script:NewsTickerDraft.ContainsKey('PublishAt') | Should -BeFalse
+        Should -Invoke Publish-NewsTickerDraft -Times 0
+    }
+
+    It 'cancels publication while ticker management is disabled' {
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Publish-NewsTickerDraft { throw 'disabled ticker reached publication' }
+        $script:NewsTickerDraft.PublishAt = [datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')
+        Update-NewsScheduledPublish
+        $script:NewsTickerDraft.ContainsKey('PublishAt') | Should -BeFalse
+        Should -Invoke Publish-NewsTickerDraft -Times 0
+    }
+
+    It 'keeps the same scheduled instant after reading the draft from disk' {
+        $previousDraftFile = $script:newsDraftFile
+        $script:newsDraftFile = Join-Path $TestDrive 'ticker-offset.json'
+        try {
+            $when = [datetimeoffset]::Parse('2026-10-24T01:00:00+03:00')
+            $script:NewsTickerDraft.PublishAt = $when.ToString('o')
+            $script:NewsTickerDraft | ConvertTo-Json | Set-Content -LiteralPath $script:newsDraftFile
+            Import-NewsTickerDraft
+            (Get-NewsPublishAt -Draft (Get-NewsTickerDraft -UserId 42)).ToUnixTimeMilliseconds() | Should -Be $when.ToUnixTimeMilliseconds()
+        }
+        finally { $script:newsDraftFile = $previousDraftFile }
     }
 
     It 'publishes through the normal path when the time comes, not before' {

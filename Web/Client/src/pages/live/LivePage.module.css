@@ -1,3 +1,10 @@
+.page,
+.floatingPage {
+  --monitor-screen: #182334;
+  --monitor-rail: #415673;
+  --monitor-ink: #e6edf9;
+}
+
 .page {
   max-inline-size: 78rem;
   min-inline-size: 0;
@@ -11,8 +18,6 @@
 }
 
 .monitor {
-  --monitor-screen: #081522;
-  --monitor-rail: #233e4b;
   min-inline-size: 0;
   overflow: hidden;
 }
@@ -31,7 +36,7 @@
   max-block-size: 22rem;
   object-fit: contain;
   border-radius: var(--mantine-radius-md);
-  background: #081522;
+  background: var(--monitor-screen);
 }
 
 .monitorHeader,
@@ -53,7 +58,7 @@
   aspect-ratio: 16 / 9;
   min-block-size: 12.5rem;
   background: var(--monitor-screen);
-  color: #d9e6f8;
+  color: var(--monitor-ink);
 }
 
 .screen video {
@@ -76,7 +81,6 @@
   padding: var(--mantine-spacing-md);
   justify-content: center;
   text-align: center;
-  background: radial-gradient(ellipse at 50% 72%, #153544, var(--monitor-screen) 68%);
 }
 
 .idleIcon {
@@ -86,7 +90,7 @@
   place-items: center;
   border: 1px solid var(--monitor-rail);
   border-radius: var(--mantine-radius-lg);
-  color: #a6e5da;
+  color: var(--monitor-ink);
 }
 
 .playerStatus {

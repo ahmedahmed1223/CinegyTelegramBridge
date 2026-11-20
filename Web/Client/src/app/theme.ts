@@ -1,23 +1,17 @@
 import { createTheme, type MantineColorsTuple } from '@mantine/core'
 
 const signal: MantineColorsTuple = [
-  '#e6f8f5', '#ccefe8', '#a5e2d8', '#7bd2c4', '#58c4b3',
-  '#39af9d', '#08776a', '#09675d', '#085449', '#073d36',
-]
-
-const ink: MantineColorsTuple = [
-  '#f3f6fa', '#e4eaf1', '#d1dbe7', '#b7c6d6', '#94a6bc',
-  '#788da6', '#5a708b', '#415773', '#2d405b', '#162439',
+  '#eef3fc', '#dde8fb', '#c3d5f5', '#9ab9ee', '#729be3',
+  '#4878d0', '#214ea5', '#1c438e', '#183568', '#122748',
 ]
 
 export const theme = createTheme({
   primaryColor: 'signal',
-  primaryShade: 6,
+  primaryShade: { light: 6, dark: 3 },
   autoContrast: true,
   colors: {
     signal,
-    ink,
-    dark: ['#e1e8f1', '#b0bed0', '#8e9fb6', '#6d809c', '#4c607d', '#354860', '#263850', '#1a2a40', '#132137', '#0d1828'],
+    dark: ['#edeee7', '#bfc2bb', '#a1a59c', '#85897f', '#65695f', '#4d5048', '#373a34', '#292b26', '#22241f', '#1b1d19'],
   },
   fontFamily: "'IBM Plex Sans Arabic', system-ui, sans-serif",
   fontFamilyMonospace: "'IBM Plex Mono', 'IBM Plex Sans Arabic', ui-monospace, monospace",
@@ -26,7 +20,7 @@ export const theme = createTheme({
     fontWeight: '700',
   },
   defaultRadius: 'md',
-  radius: { xs: '4px', sm: '7px', md: '9px', lg: '15px', xl: '22px' },
+  radius: { xs: '3px', sm: '5px', md: '6px', lg: '8px', xl: '12px' },
   components: {
     Paper: { defaultProps: { withBorder: true } },
     Card: { defaultProps: { withBorder: true } },

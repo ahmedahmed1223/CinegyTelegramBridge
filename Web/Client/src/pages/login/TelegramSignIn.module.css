@@ -9,7 +9,7 @@
   letter-spacing: 0.18em;
   padding: 18px 12px;
   border-radius: var(--mantine-radius-lg);
-  background: light-dark(var(--mantine-color-ink-0), var(--mantine-color-dark-7));
+  background: var(--cgb-sidebar);
   border: 1px solid var(--mantine-color-default-border);
   user-select: all;
 }

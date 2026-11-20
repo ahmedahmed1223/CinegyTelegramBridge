@@ -1242,7 +1242,7 @@ function Invoke-WebUrgentWrite {
 }
 
 function Get-WebTickerEditorState {
-    param([Parameter(Mandatory)][long]$Actor)
+    param([Parameter(Mandatory)][long]$Actor, [int]$PausedPage = 1)
     $draft = Get-NewsTickerDraft
     $data = @{ state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1 }
     if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
@@ -1253,12 +1253,18 @@ function Get-WebTickerEditorState {
         }
         else {
             $data.state = 'editing'
+            $pausedTotal = $script:NewsPaused.Count
+            $window = Get-BridgePageWindow -ItemCount $pausedTotal -Page ([math]::Max(1, $PausedPage) - 1) -PageSize 10
+            $pausedItems = @(for ($pausedIndex = $window.StartIndex; $pausedIndex -le $window.EndIndex; $pausedIndex++) {
+                    $script:NewsPaused[$pausedIndex]
+                })
             $data.draft = @{
                 revision = Get-NewsTickerDraftRevision -Draft $draft
                 items = @(Get-JsonProp $draft 'Items' | Where-Object { $null -ne $_ })
                 scheduledAt = Get-NewsPublishAt -Draft $draft
                 canRemove = Test-NewsTickerDeleteAccess -ChatId $Actor -UserId $Actor
                 maxItems = Get-SettingInt 'NewsMaxItems' 1
+                paused = @{ items = $pausedItems; page = $window.Page + 1; pageCount = $window.PageCount; total = $pausedTotal; offset = $window.StartIndex }
             }
         }
         return $data
@@ -1279,7 +1285,8 @@ function Invoke-WebTickerEdit {
     if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
 
     $action = [string](Get-JsonProp $Arguments 'action')
-    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor } }
+    $pausedPage = [int](Get-JsonProp $Arguments 'pausedPage')
+    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor -PausedPage $pausedPage } }
     if ($action -eq 'start') {
         if ((Get-WebTickerEditorState -Actor $actor).state -eq 'locked') { return @{ ok = $false; error = 'ticker_locked' } }
         $started = Start-NewsTickerDraft -ChatId $actor -UserId $actor
@@ -1331,11 +1338,31 @@ function Invoke-WebTickerEdit {
         }
         'up' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta -1 }
         'down' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta 1 }
+        'pause' { $saved = Suspend-NewsTickerDraftItem -UserId $actor -Index $index }
+        'resume' {
+            if ($index -lt 0 -or $index -ge $script:NewsPaused.Count -or
+                -not [string]::Equals($script:NewsPaused[$index], $copy, [StringComparison]::Ordinal)) {
+                return @{ ok = $false; error = 'ticker_stale' }
+            }
+            if (@($draft.Items).Count -ge (Get-SettingInt 'NewsMaxItems' 1) -and [Array]::IndexOf([string[]]@($draft.Items), $copy) -lt 0) {
+                return @{ ok = $false; error = 'ticker_full' }
+            }
+            $saved = Resume-NewsPausedItem -UserId $actor -Index $index
+        }
+        'schedule' {
+            $stamp = Get-JsonProp $Arguments 'publishAtMs'
+            if ($stamp -isnot [int] -and $stamp -isnot [long]) { return @{ ok = $false; error = 'ticker_schedule_invalid' } }
+            try { $at = [datetimeoffset]::FromUnixTimeMilliseconds($stamp) }
+            catch { return @{ ok = $false; error = 'ticker_schedule_invalid' } }
+            if ($at -le [datetimeoffset]::UtcNow) { return @{ ok = $false; error = 'ticker_schedule_invalid' } }
+            $saved = Set-NewsPublishAt -UserId $actor -At $at
+        }
+        'unschedule' { $saved = Clear-NewsPublishAt -UserId $actor }
         'handover' { $saved = Open-NewsTickerDraftToAll -ChatId $actor -UserId $actor }
         default { return @{ ok = $false; error = 'ticker_invalid' } }
     }
     if (-not $saved) { return @{ ok = $false; error = 'ticker_invalid' } }
-    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor }
+    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor -PausedPage $pausedPage }
 }
 
 function Get-WebUrgentRun {

@@ -39,13 +39,14 @@ function Start-MojazPlayback {
         maintenance mode, the layer policy, the live Cinegy check or the audit
         trail - a bulletin is still a graphic going on air.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force, $Bulletin)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:MojazPlayback) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.alreadyRunning')
         return $false
     }
-    $bulletin = Get-MojazSelected -ChatId $ChatId
+    $explicitBulletin = $PSBoundParameters.ContainsKey('Bulletin')
+    if (-not $explicitBulletin) { $bulletin = Get-MojazSelected -ChatId $ChatId }
     if (-not $bulletin) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notThere')
         return $false
@@ -147,7 +148,7 @@ function Start-MojazPlayback {
     $fitNote = Get-MojazBulletinLoopFitNote -Bulletin $bulletin
     if ($fitNote) { Write-BridgeLog "Mojaz row hold does not fit the scene loop: $fitNote" 'WARN' }
     Add-AuditEntry (T 'mjp.started' $([string]$snapshot.BulletinName) $($rows.Count) $(Format-UserAuditActor -UserId $UserId))
-    Show-MojazScreen -ChatId $ChatId -UserId $UserId
+    if (-not $explicitBulletin) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
     return $true
 }
 

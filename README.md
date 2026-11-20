@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.102.0
+
+The bulletin editor can book and cancel future appointments for supported designs using the same schedule as Telegram. Appointments use the latest saved content and wait behind an urgent or running bulletin. The bridge checks the web scheduler's access again before starting the appointment.
+
 ## Version 8.101.0
 
 Bulletin previews can open attached, inherited and template images on demand. The bridge resolves media against the saved revision and selected scene. The server streams supported raster images within the configured scene directory to signed-in operators.

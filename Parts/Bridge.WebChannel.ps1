@@ -361,6 +361,7 @@ function Invoke-WebChannelOperation {
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.preview' { return Get-WebBulletinPreview -Arguments $arguments }
         'bulletin.preview-image' { return Get-WebBulletinPreview -Arguments $arguments -Image }
+        'bulletin.schedule' { return Invoke-WebBulletinSchedule -Arguments $arguments }
         'bulletin.photo' { return Start-WebBulletinPhotoRequest -Entry $Entry }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -1346,6 +1347,86 @@ function Invoke-WebBulletinEdit {
     }
     Add-AuditEntry "Web bulletin $action by $(Format-UserAuditActor -UserId $actor) ($([string]$saved.Id))"
     return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $saved -Page $page }
+}
+
+function Test-WebBulletinScheduling {
+    param($Bulletin, [long]$Actor)
+    if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin)) { return $false }
+    $template = Get-MojazTemplate
+    if (-not $template) { return $false }
+    $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    $layer = [int](Get-JsonProp $template 'Layer')
+    return ((Test-TemplateAccess -Key $key -Layer $layer -ChatId $Actor -UserId $Actor).Allowed -and
+        (Test-TemplateShowPolicy -Key $key -Layer $layer -IsAdmin:(Test-Admin -ChatId $Actor -UserId $Actor)).Allowed)
+}
+
+function Get-WebBulletinSchedules {
+    param([string]$BulletinId, [int]$Page, [bool]$CanSchedule)
+    $entries = @(
+        foreach ($entry in $script:MojazSchedules) {
+            if ((Get-JsonProp $entry 'BulletinId') -ne $BulletinId) { continue }
+            $time = [datetimeoffset]::MinValue
+            if (-not [datetimeoffset]::TryParse([string](Get-JsonProp $entry 'ScheduledAt'), [ref]$time)) { continue }
+            $status = [string](Get-JsonProp $entry 'Status')
+            @{ id = [string](Get-JsonProp $entry 'Id'); scheduledAtMs = $time.ToUnixTimeMilliseconds(); status = $status
+                canCancel = $status -in 'scheduled', 'queued'; reason = [string](Get-JsonProp $entry 'DelayReason') }
+        }
+    )
+    $ordered = @($entries | Sort-Object @{ Expression = { if ($_.canCancel) { 0 } else { 1 } } },
+        @{ Expression = { if ($_.canCancel) { $_.scheduledAtMs } else { -$_.scheduledAtMs } } })
+    $window = Get-BridgePageWindow -ItemCount $ordered.Count -Page $Page
+    return @{ canSchedule = $CanSchedule; page = $window.Page; pageCount = $window.PageCount
+        items = @(for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) { $ordered[$i] }) }
+}
+
+function Invoke-WebBulletinSchedule {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    if (-not $id) { return @{ ok = $false; error = 'not_found' } }
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $page = [int](Get-JsonProp $Arguments 'page')
+    $canSchedule = Test-WebBulletinScheduling -Bulletin $bulletin -Actor $actor
+    switch ($action) {
+        'list' {}
+        'add' {
+            if (-not $canSchedule) { return @{ ok = $false; error = 'bulletin_schedule_unavailable' } }
+            if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $bulletin 'Revision')) { return @{ ok = $false; error = 'bulletin_stale' } }
+            $now = [datetimeoffset]::Now
+            $clock = Get-SystemClockStatus -Now $now
+            if (-not $clock.Success) { return @{ ok = $false; error = 'bulletin_schedule_clock' } }
+            $stamp = Get-JsonProp $Arguments 'scheduledAtMs'
+            if ($stamp -isnot [long] -and $stamp -isnot [int]) { return @{ ok = $false; error = 'bulletin_schedule_invalid' } }
+            try { $when = [datetimeoffset]::FromUnixTimeMilliseconds($stamp).ToLocalTime() }
+            catch { return @{ ok = $false; error = 'bulletin_schedule_invalid' } }
+            if ($when -le $now) { return @{ ok = $false; error = 'bulletin_schedule_invalid' } }
+            $existing = Get-MojazBulletinSchedules -BulletinId $id | Where-Object {
+                [long](Get-JsonProp $_ 'CreatedBy') -eq $actor -and [datetimeoffset](Get-JsonProp $_ 'ScheduledAt') -eq $when
+            } | Select-Object -First 1
+            if (-not $existing) {
+                if (-not (Add-MojazSchedule -BulletinId $id -ScheduledAt $when -ChatId $actor -UserId $actor -FromWeb)) {
+                    return @{ ok = $false; error = 'bulletin_schedule_save_failed' }
+                }
+                Add-AuditEntry (T 'mjz.slotAudit' $($when.ToLocalTime().ToString('HH:mm')) $(Format-UserAuditActor -UserId $actor))
+            }
+            $page = 0
+        }
+        'cancel' {
+            $scheduleId = [string](Get-JsonProp $Arguments 'scheduleId')
+            if (-not $scheduleId -or $scheduleId -notin @(Get-MojazBulletinSchedules -BulletinId $id | ForEach-Object { $_.Id })) {
+                return @{ ok = $false; error = 'bulletin_schedule_stale' }
+            }
+            $outcome = Remove-MojazPendingSchedule -ScheduleId $scheduleId
+            if ($outcome -ne 'cancelled') { return @{ ok = $false; error = 'bulletin_schedule_save_failed' } }
+            Add-AuditEntry (T 'mjz.slotCancelledAudit' $(Format-UserAuditActor -UserId $actor))
+        }
+        default { return @{ ok = $false; error = 'bulletin_schedule_invalid' } }
+    }
+    return @{ ok = $true; data = Get-WebBulletinSchedules -BulletinId $id -Page $page -CanSchedule $canSchedule }
 }
 
 function Get-WebBulletinPhotoDestination {

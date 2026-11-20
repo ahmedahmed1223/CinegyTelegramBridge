@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
-import { formatDateTime } from '../../lib/time'
+import { formatDateTime, localDateInput } from '../../lib/time'
 import classes from './NewsroomPage.module.css'
 import { TickerBackups } from './TickerBackups'
 import { TickerPaste } from './TickerPaste'
@@ -23,10 +23,6 @@ type Schedule = { revision: string; time: string }
 const draftKey = ['ticker-draft']
 const pageSize = 20
 const number = new Intl.NumberFormat('ar')
-
-function localDateInput(date: Date) {
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-}
 
 async function tickerCommand(body: Pick<Request, 'action'> & Partial<Request>) {
   const { data, error, response } = await api.POST('/api/content/ticker/draft', {

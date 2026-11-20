@@ -30,6 +30,10 @@ export function formatDateTime(value: string | number | null | undefined): strin
   return dateTime.format(new Date(value))
 }
 
+export function localDateInput(date: Date): string {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
 /**
  * Whether the bridge's last Cinegy reading still counts. A counter running on
  * an unconfirmed reading would claim more than the bridge knows - the same

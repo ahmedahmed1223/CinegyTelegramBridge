@@ -1801,6 +1801,92 @@ Describe 'Web channel: the pipe' {
         finally { $script:MojazLibrary = $oldLibrary }
     }
 
+    It 'shares bulletin appointments with Telegram and refuses revoked scheduled web operators' {
+        Mock Test-MojazAvailable { $true }
+        Mock Test-MojazBulletinPlaybackDesign { $true }
+        Mock Get-MojazTemplate { @{ Layer = 4 } }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MojazUrgentOnAir { $false }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
+        Mock Get-SettingInt { 180 } -ParameterFilter { $Name -eq 'MojazScheduleNoticeSeconds' }
+        Mock Send-TelegramMessage {}
+        Mock Write-BridgeExecutionRecord {}
+        Mock Get-MojazSchedulesFile { Join-Path $TestDrive 'shared-web-bulletin-schedule.json' }
+        Mock Invoke-ShowTemplateResult { throw 'The test never calls air' }
+        $script:webScheduleAllowed = $true
+        Mock Test-Authorized { $UserId -eq 4321 -and $script:webScheduleAllowed }
+        $oldLibrary = $script:MojazLibrary
+        $oldSchedule = $script:MojazSchedules
+        $oldPlayback = $script:MojazPlayback
+        $oldSelections = $script:MojazSelections
+        try {
+            $script:MojazPlayback = $null
+            $script:MojazSchedules = @()
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الموعد').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'الخبر المحفوظ').Value
+            $sendSchedule = {
+                param($scheduleArgs)
+                $line = @{ op = 'bulletin.schedule'; args = $scheduleArgs } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $future = [datetimeoffset]::Now.AddHours(3)
+            Add-MojazSchedule -BulletinId $id -ScheduledAt $future.AddMinutes(5) -ChatId 100 -UserId 101 | Should -BeTrue
+            $schedule = @{ actor = 4321; id = $id; revision = $script:MojazLibrary.Bulletins[0].Revision; action = 'list' }
+            (& $sendSchedule $schedule).data.items.Count | Should -Be 1
+            $schedule.action = 'add'
+            $schedule.scheduledAtMs = $future.ToUnixTimeMilliseconds()
+            $schedule.revision--
+            (& $sendSchedule $schedule).error | Should -Be 'bulletin_stale'
+            $schedule.revision++
+            $schedule.scheduledAtMs = [datetimeoffset]::Now.AddMinutes(-1).ToUnixTimeMilliseconds()
+            (& $sendSchedule $schedule).error | Should -Be 'bulletin_schedule_invalid'
+            $schedule.scheduledAtMs = $future.ToUnixTimeMilliseconds()
+            $created = & $sendSchedule $schedule
+            $created.ok | Should -BeTrue
+            (& $sendSchedule $schedule).data.items.Count | Should -Be 2
+            Import-MojazSchedules
+            @(Get-MojazBulletinSchedules -BulletinId $id).Count | Should -Be 2
+            $webId = $created.data.items[0].id
+            ([datetimeoffset]$script:MojazSchedules[1].ScheduledAt).Offset | Should -Be $future.ToLocalTime().Offset
+            $schedule.action = 'cancel'
+            $schedule.scheduleId = $created.data.items[1].id
+            (& $sendSchedule $schedule).ok | Should -BeTrue
+            @(Get-MojazBulletinSchedules -BulletinId $id).Count | Should -Be 1
+            $script:webScheduleAllowed = $false
+            Update-MojazScheduleQueue -Now $future.AddSeconds(-1)
+            $script:MojazPlayback = @{ BulletinId = 'busy'; BulletinName = 'موجز على الهواء' }
+            Update-MojazScheduleQueue -Now $future.AddSeconds(1)
+            $script:MojazSchedules[0].Id | Should -Be $webId
+            $script:MojazSchedules[0].Status | Should -Be 'failed'
+            $script:MojazSchedules[0].LastError | Should -Be 'not_authorized'
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+            $script:MojazPlayback = $null
+            $script:webScheduleAllowed = $true
+            $script:MojazSelections = @{ '4321' = 'different-bulletin' }
+            $schedule.action = 'add'
+            $schedule.scheduledAtMs = $future.AddMinutes(10).ToUnixTimeMilliseconds()
+            (& $sendSchedule $schedule).ok | Should -BeTrue
+            Mock Start-MojazPlayback { $true }
+            Update-MojazScheduleQueue -Now $future.AddMinutes(11)
+            Should -Invoke Start-MojazPlayback -Times 1 -Exactly -ParameterFilter { $Bulletin.Id -eq $id -and $Force }
+            $script:MojazSelections['4321'] | Should -Be 'different-bulletin'
+            $running = $script:MojazSchedules | Where-Object Status -EQ 'running'
+            $schedule.action = 'cancel'
+            $schedule.scheduleId = $running.Id
+            (& $sendSchedule $schedule).error | Should -Be 'bulletin_schedule_stale'
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:MojazSchedules = $oldSchedule
+            $script:MojazPlayback = $oldPlayback
+            $script:MojazSelections = $oldSelections
+        }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

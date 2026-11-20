@@ -1013,7 +1013,8 @@ function Add-MojazSchedule {
         [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
         [Parameter(Mandatory)][long]$ChatId,
-        [long]$UserId = 0
+        [long]$UserId = 0,
+        [switch]$FromWeb
     )
     if (-not (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId)) { return $false }
     $schedule = [pscustomobject]@{
@@ -1023,6 +1024,7 @@ function Add-MojazSchedule {
         CreatedAt = [datetimeoffset]::Now.ToString('o')
         CreatedBy = $UserId
         ChatId = $ChatId
+        Source = $(if ($FromWeb) { 'web' } else { 'telegram' })
         Status = 'scheduled'
         DueAt = $null
         StartedAt = $null
@@ -1034,11 +1036,21 @@ function Add-MojazSchedule {
     return (Save-MojazSchedules -Schedules @(@($script:MojazSchedules) + $schedule))
 }
 
+function Remove-MojazPendingSchedule {
+    param([Parameter(Mandatory)][string]$ScheduleId)
+    $kept = @($script:MojazSchedules | Where-Object {
+        [string](Get-JsonProp $_ 'Id') -ne $ScheduleId -or [string](Get-JsonProp $_ 'Status') -notin 'scheduled', 'queued'
+    })
+    if ($kept.Count -eq @($script:MojazSchedules).Count) { return 'not_found' }
+    if (-not (Save-MojazSchedules -Schedules $kept)) { return 'save_failed' }
+    return 'cancelled'
+}
+
 function Stop-MojazSchedule {
     param([Parameter(Mandatory)][string]$ScheduleId, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    $kept = @($script:MojazSchedules | Where-Object { [string](Get-JsonProp $_ 'Id') -ne $ScheduleId })
-    if ($kept.Count -eq @($script:MojazSchedules).Count) { Show-MojazSchedulesScreen -ChatId $ChatId -UserId $UserId; return }
-    if (-not (Save-MojazSchedules -Schedules $kept)) {
+    $outcome = Remove-MojazPendingSchedule -ScheduleId $ScheduleId
+    if ($outcome -eq 'not_found') { Show-MojazSchedulesScreen -ChatId $ChatId -UserId $UserId; return }
+    if ($outcome -eq 'save_failed') {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.cancelScheduleFailed')
         return
     }
@@ -1171,6 +1183,12 @@ function Set-MojazScheduleStatus {
     return (Save-MojazSchedules -Schedules $candidate)
 }
 
+function Test-MojazScheduleAccess {
+    param($Entry)
+    if ((Get-JsonProp $Entry 'Source') -ne 'web') { return $true }
+    return Test-Authorized -ChatId ([long](Get-JsonProp $Entry 'ChatId')) -UserId ([long](Get-JsonProp $Entry 'CreatedBy'))
+}
+
 function Send-MojazScheduleNotices {
     <#
         A word before a booked bulletin starts by itself.
@@ -1188,6 +1206,7 @@ function Send-MojazScheduleNotices {
         $moment = [datetimeoffset](Get-JsonProp $entry 'ScheduledAt')
         $seconds = ($moment - $Now).TotalSeconds
         if ($seconds -gt $lead -or $seconds -lt 0) { continue }
+        if (-not (Test-MojazScheduleAccess -Entry $entry)) { continue }
         $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$entry.BulletinId)
         $name = if ($bulletin) { [string]$bulletin.Name } else { (T 'mojaz.scheduledBulletin') }
         if (Set-MojazScheduleStatus -ScheduleId ([string]$entry.Id) -Status 'scheduled' -Fields @{ NoticedAt = $Now.ToString('o') }) {
@@ -1208,7 +1227,20 @@ function Update-MojazScheduleQueue {
     #>
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     Send-MojazScheduleNotices -Now $Now
-    $due = @(Get-MojazDueQueue -Schedules $script:MojazSchedules -Now $Now)
+    $due = @(
+        foreach ($candidate in Get-MojazDueQueue -Schedules $script:MojazSchedules -Now $Now) {
+            if (Test-MojazScheduleAccess -Entry $candidate) { $candidate; continue }
+            $refusedId = [string]$candidate.Id
+            if (Set-MojazScheduleStatus -ScheduleId $refusedId -Status 'failed' -Fields @{
+                    LastError = 'not_authorized'; CompletedAt = $Now.ToString('o')
+                }) {
+                $refused = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$candidate.BulletinId)
+                $label = if ($refused) { [string]$refused.Name } else { [string]$candidate.BulletinId }
+                Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'failed' -EventId $refusedId -Label $label `
+                    -ScheduledAt ([string]$candidate.ScheduledAt) -ErrorText 'not_authorized' | Out-Null
+            }
+        }
+    )
     if ($due.Count -eq 0) { return }
     # Two things hold a due bulletin back: another one already on air, and the
     # urgent, which outranks it. Neither is a reason to drop the appointment.
@@ -1233,15 +1265,17 @@ function Update-MojazScheduleQueue {
     $next = $due[0]
     $scheduleId = [string]$next.Id
     $bulletinForLog = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$next.BulletinId)
+    $bulletinName = if ($bulletinForLog) { [string]$bulletinForLog.Name } else { [string]$next.BulletinId }
     if (-not (Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'running' -Fields @{ StartedAt = $Now.ToString('o') })) { return }
-    $script:MojazSelections[[string]$next.ChatId] = [string]$next.BulletinId
     # -Force: the urgent check above has already been made, and nobody is
     # watching a scheduled start to answer a question.
     # Logged where scheduled graphics are logged. The outcome used to live on
     # the schedule record alone and die with it, so nothing could answer "did
     # last night's bulletin actually start, and how late?" after the fact.
-    $bulletinName = if ($bulletinForLog) { [string]$bulletinForLog.Name } else { [string]$next.BulletinId }
-    if (-not (Start-MojazPlayback -ChatId ([long]$next.ChatId) -UserId ([long]$next.CreatedBy) -ScheduleId $scheduleId -Force)) {
+    $start = @{ ChatId = [long]$next.ChatId; UserId = [long]$next.CreatedBy; ScheduleId = $scheduleId; Force = $true }
+    if ((Get-JsonProp $next 'Source') -eq 'web') { $start.Bulletin = $bulletinForLog }
+    else { $script:MojazSelections[[string]$next.ChatId] = [string]$next.BulletinId }
+    if (-not (Start-MojazPlayback @start)) {
         Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'failed' -Fields @{ LastError = 'playback_start_failed' } | Out-Null
         Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'failed' -EventId $scheduleId -Label $bulletinName `
             -ScheduledAt ([string](Get-JsonProp $next 'ScheduledAt')) -ErrorText 'playback_start_failed' | Out-Null

@@ -11,6 +11,7 @@ import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './BulletinPaste'
 import { BulletinPhotoDialog } from './BulletinPhotoDialog'
 import { BulletinPreview } from './BulletinPreview'
+import { BulletinSchedule } from './BulletinSchedule'
 import { BulletinTimingForm } from './BulletinTimingForm'
 import classes from './NewsroomPage.module.css'
 
@@ -94,6 +95,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [pasting, setPasting] = useState(false)
   const [editingTiming, setEditingTiming] = useState(false)
   const [previewing, setPreviewing] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; rank: string } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
@@ -126,7 +128,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming || previewing
+  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming || previewing || scheduling
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
   const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
@@ -213,6 +215,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             </div>
             <Group gap="xs">
               <Button variant="default" disabled={busy || editing} onClick={() => setPreviewing(true)}>معاينة الموجز</Button>
+              <Button variant="default" disabled={busy || editing} onClick={() => setScheduling(true)}>المواعيد</Button>
               {availableDesigns.length > 0 && <Button variant="default" disabled={busy || editing || bulletin.onAir}
                 onClick={() => { edit.reset(); setSavedNote(''); setDesignChange({ key: null, revision: bulletin.revision }) }}>
                 تغيير التصميم
@@ -225,6 +228,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
           {previewing && <BulletinPreview bulletin={bulletin} onClose={() => setPreviewing(false)} />}
+          {scheduling && <BulletinSchedule bulletin={bulletin} onClose={() => setScheduling(false)} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
             onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
           {designChange && <Paper withBorder p="md" radius="lg">

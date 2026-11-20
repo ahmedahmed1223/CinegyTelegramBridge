@@ -17,6 +17,10 @@ public sealed record BulletinPreviewRow(string Id, int Number, Dictionary<string
     string? ImageMode, double? StartSeconds, string[]? ImageFields = null);
 public sealed record BulletinPreview(int Revision, string Stamp, BulletinField[] Fields, BulletinPreviewRow[] Rows, int Page, int PageCount, int Total,
     bool PlaybackSupported, int PlannedCount, double? ExitSeconds, string? ImageField);
+public sealed record BulletinScheduleItem(string Id, long ScheduledAtMs, string Status, bool CanCancel, string Reason);
+public sealed record BulletinSchedulePage(BulletinScheduleItem[] Items, bool CanSchedule, int Page, int PageCount);
+public sealed record BulletinScheduleRequest(string Action, string Id, int? Revision = null, long? ScheduledAtMs = null,
+    string? ScheduleId = null, int? Page = null);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,
     BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing,
     string? ImageField = null, BulletinImageChoice[]? ImageChoices = null, bool CanUploadPhoto = false);

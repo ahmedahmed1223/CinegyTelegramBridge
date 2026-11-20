@@ -897,10 +897,29 @@ function Get-WebBulletinFields {
     }
 }
 
+function Get-WebBulletinImageField {
+    param([object[]]$Fields)
+    foreach ($field in $Fields) {
+        if ($field.kind -eq 'media' -and $field.name -eq $script:MojazImageVariable) { return $field.name }
+    }
+}
+
 function Get-WebBulletinEditor {
     param([Parameter(Mandatory)]$Bulletin, [int]$Page)
     $fields = @(Get-WebBulletinFields -Bulletin $Bulletin)
     $rows = @(Get-JsonProp $Bulletin 'Rows' | Where-Object { $null -ne $_ })
+    $imageField = Get-WebBulletinImageField -Fields $fields
+    $imageChoices = @(
+        if ($imageField) {
+            $seenImages = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            for ($index = 0; $index -lt $rows.Count -and $seenImages.Count -lt 8; $index++) {
+                $sourceImage = [string](Get-JsonProp $rows[$index] 'Image')
+                if ($sourceImage -and $seenImages.Add($sourceImage)) {
+                    @{ rowId = [string](Get-JsonProp $rows[$index] 'Id'); rowNumber = $index + 1 }
+                }
+            }
+        }
+    )
     $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page
     $items = @(
         for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
@@ -913,7 +932,8 @@ function Get-WebBulletinEditor {
                     elseif ($value) { $field.name }
                 }
             )
-            @{ id = [string](Get-JsonProp $row 'Id'); values = $values; media = $media; skipped = Test-MojazRowSkipped -Row $row }
+            @{ id = [string](Get-JsonProp $row 'Id'); values = $values; media = $media; skipped = Test-MojazRowSkipped -Row $row
+                imageMode = $(if ($imageField) { Get-MojazRowImageMode -Row $row }) }
         }
     )
     $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
@@ -925,6 +945,7 @@ function Get-WebBulletinEditor {
         timing = $(if ($canPlay) { Get-WebBulletinTiming -Bulletin $Bulletin })
         revision = [int](Get-JsonProp $Bulletin 'Revision'); onAir = Test-MojazOnAir -Bulletin $Bulletin
         fields = $fields; rows = $items; page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
+        imageField = $imageField; imageChoices = $imageChoices
     }
 }
 
@@ -1152,8 +1173,12 @@ function Invoke-WebBulletinEdit {
             { $_ -in 'up', 'down' } { $result = Move-MojazBulletinRow @editArgs -RowId $rowId -Direction $action }
             { $_ -in 'add', 'update' } {
                 $values = Get-JsonProp $Arguments 'values'
-                $fields = @(Get-WebBulletinFields -Bulletin $bulletin | Where-Object { $_.kind -eq 'text' })
-                if ($fields.Count -eq 0 -or $values -isnot [System.Collections.IDictionary] -or $values.Count -ne $fields.Count) {
+                $allFields = @(Get-WebBulletinFields -Bulletin $bulletin)
+                $fields = @($allFields | Where-Object { $_.kind -eq 'text' })
+                $imageField = Get-WebBulletinImageField -Fields $allFields
+                $imageMode = [string](Get-JsonProp $Arguments 'imageMode')
+                $imageSource = [string](Get-JsonProp $Arguments 'imageSourceRowId')
+                if (($fields.Count -eq 0 -and -not $imageMode) -or $values -isnot [System.Collections.IDictionary] -or $values.Count -ne $fields.Count) {
                     return @{ ok = $false; error = 'bulletin_invalid' }
                 }
                 $cells = @{}
@@ -1165,6 +1190,24 @@ function Invoke-WebBulletinEdit {
                     $cells[$field.name] = $value
                 }
                 $rowArgs = ConvertTo-WebBulletinRowArguments -Cells $cells
+                if ($imageMode -or $imageSource) {
+                    if (-not $imageField -or $imageMode -cnotin 'inherit', 'template', 'reuse' -or ($imageSource -and $imageMode -cne 'reuse')) {
+                        return @{ ok = $false; error = 'bulletin_image_invalid' }
+                    }
+                    $rowArgs.Image = ''
+                    $rowArgs.ImageMode = $imageMode
+                    if ($imageMode -ceq 'reuse') {
+                        if (-not $imageSource) { return @{ ok = $false; error = 'bulletin_image_invalid' } }
+                        $sourceRow = @(Get-JsonProp $bulletin 'Rows') | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $imageSource } | Select-Object -First 1
+                        $rowArgs.Image = [string](Get-JsonProp $sourceRow 'Image')
+                        if (-not $rowArgs.Image) { return @{ ok = $false; error = 'bulletin_image_invalid' } }
+                        $rowArgs.ImageMode = 'new'
+                    }
+                    # Older bulletin designs could also carry a picture under
+                    # the same field in the value bag. The explicit choice wins.
+                    $rowArgs.Fields[$imageField] = ''
+                    $rowArgs.AllowImageOnly = $fields.Count -eq 0
+                }
                 # Clear stale design aliases for the names the bot edits directly.
                 $designFields = $rowArgs.Fields
                 $rowArgs.Remove('Fields')

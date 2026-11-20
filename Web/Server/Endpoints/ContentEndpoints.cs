@@ -173,7 +173,7 @@ public static class ContentEndpoints
         var reply = await bridge.SendAsync("bulletin.edit", new
         {
             actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Page,
-            request.RowId, request.Name, request.Design, request.Values, request.Timing
+            request.RowId, request.Name, request.Design, request.Values, request.Timing, request.ImageMode, request.ImageSourceRowId
         }, http.RequestAborted);
         if (!reply.Ok) return BulletinError(reply);
         http.Response.Headers.CacheControl = "no-store";
@@ -203,7 +203,7 @@ public static class ContentEndpoints
     {
         "forbidden" => ApiErrors.Of(403, reply.Error),
         "not_found" or "content_disabled" => ApiErrors.Of(404, reply.Error),
-        "bulletin_invalid" or "bulletin_paste_invalid" => ApiErrors.Of(400, reply.Error),
+        "bulletin_invalid" or "bulletin_paste_invalid" or "bulletin_image_invalid" => ApiErrors.Of(400, reply.Error),
         "bulletin_refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
         "bulletin_stale" or "bulletin_on_air" or "bulletin_design_collision" => ApiErrors.Of(409, reply.Error),
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),

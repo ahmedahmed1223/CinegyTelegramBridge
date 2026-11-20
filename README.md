@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.98.0
+
+The bulletin image column can retain the current source, continue the previous image, restore the template image, or reuse an image from another row in the same bulletin. The bridge saves the image choice and editorial text together against the same revision. The browser receives source row references without station file paths.
+
 ## Version 8.97.0
 
 Web editors can change the design of an existing bulletin when multiple designs are enabled. The table adopts the selected design's columns while the shared library retains the saved rows and attachments. A stale edit or an on-air bulletin cannot be switched. Telegram uses the same library update.

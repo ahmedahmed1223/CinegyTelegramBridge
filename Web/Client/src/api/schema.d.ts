@@ -2702,6 +2702,10 @@ export interface components {
             /** Format: int32 */
             total: number;
             timing: components["schemas"]["BulletinTiming"];
+            /** @default null */
+            imageField: string | null;
+            /** @default null */
+            imageChoices: components["schemas"]["BulletinImageChoice"][] | null;
         };
         BulletinEditRequest: {
             action: string;
@@ -2728,11 +2732,20 @@ export interface components {
                 [key: string]: string;
             } | null;
             timing?: components["schemas"]["BulletinTimingInput"];
+            /** @default null */
+            imageMode: string | null;
+            /** @default null */
+            imageSourceRowId: string | null;
         };
         BulletinField: {
             name: string;
             label: string;
             kind: string;
+        };
+        BulletinImageChoice: {
+            rowId: string;
+            /** Format: int32 */
+            rowNumber: number;
         };
         BulletinPastePreview: {
             review: string;
@@ -2764,6 +2777,8 @@ export interface components {
             };
             media: string[];
             skipped: boolean;
+            /** @default null */
+            imageMode: string | null;
         };
         BulletinTiming: {
             /** Format: int32 */

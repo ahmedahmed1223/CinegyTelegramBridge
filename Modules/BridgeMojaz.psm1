@@ -379,7 +379,7 @@ function New-MojazBulletinRowData {
     param([string]$Image = '', [string]$Title = '', [string]$Text = '',
         # The design's own fields, keyed by the scene's variable names. Absent
         # for the built-in design, whose three are named above and unchanged.
-        $Fields,
+        $Fields, [switch]$AllowImageOnly,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '')
     $rowTitle = ConvertTo-MojazRowText -Text $Title
     $rowText = ConvertTo-MojazRowText -Text $Text
@@ -388,14 +388,16 @@ function New-MojazBulletinRowData {
     # the news design's shape, and it would have refused a row on a
     # video-only design outright.
     $rowFields = if ($PSBoundParameters.ContainsKey('Fields')) { Get-MojazFieldValues -Fields $Fields } else { $null }
+    $imageSelected = $AllowImageOnly -and ($ImageMode -in 'inherit', 'template' -or
+        ($ImageMode -eq 'new' -and -not [string]::IsNullOrWhiteSpace($Image)))
     if ($null -ne $rowFields) {
         # Not @($hashtable).Count - that wraps the table in a one-element
         # array and answers 1 however empty the table is.
-        if ($rowFields.Count -eq 0) {
+        if ($rowFields.Count -eq 0 -and -not $imageSelected) {
             return (New-MojazResult $false $null 'empty_row' 'الصف فارغ: لم يُملأ أي حقل من حقول التصميم.')
         }
     }
-    elseif ([string]::IsNullOrWhiteSpace($rowTitle) -and [string]::IsNullOrWhiteSpace($rowText)) {
+    elseif (-not $imageSelected -and [string]::IsNullOrWhiteSpace($rowTitle) -and [string]::IsNullOrWhiteSpace($rowText)) {
         return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
     }
     $rowImage = ([string]$Image).Trim()
@@ -435,10 +437,10 @@ function Add-MojazBulletinRows {
 function Add-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [string]$Image = '', [string]$Title = '', [string]$Text = '', $Fields,
+        [string]$Image = '', [string]$Title = '', [string]$Text = '', $Fields, [switch]$AllowImageOnly,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
-    $rowData = @{ Image = $Image; Title = $Title; Text = $Text; ImageMode = $ImageMode }
+    $rowData = @{ Image = $Image; Title = $Title; Text = $Text; ImageMode = $ImageMode; AllowImageOnly = $AllowImageOnly }
     if ($PSBoundParameters.ContainsKey('Fields')) { $rowData.Fields = $Fields }
     return (Add-MojazBulletinRows -Library $Library -BulletinId $BulletinId -Rows @($rowData) -Now $Now -UserId $UserId)
 }
@@ -446,11 +448,13 @@ function Add-MojazBulletinRow {
 function Set-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image, [hashtable]$DesignFields,
+        [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image, [hashtable]$DesignFields, [switch]$AllowImageOnly,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
     $editedRowId = $RowId
+    $imageSelected = $AllowImageOnly -and ($ImageMode -in 'inherit', 'template' -or
+        ($ImageMode -eq 'new' -and -not [string]::IsNullOrWhiteSpace($Image)))
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
             $row = @(@(Get-MojazProperty $bulletin 'Rows' @()) | Where-Object { [string]$_.Id -eq $editedRowId }) | Select-Object -First 1
@@ -460,8 +464,8 @@ function Set-MojazBulletinRow {
             if ($fields.ContainsKey('Image') -or $fields.ContainsKey('ImageMode')) {
                 $path = ([string]$Image).Trim()
                 $mode = if ($ImageMode) { $ImageMode } elseif ($path) { 'new' } else { 'inherit' }
-                $row.ImageMode = $mode
-                $row.Image = $(if ($mode -eq 'new') { $path } else { '' })
+                $row | Add-Member -NotePropertyName ImageMode -NotePropertyValue $mode -Force
+                $row | Add-Member -NotePropertyName Image -NotePropertyValue $(if ($mode -eq 'new') { $path } else { '' }) -Force
             }
             if ($fields.ContainsKey('DesignFields')) {
                 # Keep fields the current editor cannot see, including media
@@ -475,7 +479,7 @@ function Set-MojazBulletinRow {
                 $row | Add-Member -NotePropertyName Fields -NotePropertyValue ([pscustomobject]$mergedFields) -Force
                 if ($mergedFields.Count -gt 0 -or [string](Get-MojazProperty $row 'Image')) { return }
             }
-            if ([string]::IsNullOrWhiteSpace([string]$row.Title) -and [string]::IsNullOrWhiteSpace([string]$row.Text)) {
+            if (-not $imageSelected -and [string]::IsNullOrWhiteSpace([string]$row.Title) -and [string]::IsNullOrWhiteSpace([string]$row.Text)) {
                 return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
             }
         })

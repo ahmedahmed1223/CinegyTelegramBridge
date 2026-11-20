@@ -2559,6 +2559,19 @@
           },
           "timing": {
             "$ref": "#/components/schemas/BulletinTiming"
+          },
+          "imageField": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "imageChoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulletinImageChoice"
+            },
+            "default": null,
+            "nullable": true
           }
         }
       },
@@ -2613,6 +2626,16 @@
           },
           "timing": {
             "$ref": "#/components/schemas/BulletinTimingInput"
+          },
+          "imageMode": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "imageSourceRowId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         }
       },
@@ -2632,6 +2655,22 @@
           },
           "kind": {
             "type": "string"
+          }
+        }
+      },
+      "BulletinImageChoice": {
+        "required": [
+          "rowId",
+          "rowNumber"
+        ],
+        "type": "object",
+        "properties": {
+          "rowId": {
+            "type": "string"
+          },
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },
@@ -2748,6 +2787,11 @@
           },
           "skipped": {
             "type": "boolean"
+          },
+          "imageMode": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         }
       },

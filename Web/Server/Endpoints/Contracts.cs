@@ -11,15 +11,17 @@ public sealed record OutputCapture(string Id, string State, string Kind, string 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
 public sealed record BulletinField(string Name, string Label, string Kind);
-public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped);
+public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
+public sealed record BulletinImageChoice(string RowId, int RowNumber);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,
-    BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing);
+    BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing,
+    string? ImageField = null, BulletinImageChoice[]? ImageChoices = null);
 public sealed record BulletinTiming(int DelayFrames, int IntroExtraFrames, int LastRowFrames, bool SyncToLoop,
     int LoopFrames, double Fps, int EffectiveIntroFrames, int EffectiveLastFrames, string FitNote);
 public sealed record BulletinTimingInput(int? DelayFrames = null, int? IntroExtraFrames = null, int? LastRowFrames = null, bool? SyncToLoop = null);
 public sealed record BulletinEditRequest(string Action, string? Id = null, int? Revision = null, int? Page = null,
     string? RowId = null, string? Name = null, string? Design = null, Dictionary<string, string>? Values = null,
-    BulletinTimingInput? Timing = null);
+    BulletinTimingInput? Timing = null, string? ImageMode = null, string? ImageSourceRowId = null);
 public sealed record BulletinDesignOption(string Key, string Label);
 public sealed record BulletinDesignOptions(BulletinDesignOption[] Designs);
 public sealed record BulletinPasteRequest(string Action, string Id, int Revision, string Format, string Text, string? Review = null);

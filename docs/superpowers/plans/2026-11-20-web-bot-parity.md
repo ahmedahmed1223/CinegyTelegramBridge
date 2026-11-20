@@ -8,7 +8,7 @@
 |---|---|---|
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, shared timing defaults and per-story overrides, automatic run preview and playback, pause, resume, advance, stop retry, reviewed single-story and timed playback, isolated rehearsal | Cross-client acceptance checks |
-| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, built-in timing, on-air indicator | Attachments, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
+| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, existing picture choices, built-in timing, on-air indicator | New attachments, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
 | Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls, snapshots and clips | Template and material schedule, incident and operation history, notifications, reports and exports |
@@ -33,6 +33,7 @@
 - [x] Connect the bulletin library and editor to `Parts/Bridge.Mojaz.ps1` and the shared library module. Test stale revisions, preserving existing media, and rejecting file paths in text edits.
 - [x] Review bulletin paste against the selected design's columns and save the approved rows atomically. Expose the built-in design's shared frame timing.
 - [x] Switch an existing bulletin to another usable design while preserving its rows and attachments. Reject a stale edit or a bulletin on air.
+- [x] Expose existing picture choices in the bulletin table and resolve reused pictures through revision-checked row IDs.
 - [ ] Complete bulletin attachments and scheduling using the existing bot rules. Route a run through its selected scene and test recovery and the existing urgent conflict rules before adding web playback.
 - [ ] Extend the news views with program boards from `Parts/Bridge.Boards.ps1`. Test upload validation, shared ownership and role restrictions before exposing actions.
 

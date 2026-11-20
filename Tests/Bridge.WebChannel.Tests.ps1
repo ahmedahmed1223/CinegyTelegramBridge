@@ -1357,11 +1357,14 @@ Describe 'Web channel: the pipe' {
         '<Scene><Var Name="mojaz_img" Type="String" /><Title Text="${mojaz_img}" /></Scene>' | Set-Content -LiteralPath $collision
         $mediaCollision = Join-Path $TestDrive 'media-collision.cintitle'
         '<Scene><Var Name="location.Text" Type="String" /><Plate File="${location.Text}" /></Scene>' | Set-Content -LiteralPath $mediaCollision
+        $imageOnly = Join-Path $TestDrive 'image-only.cintitle'
+        '<Scene><Var Name="mojaz_img" Type="File" /><Plate File="${mojaz_img}" /></Scene>' | Set-Content -LiteralPath $imageOnly
         @{
             Mojaz = @{ path = $scene; layer = 4 }
             HeadlineBulletin = @{ path = $alternate; layer = 6; bulletin = $true }
             ConflictingBulletin = @{ path = $collision; layer = 6; bulletin = $true }
             ConflictingMedia = @{ path = $mediaCollision; layer = 6; bulletin = $true }
+            PhotoBulletin = @{ path = $imageOnly; layer = 6; bulletin = $true }
             StudioBulletin = @{
                 path = $scene; layer = 5; description = 'موجز الاستوديو'; bulletin = $true
                 fields = @(@{ name = 'title.Text'; label = 'العنوان' }, @{ name = 'location.Text'; label = 'الموقع' })
@@ -1465,12 +1468,44 @@ Describe 'Web channel: the pipe' {
             $restoredDesign.data.rows[1].values.'title.Text' | Should -Be 'عنوان من البوت'
             $restoredDesign.data.rows[1].values.'location.Text' | Should -Be 'الميدان'
 
+            $restoredDesign.data.rows[1].imageMode | Should -Be 'new'
+            @($restoredDesign.data.imageChoices).rowId | Should -Contain $rowId
+            ($restoredDesign | ConvertTo-Json -Depth 9) | Should -Not -Match 'attached\.png'
+            $imageEdit = @{
+                actor = 4321; action = 'update'; id = $id; rowId = $restoredDesign.data.rows[0].id
+                revision = $restoredDesign.data.revision; values = @{ 'title.Text' = 'خبر ثانٍ'; 'location.Text' = '' }
+                imageMode = 'reuse'; imageSourceRowId = 'D:/unauthorized.png'
+            }
+            (& $requestBulletin $imageEdit).error | Should -Be 'bulletin_image_invalid'
+            $imageEdit.imageSourceRowId = $rowId
+            (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id).Rows[0].PSObject.Properties.Remove('ImageMode')
+            $reused = & $requestBulletin $imageEdit
+            $reused.data.rows[0].imageMode | Should -Be 'new'
+            (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id).Rows[0].Image | Should -Be 'D:/station/attached.png'
+            (& $requestBulletin $imageEdit).error | Should -Be 'bulletin_stale'
+            $imageEdit.revision = $reused.data.revision
+            $imageEdit.imageMode = 'template'
+            $imageEdit.Remove('imageSourceRowId')
+            $templateImage = & $requestBulletin $imageEdit
+            $templateImage.data.rows[0].imageMode | Should -Be 'template'
+            $imageEdit.revision = $templateImage.data.revision
+            $imageEdit.imageMode = 'inherit'
+            $inherited = & $requestBulletin $imageEdit
+            $inherited.data.rows[0].imageMode | Should -Be 'inherit'
+
+            $album = & $requestBulletin @{ actor = 4321; action = 'create'; name = 'موجز الصور'; design = 'PhotoBulletin' }
+            $album.ok | Should -BeTrue
+            $photo = & $requestBulletin @{ actor = 4321; action = 'add'; id = $album.data.id; revision = $album.data.revision; imageMode = 'template'; values = @{} }
+            $photo.data.rows[0].imageMode | Should -Be 'template'
+            $photo = & $requestBulletin @{ actor = 4321; action = 'update'; id = $album.data.id; revision = $photo.data.revision; rowId = $photo.data.rows[0].id; imageMode = 'inherit'; values = @{} }
+            $photo.data.rows[0].imageMode | Should -Be 'inherit'
+
             Mock Write-BridgeValidatedJson { $false }
             $move.action = 'remove'
-            $move.revision = $restoredDesign.data.revision
+            $move.revision = $inherited.data.revision
             (& $requestBulletin $move).error | Should -Be 'bulletin_save_failed'
             $stillSaved = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
-            $stillSaved.data.revision | Should -Be $restoredDesign.data.revision
+            $stillSaved.data.revision | Should -Be $inherited.data.revision
             $stillSaved.data.rows[1].id | Should -Be $rowId
 
             Move-Item -LiteralPath $scene -Destination (Join-Path $TestDrive 'retired-bulletin.cintitle')

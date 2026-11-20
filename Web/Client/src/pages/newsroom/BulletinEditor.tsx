@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Button, Group, Pagination, Paper, Select, Skeleton, Stack,
+  ActionIcon, Alert, Badge, Button, Group, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
   Table, Text, Textarea, TextInput, Title, Tooltip,
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
@@ -15,14 +15,15 @@ import classes from './NewsroomPage.module.css'
 type Bulletin = Schemas['BulletinEditor']
 type Row = Schemas['BulletinRow']
 type EditRequest = Pick<Schemas['BulletinEditRequest'], 'action'> & Partial<Schemas['BulletinEditRequest']>
-type EditRow = { row: Row | null; revision: number; values: Record<string, string> }
+type EditRow = { row: Row | null; revision: number; values: Record<string, string>; imageChoice: string }
 type NameAction = 'create' | 'rename' | 'copy'
 const number = new Intl.NumberFormat('ar')
 const names = { create: 'إنشاء موجز', rename: 'إعادة تسمية', copy: 'نسخ الموجز' }
 
 async function applyEdit(request: EditRequest) {
   const { data, error, response } = await api.POST('/api/content/bulletins/editor', {
-    body: { id: null, revision: null, page: null, rowId: null, name: null, design: null, values: null, timing: null, ...request },
+    body: { id: null, revision: null, page: null, rowId: null, name: null, design: null, values: null, timing: null,
+      imageMode: null, imageSourceRowId: null, ...request },
   })
   if (!data) throw new Error(error?.message || messageFor(errorCode(error, response)))
   return data
@@ -128,7 +129,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   function startRow(row: Row | null, revision: number) {
     edit.reset()
     setSavedNote('')
-    setRowEdit({ row, revision, values: Object.fromEntries(textFields.map((field) => [field.name, row?.values[field.name] ?? ''])) })
+    setRowEdit({ row, revision, values: Object.fromEntries(textFields.map((field) => [field.name, row?.values[field.name] ?? ''])),
+      imageChoice: row || !bulletin?.imageField ? '' : 'inherit' })
   }
 
   function rowAction(action: 'up' | 'down' | 'skip' | 'remove', row: Row, latest: Bulletin) {
@@ -150,12 +152,22 @@ export function BulletinEditor({ id, onBack, onSaved }: {
 
   function cell(row: Row | null, field: Bulletin['fields'][number]) {
     if (field.kind === 'media') {
-      return row?.media.includes(field.name) ? <Text size="sm">مرفق</Text> : <Text size="sm" c="dimmed">—</Text>
+      if (row?.media.includes(field.name)) return <Text size="sm">مرفق</Text>
+      if (field.name === bulletin?.imageField && row?.imageMode) {
+        return <Text size="sm" c="dimmed">{row.imageMode === 'template' ? 'صورة القالب' : 'استمرار الصورة السابقة'}</Text>
+      }
+      return <Text size="sm" c="dimmed">—</Text>
     }
     return <Text size="sm" dir="auto" className={classes.bulletinCellText}>{row?.values[field.name] || '—'}</Text>
   }
 
   function editRow(active: EditRow, rank?: number) {
+    const imageChoices = [
+      ...(active.row ? [{ value: '', label: 'الإبقاء على الإعداد الحالي' }] : []),
+      { value: 'inherit', label: 'استمرار الصورة السابقة' },
+      { value: 'template', label: 'صورة القالب' },
+      ...(bulletin?.imageChoices ?? []).map(({ rowId, rowNumber }) => ({ value: `reuse:${rowId}`, label: `صورة الصف ${number.format(rowNumber)}` })),
+    ]
     return (
       <Table.Tr key={active.row?.id ?? 'new'} className={classes.editRow}>
         <Table.Td>{rank == null ? 'جديد' : number.format(rank)}</Table.Td>
@@ -165,6 +177,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <Textarea aria-label={field.label} dir="auto" autosize minRows={2} maxRows={6} maxLength={4096}
                 autoFocus={field === textFields[0]} disabled={busy} value={active.values[field.name] ?? ''}
                 onChange={(event) => setRowEdit({ ...active, values: { ...active.values, [field.name]: event.currentTarget.value } })} />
+            ) : field.name === bulletin?.imageField ? (
+              <NativeSelect miw={170} aria-label={field.label} data={imageChoices} value={active.imageChoice} disabled={busy}
+                onChange={(event) => setRowEdit({ ...active, imageChoice: event.currentTarget.value })} />
             ) : cell(active.row, field)}
           </Table.Td>
         ))}
@@ -232,7 +247,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             <Group gap="xs">
               <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={!textFields.length || busy || editing}
                 onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>
-              <Button leftSection={<IconPlus size={17} />} disabled={!textFields.length || busy || editing}
+              <Button leftSection={<IconPlus size={17} />} disabled={(!textFields.length && !bulletin.imageField) || busy || editing}
                 onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>
             </Group>
           </Group>
@@ -255,7 +270,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <form onSubmit={(event) => {
                 event.preventDefault()
                 if (!rowEdit || busy) return
-                edit.mutate({ action: rowEdit.row ? 'update' : 'add', id, revision: rowEdit.revision, page: bulletin.page, rowId: rowEdit.row?.id, values: rowEdit.values })
+                const [imageMode, imageSourceRowId] = rowEdit.imageChoice.split(':', 2)
+                edit.mutate({ action: rowEdit.row ? 'update' : 'add', id, revision: rowEdit.revision, page: bulletin.page,
+                  rowId: rowEdit.row?.id, values: rowEdit.values, imageMode: imageMode || null, imageSourceRowId })
               }}>
                 <Table.ScrollContainer minWidth={Math.max(520, textFields.length * 165 + 265)} type="native" tabIndex={0} aria-label="جدول إدخال الموجز">
                   <Table verticalSpacing="sm" horizontalSpacing="sm">
@@ -284,7 +301,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                             </Table.Td>
                             <Table.Td>
                               <Group gap={4} wrap="nowrap">
-                                <Tooltip label="تعديل"><ActionIcon variant="subtle" aria-label={`تعديل الصف ${rank}`} disabled={!textFields.length || busy || editing} onClick={() => startRow(row, bulletin.revision)}><IconEdit size={16} /></ActionIcon></Tooltip>
+                                <Tooltip label="تعديل"><ActionIcon variant="subtle" aria-label={`تعديل الصف ${rank}`} disabled={(!textFields.length && !bulletin.imageField) || busy || editing} onClick={() => startRow(row, bulletin.revision)}><IconEdit size={16} /></ActionIcon></Tooltip>
                                 <Tooltip label="رفع"><ActionIcon variant="subtle" aria-label={`رفع الصف ${rank}`} disabled={rank === 1 || busy || editing} onClick={() => rowAction('up', row, bulletin)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
                                 <Tooltip label="خفض"><ActionIcon variant="subtle" aria-label={`خفض الصف ${rank}`} disabled={rank === bulletin.total || busy || editing} onClick={() => rowAction('down', row, bulletin)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
                                 <Tooltip label="حذف"><ActionIcon variant="subtle" color="red" aria-label={`حذف الصف ${rank}`} disabled={busy || editing} onClick={() => rowAction('remove', row, bulletin)}><IconTrash size={16} /></ActionIcon></Tooltip>
@@ -299,7 +316,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 {rowEdit && (
                   <Group justify="flex-end" gap="xs" className={classes.bulletinSave}>
                     <Button variant="subtle" disabled={busy} onClick={() => { setRowEdit(null); edit.reset() }}>إلغاء</Button>
-                    <Button type="submit" loading={edit.isPending} disabled={query.isFetching}>حفظ الصف</Button>
+                    <Button type="submit" loading={edit.isPending} disabled={query.isFetching || (!textFields.length && !rowEdit.imageChoice)}>حفظ الصف</Button>
                   </Group>
                 )}
               </form>

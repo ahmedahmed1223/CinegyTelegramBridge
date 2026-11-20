@@ -21,12 +21,13 @@ param(
     [string]$PipeName = 'CinegyTelegramBridge.Web.Dev',
     [long]$OwnerId = 1001,
     [string]$CaptureFixtureDirectory,
-    [string]$SheetFixturePath
+    [string]$SheetFixturePath,
+    [string]$FixtureRuntimeDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge')
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$runtime = Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge'
+$runtime = [IO.Path]::GetFullPath($FixtureRuntimeDirectory)
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 . (Join-Path $root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json' -RuntimePath $runtime
 Copy-Item -LiteralPath (Join-Path $root 'TelegramBridge.ps1') -Destination $runtime
@@ -108,7 +109,8 @@ Set-JsonProp $script:UrgentBoard.Items[0] 'ExtraFields' @{ 'Ajel.location' = 'ا
 $script:UrgentBoard.Items[1].Enabled = $false
 $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الفترة المسائية').Value
 $demoBulletinId = $script:MojazLibrary.Bulletins[0].Id
-$script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.').Value
+$demoPicture = if ($CaptureFixtureDirectory) { Join-Path $CaptureFixtureDirectory 'output.jpg' } else { '' }
+$script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.' -Image $demoPicture).Value
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'تقرير اليوم' -Text 'متابعة من غرفة الأخبار.').Value
 
 $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @($OwnerId) -Force

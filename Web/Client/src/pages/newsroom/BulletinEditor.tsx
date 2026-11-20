@@ -98,7 +98,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [editingTiming, setEditingTiming] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
-  const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; rank: string } | null>(null)
+  const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; field: string; title: string } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
@@ -315,19 +315,25 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                         return rowEdit?.row?.id === row.id ? editRow(rowEdit, rank) : (
                           <Table.Tr key={row.id}>
                             <Table.Td>{number.format(rank)}</Table.Td>
-                            {fields.map((field) => (
-                              <Table.Td key={field.name}>
-                                {bulletin.canUploadPhoto && field.name === bulletin.imageField ? <Group gap={6} wrap="nowrap">
-                                  {cell(row, field)}
-                                  <Tooltip label="رفع صورة">
-                                    <ActionIcon variant="subtle" aria-label={`رفع صورة للصف ${number.format(rank)}`} disabled={busy || editing}
-                                      onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, rank: number.format(rank), revision: bulletin.revision }) }}>
-                                      <IconFileUpload size={16} />
-                                    </ActionIcon>
-                                  </Tooltip>
-                                </Group> : cell(row, field)}
-                              </Table.Td>
-                            ))}
+                            {fields.map((field) => {
+                              const canonical = field.name === bulletin.imageField
+                              const canUpload = bulletin.photoFields?.includes(field.name) ?? (bulletin.canUploadPhoto && canonical)
+                              const title = canonical ? `رفع صورة للصف ${number.format(rank)}`
+                                : `رفع صورة إلى ${field.label} للصف ${number.format(rank)}`
+                              return (
+                                <Table.Td key={field.name}>
+                                  {canUpload ? <Group gap={6} wrap="nowrap">
+                                    {cell(row, field)}
+                                    <Tooltip label={title}>
+                                      <ActionIcon variant="subtle" aria-label={title} disabled={busy || editing}
+                                        onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, field: field.name, title, revision: bulletin.revision }) }}>
+                                        <IconFileUpload size={16} />
+                                      </ActionIcon>
+                                    </Tooltip>
+                                  </Group> : cell(row, field)}
+                                </Table.Td>
+                              )
+                            })}
                             <Table.Td>
                               <Button size="compact-xs" variant="subtle" color={row.skipped ? 'gray' : 'teal'} disabled={busy || editing}
                                 aria-label={row.skipped ? `تضمين الصف ${rank}` : `تجاوز الصف ${rank}`}

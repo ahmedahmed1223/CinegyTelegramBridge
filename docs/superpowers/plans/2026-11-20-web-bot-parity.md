@@ -8,7 +8,7 @@
 |---|---|---|
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, shared timing defaults and per-story overrides, automatic run preview and playback, pause, resume, advance, stop retry, reviewed single-story and timed playback, isolated rehearsal | Cross-client acceptance checks |
-| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, shared picture choices and uploads, editorial and image previews, timing, schedules, reviewed start and identity-checked stop for the selected design | Uploads for arbitrary design fields and cross-client acceptance checks |
+| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, shared picture choices, uploads to individual picture columns in saved rows, editorial and image previews, timing, schedules, reviewed start and identity-checked stop for the selected design | Creating rows that contain only custom media, other attachment types, and cross-client acceptance checks |
 | Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls, snapshots and clips | Template and material schedule, incident and operation history, notifications, reports and exports |
@@ -41,7 +41,8 @@
 - [x] Start the built-in bulletin after reviewing content and the target layer, follow the shared run progress, and stop only its confirmed scene.
 - [x] Edit and preview the clock of alternate designs that declare their own frame rate, loop and outro.
 - [x] Route alternate designs through the selected scene and variables for manual and scheduled playback, including recovery and urgent priority.
-- [ ] Complete attachments for arbitrary design fields.
+- [x] Upload a photo to the chosen media column of a saved row and preview the resulting picture. Verify that cleanup retains attachments from saved rows and active runs.
+- [ ] Create rows directly from a custom attachment and complete other attachment types.
 - [ ] Extend the news views with program boards from `Parts/Bridge.Boards.ps1`. Test upload validation, shared ownership and role restrictions before exposing actions.
 
 ## Acceptance for each workflow

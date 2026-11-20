@@ -28,7 +28,7 @@ public sealed record BulletinScheduleRequest(string Action, string Id, int? Revi
     string? ScheduleId = null, int? Page = null);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,
     BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing,
-    string? ImageField = null, BulletinImageChoice[]? ImageChoices = null, bool CanUploadPhoto = false);
+    string? ImageField = null, BulletinImageChoice[]? ImageChoices = null, bool CanUploadPhoto = false, string[]? PhotoFields = null);
 public sealed record BulletinTiming(int DelayFrames, int IntroExtraFrames, int LastRowFrames, bool SyncToLoop,
     int LoopFrames, double Fps, int EffectiveIntroFrames, int EffectiveLastFrames, string FitNote);
 public sealed record BulletinTimingInput(int? DelayFrames = null, int? IntroExtraFrames = null, int? LastRowFrames = null, bool? SyncToLoop = null);

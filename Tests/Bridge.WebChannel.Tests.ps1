@@ -1594,6 +1594,69 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'uploads a photo only to the selected custom bulletin media field' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'custom-photo-library.json' }
+        Mock Get-TemplateRegistryFilePath { Join-Path $TestDrive 'custom-photo-templates.json' }
+        $sceneFolder = Join-Path $TestDrive "studio`u{A0}archive"
+        New-Item -ItemType Directory -Path $sceneFolder | Out-Null
+        $path = Join-Path $sceneFolder 'custom-photo.cintitle'
+        '<Scene Fps="25" Duration="125"><Var Name="studio.main" Type="File" /><Plate File="${studio.main}" Size="40;20" /><Var Name="studio.side" Type="File" /><Plate File="${studio.side}" /><Var Name="studio.title" Type="String" /><Title Text="${studio.title}" /></Scene>' |
+            Set-Content -LiteralPath $path
+        @{ StudioPhoto = @{ path = $path; layer = 6; bulletin = $true } } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-TemplateRegistryFilePath)
+        $oldLibrary = $script:MojazLibrary
+        $oldUploadDirectory = Get-Variable mojazWebUploadDirectory -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $script:mojazWebUploadDirectory = Join-Path $TestDrive 'web-custom-photo-uploads'
+        New-Item -ItemType Directory -Path $script:mojazWebUploadDirectory | Out-Null
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'صور الاستوديو' -TemplateKey 'StudioPhoto').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Fields @{
+                    'studio.title' = 'عنوان ثابت'; 'studio.side' = 'other.png'
+                }).Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $photo = @{ actor = 4321; action = 'prepare'; id = $id; rowId = $bulletin.Rows[0].Id; revision = $bulletin.Revision; field = 'studio.title' }
+            $send = {
+                $line = @{ op = 'bulletin.photo'; args = $photo } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            (& $send).error | Should -Be 'bulletin_photo_unavailable'
+            $photo.field = 'studio.main'
+            (& $send).ok | Should -BeTrue
+            $photo.action = 'apply'
+            $photo.upload = [guid]::NewGuid().ToString('N')
+            $inputFile = Join-Path $script:mojazWebUploadDirectory "web-$($photo.upload).image"
+            $bitmap = [System.Drawing.Bitmap]::new(3, 3)
+            try { $bitmap.Save($inputFile, [System.Drawing.Imaging.ImageFormat]::Png) }
+            finally { $bitmap.Dispose() }
+            $edited = & $send
+            $edited.ok | Should -BeTrue
+            $edited.data.photoFields | Should -Contain 'studio.main'
+            $edited.data.rows[0].media | Should -Contain 'studio.main'
+            ($edited | ConvertTo-Json -Depth 8) | Should -Not -Match '\.png'
+            Import-MojazLibrary
+            $row = $script:MojazLibrary.Bulletins[0].Rows[0]
+            $row.Fields.'studio.side' | Should -Be 'other.png'
+            $row.Fields.'studio.title' | Should -Be 'عنوان ثابت'
+            $row.Image | Should -BeNullOrEmpty
+            $asset = [System.Drawing.Image]::FromFile($row.MediaFields.'studio.main')
+            try { $asset.Width | Should -Be 40; $asset.Height | Should -Be 20 }
+            finally { $asset.Dispose() }
+            $previewArgs = @{ actor = 4321; id = $id; rowId = $row.Id; revision = $edited.data.revision; field = 'studio.main' }
+            $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress
+            $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $preview.ok | Should -BeTrue
+            $preview.data.rows[0].imageFields | Should -Contain 'studio.main'
+            ($preview | ConvertTo-Json -Depth 8) | Should -Not -Match '\.png'
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:mojazWebUploadDirectory = $oldUploadDirectory
+        }
+    }
+
     It 'reviews a batch against its mapped bulletin columns and appends it only once after confirmation' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-MojazAvailable { $true }

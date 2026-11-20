@@ -2128,6 +2128,13 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "field",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3160,6 +3167,14 @@
           "canUploadPhoto": {
             "type": "boolean",
             "default": false
+          },
+          "photoFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
           }
         }
       },

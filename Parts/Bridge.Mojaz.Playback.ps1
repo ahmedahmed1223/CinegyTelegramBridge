@@ -41,7 +41,7 @@ function Get-MojazRunRowVariables {
             if ($image) { $values[$name] = $image }
         }
         else {
-            $value = Get-MojazRowFieldValue -Row $Row -FieldName $name
+            $value = Get-MojazRowFieldValue -Row $Row -FieldName $name -Kind $kind
             if ($kind -eq 'text' -or $value) { $values[$name] = $value }
         }
     }
@@ -1065,29 +1065,45 @@ function Update-MojazImageCleanup {
     # Zero turns the sweep off: a newsroom that wants to keep every picture it
     # ever uploaded is allowed to.
     if ($MinimumAgeHours -le 0) { return 0 }
-    $directory = Get-MojazUploadDirectory
-    if (-not $directory -or -not (Test-Path -LiteralPath $directory)) { return 0 }
+    $directories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $defaultDirectory = Get-MojazUploadDirectory
+    if ($defaultDirectory -and (Test-MojazUploadDirectoryPath -Directory $defaultDirectory)) { [void]$directories.Add($defaultDirectory) }
+    $store = Get-TemplateStore
+    foreach ($key in @($store.Order)) {
+        if ($key -eq $script:MojazTemplateKey -or -not (Test-MojazDesignTemplate -Key $key -Template $store.Map[$key])) { continue }
+        $designDirectory = Get-MojazDesignUploadDirectory -Scene ([string](Get-JsonProp $store.Map[$key] 'Path'))
+        if ($designDirectory) { [void]$directories.Add($designDirectory) }
+    }
+    if (-not $directories.Count) { return 0 }
     $referenced = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $attached = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $rows = [System.Collections.Generic.List[object]]::new()
     foreach ($bulletin in @(Get-JsonProp $script:MojazLibrary 'Bulletins')) {
-        foreach ($row in @(Get-JsonProp $bulletin 'Rows')) {
-            $image = [string](Get-JsonProp $row 'Image')
-            if ($image) { $referenced.Add((Split-Path -Path $image -Leaf)) | Out-Null }
-        }
+        foreach ($row in @(Get-JsonProp $bulletin 'Rows')) { $rows.Add($row) }
     }
     if ($script:MojazPlayback) {
-        foreach ($row in @($script:MojazPlayback.Rows)) {
-            $image = [string](Get-JsonProp $row 'Image')
-            if ($image) { $referenced.Add((Split-Path -Path $image -Leaf)) | Out-Null }
+        foreach ($row in @($script:MojazPlayback.Rows)) { $rows.Add($row) }
+    }
+    foreach ($row in $rows) {
+        $image = [string](Get-JsonProp $row 'Image')
+        if ($image) { $referenced.Add((Split-Path -Path $image -Leaf)) | Out-Null }
+        $media = Get-JsonProp $row 'MediaFields'
+        $paths = if ($media -is [System.Collections.IDictionary]) { $media.Values }
+        elseif ($media) { $media.PSObject.Properties.Value }
+        foreach ($path in $paths) {
+            if ($path) { [void]$attached.Add([string]$path) }
         }
     }
     $cutoff = (Get-Date).AddHours(-1 * [math]::Max(1, $MinimumAgeHours))
     $removed = 0
-    foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -ErrorAction SilentlyContinue)) {
-        if ($file.Name -notmatch $script:MojazUploadPattern) { continue }
-        if ($referenced.Contains($file.Name)) { continue }
-        if ($file.LastWriteTime -gt $cutoff) { continue }
-        try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $removed++ }
-        catch { Write-BridgeLog "Could not remove the orphaned Mojaz picture '$($file.Name)': $($_.Exception.Message)" 'WARN' }
+    foreach ($directory in $directories) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -ErrorAction SilentlyContinue)) {
+            if ($file.Name -notmatch $script:MojazUploadPattern -or $file.LastWriteTime -gt $cutoff) { continue }
+            if ($attached.Contains($file.FullName) -or $referenced.Contains($file.Name)) { continue }
+            if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $removed++ }
+            catch { Write-BridgeLog "Could not remove the orphaned Mojaz picture '$($file.Name)': $($_.Exception.Message)" 'WARN' }
+        }
     }
     if ($removed -gt 0) { Write-BridgeLog "Removed $removed orphaned Mojaz picture(s)." }
     return $removed

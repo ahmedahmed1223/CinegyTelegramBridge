@@ -33,9 +33,11 @@ export async function uploadTickerTxt(file: File, revision: string, review?: str
   return response.status === 204 ? null : await response.json() as Schemas['TickerTxtPreview']
 }
 
-export async function uploadBulletinPhoto(file: File, id: string, rowId: string, revision: number): Promise<Schemas['BulletinEditor']> {
+export async function uploadBulletinPhoto(file: File, id: string, rowId: string, revision: number, field?: string): Promise<Schemas['BulletinEditor']> {
   const path = '/api/content/bulletins/photo' satisfies keyof paths
-  const response = await postBinary(path, new URLSearchParams({ id, rowId, revision: String(revision) }), file, 'bulletin_photo_size')
+  const query = new URLSearchParams({ id, rowId, revision: String(revision) })
+  if (field) query.set('field', field)
+  const response = await postBinary(path, query, file, 'bulletin_photo_size')
   return await response.json() as Schemas['BulletinEditor']
 }
 

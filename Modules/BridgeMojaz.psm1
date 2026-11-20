@@ -456,6 +456,7 @@ function Set-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
         [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image, [hashtable]$DesignFields, [switch]$AllowImageOnly,
+        [string]$MediaField, [string]$MediaPath,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
@@ -474,6 +475,15 @@ function Set-MojazBulletinRow {
                 $row | Add-Member -NotePropertyName ImageMode -NotePropertyValue $mode -Force
                 $row | Add-Member -NotePropertyName Image -NotePropertyValue $(if ($mode -eq 'new') { $path } else { '' }) -Force
             }
+            $media = Get-MojazProperty $row 'MediaFields'
+            if ($MediaField -and $MediaPath) {
+                # Keep physical paths out of the text normalizer. Unicode
+                # characters in a station folder name are part of the path.
+                if (-not $media) { $media = [pscustomobject]@{} }
+                $media | Add-Member -NotePropertyName $MediaField -NotePropertyValue $MediaPath -Force
+                $row | Add-Member -NotePropertyName MediaFields -NotePropertyValue $media -Force
+                return
+            }
             if ($fields.ContainsKey('DesignFields')) {
                 # Keep fields the current editor cannot see, including media
                 # and values from a design previously assigned to this bulletin.
@@ -486,6 +496,7 @@ function Set-MojazBulletinRow {
                 $row | Add-Member -NotePropertyName Fields -NotePropertyValue ([pscustomobject]$mergedFields) -Force
                 if ($mergedFields.Count -gt 0 -or [string](Get-MojazProperty $row 'Image')) { return }
             }
+            if ($media -and @($media.PSObject.Properties).Count -gt 0) { return }
             if (-not $imageSelected -and [string]::IsNullOrWhiteSpace([string]$row.Title) -and [string]::IsNullOrWhiteSpace([string]$row.Text)) {
                 return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
             }

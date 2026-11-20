@@ -78,6 +78,8 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
             @{ name = 'title.Text'; label = 'العنوان' }
             @{ name = 'Subject.Text'; label = 'التفاصيل' }
             @{ name = 'studio.location'; label = 'الموقع' }
+            @{ name = 'studio.picture'; label = 'صورة الاستوديو' }
+            @{ name = 'studio.thumbnail'; label = 'الصورة المصغّرة' }
         )
     }
     Guest = @{
@@ -97,6 +99,8 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
   <Var Name="title.Text" Type="String" /><Title Text="${title.Text}" />
   <Var Name="Subject.Text" Type="String" /><Title Text="${Subject.Text}" />
   <Var Name="studio.location" Type="String" /><Title Text="${studio.location}" />
+  <Var Name="studio.picture" Type="File" /><Plate File="${studio.picture}" Size="320;180" />
+  <Var Name="studio.thumbnail" Type="File" /><Plate File="${studio.thumbnail}" Size="160;90" />
 </Scene>
 '@ | Set-Content -LiteralPath (Join-Path $runtime 'studio-bulletin.cintitle')
 'نافذة على أبرز الأخبار اليوم|متابعة مباشرة في النشرة المسائية|برنامج خاص مساء الخميس' |

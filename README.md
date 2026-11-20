@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.107.0
+
+The web bulletin editor can upload a photo into an individual media column in a saved row, including custom columns in alternate designs. The bridge uses each field's declared dimensions when available and preserves referenced uploads during cleanup of registered designs' photo directories.
+
 ## Version 8.106.0
 
 Alternate bulletin designs with a scene clock can run from the web preview or the shared schedule. The run uses the selected template fields and retains its scene identity through restart. An alternate appointment uses the latest saved rows and starts only when its booked target still matches and its layer is empty.

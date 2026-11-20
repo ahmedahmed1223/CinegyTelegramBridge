@@ -4,18 +4,19 @@ import { useEffect, useState } from 'react'
 import { uploadBulletinPhoto, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 
-export function BulletinPhotoDialog({ id, rowId, revision, rank, onClose, onSaved }: {
+export function BulletinPhotoDialog({ id, rowId, revision, title, field, onClose, onSaved }: {
   id: string
   rowId: string
   revision: number
-  rank: string
+  title: string
+  field: string
   onClose: () => void
   onSaved: (bulletin: Schemas['BulletinEditor']) => void
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
   const upload = useMutation({
-    mutationFn: (image: File) => uploadBulletinPhoto(image, id, rowId, revision),
+    mutationFn: (image: File) => uploadBulletinPhoto(image, id, rowId, revision, field),
     onSuccess: onSaved,
   })
   const tooLarge = !!file && file.size > 10 * 1024 * 1024
@@ -28,7 +29,7 @@ export function BulletinPhotoDialog({ id, rowId, revision, rank, onClose, onSave
     return () => { reader.onload = null; if (reader.readyState === FileReader.LOADING) reader.abort() }
   }, [file, tooLarge])
   return (
-    <Modal opened title={`رفع صورة للصف ${rank}`} onClose={() => { if (!upload.isPending) onClose() }}>
+    <Modal opened title={title} onClose={() => { if (!upload.isPending) onClose() }}>
       <form onSubmit={(event) => {
         event.preventDefault()
         if (file && !tooLarge && !upload.isPending && !stale) upload.mutate(file)

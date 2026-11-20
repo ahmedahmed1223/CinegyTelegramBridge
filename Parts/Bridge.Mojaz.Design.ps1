@@ -166,7 +166,13 @@ function Get-MojazRowFieldValue {
         This is what lets a bulletin written before designs existed play on a
         design without being rewritten.
     #>
-    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$FieldName)
+    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$FieldName, [string]$Kind)
+    $media = Get-JsonProp $Row 'MediaFields'
+    if ($Kind -ne 'text' -and $media) {
+        $attachment = if ($media -is [System.Collections.IDictionary]) { [string]$media[$FieldName] }
+        else { [string]$media.PSObject.Properties[$FieldName]?.Value }
+        if ($attachment) { return $attachment }
+    }
     $bag = Get-JsonProp $Row 'Fields'
     if ($bag) {
         # Scene variable names can contain literal brackets. Properties.Match
@@ -189,7 +195,7 @@ function Get-MojazRowValues {
     param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$TemplateKey)
     $values = [ordered]@{}
     foreach ($prompt in @(Get-MojazRowFieldPrompts -TemplateKey $TemplateKey)) {
-        $values[$prompt.Name] = Get-MojazRowFieldValue -Row $Row -FieldName $prompt.Name
+        $values[$prompt.Name] = Get-MojazRowFieldValue -Row $Row -FieldName $prompt.Name -Kind $prompt.Kind
     }
     return $values
 }

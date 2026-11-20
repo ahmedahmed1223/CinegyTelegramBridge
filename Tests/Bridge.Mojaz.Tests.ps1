@@ -924,12 +924,26 @@ Describe 'Cleaning up orphaned bulletin pictures' {
         $onAir = Join-Path $script:pictures 'mojaz-20260901-120000-bbbbbbbb.jpg'
         $orphan = Join-Path $script:pictures 'mojaz-20260901-120000-cccccccc.jpg'
         $foreign = Join-Path $script:pictures 'newsroom-logo.png'
-        foreach ($file in @($used, $onAir, $orphan, $foreign)) {
+        $script:cleanupScene = Join-Path $script:pictures 'alternate\studio.cintitle'
+        $alternateDirectory = Join-Path (Split-Path -Parent $script:cleanupScene) 'Mojaz\bot'
+        New-Item -ItemType Directory -Path $alternateDirectory -Force | Out-Null
+        '<Scene />' | Set-Content -LiteralPath $script:cleanupScene
+        Mock Get-TemplateStore {
+            @{ Order = @('Studio'); Map = @{ Studio = @{ Path = $script:cleanupScene; Bulletin = $true } } }
+        }
+        $customSaved = Join-Path $script:pictures 'mojaz-20260901-120000-eeeeeeee.png'
+        $customOnAir = Join-Path $alternateDirectory 'mojaz-20260901-120000-ffffffff.png'
+        $alternateOrphan = Join-Path $alternateDirectory 'mojaz-20260901-120000-aaaaaaaa.jpg'
+        foreach ($file in @($used, $onAir, $orphan, $foreign, $customSaved, $customOnAir, $alternateOrphan)) {
             'x' | Set-Content -LiteralPath $file -Encoding utf8
             (Get-Item -LiteralPath $file).LastWriteTime = (Get-Date).AddDays(-3)
         }
-        New-TestMojazLibrary -Rows @((New-TestMojazRow -Image ".\Mojaz\bot\$(Split-Path $used -Leaf)")) | Out-Null
-        $script:MojazPlayback = @{ BulletinId = 'b_x'; Rows = @((New-TestMojazRow -Image ".\Mojaz\bot\$(Split-Path $onAir -Leaf)")) }
+        $savedRow = New-TestMojazRow -Image ".\Mojaz\bot\$(Split-Path $used -Leaf)"
+        Set-JsonProp $savedRow 'MediaFields' ([pscustomobject]@{ 'studio.picture' = $customSaved })
+        New-TestMojazLibrary -Rows @($savedRow) | Out-Null
+        $runningRow = New-TestMojazRow -Image ".\Mojaz\bot\$(Split-Path $onAir -Leaf)"
+        Set-JsonProp $runningRow 'MediaFields' ([pscustomobject]@{ 'studio.picture' = $customOnAir })
+        $script:MojazPlayback = @{ BulletinId = 'b_x'; Rows = @($runningRow) }
 
         Update-MojazImageCleanup | Should -Be 1
 
@@ -937,6 +951,12 @@ Describe 'Cleaning up orphaned bulletin pictures' {
         Test-Path -LiteralPath $onAir | Should -BeTrue
         Test-Path -LiteralPath $foreign | Should -BeTrue
         Test-Path -LiteralPath $orphan | Should -BeFalse
+        Test-Path -LiteralPath $customSaved | Should -BeTrue
+        Test-Path -LiteralPath $customOnAir | Should -BeTrue
+        # Legacy relative references are retained conservatively across roots.
+        Test-Path -LiteralPath $alternateOrphan | Should -BeTrue
+        Move-Item -LiteralPath $alternateOrphan -Destination (Join-Path $alternateDirectory 'mojaz-20260901-120000-11223344.jpg')
+        Update-MojazImageCleanup -Force | Should -Be 1
     }
 
     It 'leaves a picture uploaded for a row still being written' {

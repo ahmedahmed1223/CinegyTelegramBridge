@@ -175,6 +175,23 @@ function Get-MojazUploadDirectory {
     return (Join-Path $root 'Mojaz\bot')
 }
 
+function Test-MojazUploadDirectoryPath {
+    param([string]$Directory)
+    if (-not [IO.Path]::IsPathFullyQualified($Directory)) { return $false }
+    for ($folder = $Directory; $folder; $folder = [IO.Path]::GetDirectoryName($folder)) {
+        $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
+        if ($item -and (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) { return $false }
+    }
+    return $true
+}
+
+function Get-MojazDesignUploadDirectory {
+    param([string]$Scene)
+    if (-not [IO.Path]::IsPathFullyQualified($Scene) -or -not (Test-Path -LiteralPath $Scene -PathType Leaf)) { return }
+    $directory = Join-Path (Split-Path -Parent $Scene) 'Mojaz\bot'
+    if (Test-MojazUploadDirectoryPath -Directory $directory) { return $directory }
+}
+
 # ------------------------------------------------------------------ selection
 
 function Get-MojazSelectedId {

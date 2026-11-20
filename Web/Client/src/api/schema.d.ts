@@ -2386,6 +2386,7 @@ export interface paths {
                     id: string;
                     rowId: string;
                     revision: number;
+                    field?: string;
                 };
                 header?: never;
                 path?: never;
@@ -3221,6 +3222,8 @@ export interface components {
             imageChoices: components["schemas"]["BulletinImageChoice"][] | null;
             /** @default false */
             canUploadPhoto: boolean;
+            /** @default null */
+            photoFields: string[] | null;
         };
         BulletinEditRequest: {
             action: string;

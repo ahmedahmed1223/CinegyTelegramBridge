@@ -13,7 +13,7 @@
     this script.
 
         pwsh -File Web/dev/Start-DevBridge.ps1
-        dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev
+        dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev --BridgeRoot (Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge')
         pnpm --dir Web/Client dev
 #>
 param(
@@ -26,6 +26,43 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $runtime = Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge'
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 . (Join-Path $root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json' -RuntimePath $runtime
+Copy-Item -LiteralPath (Join-Path $root 'TelegramBridge.ps1') -Destination $runtime
+
+$fixtureRegistry = Join-Path $runtime 'templates.json'
+$fixtureTicker = Join-Path $runtime 'ticker.txt'
+Set-JsonProp $config 'TemplateRegistryPath' $fixtureRegistry
+Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
+Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
+Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
+Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
+@{
+    Urgent = @{
+        path = Join-Path $runtime 'urgent.cintitle'; layer = 3; description = 'شريط الأخبار العاجلة'; category = 'الأخبار'
+        fields = @(
+            @{ name = 'Ajel.center'; label = 'نص العاجل'; required = $true; maxLength = 120 }
+            @{ name = 'Ajel.title'; label = 'العنوان'; maxLength = 45 }
+            @{ name = 'Ajel.location'; label = 'الموقع'; maxLength = 30 }
+        )
+    }
+    Mojaz = @{
+        path = Join-Path $runtime 'mojaz.cintitle'; layer = 4; description = 'الموجز الإخباري'; category = 'الأخبار'
+        fields = @(@{ name = 'title.Text'; label = 'العنوان'; required = $true }, @{ name = 'Subject.Text'; label = 'التفاصيل' })
+    }
+    Guest = @{
+        path = Join-Path $runtime 'guest.cintitle'; layer = 5; description = 'اسم الضيف'; category = 'الأسماء'
+        fields = @(@{ name = 'name'; label = 'اسم الضيف'; required = $true; maxLength = 40 }, @{ name = 'role'; label = 'الصفة' })
+    }
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureRegistry
+'نافذة على أبرز الأخبار اليوم|متابعة مباشرة في النشرة المسائية|برنامج خاص مساء الخميس' |
+    Set-Content -LiteralPath $fixtureTicker
+$script:UrgentBoard = New-UrgentBoard
+$script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'متابعة مباشرة من غرفة الأخبار' -Title 'متابعة مباشرة').Value
+$script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خدمة إخبارية خاصة عند التاسعة').Value
+Set-JsonProp $script:UrgentBoard.Items[0] 'ExtraFields' @{ 'Ajel.location' = 'الاستوديو' }
+$script:UrgentBoard.Items[1].Enabled = $false
+$script:MojazLibrary = @{ Bulletins = @(
+    @{ Id = 'dev-bulletin1'; Name = 'موجز الفترة المسائية'; Revision = 1; Rows = @(@{ Title = 'أبرز العناوين' }, @{ Title = 'تقرير اليوم' }) }
+) }
 
 $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @($OwnerId) -Force
 $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($OwnerId, 1002) -Force
@@ -38,6 +75,34 @@ $script:UserAliases['1003'] = 'مشغّل الفترة المسائية'
 function Save-Config { }
 function Save-UserAliases { $true }
 function Update-WebBotUsername { $script:WebBotUsername = 'cinegy_dev_bot' }
+
+# The dev pipe uses real web dispatch and validation. Replacing the three
+# commands here confines their effects to the simulated on-air state.
+function Invoke-ShowTemplateResult {
+    param([string]$Key, [hashtable]$Variables, [long]$UserId, [int]$AutoHideSeconds)
+    $template = (Get-TemplateStore).Map[$Key]
+    $layer = [int]$template.Layer
+    $shownAt = Get-Date
+    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; UserId = $UserId; Source = 'bridge'; Variables = $Variables }
+    $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $layer })
+    if ($AutoHideSeconds -gt 0) {
+        $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
+    }
+    return @{ Success = $true }
+}
+
+function Invoke-HideLayer {
+    param([int]$Layer)
+    $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $Layer })
+    if (-not $script:OnAir.ContainsKey($Layer)) { return $false }
+    $script:OnAir.Remove($Layer)
+    return $true
+}
+
+function Invoke-ExitLayer {
+    param([int]$Layer)
+    return Invoke-HideLayer -Layer $Layer
+}
 
 $script:WebChannelPipeName = $PipeName
 Start-WebChannel
@@ -53,6 +118,9 @@ $script:AutoHideQueue = @([pscustomobject]@{ Layer = 5; At = $started.AddSeconds
 Write-Host "Dev bridge on pipe $PipeName. Ctrl+C to stop." -ForegroundColor Cyan
 try {
     while ($true) {
+        foreach ($timer in @($script:AutoHideQueue)) {
+            if ($timer.At -le (Get-Date)) { Invoke-HideLayer -Layer $timer.Layer | Out-Null }
+        }
         $script:RuntimeState.Monitoring.LastCinegyStateSuccess = Get-Date
         $script:RuntimeState.Monitoring.LastCinegyStateFailedCount = 0
         foreach ($code in @($script:WebLoginRequests.Keys)) {

@@ -207,19 +207,22 @@ Describe 'Web channel: the pipe' {
     }
 
     It 'handles air operations via pipe' {
-        $storeMock = @{
-            Map = @{
-                'test_lower' = [ordered]@{
-                    description = 'Lower Third Template'
-                    layer = 5
-                    category = 'news'
-                    fields = @(
-                        [ordered]@{ name = 'f1'; label = 'Headline'; required = $true }
-                    )
-                }
+        $registry = Join-Path $TestDrive 'web-templates.json'
+        @{
+            test_lower = @{
+                path = Join-Path $TestDrive 'test_lower.cintitle'
+                description = 'Lower Third Template'
+                layer = 5
+                category = 'news'
+                maxLength = 20
+                fields = @(
+                    @{ name = 'f1'; label = 'Headline'; required = $true; maxLength = 10 }
+                    @{ name = 'f2'; label = 'Subtitle' }
+                    'f3'
+                )
             }
-        }
-        Mock Get-TemplateStore { $storeMock }
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $registry
+        Mock Get-TemplateRegistryFilePath { $registry }
         Mock Test-Authorized { $true }
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-HideLayer { $true }
@@ -233,11 +236,30 @@ Describe 'Web channel: the pipe' {
         $tplReply.data[0].name | Should -Be 'Lower Third Template'
         $tplReply.data[0].layer | Should -Be 5
         $tplReply.data[0].fields[0].name | Should -Be 'f1'
+        $tplReply.data[0].fields[0].label | Should -Be 'Headline'
+        $tplReply.data[0].fields[0].required | Should -BeTrue
+        $tplReply.data[0].fields[0].maxLength | Should -Be 10
+        $tplReply.data[0].fields[1].maxLength | Should -Be 20
+        $tplReply.data[0].fields[2].label | Should -Be 'f3'
 
         # 2. air.show
         $showReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.show","args":{"actor":4321,"key":"test_lower","variables":{"f1":"Breaking"}}}') | ConvertFrom-Json
         $showReply.ok | Should -BeTrue
-        Should -Invoke Invoke-ShowTemplateResult -Times 1
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+            $Variables['f1'] -eq 'Breaking' -and $Variables.Count -eq 1
+        }
+
+        foreach ($request in @(
+                '{"op":"air.show","args":{"actor":4321,"key":"missing"}}'
+                '{"op":"air.show","args":{"actor":4321,"key":"test_lower","variables":{}}}'
+                '{"op":"air.show","args":{"actor":4321,"key":"test_lower","variables":{"f1":"01234567890"}}}'
+                '{"op":"air.show","args":{"actor":4321,"key":"test_lower","variables":{"f1":"Breaking","other":"value"}}}'
+            )) {
+            $refused = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $request) | ConvertFrom-Json
+            $refused.ok | Should -BeFalse
+            $refused.error | Should -Be 'refused'
+        }
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
 
         # 3. air.hide
         $hideReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.hide","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
@@ -248,5 +270,115 @@ Describe 'Web channel: the pipe' {
         $exitReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.exit","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
         $exitReply.ok | Should -BeTrue
         Should -Invoke Invoke-ExitLayer -Times 1
+    }
+
+    It 'serves the published ticker in bounded pages only to authorized operators' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-NewsTickerConfiguredSnapshot {
+            [pscustomobject]@{ Success = $true; Items = @(1..34 | ForEach-Object { "خبر $_" }) }
+        }
+        $denied = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":999,"view":"ticker"}}') | ConvertFrom-Json
+        $denied.error | Should -Be 'forbidden'
+        Should -Invoke Get-NewsTickerConfiguredSnapshot -Times 0 -Exactly
+        $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":4321,"view":"ticker","page":1}}') | ConvertFrom-Json
+        $reply.ok | Should -BeTrue
+        $reply.data.total | Should -Be 34
+        $reply.data.page | Should -Be 1
+        $reply.data.pageCount | Should -Be 2
+        $reply.data.items.Count | Should -Be 14
+        $reply.data.items[0].title | Should -Be 'خبر 21'
+    }
+
+    It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
+        Mock Test-Authorized { $true }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Get-UrgentTemplate {
+            @{ Layer = 5; Fields = @('strap'); FieldLabels = @(''); FieldLimits = @(0); FieldRequired = @($true) }
+        }
+        Mock Get-UrgentLiveStamp { 'current scene' }
+        Mock Save-UrgentManualState { $true }
+        $previousBoard = $script:UrgentBoard
+        $previousLive = $script:UrgentManualLive
+        try {
+            $script:UrgentBoard = @{ Items = @(@{ Id = 'story'; Text = 'خبر عاجل'; Enabled = $true }) }
+            $script:UrgentManualLive = @{ '4321' = @{ ItemId = 'story'; Layer = 5; LiveStamp = 'previous scene' } }
+            $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":4321,"view":"urgent"}}') | ConvertFrom-Json
+            $reply.ok | Should -BeTrue
+            $reply.data.items[0].state | Should -Be 'ready'
+            $reply.data.fields.Count | Should -Be 1
+            $reply.data.items[0].values.strap | Should -Be 'خبر عاجل'
+            $script:UrgentManualLive.ContainsKey('4321') | Should -BeTrue
+            Should -Invoke Save-UrgentManualState -Times 0 -Exactly
+        }
+        finally {
+            $script:UrgentBoard = $previousBoard
+            $script:UrgentManualLive = $previousLive
+        }
+    }
+
+    It 'saves template fields as columns and rejects stale edits made after the board changed' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Get-UrgentBoardFile { Join-Path $TestDrive 'web-urgent.json' }
+        Mock Get-UrgentTemplate {
+            @{
+                Layer = 5
+                Fields = @('strap', 'kicker', 'location[1]')
+                FieldLabels = @('النص', 'العنوان', 'الموقع')
+                FieldLimits = @(100, 50, 16)
+                FieldRequired = @($true, $false, $true)
+                FieldTypes = @{ 'location[1]' = 'String' }
+            }
+        }
+        $previousBoard = $script:UrgentBoard
+        try {
+            $script:UrgentBoard = New-UrgentBoard
+            $initial = [int]$script:UrgentBoard.Revision
+            $add = '{"op":"urgent.write","args":{"actor":4321,"action":"add","revision":' + $initial + ',"row":{"values":{"kicker":"تنبيه","strap":"خبر جديد","location[1]":"الاستوديو"},"enabled":true}}}'
+            $created = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $add) | ConvertFrom-Json
+            $created.ok | Should -BeTrue
+            $row = $script:UrgentBoard.Items[0]
+            $row.Title | Should -Be 'تنبيه'
+            $row.Text | Should -Be 'خبر جديد'
+            $row.UpdatedBy | Should -Be 4321
+
+            $stale = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $add) | ConvertFrom-Json
+            $stale.error | Should -Be 'urgent_stale'
+            $script:UrgentBoard.Items.Count | Should -Be 1
+
+            $edit = '{"op":"urgent.write","args":{"actor":4321,"action":"update","revision":' + $script:UrgentBoard.Revision + ',"id":"' + $row.Id + '","row":{"values":{"kicker":"عنوان معدّل","strap":"خبر معدّل","location[1]":"الميدان"},"enabled":false}}}'
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $edit) | ConvertFrom-Json).ok | Should -BeTrue
+            $script:UrgentBoard.Items[0].Enabled | Should -BeFalse
+            $script:UrgentBoard.Items[0].Text | Should -Be 'خبر معدّل'
+            $list = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":4321,"view":"urgent"}}') | ConvertFrom-Json
+            $list.data.items[0].id | Should -Be $row.Id
+            $list.data.fields[2].label | Should -Be 'الموقع'
+            $list.data.items[0].values.kicker | Should -Be 'عنوان معدّل'
+            $list.data.items[0].values.'location[1]' | Should -Be 'الميدان'
+            $list.data.revision | Should -Be $script:UrgentBoard.Revision
+
+            $invalid = $edit | ConvertFrom-Json -AsHashtable
+            $invalid.args.revision = $list.data.revision
+            $invalid.args.row.values['location[1]'] = ''
+            $emptyLocation = $invalid | ConvertTo-Json -Depth 6 -Compress
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $emptyLocation) | ConvertFrom-Json).error | Should -Be 'urgent_invalid'
+            $invalid.args.row.values['location[1]'] = "الميدان$([char]0)"
+            $invalidXml = $invalid | ConvertTo-Json -Depth 6 -Compress
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $invalidXml) | ConvertFrom-Json).error | Should -Be 'urgent_invalid'
+
+            Import-UrgentBoard
+            (Get-UrgentItemVariables -Item $script:UrgentBoard.Items[0])['location[1]'] | Should -Be 'الميدان'
+
+            $plan = New-UrgentRunPlan -Items @($row) -Defaults (New-UrgentDefaults)
+            $plan.Success | Should -BeTrue
+            (Get-UrgentItemVariables -Item $plan.Value.Steps[0])['location[1]'] | Should -Be 'الاستوديو'
+            Mock Send-PostboxValues { @{ Success = $true } }
+            (Send-UrgentBoardStep -Step $plan.Value.Steps[0]).Success | Should -BeTrue
+            Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter {
+                $Types['location[1]'] -eq 'String' -and $Values['location[1]'] -eq 'الاستوديو'
+            }
+        }
+        finally { $script:UrgentBoard = $previousBoard }
     }
 }

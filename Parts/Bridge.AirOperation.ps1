@@ -630,14 +630,26 @@ function Get-VerifiedCinegyShowIdentity {
     return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
 }
 
+function Get-TemplateFieldTypeOverrides {
+    param($Template)
+    $types = @{}
+    $configured = Get-JsonProp $Template 'FieldTypes'
+    if ($configured -is [System.Collections.IDictionary]) {
+        foreach ($name in $configured.Keys) {
+            if ($configured[$name]) { $types[$name] = [string]$configured[$name] }
+        }
+    }
+    return $types
+}
+
 function Send-PreShowValues {
     <# The story into the postbox before its scene loads, under the same
        setting as the write after. A failure is logged and does not stop
        the SHOW: the post-show write is still coming. #>
-    param([string]$Key = '', [hashtable]$Variables = @{})
+    param([string]$Key = '', [hashtable]$Variables = @{}, [hashtable]$Types = @{})
     if (-not (Get-Setting 'SetValuesAfterShow') -or -not $Variables -or $Variables.Count -lt 1) { return }
     $primed = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-        -Values $Variables -TimeoutSec (Get-AirTimeout)
+        -Values $Variables -Types $Types -TimeoutSec (Get-AirTimeout)
     if (-not $primed.Success) { Write-BridgeLog "Pre-show postbox write failed for '$Key': $([string](Get-JsonProp $primed 'Error'))" 'WARN' }
     elseif (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
 }
@@ -773,10 +785,7 @@ function Invoke-ShowTemplateResult {
 
     # Only pass through explicit per-field type overrides; everything else
     # takes the AirVariableType default.
-    $types = @{}
-    foreach ($name in @($template.FieldTypes.Keys)) {
-        if ($template.FieldTypes[$name]) { $types[$name] = [string]$template.FieldTypes[$name] }
-    }
+    $types = Get-TemplateFieldTypeOverrides -Template $template
     $defaultType = [string](Get-Setting 'AirVariableType')
     if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
 
@@ -786,7 +795,7 @@ function Invoke-ShowTemplateResult {
     # the previous story - and the post-show write only reaches it a tick
     # later, so an operator watched the old headline for a second or two
     # on every new urgent. The write after SHOW stays as belt and braces.
-    Send-PreShowValues -Key $Key -Variables $Variables
+    Send-PreShowValues -Key $Key -Variables $Variables -Types $types
     $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
@@ -902,7 +911,7 @@ function Invoke-ShowTemplateResult {
             # fire time that it is still addressing the same scene.
             $liveScene = if ($script:OnAir.ContainsKey([int]$template.Layer)) { $script:OnAir[[int]$template.Layer] } else { $null }
             $script:PostShowQueue.Add(@{
-                    At = (Get-Date).AddMilliseconds($delay); Values = $Variables
+                    At = (Get-Date).AddMilliseconds($delay); Values = $Variables; Types = $types
                     Layer = [int]$template.Layer; Key = $Key
                     ActiveId = if ($liveScene) { [string](Get-JsonProp $liveScene 'ActiveId') } else { '' }
                 })

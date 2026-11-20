@@ -1,0 +1,54 @@
+.page {
+  max-inline-size: 66rem;
+}
+
+.list {
+  margin: 0;
+  padding-inline-start: 2.75rem;
+  padding-inline-end: var(--mantine-spacing-md);
+}
+
+.row {
+  padding-block: var(--mantine-spacing-sm);
+}
+
+.row + .row {
+  border-block-start: 1px solid var(--mantine-color-default-border);
+}
+
+.row::marker {
+  color: var(--mantine-color-dimmed);
+  font-variant-numeric: tabular-nums;
+}
+
+.entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-xs) var(--mantine-spacing-lg);
+}
+
+.headline {
+  overflow-wrap: anywhere;
+  text-align: start;
+  flex: 1 1 19rem;
+  min-inline-size: 0;
+}
+
+.details {
+  flex: 0 0 auto;
+}
+
+.urgentGrid {
+  overflow: hidden;
+}
+
+.urgentGrid thead,
+.editRow {
+  background: var(--mantine-color-default-hover);
+}
+
+.urgentCell {
+  min-inline-size: 10rem;
+}

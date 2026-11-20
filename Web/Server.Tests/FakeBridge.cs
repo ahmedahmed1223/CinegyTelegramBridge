@@ -37,6 +37,10 @@ public sealed class FakeBridge : IBridgeChannel
             "air.show" => Reply("null"),
             "air.hide" => Reply("null"),
             "air.exit" => Reply("null"),
+            "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
+            "urgent.write" => a.GetProperty("revision").GetInt32() == 3
+                ? Reply("null")
+                : new BridgeReply(false, default, "urgent_stale"),
             _ => new BridgeReply(false, default, "unknown_op"),
         });
     }

@@ -215,4 +215,38 @@ public sealed class AccountTests : IDisposable
         Assert.Equal(HttpStatusCode.NoContent, exitRes.StatusCode);
         Assert.Contains(_app.Bridge.Calls, c => c.Op == "air.exit" && c.Args.Contains("\"layer\":5"));
     }
+
+    [Fact]
+    public async Task Newsroom_passes_the_signed_in_identity_and_requested_page_to_the_bridge()
+    {
+        var anonymous = await _app.BrowserAsync();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.Client.GetAsync("/api/content/ticker?page=1")).StatusCode);
+
+        var browser = await _app.SignedInAsync("desk", WebApp.Operator);
+        var response = await browser.Client.GetAsync("/api/content/ticker?page=1");
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        var page = await response.Content.ReadFromJsonAsync<ContentPage>();
+        Assert.NotNull(page);
+        Assert.Equal(1, page.Page);
+        Assert.Equal("خبر منشور", Assert.Single(page.Items).Title);
+        Assert.Contains(_app.Bridge.Calls, call => call.Op == "content.list" &&
+            call.Args == """{"actor":33,"view":"ticker","page":1}""");
+    }
+
+    [Fact]
+    public async Task Urgent_table_requires_csrf_and_reports_an_outdated_revision()
+    {
+        var browser = await _app.SignedInAsync("desk", WebApp.Operator);
+        var row = new UrgentRowInput(new() { ["strap"] = "خبر جديد", ["location"] = "الميدان" }, true);
+        var request = new UrgentWriteRequest("add", 3, Row: row);
+        browser.Client.DefaultRequestHeaders.Remove("X-XSRF-TOKEN");
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.PostAsync("/api/content/urgent", request)).StatusCode);
+        Assert.DoesNotContain(_app.Bridge.Calls, call => call.Op == "urgent.write");
+        await browser.RefreshSessionAsync();
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.PostAsync("/api/content/urgent", request)).StatusCode);
+        var stale = await browser.PostAsync("/api/content/urgent", request with { Revision = 2 });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("urgent_stale", (await stale.Content.ReadFromJsonAsync<ErrorResponse>())?.Error);
+    }
 }

@@ -423,6 +423,7 @@ function Add-UrgentRunStep {
         ItemId = [string](Get-UrgentProperty $Item 'Id' '')
         Text = [string](Get-UrgentProperty $Item 'Text' '')
         Title = [string](Get-UrgentProperty $Item 'Title' '')
+        ExtraFields = Get-UrgentProperty $Item 'ExtraFields'
         Mode = $timing.Mode
         AtSeconds = [math]::Round($at, 3)
         TransitionSeconds = [math]::Round($transition, 3)
@@ -613,15 +614,15 @@ function Send-UrgentBoardStep {
         continuing.
     #>
     param([Parameter(Mandatory)]$Step, [switch]$ForceExit)
+    $template = Get-UrgentTemplate
+    if (-not $template) { return [pscustomobject]@{ Success = $false; Error = (T 'urgp.noTemplate') } }
     $values = Get-UrgentItemVariables -Item $Step
     if (-not $ForceExit -and [string]$Step.Mode -ne 'exit') {
         $posted = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Values $values -TimeoutSec (Get-AirTimeout)
+            -Values $values -Types (Get-TemplateFieldTypeOverrides -Template $template) -TimeoutSec (Get-AirTimeout)
         if (Get-Setting 'LogAirXml') { Write-BridgeLog "Urgent board POSTBOX XML: $($posted.Xml)" }
         return $posted
     }
-    $template = Get-UrgentTemplate
-    if (-not $template) { return [pscustomobject]@{ Success = $false; Error = (T 'urgp.noTemplate') } }
     $layer = [int]$template.Layer
     $exit = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $layer -TimeoutSec (Get-AirTimeout)
@@ -666,6 +667,9 @@ function Show-UrgentBoardScene {
     #>
     param([Parameter(Mandatory)]$Template, [Parameter(Mandatory)]$Values)
     $layer = [int]$Template.Layer
+    $types = Get-TemplateFieldTypeOverrides -Template $Template
+    $defaultType = [string](Get-Setting 'AirVariableType')
+    if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
     $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $layer -TimeoutSec (Get-AirTimeout)
     # Reported, not fatal: a failed clear is the exact condition under which
@@ -677,10 +681,10 @@ function Show-UrgentBoardScene {
     # The layer is clear now, so the previous line is off screen; prime the
     # postbox with this line before its scene loads, or the scene comes up
     # wearing the previous line until the post-show write lands.
-    Send-PreShowValues -Key $script:MojazUrgentKey -Variables $Values
+    Send-PreShowValues -Key $script:MojazUrgentKey -Variables $Values -Types $types
     $shown = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $layer -TemplatePath ([string]$Template.Path) -Variables $Values -TimeoutSec (Get-AirTimeout) `
-            -Device ([string](Get-JsonProp $Template 'Device'))
+            -Device ([string](Get-JsonProp $Template 'Device')) -Types $types -DefaultType $defaultType
     # The same line the first SHOW writes, for every line after it. Two runs
     # today lost their layer 5 s and 43 s after the third line went up, with
     # nothing in Cinegy's own logs; the item the engine actually made - its
@@ -710,7 +714,7 @@ function Show-UrgentBoardScene {
         # "only the first story was shown" meant.
         if ((Get-Setting 'SetValuesAfterShow') -and $Values.Count -gt 0) {
             $script:PostShowQueue.Add(@{
-                    At = (Get-Date).AddMilliseconds((Get-SettingInt 'PostShowDelayMs' 0)); Values = $Values
+                    At = (Get-Date).AddMilliseconds((Get-SettingInt 'PostShowDelayMs' 0)); Values = $Values; Types = $types
                     Layer = $layer; Key = $script:MojazUrgentKey; ActiveId = $newId
                 })
         }

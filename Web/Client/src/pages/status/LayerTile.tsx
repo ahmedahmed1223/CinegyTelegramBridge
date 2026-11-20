@@ -38,7 +38,7 @@ export function LayerTile({ layer, now, fresh }: { layer: LayerStatus; now: numb
       onConfirm: async () => {
         try {
           await hideLayer(layer.layer)
-          notifications.show({ title: 'تم الإخفاء', message: `أُخفيت الطبقة ${layer.layer} بنجاح`, color: 'teal' })
+          notifications.show({ title: 'أُرسل أمر الإخفاء', message: `تابع حالة الطبقة ${layer.layer} في لوحة الهواء`, color: 'teal' })
         } catch (err: any) {
           notifications.show({ title: 'فشل الإخفاء', message: messageFor(err.message), color: 'red' })
         }

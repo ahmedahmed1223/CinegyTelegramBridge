@@ -328,7 +328,7 @@ dotnet build Manager/BridgeManager/BridgeManager.csproj
 
 ```powershell
 pwsh -File Web/dev/Start-DevBridge.ps1
-dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev
+dotnet run --project Web/Server -- --PipeName CinegyTelegramBridge.Web.Dev --BridgeRoot (Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge')
 pnpm --dir Web/Client dev            # http://localhost:5173 ، و/api إلى الخادم
 .\scripts\Build-BridgeWeb.ps1        # dist\web\CinegyBridge.Web.exe
 pwsh -File Run-Checks.ps1 -SkipWeb   # جهاز بلا .NET وpnpm

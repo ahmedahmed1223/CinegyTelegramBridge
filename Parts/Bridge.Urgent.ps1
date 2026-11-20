@@ -385,12 +385,26 @@ function Get-UrgentItemVariables {
     $template = Get-UrgentTemplate
     $values = @{}
     if (-not $template) { return $values }
-    $fields = @(Get-JsonProp $template 'Fields')
+    $fields = @(Get-JsonProp $template 'Fields' | Where-Object { $null -ne $_ })
     if ($fields.Count -lt 1) { return $values }
     $values[[string]$fields[0]] = [string](Get-UrgentProperty $Item 'Text' '')
     $title = [string](Get-UrgentProperty $Item 'Title' '')
     # An omitted field retains the preceding story's title on text updates.
     if ($fields.Count -gt 1) { $values[[string]$fields[1]] = $title }
+    $extra = Get-UrgentProperty $Item 'ExtraFields'
+    for ($index = 2; $index -lt $fields.Count; $index++) {
+        $name = [string]$fields[$index]
+        # An empty cell must clear the preceding story's value in text mode.
+        $values[$name] = ''
+        if ($extra -is [System.Collections.IDictionary]) {
+            $values[$name] = [string]$extra[$name]
+        }
+        elseif ($null -ne $extra) {
+            # Registry names may have literal brackets; Properties.Match uses wildcards.
+            $property = $extra.PSObject.Properties[$name]
+            if ($property) { $values[$name] = [string]$property.Value }
+        }
+    }
     return $values
 }
 
@@ -438,12 +452,15 @@ function Set-UrgentBoardFilter {
 }
 
 function Get-UrgentCurrentItemId {
+    param([switch]$ReadOnly)
     $template = Get-UrgentTemplate
     if (-not $template) { return '' }
     if ($script:UrgentBoardRun) {
         $steps = @(Get-JsonProp $script:UrgentBoardRun 'Steps')
         $step = [int](Get-JsonProp $script:UrgentBoardRun 'Step')
         if ($step -ge 0 -and $step -lt $steps.Count) {
+            $itemId = [string](Get-JsonProp $steps[$step] 'ItemId')
+            if ($itemId) { return $itemId }
             return [string](Get-JsonProp $steps[$step] 'Id')
         }
     }
@@ -458,9 +475,11 @@ function Get-UrgentCurrentItemId {
         $entry = $script:UrgentManualLive[$chatId]
         if ([int](Get-UrgentProperty $entry 'Layer' 0) -ne $layer) { continue }
         if ([string](Get-UrgentProperty $entry 'LiveStamp' '') -cne $stamp) {
-            $script:UrgentManualLive.Remove($chatId) | Out-Null
-            Save-UrgentManualState | Out-Null
-            Write-BridgeLog "Urgent: dropped a stale 'shown alone' record for chat $chatId; its scene is no longer what is on layer $layer."
+            if (-not $ReadOnly) {
+                $script:UrgentManualLive.Remove($chatId) | Out-Null
+                Save-UrgentManualState | Out-Null
+                Write-BridgeLog "Urgent: dropped a stale 'shown alone' record for chat $chatId; its scene is no longer what is on layer $layer."
+            }
             continue
         }
         return [string](Get-JsonProp $entry 'ItemId')
@@ -998,6 +1017,7 @@ function Show-UrgentManualConfirm {
     $state = @{ Mode='urgent_manual_confirm'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
         UserId=$UserId; StartedAt=Get-Date; ItemId=$ItemId; Layer=[int]$template.Layer
         Key=[string]$template.Key; Text=[string](Get-JsonProp $item 'Text'); Title=[string](Get-JsonProp $item 'Title')
+        ItemUpdatedAt=[string](Get-JsonProp $item 'UpdatedAt')
         LiveStamp=(Get-UrgentLiveStamp -Layer ([int]$template.Layer)); HadRun=[bool]$script:UrgentBoardRun
         AutoHideSeconds=$manualHide }
     Set-PendingState -ChatId $ChatId -State $state | Out-Null
@@ -1078,8 +1098,10 @@ function Invoke-UrgentManualAction {
     if ([string](Get-JsonProp $state 'Mode') -ne 'urgent_manual_confirm') { return $false }
     $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $state.ItemId } | Select-Object -First 1
     $template = Get-UrgentTemplate
+    $reviewedAt = Get-JsonProp $state 'ItemUpdatedAt'
     if (-not $item -or -not $template -or -not [bool](Get-JsonProp $item 'Enabled') -or
         [string](Get-JsonProp $item 'Text') -cne $state.Text -or [string](Get-JsonProp $item 'Title') -cne $state.Title -or
+        ($null -ne $reviewedAt -and [string](Get-JsonProp $item 'UpdatedAt') -cne [string]$reviewedAt) -or
         [int]$template.Layer -ne [int]$state.Layer -or [string]$template.Key -cne $state.Key -or
         -not (Test-UrgentSceneUnchanged -State $state -Layer ([int]$state.Layer)) -or
         [bool]$state.HadRun -ne [bool]$script:UrgentBoardRun) { return $false }

@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Badge,
   Button,
   Card,
@@ -16,20 +17,19 @@ import { useQuery } from '@tanstack/react-query'
 import { IconPlayerPlay, IconRefresh, IconSearch } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
+import { messageFor } from '../../api/messages'
 import { ShowModal } from './ShowModal'
 
 export function TemplatesPage() {
   const [search, setSearch] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
-  const [modalOpened, setModalOpened] = useState(false)
-
-  const { data: templates, isLoading, refetch, isFetching } = useQuery({
+  const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['templates'],
     queryFn: getTemplates,
   })
 
-  const filtered = (templates || []).filter((t) => {
-    const q = search.trim().toLowerCase()
+  const q = search.trim().toLowerCase()
+  const filtered = (templates ?? []).filter((t) => {
     if (!q) return true
     return (
       t.name.toLowerCase().includes(q) ||
@@ -39,18 +39,13 @@ export function TemplatesPage() {
     )
   })
 
-  const handleOpenShow = (template: TemplateDto) => {
-    setSelectedTemplate(template)
-    setModalOpened(true)
-  }
-
   return (
     <Stack gap="xl">
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <div>
           <Title order={2}>مكتبة القوالب</Title>
           <Text c="dimmed" size="sm">
-            عرض وتشغيل قوالب الرسوم والمشاهد على الهواء مباشرة.
+            اختر قالبًا وجهّز نصه قبل العرض.
           </Text>
         </div>
         <Group gap="xs">
@@ -68,7 +63,8 @@ export function TemplatesPage() {
       </Group>
 
       <TextInput
-        placeholder="ابحث باسم القالب أو المعرّف أو التصنيف أو رقم الطبقة..."
+        aria-label="بحث في القوالب"
+        placeholder="الاسم أو التصنيف أو رقم الطبقة"
         leftSection={<IconSearch size={16} />}
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
@@ -76,7 +72,16 @@ export function TemplatesPage() {
         radius="md"
       />
 
-      {isLoading ? (
+      {error ? (
+        <Alert color="red" title="تعذّر تحميل القوالب" role="alert">
+          <Stack align="flex-start" gap="xs">
+            {messageFor(error.message)}
+            <Button variant="default" size="xs" onClick={() => refetch()} loading={isFetching}>
+              إعادة المحاولة
+            </Button>
+          </Stack>
+        </Alert>
+      ) : isLoading ? (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
           <Skeleton h={140} radius="md" />
           <Skeleton h={140} radius="md" />
@@ -84,9 +89,9 @@ export function TemplatesPage() {
         </SimpleGrid>
       ) : filtered.length === 0 ? (
         <Paper p="xl" radius="lg" ta="center">
-          <Text fw={600}>لا توجد قوالب مطابقة</Text>
+          <Text fw={600}>{q ? 'لا توجد قوالب مطابقة' : 'مكتبة القوالب فارغة'}</Text>
           <Text size="sm" c="dimmed" mt={4}>
-            لم يُعثر على قوالب تطابق البحث أو لم يتم تسجيل قوالب في templates.json بعد.
+            {q ? 'جرّب اسمًا آخر أو رقم الطبقة.' : 'تظهر هنا القوالب المسجّلة في الجسر.'}
           </Text>
         </Paper>
       ) : (
@@ -127,14 +132,13 @@ export function TemplatesPage() {
                 </Stack>
 
                 <Button
-                  color="teal"
                   variant="light"
                   leftSection={<IconPlayerPlay size={16} />}
                   disabled={template.disabled}
-                  onClick={() => handleOpenShow(template)}
+                  onClick={() => setSelectedTemplate(template)}
                   fullWidth
                 >
-                  عرض على الهواء
+                  تجهيز للعرض
                 </Button>
               </Stack>
             </Card>
@@ -142,14 +146,7 @@ export function TemplatesPage() {
         </SimpleGrid>
       )}
 
-      <ShowModal
-        template={selectedTemplate}
-        opened={modalOpened}
-        onClose={() => {
-          setModalOpened(false)
-          setSelectedTemplate(null)
-        }}
-      />
+      {selectedTemplate && <ShowModal template={selectedTemplate} onClose={() => setSelectedTemplate(null)} />}
     </Stack>
   )
 }

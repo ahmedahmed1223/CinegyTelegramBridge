@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.79.0
+
+The web interface opens on the breaking-news board in Newsroom. Its data-entry table takes its columns from the configured template fields. Operators can add, edit, enable, reorder, and delete rows. Edits share the bot's board and reject stale revisions. Extra fields travel with the saved row into playback. Newsroom also has paged views of saved bulletins and the published ticker.
+
+The template library uses the bridge's field labels, required fields, and text limits. The bridge validates display requests and the browser shows refusal details when available. Operators can confirm Hide or Exit from the air board. The development bridge includes simulated content and air controls.
+
 ## Version 8.78.0
 
 A web interface, foundation release. `CinegyBridge.Web` (ASP.NET Core, .NET 9, loopback only) serves a React/TypeScript/Mantine app and talks to the bridge over a local named pipe that only the current Windows user can open. The bridge stays the single writer to Cinegy and the single judge of permission: the web server carries requests, the bridge decides. Sign-in is by approving a code in the bot, or with a password an administrator creates; browser-only accounts get a bridge identity outside Telegram's id range and pass the same checks. This release shows the air state live, accounts and sessions. The control program starts the server and a Cloudflare quick tunnel from one window. Off by default (`WebAccessEnabled`); when off, the bridge runs exactly as before.

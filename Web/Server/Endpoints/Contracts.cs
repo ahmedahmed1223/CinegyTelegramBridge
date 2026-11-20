@@ -6,6 +6,11 @@ namespace CinegyBridge.Web.Endpoints;
 
 public sealed record ErrorResponse(string Error, string? Message = null);
 
+public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values);
+public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
+public sealed record UrgentRowInput(Dictionary<string, string> Values, bool Enabled);
+public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null);
+
 public sealed record CurrentUser(long Id, string Name, string Role, string Method, bool WebOnly);
 
 public sealed record SessionResponse(CurrentUser? User, string CsrfToken);

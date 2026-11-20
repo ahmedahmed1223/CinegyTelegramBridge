@@ -3,21 +3,17 @@ import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconSend } from '@tabler/icons-react'
 import { useState } from 'react'
 import { showTemplate, type TemplateDto } from '../../api/air'
-import { messageFor } from '../../api/messages'
 
 interface ShowModalProps {
-  template: TemplateDto | null
-  opened: boolean
+  template: TemplateDto
   onClose: () => void
 }
 
-export function ShowModal({ template, opened, onClose }: ShowModalProps) {
+export function ShowModal({ template, onClose }: ShowModalProps) {
   const [variables, setVariables] = useState<Record<string, string>>({})
   const [autoHide, setAutoHide] = useState<number | string>(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  if (!template) return null
 
   const handleFieldChange = (name: string, value: string) => {
     setVariables((prev) => ({ ...prev, [name]: value }))
@@ -25,6 +21,7 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submitting) return
     setError(null)
 
     // Validate required fields
@@ -43,14 +40,13 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
         autoHideSeconds: Number(autoHide) || 0,
       })
       notifications.show({
-        title: 'على الهواء الآن!',
-        message: `تم عرض قالب "${template.name}" على الطبقة ${template.layer} بنجاح.`,
+        title: 'قُبل أمر العرض',
+        message: `تابع القالب «${template.name}» على الطبقة ${template.layer} في لوحة الهواء.`,
         color: 'teal',
       })
       onClose()
-      setVariables({})
-    } catch (err: any) {
-      setError(messageFor(err.message))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'تعذّر إرسال أمر العرض.')
     } finally {
       setSubmitting(false)
     }
@@ -58,9 +54,12 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
 
   return (
     <Modal
-      opened={opened}
-      onClose={onClose}
-      title={<Text fw={700}>عرض قالب على الهواء: {template.name}</Text>}
+      opened
+      onClose={submitting ? () => {} : onClose}
+      withCloseButton={!submitting}
+      closeOnEscape={!submitting}
+      closeOnClickOutside={!submitting}
+      title={<Text fw={700}>{template.name}</Text>}
       size="md"
       centered
     >
@@ -73,7 +72,7 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
           )}
 
           <Text size="xs" c="dimmed">
-            الطبقة المستهدفة: <strong className="cgb-mono">{template.layer}</strong>
+            الطبقة المستهدفة <strong className="cgb-mono">{template.layer}</strong>
           </Text>
 
           {template.fields.length === 0 ? (
@@ -86,7 +85,8 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
                 key={f.name}
                 label={f.label || f.name}
                 required={f.required}
-                maxLength={f.maxLength ?? undefined}
+                description={f.maxLength ? `الحد الأقصى ${f.maxLength} حرفًا` : undefined}
+                disabled={submitting}
                 value={variables[f.name] || ''}
                 onChange={(e) => handleFieldChange(f.name, e.currentTarget.value)}
                 placeholder={`اكتب ${f.label || f.name}...`}
@@ -97,7 +97,9 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
 
           <NumberInput
             label="إخفاء تلقائي بعد (ثوانٍ)"
-            description="اتركه 0 للبقاء حتى الإخفاء اليدوي"
+            description="الصفر يترك مدة العرض لسياسة القالب"
+            disabled={submitting}
+            allowDecimal={false}
             min={0}
             max={86400}
             value={autoHide}
@@ -110,11 +112,11 @@ export function ShowModal({ template, opened, onClose }: ShowModalProps) {
             </Button>
             <Button
               type="submit"
-              color="teal"
+              color="red"
               loading={submitting}
               leftSection={<IconSend size={16} />}
             >
-              عرض على الهواء (SHOW)
+              عرض على الهواء
             </Button>
           </Group>
         </Stack>

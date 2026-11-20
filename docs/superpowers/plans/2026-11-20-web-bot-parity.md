@@ -1,0 +1,31 @@
+# Web and Bot Feature Parity
+
+**Goal** — Let newsroom operators complete their existing bot workflows from the browser using the same bridge and authorization rules.
+
+**Architecture** — React and Mantine provide the Arabic RTL interface. The ASP.NET Core server authenticates sessions and carries typed requests to the local pipe. The bridge executes commands on its own thread and owns concurrency, authorization, scheduling, and Cinegy state.
+
+| Workflow | In the web interface | Remaining work |
+|---|---|---|
+| Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
+| Breaking news | Default page, paged board, columns from template fields, inline add/edit, enable, order and guarded deletion | Selection, timing, rehearsal, manual and automatic playback, stop and recovery |
+| Bulletins | Saved library, row counts and on-air indicators | Row editor, images and paste, design and timing, revisions, preview, run control and schedules |
+| Ticker | Paged published list | Shared draft editor and handover, reorder and pause, review and publish, scheduled publish, sets, backups and Google Sheets sync |
+| Program content | | Board, fields and media, draft control, publish and live editing |
+| Shift and monitoring | Air status and connectivity | Template and material schedule, watch page, incident and operation history, notifications, reports and exports |
+| Administration | Web accounts and sessions | Bot access requests and roles, settings, health tools, audit and announcements |
+
+## Newsroom implementation order
+
+- [ ] Map ticker draft, lock, reorder and publish commands to `Parts/Bridge.News.ps1`. Use the saved draft identity and revision during editing. Add pipe tests for a competing editor, a stale draft, a changed published file, and a successful publish into temporary storage.
+- [x] Use the template fields as urgent table columns. Save inline edits with the board revision and stable item IDs, and keep extra fields in playback.
+- [ ] Use `Parts/Bridge.Urgent.ps1` and `Parts/Bridge.Urgent.Playback.ps1` for timing and playback. Test revoked access, a changed story between review and confirm, and a failed stop on a simulated scene.
+- [ ] Use `Parts/Bridge.Mojaz.ps1`, `Parts/Bridge.Mojaz.Screens.ps1` and `Parts/Bridge.Mojaz.Playback.ps1` for bulletin rows, designs, timing and scheduling. Test stale revisions, unsupported media, and the existing urgent and bulletin conflict rules.
+- [ ] Extend the news views with program boards from `Parts/Bridge.Boards.ps1`. Test upload validation, shared ownership and role restrictions before exposing actions.
+
+## Acceptance for each workflow
+
+- [ ] Exercise the browser flow with both operator and administrator accounts wherever their actions differ.
+- [ ] Test the real pipe against simulated station state and verify the public API contract and generated client types.
+- [ ] Check Arabic layout and keyboard interactions at desktop and phone widths, including empty, loading and error states.
+- [ ] Verify that changes from Telegram are visible in the browser and changes from the browser are visible to the bot.
+- [ ] Run the full release gate and update the operator-facing release notes.

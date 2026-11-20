@@ -271,10 +271,12 @@ function Invoke-WebChannelOperation {
         'login.status' { return Get-WebLoginRequestState -Code ([string](Get-JsonProp $arguments 'code')) }
         'account.grant' { return Grant-WebOnlyAccount -Arguments $arguments }
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
-        'air.templates' { return Get-WebTemplates -Arguments $arguments }
+        'air.templates' { return Get-WebTemplates }
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
+        'content.list' { return Get-WebContentPage -Arguments $arguments }
+        'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -486,50 +488,43 @@ function Revoke-WebOnlyAccount {
 
 # ------------------------------------------------------------- air operations
 
+function Get-WebTemplateFields {
+    param([Parameter(Mandatory)][hashtable]$Template)
+    # The registry parser has already resolved each field's label and template limit.
+    for ($index = 0; $index -lt $Template.Fields.Count; $index++) {
+        $name = $Template.Fields[$index]
+        $label = $Template.FieldLabels[$index]
+        $limit = Get-EffectiveFieldLimit -FieldLimit $Template.FieldLimits[$index]
+        [ordered]@{
+            name = $name
+            label = $label ? $label : $name
+            required = $Template.FieldRequired[$index]
+            maxLength = ($limit -gt 0) ? $limit : $null
+        }
+    }
+}
+
 function Get-WebTemplates {
-    param([System.Collections.IDictionary]$Arguments)
     $store = Get-TemplateStore
     if (-not $store -or -not $store.Map) { return @{ ok = $true; data = @() } }
 
-    $disabledKeys = @(Get-JsonProp $config 'DisabledTemplateKeys')
+    $disabledKeys = @(Get-BridgeKeyList -Value (Get-Setting 'DisabledTemplateKeys'))
     $templates = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($key in ($store.Map.Keys | Sort-Object)) {
+    foreach ($key in $store.Order) {
         $item = $store.Map[$key]
-        $fields = [System.Collections.Generic.List[object]]::new()
-
-        $rawFields = Get-JsonProp $item 'fields'
-        if ($rawFields) {
-            foreach ($f in @($rawFields)) {
-                if ($f -is [string]) {
-                    $fields.Add([ordered]@{
-                        name = [string]$f
-                        label = [string]$f
-                        required = $false
-                    })
-                }
-                elseif ($f -is [System.Collections.IDictionary] -or $f -is [System.Management.Automation.PSCustomObject]) {
-                    $fields.Add([ordered]@{
-                        name = [string](Get-JsonProp $f 'name')
-                        label = [string]((Get-JsonProp $f 'label') ? (Get-JsonProp $f 'label') : (Get-JsonProp $f 'name'))
-                        required = [bool](Get-JsonProp $f 'required')
-                        maxLength = [int](Get-JsonProp $f 'maxLength')
-                    })
-                }
-            }
-        }
 
         $templates.Add([ordered]@{
             key = [string]$key
-            name = [string]((Get-JsonProp $item 'description') ? (Get-JsonProp $item 'description') : $key)
-            layer = [int](Get-JsonProp $item 'layer')
-            category = [string](Get-JsonProp $item 'category')
+            name = $item.Description ? $item.Description : $key
+            layer = $item.Layer
+            category = $item.Category
             disabled = ($key -in $disabledKeys)
-            fields = @($fields)
+            fields = @(Get-WebTemplateFields -Template $item)
         })
     }
 
-    return @{ ok = $true; data = @($templates) }
+    return @{ ok = $true; data = $templates.ToArray() }
 }
 
 function Invoke-WebAirShow {
@@ -543,16 +538,36 @@ function Invoke-WebAirShow {
         return @{ ok = $false; error = 'forbidden' }
     }
 
+    $store = Get-TemplateStore
+    if (-not $store.Map.ContainsKey($key)) {
+        return @{ ok = $false; error = 'refused'; data = (T 'air.templateUnknown' (ConvertTo-TelegramHtmlText -Text $key)) }
+    }
+    if ($autoHide -lt 0 -or $autoHide -gt 86400) {
+        return @{ ok = $false; error = 'bad_duration' }
+    }
+
+    $template = $store.Map[$key]
     $variables = @{}
     if ($rawVars -is [System.Collections.IDictionary]) {
         foreach ($k in $rawVars.Keys) {
+            if ($k -notin $template.Fields) { return @{ ok = $false; error = 'refused' } }
             $variables[[string]$k] = [string]$rawVars[$k]
+        }
+    }
+    foreach ($field in Get-WebTemplateFields -Template $template) {
+        $value = [string]$variables[$field.name]
+        if ($field.required -and [string]::IsNullOrWhiteSpace($value)) {
+            return @{ ok = $false; error = 'refused'; data = (T 'flow.fieldRequiredNoEmpty') }
+        }
+        $length = Get-TextElementCount -Text $value
+        if ($field.maxLength -and $length -gt $field.maxLength) {
+            return @{ ok = $false; error = 'refused'; data = (T 'flow.textTooLong' $length $field.maxLength) }
         }
     }
 
     $result = Invoke-ShowTemplateResult -Key $key -Variables $variables -ChatId $actor -UserId $actor -AutoHideSeconds $autoHide
-    if ($result -and -not $result.Success) {
-        return @{ ok = $false; error = 'refused'; message = [string]$result.Error }
+    if (-not (Get-JsonProp $result 'Success')) {
+        return @{ ok = $false; error = 'refused'; data = [string](Get-JsonProp $result 'Error') }
     }
 
     Publish-WebChannelState -Force
@@ -592,5 +607,155 @@ function Invoke-WebAirExit {
     }
 
     Publish-WebChannelState -Force
+    return @{ ok = $true }
+}
+
+function Get-WebContentPage {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    $view = [string](Get-JsonProp $Arguments 'view')
+    $entries = @()
+    $selected = @()
+    $currentUrgentId = ''
+    $revision = $null
+    $fields = @()
+    switch ($view) {
+        'urgent' {
+            if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+            $entries = @(Get-UrgentProperty $script:UrgentBoard 'Items' @())
+            $selected = @(Get-UrgentSelectedIds -ChatId $actor)
+            $currentUrgentId = Get-UrgentCurrentItemId -ReadOnly
+            $revision = [int](Get-JsonProp $script:UrgentBoard 'Revision')
+            $fields = @(Get-WebUrgentFields)
+        }
+        'bulletins' {
+            if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+            $entries = @(Get-JsonProp $script:MojazLibrary 'Bulletins' | Where-Object { $null -ne $_ })
+        }
+        'ticker' {
+            if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+            $snapshot = Get-NewsTickerConfiguredSnapshot
+            if (-not $snapshot.Success) { return @{ ok = $false; error = 'content_unreadable' } }
+            $entries = @($snapshot.Items)
+        }
+        default { return @{ ok = $false; error = 'bad_view' } }
+    }
+
+    $window = Get-BridgePageWindow -ItemCount $entries.Count -Page ([int](Get-JsonProp $Arguments 'page'))
+    $items = @(
+        for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
+            $entry = $entries[$index]
+            switch ($view) {
+                'urgent' {
+                    $id = [string](Get-JsonProp $entry 'Id')
+                    $state = if ($id -and $id -ceq $currentUrgentId) { 'on_air' }
+                    elseif (-not (Get-UrgentProperty $entry 'Enabled' $true)) { 'disabled' }
+                    elseif ($selected -contains $id) { 'selected' }
+                    else { 'ready' }
+                    @{
+                        id = $id
+                        title = [string](Get-JsonProp $entry 'Text')
+                        enabled = [bool](Get-UrgentProperty $entry 'Enabled' $true)
+                        state = $state
+                        values = Get-UrgentItemVariables -Item $entry
+                    }
+                }
+                'bulletins' {
+                    $state = if (Test-MojazOnAir -Bulletin $entry) { 'on_air' } else { 'saved' }
+                    $rows = @(Get-JsonProp $entry 'Rows' | Where-Object { $null -ne $_ }).Count
+                    @{ title = Get-NewsScreenLine -Text ([string](Get-JsonProp $entry 'Name')) -Length 120; state = $state; rows = $rows }
+                }
+                'ticker' { @{ title = Get-NewsScreenLine -Text ([string]$entry) -Length 240; state = 'published' } }
+            }
+        }
+    )
+    return @{ ok = $true; data = @{
+        items = $items; page = $window.Page; pageCount = $window.PageCount; total = $entries.Count; revision = $revision; fields = $fields
+    } }
+}
+
+function Get-WebUrgentFields {
+    $maxLength = Get-SettingInt 'UrgentBoardMaxTextLength' 300
+    $isFirst = $true
+    foreach ($field in Get-WebTemplateFields -Template (Get-UrgentTemplate)) {
+        $field.required = $isFirst -or $field.required
+        $field.maxLength = if ($field.maxLength) { [math]::Min($maxLength, [int]$field.maxLength) } else { $maxLength }
+        $field
+        $isFirst = $false
+    }
+}
+
+function Invoke-WebUrgentWrite {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+
+    $board = $script:UrgentBoard
+    if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $board 'Revision')) {
+        return @{ ok = $false; error = 'urgent_stale' }
+    }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $id = [string](Get-JsonProp $Arguments 'id')
+    if ($action -ne 'add' -and (-not $id -or -not (Get-UrgentItem -Board $board -ItemId $id))) {
+        return @{ ok = $false; error = 'not_found' }
+    }
+    $row = Get-JsonProp $Arguments 'row'
+    $result = $null
+    switch ($action) {
+        { $_ -in 'add', 'update' } {
+            $values = Get-JsonProp $row 'values'
+            $enabled = Get-JsonProp $row 'enabled'
+            $fields = @(Get-WebUrgentFields)
+            if ($fields.Count -eq 0 -or $values -isnot [System.Collections.IDictionary] -or $enabled -isnot [bool]) {
+                return @{ ok = $false; error = 'urgent_invalid' }
+            }
+            if ($values.Count -ne $fields.Count) { return @{ ok = $false; error = 'urgent_stale' } }
+            $cells = [System.Collections.Generic.List[string]]::new()
+            $extra = @{}
+            foreach ($field in $fields) {
+                if (-not $values.Contains($field.name)) { return @{ ok = $false; error = 'urgent_stale' } }
+                $cell = ([string]$values[$field.name] -replace '\s+', ' ').Trim()
+                if ($field.required -and -not $cell) { return @{ ok = $false; error = 'urgent_invalid' } }
+                try { [void][System.Xml.XmlConvert]::VerifyXmlChars($cell) }
+                catch { return @{ ok = $false; error = 'urgent_invalid' } }
+                if ($cell.Length -gt $field.maxLength) {
+                    return @{ ok = $false; error = 'refused'; data = (T 'flow.textTooLong' $cell.Length $field.maxLength) }
+                }
+                if ($cells.Count -ge 2) { $extra[$field.name] = $cell }
+                $cells.Add($cell)
+            }
+            $text = $cells[0]
+            $heading = if ($cells.Count -gt 1) { $cells[1] } else { '' }
+            $maxLength = Get-SettingInt 'UrgentBoardMaxTextLength' 300
+            if ($action -eq 'add') {
+                # Apply the same title and enabled validation as an edit before
+                # persisting the new row and its final revision together.
+                $result = Add-UrgentItem -Board $board -Text $text -MaxItems (Get-SettingInt 'UrgentBoardMaxItems' 40) -MaxLength $maxLength -UserId $actor
+                if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
+                $board = $result.Value
+                $id = $board.Items[-1].Id
+            }
+            $changes = [ordered]@{ Text = $text; Enabled = $enabled }
+            if ($cells.Count -gt 1) { $changes.Title = $heading }
+            foreach ($field in $changes.Keys) {
+                $result = Set-UrgentItem -Board $board -ItemId $id -Field $field -Value $changes[$field] -MaxLength $maxLength -UserId $actor
+                if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
+                $board = $result.Value
+            }
+            Set-JsonProp (Get-UrgentItem -Board $board -ItemId $id) 'ExtraFields' $extra
+        }
+        'up' { $result = Move-UrgentItem -Board $board -ItemId $id -Delta -1 }
+        'down' { $result = Move-UrgentItem -Board $board -ItemId $id -Delta 1 }
+        'remove' { $result = Remove-UrgentItem -Board $board -ItemId $id }
+        default { return @{ ok = $false; error = 'urgent_invalid' } }
+    }
+    if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
+    if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
+    Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
 }

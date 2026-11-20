@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using CinegyBridge.Web.Auth;
 using CinegyBridge.Web.Bridge;
@@ -29,11 +28,13 @@ public static class AirEndpoints
 
         api.MapPost("/hide/{layer:int}", Hide)
             .Produces(StatusCodes.Status204NoContent)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         api.MapPost("/exit/{layer:int}", Exit)
             .Produces(StatusCodes.Status204NoContent)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
@@ -60,14 +61,7 @@ public static class AirEndpoints
             autoHideSeconds = request.AutoHideSeconds
         }, http.RequestAborted);
 
-        if (!reply.Ok)
-        {
-            if (reply.Error == "forbidden") return ApiErrors.Of(403, "forbidden");
-            if (reply.Error == "refused") return ApiErrors.Of(400, reply.Error, reply.Data.ToString());
-            return ApiErrors.BridgeUnavailable();
-        }
-
-        return TypedResults.NoContent();
+        return AirResult(reply);
     }
 
     private static async Task<IResult> Hide(int layer, IBridgeChannel bridge, HttpContext http)
@@ -75,14 +69,7 @@ public static class AirEndpoints
         var actor = http.User.UserId();
         var reply = await bridge.SendAsync("air.hide", new { actor, layer }, http.RequestAborted);
 
-        if (!reply.Ok)
-        {
-            if (reply.Error == "forbidden") return ApiErrors.Of(403, "forbidden");
-            if (reply.Error == "refused") return ApiErrors.Of(400, "refused");
-            return ApiErrors.BridgeUnavailable();
-        }
-
-        return TypedResults.NoContent();
+        return AirResult(reply);
     }
 
     private static async Task<IResult> Exit(int layer, IBridgeChannel bridge, HttpContext http)
@@ -90,13 +77,14 @@ public static class AirEndpoints
         var actor = http.User.UserId();
         var reply = await bridge.SendAsync("air.exit", new { actor, layer }, http.RequestAborted);
 
-        if (!reply.Ok)
-        {
-            if (reply.Error == "forbidden") return ApiErrors.Of(403, "forbidden");
-            if (reply.Error == "refused") return ApiErrors.Of(400, "refused");
-            return ApiErrors.BridgeUnavailable();
-        }
-
-        return TypedResults.NoContent();
+        return AirResult(reply);
     }
+
+    private static IResult AirResult(BridgeReply reply) => reply.Ok ? TypedResults.NoContent() : reply.Error switch
+    {
+        "forbidden" => ApiErrors.Of(403, reply.Error),
+        "bad_duration" => ApiErrors.Of(400, reply.Error),
+        "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
+        _ => ApiErrors.BridgeUnavailable()
+    };
 }

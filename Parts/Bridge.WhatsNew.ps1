@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.79.0'; Items = @('The web interface opens on the breaking-news table. Add or edit a row using the columns from your template, move it, or delete it after confirmation.', 'Browse saved bulletins and the published ticker in Newsroom. The air board and templates have Show, Hide, and Exit controls.') },
                 @{ Version = '8.78.0'; Items = @('🌐 A web interface for the bridge, working alongside the bot on the same state. An administrator turns it on from the control program (the 🌐 Web interface button). Sign in by sending the code shown on the page to the bot and approving the message it sends back, or with a password an administrator adds. This release shows what is on air live, accounts and sessions; controlling the air from the browser comes in the next releases.') },
                 @{ Version = '8.77.2'; Items = @('⚡ Putting a breaking-news line on air or taking it off answers in about a second. Other people''s open breaking-news boards now update one after another in the background, a moment later.') },
                 @{ Version = '8.77.1'; Items = @('🛠 While Telegram is refusing live panels from the bot, the main menu opens straight away as the ordinary screen instead of trying the panel first each time.') },
@@ -318,6 +319,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.79.0'; Items = @('يفتح الموقع على جدول العواجل. أضف عاجلًا أو عدّل صفّه في الأعمدة المأخوذة من قالبك، ثم احفظه. ويمكن تغيير ترتيب الصف وحذفه بعد التأكيد.', 'تصفّح الموجزات المحفوظة والشريط المنشور في «غرفة الأخبار»، واعرض القوالب أو أخفها من صفحات القوالب والهواء.') },
                 @{ Version = '8.78.0'; Items = @('🌐 واجهة ويب للجسر، تعمل مع البوت في الوقت نفسه وعلى الحالة نفسها. يفتحها المشرف من برنامج التحكم (زر «🌐 واجهة الويب»). الدخول بإرسال الرمز الظاهر في الصفحة إلى البوت ثم الموافقة على الرسالة التي تصلك، أو بكلمة مرور يضيفها المشرف. في هذا الإصدار تعرض الصفحة ما على الهواء حيًّا، والحسابات، والجلسات؛ التحكم بالهواء من المتصفح يأتي في الإصدارات القادمة.') },
                 @{ Version = '8.77.2'; Items = @('⚡ عرض العاجل أو إخفاؤه يُجاب في نحو ثانية. لوحات العواجل المفتوحة عند الآخرين تتحدّث واحدة تلو الأخرى في الخلفية، بعد لحظات.') },
                 @{ Version = '8.77.1'; Items = @('🛠 ما دام Telegram يرفض اللوحات الحيّة من البوت، تُفتح القائمة الرئيسية مباشرةً بشاشتها العادية بدل محاولة اللوحة أولًا في كل مرة.') },

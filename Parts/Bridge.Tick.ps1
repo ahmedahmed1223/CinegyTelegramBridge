@@ -147,8 +147,9 @@ function Update-PostShowQueue {
             Write-BridgeLog "Dropped the post-show postbox write for '$($item.Key)' on layer $layer : the layer now holds $now." 'WARN'
             continue
         }
+        $types = (Get-JsonProp $item 'Types') ?? @{}
         $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress `
-            -AirChannelNumber $config.AirChannelNumber -Values $item.Values -TimeoutSec (Get-AirTimeout)
+            -AirChannelNumber $config.AirChannelNumber -Values $item.Values -Types $types -TimeoutSec (Get-AirTimeout)
         if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air post-show POSTBOX ($($item.Key)): success=$($result.Success) $($result.Xml)" }
         if (-not $result.Success) {
             Write-BridgeLog "Post-show postbox write failed for '$($item.Key)': $($result.Error)" "WARN"

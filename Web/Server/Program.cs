@@ -123,6 +123,7 @@ app.MapStatusEndpoints();
 app.MapAccountEndpoints();
 app.MapSessionEndpoints();
 app.MapAirEndpoints();
+app.MapContentEndpoints();
 // Client-side routes: any non-API path is the app.
 app.MapFallbackToFile("index.html");
 

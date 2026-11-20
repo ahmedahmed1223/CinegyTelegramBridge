@@ -1,5 +1,6 @@
 import { api, errorCode } from './client'
 import type { Schemas } from './client'
+import { messageFor } from './messages'
 
 export type TemplateDto = Schemas['TemplateDto']
 export type TemplateFieldDto = Schemas['TemplateFieldDto']
@@ -13,19 +14,19 @@ export async function getTemplates(): Promise<TemplateDto[]> {
 
 export async function showTemplate(request: ShowTemplateRequest): Promise<void> {
   const { error, response } = await api.POST('/api/air/show', { body: request })
-  if (error) throw new Error(errorCode(error, response))
+  if (!response.ok) throw new Error(error?.message || messageFor(errorCode(error, response)))
 }
 
 export async function hideLayer(layer: number): Promise<void> {
   const { error, response } = await api.POST('/api/air/hide/{layer}', {
     params: { path: { layer } },
   })
-  if (error) throw new Error(errorCode(error, response))
+  if (!response.ok) throw new Error(errorCode(error, response))
 }
 
 export async function exitLayer(layer: number): Promise<void> {
   const { error, response } = await api.POST('/api/air/exit/{layer}', {
     params: { path: { layer } },
   })
-  if (error) throw new Error(errorCode(error, response))
+  if (!response.ok) throw new Error(errorCode(error, response))
 }

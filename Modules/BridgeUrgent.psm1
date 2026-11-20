@@ -494,6 +494,7 @@ function New-UrgentRunPlan {
             ItemId = [string](Get-UrgentProperty $item 'Id' '')
             Text = [string](Get-UrgentProperty $item 'Text' '')
             Title = [string](Get-UrgentProperty $item 'Title' '')
+            ExtraFields = Get-UrgentProperty $item 'ExtraFields'
             Mode = $timing.Mode
             AtSeconds = [math]::Round($at, 3)
             TransitionSeconds = [math]::Round($transition, 3)

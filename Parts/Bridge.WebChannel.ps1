@@ -32,6 +32,7 @@ $script:WebOnlyUserIdBase = 9000000000000000L
 $script:WebLoginRequests = @{}
 $script:WebLoginLifetimeMinutes = 5
 $script:WebLoginMaxPending = 50
+$script:WebRelayReviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 $script:WebBotUsername = ''
 
 function Test-WebOnlyUserId {
@@ -329,8 +330,73 @@ function Invoke-WebChannelOperation {
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
+        'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
+}
+
+function Get-WebRelayControlState {
+    $enabled = [bool](Get-Setting 'EnableLiveRelay')
+    $source = Get-ActiveLiveStreamConfig
+    $inputUrl = [string](Get-JsonProp $source 'SourceUrl')
+    $destination = [string](Get-JsonProp $source 'RtmpDestination')
+    $configured = -not ([string]::IsNullOrWhiteSpace($inputUrl) -or [string]::IsNullOrWhiteSpace($destination))
+    $process = Get-RunningRelayProcess -ReadOnly -RequireTimestamp
+    $unverified = -not $process -and [bool](Get-RunningRelayProcess -ReadOnly)
+    $retry = [bool]$script:RelayState.ShouldRun
+    $state = if ($unverified) { 'unverified' }
+    elseif ($retry -and (Get-JsonProp $script:RelayState 'SourceRestartPending')) { 'switching' }
+    elseif ($script:RelayState.VerifyAt) { 'starting' }
+    elseif ($process) { 'running' }
+    elseif ($retry) { 'retrying' }
+    elseif (-not $enabled) { 'disabled' }
+    elseif (Get-JsonProp $script:RelayState 'StartFailed') { 'failed' }
+    else { 'stopped' }
+
+    # Bind the operator's review to the exact process and station input. The
+    # opaque value must not reveal credentials embedded in either URL.
+    $processIdentity = if ($process) { "$($process.Id)|$($process.StartTime.ToUniversalTime().Ticks)" } else { '' }
+    $generation = [long](Get-JsonProp $script:RelayState 'Revision')
+    $reviewed = ConvertTo-Json -Compress -InputObject @($state, $enabled, $configured, $retry, $generation, $processIdentity, $inputUrl, $destination)
+    $revision = [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData($script:WebRelayReviewKey, [Text.Encoding]::UTF8.GetBytes($reviewed)))
+    return @{
+        Process = $process
+        Data = @{
+            state = $state; revision = $revision; enabled = $enabled; configured = $configured
+            canStart = $state -in 'stopped', 'failed' -and $configured
+            canStop = -not $unverified -and ([bool]$process -or $retry)
+            outcome = ''
+        }
+    }
+}
+
+function Invoke-WebRelayControl {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -notin 'status', 'start', 'stop') { return @{ ok = $false; error = 'relay_invalid' } }
+    $current = Get-WebRelayControlState
+    if ($action -eq 'status') { return @{ ok = $true; data = $current.Data } }
+    if ((Get-JsonProp $Arguments 'revision') -cne $current.Data.revision) {
+        return @{ ok = $false; error = 'relay_stale' }
+    }
+    if ($action -eq 'start') {
+        if (-not $current.Data.canStart) { return @{ ok = $false; error = 'relay_unavailable' } }
+        $operation = Start-LiveRelayOperation -UserId $actor
+        if ($operation.Code -eq 'failed') { return @{ ok = $false; error = 'relay_start_failed' } }
+        if ($operation.Code -ne 'starting') { return @{ ok = $false; error = 'relay_stale' } }
+    }
+    else {
+        if (-not $current.Data.canStop) { return @{ ok = $false; error = 'relay_unavailable' } }
+        $operation = Stop-LiveRelayOperation -UserId $actor -Process $current.Process
+        if ($operation.Code -eq 'failed') { return @{ ok = $false; error = 'relay_stop_failed' } }
+    }
+    $updated = (Get-WebRelayControlState).Data
+    $updated.outcome = $operation.Code
+    return @{ ok = $true; data = $updated }
 }
 
 function Update-WebChannel {

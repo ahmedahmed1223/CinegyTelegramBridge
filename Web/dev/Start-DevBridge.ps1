@@ -35,6 +35,7 @@ Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
+Set-JsonProp $config.Settings 'EnableLiveRelay' $true
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
 Set-JsonProp $config.Settings 'MojazMultiDesign' $true
 @{
@@ -103,6 +104,14 @@ function Save-UserAliases { $true }
 function Update-WebBotUsername { $script:WebBotUsername = 'cinegy_dev_bot' }
 function Send-TelegramMessage { }
 function Save-NewsSheetItems { @{ Success = $false; Attempted = $false; Error = '' } }
+function Start-RelayProcess {
+    $script:RelayState.Process = @{ Id = 1; StartTime = (Get-Date); HasExited = $false }
+    return $true
+}
+function Stop-RelayProcess {
+    param($Process)
+    $Process.HasExited = $true
+}
 
 # The dev pipe uses real web dispatch and validation. Replacing the three
 # commands here confines their effects to the simulated on-air state.
@@ -151,6 +160,7 @@ Start-WebChannel
 
 $started = Get-Date
 Set-JsonProp (Get-LiveStreamConfig) 'SourceUrl' 'https://example.invalid/simulated-output.m3u8'
+Set-JsonProp (Get-LiveStreamConfig) 'RtmpDestination' 'rtmp://example.invalid/simulated-relay'
 $script:LastOutputMonitorAt = $started.AddMinutes(-2)
 $script:StreamOutages = New-BridgeOutageLedger
 Open-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $started.AddMinutes(-47) | Out-Null
@@ -179,6 +189,7 @@ try {
         }
         Publish-WebChannelState
         Invoke-WebChannelRequests
+        if ($script:RelayState.ShouldRun) { Update-RelayWatchdog }
         Update-UrgentBoardRun
         Wait-WebChannelSignal -Milliseconds 250
     }

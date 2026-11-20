@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Badge, Button, Group, Menu, Paper, Skeleton, Stack, Table, Text, Title } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Group, Menu, Paper, Skeleton, Stack, Table, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { roleLabel, useSession } from '../../api/session'
+import { PageHeader } from '../../components/PageHeader'
 import { useNow } from '../../hooks/useNow'
 import { formatDateTime } from '../../lib/time'
 import { CreateAccountModal } from './CreateAccountModal'
@@ -59,17 +60,11 @@ export function AccountsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>الحسابات</Title>
-          <Text c="dimmed" size="sm">
-            دخول الويب بكلمة مرور. الصلاحيات نفسها التي في البوت: الجسر يقرّرها لا هذه الصفحة.
-          </Text>
-        </div>
+      <PageHeader title="الحسابات" description="إدارة حسابات الويب وكلمات المرور والصلاحيات." actions={
         <Button leftSection={<IconPlus size={18} />} onClick={create.open} disabled={!accounts.data}>
           حساب جديد
         </Button>
-      </Group>
+      } />
 
       {accounts.isError && <Alert color="red">{accounts.error.message}</Alert>}
 

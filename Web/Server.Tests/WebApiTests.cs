@@ -38,6 +38,26 @@ public sealed class SignInTests : IDisposable
         Assert.Equal("https://media.example.test/output/main.m3u8", playback!.Url);
     }
 
+    [Fact]
+    public async Task Only_administrators_can_review_and_control_the_relay_with_csrf()
+    {
+        var viewer = await _app.SignedInAsync("desk", WebApp.Operator);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.Client.GetAsync("/api/live/relay")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsync("/api/live/relay", new RelayRequest("start", "review"))).StatusCode);
+        Assert.DoesNotContain(_app.Bridge.Calls, call => call.Op == "relay.control");
+
+        var administrator = await _app.SignedInAsync("studio", WebApp.Admin);
+        var state = await administrator.Client.GetFromJsonAsync<RelayState>("/api/live/relay");
+        Assert.Equal("review", state!.Revision);
+        administrator.Client.DefaultRequestHeaders.Remove("X-XSRF-TOKEN");
+        var payload = new { action = "start", revision = state.Revision, actor = 999 };
+        Assert.Equal(HttpStatusCode.BadRequest, (await administrator.PostAsync("/api/live/relay", payload)).StatusCode);
+        await administrator.RefreshSessionAsync();
+        var response = await administrator.PostAsync("/api/live/relay", payload);
+        Assert.Equal("starting", (await response.Content.ReadFromJsonAsync<RelayState>())!.State);
+        Assert.Contains(_app.Bridge.Calls, call => call.Op == "relay.control" && call.Args.Contains("\"actor\":22") && call.Args.Contains("\"action\":\"start\""));
+    }
+
     [Theory]
     [InlineData("http://media.example.test/output/main.m3u8")]
     [InlineData("https://name:secret@media.example.test/output.m3u8")]

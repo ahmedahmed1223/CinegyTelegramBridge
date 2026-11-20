@@ -7,23 +7,58 @@
 }
 
 body {
+  --cgb-canvas: light-dark(#eef3f7, #0a1423);
+  --cgb-panel: light-dark(#fff, #142238);
+  --cgb-sidebar: light-dark(#f8fbfd, #101d2f);
+  --cgb-line: light-dark(#d6e1eb, #2b3d55);
+  --cgb-tab-active: light-dark(#d8f0eb, #173f3f);
+  --cgb-tab-ink: light-dark(#075d54, #a7e8de);
   font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
+  background: var(--cgb-canvas);
 }
 
 [data-mantine-color-scheme='light'] body {
-  --mantine-color-dimmed: #596778;
-  background: #f4f6fa;
+  --mantine-color-dimmed: #53647a;
 }
 
 [data-mantine-color-scheme='dark'] body {
-  --mantine-color-dimmed: #a6b4c4;
-  background: #0d1115;
+  --mantine-color-dimmed: #aebdd0;
 }
 
 ::selection {
-  background: light-dark(#c8dfff, #25446d);
-  color: light-dark(#0a2d58, #f4f8ff);
+  background: light-dark(#b9e8df, #22554d);
+  color: light-dark(#12362f, #eefcf9);
+}
+
+.mantine-Paper-root:where(:not(.mantine-Skeleton-root)) {
+  --paper-bg: var(--cgb-panel);
+}
+
+.mantine-Paper-root[data-with-border] {
+  border-color: var(--cgb-line);
+}
+
+.mantine-Table-th {
+  font-weight: 700;
+  color: var(--mantine-color-dimmed);
+}
+
+.cgb-page-header {
+  min-inline-size: 0;
+  padding-block-end: var(--mantine-spacing-lg);
+  border-block-end: 1px solid var(--cgb-line);
+}
+
+.cgb-page-title {
+  font-size: 2rem;
+  line-height: 1.24;
+}
+
+@media (max-width: 36em) {
+  .cgb-page-title {
+    font-size: 1.625rem;
+  }
 }
 
 /* Timecodes and counters: digits that do not jitter while they tick. */

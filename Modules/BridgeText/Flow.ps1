@@ -211,6 +211,8 @@ function Add-BridgeTextFlow {
     $catalogue['media.starting'] = @{ ar = '⏳ جاري بدء البث...'; en = '⏳ Starting the relay...' }
     $catalogue['media.noneRunning'] = @{ ar = 'لا يوجد بث يعمل حاليًا.'; en = 'No relay is running.' }
     $catalogue['media.stoppedOk'] = @{ ar = '⏹ تم إيقاف البث.'; en = '⏹ The relay was stopped.' }
+    $catalogue['media.stopping'] = @{ ar = 'طُلب إيقاف الترحيل. حدّث الحالة للتحقق من توقفه.'; en = 'The relay stop was requested. Refresh to check whether it has stopped.' }
+    $catalogue['media.relayUnverified'] = @{ ar = 'تعذّر التحقق من هوية عملية الترحيل. راجع العملية على جهاز الجسر.'; en = 'The relay process could not be identified. Check the process on the bridge computer.' }
     $catalogue['media.runningNow'] = @{ ar = '▶️ البث يعمل الآن.'; en = '▶️ The relay is running now.' }
     $catalogue['media.relayStopped'] = @{ ar = '⚠️ توقف البث المباشر (إعادة التشغيل التلقائي معطّلة).'; en = '⚠️ The live relay stopped (automatic restart is off).' }
     $catalogue['media.sendRtmp'] = @{ ar = 'أرسل رابط RTMP الكامل (الخادم + المفتاح معًا) من إعدادات بث فيديو تشات تليجرام:'; en = 'Send the full RTMP link (server and key together) from the Telegram video chat streaming settings:' }

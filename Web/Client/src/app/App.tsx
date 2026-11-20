@@ -7,7 +7,6 @@ import { RequireAdmin, RequireSession } from '../layout/guards'
 import { Shell } from '../layout/Shell'
 import { AccountsPage } from '../pages/accounts/AccountsPage'
 import { LoginPage } from '../pages/login/LoginPage'
-import { LivePage } from '../pages/live/LivePage'
 import { NewsroomPage } from '../pages/newsroom/NewsroomPage'
 import { SessionsPage } from '../pages/sessions/SessionsPage'
 import { StatusPage } from '../pages/status/StatusPage'
@@ -31,7 +30,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/newsroom" replace /> },
       { path: 'air', element: <StatusPage /> },
-      { path: 'live', element: <LivePage /> },
+      { path: 'live', element: <></> },
       { path: 'templates', element: <TemplatesPage /> },
       { path: 'newsroom', element: <NewsroomPage /> },
       { path: 'sessions', element: <SessionsPage /> },

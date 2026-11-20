@@ -11,7 +11,7 @@
 | Bulletins | Shared library and paginated design-field table, create and copy, revision-checked row editing and batch paste, built-in timing, on-air indicator | Attachments, design switching, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
 | Ticker | Paged published list, shared draft lock and handover, editing and reordering, reviewed publication and conflict resolution | Pause and resume headlines, scheduled publish controls, sets, backups and Google Sheets sync controls |
 | Program content | | Board, fields and media, draft control, publish and live editing |
-| Shift and monitoring | Air status, connectivity, live output player and feed outage history | Relay controls, snapshots and clips, template and material schedule, incident and operation history, notifications, reports and exports |
+| Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls | Snapshots and clips, template and material schedule, incident and operation history, notifications, reports and exports |
 | Administration | Web accounts and sessions | Bot access requests and roles, settings, health tools, audit and announcements |
 
 ## Newsroom implementation order

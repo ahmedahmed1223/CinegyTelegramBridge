@@ -1,6 +1,11 @@
 // What each server error code means to the person in front of the screen.
 // Codes come from the server (ErrorResponse.error) and the bridge.
 const messages: Record<string, string> = {
+  relay_stale: 'تغيّرت حالة الترحيل أثناء التأكيد. راجع الحالة ثم أعد الطلب.',
+  relay_unavailable: 'هذا الإجراء غير متاح في حالة الترحيل الحالية.',
+  relay_start_failed: 'تعذّر تشغيل الترحيل. تحقّق من إعدادات المصدر ووجهة Telegram وFFmpeg على جهاز الجسر.',
+  relay_stop_failed: 'تعذّر إيقاف الترحيل. راجع الحالة وأعد المحاولة.',
+  relay_invalid: 'أمر الترحيل غير صالح.',
   invalid_credentials: 'اسم المستخدم أو كلمة المرور غير صحيحة.',
   locked: 'أُقفل الحساب مؤقتًا بعد محاولات خاطئة متتالية. حاول بعد ربع ساعة أو اطلب من المشرف إعادة تعيين كلمة المرور.',
   not_authorized: 'هذا الحساب لم يعد مخوّلًا في الجسر.',

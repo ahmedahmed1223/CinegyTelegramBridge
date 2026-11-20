@@ -60,25 +60,41 @@ function Set-OutputMonitorFallbackActive {
     # A relay process receives its input only when it starts, so an active
     # relay must be relaunched for the source selection to take effect.
     if ($script:RelayState.ShouldRun) {
-        $running = Get-RunningRelayProcess
-        if ($running) { Stop-Process -Id $running.Id -Force -ErrorAction SilentlyContinue }
-        Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue
-        $script:RelayState.Process = $null
         try {
-            Start-RelayProcess | Out-Null
-            $script:RelayState.Restarts = 0
-            $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
-            $script:RelayState.NotifyChatId = 0
+            $running = Get-RunningRelayProcess -ReadOnly -RequireTimestamp
+            if ($running) { Stop-RelayProcess -Process $running }
+            elseif (Get-RunningRelayProcess -ReadOnly) { throw (T 'media.relayUnverified') }
+            # An accepted stop may still be draining. The watchdog will
+            # relaunch only after the original process has exited.
+            Set-JsonProp $script:RelayState 'SourceRestartPending' $true
+            Update-LiveRelayRevision
+            Update-LiveRelaySourceRestart
         }
         catch {
-            # A manual start failure is final. A failed automatic attempt keeps
-            # ShouldRun set so the watchdog can spend the remaining retry budget.
-            if ($notify) { $script:RelayState.ShouldRun = $false }
             Write-BridgeLog "Live relay source switch failed: $(Protect-SensitiveText $_.Exception.Message)" 'ERROR'
             Send-AdminBroadcast -Text (T 'media.restartFailed') -Urgent
         }
     }
     return $true
+}
+
+function Update-LiveRelaySourceRestart {
+    if (Get-RunningRelayProcess -ReadOnly) { return }
+    Set-JsonProp $script:RelayState 'SourceRestartPending' $false
+    Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue
+    $script:RelayState.Process = $null
+    $script:RelayState.VerifyAt = $null
+    try {
+        Start-RelayProcess | Out-Null
+        $script:RelayState.Restarts = 0
+        $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
+        $script:RelayState.NotifyChatId = 0
+    }
+    catch {
+        # Keep ShouldRun set so the watchdog can apply its retry policy.
+        Write-BridgeLog "Live relay could not start after the source change: $(Protect-SensitiveText $_.Exception.Message)" 'ERROR'
+        Send-AdminBroadcast -Text (T 'media.restartFailed') -Urgent
+    }
 }
 
 function Get-FfmpegPath {
@@ -864,6 +880,7 @@ function Get-RunningRelayProcess {
        resolve to an unrelated ffmpeg - very plausibly one of this bridge's own
        short-lived snapshot captures - and the menu would claim the relay is
        live while offering to kill the wrong process. #>
+    param([switch]$ReadOnly, [switch]$RequireTimestamp)
     if ($script:RelayState.Process -and -not $script:RelayState.Process.HasExited) { return $script:RelayState.Process }
     if (Test-Path $relayPidFile) {
         $raw = ''
@@ -872,17 +889,18 @@ function Get-RunningRelayProcess {
         $parsedPid = 0
         if ($parts.Count -ge 1 -and [int]::TryParse($parts[0], [ref]$parsedPid)) {
             $proc = Get-Process -Id $parsedPid -ErrorAction SilentlyContinue
-            if ($proc -and $proc.ProcessName -like 'ffmpeg*') {
+            if ($proc -and -not $proc.HasExited -and $proc.ProcessName -like 'ffmpeg*') {
                 $ticks = 0L
                 if ($parts.Count -lt 2 -or -not [long]::TryParse($parts[1], [ref]$ticks)) {
-                    return $proc          # legacy pid file without a timestamp
+                    if (-not $RequireTimestamp) { return $proc }
+                    return $null
                 }
                 if ([Math]::Abs($proc.StartTime.Ticks - $ticks) -lt [TimeSpan]::TicksPerSecond) {
                     return $proc
                 }
             }
         }
-        Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
+        if (-not $ReadOnly) { Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue }
     }
     return $null
 }
@@ -945,52 +963,98 @@ function Start-RelayProcess {
     return $true
 }
 
-function Start-LiveRelay {
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    if ($UserId -eq 0) { $UserId = $ChatId }
-    if (-not (Get-Setting 'EnableLiveRelay')) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.relayDisabled') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
-    if (Get-RunningRelayProcess) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.alreadyRunning') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
-    }
+function Start-LiveRelayOperation {
+    param([Parameter(Mandatory)][long]$UserId, [long]$NotifyChatId = 0)
+    if (-not (Get-Setting 'EnableLiveRelay')) { return @{ Code = 'disabled' } }
+    if (Get-RunningRelayProcess -ReadOnly) { return @{ Code = 'running' } }
+    Update-LiveRelayRevision
+    Set-JsonProp $script:RelayState 'StartFailed' $false
     try { Start-RelayProcess | Out-Null }
     catch {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ $(Protect-SensitiveText $_.Exception.Message)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
+        $detail = Protect-SensitiveText $_.Exception.Message
+        Write-BridgeLog "Live relay could not start: $detail" 'WARN'
+        Set-JsonProp $script:RelayState 'StartFailed' $true
+        return @{ Code = 'failed'; Detail = $detail }
     }
     $script:RelayState.ShouldRun = $true
     $script:RelayState.Restarts = 0
-    $script:RelayState.NotifyChatId = $ChatId
+    $script:RelayState.NotifyChatId = $NotifyChatId
     $script:RelayState.VerifyAt = (Get-Date).AddSeconds(3)
     Write-BridgeLog "User $UserId started live relay (PID $($script:RelayState.Process.Id))"
     Add-AuditEntry (T 'media.feedStartedAudit' $(Format-UserAuditActor -UserId $UserId))
-    Send-TelegramMessage -ChatId $ChatId -Text (T 'media.starting') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    return @{ Code = 'starting' }
+}
+
+function Stop-LiveRelayOperation {
+    param([Parameter(Mandatory)][long]$UserId, $Process)
+    $retryWasRequested = $script:RelayState.ShouldRun
+    $script:RelayState.ShouldRun = $false
+    $script:RelayState.VerifyAt = $null
+    Set-JsonProp $script:RelayState 'SourceRestartPending' $false
+    if ($retryWasRequested -or $Process) { Update-LiveRelayRevision }
+    if (-not $Process -or $Process.HasExited) {
+        if ($retryWasRequested) {
+            Add-AuditEntry (T 'media.feedStoppedAudit' $(Format-UserAuditActor -UserId $UserId))
+            return @{ Code = 'stopped' }
+        }
+        return @{ Code = 'idle' }
+    }
+    try {
+        Stop-RelayProcess -Process $Process
+    }
+    catch {
+        # Keep the process and stamp so the operator can retry a failed stop.
+        $detail = Protect-SensitiveText $_.Exception.Message
+        Write-BridgeLog "Live relay could not stop: $detail" 'WARN'
+        return @{ Code = 'failed'; Detail = $detail }
+    }
+    Write-BridgeLog "User $UserId requested live relay stop (PID $($Process.Id))"
+    Add-AuditEntry (T 'media.feedStoppedAudit' $(Format-UserAuditActor -UserId $UserId))
+    if (-not $Process.HasExited) { return @{ Code = 'stopping' } }
+    $script:RelayState.Process = $null
+    Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue
+    return @{ Code = 'stopped' }
+}
+
+function Update-LiveRelayRevision {
+    # A stopped relay can look identical after another operator has started
+    # and stopped it. Keep the old browser confirmation from becoming valid.
+    $revision = [long](Get-JsonProp $script:RelayState 'Revision')
+    Set-JsonProp $script:RelayState 'Revision' ($revision + 1)
+}
+
+function Stop-RelayProcess {
+    param([Parameter(Mandatory)]$Process)
+    Stop-Process -InputObject $Process -Force -ErrorAction Stop
+}
+
+function Start-LiveRelay {
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $outcome = Start-LiveRelayOperation -UserId $UserId -NotifyChatId $ChatId
+    $message = switch ($outcome.Code) {
+        'disabled' { T 'media.relayDisabled' }
+        'running' { T 'media.alreadyRunning' }
+        'failed' { "❌ $($outcome.Detail)" }
+        default { T 'media.starting' }
+    }
+    Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Stop-LiveRelay {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $script:RelayState.ShouldRun = $false
-    $script:RelayState.VerifyAt = $null
-    $proc = Get-RunningRelayProcess
-    if (-not $proc) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.noneRunning') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        return
+    $process = Get-RunningRelayProcess -ReadOnly -RequireTimestamp
+    $outcome = if (-not $process -and (Get-RunningRelayProcess -ReadOnly)) { @{ Code = 'unverified' } }
+    else { Stop-LiveRelayOperation -UserId $UserId -Process $process }
+    $message = switch ($outcome.Code) {
+        'failed' { T 'media.stopFailed' $outcome.Detail }
+        'unverified' { T 'media.relayUnverified' }
+        'idle' { T 'media.noneRunning' }
+        'stopping' { T 'media.stopping' }
+        default { T 'media.stoppedOk' }
     }
-    try {
-        Stop-Process -Id $proc.Id -Force -ErrorAction Stop
-        Write-BridgeLog "User $UserId stopped live relay (PID $($proc.Id))"
-        Add-AuditEntry (T 'media.feedStoppedAudit' $(Format-UserAuditActor -UserId $UserId))
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.stoppedOk') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-    }
-    catch {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'media.stopFailed' $(Protect-SensitiveText $_.Exception.Message)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-    }
-    $script:RelayState.Process = $null
-    Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
+    Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
 }
 
 function Update-RelayWatchdog {
@@ -998,6 +1062,10 @@ function Update-RelayWatchdog {
        Start-LiveRelay does not sleep), and restart a relay that died on its
        own - a dropped source used to silently kill the stream with nobody
        noticing until someone checked. #>
+    if ($script:RelayState.ShouldRun -and (Get-JsonProp $script:RelayState 'SourceRestartPending')) {
+        Update-LiveRelaySourceRestart
+        return
+    }
     if ($script:RelayState.VerifyAt) {
         if ((Get-Date) -lt $script:RelayState.VerifyAt) { return }
         $script:RelayState.VerifyAt = $null
@@ -1008,6 +1076,7 @@ function Update-RelayWatchdog {
             $detail = Get-LastErrorLine -Path (Join-Path $logDir "relay-stderr.log")
             Write-BridgeLog "Live relay exited immediately (code $exitCode): $detail" "ERROR"
             $script:RelayState.ShouldRun = $false
+            Set-JsonProp $script:RelayState 'StartFailed' $true
             $script:RelayState.Process = $null
             Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
             if ($notify) {

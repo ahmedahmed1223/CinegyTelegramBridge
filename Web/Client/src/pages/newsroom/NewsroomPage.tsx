@@ -4,6 +4,7 @@ import { IconRefresh } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { PageHeader } from '../../components/PageHeader'
 import { UrgentPlayback } from './UrgentPlayback'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
@@ -50,13 +51,11 @@ export function NewsroomPage() {
 
   return (
     <Stack gap="xl" className={classes.page}>
-      <div>
-        <Title order={2}>غرفة الأخبار</Title>
-        <Text c="dimmed">تابع محتوى النشرات والشريط من الجسر.</Text>
-      </div>
+      <PageHeader title="غرفة الأخبار" description="حرّر العواجل والموجز وشريط الأخبار." />
 
       <Tabs
         value={view}
+        variant="pills"
         onChange={(next) => {
           if (next === 'urgent' || next === 'bulletins' || next === 'ticker') {
             setView(next)
@@ -65,7 +64,7 @@ export function NewsroomPage() {
         }}
         keepMounted={false}
       >
-        <Tabs.List grow aria-label="أقسام غرفة الأخبار">
+        <Tabs.List grow aria-label="أقسام غرفة الأخبار" className={classes.tabs}>
           {Object.entries(views).map(([key, { label }]) => <Tabs.Tab key={key} value={key}>{label}</Tabs.Tab>)}
         </Tabs.List>
         <Tabs.Panel value={view} pt="lg">
@@ -77,7 +76,7 @@ export function NewsroomPage() {
           ) : <Stack gap="md">
             <Group justify="space-between" align="center">
               <div>
-                <Title order={3}>{current.title}</Title>
+                <Title order={2}>{current.title}</Title>
                 {result && view !== 'ticker' && <Text size="sm" c="dimmed">{number.format(result.total)} في القائمة</Text>}
               </div>
               {view !== 'ticker' && (

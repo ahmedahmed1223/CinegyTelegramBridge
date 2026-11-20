@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.84.0
+
+Watch the configured output in Picture-in-Picture while editing Newsroom data. The web app keeps playback running on navigation and provides an in-app floating player when a browser window is unavailable. Administrators can also review the Telegram relay state and confirm start or stop from Live Broadcast. Both interfaces use the same relay process and watchdog. Stopping browser playback affects only the current viewer.
+
+The web interface has a new shared theme with deep navy surfaces, teal selection and action states, and consistent headers and navigation across sign-in, Newsroom, Live Broadcast, air monitoring, templates, and access management. Both color modes retain IBM Plex Sans Arabic and IBM Plex Mono.
+
 ## Version 8.83.0
 
 The web control room has a Live Broadcast page with an output player, signal health, and recent outages. Set the web host's `LivePlaybackUrl` configuration value or launch argument `--LivePlaybackUrl` to a browser-facing HTTPS HLS or MP4 URL without credentials or query parameters. For HLS, serve the playlist and its resources from that origin and allow the web app's origin with CORS. The player contacts the media host directly. The bridge's ingest and relay destinations stay private.

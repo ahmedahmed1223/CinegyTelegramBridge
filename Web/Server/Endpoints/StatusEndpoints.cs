@@ -1,3 +1,5 @@
+using System.Text.Json;
+using CinegyBridge.Web.Auth;
 using CinegyBridge.Web.Bridge;
 
 namespace CinegyBridge.Web.Endpoints;
@@ -21,6 +23,8 @@ public sealed record BridgeStatus(string Version, long StartedAt, long Published
 
 public sealed record StatusEnvelope(bool Online, BridgeStatus? Status);
 public sealed record LivePlayback(string? Url);
+public sealed record RelayState(string State, string Revision, bool Enabled, bool Configured, bool CanStart, bool CanStop, string Outcome);
+public sealed record RelayRequest(string Action, string? Revision = null);
 
 public static class StatusEndpoints
 {
@@ -45,6 +49,36 @@ public static class StatusEndpoints
             .WithTags("Status")
             .RequireAuthorization()
             .Produces<LivePlayback>();
+
+        var relay = app.MapGroup("/api/live/relay").WithTags("Status").RequireAuthorization(AccountEndpoints.AdminPolicy);
+        relay.MapGet("", (IBridgeChannel bridge, HttpContext http) => ControlRelay(new("status"), bridge, http))
+            .Produces<RelayState>()
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        relay.MapPost("", ControlRelay)
+            .Produces<RelayState>()
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    private static async Task<IResult> ControlRelay(RelayRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("relay.control", new { actor = http.User.UserId(), request.Action, request.Revision }, http.RequestAborted);
+        if (reply.Ok)
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return TypedResults.Ok(reply.Data.Deserialize<RelayState>(JsonDefaults.Options));
+        }
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "relay_invalid" => ApiErrors.Of(400, reply.Error),
+            "relay_stale" or "relay_unavailable" => ApiErrors.Of(409, reply.Error),
+            "relay_start_failed" or "relay_stop_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
     }
 
     private static async Task Stream(HttpContext http, StatusFeed feed)

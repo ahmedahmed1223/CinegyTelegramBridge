@@ -172,6 +172,115 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'controls the same relay as Telegram and refuses expired reviews and unauthorized operators' {
+        $previousRelay = $script:RelayState
+        $previousPidFile = $script:relayPidFile
+        $script:RelayState = @{ Process = $null; ShouldRun = $false; Restarts = 0; NotifyChatId = 0; VerifyAt = $null }
+        $script:relayPidFile = Join-Path $TestDrive 'web-relay.pid'
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableLiveRelay' }
+        Mock Get-ActiveLiveStreamConfig { @{ SourceUrl = 'https://example.invalid/ingest?secret=station'; RtmpDestination = 'rtmp://example.invalid/private-stream-key' } }
+        Mock Start-RelayProcess {
+            $script:RelayState.Process = [pscustomobject]@{ Id = 5777; StartTime = [datetime]'2026-11-20T13:00:00'; HasExited = $false }
+            return $true
+        }
+        Mock Stop-RelayProcess { throw 'Simulated access denied' }
+        Mock Send-TelegramMessage { }
+        try {
+            $relayRequest = {
+                param($arguments)
+                $line = @{ op = 'relay.control'; args = $arguments } | ConvertTo-Json -Compress
+                return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json)
+            }
+            (& $relayRequest @{ actor = 4322; action = 'status' }).error | Should -Be 'forbidden'
+            (& $relayRequest @{ actor = 4322; action = 'start'; revision = 'anything' }).error | Should -Be 'forbidden'
+            $initial = & $relayRequest @{ actor = 4321; action = 'status' }
+            $initial.data.state | Should -Be 'stopped'
+            $initial.data.canStart | Should -BeTrue
+            $initial | ConvertTo-Json -Depth 6 | Should -Not -Match 'station|private-stream-key|example\.invalid'
+
+            $launch = @{ actor = 4321; action = 'start'; revision = $initial.data.revision }
+            $started = & $relayRequest $launch
+            $started.data.state | Should -Be 'starting'
+            $script:RelayState.NotifyChatId | Should -Be 0
+            (& $relayRequest $launch).error | Should -Be 'relay_stale'
+            Should -Invoke Start-RelayProcess -Times 1 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+
+            $stop = @{ actor = 4321; action = 'stop'; revision = $started.data.revision }
+            $script:RelayState.Process.StartTime = $script:RelayState.Process.StartTime.AddSeconds(10)
+            (& $relayRequest $stop).error | Should -Be 'relay_stale'
+            Should -Invoke Stop-RelayProcess -Times 0 -Exactly
+            $current = & $relayRequest @{ actor = 4321; action = 'status' }
+            $stop.revision = $current.data.revision
+            (& $relayRequest $stop).error | Should -Be 'relay_stop_failed'
+            $script:RelayState.Process.HasExited | Should -BeFalse
+            $script:RelayState.ShouldRun | Should -BeFalse
+
+            Mock Stop-RelayProcess { $script:RelayState.Process.HasExited = $true }
+            $current = & $relayRequest @{ actor = 4321; action = 'status' }
+            $stop.revision = $current.data.revision
+            (& $relayRequest $stop).data.state | Should -Be 'stopped'
+            $script:RelayState.Process | Should -BeNullOrEmpty
+            (& $relayRequest $launch).error | Should -Be 'relay_stale'
+
+            '5777' | Set-Content -LiteralPath $script:relayPidFile
+            Mock Get-Process { [pscustomobject]@{ Id = 5777; HasExited = $false; ProcessName = 'ffmpeg' } } -ParameterFilter { $Id -eq 5777 }
+            $unverified = & $relayRequest @{ actor = 4321; action = 'status' }
+            $unverified.data.state | Should -Be 'unverified'
+            $unverified.data.canStart | Should -BeFalse
+            $stop.revision = $unverified.data.revision
+            (& $relayRequest $stop).error | Should -Be 'relay_unavailable'
+            Test-Path -LiteralPath $script:relayPidFile | Should -BeTrue
+        }
+        finally { $script:RelayState = $previousRelay; $script:relayPidFile = $previousPidFile }
+    }
+
+    It 'waits for the original relay to exit before changing source and reports an early exit to the web' {
+        $previousRelay = $script:RelayState
+        $previousPidFile = $script:relayPidFile
+        $previousFallback = $script:OutputMonitorFallbackActive
+        $script:relayPidFile = Join-Path $TestDrive 'relay-source-change.pid'
+        $script:OutputMonitorFallbackActive = $false
+        $original = [pscustomobject]@{ Id = 1; StartTime = (Get-Date); HasExited = $false }
+        $script:RelayState = @{ Process = $original; ShouldRun = $true; Restarts = 0; NotifyChatId = 0; VerifyAt = $null }
+        Mock Get-BackupLiveStreamConfig { @{ SourceUrl = 'https://example.invalid/backup' } }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableLiveRelay' }
+        Mock Get-ActiveLiveStreamConfig { @{ SourceUrl = 'https://example.invalid/output'; RtmpDestination = 'rtmp://example.invalid/test' } }
+        Mock Stop-RelayProcess { }
+        Mock Start-RelayProcess {
+            $script:RelayState.Process = [pscustomobject]@{ Id = 2; HasExited = $false; ExitCode = 1; StartTime = (Get-Date) }
+            return $true
+        }
+        Mock Get-LastErrorLine { 'simulated encoder error' }
+        try {
+            Set-OutputMonitorFallbackActive -Active $true | Should -BeTrue
+            (Get-WebRelayControlState).Data.state | Should -Be 'switching'
+            Update-RelayWatchdog
+            Should -Invoke Start-RelayProcess -Times 0 -Exactly
+            $script:RelayState.Process.Id | Should -Be $original.Id
+
+            $original.HasExited = $true
+            Update-RelayWatchdog
+            Should -Invoke Start-RelayProcess -Times 1 -Exactly
+            $script:RelayState.Process.Id | Should -Be 2
+            $script:RelayState.Process.HasExited = $true
+            (Get-WebRelayControlState).Data.state | Should -Be 'starting'
+            $script:RelayState.VerifyAt = (Get-Date).AddSeconds(-1)
+            Update-RelayWatchdog
+            $failed = (Get-WebRelayControlState).Data
+            $failed.state | Should -Be 'failed'
+            $failed.canStart | Should -BeTrue
+            ($failed | ConvertTo-Json -Compress) | Should -Not -Match 'simulated encoder error'
+        }
+        finally {
+            $script:RelayState = $previousRelay
+            $script:relayPidFile = $previousPidFile
+            $script:OutputMonitorFallbackActive = $previousFallback
+        }
+    }
+
     It 'carries a queued request to the bridge thread and its answer back' {
         $parsed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}') | ConvertFrom-Json
         $parsed.ok | Should -BeTrue

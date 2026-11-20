@@ -11,13 +11,13 @@ import {
   Stack,
   Text,
   TextInput,
-  Title,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { IconPlayerPlay, IconRefresh, IconSearch } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
+import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
 
 export function TemplatesPage() {
@@ -41,14 +41,7 @@ export function TemplatesPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" align="flex-end" wrap="wrap">
-        <div>
-          <Title order={2}>مكتبة القوالب</Title>
-          <Text c="dimmed" size="sm">
-            اختر قالبًا وجهّز نصه قبل العرض.
-          </Text>
-        </div>
-        <Group gap="xs">
+      <PageHeader title="مكتبة القوالب" description="ابحث عن القالب وجهّز حقوله قبل العرض." actions={
           <ActionIcon
             variant="default"
             size="lg"
@@ -59,8 +52,7 @@ export function TemplatesPage() {
           >
             <IconRefresh size={18} />
           </ActionIcon>
-        </Group>
-      </Group>
+      } />
 
       <TextInput
         aria-label="بحث في القوالب"

@@ -1,99 +1,75 @@
 .page {
-  min-height: 100vh;
+  min-block-size: 100dvh;
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
 }
 
+.brand {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3rem;
+  background: radial-gradient(ellipse at 90% 92%, #154b48, transparent 68%), #0b1a2b;
+  color: #edf6fa;
+}
+
+.brandMark {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #a4e9db;
+}
+
+.brandText {
+  border-block-start: 1px solid #4e787b;
+  padding-block-start: 1.5rem;
+  max-inline-size: 24rem;
+}
+
+.brandTitle {
+  font-size: 3.375rem;
+  font-weight: 700;
+  line-height: 1.12;
+}
+
+.brandLead {
+  margin-block-start: 0.625rem;
+  color: #d4e6e9;
+}
+
+.panel {
+  display: grid;
+  place-items: center;
+  min-inline-size: 0;
+  padding: var(--mantine-spacing-lg);
+}
+
+.card {
+  inline-size: min(100%, 29rem);
+}
+
+.methods {
+  border: 1px solid var(--cgb-line);
+  background: var(--cgb-sidebar);
+  border-radius: var(--mantine-radius-md);
+  padding: 0.25rem;
+  gap: 0.25rem;
+}
+
+.methods :global(.mantine-Tabs-tab[data-active]) {
+  background: var(--cgb-tab-active);
+  color: var(--cgb-tab-ink);
+}
+
 @media (max-width: $mantine-breakpoint-md) {
   .page {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .brand {
     display: none;
   }
-}
-
-/* The control-room side: deliberately dark in both schemes. */
-.brand {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 48px;
-  color: #e6ebf0;
-  background:
-    radial-gradient(120% 80% at 100% 0%, rgba(229, 72, 77, 0.18), transparent 55%),
-    radial-gradient(90% 70% at 0% 100%, rgba(33, 108, 223, 0.22), transparent 60%),
-    #0d1115;
-}
-
-/* A faint multiviewer grid behind the text. */
-.grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(80% 70% at 60% 40%, #000 30%, transparent 80%);
-  pointer-events: none;
-}
-
-.tally {
-  position: relative;
-  z-index: 1;
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid rgba(229, 72, 77, 0.55);
-  color: #ff8a8e;
-  font-family: var(--mantine-font-family-monospace);
-  font-weight: 700;
-  letter-spacing: 0.24em;
-  direction: ltr;
-}
-
-.tallyDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--cgb-on-air);
-  box-shadow: 0 0 12px 2px var(--cgb-on-air-glow);
-}
-
-.brandText {
-  position: relative;
-  z-index: 1;
-  max-width: 440px;
-}
-
-.brandTitle {
-  font-size: 44px;
-  font-weight: 700;
-  line-height: 1.15;
-  color: #fff;
-}
-
-.brandLead {
-  margin-top: 14px;
-  font-size: 17px;
-  line-height: 1.8;
-  color: #a9b4bf;
-}
-
-.panel {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.card {
-  width: 100%;
-  max-width: 460px;
 }

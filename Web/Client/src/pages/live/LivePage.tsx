@@ -1,13 +1,17 @@
 import { Alert, Badge, Button, Group, Paper, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconAntenna, IconCircleDot, IconDeviceTv, IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
+import { IconAntenna, IconArrowUpRight, IconCircleDot, IconDeviceTv, IconPictureInPicture, IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import type Hls from 'hls.js'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { isAdmin, useSession } from '../../api/session'
+import { PageHeader } from '../../components/PageHeader'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { formatClock, formatDateTime } from '../../lib/time'
 import classes from './LivePage.module.css'
+import { RelayPanel } from './RelayPanel'
 
 type Feed = Schemas['FeedStatus']
 type PlayerState = 'loading' | 'playing' | 'paused' | 'buffering' | 'failed'
@@ -29,12 +33,47 @@ const playerLabels = {
   failed: 'تعذّر تشغيل الفيديو',
 }
 
-function LiveVideo({ url, onStop }: { url: string; onStop: () => void }) {
+function LiveVideo({ url, floating, nativePip, onPipChange, onStop }: {
+  url: string
+  floating: boolean
+  nativePip: boolean
+  onPipChange: (open: boolean) => void
+  onStop: () => void
+}) {
   const video = useRef<HTMLVideoElement>(null)
   const [state, setState] = useState<PlayerState>('loading')
   const [attempt, setAttempt] = useState(0)
+  const [pipError, setPipError] = useState(false)
+  const canUsePip = document.pictureInPictureEnabled && typeof HTMLVideoElement.prototype.requestPictureInPicture === 'function'
 
   useEffect(() => { video.current?.focus({ preventScroll: true }) }, [])
+
+  useEffect(() => {
+    const element = video.current
+    if (!element) return
+    onPipChange(document.pictureInPictureElement === element)
+    const enter = () => { setPipError(false); onPipChange(true) }
+    const leave = () => onPipChange(false)
+    element.addEventListener('enterpictureinpicture', enter)
+    element.addEventListener('leavepictureinpicture', leave)
+    return () => {
+      element.removeEventListener('enterpictureinpicture', enter)
+      element.removeEventListener('leavepictureinpicture', leave)
+      if (document.pictureInPictureElement === element) void document.exitPictureInPicture().catch(() => {})
+    }
+  }, [onPipChange])
+
+  async function togglePip() {
+    const element = video.current
+    if (!element) return
+    setPipError(false)
+    try {
+      if (document.pictureInPictureElement === element) await document.exitPictureInPicture()
+      else await element.requestPictureInPicture()
+    } catch {
+      setPipError(true)
+    }
+  }
 
   useEffect(() => {
     const element = video.current
@@ -81,6 +120,7 @@ function LiveVideo({ url, onStop }: { url: string; onStop: () => void }) {
       <div className={classes.screen}>
         <video
           ref={video} controls muted autoPlay playsInline aria-label="مشغّل البث المباشر"
+          tabIndex={floating && nativePip ? -1 : 0}
           onPlaying={() => setState('playing')}
           onWaiting={() => setState((previous) => previous === 'failed' || previous === 'loading' ? previous : 'buffering')}
           onPause={() => setState((previous) => previous === 'playing' || previous === 'buffering' ? 'paused' : previous)}
@@ -96,12 +136,23 @@ function LiveVideo({ url, onStop }: { url: string; onStop: () => void }) {
         <Group gap="xs">
           {state === 'failed' && <Button size="xs" variant="default" leftSection={<IconRefresh size={15} />}
             onClick={() => { setState('loading'); setAttempt((previous) => previous + 1) }}>إعادة المحاولة</Button>}
+          {canUsePip && state !== 'loading' && state !== 'failed' && (
+            <Button size="xs" variant="default" leftSection={<IconPictureInPicture size={15} />} aria-pressed={nativePip} onClick={() => void togglePip()}>
+              {nativePip ? 'إغلاق صورة داخل صورة' : 'صورة داخل صورة'}
+            </Button>
+          )}
+          {!floating && <Button component={Link} to="/newsroom" size="xs" variant="subtle" leftSection={<IconArrowUpRight size={15} />}>المشاهدة أثناء التحرير</Button>}
           <Button size="xs" variant="default" leftSection={<IconPlayerStop size={15} />} onClick={onStop}>إيقاف المشاهدة</Button>
         </Group>
       </Group>
       {state === 'failed' && (
         <Alert color="yellow" className={classes.playerAlert}>
           تأكّد من إتاحة رابط المشاهدة لهذا المتصفح ومن سماح خادم الفيديو بتشغيله من الموقع.
+        </Alert>
+      )}
+      {pipError && (
+        <Alert color="yellow" className={classes.playerAlert} role="alert">
+          تعذّر فتح نافذة المتصفح. يمكنك متابعة البث في المشغّل العائم داخل الموقع.
         </Alert>
       )}
     </>
@@ -135,11 +186,16 @@ function SignalDetails({ feed, fresh }: { feed: Feed | undefined | null; fresh: 
   )
 }
 
-export function LivePage() {
+export function LivePage({ active, watching, onWatchingChange }: {
+  active: boolean
+  watching: boolean
+  onWatchingChange: (watching: boolean) => void
+}) {
+  const admin = isAdmin(useSession().data)
   const live = useLiveStatus()
   const feed = live.status?.feed
   const fresh = live.stream === 'live' && live.bridgeOnline
-  const [watching, setWatching] = useState(false)
+  const [nativePip, setNativePip] = useState(false)
   const restoreWatchFocus = useRef(false)
   const player = useQuery({
     queryKey: ['live-playback'],
@@ -153,19 +209,19 @@ export function LivePage() {
   })
   const url = player.data?.url
   return (
-    <Stack gap="xl" className={classes.page}>
-      <header className={classes.heading}>
-        <Title order={1}>البث المباشر</Title>
-        <Text c="dimmed">شاهد خرج القناة وتابع حالة الإشارة من غرفة التحكم.</Text>
-      </header>
-      <div className={classes.workspace}>
-        <Paper radius="lg" className={classes.monitor}>
-          <Group gap="xs" className={classes.monitorHeader}>
+    <Stack gap="xl" className={active ? classes.page : classes.floatingPage}>
+      {active && <PageHeader title="البث المباشر" description="مشاهدة خرج القناة ومراقبة الإشارة." />}
+      <div className={active ? classes.workspace : undefined}>
+        <Paper radius="lg" className={classes.monitor} data-floating-video={active ? undefined : nativePip ? 'native' : 'inline'}>
+          <Group gap="xs" justify="space-between" className={classes.monitorHeader}>
             <Group gap="xs"><IconDeviceTv size={20} aria-hidden /><Title order={2}>مشاهدة الخرج</Title></Group>
+            {!active && <Button component={Link} to="/live" size="compact-xs" variant="subtle">فتح صفحة البث</Button>}
           </Group>
-          {watching && url ? <LiveVideo url={url} key={url} onStop={() => {
+          {watching && url ? <LiveVideo url={url} key={url} floating={!active} nativePip={nativePip} onPipChange={setNativePip} onStop={() => {
             restoreWatchFocus.current = true
-            setWatching(false)
+            setNativePip(false)
+            onWatchingChange(false)
+            if (!active) document.getElementById('bridge-main')?.focus({ preventScroll: true })
           }} /> : (
             <div className={classes.screen}>
               {player.isPending ? <Skeleton className={classes.screenLoading} aria-label="جارٍ تحميل إعداد المشاهدة" /> : (
@@ -177,7 +233,7 @@ export function LivePage() {
                       <Button size="sm" variant="light" onClick={() => void player.refetch()} leftSection={<IconRefresh size={16} />}>إعادة المحاولة</Button>
                     </>
                   ) : url ? (
-                    <Button size="md" onClick={() => setWatching(true)} leftSection={<IconPlayerPlay size={19} />}
+                    <Button size="md" onClick={() => onWatchingChange(true)} leftSection={<IconPlayerPlay size={19} />}
                       ref={(button) => {
                         if (button && restoreWatchFocus.current) {
                           restoreWatchFocus.current = false
@@ -195,9 +251,12 @@ export function LivePage() {
             </div>
           )}
         </Paper>
-        <SignalDetails feed={feed} fresh={fresh} />
+        {active && <Stack gap="md">
+          <SignalDetails feed={feed} fresh={fresh} />
+          {admin && <RelayPanel />}
+        </Stack>}
       </div>
-      <Paper radius="lg" className={classes.history}>
+      {active && <Paper radius="lg" className={classes.history}>
         <Group justify="space-between" align="baseline" gap="xs" className={classes.historyHead}>
           <Title order={3}>الانقطاعات الأخيرة</Title>
           {feed && <Text size="sm" c="dimmed">آخر ٢٤ ساعة · {number.format(feed.outageCount)} انقطاع · <bdi>{formatClock(feed.outageSeconds * 1000)}</bdi></Text>}
@@ -219,7 +278,7 @@ export function LivePage() {
             ))}
           </ol>
         )}
-      </Paper>
+      </Paper>}
     </Stack>
   )
 }

@@ -1,4 +1,4 @@
-import { Avatar, Badge, Group, Menu, Text, UnstyledButton, useMantineColorScheme } from '@mantine/core'
+import { Avatar, Badge, Group, Menu, Text, UnstyledButton, useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconKey, IconLogout, IconMoon, IconSun } from '@tabler/icons-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -8,7 +8,8 @@ import { roleLabel, sessionKey } from '../api/session'
 import { ChangePasswordModal } from '../components/ChangePasswordModal'
 
 export function UserMenu({ user }: { user: CurrentUser }) {
-  const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const { setColorScheme } = useMantineColorScheme()
+  const colorScheme = useComputedColorScheme('light')
   const [passwordOpen, password] = useDisclosure()
   const queryClient = useQueryClient()
   const navigate = useNavigate()

@@ -1,5 +1,24 @@
 .page {
-  max-inline-size: 66rem;
+  max-inline-size: 78rem;
+}
+
+.tabs {
+  max-inline-size: 34rem;
+  border: 1px solid var(--cgb-line);
+  background: var(--cgb-sidebar);
+  border-radius: var(--mantine-radius-lg);
+  padding: 0.25rem;
+  gap: 0.25rem;
+}
+
+.tabs :global(.mantine-Tabs-tab) {
+  min-block-size: 2.5rem;
+  font-weight: 600;
+}
+
+.tabs :global(.mantine-Tabs-tab[data-active]) {
+  background: var(--cgb-tab-active);
+  color: var(--cgb-tab-ink);
 }
 
 .list {

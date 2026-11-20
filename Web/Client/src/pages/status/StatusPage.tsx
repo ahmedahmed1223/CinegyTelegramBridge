@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text, 
 import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
+import { PageHeader } from '../../components/PageHeader'
 import { useNow } from '../../hooks/useNow'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { cinegyLamp, telegramLamp } from '../../lib/lamps'
@@ -22,7 +23,7 @@ export function StatusPage() {
   if (!status) {
     return (
       <Stack>
-        <Title order={2}>لوحة الهواء</Title>
+        <PageHeader title="لوحة الهواء" />
         {live.stream !== 'connecting' && !live.bridgeOnline ? (
           <Alert color="red" icon={<IconAlertTriangle />} title="الجسر لا يجيب">
             خادم الويب يعمل، لكنه لا يصل إلى الجسر. تأكّد أن الجسر يعمل وأن «واجهة الويب» مفعّلة من برنامج التحكم.
@@ -45,17 +46,8 @@ export function StatusPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>لوحة الهواء</Title>
-          <Text c="dimmed" size="sm">
-            ما على الهواء الآن كما يراه الجسر، يتحدّث كل ثانية.
-          </Text>
-        </div>
-        <Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>
-          البث المباشر
-        </Button>
-      </Group>
+      <PageHeader title="لوحة الهواء" description="تابع الطبقات المعروضة وحالة محرك البث."
+        actions={<Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>البث المباشر</Button>} />
 
       {!live.bridgeOnline && (
         <Alert color="red" icon={<IconPlugConnected />} title="الجسر لا يجيب">
@@ -107,7 +99,7 @@ export function StatusPage() {
       <Stack gap="sm">
         <Group justify="space-between">
           <Group gap="xs">
-            <Title order={3}>الطبقات على الهواء</Title>
+            <Title order={2}>الطبقات على الهواء</Title>
             <Badge variant={layers.length > 0 ? 'filled' : 'default'} color="red" radius="sm" className="cgb-mono">
               {layers.length}
             </Badge>

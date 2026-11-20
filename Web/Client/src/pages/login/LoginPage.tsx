@@ -1,5 +1,5 @@
 import { Center, Loader, Paper, Stack, Tabs, Text, Title } from '@mantine/core'
-import { IconBrandTelegram, IconKey } from '@tabler/icons-react'
+import { IconBrandTelegram, IconBroadcast, IconKey } from '@tabler/icons-react'
 import { Navigate } from 'react-router'
 import { useSession } from '../../api/session'
 import classes from './LoginPage.module.css'
@@ -19,31 +19,26 @@ export function LoginPage() {
 
   return (
     <div className={classes.page}>
-      <aside className={classes.brand} aria-hidden>
-        <div className={classes.tally}>
-          <span className={classes.tallyDot} />
-          ON AIR
-        </div>
+      <aside className={classes.brand}>
+        <div className={classes.brandMark}><IconBroadcast size={25} stroke={1.7} aria-hidden /> Cinegy</div>
         <div className={classes.brandText}>
-          <Text className={classes.brandTitle}>جسر Cinegy</Text>
-          <Text className={classes.brandLead}>
-            غرفة التحكم بالرسوم على الهواء، من أي متصفح. البوت والويب يعملان معًا على الحالة نفسها.
-          </Text>
+          <Text className={classes.brandTitle}>غرفة التحكّم</Text>
+          <Text className={classes.brandLead}>الرسوم على الهواء، تحرير الأخبار، ومراقبة البث.</Text>
         </div>
-        <div className={classes.grid} />
       </aside>
 
       <main className={classes.panel}>
-        <Paper className={classes.card} p={{ base: 'lg', sm: 32 }} radius="lg" shadow="sm">
+        <Paper className={classes.card} p={{ base: 'lg', sm: 32 }} radius="xl">
           <Stack gap="lg">
             <div>
-              <Title order={2}>تسجيل الدخول</Title>
+              <Text size="sm" fw={700} color="signal" hiddenFrom="md">غرفة تحكّم Cinegy</Text>
+              <Title order={1} size="h2">تسجيل الدخول</Title>
               <Text c="dimmed" size="sm" mt={4}>
                 بحسابك في البوت، أو بكلمة مرور أعطاك إياها المشرف.
               </Text>
             </div>
             <Tabs defaultValue="telegram" variant="pills" radius="md">
-              <Tabs.List grow mb="lg">
+              <Tabs.List grow mb="lg" className={classes.methods}>
                 <Tabs.Tab value="telegram" leftSection={<IconBrandTelegram size={18} />}>
                   عبر Telegram
                 </Tabs.Tab>

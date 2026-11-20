@@ -38,6 +38,9 @@ public sealed class FakeBridge : IBridgeChannel
             "air.hide" => Reply("null"),
             "air.exit" => Reply("null"),
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
+            "relay.control" => a.GetProperty("action").GetString() == "status"
+                ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
+                : Reply("""{"state":"starting","revision":"next","enabled":true,"configured":true,"canStart":false,"canStop":true,"outcome":"starting"}"""),
             "urgent.write" => a.GetProperty("revision").GetInt32() == 3
                 ? Reply("null")
                 : new BridgeReply(false, default, "urgent_stale"),

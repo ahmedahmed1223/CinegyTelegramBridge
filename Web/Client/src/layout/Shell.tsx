@@ -2,10 +2,12 @@ import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from
 import { useDisclosure } from '@mantine/hooks'
 import { IconBroadcast, IconDevices, IconDeviceTv, IconLayoutGrid, IconNews, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
+import { useState } from 'react'
 import { isAdmin, useSession } from '../api/session'
 import { useNow } from '../hooks/useNow'
 import { useStatusStream } from '../hooks/useStatusStream'
 import { bridgeLamp, cinegyLamp, telegramLamp } from '../lib/lamps'
+import { LivePage } from '../pages/live/LivePage'
 import { LiveStatusContext } from './LiveStatusContext'
 import { SignalLamp } from './SignalLamp'
 import { UserMenu } from './UserMenu'
@@ -20,30 +22,38 @@ const navigation = [
   { to: '/accounts', label: 'الحسابات', description: 'دخول الويب بكلمة مرور', icon: IconUsersGroup, admin: true },
 ]
 
+const sections = [
+  { label: 'التشغيل', links: navigation.slice(0, 4) },
+  { label: 'إدارة الوصول', links: navigation.slice(4) },
+]
+
 export function Shell() {
   const [opened, { toggle, close }] = useDisclosure()
   const session = useSession()
   const live = useStatusStream()
   const now = useNow()
   const location = useLocation()
+  const [watching, setWatching] = useState(false)
+  const currentPath = location.pathname.replace(/\/$/, '')
+  const livePage = currentPath === '/live'
   const admin = isAdmin(session.data)
   const status = live.status
 
   return (
     <LiveStatusContext.Provider value={live}>
       <AppShell
-        header={{ height: 64 }}
-        navbar={{ width: 248, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+        header={{ height: 68 }}
+        navbar={{ width: 256, breakpoint: 'sm', collapsed: { mobile: !opened } }}
         padding={{ base: 'md', sm: 'xl' }}
       >
         <AppShell.Header className={classes.header}>
-          <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+          <Group h="100%" px={{ base: 'md', sm: 'lg' }} justify="space-between" wrap="nowrap">
             <Group gap="sm" wrap="nowrap">
               <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" aria-label="القائمة" />
-              <div className={classes.mark} aria-hidden />
+              <div className={classes.mark} aria-hidden><IconBroadcast size={20} stroke={1.8} /></div>
               <Stack gap={0}>
                 <Text fw={700} lh={1.2}>
-                  جسر Cinegy
+                  غرفة تحكّم Cinegy
                 </Text>
                 {status && (
                   <Text size="xs" c="dimmed" className="cgb-mono">
@@ -63,28 +73,31 @@ export function Shell() {
           </Group>
         </AppShell.Header>
 
-        <AppShell.Navbar p="sm" className={classes.navbar}>
+        <AppShell.Navbar p="md" className={classes.navbar}>
           <AppShell.Section grow component={ScrollArea}>
-            <Stack gap={4}>
-              {navigation
-                .filter((item) => !item.admin || admin)
-                .map((item) => (
-                  <NavLink
-                    key={item.to}
-                    component={RouterLink}
-                    to={item.to}
-                    end
-                    onClick={close}
-                    active={location.pathname === item.to}
-                    label={item.label}
-                    description={item.description}
-                    leftSection={<item.icon size={20} stroke={1.6} />}
-                    className={classes.link}
-                  />
-                ))}
+            <Stack component="nav" gap="lg" aria-label="التنقّل الرئيسي">
+              {sections.map((section) => (
+                <Stack key={section.label} gap={4}>
+                  <Text component="div" className={classes.sectionLabel}>{section.label}</Text>
+                  {section.links.filter((item) => !item.admin || admin).map((item) => (
+                    <NavLink
+                      key={item.to}
+                      component={RouterLink}
+                      to={item.to}
+                      end
+                      onClick={close}
+                      active={currentPath === item.to}
+                      label={item.label}
+                      description={item.description}
+                      leftSection={<span className={classes.navIcon}><item.icon size={19} stroke={1.7} /></span>}
+                      className={classes.link}
+                    />
+                  ))}
+                </Stack>
+              ))}
             </Stack>
           </AppShell.Section>
-          <AppShell.Section>
+          <AppShell.Section className={classes.navFooter}>
             <Group gap="xs" hiddenFrom="md" mb="sm" wrap="wrap">
               <SignalLamp label="الجسر" {...bridgeLamp(live)} />
               <SignalLamp label="المحرك" {...cinegyLamp(status, now)} />
@@ -98,8 +111,9 @@ export function Shell() {
           </AppShell.Section>
         </AppShell.Navbar>
 
-        <AppShell.Main>
-          <Outlet />
+        <AppShell.Main id="bridge-main" tabIndex={-1} className={classes.main}>
+          {(livePage || watching) && <LivePage active={livePage} watching={watching} onWatchingChange={setWatching} />}
+          {!livePage && <div className={classes.route}><Outlet /></div>}
         </AppShell.Main>
       </AppShell>
     </LiveStatusContext.Provider>

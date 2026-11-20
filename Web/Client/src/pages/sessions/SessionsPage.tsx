@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Group, Paper, Skeleton, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import { Alert, Badge, Button, Group, Paper, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { IconBrandTelegram, IconKey } from '@tabler/icons-react'
@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { isAdmin, sessionKey, useSession } from '../../api/session'
+import { PageHeader } from '../../components/PageHeader'
 import { useNow } from '../../hooks/useNow'
 import { describeAgent } from '../../lib/agent'
 import { formatAgo, formatDateTime } from '../../lib/time'
@@ -52,12 +53,7 @@ export function SessionsPage() {
 
   return (
     <Stack gap="lg">
-      <div>
-        <Title order={2}>الجلسات</Title>
-        <Text c="dimmed" size="sm">
-          {isAdmin(me.data) ? 'كل متصفح مسجَّل الدخول الآن. إنهاء جلسة يخرج صاحبها فورًا.' : 'المتصفحات التي دخلت منها. أنهِ ما لا تعرفه.'}
-        </Text>
-      </div>
+      <PageHeader title="الجلسات" description={isAdmin(me.data) ? 'إدارة المتصفحات المسجّلة الآن.' : 'عرض المتصفحات التي سجلت الدخول إليها.'} />
 
       {sessions.isError && <Alert color="red">{sessions.error.message}</Alert>}
 

@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.83.0'
+$script:BridgeVersion = '8.84.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -2412,11 +2412,14 @@ finally {
     foreach ($job in @($script:SnapshotJobs)) {
         if ($job.Proc -and -not $job.Proc.HasExited) { Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue }
     }
-    $relayProc = Get-RunningRelayProcess
+    $relayProc = Get-RunningRelayProcess -ReadOnly -RequireTimestamp
     if ($relayProc) {
         Write-BridgeLog "Bridge shutting down - stopping live relay (PID $($relayProc.Id))"
-        Stop-Process -Id $relayProc.Id -Force -ErrorAction SilentlyContinue
-        Remove-Item $relayPidFile -Force -ErrorAction SilentlyContinue
+        try {
+            Stop-RelayProcess -Process $relayProc
+            if ($relayProc.HasExited) { Remove-Item -LiteralPath $relayPidFile -Force -ErrorAction SilentlyContinue }
+        }
+        catch { Write-BridgeLog "Could not stop live relay during shutdown: $(Protect-SensitiveText $_.Exception.Message)" 'WARN' }
     }
     if ($script:InstanceMutex) {
         try { $script:InstanceMutex.ReleaseMutex() }

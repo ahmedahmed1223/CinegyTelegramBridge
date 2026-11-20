@@ -3,12 +3,6 @@
   min-inline-size: 0;
 }
 
-.heading h1 {
-  font-size: 2rem;
-  line-height: 1.24;
-  margin-block-end: 0.375rem;
-}
-
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.33fr);
@@ -17,8 +11,8 @@
 }
 
 .monitor {
-  --monitor-screen: #0c1420;
-  --monitor-rail: #1e2b3c;
+  --monitor-screen: #081522;
+  --monitor-rail: #233e4b;
   min-inline-size: 0;
   overflow: hidden;
 }
@@ -65,7 +59,7 @@
   padding: var(--mantine-spacing-md);
   justify-content: center;
   text-align: center;
-  background: radial-gradient(ellipse at 50% 72%, #172a43, var(--monitor-screen) 68%);
+  background: radial-gradient(ellipse at 50% 72%, #153544, var(--monitor-screen) 68%);
 }
 
 .idleIcon {
@@ -75,7 +69,7 @@
   place-items: center;
   border: 1px solid var(--monitor-rail);
   border-radius: var(--mantine-radius-lg);
-  color: #91baff;
+  color: #a6e5da;
 }
 
 .playerStatus {
@@ -94,6 +88,57 @@
 
 .playerAlert {
   margin: 0 var(--mantine-spacing-md) var(--mantine-spacing-md);
+}
+
+.floatingPage {
+  position: fixed;
+  z-index: 90;
+  inset-inline-end: var(--mantine-spacing-md);
+  inset-block-end: max(var(--mantine-spacing-md), env(safe-area-inset-bottom));
+  inline-size: min(23rem, calc(100% - 2 * var(--mantine-spacing-md)));
+}
+
+.floatingPage .monitor {
+  box-shadow: 0 8px 26px rgb(9 20 36 / 22%);
+}
+
+.floatingPage .screen {
+  inline-size: 100%;
+  min-block-size: 0;
+}
+
+.floatingPage .monitorFooter {
+  gap: var(--mantine-spacing-xs);
+}
+
+[data-floating-video='native'] .screen {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 36em) {
+  .floatingPage {
+    inline-size: min(17rem, calc(100% - 2 * var(--mantine-spacing-md)));
+  }
+
+  .floatingPage:has([data-floating-video='inline']) {
+    position: relative;
+    inset: auto;
+    inline-size: 100%;
+  }
+
+  .floatingPage [data-floating-video='inline'] .screen {
+    max-block-size: min(22dvh, 11rem);
+  }
+
+  .floatingPage [data-floating-video='inline'] {
+    max-block-size: 45dvh;
+    overflow: auto;
+  }
 }
 
 .signalPanel {
@@ -154,10 +199,6 @@
 }
 
 @media (max-width: 36em) {
-  .heading h1 {
-    font-size: 1.625rem;
-  }
-
   .monitorHeader,
   .monitorFooter {
     padding-inline: var(--mantine-spacing-sm);

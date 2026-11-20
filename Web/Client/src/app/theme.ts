@@ -23,7 +23,7 @@ export const theme = createTheme({
     dark: ['#c9d1d9', '#aab4bf', '#7d8995', '#56616d', '#3a434d', '#2a323b', '#1f262e', '#171d23', '#12171c', '#0d1115'],
   },
   fontFamily: "'IBM Plex Sans Arabic', system-ui, sans-serif",
-  fontFamilyMonospace: "'JetBrains Mono Variable', ui-monospace, monospace",
+  fontFamilyMonospace: "'IBM Plex Mono', 'IBM Plex Sans Arabic', ui-monospace, monospace",
   headings: {
     fontFamily: "'IBM Plex Sans Arabic', system-ui, sans-serif",
     fontWeight: '600',

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.80.1
+
+The website uses self-hosted IBM Plex fonts throughout. IBM Plex Sans Arabic renders the interface, and IBM Plex Mono keeps timecodes and counters aligned.
+
 ## Version 8.80.0
 
 Review the order and timing of all or selected breaking-news rows in Newsroom before starting a run. The web screen shows the current and next story and offers pause, resume, advance, and stop. The bridge checks the reviewed plan again on confirmation and retains the stop control if the exit cannot be confirmed.

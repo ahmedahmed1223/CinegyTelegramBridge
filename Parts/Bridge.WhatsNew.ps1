@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.103.0'; Items = @('Choose Watch while editing to keep the monitor visible alongside your editing tools and Save button.') },
                 @{ Version = '8.102.0'; Items = @('Open Appointments in the bulletin editor to book, review, or cancel a broadcast appointment using the queue shared with Telegram.') },
                 @{ Version = '8.101.0'; Items = @('In the bulletin preview, open a row picture to verify the attachment, inherited picture, or template picture before playback.') },
                 @{ Version = '8.100.0'; Items = @('Use Preview bulletin to read the saved rows in full and see which rows are included in the playback plan.') },
@@ -343,6 +344,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.103.0'; Items = @('اضغط «المشاهدة أثناء التحرير» لترى البث وتصل إلى الحقول وزر الحفظ في الشاشة نفسها.') },
                 @{ Version = '8.102.0'; Items = @('افتح «المواعيد» في محرّر الموجز لحجز موعد العرض أو مراجعته أو إلغائه من الجدول المشترك مع البوت.') },
                 @{ Version = '8.101.0'; Items = @('من معاينة الموجز اختر «عرض الصورة» لمراجعة مرفق الصف أو الصورة الموروثة أو صورة القالب قبل التشغيل.') },
                 @{ Version = '8.100.0'; Items = @('استخدم «معاينة الموجز» لقراءة الصفوف المحفوظة كاملة ومعرفة الصفوف الداخلة في خطة التشغيل.') },

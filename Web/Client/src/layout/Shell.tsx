@@ -111,7 +111,7 @@ export function Shell() {
           </AppShell.Section>
         </AppShell.Navbar>
 
-        <AppShell.Main id="bridge-main" tabIndex={-1} className={classes.main}>
+        <AppShell.Main id="bridge-main" tabIndex={-1} className={classes.main} data-watch-workspace={!livePage && watching || undefined}>
           {(livePage || watching) && <LivePage active={livePage} watching={watching} onWatchingChange={setWatching} />}
           {!livePage && <div className={classes.route}><Outlet /></div>}
         </AppShell.Main>

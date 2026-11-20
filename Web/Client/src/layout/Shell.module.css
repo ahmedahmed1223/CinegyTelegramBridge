@@ -24,30 +24,34 @@
   border-block-start: 1px solid var(--cgb-line);
 }
 
-.main:has([data-floating-video]) {
-  padding-block-end: max(var(--app-shell-padding), 18rem);
+.main[data-watch-workspace] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--mantine-spacing-md);
+  block-size: max(18rem, 100dvh);
+  overflow: hidden;
 }
 
-.main:has([data-floating-video='native']) {
-  padding-block-end: max(var(--app-shell-padding), 7rem);
+.main[data-watch-workspace] .route {
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: var(--mantine-spacing-md);
 }
 
-@media (max-width: 36em) {
-  .main:has([data-floating-video='inline']) {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    block-size: 100dvh;
-    padding-block-end: var(--app-shell-padding);
-    overflow: hidden;
+@media (min-width: 75em) {
+  .main[data-watch-workspace] {
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr) clamp(17rem, 24vw, 22rem);
+    align-items: start;
   }
 
-  .main:has([data-floating-video='inline']) .route {
-    min-block-size: 0;
-    min-inline-size: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-block-start: var(--mantine-spacing-md);
-    scroll-padding-block: var(--mantine-spacing-md);
+  .main[data-watch-workspace] > :first-child {
+    grid-area: 1 / 2;
+  }
+
+  .main[data-watch-workspace] .route {
+    grid-area: 1 / 1;
+    align-self: stretch;
   }
 }
 

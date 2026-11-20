@@ -111,16 +111,9 @@
   margin: 0 var(--mantine-spacing-md) var(--mantine-spacing-md);
 }
 
-.floatingPage {
-  position: fixed;
-  z-index: 90;
-  inset-inline-end: var(--mantine-spacing-md);
-  inset-block-end: max(var(--mantine-spacing-md), env(safe-area-inset-bottom));
-  inline-size: min(23rem, calc(100% - 2 * var(--mantine-spacing-md)));
-}
-
 .floatingPage .monitor {
-  box-shadow: 0 8px 26px rgb(9 20 36 / 22%);
+  overflow: auto;
+  max-block-size: 45dvh;
 }
 
 .floatingPage .screen {
@@ -141,24 +134,15 @@
   pointer-events: none;
 }
 
-@media (max-width: 36em) {
-  .floatingPage {
-    inline-size: min(17rem, calc(100% - 2 * var(--mantine-spacing-md)));
-  }
-
-  .floatingPage:has([data-floating-video='inline']) {
-    position: relative;
-    inset: auto;
-    inline-size: 100%;
-  }
-
+@media (max-width: 74.999em) {
   .floatingPage [data-floating-video='inline'] .screen {
     max-block-size: min(22dvh, 11rem);
   }
+}
 
-  .floatingPage [data-floating-video='inline'] {
-    max-block-size: 45dvh;
-    overflow: auto;
+@media (max-height: 28em) {
+  .floatingPage [data-floating-video='inline'] .screen {
+    max-block-size: min(14dvh, 6rem);
   }
 }
 

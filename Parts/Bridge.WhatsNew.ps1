@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.99.0'; Items = @('Use the upload button in the bulletin image column to attach a picture to a saved row. The bridge checks the image and resizes it for the scene.') },
                 @{ Version = '8.98.0'; Items = @('In the bulletin image column, keep the current choice, continue the previous image, restore the template image or reuse the image of another row.') },
                 @{ Version = '8.97.0'; Items = @('Use Change design in the web bulletin editor to switch the columns of an existing bulletin. Your saved rows and attachments remain available when you return to the previous design.') },
                 @{ Version = '8.96.0'; Items = @('Administrators can choose Rehearsal when reviewing an urgent story if the station has an isolated test layer.') },
@@ -339,6 +340,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.99.0'; Items = @('استخدم زر الرفع في عمود الصورة لإرفاق صورة بصف محفوظ في الموجز. يتحقق الجسر من الصورة ويهيّئها لأبعاد القالب.') },
                 @{ Version = '8.98.0'; Items = @('من عمود الصورة في الموجز يمكنك إبقاء الاختيار الحالي أو متابعة الصورة السابقة أو استعادة صورة القالب أو استخدام صورة صف آخر.') },
                 @{ Version = '8.97.0'; Items = @('استخدم «تغيير التصميم» في محرر الموجز على الويب لتبديل أعمدة موجز موجود. تبقى الصفوف والمرفقات المحفوظة متاحة عند الرجوع إلى التصميم السابق.') },
                 @{ Version = '8.96.0'; Items = @('يستطيع المشرف اختيار «البروفة» عند مراجعة عرض العاجل في الويب إذا أُعدّت طبقة تجربة معزولة.') },

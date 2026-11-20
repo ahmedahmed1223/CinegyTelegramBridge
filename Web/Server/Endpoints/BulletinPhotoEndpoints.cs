@@ -1,0 +1,83 @@
+using System.Text.Json;
+using CinegyBridge.Web.Auth;
+using CinegyBridge.Web.Bridge;
+using Microsoft.AspNetCore.Http.Features;
+
+namespace CinegyBridge.Web.Endpoints;
+
+internal static class BulletinPhotoEndpoints
+{
+    private sealed record UploadPolicy(string Directory, int MaximumBytes);
+
+    public static void Map(RouteGroupBuilder bulletin)
+    {
+        bulletin.MapPost("/photo", Upload)
+            .Accepts<Stream>("application/octet-stream")
+            .Produces<BulletinEditor>()
+            .Produces<ErrorResponse>(400)
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(413)
+            .Produces<ErrorResponse>(503);
+    }
+
+    private static async Task<IResult> Upload(string id, string rowId, int revision, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (revision < 1 || id.Length is < 1 or > 64 || rowId.Length is < 1 or > 64)
+            return Error("bulletin_photo_invalid");
+        var actor = http.User.UserId();
+        var cancellation = http.RequestAborted;
+        var prepare = await bridge.SendAsync("bulletin.photo", new { actor, action = "prepare", id, rowId, revision }, cancellation);
+        if (!prepare.Ok) return Error(prepare.Error);
+        var policy = prepare.Data.Deserialize<UploadPolicy>(JsonDefaults.Options);
+        if (policy is null || string.IsNullOrEmpty(policy.Directory) ||
+            !Path.IsPathFullyQualified(policy.Directory) || policy.MaximumBytes <= 0)
+            return ApiErrors.BridgeUnavailable();
+        if (http.Request.ContentLength > policy.MaximumBytes) return Error("bulletin_photo_size");
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+            limit.MaxRequestBodySize = policy.MaximumBytes;
+
+        try
+        {
+            var directory = Directory.CreateDirectory(policy.Directory);
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return Error("bulletin_save_failed");
+            var upload = Guid.NewGuid().ToString("N");
+            var path = Path.Combine(directory.FullName, $"web-{upload}.image");
+            await using var staged = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read | FileShare.Delete,
+                32_768, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+            var buffer = new byte[32_768];
+            long bytes = 0;
+            while (true)
+            {
+                var read = await http.Request.Body.ReadAsync(buffer, cancellation);
+                if (read == 0) break;
+                bytes += read;
+                if (bytes > policy.MaximumBytes) return Error("bulletin_photo_size");
+                await staged.WriteAsync(buffer.AsMemory(0, read), cancellation);
+            }
+            if (bytes == 0) return Error("bulletin_photo_invalid");
+            await staged.FlushAsync(cancellation);
+            var reply = await bridge.SendAsync("bulletin.photo", new { actor, action = "apply", id, rowId, revision, upload }, cancellation);
+            return reply.Ok ? Results.Ok(reply.Data.Deserialize<BulletinEditor>(JsonDefaults.Options)) : Error(reply.Error);
+        }
+        catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return Error("bulletin_photo_size");
+        }
+        catch (IOException) { return Error("bulletin_save_failed"); }
+        catch (UnauthorizedAccessException) { return Error("bulletin_save_failed"); }
+    }
+
+    private static IResult Error(string code) => code switch
+    {
+        "bulletin_photo_invalid" => ApiErrors.Of(400, code),
+        "forbidden" => ApiErrors.Of(403, code),
+        "not_found" or "content_disabled" or "bulletin_photo_unavailable" => ApiErrors.Of(404, code),
+        "bulletin_stale" or "bulletin_photo_busy" => ApiErrors.Of(409, code),
+        "bulletin_photo_size" => ApiErrors.Of(413, code),
+        "bulletin_save_failed" or "bulletin_photo_timeout" or "bridge_outcome_unknown" => ApiErrors.Of(503, code),
+        _ => ApiErrors.BridgeUnavailable(),
+    };
+}

@@ -102,6 +102,7 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
+        BulletinPhotoEndpoints.Map(bulletin);
         bulletin.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
                 EditBulletin(new("read", Id: id, Page: page), bridge, http))
             .Produces<BulletinEditor>()

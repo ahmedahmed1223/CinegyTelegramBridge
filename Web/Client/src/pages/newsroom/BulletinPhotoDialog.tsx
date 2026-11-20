@@ -1,0 +1,55 @@
+import { Alert, Button, FileInput, Group, Image, Modal, Stack, Text } from '@mantine/core'
+import { useMutation } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { uploadBulletinPhoto, type Schemas } from '../../api/client'
+import { messageFor } from '../../api/messages'
+
+export function BulletinPhotoDialog({ id, rowId, revision, rank, onClose, onSaved }: {
+  id: string
+  rowId: string
+  revision: number
+  rank: string
+  onClose: () => void
+  onSaved: (bulletin: Schemas['BulletinEditor']) => void
+}) {
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState('')
+  const upload = useMutation({
+    mutationFn: (image: File) => uploadBulletinPhoto(image, id, rowId, revision),
+    onSuccess: onSaved,
+  })
+  const tooLarge = !!file && file.size > 10 * 1024 * 1024
+  const stale = upload.error?.message === 'bulletin_stale'
+  useEffect(() => {
+    if (!file || tooLarge || !/^image\/(jpeg|png|gif|bmp)$/.test(file.type)) return
+    const reader = new FileReader()
+    reader.onload = () => { if (typeof reader.result === 'string') setPreview(reader.result) }
+    reader.readAsDataURL(file)
+    return () => { reader.onload = null; if (reader.readyState === FileReader.LOADING) reader.abort() }
+  }, [file, tooLarge])
+  return (
+    <Modal opened title={`رفع صورة للصف ${rank}`} onClose={() => { if (!upload.isPending) onClose() }}>
+      <form onSubmit={(event) => {
+        event.preventDefault()
+        if (file && !tooLarge && !upload.isPending && !stale) upload.mutate(file)
+      }}>
+        <Stack gap="md">
+          <FileInput label="ملف الصورة" description="JPEG أو PNG أو GIF أو BMP. الحد الأقصى 10 ميغابايت." placeholder="اختر صورة"
+            accept=".jpg,.jpeg,.png,.gif,.bmp" clearable clearButtonProps={{ 'aria-label': 'إزالة الملف المختار' }}
+            value={file} disabled={upload.isPending}
+            onChange={(next) => { setPreview(''); setFile(next); if (!stale) upload.reset() }} />
+          {preview && <Image src={preview} alt="معاينة الصورة المختارة" h={155} fit="contain" radius="sm" onError={() => setPreview('')} />}
+          {upload.isPending && <Text size="sm" role="status">جارٍ رفع الصورة ومعالجتها…</Text>}
+          {(tooLarge || upload.error) && <Alert color="red" role="alert">
+            {stale ? 'تغيّر الصف أثناء التحرير. أغلق النافذة وحدّث الموجز، ثم اختر الصورة من جديد.'
+              : messageFor(tooLarge ? 'bulletin_photo_size' : upload.error?.message ?? 'unknown')}
+          </Alert>}
+          <Group justify="flex-end">
+            <Button variant="default" disabled={upload.isPending} onClick={onClose}>إلغاء</Button>
+            <Button type="submit" loading={upload.isPending} disabled={!file || tooLarge || stale}>حفظ الصورة</Button>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
+  )
+}

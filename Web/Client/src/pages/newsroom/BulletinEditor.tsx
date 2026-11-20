@@ -4,11 +4,12 @@ import {
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconFileUpload, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './BulletinPaste'
+import { BulletinPhotoDialog } from './BulletinPhotoDialog'
 import { BulletinTimingForm } from './BulletinTimingForm'
 import classes from './NewsroomPage.module.css'
 
@@ -91,6 +92,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [nameMode, setNameMode] = useState<Exclude<NameAction, 'create'> | null>(null)
   const [pasting, setPasting] = useState(false)
   const [editingTiming, setEditingTiming] = useState(false)
+  const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; rank: string } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
@@ -115,13 +117,14 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     setNameMode(null)
     setPasting(false)
     setEditingTiming(false)
+    setPhotoRow(null)
     setDesignChange(null)
     onSaved(value)
   }
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode || !!designChange || pasting || editingTiming
+  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
   const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
@@ -218,6 +221,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
+          {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
+            onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
           {designChange && <Paper withBorder p="md" radius="lg">
             <form onSubmit={(event) => {
               event.preventDefault()
@@ -293,7 +298,19 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                         return rowEdit?.row?.id === row.id ? editRow(rowEdit, rank) : (
                           <Table.Tr key={row.id}>
                             <Table.Td>{number.format(rank)}</Table.Td>
-                            {fields.map((field) => <Table.Td key={field.name}>{cell(row, field)}</Table.Td>)}
+                            {fields.map((field) => (
+                              <Table.Td key={field.name}>
+                                {bulletin.canUploadPhoto && field.name === bulletin.imageField ? <Group gap={6} wrap="nowrap">
+                                  {cell(row, field)}
+                                  <Tooltip label="رفع صورة">
+                                    <ActionIcon variant="subtle" aria-label={`رفع صورة للصف ${number.format(rank)}`} disabled={busy || editing}
+                                      onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, rank: number.format(rank), revision: bulletin.revision }) }}>
+                                      <IconFileUpload size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                </Group> : cell(row, field)}
+                              </Table.Td>
+                            ))}
                             <Table.Td>
                               <Button size="compact-xs" variant="subtle" color={row.skipped ? 'gray' : 'teal'} disabled={busy || editing}
                                 aria-label={row.skipped ? `تضمين الصف ${rank}` : `تجاوز الصف ${rank}`}

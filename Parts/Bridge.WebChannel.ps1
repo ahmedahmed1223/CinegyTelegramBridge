@@ -23,6 +23,7 @@
 $script:WebChannel = $null
 $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
+$script:WebBulletinPhotoRequest = $null
 $script:WebUrgentManualReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
@@ -153,6 +154,7 @@ function Stop-WebChannel {
     $script:WebChannel = $null
     $channel.Shared.Stop = $true
     Stop-WebTickerSheetRequest -ErrorCode 'channel_closed'
+    Stop-WebBulletinPhotoRequest -ErrorCode 'channel_closed'
     if ($script:WebTickerTxtRequest) {
         $worker = $script:WebTickerTxtRequest
         $script:WebTickerTxtRequest = $null
@@ -299,6 +301,7 @@ function Invoke-WebChannelRequests {
     <# Drains what the listeners queued. Bounded per call so a flood of
        requests cannot hold the air clock; the rest wait for the next pass. #>
     param([int]$Limit = 25)
+    Update-WebBulletinPhotoRequest
     if (-not (Test-WebChannelActive)) { return }
     Update-WebTickerSheetRequest
     Update-WebTickerTxtRequest
@@ -318,7 +321,8 @@ function Invoke-WebChannelRequests {
             $answer = Invoke-WebChannelOperation -Request $item.Request -Entry $item
             if ($null -eq $answer -and (
                 [object]::ReferenceEquals((Get-JsonProp $script:WebTickerSheetRequest 'Entry'), $item) -or
-                [object]::ReferenceEquals((Get-JsonProp $script:WebTickerTxtRequest 'Entry'), $item))) { continue }
+                [object]::ReferenceEquals((Get-JsonProp $script:WebTickerTxtRequest 'Entry'), $item) -or
+                [object]::ReferenceEquals((Get-JsonProp $script:WebBulletinPhotoRequest 'Entry'), $item))) { continue }
         }
         catch {
             Write-BridgeLog "Web channel operation failed: $($_.Exception.Message)" 'ERROR'
@@ -354,6 +358,7 @@ function Invoke-WebChannelOperation {
         'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
+        'bulletin.photo' { return Start-WebBulletinPhotoRequest -Entry $Entry }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }
@@ -486,10 +491,9 @@ function Update-WebChannel {
     $wanted = [bool](Get-Setting 'WebAccessEnabled')
     if ($wanted -and -not (Test-WebChannelActive)) { Start-WebChannel }
     elseif (-not $wanted -and (Test-WebChannelActive)) { Stop-WebChannel }
-    if (-not (Test-WebChannelActive)) { return }
-    Publish-WebChannelState
+    if (Test-WebChannelActive) { Publish-WebChannelState }
     Invoke-WebChannelRequests
-    Update-WebLoginExpiry
+    if (Test-WebChannelActive) { Update-WebLoginExpiry }
 }
 
 function Wait-WebChannelSignal {
@@ -946,6 +950,7 @@ function Get-WebBulletinEditor {
         revision = [int](Get-JsonProp $Bulletin 'Revision'); onAir = Test-MojazOnAir -Bulletin $Bulletin
         fields = $fields; rows = $items; page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
         imageField = $imageField; imageChoices = $imageChoices
+        canUploadPhoto = [bool]($imageField -and (Get-WebBulletinPhotoDestination -Bulletin $Bulletin))
     }
 }
 
@@ -1235,6 +1240,136 @@ function Invoke-WebBulletinEdit {
     }
     Add-AuditEntry "Web bulletin $action by $(Format-UserAuditActor -UserId $actor) ($([string]$saved.Id))"
     return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $saved -Page $page }
+}
+
+function Get-WebBulletinPhotoDestination {
+    param($Bulletin)
+    $directory = Get-MojazUploadDirectory
+    if (-not $directory) { return $null }
+    $design = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    $scenePath = ''
+    if ($design -ne $script:MojazTemplateKey) {
+        $scenePath = [string](Get-JsonProp (Get-TemplateStore).Map[$design] 'Path')
+        if (-not $scenePath -or (Join-Path (Split-Path -Parent $scenePath) 'Mojaz\bot') -ne $directory) { return $null }
+    }
+    return @{ Directory = $directory; Scene = $scenePath }
+}
+
+function Get-WebBulletinPhotoAdmission {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    $rowId = [string](Get-JsonProp $Arguments 'rowId')
+    if (-not $id -or -not $rowId) { return @{ ok = $false; error = 'not_found' } }
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+    if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $bulletin 'Revision')) { return @{ ok = $false; error = 'bulletin_stale' } }
+    if ($rowId -cnotin @(Get-JsonProp $bulletin 'Rows' | ForEach-Object { [string](Get-JsonProp $_ 'Id') })) {
+        return @{ ok = $false; error = 'not_found' }
+    }
+    $destination = Get-WebBulletinPhotoDestination -Bulletin $bulletin
+    if (-not $destination -or -not (Get-WebBulletinImageField -Fields @(Get-WebBulletinFields -Bulletin $bulletin))) {
+        return @{ ok = $false; error = 'bulletin_photo_unavailable' }
+    }
+    return @{ ok = $true; Actor = $actor; BulletinId = $id; RowId = $rowId; Directory = $destination.Directory
+        Size = Get-MojazImageSize -Path $destination.Scene; Scene = $destination.Scene }
+}
+
+function Start-WebBulletinPhotoRequest {
+    param([Parameter(Mandatory)][hashtable]$Entry)
+    $arguments = Get-JsonProp $Entry.Request 'args'
+    if ($arguments -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'bulletin_photo_invalid' } }
+    $admission = Get-WebBulletinPhotoAdmission -Arguments $arguments
+    if (-not $admission.ok) { return $admission }
+    $action = Get-JsonProp $arguments 'action'
+    if ($action -ceq 'prepare') {
+        return @{ ok = $true; data = @{ directory = $script:mojazWebUploadDirectory; maximumBytes = 10MB } }
+    }
+    $upload = [string](Get-JsonProp $arguments 'upload')
+    if ($action -cne 'apply' -or $upload -cnotmatch '^[a-f0-9]{32}$') { return @{ ok = $false; error = 'bulletin_photo_invalid' } }
+    if ($script:WebBulletinPhotoRequest) { return @{ ok = $false; error = 'bulletin_photo_busy' } }
+    $sourcePath = Join-Path $script:mojazWebUploadDirectory "web-$upload.image"
+    $source = Get-Item -LiteralPath $sourcePath -ErrorAction SilentlyContinue
+    if (-not $source -or $source.PSIsContainer -or ($source.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $source.Length) {
+        return @{ ok = $false; error = 'bulletin_photo_invalid' }
+    }
+    if ($source.Length -gt 10MB) { return @{ ok = $false; error = 'bulletin_photo_size' } }
+    $name = "mojaz-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('N').Substring(0,8)).png"
+    $path = Join-Path $admission.Directory $name
+    $pipeline = [powershell]::Create()
+    try {
+        # Image decoding must not block the playout tick. Only the bridge
+        # thread can change the bulletin after the worker returns.
+        $pipeline.AddScript(${function:Convert-MojazPicture}.ToString()).AddParameter('SourcePath', $sourcePath).AddParameter('DestinationPath', $path).
+            AddParameter('Size', $admission.Size).AddParameter('SharedUpload') | Out-Null
+        $invocation = $pipeline.BeginInvoke()
+        $script:WebBulletinPhotoRequest = @{ Entry = $Entry; Arguments = $arguments; Admission = $admission; Name = $name
+            Path = $path; Pipeline = $pipeline; Invocation = $invocation; Stopping = $false; Saved = $false }
+    }
+    catch {
+        $pipeline.Dispose()
+        return @{ ok = $false; error = 'bulletin_save_failed' }
+    }
+}
+
+function Stop-WebBulletinPhotoRequest {
+    param([string]$ErrorCode)
+    $pending = $script:WebBulletinPhotoRequest
+    if (-not $pending -or $pending.Stopping) { return }
+    $pending.Stopping = $true
+    [void]$pending.Entry.Reply.TrySetResult(('{"ok":false,"error":"' + $ErrorCode + '"}'))
+    if (-not $pending.Invocation.IsCompleted) {
+        try { [void]$pending.Pipeline.BeginStop($null, $null) }
+        catch { Write-BridgeLog 'The bulletin photo worker ended while cancellation was requested.' 'DEBUG' }
+    }
+}
+
+function Update-WebBulletinPhotoRequest {
+    $pending = $script:WebBulletinPhotoRequest
+    if (-not $pending) { return }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $pending.Entry.Deadline) {
+        Stop-WebBulletinPhotoRequest -ErrorCode 'bulletin_photo_timeout'
+    }
+    if (-not $pending.Invocation.IsCompleted) { return }
+    $script:WebBulletinPhotoRequest = $null
+    try {
+        if ($pending.Stopping) { return }
+        $result = @($pending.Pipeline.EndInvoke($pending.Invocation))
+        $answer = @{ ok = $false; error = 'bulletin_photo_invalid' }
+        if ($result.Count -eq 1 -and $result[0] -eq $true -and -not $pending.Pipeline.HadErrors) {
+            $answer = Complete-WebBulletinPhotoRequest -Pending $pending
+        }
+        [void]$pending.Entry.Reply.TrySetResult(($answer | ConvertTo-Json -Compress -Depth 6))
+    }
+    catch {
+        $code = if ($pending.Saved) { 'bridge_outcome_unknown' } else { 'bulletin_photo_invalid' }
+        [void]$pending.Entry.Reply.TrySetResult(('{"ok":false,"error":"' + $code + '"}'))
+    }
+    finally {
+        $pending.Pipeline.Dispose()
+        if (-not $pending.Saved) { Remove-Item -LiteralPath $pending.Path -ErrorAction SilentlyContinue }
+    }
+}
+
+function Complete-WebBulletinPhotoRequest {
+    param([hashtable]$Pending)
+    $admission = Get-WebBulletinPhotoAdmission -Arguments $Pending.Arguments
+    if (-not $admission.ok) { return $admission }
+    if ($admission.Directory -ne $Pending.Admission.Directory -or $admission.Scene -ne $Pending.Admission.Scene -or
+        (Get-JsonProp $admission.Size 'Width') -ne (Get-JsonProp $Pending.Admission.Size 'Width') -or
+        (Get-JsonProp $admission.Size 'Height') -ne (Get-JsonProp $Pending.Admission.Size 'Height')) {
+        return @{ ok = $false; error = 'bulletin_stale' }
+    }
+    $result = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $admission.BulletinId -RowId $admission.RowId `
+        -UserId $admission.Actor -ImageMode 'new' -Image ".\Mojaz\bot\$($Pending.Name)" -DesignFields @{ $script:MojazImageVariable = '' }
+    if (-not (Invoke-MojazEdit -Result $result -ChatId $admission.Actor -Quiet)) { return @{ ok = $false; error = 'bulletin_save_failed' } }
+    $Pending.Saved = $true
+    Add-AuditEntry "Web bulletin photo attached by $(Format-UserAuditActor -UserId $admission.Actor) ($($admission.BulletinId))"
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $admission.BulletinId
+    $page = Get-MojazRowPage -Rows @(Get-JsonProp $bulletin 'Rows') -RowId $admission.RowId -PageSize 20
+    return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $bulletin -Page $page }
 }
 
 function Get-WebUrgentFields {

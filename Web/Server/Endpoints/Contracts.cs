@@ -15,7 +15,7 @@ public sealed record BulletinRow(string Id, Dictionary<string, string> Values, s
 public sealed record BulletinImageChoice(string RowId, int RowNumber);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,
     BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total, BulletinTiming? Timing,
-    string? ImageField = null, BulletinImageChoice[]? ImageChoices = null);
+    string? ImageField = null, BulletinImageChoice[]? ImageChoices = null, bool CanUploadPhoto = false);
 public sealed record BulletinTiming(int DelayFrames, int IntroExtraFrames, int LastRowFrames, bool SyncToLoop,
     int LoopFrames, double Fps, int EffectiveIntroFrames, int EffectiveLastFrames, string FitNote);
 public sealed record BulletinTimingInput(int? DelayFrames = null, int? IntroExtraFrames = null, int? LastRowFrames = null, bool? SyncToLoop = null);

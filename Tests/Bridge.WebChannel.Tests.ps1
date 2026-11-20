@@ -1517,6 +1517,83 @@ Describe 'Web channel: the pipe' {
         finally { $script:MojazLibrary = $previousLibrary }
     }
 
+    It 'validates and saves a staged bulletin photo only for the current row revision' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'photo-library.json' }
+        Mock Get-MojazUploadDirectory { Join-Path $TestDrive 'scene-pictures' }
+        Mock Get-MojazImageSize { @{ Width = 32; Height = 18 } }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-WebBulletinFields { @{ name = $script:MojazImageVariable; label = 'الصورة'; kind = 'media' } }
+        $oldLibrary = $script:MojazLibrary
+        $oldUploadDirectory = Get-Variable mojazWebUploadDirectory -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $script:mojazWebUploadDirectory = Join-Path $TestDrive 'web-photo-uploads'
+        New-Item -ItemType Directory -Path $script:mojazWebUploadDirectory | Out-Null
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الصور').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'عنوان محفوظ').Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $sendPhoto = {
+                param($photoArgs)
+                $line = @{ op = 'bulletin.photo'; args = $photoArgs } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $photo = @{ actor = 999; action = 'prepare'; id = $id; rowId = $bulletin.Rows[0].Id; revision = $bulletin.Revision }
+            (& $sendPhoto $photo).error | Should -Be 'forbidden'
+            $photo.actor = 4321
+            (& $sendPhoto $photo).data.maximumBytes | Should -Be 10MB
+            $photo.action = 'apply'
+            $photo.upload = [guid]::NewGuid().ToString('N')
+            $inputFile = Join-Path $script:mojazWebUploadDirectory "web-$($photo.upload).image"
+            Set-Content -LiteralPath $inputFile -Value 'هذا ليس صورة'
+            (& $sendPhoto $photo).error | Should -Be 'bulletin_photo_invalid'
+            $large = [IO.File]::OpenWrite($inputFile)
+            try { $large.SetLength(10MB + 1) }
+            finally { $large.Dispose() }
+            (& $sendPhoto $photo).error | Should -Be 'bulletin_photo_size'
+            $bitmap = [System.Drawing.Bitmap]::new(2, 2)
+            try { $bitmap.Save($inputFile, [System.Drawing.Imaging.ImageFormat]::Png) }
+            finally { $bitmap.Dispose() }
+            $validRevision = $photo.revision
+            $photo.revision--
+            (& $sendPhoto $photo).error | Should -Be 'bulletin_stale'
+            $photo.revision = $validRevision
+            Mock Get-MojazImageSize { @{ Width = 40; Height = 18 } } -ParameterFilter { $script:webPhotoTargetChanged }
+            $script:webPhotoTargetChanged = $false
+            Mock Test-Authorized {
+                $script:webPhotoAuthChecks++
+                if ($script:webPhotoAuthChecks -eq 2) { $script:webPhotoTargetChanged = $true }
+                $UserId -eq 4321
+            }
+            $script:webPhotoAuthChecks = 0
+            (& $sendPhoto $photo).error | Should -Be 'bulletin_stale'
+            @(Get-ChildItem -LiteralPath (Get-MojazUploadDirectory) -Filter '*.png').Count | Should -Be 0
+            $script:webPhotoTargetChanged = $false
+            $edited = & $sendPhoto $photo
+            $edited.ok | Should -BeTrue
+            $edited.data.rows[0].imageMode | Should -Be 'new'
+            ($edited | ConvertTo-Json -Depth 8) | Should -Not -Match '\.png'
+            Import-MojazLibrary
+            $saved = $script:MojazLibrary.Bulletins[0].Rows[0]
+            $saved.Title | Should -Be 'عنوان محفوظ'
+            $saved.Image | Should -Match '^\.\\Mojaz\\bot\\mojaz-.*\.png$'
+            $file = Join-Path (Get-MojazUploadDirectory) (Split-Path -Leaf $saved.Image)
+            $decoded = [System.Drawing.Image]::FromFile($file)
+            try { $decoded.Width | Should -Be 32; $decoded.Height | Should -Be 18 }
+            finally { $decoded.Dispose() }
+            (& $sendPhoto $photo).error | Should -Be 'bulletin_stale'
+            $photo.revision = $script:MojazLibrary.Bulletins[0].Revision
+            Mock Get-WebBulletinEditor { throw 'simulated editor projection failure' }
+            (& $sendPhoto $photo).error | Should -Be 'bridge_outcome_unknown'
+            $newImage = $script:MojazLibrary.Bulletins[0].Rows[0].Image
+            Test-Path -LiteralPath (Join-Path (Get-MojazUploadDirectory) (Split-Path -Leaf $newImage)) | Should -BeTrue
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:mojazWebUploadDirectory = $oldUploadDirectory
+        }
+    }
+
     It 'reviews a batch against its mapped bulletin columns and appends it only once after confirmation' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-MojazAvailable { $true }

@@ -318,13 +318,23 @@ function Convert-MojazPicture {
 
         Returns $true only when a picture was written.
     #>
-    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$DestinationPath, $Size)
+    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$DestinationPath,
+        $Size, [switch]$SharedUpload)
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    # Throws for anything that is not a picture, which is the check.
-    $image = [System.Drawing.Image]::FromFile($SourcePath)
+    $image = $null
+    $uploadStream = $null
     try {
+        if ($SharedUpload) {
+            # The server keeps a delete-on-close handle while the bridge reads.
+            $uploadStream = [IO.File]::Open($SourcePath, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $image = [System.Drawing.Image]::FromStream($uploadStream, $false, $false)
+        }
+        else { $image = [System.Drawing.Image]::FromFile($SourcePath) }
         $width = if ($Size) { [int]$Size.Width } else { [int]$image.Width }
         $height = if ($Size) { [int]$Size.Height } else { [int]$image.Height }
+        if ($SharedUpload -and (([long]$image.Width * $image.Height) -gt 32MB -or ([long]$width * $height) -gt 32MB)) {
+            throw 'The image exceeds the maximum pixel count.'
+        }
         $canvas = New-Object System.Drawing.Bitmap($width, $height)
         try {
             $graphics = [System.Drawing.Graphics]::FromImage($canvas)
@@ -340,11 +350,15 @@ function Convert-MojazPicture {
                     [single]$drawWidth, [single]$drawHeight)
             }
             finally { $graphics.Dispose() }
+            if ($SharedUpload) { New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force -ErrorAction Stop | Out-Null }
             $canvas.Save($DestinationPath, [System.Drawing.Imaging.ImageFormat]::Png)
         }
         finally { $canvas.Dispose() }
     }
-    finally { $image.Dispose() }
+    finally {
+        if ($image) { $image.Dispose() }
+        if ($uploadStream) { $uploadStream.Dispose() }
+    }
     return (Test-Path -LiteralPath $DestinationPath)
 }
 

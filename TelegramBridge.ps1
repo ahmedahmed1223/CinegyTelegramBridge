@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.98.0'
+$script:BridgeVersion = '8.99.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -750,6 +750,7 @@ $script:newsDraftFile = Join-Path $logDir 'news-draft.json'
 $script:newsLockRequestFile = Join-Path $logDir 'news-lock-request.json'
 $script:newsBackupDirectory = Join-Path $logDir 'news-backups'
 $script:newsImportDirectory = Join-Path $logDir 'news-imports'
+$script:mojazWebUploadDirectory = Join-Path $logDir 'mojaz-web-uploads'
 $script:NewsTickerDraft = $null
 
 

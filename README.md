@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.99.0
+
+The bulletin image column uploads a picture to a saved row for designs using the shared Mojaz picture folder and field. The bridge accepts up to 10 MiB, decodes and resizes the image off the playout thread, and verifies the row revision again before updating the shared library. The web client receives the updated row without station file paths.
+
 ## Version 8.98.0
 
 The bulletin image column can retain the current source, continue the previous image, restore the template image, or reuse an image from another row in the same bulletin. The bridge saves the image choice and editorial text together against the same revision. The browser receives source row references without station file paths.

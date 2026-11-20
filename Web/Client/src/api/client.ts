@@ -29,15 +29,26 @@ export async function uploadTickerTxt(file: File, revision: string, review?: str
   const path = '/api/content/ticker/draft/txt' satisfies keyof paths
   const query = new URLSearchParams({ action: review ? 'apply' : 'preview', revision })
   if (review) query.set('review', review)
+  const response = await postBinary(path, query, file, 'ticker_txt_size')
+  return response.status === 204 ? null : await response.json() as Schemas['TickerTxtPreview']
+}
+
+export async function uploadBulletinPhoto(file: File, id: string, rowId: string, revision: number): Promise<Schemas['BulletinEditor']> {
+  const path = '/api/content/bulletins/photo' satisfies keyof paths
+  const response = await postBinary(path, new URLSearchParams({ id, rowId, revision: String(revision) }), file, 'bulletin_photo_size')
+  return await response.json() as Schemas['BulletinEditor']
+}
+
+async function postBinary(path: string, query: URLSearchParams, file: File, sizeError: string) {
   const response = await fetch(`${path}?${query}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/octet-stream', 'X-XSRF-TOKEN': csrfToken },
     body: file,
   })
-  if (response.status === 413) throw new Error('ticker_txt_size')
+  if (response.status === 413) throw new Error(sizeError)
   if (!response.ok) throw new Error(errorCode(await response.json().catch(() => undefined), response))
-  return response.status === 204 ? null : await response.json() as Schemas['TickerTxtPreview']
+  return response
 }
 
 /** The error code the server sent, or a stand-in for a failure with none. */

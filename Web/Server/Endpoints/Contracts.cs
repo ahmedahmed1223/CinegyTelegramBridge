@@ -34,6 +34,11 @@ public sealed record UrgentRunStatus(string Id, string State, int Step, int Step
 public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);
 public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps);
 public sealed record UrgentPlaybackResponse(UrgentRunStatus? Run, UrgentRunPreview? Preview);
+public sealed record UrgentManualRequest(string Action, string? ItemId = null, int? AutoHideSeconds = null, string? Review = null);
+public sealed record UrgentManualPreview(string Review, int Layer, Dictionary<string, string> Values, int AutoHideSeconds,
+    bool ReplacesGraphic, bool StopsRun, bool StopsBulletin, string GraphicName);
+public sealed record UrgentManualLive(string ItemId, int Layer, string Review);
+public sealed record UrgentManualResponse(UrgentManualPreview? Preview = null, UrgentManualLive? Live = null, int[]? Durations = null, bool AutoHideFailed = false);
 public sealed record UrgentTimingRequest(string Action, string? Revision = null, string? Field = null, int? Number = null, string? Option = null);
 public sealed record UrgentTimingBounds(int Minimum, int Maximum);
 public sealed record UrgentTimingState(string Revision, int IntervalSeconds, int Repeats, int TotalSeconds, int ExitGapSeconds,

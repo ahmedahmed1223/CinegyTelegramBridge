@@ -536,6 +536,100 @@ Describe 'Web channel: the pipe' {
         Should -Invoke Invoke-ExitLayer -Times 1
     }
 
+    It 'reviews a single urgent before showing it and hides only the same scene for its owner' {
+        $oldBoard = $script:UrgentBoard
+        $oldManual = $script:UrgentManualLive
+        $oldReviews = $script:WebUrgentManualReviews
+        $oldRun = $script:UrgentBoardRun
+        $oldBulletin = $script:MojazPlayback
+        $oldLayer = $script:OnAir[5]
+        $script:UrgentBoard = (Add-UrgentItem -Board (New-UrgentBoard) -Text 'خبر فردي').Value
+        $script:UrgentBoardRun = $null
+        $script:MojazPlayback = $null
+        $script:UrgentManualLive = @{}
+        $script:WebUrgentManualReviews = @{}
+        $script:webSingleScene = @{ Success = $true; IsOnAir = $false }
+        $script:webSingleHideClears = $false
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Layer = 5; Fields = @('headline') } }
+        Mock Get-WebUrgentLayerStatus { $script:webSingleScene }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Get-EffectiveAutoHideSeconds { [math]::Min(20, $RequestedSeconds) }
+        Mock Save-UrgentManualState { $true }
+        Mock Invoke-ShowTemplateResult {
+            $script:OnAir[5] = @{ Key = 'Urgent'; ActiveId = 'single-scene'; At = (Get-Date) }
+            $script:webSingleScene = @{ Success = $true; IsOnAir = $true; ActiveId = 'single-scene' }
+            @{ Success = $true }
+        }
+        Mock Invoke-HideLayer {
+            if ($script:webSingleHideClears) { $script:webSingleScene = @{ Success = $true; IsOnAir = $false } }
+            $true
+        }
+        $call = {
+            param($arguments)
+            $line = @{ op = 'urgent.manual'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $command = @{ actor = 4321; action = 'preview'; itemId = $script:UrgentBoard.Items[0].Id; autoHideSeconds = 30 }
+            $review = (& $call $command).data.preview
+            $review.autoHideSeconds | Should -Be 20
+            $script:WebUrgentManualReviews[[long]4321].ExpiresAt = [datetimeoffset]::UtcNow.AddMinutes(-1)
+            $command.action = 'show'
+            $command.review = $review.review
+            (& $call $command).error | Should -Be 'urgent_stale'
+            $command.action = 'preview'
+            $command.review = (& $call $command).data.preview.review
+            $command.action = 'show'
+            $script:webSingleScene = @{ Success = $true; IsOnAir = $true; ActiveId = 'other-scene' }
+            (& $call $command).error | Should -Be 'urgent_stale'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            $script:webSingleScene = @{ Success = $true; IsOnAir = $false }
+            (& $call $command).error | Should -Be 'urgent_stale'
+            $command.action = 'preview'
+            $command.review = (& $call $command).data.preview.review
+            $command.action = 'show'
+            $script:MojazPlayback = @{ OperationId = 'new-bulletin' }
+            (& $call $command).error | Should -Be 'urgent_stale'
+            $command.action = 'preview'
+            $newReview = (& $call $command).data.preview
+            $newReview.stopsBulletin | Should -BeTrue
+            $command.review = $newReview.review
+            $command.action = 'show'
+            $result = (& $call $command).data
+            $result.autoHideFailed | Should -BeTrue
+            $live = $result.live
+            $live.itemId | Should -Be $command.itemId
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $AutoHideSeconds -eq 30 -and $ExpectedLayerStamp -eq 'empty' -and $Variables['headline'] -eq 'خبر فردي'
+            }
+            (& $call @{ actor = 4322; action = 'hide'; review = $live.review }).error | Should -Be 'urgent_stale'
+            $hide = @{ actor = 4321; action = 'hide'; review = $live.review }
+            $script:webSingleScene.ActiveId = 'replacement'
+            (& $call $hide).error | Should -Be 'urgent_stale'
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+            $script:webSingleScene.ActiveId = 'single-scene'
+            (& $call $hide).error | Should -Be 'urgent_manual_hide_unconfirmed'
+            $script:UrgentManualLive.Count | Should -Be 1
+            $script:webSingleHideClears = $true
+            (& $call $hide).ok | Should -BeTrue
+            Should -Invoke Invoke-HideLayer -Times 2 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:single-scene' }
+            $script:UrgentManualLive.Count | Should -Be 0
+            (& $call $command).error | Should -Be 'urgent_stale'
+        }
+        finally {
+            $script:UrgentBoard = $oldBoard
+            $script:UrgentManualLive = $oldManual
+            $script:WebUrgentManualReviews = $oldReviews
+            $script:UrgentBoardRun = $oldRun
+            $script:MojazPlayback = $oldBulletin
+            if ($oldLayer) { $script:OnAir[5] = $oldLayer } else { $script:OnAir.Remove(5) | Out-Null }
+        }
+    }
+
     It 'starts only a reviewed urgent plan and refuses revoked actors or commands for a different run' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-UrgentBoardAvailable { $true }

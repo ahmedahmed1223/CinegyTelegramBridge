@@ -1338,6 +1338,122 @@
         }
       }
     },
+    "/api/content/urgent/manual": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrgentManualResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrgentManualRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrgentManualResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/urgent/timing": {
       "get": {
         "tags": [
@@ -4006,6 +4122,125 @@
         },
         "default": null,
         "nullable": true
+      },
+      "UrgentManualLive": {
+        "required": [
+          "itemId",
+          "layer",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "review": {
+            "type": "string"
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
+      "UrgentManualPreview": {
+        "required": [
+          "review",
+          "layer",
+          "values",
+          "autoHideSeconds",
+          "replacesGraphic",
+          "stopsRun",
+          "stopsBulletin",
+          "graphicName"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "autoHideSeconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "replacesGraphic": {
+            "type": "boolean"
+          },
+          "stopsRun": {
+            "type": "boolean"
+          },
+          "stopsBulletin": {
+            "type": "boolean"
+          },
+          "graphicName": {
+            "type": "string"
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
+      "UrgentManualRequest": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "autoHideSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "UrgentManualResponse": {
+        "type": "object",
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/UrgentManualPreview"
+          },
+          "live": {
+            "$ref": "#/components/schemas/UrgentManualLive"
+          },
+          "durations": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "default": null,
+            "nullable": true
+          },
+          "autoHideFailed": {
+            "type": "boolean",
+            "default": false
+          }
+        }
       },
       "UrgentPlaybackRequest": {
         "required": [

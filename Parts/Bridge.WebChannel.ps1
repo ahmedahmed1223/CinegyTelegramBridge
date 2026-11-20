@@ -23,6 +23,7 @@
 $script:WebChannel = $null
 $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
+$script:WebUrgentManualReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
 $script:WebChannelListenerCount = 4
@@ -346,6 +347,7 @@ function Invoke-WebChannelOperation {
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
         'urgent.timing' { return Invoke-WebUrgentTiming -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
+        'urgent.manual' { return Invoke-WebUrgentManual -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'ticker.txt' { return Start-WebTickerTxtRequest -Entry $Entry }
         'ticker.sets' { return Invoke-WebTickerSets -Arguments $arguments }
@@ -1957,6 +1959,110 @@ function Get-WebUrgentRun {
 function Get-WebUrgentLayerStatus {
     param([int]$Layer)
     return Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+}
+
+function Get-WebUrgentManualLive {
+    param([long]$Actor)
+    $record = $script:UrgentManualLive[$Actor]
+    if (-not $record -or [long](Get-JsonProp $record 'UserId') -ne $Actor) { return $null }
+    $layer = [int](Get-JsonProp $record 'Layer')
+    if ([string](Get-JsonProp $record 'LiveStamp') -cne (Get-UrgentLiveStamp -Layer $layer)) { return $null }
+    return @{ itemId = [string]$record.ItemId; layer = $layer; review = [string]$record.Token }
+}
+
+function Invoke-WebUrgentManual {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $live = Get-WebUrgentManualLive -Actor $actor
+    if ($action -eq 'status') { return @{ ok = $true; data = @{ live = $live } } }
+    if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $review = [string](Get-JsonProp $Arguments 'review')
+    if ($action -eq 'hide') {
+        if (-not $live -or $review -cne $live.review) { return @{ ok = $false; error = 'urgent_stale' } }
+        $current = $script:OnAir[$live.layer]
+        $key = [string](Get-JsonProp $current 'Key')
+        if (-not (Test-TemplateAccess -Key $key -Layer $live.layer -ChatId $actor -UserId $actor).Allowed) { return @{ ok = $false; error = 'forbidden' } }
+        $expected = Get-CinegyLayerReviewStamp -Status @{ Success = $true; IsOnAir = $true; ActiveId = Get-JsonProp $current 'ActiveId' }
+        $actual = Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $live.layer)
+        if (-not $expected -or $actual -cne $expected) { return @{ ok = $false; error = 'urgent_stale' } }
+        if (-not (Invoke-HideLayer -Layer $live.layer -ChatId $actor -UserId $actor -Quiet -ExpectedLayerStamp $expected)) {
+            return @{ ok = $false; error = 'urgent_manual_hide_unconfirmed' }
+        }
+        if ((Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $live.layer)) -cne 'empty') {
+            return @{ ok = $false; error = 'urgent_manual_hide_unconfirmed' }
+        }
+        $script:UrgentManualLive.Remove($actor) | Out-Null
+        Save-UrgentManualState | Out-Null
+        Publish-WebChannelState -Force
+        return @{ ok = $true; data = @{} }
+    }
+    if ($action -notin 'options', 'preview', 'show') { return @{ ok = $false; error = 'urgent_invalid' } }
+    $now = [datetimeoffset]::UtcNow
+    $pending = $null
+    if ($action -eq 'show') {
+        $pending = $script:WebUrgentManualReviews[$actor]
+        if (-not $pending -or $review -cne $pending.Token) { return @{ ok = $false; error = 'urgent_stale' } }
+        $script:WebUrgentManualReviews.Remove($actor) | Out-Null
+        if ($pending.ExpiresAt -le $now) { return @{ ok = $false; error = 'urgent_stale' } }
+    }
+    if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $itemId = [string](Get-JsonProp $Arguments 'itemId')
+    if (-not $itemId) { return @{ ok = $false; error = 'urgent_invalid' } }
+    $item = Get-UrgentItem -Board $script:UrgentBoard -ItemId $itemId
+    if (-not $item -or -not (Get-UrgentProperty $item 'Enabled' $true)) { return @{ ok = $false; error = 'urgent_stale' } }
+    $template = Get-UrgentTemplate
+    $layer = [int]$template.Layer
+    if (-not (Test-TemplateAccess -Key $template.Key -Layer $layer -ChatId $actor -UserId $actor).Allowed) { return @{ ok = $false; error = 'forbidden' } }
+    $policy = Test-TemplateShowPolicy -Key $template.Key -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)
+    if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
+    if ($action -eq 'options') {
+        $timing = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
+        $choices = @(Get-AutoHideChoices) + @([int][math]::Ceiling($timing.HoldSeconds))
+        return @{ ok = $true; data = @{ durations = @($choices | Where-Object { $_ -gt 0 -and $_ -le 86400 } | Sort-Object -Unique) } }
+    }
+    $duration = Get-JsonProp $Arguments 'autoHideSeconds'
+    if (($duration -isnot [int] -and $duration -isnot [long]) -or $duration -lt 0 -or $duration -gt 86400) {
+        return @{ ok = $false; error = 'urgent_invalid' }
+    }
+    $status = Get-WebUrgentLayerStatus -Layer $layer
+    $stamp = Get-CinegyLayerReviewStamp -Status $status
+    if (-not $stamp) { return @{ ok = $false; error = 'refused'; data = (T 'air.layerCheckFailed') } }
+    $variables = Get-UrgentItemVariables -Item $item
+    $effective = Get-EffectiveAutoHideSeconds -Key $template.Key -RequestedSeconds $duration
+    $reviewed = ConvertTo-Json -Compress -Depth 12 -InputObject @(
+        $actor, $itemId, (Get-JsonProp $script:UrgentBoard 'Revision'), $template, $stamp, $duration, $effective, $variables,
+        [bool]$script:UrgentBoardRun, (Get-JsonProp $script:UrgentBoardRun 'OperationId'),
+        [bool]$script:MojazPlayback, (Get-JsonProp $script:MojazPlayback 'OperationId')
+    )
+    $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
+    if ($action -eq 'preview') {
+        foreach ($entry in @($script:WebUrgentManualReviews.GetEnumerator())) {
+            if ($entry.Value.ExpiresAt -le $now) { $script:WebUrgentManualReviews.Remove($entry.Key) | Out-Null }
+        }
+        $token = [guid]::NewGuid().ToString('N')
+        $script:WebUrgentManualReviews[$actor] = @{
+            Token = $token; Fingerprint = $fingerprint
+            ExpiresAt = $now.AddMinutes((Get-SettingInt 'PendingStateTimeoutMinutes' 1))
+        }
+        return @{ ok = $true; data = @{ preview = @{
+            review = $token; layer = $layer; values = $variables; autoHideSeconds = $effective
+            replacesGraphic = $stamp -ne 'empty'; stopsRun = [bool]$script:UrgentBoardRun
+            stopsBulletin = [bool]$script:MojazPlayback
+            graphicName = Get-NewsScreenLine ([string](Get-JsonProp $status 'ActiveName')) 100
+        } } }
+    }
+    if ($pending.Fingerprint -cne $fingerprint) { return @{ ok = $false; error = 'urgent_stale' } }
+    $result = Invoke-ShowTemplateResult -Key $template.Key -Variables $variables -ChatId $actor -UserId $actor `
+        -AutoHideSeconds $duration -ExpectedLayerStamp $stamp
+    if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'refused'; data = [string](Get-JsonProp $result 'Error') } }
+    Set-UrgentManualLiveState -ChatId $actor -UserId $actor -ItemId $itemId -Layer $layer | Out-Null
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{
+        live = Get-WebUrgentManualLive -Actor $actor
+        autoHideFailed = $effective -gt 0 -and -not (Get-JsonProp $result 'AutoHideArmed')
+    } }
 }
 
 function Invoke-WebUrgentPlayback {

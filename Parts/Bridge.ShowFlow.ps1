@@ -580,7 +580,8 @@ function Invoke-HideLayer {
         [long]$UserId = 0,
         [switch]$Quiet,
         [switch]$MaintenanceOverride,
-        [switch]$System
+        [switch]$System,
+        [string]$ExpectedLayerStamp = ''
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
@@ -612,6 +613,14 @@ function Invoke-HideLayer {
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId -EmergencyOverride:$MaintenanceOverride)) {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
+    }
+    if ($ExpectedLayerStamp) {
+        $verified = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if ((Get-CinegyLayerReviewStamp -Status $verified) -cne $ExpectedLayerStamp) {
+            Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'reviewed scene changed'
+            return $false
+        }
     }
     # A bulletin walking this layer has to stop with it, or it keeps writing
     # rows into a scene nobody can see.

@@ -1615,6 +1615,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/urgent/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UrgentManualResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UrgentManualRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UrgentManualResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/urgent/timing": {
         parameters: {
             query?: never;
@@ -3067,6 +3188,48 @@ export interface components {
             repeats: number | null;
             mode: string | null;
         } | null;
+        /** @default null */
+        UrgentManualLive: {
+            itemId: string;
+            /** Format: int32 */
+            layer: number;
+            review: string;
+        } | null;
+        /** @default null */
+        UrgentManualPreview: {
+            review: string;
+            /** Format: int32 */
+            layer: number;
+            values: {
+                [key: string]: string;
+            };
+            /** Format: int32 */
+            autoHideSeconds: number;
+            replacesGraphic: boolean;
+            stopsRun: boolean;
+            stopsBulletin: boolean;
+            graphicName: string;
+        } | null;
+        UrgentManualRequest: {
+            action: string;
+            /** @default null */
+            itemId: string | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            autoHideSeconds: number | null;
+            /** @default null */
+            review: string | null;
+        };
+        UrgentManualResponse: {
+            preview?: components["schemas"]["UrgentManualPreview"];
+            live?: components["schemas"]["UrgentManualLive"];
+            /** @default null */
+            durations: number[] | null;
+            /** @default false */
+            autoHideFailed: boolean;
+        };
         UrgentPlaybackRequest: {
             action: string;
             /** @default null */

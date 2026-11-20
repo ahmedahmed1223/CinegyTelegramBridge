@@ -937,6 +937,7 @@ function Invoke-ShowTemplateResult {
         if ($AutoHideSeconds -gt 0) {
             $timerSaved = $activeIdConfirmed -and (Set-AutoHideTimer -Layer ([int]$template.Layer) -Seconds $AutoHideSeconds `
                     -ChatId $ChatId -UserId $UserId -TemplateKey $Key -ActiveId $activeId -ActiveIdConfirmed $true)
+            Set-JsonProp $result 'AutoHideArmed' $timerSaved
             $suffix = if (-not $activeIdConfirmed) {
                 (T 'air.autoHideNotSet')
             }

@@ -1080,6 +1080,17 @@ function Invoke-UrgentTimedPick {
     return $true
 }
 
+function Set-UrgentManualLiveState {
+    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$Layer)
+    $stamp = Get-UrgentLiveStamp -Layer $Layer
+    if (-not $stamp) { return }
+    $liveState = @{ Mode = 'urgent_manual_live'; Token = [guid]::NewGuid().ToString('N').Substring(0, 12)
+        StartedAt = Get-Date; UserId = $UserId; ItemId = $ItemId; Layer = $Layer; LiveStamp = $stamp }
+    $script:UrgentManualLive[$ChatId] = $liveState
+    Save-UrgentManualState | Out-Null
+    return $liveState
+}
+
 function Invoke-UrgentManualAction {
     param([long]$ChatId, [long]$UserId, [string]$Argument)
     if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId) -or
@@ -1122,13 +1133,8 @@ function Invoke-UrgentManualAction {
     $manualHide = [int](Get-JsonProp $state 'AutoHideSeconds')
     $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables (Get-UrgentItemVariables -Item $item) -ChatId $ChatId -UserId $UserId -AutoHideSeconds $manualHide
     if (-not [bool](Get-JsonProp $result 'Success')) { return $false }
-    $stamp = Get-UrgentLiveStamp -Layer ([int]$template.Layer)
-    if (-not $stamp) { return $true }
-    $liveState = @{ Mode='urgent_manual_live'; Token=[guid]::NewGuid().ToString('N').Substring(0,12)
-        StartedAt=Get-Date; UserId=$UserId; ItemId=[string](Get-JsonProp $state 'ItemId')
-        Layer=[int]$template.Layer; LiveStamp=$stamp }
-    $script:UrgentManualLive[$ChatId] = $liveState
-    Save-UrgentManualState | Out-Null
+    $liveState = Set-UrgentManualLiveState -ChatId $ChatId -UserId $UserId -ItemId ([string]$state.ItemId) -Layer ([int]$template.Layer)
+    if (-not $liveState) { return $true }
     $shownText = (T 'urgent.shownAlone')
     if ($manualHide -gt 0) { $shownText += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
     $shownText += "`n`n" + (ConvertTo-TelegramHtmlText -Text ([string](Get-JsonProp $state 'Text')))

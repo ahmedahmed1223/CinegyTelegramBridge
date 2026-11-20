@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.95.0
+
+The web urgent board can review and show an individual story, with a shared preset or custom duration. The review displays any effective time cap and warns when the current graphic or urgent run will be replaced. The bridge checks the live scene again before acting, and a separate reviewed hide command targets the same manually shown scene.
+
 ## Version 8.94.0
 
 Each urgent-board row in the web editor can override its duration, repeats and display mode or inherit the board defaults. The bridge validates and saves the three options together against the current board revision. The row's editorial fields and on-air plan already in progress are retained.

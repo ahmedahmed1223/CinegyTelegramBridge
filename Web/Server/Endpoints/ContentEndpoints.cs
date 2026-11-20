@@ -37,6 +37,12 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        var manual = app.MapGroup("/api/content/urgent/manual").WithTags("Content").RequireAuthorization();
+        manual.MapGet("", (IBridgeChannel bridge, HttpContext http) => UrgentManual(new("status"), bridge, http))
+            .Produces<UrgentManualResponse>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
+        manual.MapPost("", UrgentManual)
+            .Produces<UrgentManualResponse>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
         var timing = app.MapGroup("/api/content/urgent/timing").WithTags("Content").RequireAuthorization();
         timing.MapGet("", (IBridgeChannel bridge, HttpContext http) => UrgentTiming(new("status"), bridge, http))
             .Produces<UrgentTimingState>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
@@ -283,6 +289,26 @@ public static class ContentEndpoints
             "ticker_invalid" or "ticker_full" or "ticker_schedule_invalid" or "ticker_paste_invalid" or "ticker_paste_separator" => ApiErrors.Of(400, reply.Error),
             "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "ticker_lock_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
+        };
+    }
+
+    private static async Task<IResult> UrgentManual(UrgentManualRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("urgent.manual", new
+        {
+            actor = http.User.UserId(), request.Action, request.ItemId, request.AutoHideSeconds, request.Review
+        }, http.RequestAborted);
+        if (reply.Ok) return Results.Ok(reply.Data.Deserialize<UrgentManualResponse>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "urgent_invalid" => ApiErrors.Of(400, reply.Error),
+            "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "urgent_stale" or "urgent_manual_hide_unconfirmed" => ApiErrors.Of(409, reply.Error),
+            "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable(),
         };
     }
 

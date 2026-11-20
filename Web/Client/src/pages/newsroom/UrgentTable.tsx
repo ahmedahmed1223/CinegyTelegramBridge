@@ -1,11 +1,13 @@
 import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { IconArrowDown, IconArrowUp, IconClock, IconEdit, IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconClock, IconEdit, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import classes from './NewsroomPage.module.css'
 import { UrgentRowTiming } from './UrgentRowTiming'
+import { UrgentManual } from './UrgentManual'
+import { sendUrgentManual, useUrgentManual } from './urgentManualApi'
 
 type ContentPage = Schemas['ContentPage']
 type ContentItem = Schemas['ContentItem']
@@ -27,9 +29,29 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
 }) {
   const [edit, setEdit] = useState<Edit | null>(null)
   const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
+  const [manualId, setManualId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fields = board.fields ?? []
+  const manual = useUrgentManual()
+  const liveManual = manual.data?.live
+
+  function confirmHide() {
+    if (!liveManual) return
+    modals.openConfirmModal({
+      title: 'إخفاء العاجل المعروض',
+      children: <Text size="sm">سيُخفى العاجل الذي عرضته من الطبقة {liveManual.layer}.</Text>,
+      labels: { confirm: 'إخفاء العاجل', cancel: 'إلغاء' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => void (async () => {
+        setBusy(true)
+        setError('')
+        try { await sendUrgentManual({ action: 'hide', review: liveManual.review }); await Promise.all([manual.refetch(), onSaved(false)]) }
+        catch (failure) { setError(failure instanceof Error ? failure.message : messageFor('bridge_unavailable')); await manual.refetch() }
+        finally { setBusy(false) }
+      })(),
+    })
+  }
 
   function startEdit(item?: ContentItem) {
     if (board.revision == null) return
@@ -127,6 +149,10 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
       {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
+      {liveManual && <Group justify="space-between">
+        <Text size="sm">عرض فردي على الطبقة {liveManual.layer}</Text>
+        <Button color="red" variant="light" size="sm" disabled={busy} onClick={confirmHide}>إخفاء العاجل المعروض</Button>
+      </Group>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -178,6 +204,8 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                       <Table.Td>
                         <Group wrap="nowrap" gap={4}>
                           <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
+                          <ActionIcon variant="subtle" aria-label={`عرض العاجل ${rank}`} disabled={!item.id || !item.enabled || !!edit || busy}
+                            onClick={() => setManualId(item.id ?? null)}><IconPlayerPlay size={17} /></ActionIcon>
                           <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
                             aria-label={`توقيت العاجل ${rank}`} disabled={!item.id || !!edit || busy}
                             onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconClock size={17} /></ActionIcon>
@@ -200,6 +228,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
       {timingEdit && <UrgentRowTiming title={timingEdit.item.title} timing={timingEdit.item.timing} busy={busy}
         stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}
         onSave={(timing) => void write({ action: 'timing', id: timingEdit.item.id, revision: timingEdit.revision, timing })} />}
+      {manualId && <UrgentManual itemId={manualId} fields={fields} onClose={() => setManualId(null)} onChanged={() => onSaved(false)} />}
     </Stack>
   )
 }

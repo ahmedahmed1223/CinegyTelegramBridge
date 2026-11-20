@@ -11,7 +11,7 @@ export function UrgentTimingStepper({ label, value, minimum, maximum, disabled, 
 }) {
   return (
     <Group gap="xs" aria-label={label}>
-      {(maximum > 300 ? [1, 60, 300] : [1, 10]).map((step) => (
+      {(maximum > 3600 ? [1, 60, 300, 3600] : maximum > 300 ? [1, 60, 300] : [1, 10]).map((step) => (
         <Group key={step} gap={4} wrap="nowrap">
           <Button variant="default" size="compact-sm" leftSection={<IconMinus size={13} aria-hidden />}
             aria-label={`إنقاص ${label} بمقدار ${step}`} disabled={disabled || value <= minimum}

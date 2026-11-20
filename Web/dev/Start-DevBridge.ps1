@@ -152,7 +152,7 @@ function Invoke-ShowTemplateResult {
     if ($AutoHideSeconds -gt 0) {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
     }
-    return @{ Success = $true }
+    return @{ Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0 }
 }
 
 function Invoke-HideLayer {

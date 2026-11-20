@@ -81,8 +81,7 @@ function Get-CallbackRefusal {
         $lockDenial = Get-NewsSheetPullLockDenial -ChatId $ChatId -UserId $UserId
         if (-not [string]::IsNullOrWhiteSpace($lockDenial)) { return $lockDenial }
     }
-    if ($Data -like 'news:restore*' -and -not (Test-Admin -ChatId $ChatId -UserId $UserId) `
-            -and -not (Get-Setting 'AllowOperatorsRestoreNews')) {
+    if ($Data -like 'news:restore*' -and -not (Test-NewsTickerBackupAccess -ChatId $ChatId -UserId $UserId)) {
         return (T 'reply.newsRestoreAdminOnly')
     }
     if ($Data -eq 'menu:airwidget' -and -not (Test-StatusViewer -ChatId $ChatId -UserId $UserId)) {
@@ -581,28 +580,48 @@ function Invoke-CallbackQuery {
             break
         }
         'news:restore:*' {
-            if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }
-            $i = [int](Get-CallbackArg $data 'news:restore:')
+            if (-not (Test-NewsTickerBackupAccess -ChatId $chatId -UserId $userId)) { break }
+            $plan = $null
+            if ($data -cmatch '^news:restore:(\d{1,2}):([A-F0-9]{20})$') {
+                $i = [int]$Matches[1]
+                $id = [string]$Matches[2]
+                $chosenBackup = Get-NewsTickerBackupByIndex -Index $i
+                if ($chosenBackup -and (Get-NewsTickerBackupToken "file:$($chosenBackup.FullName)").Substring(0, 20) -ceq $id) {
+                    $plan = Get-NewsTickerBackupReview -File $chosenBackup -Actor $userId
+                }
+            }
+            if (-not $plan -or $plan.Preview.identical) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.newsRestoreReviewAgain') -ReplyMarkup (Get-NewsTickerBackupsKeyboard)
+                break
+            }
+            $token = $plan.Preview.review.Substring(0, 20)
             $restoreConfirm = @{ inline_keyboard = @(, @(
-                        @{ text = (T 'reply.restore'); callback_data = "news:restoreconfirm:$i"; style = 'danger' }
+                        @{ text = (T 'reply.restore'); callback_data = "news:restoreconfirm:${i}:$token"; style = 'danger' }
                         @{ text = (T 'reply.cancelWord'); callback_data = 'news:backups' }
                     )) }
-            Send-TelegramMessage -ChatId $chatId -Text (T 'reply.confirmRestore') -ReplyMarkup $restoreConfirm
+            $restorePrompt = (T 'reply.confirmRestore')
+            if ($plan.Preview.cancelsSchedule) { $restorePrompt += "`n$(T 'reply.newsRestoreCancelsSchedule')" }
+            Send-TelegramMessage -ChatId $chatId -Text $restorePrompt -ReplyMarkup $restoreConfirm
             break
         }
         'news:restoreconfirm:*' {
-            if (-not (Test-Admin -ChatId $chatId -UserId $userId) -and -not (Get-Setting 'AllowOperatorsRestoreNews')) { break }
-            # Through the shared reader, not a second copy of its query. The
-            # two agreed only by coincidence, and the moment one of them
-            # learned the NewsBackupKeepFiles cap the numbering would have
-            # split: button 12 on the screen restoring a different copy, or
-            # none. Get-NewsTickerBackupByIndex also carries the lower bound
-            # this path was missing.
-            $i = [int](Get-CallbackArg $data 'news:restoreconfirm:')
-            $chosenBackup = Get-NewsTickerBackupByIndex -Index $i
-            if (-not $chosenBackup) { break }
-            $live=Get-NewsTickerConfiguredSnapshot;$result=Restore-NewsTickerBackup -Path ([string](Get-Setting 'NewsFilePath')) -BackupPath $chosenBackup.FullName -ExpectedHash $live.Hash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
-            if($result.Success){Remove-NewsTickerDraft;Add-AuditEntry (T 'cb.tickerRestoreAudit' $(Format-UserAuditActor -UserId $userId))};Send-TelegramMessage -ChatId $chatId -Text $(if($result.Success){(T 'reply.restored')}else{(T 'cb.restoreFailed' $($result.Error))}) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId);break
+            if (-not (Test-NewsTickerBackupAccess -ChatId $chatId -UserId $userId)) { break }
+            $message = T 'reply.newsRestoreReviewAgain'
+            if ($data -cmatch '^news:restoreconfirm:(\d{1,2}):([A-F0-9]{20})$') {
+                $chosenBackup = Get-NewsTickerBackupByIndex -Index ([int]$Matches[1])
+                $confirmation = [string]$Matches[2]
+                if ($chosenBackup) {
+                    $plan = Get-NewsTickerBackupReview -File $chosenBackup -Actor $userId
+                    if ($plan -and -not $plan.Preview.identical -and $plan.Preview.review.Substring(0, 20) -ceq $confirmation) {
+                        $outcome = Invoke-NewsTickerReviewedRestore -Plan $plan -Actor $userId
+                        $message = if (-not $outcome) { T 'reply.restored' }
+                        elseif ($outcome -eq 'ticker_backup_schedule_cancelled') { T 'reply.newsRestoreScheduleCancelled' }
+                        else { T 'reply.newsRestoreReviewAgain' }
+                    }
+                }
+            }
+            Send-TelegramMessage -ChatId $chatId -Text $message -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)
+            break
         }
         'news:handover' {
             if (Open-NewsTickerDraftToAll -ChatId $chatId -UserId $userId) {

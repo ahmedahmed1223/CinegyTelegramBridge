@@ -37,7 +37,12 @@ public sealed record TickerDraftRequest(string Action, string? Revision = null, 
 public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, int Total, int Offset);
 public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused);
 public sealed record TickerConflict(string Review, string[] Items);
-public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed);
+public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed, bool CanRestore);
+public sealed record TickerBackupRequest(string Action, string? Id = null, string? Review = null, int? Page = null);
+public sealed record TickerBackupItem(string Id, long SavedAt);
+public sealed record TickerBackupPage(TickerBackupItem[] Items, int Page, int PageCount, int Total);
+public sealed record TickerBackupPreview(string Review, long SavedAt, string[] Items, string[] CurrentItems, bool CurrentReadable, bool Identical, bool CancelsSchedule);
+public sealed record TickerBackupResponse(TickerBackupPage? List, TickerBackupPreview? Preview);
 public sealed record TickerSetRequest(string Action, int? Index = null, string? Revision = null, string? DraftRevision = null, string? Name = null);
 public sealed record TickerSavedSet(int Index, string Name, string Revision, int Count, bool CanManage);
 public sealed record TickerSetsState(string? DraftRevision, int MaxSets, TickerSavedSet[] Items);

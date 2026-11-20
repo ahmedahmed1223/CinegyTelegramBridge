@@ -64,6 +64,20 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(503);
+        var tickerBackups = app.MapGroup("/api/content/ticker/backups").WithTags("Content").RequireAuthorization();
+        tickerBackups.MapGet("", (int? page, IBridgeChannel bridge, HttpContext http) => TickerBackups(new("list", Page: page), bridge, http))
+            .Produces<TickerBackupResponse>()
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(503);
+        tickerBackups.MapPost("", TickerBackups)
+            .Produces<TickerBackupResponse>()
+            .Produces(204)
+            .Produces<ErrorResponse>(400)
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         bulletin.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
                 EditBulletin(new("read", Id: id, Page: page), bridge, http))
@@ -172,6 +186,27 @@ public static class ContentEndpoints
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()
     };
+
+    private static async Task<IResult> TickerBackups(TickerBackupRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (request.Action is not ("list" or "preview" or "restore")) return ApiErrors.Of(400, "ticker_backup_invalid");
+        var reply = await bridge.SendAsync("ticker.backups", new
+        {
+            actor = http.User.UserId(), request.Action, request.Id, request.Review, request.Page
+        }, http.RequestAborted);
+        if (reply.Ok)
+            return request.Action == "restore" ? Results.NoContent() : TypedResults.Ok(reply.Data.Deserialize<TickerBackupResponse>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "ticker_backup_invalid" => ApiErrors.Of(400, reply.Error),
+            "ticker_backup_stale" => ApiErrors.Of(409, reply.Error),
+            "ticker_backup_unreadable" or "ticker_backup_save_failed" or "ticker_backup_schedule_cancelled" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
 
     private static async Task<IResult> TickerSets(TickerSetRequest request, IBridgeChannel bridge, HttpContext http)
     {

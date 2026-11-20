@@ -1518,6 +1518,145 @@
         }
       }
     },
+    "/api/content/ticker/backups": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerBackupResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickerBackupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerBackupResponse"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/bulletins/editor": {
       "get": {
         "tags": [
@@ -2910,6 +3049,137 @@
           }
         }
       },
+      "TickerBackupItem": {
+        "required": [
+          "id",
+          "savedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "savedAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "TickerBackupPage": {
+        "required": [
+          "items",
+          "page",
+          "pageCount",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TickerBackupItem"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "nullable": true
+      },
+      "TickerBackupPreview": {
+        "required": [
+          "review",
+          "savedAt",
+          "items",
+          "currentItems",
+          "currentReadable",
+          "identical",
+          "cancelsSchedule"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "savedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currentItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currentReadable": {
+            "type": "boolean"
+          },
+          "identical": {
+            "type": "boolean"
+          },
+          "cancelsSchedule": {
+            "type": "boolean"
+          }
+        },
+        "nullable": true
+      },
+      "TickerBackupRequest": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "TickerBackupResponse": {
+        "required": [
+          "list",
+          "preview"
+        ],
+        "type": "object",
+        "properties": {
+          "list": {
+            "$ref": "#/components/schemas/TickerBackupPage"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TickerBackupPreview"
+          }
+        }
+      },
       "TickerConflict": {
         "required": [
           "review",
@@ -3018,7 +3288,8 @@
           "maxItemLength",
           "draft",
           "conflict",
-          "sheetFailed"
+          "sheetFailed",
+          "canRestore"
         ],
         "type": "object",
         "properties": {
@@ -3039,6 +3310,9 @@
             "$ref": "#/components/schemas/TickerConflict"
           },
           "sheetFailed": {
+            "type": "boolean"
+          },
+          "canRestore": {
             "type": "boolean"
           }
         }

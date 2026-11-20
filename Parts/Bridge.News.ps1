@@ -1931,6 +1931,77 @@ function Show-NewsTickerReorderScreen { param([long]$ChatId,[long]$UserId,[int]$
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $kb -ParseMode 'HTML'
 }
 
+function Get-NewsTickerBackupToken {
+    param([string]$Value)
+    return [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData(
+            $script:NewsTickerBackupReviewKey, [Text.Encoding]::UTF8.GetBytes($Value)))
+}
+
+function Get-NewsTickerBackupReview {
+    param([Parameter(Mandatory)]$File, [long]$Actor)
+    $path = [string](Get-Setting 'NewsFilePath')
+    $separator = [string](Get-Setting 'NewsItemSeparator')
+    if (-not $path -or -not $separator -or ($File.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+    $limits = @{ Separator = $separator; MaxItemLength = Get-SettingInt 'NewsMaxItemLength' 1; MaxItems = Get-SettingInt 'NewsMaxItems' 1 }
+    $saved = Get-NewsTickerSnapshot -Path $File.FullName @limits -MaximumBytes 8MB
+    $current = Get-NewsTickerSnapshot -Path $path @limits -MaximumBytes 8MB -RetainInvalidHash
+    if (-not $saved.Success -or -not $saved.Exists -or (-not $current.Success -and -not $current.Hash)) { return }
+    $draft = Get-NewsTickerDraft
+    $scheduled = Get-NewsPublishAt -Draft $draft
+    $scheduleRevision = if ($scheduled) { Get-NewsTickerDraftRevision -Draft $draft } else { '' }
+    $reviewed = ConvertTo-Json -Compress -InputObject @(
+        'restore', $Actor, $File.FullName, $path, $current.Hash, $saved.Hash, $separator, $limits.MaxItemLength, $limits.MaxItems, $scheduleRevision
+    )
+    $identical = $current.Success -and [string]::Equals(($current.Items -join "`u{001F}"), ($saved.Items -join "`u{001F}"), [StringComparison]::Ordinal)
+    return @{
+        Path = $path; ExpectedHash = $current.Hash; Limits = $limits
+        Preview = @{
+            review = Get-NewsTickerBackupToken $reviewed
+            items = @($saved.Items); currentItems = @($current.Items); currentReadable = $current.Success; identical = $identical
+            savedAt = ([datetimeoffset]$File.LastWriteTimeUtc).ToUnixTimeMilliseconds(); cancelsSchedule = [bool]$scheduled
+        }
+    }
+}
+
+function Invoke-NewsTickerReviewedRestore {
+    param([Parameter(Mandatory)][hashtable]$Plan, [long]$Actor)
+    $previousDraft = Get-NewsTickerDraft
+    if ($Plan.Preview.cancelsSchedule) {
+        $draft = Copy-NewsTickerDraft -Draft $previousDraft
+        Remove-JsonProp $draft 'PublishAt'
+        if (-not (Save-NewsTickerDraft -Draft $draft)) { return 'ticker_backup_save_failed' }
+        $script:NewsTickerDraft = $draft
+    }
+    # Use the captured backup contents, even if the backup file changes
+    # after the comparison. The publisher rechecks the destination hash.
+    $limits = $Plan.Limits
+    $errorCode = 'ticker_backup_save_failed'
+    $result = $null
+    try {
+        $result = Publish-NewsTickerFile -Path $Plan.Path -Items $Plan.Preview.items -ExpectedHash $Plan.ExpectedHash @limits `
+            -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1)
+    }
+    catch { Write-BridgeLog 'Ticker backup restore could not complete.' 'WARN' }
+    if ($result -and $result.Success) {
+        Add-AuditEntry (T 'cb.tickerRestoreAudit' $(Format-UserAuditActor -UserId $Actor))
+        return ''
+    }
+    if ($result -and $result.Conflict) { $errorCode = 'ticker_backup_stale' }
+    if ($Plan.Preview.cancelsSchedule) {
+        if (Save-NewsTickerDraft -Draft $previousDraft) { $script:NewsTickerDraft = $previousDraft }
+        else {
+            Write-BridgeLog 'Ticker restore failed and the cancelled publication time could not be reinstated.' 'WARN'
+            return 'ticker_backup_schedule_cancelled'
+        }
+    }
+    return $errorCode
+}
+
+function Test-NewsTickerBackupAccess {
+    param([long]$ChatId, [long]$UserId)
+    return (Test-Admin -ChatId $ChatId -UserId $UserId) -or [bool](Get-Setting 'AllowOperatorsRestoreNews')
+}
+
 function Get-NewsTickerBackupFiles {
     <#
         The saved copies, newest first. One reader for the list, the keyboard
@@ -1943,7 +2014,8 @@ function Get-NewsTickerBackupFiles {
         = 20" could not reach half of what the disk held.
     #>
     return @(Get-ChildItem -LiteralPath $script:newsBackupDirectory -File -Filter '*.txt' -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First (Get-SettingInt 'NewsBackupKeepFiles' 1))
+            Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+            Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -First (Get-SettingInt 'NewsBackupKeepFiles' 1))
 }
 
 function Get-NewsTickerBackupByIndex {
@@ -2009,7 +2081,8 @@ function Get-NewsTickerBackupsKeyboard {
     $window = Get-BridgePageWindow -ItemCount $files.Count -Page $Page -PageSize 8
     if ($files.Count -gt 0) {
         for ($i = $window.StartIndex; $i -le $window.EndIndex; $i++) {
-            $rows += , @((New-Button "$($i + 1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "news:restore:$i"))
+            $token = (Get-NewsTickerBackupToken "file:$($files[$i].FullName)").Substring(0, 20)
+            $rows += , @((New-Button "$($i + 1). $($files[$i].LastWriteTime.ToString('yyyy-MM-dd HH:mm'))" "news:restore:${i}:$token"))
         }
     }
     $pager = @(Get-BridgePagerButtons -Window $window -Prefix 'newsbackpage')

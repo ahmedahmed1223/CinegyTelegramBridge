@@ -131,8 +131,25 @@ Describe 'Operator screens after the desktop usability review' {
         } } }
         $buttons = @((Get-NewsTickerBackupsKeyboard -Page 1).inline_keyboard | ForEach-Object { @($_) })
         @($buttons | Where-Object callback_data -Like 'news:restore:*').Count | Should -Be 8
-        @($buttons.callback_data) | Should -Contain 'news:restore:8'
-        @($buttons.callback_data) | Should -Not -Contain 'news:restore:0'
+        @($buttons.callback_data -cmatch '^news:restore:8:[A-F0-9]{20}$').Count | Should -Be 1
+        @($buttons.callback_data -cmatch '^news:restore:0:').Count | Should -Be 0
+    }
+    It 'does not restore a different ticker backup when the Telegram list shifts before confirmation' {
+        Mock Test-Authorized { $true }
+        Mock Test-NewsTickerBackupAccess { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Get-CallbackRefusal { '' }
+        Mock Send-TelegramMessage {}
+        Mock Get-NewsTickerManagementKeyboard { @{} }
+        Mock Get-NewsTickerBackupByIndex { [pscustomobject]@{ FullName = 'another-backup.txt' } }
+        Mock Get-NewsTickerBackupReview { @{ Preview = @{ review = 'B' * 64; identical = $false } } }
+        Mock Invoke-NewsTickerReviewedRestore { throw 'stale confirmation reached publication' }
+        Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+            id = 'n'; from = [pscustomobject]@{ id = 42 }; data = "news:restoreconfirm:0:$('A' * 20)"
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 42; type = 'private' } }
+        })
+        Should -Invoke Get-NewsTickerBackupReview -Times 1 -Exactly
+        Should -Invoke Invoke-NewsTickerReviewedRestore -Times 0 -Exactly
     }
     It 'reuses the current message for read-only navigation but not an air command' {
         foreach ($data in @('menu:main', 'menu:templates', 'help:ch:boards', 'mojaz:row:r1', 'newsbackpage:1')) {

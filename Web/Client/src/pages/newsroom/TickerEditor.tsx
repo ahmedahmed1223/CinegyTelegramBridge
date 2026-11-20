@@ -1,13 +1,14 @@
 import { ActionIcon, Alert, Button, Group, Modal, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
-import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconHistory, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { formatDateTime } from '../../lib/time'
 import classes from './NewsroomPage.module.css'
+import { TickerBackups } from './TickerBackups'
 import { TickerSets } from './TickerSets'
 
 type Request = Schemas['TickerDraftRequest']
@@ -49,6 +50,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const [pausedPage, setPausedPage] = useState(1)
   const [showPaused, setShowPaused] = useState(false)
   const [showSets, setShowSets] = useState(false)
+  const [showBackups, setShowBackups] = useState(false)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -294,9 +296,14 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
               <Button variant="default" size="sm" leftSection={<IconFolders size={17} aria-hidden />}
                 aria-expanded={showSets} aria-controls={showSets ? 'ticker-sets' : undefined}
                 onClick={() => setShowSets(!showSets)}>مجموعات الشريط</Button>
+              {editor.canRestore && <Button variant="default" size="sm" leftSection={<IconHistory size={17} aria-hidden />}
+                aria-expanded={showBackups} aria-controls={showBackups ? 'ticker-backups' : undefined}
+                onClick={() => setShowBackups(!showBackups)}>النسخ الاحتياطية</Button>}
             </Group>
             {showSets && <TickerSets draft={draft ?? null} disabled={busy || !!edit}
               onLoad={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
+            {editor.canRestore && showBackups && <TickerBackups disabled={busy || !!edit}
+              onRestored={() => Promise.all([onPublished(), queryClient.invalidateQueries({ queryKey: draftKey })])} />}
           </>
         )}
       </Stack>

@@ -162,25 +162,47 @@ function Get-NewsTickerSnapshot {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Separator,
         [int]$MaxItemLength = 0,
-        [int]$MaxItems = 0
+        [int]$MaxItems = 0,
+        [switch]$RetainInvalidHash,
+        [long]$MaximumBytes = 0
     )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return [pscustomobject]@{Success=$true;Exists=$false;Items=@();Hash='';LastWriteTime=$null;Error='';EmptyCount=0;DuplicateCount=0}
     }
+    $hash = ''
     try {
-        $bytes = [IO.File]::ReadAllBytes($Path)
+        if ($MaximumBytes -gt 0) {
+            $stream = [IO.File]::OpenRead($Path)
+            try {
+                if ($stream.Length -gt $MaximumBytes) { throw 'ملف الأخبار أكبر من الحد المسموح للمراجعة.' }
+                $bytes = [byte[]]::new($stream.Length)
+                $offset = 0
+                while ($offset -lt $bytes.Length) {
+                    $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                    if ($read -eq 0) { throw 'تغيّر ملف الأخبار أثناء القراءة.' }
+                    $offset += $read
+                }
+                if ($stream.ReadByte() -ne -1) { throw 'تغيّر ملف الأخبار أثناء القراءة.' }
+            }
+            finally { $stream.Dispose() }
+        }
+        else { $bytes = [IO.File]::ReadAllBytes($Path) }
+        $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
         $text = ConvertFrom-NewsTickerUtf8 -Bytes $bytes
         if ($text.IndexOf([char]0) -ge 0) { throw 'الملف يحتوي بيانات ثنائية غير صالحة.' }
         $parsed = ConvertFrom-NewsTickerText -Text $text -Separator $Separator -MaxItemLength $MaxItemLength -MaxItems $MaxItems
         if (-not $parsed.Success) { throw ($parsed.Errors -join ' ') }
         $item = Get-Item -LiteralPath $Path
         return [pscustomobject]@{
-            Success=$true;Exists=$true;Items=@($parsed.Items);Hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+            Success=$true;Exists=$true;Items=@($parsed.Items);Hash=$hash
             LastWriteTime=$item.LastWriteTime;Error='';EmptyCount=$parsed.EmptyCount;DuplicateCount=$parsed.DuplicateCount
         }
     }
     catch {
-        return [pscustomobject]@{Success=$false;Exists=$true;Items=@();Hash='';LastWriteTime=$null;Error=$_.Exception.Message;EmptyCount=0;DuplicateCount=0}
+        # Recovery can confirm the exact corrupt bytes without representing
+        # them as readable headlines. Permission failures produce no hash.
+        if (-not $RetainInvalidHash) { $hash = '' }
+        return [pscustomobject]@{Success=$false;Exists=$true;Items=@();Hash=$hash;LastWriteTime=$null;Error=$_.Exception.Message;EmptyCount=0;DuplicateCount=0}
     }
 }
 

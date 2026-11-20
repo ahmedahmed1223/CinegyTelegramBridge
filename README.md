@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.88.0
+
+Authorized web operators can browse ticker backups, compare a saved copy with the current publication, and confirm a restore. The bridge checks the reviewed source and destination, backs up the previous publication, and preserves editorial drafts in the web and Telegram restore flows. Restoring cancels any scheduled publication of the draft. A valid backup can replace a corrupt current file when the bridge can read its original bytes within the review limit.
+
 ## Version 8.87.0
 
 The web ticker editor shares Telegram's named set library. Operators can save a draft and load a set into their current draft. Updating and deleting a set requires the saver or an administrator. Loading changes the draft, and any existing publication schedule still applies.

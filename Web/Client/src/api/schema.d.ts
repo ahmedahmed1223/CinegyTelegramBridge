@@ -1786,6 +1786,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/ticker/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TickerBackupResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TickerBackupRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TickerBackupResponse"];
+                    };
+                };
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/bulletins/editor": {
         parameters: {
             query?: never;
@@ -2408,6 +2547,46 @@ export interface components {
             /** Format: int32 */
             maxLength: number | null;
         };
+        TickerBackupItem: {
+            id: string;
+            /** Format: int64 */
+            savedAt: number;
+        };
+        TickerBackupPage: {
+            items: components["schemas"]["TickerBackupItem"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            /** Format: int32 */
+            total: number;
+        } | null;
+        TickerBackupPreview: {
+            review: string;
+            /** Format: int64 */
+            savedAt: number;
+            items: string[];
+            currentItems: string[];
+            currentReadable: boolean;
+            identical: boolean;
+            cancelsSchedule: boolean;
+        } | null;
+        TickerBackupRequest: {
+            action: string;
+            /** @default null */
+            id: string | null;
+            /** @default null */
+            review: string | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            page: number | null;
+        };
+        TickerBackupResponse: {
+            list: components["schemas"]["TickerBackupPage"];
+            preview: components["schemas"]["TickerBackupPreview"];
+        };
         TickerConflict: {
             review: string;
             items: string[];
@@ -2454,6 +2633,7 @@ export interface components {
             draft: components["schemas"]["TickerDraft"];
             conflict: components["schemas"]["TickerConflict"];
             sheetFailed: boolean;
+            canRestore: boolean;
         };
         TickerPausedPage: {
             items: string[];

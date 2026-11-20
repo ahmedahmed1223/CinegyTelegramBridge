@@ -23,6 +23,9 @@ function Add-BridgeTextReplies {
     $catalogue['reply.sheetPullDenied'] = @{ ar = 'سحب الشيت غير مسموح لك. اطلب من المشرف تفعيله.'; en = 'You may not pull the sheet. Ask an administrator to enable it.' }
     $catalogue['reply.sheetPullDeniedShort'] = @{ ar = 'سحب الشيت غير مسموح لك.'; en = 'You may not pull the sheet.' }
     $catalogue['reply.newsRestoreAdminOnly'] = @{ ar = 'استعادة نسخ الأخبار للمشرف وحده.'; en = 'Restoring news backups is for administrators alone.' }
+    $catalogue['reply.newsRestoreReviewAgain'] = @{ ar = 'لم تُستعد النسخة. راجع النسخة والشريط المنشور من جديد.'; en = 'The backup was not restored. Review the backup and current ticker again.' }
+    $catalogue['reply.newsRestoreCancelsSchedule'] = @{ ar = 'ستُحفظ المسودة ويُلغى موعد نشرها عند الاستعادة.'; en = 'The draft is kept and its scheduled publication is cancelled on restore.' }
+    $catalogue['reply.newsRestoreScheduleCancelled'] = @{ ar = 'تعذّرت الاستعادة وأُلغي موعد نشر المسودة. يمكن تحديد موعد جديد.'; en = 'Restore failed and the scheduled publication was cancelled. Set a new time if needed.' }
     $catalogue['reply.urgentExpired'] = @{ ar = '⚠️ انتهت صلاحية الأزرار. افتح العواجل من جديد.'; en = '⚠️ These buttons have expired. Open the urgent board again.' }
     $catalogue['reply.urgentChanged'] = @{ ar = '⚠️ تغيّر الجدول أو انتهت صلاحية الأزرار. افتح العواجل من جديد.'; en = '⚠️ The board changed or the buttons expired. Open the urgent board again.' }
     $catalogue['reply.urgentItemChanged'] = @{ ar = '⚠️ لم يُنفّذ الطلب: تغيّر الخبر أو العرض أو انتهت صلاحية التأكيد. افتح الخبر من جديد.'; en = '⚠️ Nothing was done: the story, the display or the confirmation changed. Open the story again.' }

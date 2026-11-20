@@ -595,6 +595,7 @@ Describe 'Web channel: the pipe' {
         Mock Get-Setting { $webTickerFile } -ParameterFilter { $Name -eq 'NewsFilePath' }
         Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsDeleteNews' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewNewsItemAtTop' }
         Mock Test-Authorized { $UserId -in @(4321, 4322) }
         Mock Test-Admin { $false }
@@ -690,6 +691,75 @@ Describe 'Web channel: the pipe' {
             $script:newsBackupDirectory = $previousBackup
             $script:NewsPaused = $previousShelf
             $script:newsPausedFile = $previousShelfFile
+        }
+    }
+
+    It 'restores only the reviewed ticker backup and preserves the editors draft' {
+        $tickerPath = Join-Path $TestDrive 'restore-ticker.txt'
+        $oldBackupDirectory = $script:newsBackupDirectory
+        $oldDraft = $script:NewsTickerDraft
+        $oldDraftPath = $script:newsDraftFile
+        $script:newsBackupDirectory = (New-Item -Path (Join-Path $TestDrive 'private-ticker-backups') -ItemType Directory).FullName
+        $backupPath = Join-Path $script:newsBackupDirectory 'backup-original.txt'
+        $script:newsDraftFile = Join-Path $TestDrive 'restore-draft.json'
+        $script:NewsTickerDraft = @{ OwnerUserId = 4322; Items = @('مسودة محرر آخر'); PublishAt = [datetimeoffset]::UtcNow.AddHours(1).ToString('o') }
+        Set-Content -LiteralPath $tickerPath -Value 'المنشور الآن'
+        Set-Content -LiteralPath $backupPath -Value 'النسخة المحفوظة'
+        Mock Test-Authorized { $UserId -in 4321, 4322, 4323 }
+        Mock Test-Admin { $UserId -in 4321, 4323 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+        Mock Get-Setting { $tickerPath } -ParameterFilter { $Name -eq 'NewsFilePath' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        $requestBackup = {
+            param($arguments)
+            $line = @{ op = 'ticker.backups'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $requestBackup @{ actor = 4322; action = 'list' }).error | Should -Be 'forbidden'
+            $listed = & $requestBackup @{ actor = 4321; action = 'list' }
+            $listed.ok | Should -BeTrue
+            $listed.data.list.total | Should -Be 1
+            $listed | ConvertTo-Json -Depth 5 | Should -Not -Match 'private-ticker-backups|backup-original'
+            $id = $listed.data.list.items[0].id
+            $preview = (& $requestBackup @{ actor = 4321; action = 'preview'; id = $id }).data.preview
+            $preview.currentItems | Should -Be @('المنشور الآن')
+            $preview.items | Should -Be @('النسخة المحفوظة')
+            $preview.cancelsSchedule | Should -BeTrue
+            $restore = @{ actor = 4321; action = 'restore'; id = $id; review = $preview.review }
+            $restore.actor = 4323
+            (& $requestBackup $restore).error | Should -Be 'ticker_backup_stale'
+            $restore.actor = 4321
+            Set-Content -LiteralPath $tickerPath -Value 'تغيّر المنشور'
+            (& $requestBackup $restore).error | Should -Be 'ticker_backup_stale'
+            $restore.review = (& $requestBackup @{ actor = 4321; action = 'preview'; id = $id }).data.preview.review
+            Set-Content -LiteralPath $backupPath -Value 'تغيّرت النسخة'
+            (& $requestBackup $restore).error | Should -Be 'ticker_backup_stale'
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('تغيّر المنشور')
+            $restore.review = (& $requestBackup @{ actor = 4321; action = 'preview'; id = $id }).data.preview.review
+            (& $requestBackup $restore).ok | Should -BeTrue
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('تغيّرت النسخة')
+            @(Get-NewsTickerBackupFiles).Count | Should -Be 2
+            $script:NewsTickerDraft.Items | Should -Be @('مسودة محرر آخر')
+            Get-NewsPublishAt -Draft $script:NewsTickerDraft | Should -BeNullOrEmpty
+            (Get-Content -LiteralPath $script:newsDraftFile -Raw | ConvertFrom-Json -AsHashtable).Contains('PublishAt') | Should -BeFalse
+            (& $requestBackup $restore).error | Should -Be 'ticker_backup_stale'
+            [IO.File]::WriteAllBytes($tickerPath, [byte[]]@(0, 1, 2))
+            $recovery = (& $requestBackup @{ actor = 4321; action = 'preview'; id = $id }).data.preview
+            $recovery.currentReadable | Should -BeFalse
+            $restore.review = $recovery.review
+            (& $requestBackup $restore).ok | Should -BeTrue
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('تغيّرت النسخة')
+            $stream = [IO.File]::OpenWrite($tickerPath)
+            try { $stream.SetLength(9MB) }
+            finally { $stream.Dispose() }
+            (& $requestBackup @{ actor = 4321; action = 'preview'; id = $id }).error | Should -Be 'ticker_backup_unreadable'
+        }
+        finally {
+            $script:newsBackupDirectory = $oldBackupDirectory
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldDraftPath
         }
     }
 

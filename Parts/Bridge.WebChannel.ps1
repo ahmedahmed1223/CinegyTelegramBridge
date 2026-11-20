@@ -330,6 +330,7 @@ function Invoke-WebChannelOperation {
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'ticker.sets' { return Invoke-WebTickerSets -Arguments $arguments }
+        'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -1242,6 +1243,44 @@ function Invoke-WebUrgentWrite {
     return @{ ok = $true }
 }
 
+function Invoke-WebTickerBackups {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor) -or
+        -not (Test-NewsTickerBackupAccess -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -notin 'list', 'preview', 'restore') { return @{ ok = $false; error = 'ticker_backup_invalid' } }
+    $files = @(Get-NewsTickerBackupFiles)
+    if ($action -eq 'list') {
+        $page = [int](Get-JsonProp $Arguments 'page')
+        $window = Get-BridgePageWindow -ItemCount $files.Count -Page $page -PageSize 8
+        return @{ ok = $true; data = @{
+                list = @{
+                    total = $files.Count; page = $window.Page; pageCount = $window.PageCount
+                    items = @(for ($row = $window.StartIndex; $row -le $window.EndIndex; $row++) {
+                            $file = $files[$row]
+                            @{ id = Get-NewsTickerBackupToken "file:$($file.FullName)"; savedAt = ([datetimeoffset]$file.LastWriteTimeUtc).ToUnixTimeMilliseconds() }
+                        })
+                }
+            } }
+    }
+
+    $id = [string](Get-JsonProp $Arguments 'id')
+    $backupFile = $files | Where-Object { (Get-NewsTickerBackupToken "file:$($_.FullName)") -ceq $id } | Select-Object -First 1
+    if (-not $backupFile) { return @{ ok = $false; error = 'ticker_backup_stale' } }
+    $plan = Get-NewsTickerBackupReview -File $backupFile -Actor $actor
+    if (-not $plan) { return @{ ok = $false; error = 'ticker_backup_unreadable' } }
+    if ($action -eq 'preview') { return @{ ok = $true; data = @{ preview = $plan.Preview } } }
+    if ($plan.Preview.review -cne [string](Get-JsonProp $Arguments 'review') -or $plan.Preview.identical) {
+        return @{ ok = $false; error = 'ticker_backup_stale' }
+    }
+    $outcome = Invoke-NewsTickerReviewedRestore -Plan $plan -Actor $actor
+    if ($outcome) { return @{ ok = $false; error = $outcome } }
+    return @{ ok = $true; data = @{} }
+}
+
 function Get-WebTickerSetsState {
     param([long]$Actor)
     $draft = Get-NewsTickerDraft -UserId $Actor
@@ -1307,7 +1346,10 @@ function Invoke-WebTickerSets {
 function Get-WebTickerEditorState {
     param([Parameter(Mandatory)][long]$Actor, [int]$PausedPage = 1)
     $draft = Get-NewsTickerDraft
-    $data = @{ state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1 }
+    $data = @{
+        state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1
+        canRestore = Test-NewsTickerBackupAccess -ChatId $Actor -UserId $Actor
+    }
     if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
         $owner = [long](Get-JsonProp $draft 'OwnerUserId')
         if ($owner -ne $Actor) {

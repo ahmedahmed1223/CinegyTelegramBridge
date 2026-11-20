@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.88.0'; Items = @('Open Ticker Backups on the web to compare a saved copy with the published headlines and confirm a restore. Restoring keeps editorial drafts available.') },
                 @{ Version = '8.87.0'; Items = @('Open Ticker Sets on the web to save a draft by name or load a shared set into the current draft. The set owner or an administrator can update or delete the set.') },
                 @{ Version = '8.86.0'; Items = @('The web app opens in the editorial light theme. Change the appearance from your account menu.', 'Schedule or cancel web ticker publication. Pause a headline in the shared draft and restore it from the paused list.') },
                 @{ Version = '8.85.0'; Items = @('Capture a still or record a short clip from Live Broadcast on the web. Review the source and download the file from the same page.') },
@@ -328,6 +329,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.88.0'; Items = @('افتح النسخ الاحتياطية للشريط على الويب لمقارنة النسخة بالشريط المنشور ثم تأكيد الاستعادة. تُحفظ مسودات المحرّرين عند الاستعادة.') },
                 @{ Version = '8.87.0'; Items = @('افتح مجموعات الشريط من الويب لتحفظ المسودة باسم أو تحمّل مجموعة مشتركة إلى المسودة. يمكن لمن حفظ المجموعة أو للمشرف تحديثها وحذفها.') },
                 @{ Version = '8.86.0'; Items = @('تفتح واجهة الويب بالثيم الفاتح التحريري. غيّر المظهر من قائمة حسابك.', 'جدوِل نشر شريط الأخبار أو ألغِ موعده من الويب. أوقف الخبر مؤقتًا في المسودة المشتركة وأعده من قائمة الأخبار الموقوفة.') },
                 @{ Version = '8.85.0'; Items = @('التقط صورة من الخرج أو سجّل مقطعًا قصيرًا في صفحة البث المباشر على الويب. راجع المصدر ونزّل الملف من الصفحة نفسها.') },

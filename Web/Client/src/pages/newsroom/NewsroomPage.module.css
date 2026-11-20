@@ -53,6 +53,27 @@
   min-inline-size: 10rem;
 }
 
+.bulletinName {
+  flex: 1 1 15rem;
+  min-inline-size: 0;
+}
+
+.bulletinTitle,
+.bulletinCellText {
+  overflow-wrap: anywhere;
+  min-inline-size: 0;
+}
+
+.bulletinCellText {
+  white-space: pre-wrap;
+  text-align: start;
+}
+
+.bulletinSave {
+  border-block-start: 1px solid var(--mantine-color-default-border);
+  padding: var(--mantine-spacing-sm);
+}
+
 .tickerItems,
 .reviewItems {
   margin: 0;

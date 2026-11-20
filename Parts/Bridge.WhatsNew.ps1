@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.82.0'; Items = @('Open or create a bulletin in Newsroom. Edit the text columns, reorder stories, and exclude a row from playback. Refresh the bulletin if another operator saved a newer version.') },
                 @{ Version = '8.81.0'; Items = @('Open a ticker draft in Newsroom, edit and reorder the headlines, or hand it to the next editor. Review the list before publishing. If another system changed the live ticker, review the current headlines and choose how to publish.') },
                 @{ Version = '8.80.1'; Items = @('The web interface uses IBM Plex for text, counters and timecodes.') },
                 @{ Version = '8.80.0'; Items = @('Review the order and duration of all breaking stories or selected rows before starting a web run. The Newsroom shows what is current and next, with controls to pause, resume, advance or stop.') },
@@ -322,6 +323,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.82.0'; Items = @('افتح الموجز أو أنشئه في غرفة الأخبار. عدّل الأعمدة النصية ورتّب الأخبار أو استبعد صفًا من التشغيل. حدّث الموجز إذا سبقك مشغّل آخر إلى حفظ نسخة أحدث.') },
                 @{ Version = '8.81.0'; Items = @('افتح مسودة شريط الأخبار من غرفة الأخبار، وعدّل الأخبار ورتّبها أو سلّمها للمحرّر التالي. راجع القائمة قبل النشر. إذا غيّر مصدر آخر الشريط المنشور، راجع أخباره واختر طريقة النشر.') },
                 @{ Version = '8.80.1'; Items = @('تستخدم واجهة الويب خط IBM Plex في النصوص والعدادات والتوقيت.') },
                 @{ Version = '8.80.0'; Items = @('من غرفة الأخبار، راجع ترتيب العواجل ومدتها قبل تشغيل الجدول كاملًا أو الصفوف المحددة. أثناء الدورة يظهر العاجل الحالي والتالي، مع أزرار الإيقاف المؤقت والاستئناف والانتقال والإيقاف.') },

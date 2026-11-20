@@ -38,6 +38,12 @@ function Start-MojazPlayback {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notThere')
         return $false
     }
+    # The current run and restore paths address the built-in scene and its
+    # variables. A saved alternate design must never fall through to that SHOW.
+    if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.designPlaybackUnavailable')
+        return $false
+    }
     # The urgent outranks the bulletin, so starting one underneath it is a
     # decision the operator makes rather than one this screen makes for them.
     # A scheduled start never reaches here while the urgent is up: the queue

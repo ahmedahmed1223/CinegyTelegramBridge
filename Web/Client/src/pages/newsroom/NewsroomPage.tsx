@@ -7,6 +7,7 @@ import { messageFor } from '../../api/messages'
 import { UrgentPlayback } from './UrgentPlayback'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
+import { BulletinEditor, BulletinNameForm } from './BulletinEditor'
 import classes from './NewsroomPage.module.css'
 
 const views = {
@@ -29,6 +30,8 @@ export function NewsroomPage() {
   const [view, setView] = useState<View>('urgent')
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<string[]>([])
+  const [bulletinId, setBulletinId] = useState<string | null>(null)
+  const [creatingBulletin, setCreatingBulletin] = useState(false)
   const content = useQuery({
     queryKey: ['newsroom', view, page],
     queryFn: async ({ signal }) => {
@@ -66,19 +69,36 @@ export function NewsroomPage() {
           {Object.entries(views).map(([key, { label }]) => <Tabs.Tab key={key} value={key}>{label}</Tabs.Tab>)}
         </Tabs.List>
         <Tabs.Panel value={view} pt="lg">
-          <Stack gap="md">
+          {view === 'bulletins' && bulletinId ? (
+            <BulletinEditor key={bulletinId} id={bulletinId} onBack={() => setBulletinId(null)} onSaved={(value) => {
+              setBulletinId(value.id)
+              void content.refetch()
+            }} />
+          ) : <Stack gap="md">
             <Group justify="space-between" align="center">
               <div>
                 <Title order={3}>{current.title}</Title>
                 {result && view !== 'ticker' && <Text size="sm" c="dimmed">{number.format(result.total)} في القائمة</Text>}
               </div>
               {view !== 'ticker' && (
-                <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => content.refetch()} loading={content.isFetching}>
-                  تحديث
-                </Button>
+                <Group gap="xs">
+                  <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => content.refetch()} loading={content.isFetching}>
+                    تحديث
+                  </Button>
+                  {view === 'bulletins' && result && !content.isError && (
+                    <Button disabled={creatingBulletin} onClick={() => setCreatingBulletin(true)}>إنشاء موجز</Button>
+                  )}
+                </Group>
               )}
             </Group>
 
+            {view === 'bulletins' && creatingBulletin && (
+              <BulletinNameForm mode="create" onCancel={() => setCreatingBulletin(false)} onSave={(value) => {
+                setCreatingBulletin(false)
+                setBulletinId(value.id)
+                void content.refetch()
+              }} />
+            )}
             {view === 'ticker' && (
               <>
                 <TickerEditor onPublished={() => content.refetch()} />
@@ -126,13 +146,17 @@ export function NewsroomPage() {
                   {result.items.map((item, index) => {
                     const state = states[item.state]
                     return (
-                      <li key={index} className={classes.row}>
+                      <li key={item.id ?? index} className={classes.row}>
                         <div className={classes.entry}>
                           <Text component="span" className={classes.headline} dir="auto">{item.title}</Text>
                           {(item.rows != null || state) && (
                             <Group gap="xs" className={classes.details}>
                               {item.rows != null && <Text size="sm" c="dimmed">الصفوف {number.format(item.rows)}</Text>}
                               {state && <Badge color={state.color} variant="light">{state.label}</Badge>}
+                              {view === 'bulletins' && item.id && (
+                                <Button variant="light" size="compact-sm" aria-label={`فتح ${item.title}`}
+                                  disabled={creatingBulletin} onClick={() => setBulletinId(item.id)}>فتح</Button>
+                              )}
                             </Group>
                           )}
                         </div>
@@ -154,7 +178,7 @@ export function NewsroomPage() {
                 getControlProps={(control) => ({ 'aria-label': control === 'next' ? 'الصفحة التالية' : 'الصفحة السابقة' })}
               />
             )}
-          </Stack>
+          </Stack>}
         </Tabs.Panel>
       </Tabs>
     </Stack>

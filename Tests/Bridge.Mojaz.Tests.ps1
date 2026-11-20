@@ -230,6 +230,25 @@ Describe 'Playing a bulletin' {
         [double]$script:MojazPlayback.Plan[1].AtSeconds | Should -Be 6
     }
 
+    It 'refuses to play another bulletin design through the built-in scene' {
+        $script:MojazPlayback = $null
+        Mock Get-MojazBulletinDesignKey { 'OtherDesign' }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -eq (T 'mjp.designPlaybackUnavailable') }
+    }
+
+    It 'refuses to drop custom variables from a modified built-in design' {
+        $script:MojazPlayback = $null
+        Mock Get-MojazRowFieldPrompts { @{ Name = 'location[1]'; Kind = 'text' } }
+
+        Start-MojazPlayback -ChatId 100 -UserId 101 | Should -BeFalse
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+    }
+
     It 'changes the following rows through the postbox, not with another show' {
         # Another SHOW would replay the entrance animation and flash the
         # screen between stories; the postbox writes into the running scene.
@@ -1991,6 +2010,11 @@ Describe 'What a row on a design is asked for' {
         Get-MojazRowFieldValue -Row $row -FieldName 'source.Text' | Should -Be 'وكالة'
         # And one nobody filled reads empty rather than throwing.
         Get-MojazRowFieldValue -Row $row -FieldName 'nothing' | Should -Be ''
+    }
+
+    It 'reads brackets in custom variable names literally' {
+        $row = [pscustomobject]@{ Fields = [pscustomobject]@{ 'location[1]' = 'الاستوديو' } }
+        Get-MojazRowFieldValue -Row $row -FieldName 'location[1]' | Should -Be 'الاستوديو'
     }
 
     It 'gives the whole row as the design sees it' {

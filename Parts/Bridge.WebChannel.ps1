@@ -292,6 +292,7 @@ function Invoke-WebChannelOperation {
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
+        'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -682,7 +683,7 @@ function Get-WebContentPage {
                 'bulletins' {
                     $state = if (Test-MojazOnAir -Bulletin $entry) { 'on_air' } else { 'saved' }
                     $rows = @(Get-JsonProp $entry 'Rows' | Where-Object { $null -ne $_ }).Count
-                    @{ title = Get-NewsScreenLine -Text ([string](Get-JsonProp $entry 'Name')) -Length 120; state = $state; rows = $rows }
+                    @{ id = [string](Get-JsonProp $entry 'Id'); title = Get-NewsScreenLine -Text ([string](Get-JsonProp $entry 'Name')) -Length 120; state = $state; rows = $rows }
                 }
                 'ticker' { @{ title = Get-NewsScreenLine -Text ([string]$entry) -Length 240; state = 'published' } }
             }
@@ -691,6 +692,149 @@ function Get-WebContentPage {
     return @{ ok = $true; data = @{
         items = $items; page = $window.Page; pageCount = $window.PageCount; total = $entries.Count; revision = $revision; fields = $fields
     } }
+}
+
+function Get-WebBulletinFields {
+    param([Parameter(Mandatory)]$Bulletin)
+    $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    foreach ($prompt in Get-MojazRowFieldPrompts -TemplateKey $key) {
+        $label = [string]$prompt.Label
+        $kind = [string]$prompt.Kind
+        if ($prompt.Name -eq $script:MojazImageVariable) {
+            $kind = 'media'
+            if ($label -eq $prompt.Name) { $label = T 'mojaz.col.image' }
+        }
+        @{ name = [string]$prompt.Name; label = $label; kind = $kind }
+    }
+}
+
+function Get-WebBulletinEditor {
+    param([Parameter(Mandatory)]$Bulletin, [int]$Page)
+    $fields = @(Get-WebBulletinFields -Bulletin $Bulletin)
+    $rows = @(Get-JsonProp $Bulletin 'Rows' | Where-Object { $null -ne $_ })
+    $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page
+    $items = @(
+        for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
+            $row = $rows[$position]
+            $values = @{}
+            $media = @(
+                foreach ($field in $fields) {
+                    $value = Get-MojazRowFieldValue -Row $row -FieldName $field.name
+                    if ($field.kind -eq 'text') { $values[$field.name] = $value }
+                    elseif ($value) { $field.name }
+                }
+            )
+            @{ id = [string](Get-JsonProp $row 'Id'); values = $values; media = $media; skipped = Test-MojazRowSkipped -Row $row }
+        }
+    )
+    $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    return @{
+        id = [string](Get-JsonProp $Bulletin 'Id'); name = [string](Get-JsonProp $Bulletin 'Name')
+        design = $designKey; playbackSupported = Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin
+        revision = [int](Get-JsonProp $Bulletin 'Revision'); onAir = Test-MojazOnAir -Bulletin $Bulletin
+        fields = $fields; rows = $items; page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
+    }
+}
+
+function Invoke-WebBulletinEdit {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'designs') {
+        $designs = @(
+            if (Get-Setting 'MojazMultiDesign') {
+                foreach ($design in Get-MojazUsableDesigns) {
+                    @{ key = $design.Key; label = $(if ($design.Description) { $design.Description } else { $design.Key }) }
+                }
+            }
+        )
+        return @{ ok = $true; data = @{ designs = $designs } }
+    }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    $page = [int](Get-JsonProp $Arguments 'page')
+    $name = ([string](Get-JsonProp $Arguments 'name')).Trim()
+    if ($action -in 'create', 'copy', 'rename' -and (-not $name -or $name.Length -gt 120)) {
+        return @{ ok = $false; error = 'bulletin_invalid' }
+    }
+    $editArgs = @{ Library = $script:MojazLibrary; UserId = $actor }
+    if ($action -eq 'create') {
+        $designKey = [string](Get-JsonProp $Arguments 'design')
+        if ($designKey -and (
+                -not (Get-Setting 'MojazMultiDesign') -or
+                $designKey -notin @(Get-MojazUsableDesigns | ForEach-Object { $_.Key })
+            )) { return @{ ok = $false; error = 'bulletin_invalid' } }
+        $result = Add-MojazBulletin @editArgs -Name $name -DelayFrames (Get-MojazDelayFrames) -TemplateKey $designKey
+    }
+    else {
+        if (-not $id) { return @{ ok = $false; error = 'not_found' } }
+        $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+        if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+        if ($action -eq 'read') { return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $bulletin -Page $page } }
+        if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $bulletin 'Revision')) {
+            return @{ ok = $false; error = 'bulletin_stale' }
+        }
+        $editArgs.BulletinId = $id
+        $rowId = [string](Get-JsonProp $Arguments 'rowId')
+        if ($action -in 'update', 'up', 'down', 'skip', 'remove' -and -not $rowId) {
+            return @{ ok = $false; error = 'bulletin_invalid' }
+        }
+        switch ($action) {
+            'copy' { $result = Copy-MojazBulletin @editArgs -Name $name }
+            'rename' { $result = Rename-MojazBulletin @editArgs -Name $name }
+            'skip' { $result = Switch-MojazBulletinRowSkip @editArgs -RowId $rowId }
+            'remove' { $result = Remove-MojazBulletinRow @editArgs -RowId $rowId }
+            { $_ -in 'up', 'down' } { $result = Move-MojazBulletinRow @editArgs -RowId $rowId -Direction $action }
+            { $_ -in 'add', 'update' } {
+                $values = Get-JsonProp $Arguments 'values'
+                $fields = @(Get-WebBulletinFields -Bulletin $bulletin | Where-Object { $_.kind -eq 'text' })
+                if ($fields.Count -eq 0 -or $values -isnot [System.Collections.IDictionary] -or $values.Count -ne $fields.Count) {
+                    return @{ ok = $false; error = 'bulletin_invalid' }
+                }
+                $cells = @{}
+                foreach ($field in $fields) {
+                    $value = Get-JsonProp $values $field.name
+                    if ($value -isnot [string] -or $value.Length -gt 4096) { return @{ ok = $false; error = 'bulletin_invalid' } }
+                    try { [void][System.Xml.XmlConvert]::VerifyXmlChars($value) }
+                    catch { return @{ ok = $false; error = 'bulletin_invalid' } }
+                    $cells[$field.name] = $value
+                }
+                # The built-in columns have dedicated properties that the bot
+                # edits directly. Clear duplicate aliases left by older saves.
+                if ($cells.ContainsKey($script:MojazTitleVariable)) {
+                    $editArgs.Title = $cells[$script:MojazTitleVariable]
+                    $cells[$script:MojazTitleVariable] = ''
+                }
+                if ($cells.ContainsKey($script:MojazTextVariable)) {
+                    $editArgs.Text = $cells[$script:MojazTextVariable]
+                    $cells[$script:MojazTextVariable] = ''
+                }
+                if ($action -eq 'add') {
+                    $filled = Get-MojazFieldValues -Fields $cells
+                    if ($filled.Count -gt 0) { $editArgs.Fields = $filled }
+                    $result = Add-MojazBulletinRow @editArgs
+                }
+                else { $result = Set-MojazBulletinRow @editArgs -RowId $rowId -DesignFields $cells }
+            }
+            default { return @{ ok = $false; error = 'bulletin_invalid' } }
+        }
+    }
+    if (-not $result.Success) {
+        return @{ ok = $false; error = 'bulletin_refused'; data = [string]$result.Error }
+    }
+    if (-not (Invoke-MojazEdit -Result $result -ChatId $actor -Quiet)) {
+        return @{ ok = $false; error = 'bulletin_save_failed' }
+    }
+    $saved = if ($action -in 'create', 'copy') { @(Get-JsonProp $script:MojazLibrary 'Bulletins')[-1] }
+    else { Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id }
+    if ($action -eq 'add') { $page = [int]::MaxValue }
+    if ($action -in 'up', 'down') {
+        $page = Get-MojazRowPage -Rows @(Get-JsonProp $saved 'Rows' | Where-Object { $null -ne $_ }) -RowId $rowId -PageSize 20
+    }
+    Add-AuditEntry "Web bulletin $action by $(Format-UserAuditActor -UserId $actor) ($([string]$saved.Id))"
+    return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $saved -Page $page }
 }
 
 function Get-WebUrgentFields {

@@ -358,6 +358,7 @@ function Get-TemplateStoreParsed {
             # A ticker or a logo lives on air all day by design. Marked here,
             # it is exempt from the "on air suspiciously long" alert.
             LongRunning = [bool](Get-JsonProp $entry 'longRunning')
+            Bulletin    = (Get-JsonProp $entry 'bulletin') -eq $true
             # 0 disables the personal elapsed-time reminder for this template.
             ReminderMinutes = $reminderMinutes
             Fields      = $fieldNames

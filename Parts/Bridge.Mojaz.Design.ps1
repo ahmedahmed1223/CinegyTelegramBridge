@@ -100,9 +100,18 @@ function Get-MojazFieldLabel {
     #>
     param([Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][string]$FieldName)
     $template = (Get-TemplateStore).Map[$TemplateKey]
-    foreach ($declared in @(Get-JsonProp $template 'Fields')) {
-        if ([string](Get-JsonProp $declared 'Name') -ne $FieldName) { continue }
-        $label = [string](Get-JsonProp $declared 'Label')
+    $declaredFields = @(Get-JsonProp $template 'Fields')
+    $labels = @(Get-JsonProp $template 'FieldLabels')
+    for ($i = 0; $i -lt $declaredFields.Count; $i++) {
+        $declared = $declaredFields[$i]
+        if ($declared -is [string]) {
+            if ($declared -ne $FieldName) { continue }
+            $label = if ($i -lt $labels.Count) { [string]$labels[$i] } else { '' }
+        }
+        else {
+            if ([string](Get-JsonProp $declared 'Name') -ne $FieldName) { continue }
+            $label = [string](Get-JsonProp $declared 'Label')
+        }
         if ($label) { return $label }
     }
     return $FieldName
@@ -125,7 +134,8 @@ function Get-MojazRowFieldPrompts {
     $fields = @(Get-MojazDesignFields -TemplateKey $TemplateKey | Where-Object { $_.Consumed })
     if ($fields.Count -eq 0) { return @() }
     $declaredOrder = @(@(Get-JsonProp ((Get-TemplateStore).Map[$TemplateKey]) 'Fields') |
-            ForEach-Object { [string](Get-JsonProp $_ 'Name') } | Where-Object { $_ })
+            ForEach-Object { if ($_ -is [string]) { $_ } else { [string](Get-JsonProp $_ 'Name') } } |
+            Where-Object { $_ })
     $ordered = @()
     foreach ($name in $declaredOrder) {
         $match = @($fields | Where-Object { $_.Name -eq $name } | Select-Object -First 1)
@@ -159,7 +169,10 @@ function Get-MojazRowFieldValue {
     param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)][string]$FieldName)
     $bag = Get-JsonProp $Row 'Fields'
     if ($bag) {
-        $value = [string](Get-JsonProp $bag $FieldName)
+        # Scene variable names can contain literal brackets. Properties.Match
+        # treats them as wildcards, which would make a saved cell appear empty.
+        $value = if ($bag -is [System.Collections.IDictionary]) { [string]$bag[$FieldName] }
+        else { [string]$bag.PSObject.Properties[$FieldName]?.Value }
         if ($value) { return $value }
     }
     switch ($FieldName) {
@@ -275,6 +288,14 @@ function Get-MojazBulletinDesignKey {
     $key = [string](Get-JsonProp $Bulletin 'TemplateKey')
     if ($key) { return $key }
     return [string]$script:MojazTemplateKey
+}
+
+function Test-MojazBulletinPlaybackDesign {
+    param([Parameter(Mandatory)]$Bulletin)
+    $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    if ($key -ne $script:MojazTemplateKey) { return $false }
+    $supported = @($script:MojazTitleVariable, $script:MojazTextVariable, $script:MojazImageVariable)
+    return @(Get-MojazRowFieldPrompts -TemplateKey $key | Where-Object { $_.Name -notin $supported }).Count -eq 0
 }
 
 function Get-MojazSceneTiming {

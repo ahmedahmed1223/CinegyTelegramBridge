@@ -452,6 +452,11 @@ Describe 'Reading a design contract out of the scene' {
         @(Get-BridgeSceneFields -Xml '').Count | Should -Be 0
         @(Get-BridgeSceneFields -Xml '<Scene />').Count | Should -Be 0
     }
+
+    It 'recognizes a file source even if the scene declared its variable as a string' {
+        $scene = '<Scene><Var Name="asset" Type="String" /><Title Text="${asset}" /><Plate File="${asset}" /></Scene>'
+        (Get-BridgeSceneFields -Xml $scene).Kind | Should -Be 'media'
+    }
 }
 
 Describe 'A design that is not the news design' {

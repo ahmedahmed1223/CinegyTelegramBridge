@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.82.0
+
+Open a saved bulletin in Newsroom or create one from the bulletin library. The table follows the design's field order. Operators can edit its text, reorder rows, skip or remove a story, and rename or copy a bulletin. Edits save to the Telegram library and check its revision before writing. Existing media stays attached when editing text. Alternate designs can be prepared in the editor, and the bridge blocks on-air playback for them until their scene is supported.
+
 ## Version 8.81.0
 
 Newsroom can open, edit, reorder, hand over, and publish the same ticker draft that Telegram uses. Every edit checks draft ownership and revision. If an external writer changes the published file, the editor can review the current headlines and choose to keep them before the draft or replace them.

@@ -463,6 +463,107 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'edits the same bulletin as Telegram, rejects older revisions and preserves media paths on the bridge' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'web-bulletins.json' }
+        Mock Get-TemplateRegistryFilePath { Join-Path $TestDrive 'web-bulletin-templates.json' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'MojazMultiDesign' }
+        $scene = Join-Path $TestDrive 'bulletin.cintitle'
+        '<Scene><Var Name="location.Text" Type="String" /><Var Name="title.Text" Type="String" /><Var Name="mojaz_img" Type="String" /><Plate File="${mojaz_img}" /><Title Text="${location.Text}" /><Title Text="${title.Text}" /></Scene>' |
+            Set-Content -LiteralPath $scene
+        @{
+            Mojaz = @{ path = $scene; layer = 4 }
+            StudioBulletin = @{
+                path = $scene; layer = 5; description = 'موجز الاستوديو'; bulletin = $true
+                fields = @(@{ name = 'title.Text'; label = 'العنوان' }, @{ name = 'location.Text'; label = 'الموقع' })
+            }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-TemplateRegistryFilePath)
+        $previousLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = New-MojazLibrary
+            $requestBulletin = {
+                param($arguments)
+                $line = @{ op = 'bulletin.edit'; args = $arguments } | ConvertTo-Json -Depth 8 -Compress
+                return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json)
+            }
+            (& $requestBulletin @{ actor = 999; action = 'create'; name = 'موجز' }).error | Should -Be 'forbidden'
+            $designs = & $requestBulletin @{ actor = 4321; action = 'designs' }
+            @($designs.data.designs).key | Should -Contain 'StudioBulletin'
+            (& $requestBulletin @{ actor = 4321; action = 'create'; name = 'موجز'; design = 'Missing' }).error | Should -Be 'bulletin_invalid'
+            $created = & $requestBulletin @{ actor = 4321; action = 'create'; name = 'موجز اليوم'; design = 'StudioBulletin' }
+            $created.ok | Should -BeTrue
+            $id = $created.data.id
+            $created.data.design | Should -Be 'StudioBulletin'
+            $created.data.playbackSupported | Should -BeFalse
+            $created.data.fields[1].name | Should -Be 'location.Text'
+            $created.data.fields[1].label | Should -Be 'الموقع'
+            $list = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":4321,"view":"bulletins"}}' | ConvertFrom-Json
+            $list.data.items[0].id | Should -Be $id
+
+            $add = @{ actor = 4321; action = 'add'; id = $id; revision = 1; values = @{ 'title.Text' = 'العنوان'; 'location.Text' = 'الاستوديو' } }
+            $added = & $requestBulletin $add
+            $added.ok | Should -BeTrue
+            $rowId = $added.data.rows[0].id
+            $saved = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+            $saved.Rows[0].Title | Should -Be 'العنوان'
+            $saved.Rows[0].Fields.'location.Text' | Should -Be 'الاستوديو'
+
+            $botImage = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -RowId $rowId -Image 'D:/station/attached.png' -UserId 4321
+            (Invoke-MojazEdit -Result $botImage -ChatId 4321 -Quiet) | Should -BeTrue
+            (& $requestBulletin $add).error | Should -Be 'bulletin_stale'
+            $latest = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
+            (Get-JsonProp $latest.data.rows[0].values 'mojaz_img') | Should -BeNullOrEmpty
+            $latest.data.rows[0].media[0] | Should -Be 'mojaz_img'
+            $edit = @{ actor = 4321; action = 'update'; id = $id; rowId = $rowId; revision = $latest.data.revision; values = @{
+                    'title.Text' = 'عنوان جديد'; 'location.Text' = ''
+                } }
+            $edit.values['mojaz_img'] = 'D:/unauthorized.png'
+            (& $requestBulletin $edit).error | Should -Be 'bulletin_invalid'
+            $edit.values.Remove('mojaz_img')
+            $updated = & $requestBulletin $edit
+            $updated.ok | Should -BeTrue
+            $updated.data.rows[0].values.'location.Text' | Should -BeNullOrEmpty
+            Import-MojazLibrary
+            $persisted = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+            $persisted.Rows[0].Image | Should -Be 'D:/station/attached.png'
+            $persisted.Rows[0].Title | Should -Be 'عنوان جديد'
+            $botTitle = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -RowId $rowId -Title 'عنوان من البوت' -UserId 4321
+            (Invoke-MojazEdit -Result $botTitle -ChatId 4321 -Quiet) | Should -BeTrue
+            $again = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
+            $again.data.rows[0].values.'title.Text' | Should -Be 'عنوان من البوت'
+
+            $add.revision = $again.data.revision
+            $add.values['title.Text'] = 'خبر ثانٍ'
+            $second = & $requestBulletin $add
+            $second.ok | Should -BeTrue
+            $move = @{ actor = 4321; action = 'down'; id = $id; revision = $second.data.revision; rowId = $rowId }
+            $moved = & $requestBulletin $move
+            $moved.data.rows[1].id | Should -Be $rowId
+            $move.action = 'skip'
+            $move.revision = $moved.data.revision
+            $skipped = & $requestBulletin $move
+            $skipped.data.rows[1].skipped | Should -BeTrue
+            $copy = & $requestBulletin @{ actor = 4321; action = 'copy'; id = $id; revision = $skipped.data.revision; name = 'نسخة اليوم' }
+            $copy.data.id | Should -Not -Be $id
+            $copy.data.rows[1].skipped | Should -BeTrue
+
+            Mock Write-BridgeValidatedJson { $false }
+            $move.action = 'remove'
+            $move.revision = $skipped.data.revision
+            (& $requestBulletin $move).error | Should -Be 'bulletin_save_failed'
+            $stillSaved = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
+            $stillSaved.data.revision | Should -Be $skipped.data.revision
+            $stillSaved.data.rows[1].id | Should -Be $rowId
+
+            Move-Item -LiteralPath $scene -Destination (Join-Path $TestDrive 'retired-bulletin.cintitle')
+            $unreadable = & $requestBulletin @{ actor = 4321; action = 'read'; id = $id }
+            $unreadable.data.fields | Should -BeNullOrEmpty
+            $edit.revision = $unreadable.data.revision
+            (& $requestBulletin $edit).error | Should -Be 'bulletin_invalid'
+        }
+        finally { $script:MojazLibrary = $previousLibrary }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

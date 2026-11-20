@@ -458,6 +458,8 @@ function Add-BridgeTextContent {
     $catalogue['mojaz.col.story'] = @{ ar = 'الخبر'; en = 'Story' }
 
     $catalogue['mojaz.imageLegend'] = @{ ar = '🖼 صورة خاصة · ↑ يتبع الصف السابق · ▫️ صورة القالب'; en = '🖼 its own image · ↑ follows the previous row · ▫️ the template image' }
+    $catalogue['mojaz.col.image'] = @{ ar = 'الصورة'; en = 'Image' }
+    $catalogue['mjp.designPlaybackUnavailable'] = @{ ar = 'التشغيل على الهواء غير متاح لهذا التصميم في هذا الإصدار.'; en = 'On-air playback for this design is unavailable in this version.' }
 
     $catalogue['mojaz.stopExit'] = @{ ar = '⏹ إيقاف وخروج'; en = '⏹ Stop and exit' }
 

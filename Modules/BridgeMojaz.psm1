@@ -348,7 +348,7 @@ function Get-MojazFieldValues {
     param($Fields)
     if (-not $Fields) { return @{} }
     $values = @{}
-    $pairs = if ($Fields -is [hashtable]) {
+    $pairs = if ($Fields -is [System.Collections.IDictionary]) {
         @($Fields.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $Fields[$_] } })
     }
     else {
@@ -421,7 +421,7 @@ function Add-MojazBulletinRow {
 function Set-MojazBulletinRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image,
+        [Parameter(Mandatory)][string]$RowId, [string]$Title, [string]$Text, [string]$Image, [hashtable]$DesignFields,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
         [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
     $fields = $PSBoundParameters
@@ -437,6 +437,18 @@ function Set-MojazBulletinRow {
                 $mode = if ($ImageMode) { $ImageMode } elseif ($path) { 'new' } else { 'inherit' }
                 $row.ImageMode = $mode
                 $row.Image = $(if ($mode -eq 'new') { $path } else { '' })
+            }
+            if ($fields.ContainsKey('DesignFields')) {
+                # Keep fields the current editor cannot see, including media
+                # and values from a design previously assigned to this bulletin.
+                $mergedFields = Get-MojazFieldValues -Fields (Get-MojazProperty $row 'Fields')
+                foreach ($cell in $DesignFields.GetEnumerator()) {
+                    $value = ConvertTo-MojazRowText -Text ([string]$cell.Value)
+                    if ($value) { $mergedFields[$cell.Key] = $value }
+                    else { $mergedFields.Remove($cell.Key) }
+                }
+                $row | Add-Member -NotePropertyName Fields -NotePropertyValue ([pscustomobject]$mergedFields) -Force
+                if ($mergedFields.Count -gt 0 -or [string](Get-MojazProperty $row 'Image')) { return }
             }
             if ([string]::IsNullOrWhiteSpace([string]$row.Title) -and [string]::IsNullOrWhiteSpace([string]$row.Text)) {
                 return (New-MojazResult $false $null 'empty_row' 'الصف بلا عنوان ولا نص.')
@@ -683,7 +695,10 @@ function Get-BridgeSceneFields {
         # The element that reads ${variable}. Escaped, because a variable name
         # may hold a dot - 'title.Text' is the common case here, and an
         # unescaped dot would match a different variable's element.
-        $consumer = [regex]::Match($Xml, '<(?<element>[A-Za-z]+)\s[^>]*\$\{' + [regex]::Escape($variable) + '\}[^>]*>')
+        $reference = '\$\{' + [regex]::Escape($variable) + '\}'
+        $fileConsumer = [regex]::Match($Xml, '(?i)<(?<element>[A-Za-z]+)\s[^>]*\bFile\s*=\s*"[^"]*' + $reference + '[^"]*"[^>]*>')
+        $consumer = if ($fileConsumer.Success) { $fileConsumer }
+        else { [regex]::Match($Xml, '<(?<element>[A-Za-z]+)\s[^>]*' + $reference + '[^>]*>') }
         $element = if ($consumer.Success) { $consumer.Groups['element'].Value } else { '' }
 
         $width = 0.0
@@ -703,7 +718,7 @@ function Get-BridgeSceneFields {
                 # pictures and its movies in the same Plate with a file
                 # source, so the scene cannot tell the two apart and neither
                 # can this. What arrives decides, and the caller bounds it.
-                Kind     = if ($declaredType -eq 'File') { 'media' } else { 'text' }
+                Kind     = if ($declaredType -eq 'File' -or $fileConsumer.Success) { 'media' } else { 'text' }
                 Element  = $element
                 Consumed = $consumer.Success
                 Width    = [int][math]::Round($width)

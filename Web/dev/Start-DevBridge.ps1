@@ -36,6 +36,7 @@ Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
+Set-JsonProp $config.Settings 'MojazMultiDesign' $true
 @{
     Urgent = @{
         path = Join-Path $runtime 'urgent.cintitle'; layer = 3; description = 'شريط الأخبار العاجلة'; category = 'الأخبار'
@@ -49,11 +50,33 @@ Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
         path = Join-Path $runtime 'mojaz.cintitle'; layer = 4; description = 'الموجز الإخباري'; category = 'الأخبار'
         fields = @(@{ name = 'title.Text'; label = 'العنوان'; required = $true }, @{ name = 'Subject.Text'; label = 'التفاصيل' })
     }
+    StudioBulletin = @{
+        path = Join-Path $runtime 'studio-bulletin.cintitle'; layer = 4; description = 'موجز الاستوديو'; category = 'الأخبار'; bulletin = $true
+        fields = @(
+            @{ name = 'title.Text'; label = 'العنوان' }
+            @{ name = 'Subject.Text'; label = 'التفاصيل' }
+            @{ name = 'studio.location'; label = 'الموقع' }
+        )
+    }
     Guest = @{
         path = Join-Path $runtime 'guest.cintitle'; layer = 5; description = 'اسم الضيف'; category = 'الأسماء'
         fields = @(@{ name = 'name'; label = 'اسم الضيف'; required = $true; maxLength = 40 }, @{ name = 'role'; label = 'الصفة' })
     }
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureRegistry
+@'
+<Scene LoopStartFrame="25" LoopEndFrame="100">
+  <Var Name="title.Text" Type="String" /><Title Text="${title.Text}" />
+  <Var Name="Subject.Text" Type="String" /><Title Text="${Subject.Text}" />
+  <Var Name="mojaz_img" Type="File" /><Plate File="${mojaz_img}" />
+</Scene>
+'@ | Set-Content -LiteralPath (Join-Path $runtime 'mojaz.cintitle')
+@'
+<Scene LoopStartFrame="25" LoopEndFrame="100">
+  <Var Name="title.Text" Type="String" /><Title Text="${title.Text}" />
+  <Var Name="Subject.Text" Type="String" /><Title Text="${Subject.Text}" />
+  <Var Name="studio.location" Type="String" /><Title Text="${studio.location}" />
+</Scene>
+'@ | Set-Content -LiteralPath (Join-Path $runtime 'studio-bulletin.cintitle')
 'نافذة على أبرز الأخبار اليوم|متابعة مباشرة في النشرة المسائية|برنامج خاص مساء الخميس' |
     Set-Content -LiteralPath $fixtureTicker
 $script:UrgentBoard = New-UrgentBoard
@@ -62,9 +85,10 @@ $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خدمة
 $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'تحديث جديد من الميدان').Value
 Set-JsonProp $script:UrgentBoard.Items[0] 'ExtraFields' @{ 'Ajel.location' = 'الاستوديو' }
 $script:UrgentBoard.Items[1].Enabled = $false
-$script:MojazLibrary = @{ Bulletins = @(
-    @{ Id = 'dev-bulletin1'; Name = 'موجز الفترة المسائية'; Revision = 1; Rows = @(@{ Title = 'أبرز العناوين' }, @{ Title = 'تقرير اليوم' }) }
-) }
+$script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الفترة المسائية').Value
+$demoBulletinId = $script:MojazLibrary.Bulletins[0].Id
+$script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.').Value
+$script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'تقرير اليوم' -Text 'متابعة من غرفة الأخبار.').Value
 
 $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @($OwnerId) -Force
 $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($OwnerId, 1002) -Force

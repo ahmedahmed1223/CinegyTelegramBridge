@@ -8,6 +8,14 @@ public sealed record ErrorResponse(string Error, string? Message = null);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values);
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
+public sealed record BulletinField(string Name, string Label, string Kind);
+public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped);
+public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported,
+    BulletinField[] Fields, BulletinRow[] Rows, int Page, int PageCount, int Total);
+public sealed record BulletinEditRequest(string Action, string? Id = null, int? Revision = null, int? Page = null,
+    string? RowId = null, string? Name = null, string? Design = null, Dictionary<string, string>? Values = null);
+public sealed record BulletinDesignOption(string Key, string Label);
+public sealed record BulletinDesignOptions(BulletinDesignOption[] Designs);
 public sealed record UrgentRowInput(Dictionary<string, string> Values, bool Enabled);
 public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null);
 public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null);

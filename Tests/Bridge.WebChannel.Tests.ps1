@@ -769,6 +769,92 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'shares web lock requests and preserves drafts through approval and administrative release' {
+        $owner = $script:WebOnlyUserIdBase + 1
+        $oldDraft = $script:NewsTickerDraft
+        $oldPath = $script:newsDraftFile
+        $oldRequest = $script:NewsLockRequest
+        $oldRequestPath = $script:newsLockRequestFile
+        $oldGrant = $script:NewsLockGrant
+        $script:newsDraftFile = Join-Path $TestDrive 'web-lock-draft.json'
+        $script:newsLockRequestFile = Join-Path $TestDrive 'web-lock-request.json'
+        $script:NewsLockRequest = $null
+        $script:NewsLockGrant = $null
+        $draft = @{ Id = 'web-lock'; OwnerUserId = $owner; OwnerChatId = $owner; Items = @('مسودة مشتركة'); PublishAt = [datetimeoffset]::UtcNow.AddHours(1).ToString('o') }
+        $script:NewsTickerDraft = $draft
+        Mock Test-Authorized { $UserId -in 4321, 4322, 9000000000000001 }
+        Mock Test-Admin { $UserId -eq 4322 }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Send-TelegramMessage {}
+        $command = {
+            param($arguments)
+            $payload = @{ op = 'ticker.edit'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $payload | ConvertFrom-Json
+        }
+        try {
+            $initial = (& $command @{ actor = 4321; action = 'status' }).data.lock
+            $initial.canRequest | Should -BeTrue
+            (& $command @{ actor = 4321; action = 'force_release'; revision = $initial.revision }).error | Should -Be 'forbidden'
+            $ask = @{ actor = 4321; action = 'request_lock'; revision = $initial.revision }
+            (& $command $ask).data.lock.waiting | Should -BeTrue
+            (& $command @{ actor = 4322; action = 'request_lock'; revision = $initial.revision }).error | Should -Be 'ticker_lock_pending'
+            $approval = (& $command @{ actor = $owner; action = 'status' }).data.lock.response
+            $approval | Should -Not -BeNullOrEmpty
+            (& $command @{ actor = 4322; action = 'approve_lock'; review = $approval }).error | Should -Be 'forbidden'
+            (& $command @{ actor = $owner; action = 'deny_lock'; review = $approval }).ok | Should -BeTrue
+            (& $command $ask).ok | Should -BeTrue
+            (& $command @{ actor = $owner; action = 'approve_lock'; review = $approval }).error | Should -Be 'ticker_stale'
+            $approval = (& $command @{ actor = $owner; action = 'status' }).data.lock.response
+            $released = & $command @{ actor = $owner; action = 'approve_lock'; review = $approval }
+            $released.ok | Should -BeTrue
+            $script:NewsTickerDraft.Items | Should -Be @('مسودة مشتركة')
+            (Get-JsonProp $script:NewsTickerDraft 'PublishAt') | Should -BeNullOrEmpty
+            (& $command @{ actor = 4321; action = 'status' }).data.state | Should -Be 'open'
+            $claimed = & $command @{ actor = 4321; action = 'start' }
+            $claimed.data.draft.items | Should -Be @('مسودة مشتركة')
+            $administrative = (& $command @{ actor = 4322; action = 'status' }).data.lock
+            $administrative.canForce | Should -BeTrue
+            (& $command @{ actor = 4322; action = 'force_release'; revision = $administrative.revision }).data.state | Should -Be 'open'
+            $script:NewsTickerDraft.Items | Should -Be @('مسودة مشتركة')
+
+            (& $command @{ actor = 4321; action = 'start' }).ok | Should -BeTrue
+            $newLock = (& $command @{ actor = $owner; action = 'status' }).data.lock
+            (& $command @{ actor = $owner; action = 'request_lock'; revision = $newLock.revision }).ok | Should -BeTrue
+            $originalId = $script:NewsLockRequest.Id
+            $script:NewsLockRequest = $null
+            Import-NewsLockRequest
+            $script:NewsLockRequest.Id | Should -Be $originalId
+            $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-60)
+            Update-NewsLockRequest
+            $script:NewsTickerDraft = $null
+            $script:NewsLockGrant = $null
+            Import-NewsTickerDraft
+            (& $command @{ actor = $owner; action = 'status' }).data.state | Should -Be 'open'
+            (& $command @{ actor = 4322; action = 'status' }).data.state | Should -Be 'locked'
+            (& $command @{ actor = $owner; action = 'start' }).data.draft.items | Should -Be @('مسودة مشتركة')
+
+            Open-NewsTickerDraftToAll -ChatId $owner -UserId $owner | Should -BeTrue
+            (& $command @{ actor = 4321; action = 'start' }).ok | Should -BeTrue
+            Request-NewsLockRelease -ChatId 4322 -UserId 4322 | Should -BeTrue
+            $telegramRequest = (& $command @{ actor = 4321; action = 'status' }).data.lock
+            $telegramRequest.preservesAtDeadline | Should -BeFalse
+            (& $command @{ actor = 4321; action = 'approve_lock'; review = $telegramRequest.response }).ok | Should -BeTrue
+            $script:NewsTickerDraft = $null
+            $script:NewsLockGrant = $null
+            Import-NewsTickerDraft
+            (& $command @{ actor = 4321; action = 'status' }).data.state | Should -Be 'locked'
+            (& $command @{ actor = 4322; action = 'start' }).data.draft.items | Should -Be @('مسودة مشتركة')
+        }
+        finally {
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldPath
+            $script:NewsLockRequest = $oldRequest
+            $script:newsLockRequestFile = $oldRequestPath
+            $script:NewsLockGrant = $oldGrant
+        }
+    }
+
     It 'imports only reviewed sheet headlines while the operator owns the ticker draft' {
         $tickerPath = Join-Path $TestDrive 'sheet-import-ticker.txt'
         Set-Content -LiteralPath $tickerPath -Value 'الشريط المنشور'

@@ -116,8 +116,16 @@ function Get-NewsLockReservation {
        everyone, so five minutes of negotiation could be lost to whoever
        happened to tap first - including the owner who had just handed it over.
        Expiry is checked on read so nothing has to sweep it. #>
+    if (-not $script:NewsLockGrant -and (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft)) {
+        $reserved = [long](Get-JsonProp $script:NewsTickerDraft 'ReservedForUserId')
+        $until = Get-JsonProp $script:NewsTickerDraft 'ReservedUntil'
+        $deadline = [datetimeoffset]::MinValue
+        if ($reserved -gt 0 -and [datetimeoffset]::TryParse([string]$until, [ref]$deadline) -and $deadline -gt [datetimeoffset]::Now) {
+            $script:NewsLockGrant = @{ UserId = $reserved; ExpiresAt = $deadline }
+        }
+    }
     if (-not $script:NewsLockGrant) { return $null }
-    if ((Get-Date) -ge [datetime]$script:NewsLockGrant.ExpiresAt) { $script:NewsLockGrant = $null; return $null }
+    if ([datetimeoffset]::Now -ge [datetimeoffset]$script:NewsLockGrant.ExpiresAt) { $script:NewsLockGrant = $null; return $null }
     return $script:NewsLockGrant
 }
 
@@ -144,7 +152,7 @@ function Start-NewsTickerDraft {
     # won by whoever merely happened to be looking at their screen.
     $reservation = Get-NewsLockReservation
     if ($reservation -and [long]$reservation.UserId -ne $UserId) {
-        $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
+        $secondsLeft = [math]::Max(1, [int]([datetimeoffset]$reservation.ExpiresAt - [datetimeoffset]::Now).TotalSeconds)
         return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockHeldFor' $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))}
     }
     if ($existing) {
@@ -155,7 +163,7 @@ function Start-NewsTickerDraft {
         $existing['OwnerUserId'] = $UserId
         $existing['OwnerChatId'] = $ChatId
         $existing['UpdatedAt'] = (Get-Date).ToString('o')
-        foreach ($mark in 'IsOpen', 'HandedOverBy', 'HandedOverChatId', 'HandedOverAt') {
+        foreach ($mark in 'IsOpen', 'HandedOverBy', 'HandedOverChatId', 'HandedOverAt', 'ReservedForUserId', 'ReservedUntil') {
             Remove-JsonProp -Object $existing -Name $mark
         }
         # The idle-expiry warning is addressed to an owner, and this draft has
@@ -463,7 +471,7 @@ function Save-NewsLockRequest {
     if ([string]::IsNullOrWhiteSpace($script:newsLockRequestFile)) { return $false }
     try {
         if (-not $script:NewsLockRequest) {
-            Remove-Item -LiteralPath $script:newsLockRequestFile -Force -ErrorAction SilentlyContinue
+            [IO.File]::Delete($script:newsLockRequestFile)
             return $true
         }
         $json = $script:NewsLockRequest | ConvertTo-Json -Depth 8
@@ -489,10 +497,21 @@ function Import-NewsLockRequest {
             throw 'not a lock request'
         }
         $stamp = [datetime]$read['RequestedAt']
+        $requestId = [string](Get-JsonProp $read 'Id')
+        if ($requestId -cnotmatch '^[a-f0-9]{32}$') {
+            # The old Telegram buttons cannot answer a tokenized request.
+            $script:NewsLockRequest = $null
+            Save-NewsLockRequest | Out-Null
+            Write-BridgeLog 'Retired a legacy ticker lock request; the requester can send a new one.' 'WARN'
+            return
+        }
         $script:NewsLockRequest = @{
             RequesterUserId = [long]$read['RequesterUserId']; RequesterChatId = [long](Get-JsonProp $read 'RequesterChatId')
             OwnerUserId = [long]$read['OwnerUserId']; OwnerChatId = [long](Get-JsonProp $read 'OwnerChatId')
             DraftId = [string](Get-JsonProp $read 'DraftId')
+            Id = $requestId
+            PreserveDraft = [bool](Get-JsonProp $read 'PreserveDraft')
+            AutoGrantSuspended = [bool](Get-JsonProp $read 'AutoGrantSuspended')
             RequestedAt = $stamp
         }
         Write-BridgeLog "Restored a pending news lock request from $($read['RequesterUserId']) (requested $stamp)"
@@ -511,7 +530,7 @@ function Request-NewsLockRelease {
         be worse - the owner may be mid-edit - so they get a window to say no,
         and only silence hands it over.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$FromWeb)
     $draft = Get-NewsTickerDraft
     if (-not $draft) { return $false }
     if ([long]$draft.OwnerUserId -eq $UserId) { return $false }
@@ -521,7 +540,7 @@ function Request-NewsLockRelease {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'news.draftAlreadyOpen') -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
-    if (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId'))) {
+    if (-not $FromWeb -and (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId')))) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'news.webEditorHandover')
         return $false
     }
@@ -534,6 +553,7 @@ function Request-NewsLockRelease {
         $existing = $null
     }
     if ($existing) {
+        if ($FromWeb) { return [long]$existing.RequesterUserId -eq $UserId }
         if ([long]$existing.RequesterUserId -ne $UserId) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'news.unlockPending' $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId))) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
             return $false
@@ -552,22 +572,30 @@ function Request-NewsLockRelease {
         RequesterUserId = $UserId; RequesterChatId = $ChatId
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
         DraftId = [string](Get-JsonProp $draft 'Id')
+        Id = [guid]::NewGuid().ToString('N')
+        PreserveDraft = [bool]$FromWeb
         RequestedAt = (Get-Date)
     }
     # The auto-grant promise below only holds if the request survives a
     # restart - that is the whole reason this file exists. If the write
     # failed, say so rather than promising something the disk did not accept.
     $requestPersisted = [bool](Save-NewsLockRequest)
+    if ($FromWeb -and -not $requestPersisted) {
+        $script:NewsLockRequest = $null
+        return $false
+    }
     Write-BridgeLog "User $UserId requested the news lock from $($draft.OwnerUserId) (auto-grant in $minutes min)"
     Add-AuditEntry (T 'news.unlockRequestAudit' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Format-UserAuditActor -UserId $UserId))
 
-    if ([long]$draft.OwnerChatId -gt 0) {
+    if ([long]$draft.OwnerChatId -gt 0 -and -not (Test-WebOnlyUserId -UserId ([long]$draft.OwnerUserId))) {
+        $requestId = $script:NewsLockRequest.Id
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
             -Text (T 'news.unlockAsk' $(Get-UserDisplayName -UserId $UserId) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')) `
             -ReplyMarkup @{inline_keyboard=@(,@(
-                    @{text=(T 'news.handLock');callback_data='news:lockgrant'},
-                    @{text=(T 'news.stillWorking');callback_data='news:lockdeny'}))}
+                    @{text=(T 'news.handLock');callback_data="news:lockgrant:$requestId"},
+                    @{text=(T 'news.stillWorking');callback_data="news:lockdeny:$requestId"}))} -Deferred:$FromWeb
     }
+    if ($FromWeb) { return $true }
     $persistNote = if ($requestPersisted) { '' } else { "`n$(T news.requestNotSaved)" }
     Send-TelegramMessage -ChatId $ChatId -Text (T 'news.requestSent' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') $persistNote) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
@@ -575,22 +603,51 @@ function Request-NewsLockRelease {
 
 function Test-NewsLockRequestDraft {
     param($Request, $Draft)
+    $requestId = [string](Get-JsonProp $Request 'Id')
     return [long](Get-JsonProp $Request 'OwnerUserId') -eq [long](Get-JsonProp $Draft 'OwnerUserId') -and
-        [string](Get-JsonProp $Request 'DraftId') -ceq [string](Get-JsonProp $Draft 'Id')
+        [string](Get-JsonProp $Request 'DraftId') -ceq [string](Get-JsonProp $Draft 'Id') -and
+        (-not $requestId -or [string](Get-JsonProp $Draft 'DeniedLockRequestId') -cne $requestId)
+}
+
+function Test-NewsLockRequesterAuthorized {
+    param($Request)
+    $requester = [long]$Request.RequesterUserId
+    $requesterChat = [long]$Request.RequesterChatId
+    if ($requesterChat -le 0) { $requesterChat = $requester }
+    return (Test-Authorized -ChatId $requesterChat -UserId $requester)
 }
 
 function Complete-NewsLockRelease {
-    <# Hands the ticker over. The owner's items are sent back to them as text
-       before the draft goes: an unpublished draft is somebody's work, and
-       either transferring it to another person or dropping it silently would
-       be worse than handing it back. #>
+    <# Browser requests hand over the draft in place so editors who have no
+       Telegram chat can keep their work. Telegram requests keep the existing
+       receipt and fresh-draft workflow. #>
     param([switch]$Denied, [string]$Reason = 'auto')
     $request = $script:NewsLockRequest
     if (-not $request) { return $false }
+    $draft = Get-NewsTickerDraft
+    $preserveDraft = [bool](Get-JsonProp $request 'PreserveDraft')
+    $requesterAuthorized = -not $Denied -and (Test-NewsLockRequesterAuthorized -Request $request)
+    if ($preserveDraft -and $requesterAuthorized -and $draft -and (Test-NewsLockRequestDraft -Request $request -Draft $draft)) {
+        $owner = [long]$request.OwnerUserId
+        return (Open-NewsTickerDraftToAll -ChatId $owner -UserId $owner)
+    }
     $script:NewsLockRequest = $null
     # Clearing the file is what stops a settled request coming back at the next
     # start and granting a lock somebody already handed over or refused.
     if (-not (Save-NewsLockRequest)) {
+        if ($Denied) {
+            if (-not $draft -or -not (Test-NewsLockRequestDraft -Request $request -Draft $draft)) { return $false }
+            $candidate = Copy-NewsTickerDraft -Draft $draft
+            $candidate['DeniedLockRequestId'] = [string](Get-JsonProp $request 'Id')
+            if (-not (Save-NewsTickerDraft -Draft $candidate)) {
+                # A failed write cannot turn the owner's answer into silence.
+                $request['AutoGrantSuspended'] = $true
+                $script:NewsLockRequest = $request
+                Save-NewsLockRequest | Out-Null
+                return $false
+            }
+            $script:NewsTickerDraft = $candidate
+        }
         Write-BridgeLog 'Settled news lock request could not be cleared from disk; it may be restored on the next start.' 'ERROR'
     }
 
@@ -600,7 +657,7 @@ function Complete-NewsLockRelease {
         return $false
     }
 
-    $draft = Get-NewsTickerDraft
+    if (-not $requesterAuthorized) { return $false }
     if ($draft -and (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId')))) { return $false }
     if ($draft -and -not (Test-NewsLockRequestDraft -Request $request -Draft $draft)) {
         # A fresh draft may belong to the same person who held the previous one.
@@ -652,6 +709,7 @@ function Resolve-NewsLockRequestOnRelease {
     if (-not (Save-NewsLockRequest)) {
         Write-BridgeLog 'Settled news lock request could not be cleared from disk; it may be restored on the next start.' 'ERROR'
     }
+    if ((Get-JsonProp $request 'AutoGrantSuspended') -or -not (Test-NewsLockRequesterAuthorized -Request $request)) { return 0 }
     $requester = [long]$request.RequesterUserId
     Set-NewsLockReservation -UserId $requester | Out-Null
     $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
@@ -719,6 +777,15 @@ function Open-NewsTickerDraftToAll {
     # The window restarts, so the warning owes itself again to whoever holds it.
     Remove-JsonProp -Object $draft -Name 'WarnedAt'
     Remove-JsonProp -Object $draft -Name 'PublishAt'
+    $pendingRequest = $script:NewsLockRequest
+    if ($pendingRequest -and -not (Get-JsonProp $pendingRequest 'AutoGrantSuspended') -and
+        (Test-NewsLockRequestDraft -Request $pendingRequest -Draft $ownedDraft)) {
+        $hold = Get-SettingInt 'NewsLockGrantHoldSeconds' 0
+        if ($hold -gt 0 -and (Test-NewsLockRequesterAuthorized -Request $pendingRequest)) {
+            $draft['ReservedForUserId'] = [long]$pendingRequest.RequesterUserId
+            $draft['ReservedUntil'] = [datetimeoffset]::Now.AddSeconds($hold).ToString('o')
+        }
+    }
     if (-not (Save-NewsTickerDraft -Draft $draft)) { return $false }
     $script:NewsTickerDraft = $draft
     Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
@@ -733,7 +800,7 @@ function Update-NewsLockRequest {
        grant condition: an operator who has gone home cannot answer, and the
        ticker cannot wait for them. #>
     $request = $script:NewsLockRequest
-    if (-not $request) { return }
+    if (-not $request -or (Get-JsonProp $request 'AutoGrantSuspended')) { return }
     $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     if (((Get-Date) - [datetime]$request.RequestedAt).TotalMinutes -lt $minutes) { return }
     Complete-NewsLockRelease -Reason 'no reply within the window' | Out-Null

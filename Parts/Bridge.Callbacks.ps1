@@ -527,14 +527,21 @@ function Invoke-CallbackQuery {
             break
         }
         'news:lockrequest' { Request-NewsLockRelease -ChatId $chatId -UserId $userId | Out-Null; break }
-        'news:lockgrant' {
+        'news:lockgrant*' {
             $pending = $script:NewsLockRequest
-            if ($pending -and [long]$pending.OwnerUserId -eq $userId) { Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null }
+            if ($data -cmatch '^news:lockgrant:([a-f0-9]{32})$' -and $pending -and
+                [long]$pending.OwnerUserId -eq $userId -and [string](Get-JsonProp $pending 'Id') -ceq $Matches[1]) {
+                Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null
+            }
             break
         }
-        'news:lockdeny' {
+        'news:lockdeny*' {
             $pending = $script:NewsLockRequest
-            if ($pending -and [long]$pending.OwnerUserId -eq $userId) { Complete-NewsLockRelease -Denied | Out-Null }
+            if ($data -cmatch '^news:lockdeny:([a-f0-9]{32})$' -and $pending -and
+                [long]$pending.OwnerUserId -eq $userId -and [string](Get-JsonProp $pending 'Id') -ceq $Matches[1]) {
+                Complete-NewsLockRelease -Denied | Out-Null
+                if ($script:NewsLockRequest) { Send-TelegramMessage -ChatId $chatId -Text (T 'news.denySaveFailed') }
+            }
             Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
             break
         }

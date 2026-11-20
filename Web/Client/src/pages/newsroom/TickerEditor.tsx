@@ -71,12 +71,13 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
     retry: false,
     refetchInterval: ({ state }) => {
       const scheduledAt = state.data?.draft?.scheduledAt
-      if (!scheduledAt) return false
-      return Math.min(60_000, Math.max(3000, Date.parse(scheduledAt) - Date.now() + 1000))
+      if (!scheduledAt) return 10_000
+      return Math.min(10_000, Math.max(3000, Date.parse(scheduledAt) - Date.now() + 1000))
     },
   })
   const editor = status.data
   const draft = editor?.draft
+  const lock = editor?.lock
   const items = draft?.items ?? []
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize))
   const currentPage = Math.min(page, pageCount)
@@ -144,6 +145,16 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       ),
       labels: { confirm: 'تسليم المسودة', cancel: 'إلغاء' },
       onConfirm: () => void send({ action: 'handover', revision: current.revision }),
+    })
+  }
+
+  function confirmForceRelease(revision: string) {
+    modals.openConfirmModal({
+      title: 'تحرير قفل المسودة',
+      children: <Text size="sm">ستُفتح المسودة للتسلّم مع أخبارها، ويُلغى أي موعد نشر مجدول. إن كان هناك طلب قائم، تُحجز المسودة لصاحبه أولًا.</Text>,
+      labels: { confirm: 'تحرير القفل', cancel: 'رجوع' },
+      confirmProps: { color: 'orange' },
+      onConfirm: () => void send({ action: 'force_release', revision }),
     })
   }
 
@@ -234,8 +245,33 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
         {!review && !schedule && error && <Alert color="red" role="alert">{error}</Alert>}
         {editor?.state === 'locked' && (
           <Alert color="orange" title="المسودة قيد التحرير">
-            {editor.owner ? `المسودة مع ${editor.owner} الآن.` : 'المسودة مع محرّر آخر الآن.'}
-            <Button variant="subtle" size="compact-sm" onClick={() => void status.refetch()}>تحديث الحالة</Button>
+            <Stack gap="xs">
+              <Text size="sm">{editor.owner ? `المسودة مع ${editor.owner} الآن.` : 'المسودة مع محرّر آخر الآن.'}</Text>
+              {lock?.waiting && <Text size="sm" role="status">طلبك بانتظار الردّ{lock.expiresAt ? ` حتى ${formatDateTime(lock.expiresAt)}` : ''}.</Text>}
+              <Group gap="xs">
+                {lock?.canRequest && lock.revision && <Button size="compact-sm" variant="light" loading={busy}
+                  onClick={() => void send({ action: 'request_lock', revision: lock.revision })}>طلب تسليم المسودة</Button>}
+                {lock?.canForce && lock.revision && <Button size="compact-sm" variant="light" color="orange" disabled={busy}
+                  onClick={() => confirmForceRelease(lock.revision!)}>تحرير القفل</Button>}
+                <Button variant="subtle" size="compact-sm" onClick={() => void status.refetch()}>تحديث الحالة</Button>
+              </Group>
+            </Stack>
+          </Alert>
+        )}
+        {draft && lock?.response && (
+          <Alert color="blue" title="طلب تسليم المسودة">
+            <Stack gap="xs">
+              <Text size="sm">{lock.requester || 'محرّر آخر'} يطلب تسلّم المسودة. ستبقى الأخبار فيها إذا وافقت هنا.</Text>
+              {draft.scheduledAt && <Text size="sm">سيلغي التسليم موعد النشر المجدول.</Text>}
+              {lock.expiresAt && !lock.preservesAtDeadline &&
+                <Text size="sm">عند انتهاء مهلة طلب Telegram، تُرسل نسخة الأخبار إلى صاحب المسودة ويُتاح القفل للطالب.</Text>}
+              {lock.expiresAt && <Text size="sm">مهلة الردّ {formatDateTime(lock.expiresAt)}.</Text>}
+              <Group gap="xs">
+                <Button size="compact-sm" loading={busy} onClick={() => void send({ action: 'approve_lock', review: lock.response })}>تسليم المسودة</Button>
+                <Button size="compact-sm" variant="default" disabled={busy}
+                  onClick={() => void send({ action: 'deny_lock', review: lock.response })}>متابعة التحرير</Button>
+              </Group>
+            </Stack>
           </Alert>
         )}
         {draft && (

@@ -1483,6 +1483,27 @@ function Invoke-WebTickerSets {
     return @{ ok = $true; data = Get-WebTickerSetsState -Actor $actor }
 }
 
+function Get-WebTickerLockState {
+    param([long]$Actor, $Draft)
+    if (-not $Draft -or (Test-NewsTickerDraftOpen -Draft $Draft)) { return $null }
+    $owner = [long](Get-JsonProp $Draft 'OwnerUserId')
+    $request = $script:NewsLockRequest
+    $pending = $request -and (Test-NewsLockRequestDraft -Request $request -Draft $Draft)
+    if ($owner -eq $Actor -and -not $pending) { return $null }
+    $waiting = $pending -and [long]$request.RequesterUserId -eq $Actor
+    $canReply = $pending -and $owner -eq $Actor
+    return @{
+        revision = if ($owner -ne $Actor) { Get-NewsTickerDraftRevision -Draft $Draft } else { $null }
+        canRequest = $owner -gt 0 -and $owner -ne $Actor -and -not $pending
+        canForce = $owner -ne $Actor -and (Test-Admin -ChatId $Actor -UserId $Actor)
+        waiting = $waiting
+        preservesAtDeadline = $canReply -and [bool](Get-JsonProp $request 'PreserveDraft')
+        response = if ($canReply) { [string](Get-JsonProp $request 'Id') } else { $null }
+        requester = if ($canReply) { Get-NewsScreenLine (Get-UserDisplayName -UserId ([long]$request.RequesterUserId)) 64 } else { $null }
+        expiresAt = if ($waiting -or $canReply) { ([datetimeoffset]$request.RequestedAt).AddMinutes((Get-SettingInt 'NewsLockRequestMinutes' 1)).ToString('o') } else { $null }
+    }
+}
+
 function Get-WebTickerEditorState {
     param([Parameter(Mandatory)][long]$Actor, [int]$PausedPage = 1)
     $draft = Get-NewsTickerDraft
@@ -1490,6 +1511,7 @@ function Get-WebTickerEditorState {
         state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1
         canRestore = Test-NewsTickerBackupAccess -ChatId $Actor -UserId $Actor
         canPullSheet = $false
+        lock = Get-WebTickerLockState -Actor $Actor -Draft $draft
     }
     if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
         $owner = [long](Get-JsonProp $draft 'OwnerUserId')
@@ -1561,6 +1583,55 @@ function Invoke-WebTickerPaste {
     return @{ ok = $true; data = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage }
 }
 
+function Invoke-WebTickerLock {
+    param([long]$Actor, [System.Collections.IDictionary]$Arguments, [int]$PausedPage)
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $draft = Get-NewsTickerDraft
+    if ($action -eq 'force_release' -and -not (Test-Admin -ChatId $Actor -UserId $Actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_stale' } }
+    $owner = [long](Get-JsonProp $draft 'OwnerUserId')
+    $request = $script:NewsLockRequest
+    if ($action -in 'approve_lock', 'deny_lock') {
+        if ($Actor -ne $owner) { return @{ ok = $false; error = 'forbidden' } }
+        $replyTo = [string](Get-JsonProp $Arguments 'review')
+        if ($replyTo -cnotmatch '^[a-f0-9]{32}$' -or -not $request -or
+            -not (Test-NewsLockRequestDraft -Request $request -Draft $draft) -or
+            [string](Get-JsonProp $request 'Id') -cne $replyTo) {
+            return @{ ok = $false; error = 'ticker_stale' }
+        }
+        if ($action -eq 'deny_lock') {
+            Complete-NewsLockRelease -Denied | Out-Null
+            $saved = -not $script:NewsLockRequest
+        }
+        else {
+            if (-not (Test-NewsLockRequesterAuthorized -Request $request)) {
+                Complete-NewsLockRelease -Denied | Out-Null
+                return @{ ok = $false; error = 'ticker_stale' }
+            }
+            $saved = Open-NewsTickerDraftToAll -ChatId $Actor -UserId $Actor
+        }
+    }
+    else {
+        if ($owner -le 0 -or $owner -eq $Actor -or
+            (Get-NewsTickerDraftRevision -Draft $draft) -cne [string](Get-JsonProp $Arguments 'revision')) {
+            return @{ ok = $false; error = 'ticker_stale' }
+        }
+        if ($action -eq 'force_release') {
+            $saved = Open-NewsTickerDraftToAll -ChatId $Actor -UserId $Actor -Force
+        }
+        else {
+            if ($request -and (Test-NewsLockRequestDraft -Request $request -Draft $draft) -and [long]$request.RequesterUserId -ne $Actor) {
+                return @{ ok = $false; error = 'ticker_lock_pending' }
+            }
+            $saved = Request-NewsLockRelease -ChatId $Actor -UserId $Actor -FromWeb
+        }
+    }
+    if (-not $saved) { return @{ ok = $false; error = 'ticker_lock_save_failed' } }
+    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage }
+}
+
 function Invoke-WebTickerEdit {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -1570,6 +1641,9 @@ function Invoke-WebTickerEdit {
     $action = [string](Get-JsonProp $Arguments 'action')
     $pausedPage = [int](Get-JsonProp $Arguments 'pausedPage')
     if ($action -eq 'status') { return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor -PausedPage $pausedPage } }
+    if ($action -in 'request_lock', 'approve_lock', 'deny_lock', 'force_release') {
+        return Invoke-WebTickerLock -Actor $actor -Arguments $Arguments -PausedPage $pausedPage
+    }
     if ($action -eq 'start') {
         if ((Get-WebTickerEditorState -Actor $actor).state -eq 'locked') { return @{ ok = $false; error = 'ticker_locked' } }
         $started = Start-NewsTickerDraft -ChatId $actor -UserId $actor

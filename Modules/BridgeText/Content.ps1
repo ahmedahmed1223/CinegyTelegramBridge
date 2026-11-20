@@ -302,6 +302,7 @@ function Add-BridgeTextContent {
 
     $catalogue['news.clearAll'] = @{ ar = '🧹 مسح الكل'; en = '🧹 Clear everything' }
     $catalogue['news.confirmClearScheduledDraft'] = @{ ar = '⚠️ سيُمسح محتوى المسودة ويُلغى موعد نشرها. هل تؤكد؟'; en = '⚠️ The draft will be emptied and its scheduled publication cancelled. Confirm?' }
+    $catalogue['news.denySaveFailed'] = @{ ar = 'تعذّر حفظ رفض الطلب. أوقف الجسر التسليم التلقائي لهذا الطلب. أعد محاولة الرفض.'; en = 'The refusal could not be saved. Automatic handover for this request is suspended. Try refusing again.' }
 
     $catalogue['news.handOverDraft'] = @{ ar = '🤝 سلّم المسودة للتالي'; en = '🤝 Hand the draft to the next person' }
 

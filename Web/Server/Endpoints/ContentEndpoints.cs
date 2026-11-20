@@ -272,9 +272,9 @@ public static class ContentEndpoints
         {
             "forbidden" => ApiErrors.Of(403, reply.Error),
             "content_disabled" => ApiErrors.Of(404, reply.Error),
-            "ticker_stale" or "ticker_locked" or "ticker_conflict" => ApiErrors.Of(409, reply.Error),
+            "ticker_stale" or "ticker_locked" or "ticker_conflict" or "ticker_lock_pending" => ApiErrors.Of(409, reply.Error),
             "ticker_invalid" or "ticker_full" or "ticker_schedule_invalid" or "ticker_paste_invalid" or "ticker_paste_separator" => ApiErrors.Of(400, reply.Error),
-            "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "ticker_lock_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
     }

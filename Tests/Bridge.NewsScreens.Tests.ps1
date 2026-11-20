@@ -468,6 +468,7 @@ Describe 'Manual news publish notifications' {
 
 Describe 'News lock hand-over' {
     BeforeEach {
+        Mock Test-Authorized { $true }
         $script:NewsLockRequest = $null
         $script:NewsLockGrant = $null
         $script:newsLockRequestFile = Join-Path $TestDrive 'news-lock-request.json'
@@ -515,6 +516,65 @@ Describe 'News lock hand-over' {
         Complete-NewsLockRelease -Denied | Should -BeFalse
 
         $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+    }
+
+    It 'rejects an old Telegram approval after the requester asks again' {
+        Mock Confirm-TelegramCallback {}
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity {}
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $firstId = $script:NewsLockRequest.Id
+        Complete-NewsLockRelease -Denied | Should -BeFalse
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $secondId = $script:NewsLockRequest.Id
+        $callback = [pscustomobject]@{
+            id = 'lock-reply'; from = [pscustomobject]@{ id = 20 }
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 20; type = 'private' } }
+            data = "news:lockgrant:$firstId"
+        }
+        Invoke-CallbackQuery -CallbackQuery $callback
+        $script:NewsLockRequest.Id | Should -Be $secondId
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+
+        $callback.data = "news:lockgrant:$secondId"
+        Invoke-CallbackQuery -CallbackQuery $callback
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsTickerDraft | Should -BeNullOrEmpty
+    }
+
+    It 'retires an old request whose Telegram buttons cannot answer it' {
+        $script:NewsLockRequest = @{ OwnerUserId = 20; RequesterUserId = 21; RequestedAt = (Get-Date).AddHours(-1) }
+        Save-NewsLockRequest | Should -BeTrue
+        $script:NewsLockRequest = $null
+        Import-NewsLockRequest
+        Update-NewsLockRequest
+
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+    }
+
+    It 'suspends automatic grant when the owner refuses and both files are unavailable' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        Mock Save-NewsLockRequest { $false }
+        Mock Save-NewsTickerDraft { $false }
+        Complete-NewsLockRelease -Denied | Should -BeFalse
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddHours(-1)
+
+        Update-NewsLockRequest
+
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+        $script:NewsLockRequest.AutoGrantSuspended | Should -BeTrue
+    }
+
+    It 'does not release a draft after the requester loses access' {
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        Mock Test-Authorized { $false }
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddHours(-1)
+
+        Update-NewsLockRequest
+
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
         $script:NewsLockRequest | Should -BeNullOrEmpty
     }
 
@@ -588,6 +648,7 @@ Describe 'News lock hand-over' {
 
 Describe 'Handing the draft to whoever edits next' {
     BeforeEach {
+        Mock Test-Authorized { $true }
         $script:NewsLockRequest = $null
         $script:NewsLockGrant = $null
         $script:newsLockRequestFile = Join-Path $TestDrive 'news-lock-request.json'
@@ -686,6 +747,7 @@ Describe 'Handing the draft to whoever edits next' {
 
 Describe 'News lock under simultaneous requests' {
     BeforeEach {
+        Mock Test-Authorized { $true }
         $script:NewsLockRequest = $null
         $script:NewsLockGrant = $null
         $script:NewsTickerDraft = @{ OwnerUserId = 20; OwnerChatId = 20; Items = @('أ', 'ب'); UpdatedAt = (Get-Date).ToString('o') }

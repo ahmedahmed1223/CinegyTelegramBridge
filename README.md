@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.91.0
+
+Web editors can request another editor's ticker draft, answer a pending request, or adopt the draft when the reply window expires. Web handovers preserve the headlines and cancel scheduled publication. Administrators can release an occupied draft while preserving its contents. Telegram reply buttons now identify their individual request. Pending requests created before this change must be sent again so owners get working response buttons.
+
 ## Version 8.90.0
 
 The web ticker draft supports reviewed bulk paste, with duplicate and limit counts and the configured insertion order. Draft options include a permission-checked clear and an owner-confirmed discard. Editors can download a text copy before confirming. Clearing or discarding cancels the existing scheduled publication.

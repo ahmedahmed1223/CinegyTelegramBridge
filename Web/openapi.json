@@ -3377,7 +3377,8 @@
           "sheetFailed",
           "canRestore",
           "canPullSheet",
-          "paste"
+          "paste",
+          "lock"
         ],
         "type": "object",
         "properties": {
@@ -3408,8 +3409,56 @@
           },
           "paste": {
             "$ref": "#/components/schemas/TickerPastePreview"
+          },
+          "lock": {
+            "$ref": "#/components/schemas/TickerLockState"
           }
         }
+      },
+      "TickerLockState": {
+        "required": [
+          "revision",
+          "canRequest",
+          "canForce",
+          "waiting",
+          "preservesAtDeadline",
+          "response",
+          "requester",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "string",
+            "nullable": true
+          },
+          "canRequest": {
+            "type": "boolean"
+          },
+          "canForce": {
+            "type": "boolean"
+          },
+          "waiting": {
+            "type": "boolean"
+          },
+          "preservesAtDeadline": {
+            "type": "boolean"
+          },
+          "response": {
+            "type": "string",
+            "nullable": true
+          },
+          "requester": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "nullable": true
       },
       "TickerPastePreview": {
         "required": [

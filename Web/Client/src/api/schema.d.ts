@@ -2728,7 +2728,19 @@ export interface components {
             canRestore: boolean;
             canPullSheet: boolean;
             paste: components["schemas"]["TickerPastePreview"];
+            lock: components["schemas"]["TickerLockState"];
         };
+        TickerLockState: {
+            revision: string | null;
+            canRequest: boolean;
+            canForce: boolean;
+            waiting: boolean;
+            preservesAtDeadline: boolean;
+            response: string | null;
+            requester: string | null;
+            /** Format: date-time */
+            expiresAt: string | null;
+        } | null;
         TickerPastePreview: {
             review: string;
             items: string[];

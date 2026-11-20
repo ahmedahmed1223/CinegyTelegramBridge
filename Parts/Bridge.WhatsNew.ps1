@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.81.0'; Items = @('Open a ticker draft in Newsroom, edit and reorder the headlines, or hand it to the next editor. Review the list before publishing. If another system changed the live ticker, review the current headlines and choose how to publish.') },
                 @{ Version = '8.80.1'; Items = @('The web interface uses IBM Plex for text, counters and timecodes.') },
                 @{ Version = '8.80.0'; Items = @('Review the order and duration of all breaking stories or selected rows before starting a web run. The Newsroom shows what is current and next, with controls to pause, resume, advance or stop.') },
                 @{ Version = '8.79.0'; Items = @('The web interface opens on the breaking-news table. Add or edit a row using the columns from your template, move it, or delete it after confirmation.', 'Browse saved bulletins and the published ticker in Newsroom. The air board and templates have Show, Hide, and Exit controls.') },
@@ -321,6 +322,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.81.0'; Items = @('افتح مسودة شريط الأخبار من غرفة الأخبار، وعدّل الأخبار ورتّبها أو سلّمها للمحرّر التالي. راجع القائمة قبل النشر. إذا غيّر مصدر آخر الشريط المنشور، راجع أخباره واختر طريقة النشر.') },
                 @{ Version = '8.80.1'; Items = @('تستخدم واجهة الويب خط IBM Plex في النصوص والعدادات والتوقيت.') },
                 @{ Version = '8.80.0'; Items = @('من غرفة الأخبار، راجع ترتيب العواجل ومدتها قبل تشغيل الجدول كاملًا أو الصفوف المحددة. أثناء الدورة يظهر العاجل الحالي والتالي، مع أزرار الإيقاف المؤقت والاستئناف والانتقال والإيقاف.') },
                 @{ Version = '8.79.0'; Items = @('يفتح الموقع على جدول العواجل. أضف عاجلًا أو عدّل صفّه في الأعمدة المأخوذة من قالبك، ثم احفظه. ويمكن تغيير ترتيب الصف وحذفه بعد التأكيد.', 'تصفّح الموجزات المحفوظة والشريط المنشور في «غرفة الأخبار»، واعرض القوالب أو أخفها من صفحات القوالب والهواء.') },

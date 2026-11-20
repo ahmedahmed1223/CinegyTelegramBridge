@@ -12,9 +12,11 @@ function Get-NewsTickerConfiguredSnapshot {
 }
 
 function Save-NewsTickerDraft {
-    if (-not $script:NewsTickerDraft) { return $false }
+    param($Draft = $script:NewsTickerDraft)
+    if (-not $Draft) { return $false }
+    $temp = $null
     try {
-        $json = $script:NewsTickerDraft | ConvertTo-Json -Depth 8
+        $json = $Draft | ConvertTo-Json -Depth 8
         $parent = Split-Path -Parent $script:newsDraftFile
         if (-not (Test-Path -LiteralPath $parent)) { [IO.Directory]::CreateDirectory($parent) | Out-Null }
         $temp = "$script:newsDraftFile.$([guid]::NewGuid().ToString('N')).tmp"
@@ -22,6 +24,41 @@ function Save-NewsTickerDraft {
         [IO.File]::Move($temp, $script:newsDraftFile, $true)
         return $true
     } catch { Write-BridgeLog "Could not save news draft: $($_.Exception.Message)" 'ERROR'; return $false }
+    finally { if ($temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
+}
+
+function Copy-NewsTickerDraft {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Draft)
+    $copy = [ordered]@{}
+    foreach ($key in $Draft.Keys) { $copy[$key] = $Draft[$key] }
+    return $copy
+}
+
+function Get-NewsTickerDraftRevision {
+    param([Parameter(Mandatory)]$Draft)
+    # Legacy Telegram edits can change contents even without changing a date.
+    $revision = [ordered]@{
+        id = Get-JsonProp $Draft 'Id'; updatedAt = Get-JsonProp $Draft 'UpdatedAt'
+        owner = Get-JsonProp $Draft 'OwnerUserId'; baseHash = Get-JsonProp $Draft 'BaseHash'
+        scheduledAt = Get-JsonProp $Draft 'PublishAt'; items = @(Get-JsonProp $Draft 'Items')
+    } | ConvertTo-Json -Compress
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($revision)))
+}
+
+function Test-NewsTickerConfirmation {
+    param([long]$UserId, [string]$Token)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    return $draft -and $Token -cmatch '^[A-F0-9]{20}$' -and (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20) -ceq $Token
+}
+
+function Set-NewsTickerDraftItems {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Draft, [string[]]$Items)
+    $candidate = Copy-NewsTickerDraft -Draft $Draft
+    $candidate.Items = @($Items)
+    $candidate.UpdatedAt = (Get-Date).ToString('o')
+    if (-not (Save-NewsTickerDraft -Draft $candidate)) { return $false }
+    $script:NewsTickerDraft = $candidate
+    return $true
 }
 
 function Import-NewsTickerDraft {
@@ -32,7 +69,7 @@ function Import-NewsTickerDraft {
 
 function Get-NewsTickerDraft { param([long]$UserId = 0)
     if (-not $script:NewsTickerDraft) { return $null }
-    if ($UserId -and [long]$script:NewsTickerDraft.OwnerUserId -ne $UserId) { return $null }
+    if ($UserId -and [long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId') -ne $UserId) { return $null }
     return $script:NewsTickerDraft
 }
 
@@ -85,9 +122,9 @@ function Clear-NewsLockReservation { $script:NewsLockGrant = $null }
 function Start-NewsTickerDraft {
     param([long]$ChatId,[long]$UserId)
     $existing = $script:NewsTickerDraft
-    if ($existing -and [long]$existing.OwnerUserId -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$existing;Error=''} }
+    if ($existing -and [long](Get-JsonProp $existing 'OwnerUserId') -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$existing;Error=''} }
     if ($existing -and -not (Test-NewsTickerDraftOpen -Draft $existing)) {
-        return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockedBy' $(Format-UserAuditActor -UserId ([long]$existing.OwnerUserId)))}
+        return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockedBy' $(Format-UserAuditActor -UserId ([long](Get-JsonProp $existing 'OwnerUserId'))))}
     }
     # Past here the slot is this caller's to take: either it is empty, or it
     # holds a draft its owner opened to whoever comes next. The reservation is
@@ -98,11 +135,11 @@ function Start-NewsTickerDraft {
         $secondsLeft = [math]::Max(1, [int]([datetime]$reservation.ExpiresAt - (Get-Date)).TotalSeconds)
         return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.lockHeldFor' $(Format-UserAuditActor -UserId ([long]$reservation.UserId)) $(Get-ArabicCountNoun -Count $secondsLeft -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))}
     }
-    if ($reservation) { Clear-NewsLockReservation }
     if ($existing) {
         # Adopted with its items. The outgoing editor chose to leave the list
         # behind rather than take it with them, so the next one continues it
         # instead of starting again from whatever is on air.
+        $existing = Copy-NewsTickerDraft -Draft $existing
         $existing['OwnerUserId'] = $UserId
         $existing['OwnerChatId'] = $ChatId
         $existing['UpdatedAt'] = (Get-Date).ToString('o')
@@ -112,16 +149,18 @@ function Start-NewsTickerDraft {
         # The idle-expiry warning is addressed to an owner, and this draft has
         # a new one who has not had their window yet.
         Remove-JsonProp -Object $existing -Name 'WarnedAt'
-        if (-not (Save-NewsTickerDraft)) {
-            Write-BridgeLog 'Adopted news draft could not be saved; it may revert to open on the next start.' 'ERROR'
-        }
+        if (-not (Save-NewsTickerDraft -Draft $existing)) { return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.draftSaveFailed')} }
+        $script:NewsTickerDraft = $existing
+        if ($reservation) { Clear-NewsLockReservation }
         Add-AuditEntry (T 'news.adoptedOpenDraft' $(Format-UserAuditActor -UserId $UserId) $(Get-ArabicCountNoun -Count (@($existing.Items).Count) -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
         return [pscustomobject]@{Success=$true;Draft=$existing;Error=''}
     }
     $snapshot = Get-NewsTickerConfiguredSnapshot
     if (-not $snapshot.Success) { return [pscustomobject]@{Success=$false;Draft=$null;Error=$snapshot.Error} }
-    $script:NewsTickerDraft = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
-    Save-NewsTickerDraft | Out-Null
+    $candidate = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
+    if (-not (Save-NewsTickerDraft -Draft $candidate)) { return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.draftSaveFailed')} }
+    $script:NewsTickerDraft = $candidate
+    if ($reservation) { Clear-NewsLockReservation }
     return [pscustomobject]@{Success=$true;Draft=$script:NewsTickerDraft;Error=''}
 }
 
@@ -169,9 +208,9 @@ function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
     # is the one that matters, and appending buried it behind however many
     # older items the draft already held. NewNewsItemAtTop turns it back into
     # an append for a rundown that is ordered by hand.
-    $draft.Items = if (Get-Setting 'NewNewsItemAtTop') { @($parsed.Items) + @($draft.Items) }
+    $items = if (Get-Setting 'NewNewsItemAtTop') { @($parsed.Items) + @($draft.Items) }
     else { @($draft.Items) + @($parsed.Items) }
-    $draft.UpdatedAt = (Get-Date).ToString('o'); return (Save-NewsTickerDraft)
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
 }
 
 function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text)
@@ -179,35 +218,35 @@ function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$T
     if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
     $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
     if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
-    $items = @($draft.Items)
+    $items = @($draft.Items | ForEach-Object { [string]$_ })
     $items[$Index] = $parsed.Items[0]
-    $draft.Items = $items
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    return (Save-NewsTickerDraft)
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
+}
+
+function Test-NewsTickerDeleteAccess {
+    param([long]$ChatId, [long]$UserId)
+    return (Test-Admin -ChatId $ChatId -UserId $UserId) -or (Get-Setting 'AllowOperatorsDeleteNews')
 }
 
 function Remove-NewsTickerDraftItem { param([long]$ChatId,[long]$UserId,[int]$Index)
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
-    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -and -not (Get-Setting 'AllowOperatorsDeleteNews')) { return $false }
+    if (-not (Test-NewsTickerDeleteAccess -ChatId $ChatId -UserId $UserId)) { return $false }
     $items = [Collections.Generic.List[string]]::new()
     @($draft.Items) | ForEach-Object { $items.Add([string]$_) }
     $items.RemoveAt($Index)
-    $draft.Items = @($items)
-    return (Save-NewsTickerDraft)
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items.ToArray())
 }
 
 function Move-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[int]$Delta)
     $draft = Get-NewsTickerDraft -UserId $UserId
     $target = $Index + $Delta
     if (-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count) { return $false }
-    $items = @($draft.Items)
+    $items = @($draft.Items | ForEach-Object { [string]$_ })
     $swap = $items[$target]
     $items[$target] = $items[$Index]
     $items[$Index] = $swap
-    $draft.Items = $items
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    return (Save-NewsTickerDraft)
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
 }
 
 function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[ValidateSet('replace','append')][string]$Mode='replace')
@@ -278,25 +317,32 @@ function Save-NewsSheetItems {
     }
 }
 
-function Publish-NewsTickerDraft { param([long]$UserId, [ValidateSet('draft', 'scheduled')][string]$Source = 'draft')
+function Publish-NewsTickerDraft { param([long]$UserId, [ValidateSet('draft', 'scheduled')][string]$Source = 'draft', [string[]]$RebasedItems, [AllowEmptyString()][string]$RebasedHash)
     $draft = Get-NewsTickerDraft -UserId $UserId
     # Carries Conflict so every caller can branch on it uniformly; without it
     # $result.Conflict throws under StrictMode on this path.
     if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error=(T 'news.noDraftOfYours')} }
-    $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items @($draft.Items) -ExpectedHash ([string]$draft.BaseHash) -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
+    $items = @($draft.Items)
+    $baseHash = [string]$draft.BaseHash
+    if ($PSBoundParameters.ContainsKey('RebasedHash')) {
+        $items = @($RebasedItems)
+        $baseHash = $RebasedHash
+    }
+    $result = Publish-NewsTickerFile -Path ([string](Get-Setting 'NewsFilePath')) -Items $items -ExpectedHash $baseHash -Separator ([string](Get-Setting 'NewsItemSeparator')) -BackupDirectory $script:newsBackupDirectory -BackupKeepFiles (Get-SettingInt 'NewsBackupKeepFiles' 1) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if ($result.Success) {
-        Add-AuditEntry (T 'news.publishedAudit' $(Format-UserAuditActor -UserId $UserId) $(@($draft.Items).Count))
-        Write-NewsPublishRecord -UserId $UserId -ItemCount (@($draft.Items).Count) -Source $Source
+        Add-AuditEntry (T 'news.publishedAudit' $(Format-UserAuditActor -UserId $UserId) $items.Count)
+        Write-NewsPublishRecord -UserId $UserId -ItemCount $items.Count -Source $Source
         # Mirror to the sheet after the ticker is safely on air, never before.
         # A sheet that refuses the write must not undo a publish that already
         # succeeded, so this reports and rolls nothing back.
-        $mirror = Save-NewsSheetItems -Items @($draft.Items)
+        $mirror = Save-NewsSheetItems -Items $items
+        $result | Add-Member -NotePropertyName 'SheetAttempted' -NotePropertyValue ([bool]$mirror.Attempted) -Force
         $result | Add-Member -NotePropertyName 'SheetSaved' -NotePropertyValue ([bool]$mirror.Success) -Force
         $result | Add-Member -NotePropertyName 'SheetError' -NotePropertyValue ([string]$mirror.Error) -Force
         if ($mirror.Attempted -and -not $mirror.Success) {
             Write-BridgeLog "News published but the sheet write-back failed: $($mirror.Error)" 'WARN'
         }
-        Send-NewsPublishNotice -UserId $UserId -ItemCount (@($draft.Items).Count)
+        Send-NewsPublishNotice -UserId $UserId -ItemCount $items.Count
         Remove-NewsTickerDraft
     }
 
@@ -373,24 +419,23 @@ function Resolve-NewsPublishConflict {
     #>
     param(
         [Parameter(Mandatory)][long]$UserId,
-        [Parameter(Mandatory)][ValidateSet('replace', 'append')][string]$Mode
+        [Parameter(Mandatory)][ValidateSet('replace', 'append')][string]$Mode,
+        [AllowEmptyString()][string]$ExpectedHash
     )
     $draft = Get-NewsTickerDraft -UserId $UserId
     if (-not $draft) { return [pscustomobject]@{Success=$false;Conflict=$false;Error=(T 'news.noDraftOfYours')} }
 
     $live = Get-NewsTickerConfiguredSnapshot
     if (-not $live.Success) { return [pscustomobject]@{Success=$false;Conflict=$false;Error=$live.Error} }
+    if ($PSBoundParameters.ContainsKey('ExpectedHash') -and $ExpectedHash -cne [string]$live.Hash) {
+        return [pscustomobject]@{Success=$false;Conflict=$true;Error=''}
+    }
 
     $items = if ($Mode -eq 'append') { @($live.Items) + @($draft.Items) } else { @($draft.Items) }
-    # Rebase onto the hash we just read, so the publish below is checked
-    # against the file as it is now rather than as it was yesterday.
-    $draft.BaseHash = $live.Hash
-    $draft.Items = @($items)
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    Save-NewsTickerDraft | Out-Null
-
-    Write-BridgeLog "User $UserId rebased the news draft onto the live file ($Mode, $(@($items).Count) item(s))" 'WARN'
-    return (Publish-NewsTickerDraft -UserId $UserId)
+    # The checked candidate goes straight to the publisher. If another write
+    # wins, the editor keeps the original draft and can review both again.
+    Write-BridgeLog "User $UserId attempted news conflict resolution ($Mode, $(@($items).Count) item(s))" 'WARN'
+    return (Publish-NewsTickerDraft -UserId $UserId -RebasedItems $items -RebasedHash ([string]$live.Hash))
 }
 
 function Save-NewsLockRequest {
@@ -459,6 +504,10 @@ function Request-NewsLockRelease {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'news.draftAlreadyOpen') -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
         return $false
     }
+    if (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId'))) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'news.webEditorHandover')
+        return $false
+    }
 
     $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     $existing = $script:NewsLockRequest
@@ -523,6 +572,7 @@ function Complete-NewsLockRelease {
     }
 
     $draft = Get-NewsTickerDraft
+    if ($draft -and (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId')))) { return $false }
     if ($draft -and [long]$draft.OwnerUserId -ne [long]$request.OwnerUserId) {
         # The draft changed hands while the window was open - the owner
         # published or cancelled, and somebody uninvolved started a fresh one.
@@ -619,9 +669,13 @@ function Open-NewsTickerDraftToAll {
         editor needs, so the draft stays where it is and simply stops
         belonging to anyone.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Force)
     $draft = Get-NewsTickerDraft -UserId $UserId
+    if ($Force -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { $draft = Get-NewsTickerDraft }
     if (-not $draft) { return $false }
+    $owner = [long](Get-JsonProp $draft 'OwnerUserId')
+    $ownerChat = [long](Get-JsonProp $draft 'OwnerChatId')
+    $draft = Copy-NewsTickerDraft -Draft $draft
     $count = @($draft.Items).Count
     $draft['IsOpen'] = $true
     $draft['OwnerUserId'] = 0
@@ -629,21 +683,21 @@ function Open-NewsTickerDraftToAll {
     # Kept so the draft still has somebody to talk to. Nobody owns it, but the
     # expiry warning and the hand-back are addressed to a person, and without
     # this an unclaimed draft would die in silence with its items.
-    $draft['HandedOverBy'] = $UserId
-    $draft['HandedOverChatId'] = $ChatId
+    $draft['HandedOverBy'] = $owner
+    $draft['HandedOverChatId'] = $ownerChat
     $draft['HandedOverAt'] = (Get-Date).ToString('o')
     # A fresh idle window for whoever takes it: the expiry clock measures how
     # long a draft sat untouched, and the next editor has not had their turn.
     $draft['UpdatedAt'] = (Get-Date).ToString('o')
     # The window restarts, so the warning owes itself again to whoever holds it.
     Remove-JsonProp -Object $draft -Name 'WarnedAt'
-    if (-not (Save-NewsTickerDraft)) {
-        Write-BridgeLog 'Opened news draft could not be saved; it may revert to its owner on the next start.' 'ERROR'
-    }
+    Remove-JsonProp -Object $draft -Name 'PublishAt'
+    if (-not (Save-NewsTickerDraft -Draft $draft)) { return $false }
+    $script:NewsTickerDraft = $draft
     Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
     Add-AuditEntry (T 'news.draftOpenedAudit' $(Format-UserAuditActor -UserId $UserId) $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
-    Resolve-NewsLockRequestOnRelease -OwnerUserId $UserId `
-        -Text (T 'news.draftOpened' $(Get-UserDisplayName -UserId $UserId)) | Out-Null
+    Resolve-NewsLockRequestOnRelease -OwnerUserId $owner `
+        -Text (T 'news.draftOpened' $(Get-UserDisplayName -UserId $owner)) | Out-Null
     return $true
 }
 
@@ -1003,7 +1057,9 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
     }
     else {
         $rows += , @(@{text=(T 'news.with' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)));callback_data='news:refresh'})
-        $rows += , @(@{text=(T 'news.requestUnlock');callback_data='news:lockrequest'})
+        if (-not (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId')))) {
+            $rows += , @(@{text=(T 'news.requestUnlock');callback_data='news:lockrequest'})
+        }
         if (Test-Admin -ChatId $ChatId -UserId $UserId) {
             $rows += , @(@{text=(T 'news.forceUnlock');callback_data='news:unlock'})
         }
@@ -1059,8 +1115,9 @@ function Show-NewsTickerDeleteConfirm {
     $item = [string]$draft.Items[$Index]
     $preview = if ($item.Length -gt 200) { $item.Substring(0, 200) + '…' } else { $item }
     $text = (T 'news.confirmDelete' $($Index + 1) $(@($draft.Items).Count) $preview)
+    $revision = (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20)
     $markup = @{inline_keyboard=@(
-            , @((New-BridgeButton -Text (T 'news.yesDelete') -CallbackData "news:delete:$Index" -Style 'danger'),
+            , @((New-BridgeButton -Text (T 'news.yesDelete') -CallbackData "news:delete:${Index}:$revision" -Style 'danger'),
                 (New-BridgeButton -Text (T 'common.cancel') -CallbackData "news:item:$Index")))}
     if ($MessageId -gt 0 -and (Edit-TelegramMessageText -ChatId $ChatId -MessageId $MessageId -Text $text -ReplyMarkup $markup)) { return $true }
     Send-TelegramMessage -ChatId $ChatId -Text $text -ReplyMarkup $markup
@@ -2139,6 +2196,10 @@ function Complete-NewsTickerAddText { param([long]$ChatId,[long]$UserId,[string]
 
 function Complete-NewsTickerEditText { param([long]$ChatId,[long]$UserId,[string]$Value)
     $state=Get-PendingState -ChatId $ChatId;if(-not $state -or $state.Mode-ne'news_edit_text'){return};$index=[int]$state.Index;Clear-PendingState -ChatId $ChatId
+    if (-not (Test-NewsTickerConfirmation -UserId $UserId -Token ([string](Get-JsonProp $state 'Revision')))) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'news.draftChanged')
+        return
+    }
     $ok=Update-NewsTickerDraftItem -UserId $UserId -Index $index -Text $Value
     Send-TelegramMessage -ChatId $chatId -Text $(if($ok){(T 'news.itemUpdated')}else{(T 'news.editFailed')});Show-NewsTickerReorderScreen -ChatId $chatId -UserId $UserId
 }

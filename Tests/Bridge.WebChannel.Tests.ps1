@@ -390,6 +390,79 @@ Describe 'Web channel: the pipe' {
         $reply.data.items[0].title | Should -Be 'خبر 21'
     }
 
+    It 'shares the ticker draft with the bot and protects its ownership, revision, and publication' {
+        $webTickerFile = Join-Path $TestDrive 'web-edit-news.txt'
+        Set-Content -LiteralPath $webTickerFile -Value 'أول | ثاني'
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { $webTickerFile } -ParameterFilter { $Name -eq 'NewsFilePath' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsDeleteNews' }
+        Mock Test-Authorized { $UserId -in @(4321, 4322) }
+        Mock Test-Admin { $false }
+        Mock Send-TelegramMessage {}
+        Mock Save-NewsSheetItems { @{ Success = $false; Attempted = $false; Error = '' } }
+        Mock Send-NewsPublishNotice {}
+        Mock Write-NewsPublishRecord {}
+        $previousDraft = $script:NewsTickerDraft
+        $previousFile = $script:newsDraftFile
+        $previousBackup = $script:newsBackupDirectory
+        $requestTicker = {
+            param($arguments)
+            $line = @{ op = 'ticker.edit'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $script:NewsTickerDraft = $null
+            $script:newsDraftFile = Join-Path $TestDrive 'web-edit-draft.json'
+            $script:newsBackupDirectory = Join-Path $TestDrive 'web-edit-backups'
+
+            $started = & $requestTicker @{ actor = 4321; action = 'start' }
+            $started.ok | Should -BeTrue
+            $started.data.draft.items | Should -Be @('أول', 'ثاني')
+            (& $requestTicker @{ actor = 4322; action = 'start' }).error | Should -Be 'ticker_locked'
+            $other = & $requestTicker @{ actor = 4322; action = 'status' }
+            $other.data.state | Should -Be 'locked'
+            $other.data.draft | Should -BeNullOrEmpty
+            (& $requestTicker @{ actor = 999; action = 'status' }).error | Should -Be 'forbidden'
+
+            $revision = $started.data.draft.revision
+            Update-NewsTickerDraftItem -UserId 4321 -Index 1 -Text 'حرره البوت' | Should -BeTrue
+            (& $requestTicker @{ actor = 4321; action = 'remove'; revision = $revision; index = 0 }).error | Should -Be 'ticker_stale'
+            $mine = (& $requestTicker @{ actor = 4321; action = 'status' }).data.draft
+            (& $requestTicker @{ actor = 4321; action = 'remove'; revision = $mine.revision; index = 0 }).error | Should -Be 'forbidden'
+            $moved = & $requestTicker @{ actor = 4321; action = 'up'; revision = $mine.revision; index = 1 }
+            $moved.data.draft.items | Should -Be @('حرره البوت', 'أول')
+
+            $released = & $requestTicker @{ actor = 4321; action = 'handover'; revision = $moved.data.draft.revision }
+            $released.data.state | Should -Be 'open'
+            $taken = & $requestTicker @{ actor = 4322; action = 'start' }
+            $taken.data.draft.items | Should -Be @('حرره البوت', 'أول')
+            $publish = @{ actor = 4322; action = 'publish'; revision = $taken.data.draft.revision }
+
+            Set-Content -LiteralPath $webTickerFile -Value 'تغيير خارجي'
+            (& $requestTicker $publish).error | Should -Be 'ticker_conflict'
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('تغيير خارجي')
+            $review = & $requestTicker @{ actor = 4322; action = 'review_conflict'; revision = $taken.data.draft.revision }
+            $review.data.conflict.items | Should -Be @('تغيير خارجي')
+            $publish.action = 'append'
+            $publish.review = $review.data.conflict.review
+            Set-Content -LiteralPath $webTickerFile -Value 'تغيير أحدث'
+            (& $requestTicker $publish).error | Should -Be 'ticker_conflict'
+            $review = & $requestTicker @{ actor = 4322; action = 'review_conflict'; revision = $taken.data.draft.revision }
+            $publish.review = $review.data.conflict.review
+            $published = & $requestTicker $publish
+            $published.ok | Should -BeTrue
+            $published.data.state | Should -Be 'available'
+            (Get-NewsTickerConfiguredSnapshot).Items | Should -Be @('تغيير أحدث', 'حرره البوت', 'أول')
+            Test-Path -LiteralPath $script:newsDraftFile | Should -BeFalse
+        }
+        finally {
+            $script:NewsTickerDraft = $previousDraft
+            $script:newsDraftFile = $previousFile
+            $script:newsBackupDirectory = $previousBackup
+        }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

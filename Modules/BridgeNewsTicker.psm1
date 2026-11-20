@@ -149,9 +149,8 @@ function Get-NewsTickerFileHash {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
-function Read-NewsTickerUtf8 {
-    param([Parameter(Mandatory)][string]$Path)
-    $bytes = [IO.File]::ReadAllBytes($Path)
+function ConvertFrom-NewsTickerUtf8 {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
     $offset = if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { 3 } else { 0 }
     $decoder = [Text.UTF8Encoding]::new($false, $true)
     return $decoder.GetString($bytes, $offset, $bytes.Length - $offset)
@@ -169,13 +168,14 @@ function Get-NewsTickerSnapshot {
         return [pscustomobject]@{Success=$true;Exists=$false;Items=@();Hash='';LastWriteTime=$null;Error='';EmptyCount=0;DuplicateCount=0}
     }
     try {
-        $text = Read-NewsTickerUtf8 -Path $Path
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        $text = ConvertFrom-NewsTickerUtf8 -Bytes $bytes
         if ($text.IndexOf([char]0) -ge 0) { throw 'الملف يحتوي بيانات ثنائية غير صالحة.' }
         $parsed = ConvertFrom-NewsTickerText -Text $text -Separator $Separator -MaxItemLength $MaxItemLength -MaxItems $MaxItems
         if (-not $parsed.Success) { throw ($parsed.Errors -join ' ') }
         $item = Get-Item -LiteralPath $Path
         return [pscustomobject]@{
-            Success=$true;Exists=$true;Items=@($parsed.Items);Hash=(Get-NewsTickerFileHash -Path $Path)
+            Success=$true;Exists=$true;Items=@($parsed.Items);Hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
             LastWriteTime=$item.LastWriteTime;Error='';EmptyCount=$parsed.EmptyCount;DuplicateCount=$parsed.DuplicateCount
         }
     }
@@ -228,9 +228,17 @@ function Publish-NewsTickerFile {
         if (-not $verify.Success -or (@($verify.Items) -join "`u{001F}") -cne (@($validation.Items) -join "`u{001F}")) {
             throw 'فشل التحقق من ملف الأخبار المؤقت.'
         }
-        [IO.File]::Move($temporary, $Path, $true)
-        Remove-OldNewsTickerBackups -BackupDirectory $BackupDirectory -KeepFiles $BackupKeepFiles
-        return [pscustomobject]@{Success=$true;Conflict=$false;BackupPath=$backupPath;Hash=(Get-NewsTickerFileHash -Path $Path);Error=''}
+        # Copying the backup and preparing the replacement can take time on a
+        # share. A writer that ignores our checks can still win between the
+        # last hash and rename, but edits during preparation are refused.
+        $latestHash = Get-NewsTickerFileHash -Path $Path
+        if ($latestHash -ne $ExpectedHash) {
+            return [pscustomobject]@{Success=$false;Conflict=$true;BackupPath=$backupPath;Hash=$latestHash;Error='تغير ملف الأخبار أثناء تجهيز النشر.'}
+        }
+        [IO.File]::Move($temporary, $Path, ($latestHash -ne ''))
+        try { Remove-OldNewsTickerBackups -BackupDirectory $BackupDirectory -KeepFiles $BackupKeepFiles }
+        catch { Write-Warning 'The ticker was published, but old backups could not be cleaned up.' }
+        return [pscustomobject]@{Success=$true;Conflict=$false;BackupPath=$backupPath;Hash=$verify.Hash;Error=''}
     }
     catch {
         return [pscustomobject]@{Success=$false;Conflict=$false;BackupPath=$backupPath;Hash=$currentHash;Error=$_.Exception.Message}

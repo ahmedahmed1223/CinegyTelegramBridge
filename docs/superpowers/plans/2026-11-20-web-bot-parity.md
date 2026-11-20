@@ -9,14 +9,15 @@
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, automatic run preview and playback, pause, resume, advance and stop retry | Timing settings, rehearsal, single-story and timed manual playback |
 | Bulletins | Saved library, row counts and on-air indicators | Row editor, images and paste, design and timing, revisions, preview, run control and schedules |
-| Ticker | Paged published list | Shared draft editor and handover, reorder and pause, review and publish, scheduled publish, sets, backups and Google Sheets sync |
+| Ticker | Paged published list, shared draft lock and handover, editing and reordering, reviewed publication and conflict resolution | Pause and resume headlines, scheduled publish controls, sets, backups and Google Sheets sync controls |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status and connectivity | Template and material schedule, watch page, incident and operation history, notifications, reports and exports |
 | Administration | Web accounts and sessions | Bot access requests and roles, settings, health tools, audit and announcements |
 
 ## Newsroom implementation order
 
-- [ ] Map ticker draft, lock, reorder and publish commands to `Parts/Bridge.News.ps1`. Use the saved draft identity and revision during editing. Add pipe tests for a competing editor, a stale draft, a changed published file, and a successful publish into temporary storage.
+- [x] Map ticker draft, lock, reorder, handover and publish commands to `Parts/Bridge.News.ps1`. Test competing editors, stale edits, publication conflicts and a successful publish into temporary storage.
+- [ ] Add controls for ticker scheduling, paused headlines, saved sets, backup restore and sheet sync.
 - [x] Use the template fields as urgent table columns. Save inline edits with the board revision and stable item IDs, and keep extra fields in playback.
 - [x] Use the existing urgent planner and playback engine for review, start and sequence controls. Test revoked access, a changed board between review and confirm, and a failed stop on a simulated scene.
 - [ ] Expose urgent timing settings, rehearsal and individual show actions through their existing bridge policies.

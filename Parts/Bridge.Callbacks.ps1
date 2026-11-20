@@ -397,17 +397,23 @@ function Invoke-CallbackQuery {
             $draft=Get-NewsTickerDraft -UserId $userId;if(-not $draft){Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId;break}
             # The words, not a count: an editor about to put copy on air is
             # deciding whether these are the right ones.
-            $publishMarkup = @{inline_keyboard=@(,@(@{text=(T 'reply.yesPublish');callback_data='news:publishconfirm';style='success'},@{text=(T 'reply.cancelWord');callback_data='news:refresh'}))}
+            $revision = (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20)
+            $publishAction = "news:publishconfirm:$revision"
+            $publishMarkup = @{inline_keyboard=@(,@(@{text=(T 'reply.yesPublish');callback_data=$publishAction;style='success'},@{text=(T 'reply.cancelWord');callback_data='news:refresh'}))}
             $publishBlocks = @(Get-NewsPublishReviewBlocks -UserId $userId)
             if ($publishBlocks.Count -gt 0 -and (Send-TelegramRichMessage -ChatId $chatId -Blocks $publishBlocks -ReplyMarkup $publishMarkup)) { break }
             $publishConfirm = @{ inline_keyboard = @(, @(
-                        @{ text = (T 'reply.yesPublish'); callback_data = 'news:publishconfirm'; style = 'success' }
+                        @{ text = (T 'reply.yesPublish'); callback_data = $publishAction; style = 'success' }
                         @{ text = (T 'reply.cancelWord'); callback_data = 'news:refresh' }
                     )) }
             Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmPublish' $(@($draft.Items).Count)) -ReplyMarkup $publishConfirm
             break
         }
-        'news:publishconfirm' {
+        'news:publishconfirm*' {
+            if ($data -notlike 'news:publishconfirm:*' -or -not (Test-NewsTickerConfirmation -UserId $userId -Token (Get-CallbackArg $data 'news:publishconfirm:'))) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.draftChanged')
+                break
+            }
             $result=Publish-NewsTickerDraft -UserId $userId
             # A conflict is not a failure to report and forget: it means the
             # live file moved on, and the operator's only way forward is a
@@ -419,8 +425,8 @@ function Invoke-CallbackQuery {
             }
             elseif ($result.Conflict) {
                 Send-TelegramMessage -ChatId $chatId -Text (T 'cb.newsFileChangedOutside') -ReplyMarkup @{inline_keyboard=@(
-                        , @(@{text=(T 'reply.appendMine');callback_data='news:rebaseappend'})
-                        , @(@{text=(T 'reply.replaceAll');callback_data='news:rebasereplace';style='danger'})
+                        , @(@{text=(T 'reply.appendMine');callback_data="news:rebaseappend:$(Get-CallbackArg $data 'news:publishconfirm:')"})
+                        , @(@{text=(T 'reply.replaceAll');callback_data="news:rebasereplace:$(Get-CallbackArg $data 'news:publishconfirm:')";style='danger'})
                         , @(@{text=(T 'reply.cancel');callback_data='news:refresh'}))}
             }
             else {
@@ -439,12 +445,14 @@ function Invoke-CallbackQuery {
         }
         'news:edit:*' {
             $i = [int](Get-CallbackArg $data 'news:edit:')
-            Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date)}
             # The item being replaced, so a one-word correction is not a
             # retyped headline. This screen said only (T 'reply.sendReplacementColon')
             # and showed nothing at all.
             $draft = Get-NewsTickerDraft -UserId $userId
-            $current = if ($draft -and $i -ge 0 -and $i -lt @($draft.Items).Count) { [string]@($draft.Items)[$i] } else { '' }
+            if (-not $draft -or $i -lt 0 -or $i -ge @($draft.Items).Count) { break }
+            $revision = (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20)
+            Set-PendingState -ChatId $chatId -State @{Mode='news_edit_text';UserId=$userId;Index=$i;StartedAt=(Get-Date);Revision=$revision}
+            $current = [string]@($draft.Items)[$i]
             Send-BridgeTextEditPrompt -ChatId $chatId -Prompt (T 'reply.sendReplacement') -Current $current -CancelData 'news:reorder'
             break
         }
@@ -453,7 +461,12 @@ function Invoke-CallbackQuery {
             break
         }
         'news:delete:*' {
-            $i = [int](Get-CallbackArg $data 'news:delete:')
+            $parts = (Get-CallbackArg $data 'news:delete:') -split ':', 2
+            $i = -1
+            if ($parts.Count -ne 2 -or -not [int]::TryParse($parts[0], [ref]$i) -or -not (Test-NewsTickerConfirmation -UserId $userId -Token $parts[1])) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.draftChanged')
+                break
+            }
             # The bounds live in Remove-NewsTickerDraftItem, which refuses an
             # index outside the draft - so this reads its answer rather than
             # repeating the check and risking the two drifting apart.
@@ -487,13 +500,21 @@ function Invoke-CallbackQuery {
             if(Move-NewsTickerDraftItem -UserId $userId -Index $i -Delta 1){Show-NewsTickerItemScreen -ChatId $chatId -UserId $userId -Index ($i+1) -MessageId ([int]$msgObj.message_id)}
             else{Send-TelegramMessage -ChatId $chatId -Text (T 'reply.alreadyLast')};break
         }
-        'news:rebaseappend' {
+        'news:rebaseappend*' {
+            if ($data -notlike 'news:rebaseappend:*' -or -not (Test-NewsTickerConfirmation -UserId $userId -Token (Get-CallbackArg $data 'news:rebaseappend:'))) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.draftChanged')
+                break
+            }
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode append
             Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
                 -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.appended') } else { (T 'cb.notPublished' $($result.Error)) })
             break
         }
-        'news:rebasereplace' {
+        'news:rebasereplace*' {
+            if ($data -notlike 'news:rebasereplace:*' -or -not (Test-NewsTickerConfirmation -UserId $userId -Token (Get-CallbackArg $data 'news:rebasereplace:'))) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.draftChanged')
+                break
+            }
             $result = Resolve-NewsPublishConflict -UserId $userId -Mode replace
             Send-TelegramMessage -ChatId $chatId -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId) `
                 -Text $(if ($result.Success) { Get-NewsPublishOutcomeText -Result $result -Lead (T 'reply.replaced') } else { (T 'cb.notPublished' $($result.Error)) })
@@ -513,6 +534,12 @@ function Invoke-CallbackQuery {
         }
         'news:unlock' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
+                $hold = Get-NewsTickerDraft
+                if ($hold -and (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $hold 'OwnerUserId')))) {
+                    Open-NewsTickerDraftToAll -ChatId $chatId -UserId $userId -Force | Out-Null
+                    Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+                    break
+                }
                 # Four pieces of one act - drop the draft, release the lock,
                 # forget any queued request, and redraw - so a half-done
                 # unlock cannot leave a reservation nobody can see or clear.

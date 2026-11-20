@@ -228,6 +228,9 @@ function Add-BridgeTextContent {
     $catalogue['news.draftActive'] = @{ ar = 'توجد مسودة نشطة الآن — انشرها أو أغلقها أولًا.'; en = 'A draft is open right now — publish or close it first.' }
 
     $catalogue['news.noDraftOfYours'] = @{ ar = 'لا توجد مسودة مملوكة لك.'; en = 'You do not hold a draft.' }
+    $catalogue['news.draftSaveFailed'] = @{ ar = 'تعذّر حفظ مسودة شريط الأخبار.'; en = 'Could not save the ticker draft.' }
+    $catalogue['news.draftChanged'] = @{ ar = 'تغيّرت مسودة الشريط. راجع أحدث نسخة قبل المتابعة.'; en = 'The ticker draft changed. Review the latest version before continuing.' }
+    $catalogue['news.webEditorHandover'] = @{ ar = 'المسودة مع محرّر ويب. يمكنه تسليمها من الموقع.'; en = 'A web editor holds the draft and can hand it over from the website.' }
 
     $catalogue['news.noDraftOfYoursShort'] = @{ ar = 'لا توجد مسودة مملوكة لك'; en = 'You do not hold a draft' }
 

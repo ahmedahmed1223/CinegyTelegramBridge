@@ -41,6 +41,34 @@ Describe 'News ticker management' {
         @($keyboard.keyboard[0].text) | Should -Contain '📰 إدارة شريط الأخبار'
     }
 
+    It 'does not edit or hand over a draft when saving it fails' {
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = 101; OwnerChatId = 101; Items = @('الخبر الأصلي'); UpdatedAt = 'original' }
+        Mock Save-NewsTickerDraft { $false }
+        Update-NewsTickerDraftItem -UserId 101 -Index 0 -Text 'تعديل' | Should -BeFalse
+        Open-NewsTickerDraftToAll -ChatId 101 -UserId 101 | Should -BeFalse
+        $draft = Get-NewsTickerDraft -UserId 101
+        $draft.Items | Should -Be @('الخبر الأصلي')
+        $draft.UpdatedAt | Should -Be 'original'
+        (Test-NewsTickerDraftOpen -Draft $draft) | Should -BeFalse
+    }
+
+    It 'preserves web-only work through idle expiry and an admin handover' {
+        $ownerId = [long]9000000000000010
+        $script:NewsTickerDraft = [ordered]@{ OwnerUserId = $ownerId; OwnerChatId = $ownerId; Items = @('عمل من الويب'); UpdatedAt = (Get-Date).AddHours(-12).ToString('o') }
+        Mock Get-SettingInt { 30 } -ParameterFilter { $Name -eq 'NewsDraftTimeoutMinutes' }
+        Request-NewsLockRelease -ChatId 101 -UserId 101 | Should -BeFalse
+        Update-NewsDraftExpiry
+        (Get-NewsTickerDraft -UserId $ownerId).Items | Should -Be @('عمل من الويب')
+
+        $script:NewsTickerDraft.PublishAt = ([datetimeoffset]::Now.AddHours(2)).ToString('o')
+        Mock Test-Admin { $true }
+        Open-NewsTickerDraftToAll -ChatId 101 -UserId 101 -Force | Should -BeTrue
+        $draft = Get-NewsTickerDraft
+        $draft.Items | Should -Be @('عمل من الويب')
+        (Test-NewsTickerDraftOpen -Draft $draft) | Should -BeTrue
+        Get-NewsPublishAt -Draft $draft | Should -BeNullOrEmpty
+    }
+
     It 'shows news management inside the main inline menu' {
         $keyboard = Get-MainMenuKeyboard -ChatId 101 -UserId 101
         $callbacks = @($keyboard.inline_keyboard | ForEach-Object { @($_) | ForEach-Object { $_['callback_data'] } })
@@ -740,15 +768,18 @@ Describe 'News publish conflict resolution' {
         # case; refusing forever would make the bot useless for the ticker.
         Resolve-NewsPublishConflict -UserId 20 -Mode append | Out-Null
 
-        @($script:NewsTickerDraft.Items) | Should -Be @('قائم١', 'قائم٢', 'جديد')
-        $script:NewsTickerDraft.BaseHash | Should -Be 'CURRENT'
+        Should -Invoke Publish-NewsTickerDraft -Times 1 -Exactly -ParameterFilter {
+            $RebasedHash -eq 'CURRENT' -and ($RebasedItems -join '|') -eq 'قائم١|قائم٢|جديد'
+        }
+        $script:NewsTickerDraft.BaseHash | Should -Be 'STALE'
     }
 
     It 'replaces only when that is explicitly chosen' {
         Resolve-NewsPublishConflict -UserId 20 -Mode replace | Out-Null
 
-        @($script:NewsTickerDraft.Items) | Should -Be @('جديد')
-        $script:NewsTickerDraft.BaseHash | Should -Be 'CURRENT'
+        Should -Invoke Publish-NewsTickerDraft -Times 1 -Exactly -ParameterFilter {
+            $RebasedHash -eq 'CURRENT' -and ($RebasedItems -join '|') -eq 'جديد'
+        }
     }
 
     It 'refuses when the live file cannot be read, rather than guessing' {
@@ -784,6 +815,24 @@ Describe 'News item delete confirmation' {
     It 'deletes nothing until the confirmation is answered' {
         Show-NewsTickerDeleteConfirm -ChatId 42 -UserId 42 -Index 1 | Out-Null
         @($script:NewsTickerDraft.Items).Count | Should -Be 3
+    }
+
+    It 'refuses Telegram delete and publish confirmations after another view changes the draft' {
+        Mock Confirm-TelegramCallback {}
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity {}
+        Mock Publish-NewsTickerDraft { throw 'a stale publication reached the ticker' }
+        $old = (Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft).Substring(0, 20)
+        Move-NewsTickerDraftItem -UserId 42 -Index 0 -Delta 1 | Should -BeTrue
+        foreach ($action in @("news:delete:0:$old", "news:publishconfirm:$old", 'news:publishconfirm')) {
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                id = 'old-confirm'; from = [pscustomobject]@{ id = 42 }; data = $action
+                message = [pscustomobject]@{ message_id = 7; chat = [pscustomobject]@{ id = 42; type = 'private' } }
+            })
+        }
+        @($script:NewsTickerDraft.Items) | Should -Be @('خبر ثانٍ', 'خبر أول', 'خبر ثالث')
+        Should -Invoke Publish-NewsTickerDraft -Times 0 -Exactly
+        Should -Invoke Send-TelegramMessage -Times 3 -Exactly -ParameterFilter { $Text -eq (T 'news.draftChanged') }
     }
 
     It 'removes exactly the confirmed item once accepted' {

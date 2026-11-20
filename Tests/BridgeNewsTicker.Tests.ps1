@@ -79,6 +79,25 @@ Describe 'Safe news ticker persistence' {
         $bytes[0..2] | Should -Be @(0xEF,0xBB,0xBF)
     }
 
+    It 'hashes the same bytes it parses for the review' {
+        $expected = (Get-FileHash -LiteralPath $script:NewsPath -Algorithm SHA256).Hash
+        Mock Get-FileHash { throw 'the snapshot reopened the reviewed file' } -ModuleName BridgeNewsTicker
+        $review = Get-NewsTickerSnapshot -Path $script:NewsPath -Separator '|'
+        $review.Success | Should -BeTrue
+        $review.Hash | Should -Be $expected
+    }
+
+    It 'keeps a newer external write made while preparing the publication' {
+        $before = Get-NewsTickerSnapshot -Path $script:NewsPath -Separator '|'
+        Mock Copy-Item -ModuleName BridgeNewsTicker {
+            [IO.File]::Copy($LiteralPath, $Destination)
+            [IO.File]::WriteAllText($LiteralPath, 'تغيير أثناء النشر')
+        }
+        $result = Publish-NewsTickerFile -Path $script:NewsPath -Items @('مسودة') -ExpectedHash $before.Hash -Separator '|' -BackupDirectory $script:BackupPath
+        $result.Conflict | Should -BeTrue
+        (Get-NewsTickerSnapshot -Path $script:NewsPath -Separator '|').Items | Should -Be @('تغيير أثناء النشر')
+    }
+
     It 'refuses to overwrite a file changed after the draft snapshot' {
         $before = Get-NewsTickerSnapshot -Path $script:NewsPath -Separator '|'
         [IO.File]::WriteAllText($script:NewsPath, "خارجي |`r`n", [Text.UTF8Encoding]::new($true))

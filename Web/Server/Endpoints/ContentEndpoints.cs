@@ -37,6 +37,19 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        var ticker = app.MapGroup("/api/content/ticker/draft").WithTags("Content").RequireAuthorization();
+        ticker.MapGet("", (IBridgeChannel bridge, HttpContext http) => TickerEditor(new("status"), bridge, http))
+            .Produces<TickerEditorState>()
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        ticker.MapPost("", TickerEditor)
+            .Produces<TickerEditorState>()
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<IResult> List(string view, int? page, IBridgeChannel bridge, HttpContext http)
@@ -73,6 +86,28 @@ public static class ContentEndpoints
             "urgent_invalid" => ApiErrors.Of(400, reply.Error),
             "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
             "urgent_save_failed" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
+
+    private static async Task<IResult> TickerEditor(TickerDraftRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("ticker.edit", new
+        {
+            actor = http.User.UserId(), request.Action, request.Revision, request.Index, request.Text, request.Review
+        }, http.RequestAborted);
+        if (reply.Ok)
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return TypedResults.Ok(reply.Data.Deserialize<TickerEditorState>(JsonDefaults.Options));
+        }
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "ticker_stale" or "ticker_locked" or "ticker_conflict" => ApiErrors.Of(409, reply.Error),
+            "ticker_invalid" or "ticker_full" => ApiErrors.Of(400, reply.Error),
+            "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
     }

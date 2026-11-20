@@ -291,6 +291,7 @@ function Invoke-WebChannelOperation {
         'content.list' { return Get-WebContentPage -Arguments $arguments }
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
+        'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -772,6 +773,103 @@ function Invoke-WebUrgentWrite {
     if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
     Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
+}
+
+function Get-WebTickerEditorState {
+    param([Parameter(Mandatory)][long]$Actor)
+    $draft = Get-NewsTickerDraft
+    $data = @{ state = 'available'; draft = $null; owner = ''; maxItemLength = Get-SettingInt 'NewsMaxItemLength' 1 }
+    if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
+        $owner = [long](Get-JsonProp $draft 'OwnerUserId')
+        if ($owner -ne $Actor) {
+            $data.state = 'locked'
+            if ($owner -gt 0) { $data.owner = Get-NewsScreenLine (Get-UserDisplayName -UserId $owner) 64 }
+        }
+        else {
+            $data.state = 'editing'
+            $data.draft = @{
+                revision = Get-NewsTickerDraftRevision -Draft $draft
+                items = @(Get-JsonProp $draft 'Items' | Where-Object { $null -ne $_ })
+                scheduledAt = Get-NewsPublishAt -Draft $draft
+                canRemove = Test-NewsTickerDeleteAccess -ChatId $Actor -UserId $Actor
+                maxItems = Get-SettingInt 'NewsMaxItems' 1
+            }
+        }
+        return $data
+    }
+    $reservation = Get-NewsLockReservation
+    if ($reservation -and [long]$reservation.UserId -ne $Actor) {
+        $data.state = 'locked'
+        $data.owner = Get-NewsScreenLine (Get-UserDisplayName -UserId ([long]$reservation.UserId)) 64
+    }
+    elseif ($draft) { $data.state = 'open' }
+    return $data
+}
+
+function Invoke-WebTickerEdit {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor } }
+    if ($action -eq 'start') {
+        if ((Get-WebTickerEditorState -Actor $actor).state -eq 'locked') { return @{ ok = $false; error = 'ticker_locked' } }
+        $started = Start-NewsTickerDraft -ChatId $actor -UserId $actor
+        if (-not $started.Success) { return @{ ok = $false; error = 'ticker_start_failed' } }
+        return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor }
+    }
+
+    $draft = Get-NewsTickerDraft -UserId $actor
+    if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_locked' } }
+    if ((Get-NewsTickerDraftRevision -Draft $draft) -cne [string](Get-JsonProp $Arguments 'revision')) {
+        return @{ ok = $false; error = 'ticker_stale' }
+    }
+    if ($action -eq 'review_conflict') {
+        $live = Get-NewsTickerConfiguredSnapshot
+        if (-not $live.Success) { return @{ ok = $false; error = 'content_unreadable' } }
+        $state = Get-WebTickerEditorState -Actor $actor
+        $state.conflict = @{ review = [string]$live.Hash; items = @($live.Items) }
+        return @{ ok = $true; data = $state }
+    }
+    if ($action -in 'publish', 'append', 'replace') {
+        if ($action -eq 'publish') { $result = Publish-NewsTickerDraft -UserId $actor }
+        else {
+            $review = Get-JsonProp $Arguments 'review'
+            if ($null -eq $review) { return @{ ok = $false; error = 'ticker_conflict' } }
+            $result = Resolve-NewsPublishConflict -UserId $actor -Mode $action -ExpectedHash ([string]$review)
+        }
+        if (-not $result.Success) {
+            if ($result.Conflict) { return @{ ok = $false; error = 'ticker_conflict' } }
+            return @{ ok = $false; error = 'ticker_publish_failed' }
+        }
+        $state = Get-WebTickerEditorState -Actor $actor
+        $state.sheetFailed = [bool](Get-JsonProp $result 'SheetAttempted') -and -not [bool](Get-JsonProp $result 'SheetSaved')
+        return @{ ok = $true; data = $state }
+    }
+
+    $rawIndex = Get-JsonProp $Arguments 'index'
+    $index = if ($null -eq $rawIndex) { -1 } else { [int]$rawIndex }
+    $copy = [string](Get-JsonProp $Arguments 'text')
+    $saved = $false
+    switch ($action) {
+        'add' {
+            if (@($draft.Items).Count -ge (Get-SettingInt 'NewsMaxItems' 1)) { return @{ ok = $false; error = 'ticker_full' } }
+            $saved = Add-NewsTickerDraftItem -UserId $actor -Text $copy
+        }
+        'update' { $saved = Update-NewsTickerDraftItem -UserId $actor -Index $index -Text $copy }
+        'remove' {
+            if (-not (Test-NewsTickerDeleteAccess -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+            $saved = Remove-NewsTickerDraftItem -ChatId $actor -UserId $actor -Index $index
+        }
+        'up' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta -1 }
+        'down' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta 1 }
+        'handover' { $saved = Open-NewsTickerDraftToAll -ChatId $actor -UserId $actor }
+        default { return @{ ok = $false; error = 'ticker_invalid' } }
+    }
+    if (-not $saved) { return @{ ok = $false; error = 'ticker_invalid' } }
+    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor }
 }
 
 function Get-WebUrgentRun {

@@ -1310,6 +1310,9 @@ function Update-NewsDraftExpiry {
     # whoever opened it. Without this an unclaimed draft expires in total
     # silence and takes its items with it.
     if ($owner -le 0) { $owner = [long](Get-JsonProp $draft 'HandedOverChatId') }
+    # Expiry returns unpublished text through Telegram. An editor with no
+    # Telegram account keeps the draft until explicit handover or publication.
+    if (Test-WebOnlyUserId -UserId $owner) { return }
     $elapsed = ((Get-Date) - $updatedAt).TotalMinutes
     if ($elapsed -lt $timeout) {
         # A warning first, with a way to keep it. This expiry does not drop

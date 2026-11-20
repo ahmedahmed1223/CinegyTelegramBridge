@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.81.0
+
+Newsroom can open, edit, reorder, hand over, and publish the same ticker draft that Telegram uses. Every edit checks draft ownership and revision. If an external writer changes the published file, the editor can review the current headlines and choose to keep them before the draft or replace them.
+
 ## Version 8.80.1
 
 The website uses self-hosted IBM Plex fonts throughout. IBM Plex Sans Arabic renders the interface, and IBM Plex Mono keeps timecodes and counters aligned.

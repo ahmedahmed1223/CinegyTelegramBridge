@@ -78,6 +78,7 @@ function Save-Config { }
 function Save-UserAliases { $true }
 function Update-WebBotUsername { $script:WebBotUsername = 'cinegy_dev_bot' }
 function Send-TelegramMessage { }
+function Save-NewsSheetItems { @{ Success = $false; Attempted = $false; Error = '' } }
 
 # The dev pipe uses real web dispatch and validation. Replacing the three
 # commands here confines their effects to the simulated on-air state.

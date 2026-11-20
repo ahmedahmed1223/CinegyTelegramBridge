@@ -6,12 +6,13 @@ import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { UrgentPlayback } from './UrgentPlayback'
 import { UrgentTable } from './UrgentTable'
+import { TickerEditor } from './TickerEditor'
 import classes from './NewsroomPage.module.css'
 
 const views = {
   urgent: { label: 'العواجل', title: 'إدارة العواجل', empty: 'لا توجد عواجل في الجدول.' },
   bulletins: { label: 'الموجز', title: 'مكتبة الموجز', empty: 'لا توجد موجزات محفوظة.' },
-  ticker: { label: 'الشريط', title: 'الشريط المنشور', empty: 'لا توجد أخبار منشورة في الشريط.' },
+  ticker: { label: 'الشريط', title: 'إدارة شريط الأخبار', empty: 'لا توجد أخبار منشورة في الشريط.' },
 } as const
 type View = keyof typeof views
 
@@ -69,12 +70,29 @@ export function NewsroomPage() {
             <Group justify="space-between" align="center">
               <div>
                 <Title order={3}>{current.title}</Title>
-                {result && <Text size="sm" c="dimmed">{number.format(result.total)} في القائمة</Text>}
+                {result && view !== 'ticker' && <Text size="sm" c="dimmed">{number.format(result.total)} في القائمة</Text>}
               </div>
-              <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => content.refetch()} loading={content.isFetching}>
-                تحديث
-              </Button>
+              {view !== 'ticker' && (
+                <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => content.refetch()} loading={content.isFetching}>
+                  تحديث
+                </Button>
+              )}
             </Group>
+
+            {view === 'ticker' && (
+              <>
+                <TickerEditor onPublished={() => content.refetch()} />
+                <Group justify="space-between">
+                  <div>
+                    <Title order={4}>الشريط المنشور</Title>
+                    {result && <Text size="sm" c="dimmed">{number.format(result.total)} خبرًا</Text>}
+                  </div>
+                  <Button variant="default" onClick={() => content.refetch()} loading={content.isFetching} leftSection={<IconRefresh size={16} />}>
+                    تحديث المنشور
+                  </Button>
+                </Group>
+              </>
+            )}
 
             {content.isError ? (
               <Alert color={content.error.message === 'content_disabled' ? 'gray' : 'red'} role="alert">

@@ -9,6 +9,7 @@ import { AccountsPage } from '../pages/accounts/AccountsPage'
 import { LoginPage } from '../pages/login/LoginPage'
 import { SessionsPage } from '../pages/sessions/SessionsPage'
 import { StatusPage } from '../pages/status/StatusPage'
+import { TemplatesPage } from '../pages/templates/TemplatesPage'
 import { theme } from './theme'
 
 const queryClient = new QueryClient({
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <StatusPage /> },
+      { path: 'templates', element: <TemplatesPage /> },
       { path: 'sessions', element: <SessionsPage /> },
       {
         path: 'accounts',

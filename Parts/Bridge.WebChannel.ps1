@@ -271,6 +271,10 @@ function Invoke-WebChannelOperation {
         'login.status' { return Get-WebLoginRequestState -Code ([string](Get-JsonProp $arguments 'code')) }
         'account.grant' { return Grant-WebOnlyAccount -Arguments $arguments }
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
+        'air.templates' { return Get-WebTemplates -Arguments $arguments }
+        'air.show' { return Invoke-WebAirShow -Arguments $arguments }
+        'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
+        'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -476,6 +480,117 @@ function Revoke-WebOnlyAccount {
     if (-not $result.Success) { return @{ ok = $false; error = 'refused'; message = [string]$result.Error } }
     Set-UserAlias -TargetUserId $target -Alias '' | Out-Null
     Write-BridgeLog "Web-only account $target revoked by $(Format-UserAuditActor -UserId $actor)" 'WARN'
+    Publish-WebChannelState -Force
+    return @{ ok = $true }
+}
+
+# ------------------------------------------------------------- air operations
+
+function Get-WebTemplates {
+    param([System.Collections.IDictionary]$Arguments)
+    $store = Get-TemplateStore
+    if (-not $store -or -not $store.Map) { return @{ ok = $true; data = @() } }
+
+    $disabledKeys = @(Get-JsonProp $config 'DisabledTemplateKeys')
+    $templates = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($key in ($store.Map.Keys | Sort-Object)) {
+        $item = $store.Map[$key]
+        $fields = [System.Collections.Generic.List[object]]::new()
+
+        $rawFields = Get-JsonProp $item 'fields'
+        if ($rawFields) {
+            foreach ($f in @($rawFields)) {
+                if ($f -is [string]) {
+                    $fields.Add([ordered]@{
+                        name = [string]$f
+                        label = [string]$f
+                        required = $false
+                    })
+                }
+                elseif ($f -is [System.Collections.IDictionary] -or $f -is [System.Management.Automation.PSCustomObject]) {
+                    $fields.Add([ordered]@{
+                        name = [string](Get-JsonProp $f 'name')
+                        label = [string]((Get-JsonProp $f 'label') ? (Get-JsonProp $f 'label') : (Get-JsonProp $f 'name'))
+                        required = [bool](Get-JsonProp $f 'required')
+                        maxLength = [int](Get-JsonProp $f 'maxLength')
+                    })
+                }
+            }
+        }
+
+        $templates.Add([ordered]@{
+            key = [string]$key
+            name = [string]((Get-JsonProp $item 'description') ? (Get-JsonProp $item 'description') : $key)
+            layer = [int](Get-JsonProp $item 'layer')
+            category = [string](Get-JsonProp $item 'category')
+            disabled = ($key -in $disabledKeys)
+            fields = @($fields)
+        })
+    }
+
+    return @{ ok = $true; data = @($templates) }
+}
+
+function Invoke-WebAirShow {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    $key = [string](Get-JsonProp $Arguments 'key')
+    $rawVars = Get-JsonProp $Arguments 'variables'
+    $autoHide = [int](Get-JsonProp $Arguments 'autoHideSeconds')
+
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    $variables = @{}
+    if ($rawVars -is [System.Collections.IDictionary]) {
+        foreach ($k in $rawVars.Keys) {
+            $variables[[string]$k] = [string]$rawVars[$k]
+        }
+    }
+
+    $result = Invoke-ShowTemplateResult -Key $key -Variables $variables -ChatId $actor -UserId $actor -AutoHideSeconds $autoHide
+    if ($result -and -not $result.Success) {
+        return @{ ok = $false; error = 'refused'; message = [string]$result.Error }
+    }
+
+    Publish-WebChannelState -Force
+    return @{ ok = $true }
+}
+
+function Invoke-WebAirHide {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    $layer = [int](Get-JsonProp $Arguments 'layer')
+
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    $success = Invoke-HideLayer -Layer $layer -ChatId $actor -UserId $actor -Quiet
+    if (-not $success) {
+        return @{ ok = $false; error = 'refused' }
+    }
+
+    Publish-WebChannelState -Force
+    return @{ ok = $true }
+}
+
+function Invoke-WebAirExit {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    $layer = [int](Get-JsonProp $Arguments 'layer')
+
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    $success = Invoke-ExitLayer -Layer $layer -ChatId $actor -UserId $actor
+    if (-not $success) {
+        return @{ ok = $false; error = 'refused' }
+    }
+
     Publish-WebChannelState -Force
     return @{ ok = $true }
 }

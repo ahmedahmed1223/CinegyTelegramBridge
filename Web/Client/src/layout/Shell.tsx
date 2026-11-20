@@ -1,6 +1,6 @@
 import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBroadcast, IconDevices, IconUsersGroup } from '@tabler/icons-react'
+import { IconBroadcast, IconDevices, IconLayoutGrid, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
 import { isAdmin, useSession } from '../api/session'
 import { useNow } from '../hooks/useNow'
@@ -13,6 +13,7 @@ import classes from './Shell.module.css'
 
 const navigation = [
   { to: '/', label: 'لوحة الهواء', description: 'الطبقات وحالة المحرك', icon: IconBroadcast, admin: false },
+  { to: '/templates', label: 'القوالب', description: 'عرض الرسوم على الهواء', icon: IconLayoutGrid, admin: false },
   { to: '/sessions', label: 'الجلسات', description: 'المتصفحات المسجّلة', icon: IconDevices, admin: false },
   { to: '/accounts', label: 'الحسابات', description: 'دخول الويب بكلمة مرور', icon: IconUsersGroup, admin: true },
 ]

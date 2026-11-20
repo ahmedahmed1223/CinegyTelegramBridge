@@ -33,6 +33,10 @@ public sealed class FakeBridge : IBridgeChannel
             "login.status" => LoginStatus(a.GetProperty("code").GetString()!),
             "account.grant" => Grant(a),
             "account.revoke" => Revoke(a),
+            "air.templates" => Reply("""[{"key":"test_l3d","name":"Lower Third","layer":5,"category":"news","disabled":false,"fields":[{"name":"title","label":"العنوان","required":true,"maxLength":40}]}]"""),
+            "air.show" => Reply("null"),
+            "air.hide" => Reply("null"),
+            "air.exit" => Reply("null"),
             _ => new BridgeReply(false, default, "unknown_op"),
         });
     }

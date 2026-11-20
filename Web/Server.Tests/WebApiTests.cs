@@ -184,4 +184,35 @@ public sealed class AccountTests : IDisposable
         Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await desk.Client.GetAsync("/api/status")).StatusCode);
     }
+
+    [Fact]
+    public async Task Air_operations_require_authentication_and_route_to_bridge()
+    {
+        var anon = await _app.BrowserAsync();
+        var unauth = await anon.Client.GetAsync("/api/air/templates");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauth.StatusCode);
+
+        var op = await _app.SignedInAsync("desk", WebApp.Operator);
+        
+        // 1. Templates
+        var tpls = await op.Client.GetFromJsonAsync<List<TemplateDto>>("/api/air/templates");
+        Assert.NotNull(tpls);
+        Assert.Single(tpls);
+        Assert.Equal("test_l3d", tpls[0].Key);
+
+        // 2. Show
+        var showRes = await op.PostAsync("/api/air/show", new ShowTemplateRequest("test_l3d", new Dictionary<string, string> { ["title"] = "Breaking" }, 10));
+        Assert.Equal(HttpStatusCode.NoContent, showRes.StatusCode);
+        Assert.Contains(_app.Bridge.Calls, c => c.Op == "air.show" && c.Args.Contains("test_l3d"));
+
+        // 3. Hide
+        var hideRes = await op.PostAsync("/api/air/hide/5", new { });
+        Assert.Equal(HttpStatusCode.NoContent, hideRes.StatusCode);
+        Assert.Contains(_app.Bridge.Calls, c => c.Op == "air.hide" && c.Args.Contains("\"layer\":5"));
+
+        // 4. Exit
+        var exitRes = await op.PostAsync("/api/air/exit/5", new { });
+        Assert.Equal(HttpStatusCode.NoContent, exitRes.StatusCode);
+        Assert.Contains(_app.Bridge.Calls, c => c.Op == "air.exit" && c.Args.Contains("\"layer\":5"));
+    }
 }

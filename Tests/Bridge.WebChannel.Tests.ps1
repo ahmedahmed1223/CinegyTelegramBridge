@@ -205,4 +205,48 @@ Describe 'Web channel: the pipe' {
         }
         finally { $client.Dispose(); $silent.Stop() }
     }
+
+    It 'handles air operations via pipe' {
+        $storeMock = @{
+            Map = @{
+                'test_lower' = [ordered]@{
+                    description = 'Lower Third Template'
+                    layer = 5
+                    category = 'news'
+                    fields = @(
+                        [ordered]@{ name = 'f1'; label = 'Headline'; required = $true }
+                    )
+                }
+            }
+        }
+        Mock Get-TemplateStore { $storeMock }
+        Mock Test-Authorized { $true }
+        Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
+        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ExitLayer { $true }
+
+        # 1. air.templates
+        $tplReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.templates"}') | ConvertFrom-Json
+        $tplReply.ok | Should -BeTrue
+        $tplReply.data.Count | Should -Be 1
+        $tplReply.data[0].key | Should -Be 'test_lower'
+        $tplReply.data[0].name | Should -Be 'Lower Third Template'
+        $tplReply.data[0].layer | Should -Be 5
+        $tplReply.data[0].fields[0].name | Should -Be 'f1'
+
+        # 2. air.show
+        $showReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.show","args":{"actor":4321,"key":"test_lower","variables":{"f1":"Breaking"}}}') | ConvertFrom-Json
+        $showReply.ok | Should -BeTrue
+        Should -Invoke Invoke-ShowTemplateResult -Times 1
+
+        # 3. air.hide
+        $hideReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.hide","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
+        $hideReply.ok | Should -BeTrue
+        Should -Invoke Invoke-HideLayer -Times 1
+
+        # 4. air.exit
+        $exitReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.exit","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
+        $exitReply.ok | Should -BeTrue
+        Should -Invoke Invoke-ExitLayer -Times 1
+    }
 }

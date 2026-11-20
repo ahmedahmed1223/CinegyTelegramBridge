@@ -33,6 +33,7 @@ $fixtureTicker = Join-Path $runtime 'ticker.txt'
 Set-JsonProp $config 'TemplateRegistryPath' $fixtureRegistry
 Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
+Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
 @{
@@ -58,6 +59,7 @@ Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
 $script:UrgentBoard = New-UrgentBoard
 $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'متابعة مباشرة من غرفة الأخبار' -Title 'متابعة مباشرة').Value
 $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خدمة إخبارية خاصة عند التاسعة').Value
+$script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'تحديث جديد من الميدان').Value
 Set-JsonProp $script:UrgentBoard.Items[0] 'ExtraFields' @{ 'Ajel.location' = 'الاستوديو' }
 $script:UrgentBoard.Items[1].Enabled = $false
 $script:MojazLibrary = @{ Bulletins = @(
@@ -75,6 +77,7 @@ $script:UserAliases['1003'] = 'مشغّل الفترة المسائية'
 function Save-Config { }
 function Save-UserAliases { $true }
 function Update-WebBotUsername { $script:WebBotUsername = 'cinegy_dev_bot' }
+function Send-TelegramMessage { }
 
 # The dev pipe uses real web dispatch and validation. Replacing the three
 # commands here confines their effects to the simulated on-air state.
@@ -83,7 +86,7 @@ function Invoke-ShowTemplateResult {
     $template = (Get-TemplateStore).Map[$Key]
     $layer = [int]$template.Layer
     $shownAt = Get-Date
-    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; UserId = $UserId; Source = 'bridge'; Variables = $Variables }
+    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; ActiveId = [guid]::NewGuid().ToString(); UserId = $UserId; Source = 'bridge'; Variables = $Variables }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $layer })
     if ($AutoHideSeconds -gt 0) {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
@@ -104,6 +107,20 @@ function Invoke-ExitLayer {
     return Invoke-HideLayer -Layer $Layer
 }
 
+function Get-TitlerLayerStatus {
+    param([int]$Layer)
+    $live = $script:OnAir[$Layer]
+    return @{
+        Success = $true; IsOnAir = $null -ne $live
+        ActiveId = Get-JsonProp $live 'ActiveId'; ActiveName = Get-JsonProp $live 'Key'
+    }
+}
+
+function Send-UrgentBoardStep {
+    param($Step)
+    return Invoke-ShowTemplateResult -Key $script:MojazUrgentKey -Variables (Get-UrgentItemVariables -Item $Step) -UserId $OwnerId
+}
+
 $script:WebChannelPipeName = $PipeName
 Start-WebChannel
 
@@ -111,7 +128,7 @@ $started = Get-Date
 $script:RuntimeState.Monitoring.TelegramConnectionState = 'connected'
 $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
 $script:OnAir[1] = [pscustomobject]@{ Key = 'شعار القناة'; At = $started.AddMinutes(-47); UserId = $OwnerId; Source = 'bridge' }
-$script:OnAir[3] = [pscustomobject]@{ Key = 'شريط الأخبار العاجلة'; At = $started.AddSeconds(-95); UserId = 1003; Source = 'bridge' }
+$script:OnAir[3] = [pscustomobject]@{ Key = 'شريط الأخبار العاجلة'; At = $started.AddSeconds(-95); ActiveId = 'dev-graphics-3'; UserId = 1003; Source = 'bridge' }
 $script:OnAir[5] = [pscustomobject]@{ Key = 'اسم الضيف — د. سامر الخطيب'; At = $started.AddSeconds(-20); UserId = 0; Source = 'cinegy' }
 $script:AutoHideQueue = @([pscustomobject]@{ Layer = 5; At = $started.AddSeconds(40) })
 
@@ -132,6 +149,7 @@ try {
         }
         Publish-WebChannelState
         Invoke-WebChannelRequests
+        Update-UrgentBoardRun
         Wait-WebChannelSignal -Milliseconds 250
     }
 }

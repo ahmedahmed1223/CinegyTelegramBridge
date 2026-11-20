@@ -89,6 +89,24 @@ Describe 'Per-template and per-layer permission' {
         Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
         Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'مالك الجسر' }
     }
+
+    It 'keeps an unreviewed replacement on air even when it changed after web confirmation' {
+        Mock Get-TemplateStore { @{ Map = @{ Urgent = @{ Layer = 7 } } } }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MaintenanceControl { $true }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = 'external' } }
+        Mock Stop-UrgentBoardForManualUrgent {}
+        Mock Hide-TitlerTemplate {}
+        Mock Show-TitlerTemplate {}
+        Mock Write-AirOperationResult {}
+
+        $result = Invoke-ShowTemplateResult -Key 'Urgent' -ChatId 100 -UserId 101 -ExpectedLayerStamp 'active:reviewed'
+        $result.Success | Should -BeFalse
+        Should -Invoke Stop-UrgentBoardForManualUrgent -Times 0 -Exactly
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
 }
 
 Describe 'Every setting the code reads is a setting the bridge declares' {

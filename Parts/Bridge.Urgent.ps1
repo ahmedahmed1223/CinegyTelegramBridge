@@ -352,15 +352,16 @@ function New-UrgentBoardPlan {
         arithmetic itself stays in one place, so the sentence on the review
         screen and the moments the engine walks come from the same call.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [switch]$SelectedOnly)
+    param([Parameter(Mandatory)][long]$ChatId, [switch]$SelectedOnly, [string[]]$SelectedIds)
     $board = $script:UrgentBoard
     # The order on air is the order on the screen. With the "newest" view
     # the table is sorted newest first and numbered that way, and a run
     # that then played the stored order looked like no order at all.
-    if ((Get-UrgentBoardFilter -ChatId $ChatId) -eq 'latest') {
+    if (-not $PSBoundParameters.ContainsKey('SelectedIds') -and (Get-UrgentBoardFilter -ChatId $ChatId) -eq 'latest') {
         $board = [pscustomobject]@{ Items = @(Get-UrgentVisibleItems -ChatId $ChatId) }
     }
-    $items = @(Get-UrgentPlayableItems -Board $board -SelectedIds (Get-UrgentSelectedIds -ChatId $ChatId) -SelectedOnly:$SelectedOnly)
+    if (-not $PSBoundParameters.ContainsKey('SelectedIds')) { $SelectedIds = @(Get-UrgentSelectedIds -ChatId $ChatId) }
+    $items = @(Get-UrgentPlayableItems -Board $board -SelectedIds $SelectedIds -SelectedOnly:$SelectedOnly)
     $ceiling = Get-UrgentRunCeiling -Items $items
     $result = New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults) `
         -FloorSeconds (Get-UrgentFloorSeconds) -TransitionSeconds (Get-UrgentTransitionSeconds) `

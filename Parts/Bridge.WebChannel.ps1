@@ -88,11 +88,17 @@ function Get-WebChannelListenerScript {
                             $reply = '{"ok":true,"data":[' + (@($Shared.Roster.Values) -join ',') + ']}'
                         }
                         else {
-                            $item = @{ Request = $request; Reply = $null; Done = [System.Threading.ManualResetEventSlim]::new($false) }
+                            $item = @{
+                                Request = $request
+                                Deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 15 * [Diagnostics.Stopwatch]::Frequency
+                                Claim = [System.Threading.Tasks.TaskCompletionSource[bool]]::new()
+                                Reply = [System.Threading.Tasks.TaskCompletionSource[string]]::new()
+                            }
                             $Shared.Queue.Enqueue($item)
                             [void]$Shared.Signal.Set()
-                            $reply = if ($item.Done.Wait(15000)) { [string]$item.Reply } else { '{"ok":false,"error":"bridge_busy"}' }
-                            $item.Done.Dispose()
+                            $reply = if ($item.Reply.Task.Wait(15000)) { $item.Reply.Task.Result }
+                                elseif ($item.Claim.TrySetResult($false) -or -not $item.Claim.Task.Result) { '{"ok":false,"error":"bridge_busy"}' }
+                                else { '{"ok":false,"error":"bridge_outcome_unknown"}' }
                         }
                     }
                 }
@@ -143,8 +149,8 @@ function Stop-WebChannel {
     # Anyone still waiting gets an answer rather than a fifteen-second hang.
     $pending = $null
     while ($channel.Shared.Queue.TryDequeue([ref]$pending)) {
-        $pending.Reply = '{"ok":false,"error":"channel_closed"}'
-        $pending.Done.Set()
+        [void]$pending.Claim.TrySetResult($false)
+        [void]$pending.Reply.TrySetResult('{"ok":false,"error":"channel_closed"}')
     }
     foreach ($listener in $channel.Listeners) {
         try { $listener.Pipeline.Stop() } catch { Write-BridgeLog "Web channel listener did not stop cleanly: $($_.Exception.Message)" 'DEBUG' }
@@ -249,14 +255,21 @@ function Invoke-WebChannelRequests {
     $queue = $script:WebChannel.Shared.Queue
     $item = $null
     for ($handled = 0; $handled -lt $Limit -and $queue.TryDequeue([ref]$item); $handled++) {
+        if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $item.Deadline) {
+            [void]$item.Claim.TrySetResult($false)
+            [void]$item.Reply.TrySetResult('{"ok":false,"error":"bridge_busy"}')
+            continue
+        }
+        # A listener that already reported a queue timeout wins the claim and
+        # the abandoned command must never reach the air-control thread.
+        if (-not $item.Claim.TrySetResult($true)) { continue }
         $answer = $null
         try { $answer = Invoke-WebChannelOperation -Request $item.Request }
         catch {
             Write-BridgeLog "Web channel operation failed: $($_.Exception.Message)" 'ERROR'
             $answer = @{ ok = $false; error = 'internal' }
         }
-        $item.Reply = ($answer | ConvertTo-Json -Compress -Depth 6)
-        $item.Done.Set()
+        [void]$item.Reply.TrySetResult(($answer | ConvertTo-Json -Compress -Depth 6))
     }
 }
 
@@ -277,6 +290,7 @@ function Invoke-WebChannelOperation {
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
         'content.list' { return Get-WebContentPage -Arguments $arguments }
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
+        'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -758,4 +772,119 @@ function Invoke-WebUrgentWrite {
     if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
     Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
+}
+
+function Get-WebUrgentRun {
+    $run = $script:UrgentBoardRun
+    if (-not $run) { return $null }
+    $steps = @(Get-JsonProp $run 'Steps')
+    $step = [int](Get-JsonProp $run 'Step')
+    $state = if (Get-JsonProp $run 'StopFailed') { 'stop_unconfirmed' }
+        elseif (Get-JsonProp $run 'Paused') { 'paused' }
+        else { 'playing' }
+    return @{
+        id = [string](Get-JsonProp $run 'OperationId')
+        state = $state
+        step = $step
+        stepCount = $steps.Count
+        current = if ($step -ge 0 -and $step -lt $steps.Count) { Get-NewsScreenLine ([string](Get-JsonProp $steps[$step] 'Text')) 160 } else { '' }
+        next = if ($step + 1 -lt $steps.Count) { Get-NewsScreenLine ([string](Get-JsonProp $steps[$step + 1] 'Text')) 160 } else { '' }
+    }
+}
+
+function Get-WebUrgentLayerStatus {
+    param([int]$Layer)
+    return Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+}
+
+function Invoke-WebUrgentPlayback {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'status') { return @{ ok = $true; data = @{ run = Get-WebUrgentRun } } }
+
+    $template = Get-UrgentTemplate
+    if (-not $template) { return @{ ok = $false; error = 'content_disabled' } }
+    $layer = [int]$template.Layer
+    $access = Test-TemplateAccess -Key $script:MojazUrgentKey -Layer $layer -ChatId $actor -UserId $actor
+    if (-not $access.Allowed) { return @{ ok = $false; error = 'forbidden' } }
+    if ($action -in 'preview', 'start') {
+        if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+        if ($script:UrgentBoardRun -or $script:MojazPlayback) { return @{ ok = $false; error = 'urgent_air_busy' } }
+        $policy = Test-TemplateShowPolicy -Key $script:MojazUrgentKey -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)
+        if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
+        $ids = @(Get-JsonProp $Arguments 'selectedIds' | Where-Object { $null -ne $_ })
+        if ($ids.Count -gt 40) { return @{ ok = $false; error = 'urgent_invalid' } }
+        $selectedOnly = $ids.Count -gt 0
+        $result = New-UrgentBoardPlan -ChatId $actor -SelectedIds $ids -SelectedOnly:$selectedOnly
+        if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
+        $plan = $result.Value
+        $live = Get-WebUrgentLayerStatus -Layer $layer
+        $stamp = Get-CinegyLayerReviewStamp -Status $live
+        if (-not $stamp) { return @{ ok = $false; error = 'refused'; data = (T 'air.layerCheckFailed') } }
+        # Recompute at confirmation on the bridge thread. The fingerprint includes
+        # the full plan and scene identity so a change cannot silently go on air.
+        $reviewed = [ordered]@{
+            actor = $actor; revision = Get-UrgentProperty $script:UrgentBoard 'Revision' 0
+            template = $template; scene = $stamp; plan = $plan; selectedOnly = $selectedOnly
+        } | ConvertTo-Json -Depth 12 -Compress
+        $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
+        if ($action -eq 'preview') {
+            return @{ ok = $true; data = @{ preview = @{
+                review = $review; totalSeconds = $plan.TotalSeconds; itemCount = $plan.ItemCount; stepCount = $plan.StepCount
+                layer = $layer; replacesGraphic = $stamp -ne 'empty'
+                graphicName = Get-NewsScreenLine ([string](Get-JsonProp $live 'ActiveName')) 100
+                notes = @($plan.Notes)
+                steps = @($plan.Steps | Select-Object -First 20 | ForEach-Object {
+                    @{ text = Get-NewsScreenLine $_.Text 160; startSeconds = $_.VisibleAtSeconds; holdSeconds = $_.HoldSeconds }
+                })
+            } } }
+        }
+        if ($review -cne [string](Get-JsonProp $Arguments 'review')) { return @{ ok = $false; error = 'urgent_stale' } }
+        if (-not (Start-UrgentBoardRun -ChatId $actor -UserId $actor -ReviewedPlan $plan -ExpectedLayerStamp $stamp -SelectedOnly:$selectedOnly -Quiet)) {
+            return @{ ok = $false; error = 'refused' }
+        }
+        Publish-WebChannelState -Force
+        return @{ ok = $true; data = @{ run = Get-WebUrgentRun } }
+    }
+
+    $run = Get-WebUrgentRun
+    if (-not $run -or -not $run.id -or $run.id -cne [string](Get-JsonProp $Arguments 'runId')) {
+        return @{ ok = $false; error = 'urgent_stale' }
+    }
+    $boundLayer = Get-JsonProp $script:UrgentBoardRun 'Layer'
+    if ($null -ne $boundLayer -and [int]$boundLayer -ne $layer) { return @{ ok = $false; error = 'urgent_stale' } }
+    $layerEmpty = $false
+    if ($action -in 'skip', 'stop') {
+        $observed = Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $layer)
+        $layerEmpty = $observed -eq 'empty'
+        $record = $script:OnAir[$layer]
+        $expected = Get-CinegyLayerReviewStamp -Status @{
+            Success = $true; IsOnAir = $true; ActiveId = Get-JsonProp $record 'ActiveId'
+        }
+        if ((-not $layerEmpty -or $action -ne 'stop') -and (
+            -not $observed -or $observed -cne $expected -or (Get-JsonProp $record 'Key') -ne $script:MojazUrgentKey
+        )) { return @{ ok = $false; error = 'urgent_stale' } }
+    }
+    $success = $false
+    switch ($action) {
+        'pause' { $success = Suspend-UrgentBoardRun -ChatId $actor -UserId $actor }
+        'resume' { $success = Resume-UrgentBoardRun -ChatId $actor -UserId $actor }
+        'skip' {
+            if ((Get-JsonProp $Arguments 'step') -ne $run.step) { return @{ ok = $false; error = 'urgent_stale' } }
+            $success = Move-UrgentBoardNext -ChatId $actor -UserId $actor
+        }
+        'stop' {
+            if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+            $success = Stop-UrgentBoardRun -ChatId $actor -UserId $actor -Reason 'manual' -NoExit:$layerEmpty -Quiet
+        }
+        default { return @{ ok = $false; error = 'urgent_invalid' } }
+    }
+    Publish-WebChannelState -Force
+    if (-not $success) {
+        if (Get-JsonProp $script:UrgentBoardRun 'StopFailed') { return @{ ok = $false; error = 'urgent_stop_unconfirmed' } }
+        return @{ ok = $false; error = 'refused' }
+    }
+    return @{ ok = $true; data = @{ run = Get-WebUrgentRun } }
 }

@@ -821,6 +821,122 @@
           }
         }
       }
+    },
+    "/api/content/urgent/playback": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrgentPlaybackResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrgentPlaybackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrgentPlaybackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1395,6 +1511,77 @@
           }
         }
       },
+      "UrgentPlaybackRequest": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "selectedIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "runId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "step": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "UrgentPlaybackResponse": {
+        "required": [
+          "run",
+          "preview"
+        ],
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/UrgentRunStatus"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/UrgentRunPreview"
+          }
+        }
+      },
+      "UrgentPreviewStep": {
+        "required": [
+          "text",
+          "startSeconds",
+          "holdSeconds"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "startSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "holdSeconds": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "UrgentRowInput": {
         "required": [
           "values",
@@ -1413,6 +1600,94 @@
           }
         },
         "default": null,
+        "nullable": true
+      },
+      "UrgentRunPreview": {
+        "required": [
+          "review",
+          "totalSeconds",
+          "itemCount",
+          "stepCount",
+          "layer",
+          "replacesGraphic",
+          "graphicName",
+          "notes",
+          "steps"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "totalSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "itemCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stepCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "replacesGraphic": {
+            "type": "boolean"
+          },
+          "graphicName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UrgentPreviewStep"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "UrgentRunStatus": {
+        "required": [
+          "id",
+          "state",
+          "step",
+          "stepCount",
+          "current",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "step": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stepCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "current": {
+            "type": "string"
+          },
+          "next": {
+            "type": "string"
+          }
+        },
         "nullable": true
       },
       "UrgentWriteRequest": {

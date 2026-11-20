@@ -154,6 +154,21 @@ Describe 'Web channel: the pipe' {
         $parsed.data.version | Should -Be $script:BridgeVersion
     }
 
+    It 'drops an expired on-air request before entering the bridge operation' {
+        Mock Invoke-WebChannelOperation { throw 'an expired command reached the air-control thread' }
+        $expired = @{
+            Request = @{ op = 'urgent.playback'; args = @{ action = 'start' } }
+            Deadline = [Diagnostics.Stopwatch]::GetTimestamp() - 1
+            Claim = [System.Threading.Tasks.TaskCompletionSource[bool]]::new()
+            Reply = [System.Threading.Tasks.TaskCompletionSource[string]]::new()
+        }
+        $script:WebChannel.Shared.Queue.Enqueue($expired)
+        Invoke-WebChannelRequests
+        $expired.Claim.Task.Result | Should -BeFalse
+        ($expired.Reply.Task.Result | ConvertFrom-Json).error | Should -Be 'bridge_busy'
+        Should -Invoke Invoke-WebChannelOperation -Times 0 -Exactly
+    }
+
     It 'answers garbage with an error instead of hanging' {
         ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line 'not json' -PumpSeconds 0) | ConvertFrom-Json).error | Should -Be 'bad_request'
         ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"drop.tables"}') | ConvertFrom-Json).error | Should -Be 'unknown_op'
@@ -270,6 +285,91 @@ Describe 'Web channel: the pipe' {
         $exitReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.exit","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
         $exitReply.ok | Should -BeTrue
         Should -Invoke Invoke-ExitLayer -Times 1
+    }
+
+    It 'starts only a reviewed urgent plan and refuses revoked actors or commands for a different run' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Layer = 5 } }
+        Mock Get-UrgentSceneTiming { $null }
+        Mock Get-WebUrgentLayerStatus { $playbackScene }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MaintenanceControl { $true }
+        Mock Invoke-ShowTemplateResult { @{ Success = $true } }
+        Mock Get-UrgentItemVariables { @{} }
+        Mock Save-UrgentRunState { $true }
+        Mock Clear-UrgentRunState {}
+        Mock Invoke-ExitLayer { $false }
+        Mock Send-TelegramMessage {}
+        Mock Send-UrgentBoardStep { @{ Success = $true } }
+        Mock Show-UrgentBoardScreen {}
+        $previousBoard = $script:UrgentBoard
+        $previousRun = $script:UrgentBoardRun
+        $previousLayer = $script:OnAir[5]
+        $playbackScene = @{ Success = $true; IsOnAir = $true; ActiveId = 'old-graphic'; ActiveName = 'النشرة' }
+        try {
+            $script:UrgentBoardRun = $null
+            $script:UrgentBoard = (Add-UrgentItem -Board (New-UrgentBoard) -Text 'خبر للمراجعة').Value
+            $previewLine = '{"op":"urgent.playback","args":{"actor":4321,"action":"preview"}}'
+            $preview = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $previewLine) | ConvertFrom-Json
+            $preview.ok | Should -BeTrue
+            $preview.data.preview.itemCount | Should -Be 1
+            $preview.data.preview.replacesGraphic | Should -BeTrue
+            $preview.data.preview.graphicName | Should -Be 'النشرة'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+            $start = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'start'; review = $preview.data.preview.review } }
+            $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خبر آخر').Value
+            $stale = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $stale.error | Should -Be 'urgent_stale'
+
+            $preview = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $previewLine) | ConvertFrom-Json
+            $start.args.review = $preview.data.preview.review
+            $playbackScene.ActiveId = 'external-replacement'
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            $playbackScene.ActiveId = 'old-graphic'
+            $start.args.actor = 999
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'forbidden'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            $start.args.actor = 4321
+            $started = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $started.data.run.state | Should -Be 'playing'
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:old-graphic' }
+            $script:OnAir[5] = @{ Key = $script:MojazUrgentKey; ActiveId = 'started-urgent' }
+            $playbackScene.ActiveId = 'started-urgent'
+
+            $control = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'pause'; runId = $started.data.run.id } }
+            $paused = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($control | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $paused.data.run.state | Should -Be 'paused'
+            $control.args.action = 'resume'
+            $resumed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($control | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $resumed.data.run.state | Should -Be 'playing'
+            $control.args.action = 'skip'
+            $control.args.step = 0
+            $skipped = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($control | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $skipped.data.run.step | Should -Be 1
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($control | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            Should -Invoke Send-UrgentBoardStep -Times 1 -Exactly
+
+            $stop = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'stop'; runId = 'old-run' } }
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($stop | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+            $stop.args.runId = $started.data.run.id
+            $playbackScene.ActiveId = 'external-replacement'
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($stop | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+            $playbackScene.ActiveId = 'started-urgent'
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($stop | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stop_unconfirmed'
+            $status = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"urgent.playback","args":{"actor":4321,"action":"status"}}') | ConvertFrom-Json
+            $status.data.run.state | Should -Be 'stop_unconfirmed'
+            $status.data.run.id | Should -Be $started.data.run.id
+        }
+        finally {
+            $script:UrgentBoard = $previousBoard
+            $script:UrgentBoardRun = $previousRun
+            if ($null -eq $previousLayer) { $script:OnAir.Remove(5) } else { $script:OnAir[5] = $previousLayer }
+        }
     }
 
     It 'serves the published ticker in bounded pages only to authorized operators' {

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.80.0
+
+Review the order and timing of all or selected breaking-news rows in Newsroom before starting a run. The web screen shows the current and next story and offers pause, resume, advance, and stop. The bridge checks the reviewed plan again on confirmation and retains the stop control if the exit cannot be confirmed.
+
 ## Version 8.79.0
 
 The web interface opens on the breaking-news board in Newsroom. Its data-entry table takes its columns from the configured template fields. Operators can add, edit, enable, reorder, and delete rows. Edits share the bot's board and reject stale revisions. Extra fields travel with the saved row into playback. Newsroom also has paged views of saved bulletins and the published ticker.

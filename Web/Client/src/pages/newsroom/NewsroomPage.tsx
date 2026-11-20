@@ -4,6 +4,7 @@ import { IconRefresh } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { UrgentPlayback } from './UrgentPlayback'
 import { UrgentTable } from './UrgentTable'
 import classes from './NewsroomPage.module.css'
 
@@ -26,6 +27,7 @@ const number = new Intl.NumberFormat('ar')
 export function NewsroomPage() {
   const [view, setView] = useState<View>('urgent')
   const [page, setPage] = useState(0)
+  const [selected, setSelected] = useState<string[]>([])
   const content = useQuery({
     queryKey: ['newsroom', view, page],
     queryFn: async ({ signal }) => {
@@ -85,15 +87,21 @@ export function NewsroomPage() {
                 <Skeleton h={56} />
               </Stack>
             ) : result && view === 'urgent' ? (
-              <UrgentTable
-                key={result.page}
-                board={result}
-                onSaved={async (added) => {
-                  const nextPage = added ? Math.floor(result.total / 20) : result.page
-                  if (nextPage !== result.page) setPage(nextPage)
-                  await content.refetch()
-                }}
-              />
+              <>
+                <UrgentPlayback selected={selected} />
+                <UrgentTable
+                  key={result.page}
+                  board={result}
+                  selected={selected}
+                  onToggle={(id) => setSelected((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id])}
+                  onClear={() => setSelected([])}
+                  onSaved={async (added) => {
+                    const nextPage = added ? Math.floor(result.total / 20) : result.page
+                    if (nextPage !== result.page) setPage(nextPage)
+                    await content.refetch()
+                  }}
+                />
+              </>
             ) : result?.items.length ? (
               <Paper radius="lg">
                 <ol className={classes.list} start={result.page * 20 + 1}>

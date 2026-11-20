@@ -47,6 +47,7 @@ function Save-UrgentRunState {
         OperationId = [string]$run.OperationId
         Summary = [string]$run.Summary
         Scope = [string](Get-JsonProp $run 'Scope')
+        Layer = Get-JsonProp $run 'Layer'
     }
     if (-not (Write-BridgeValidatedJson -Path (Get-UrgentRunFile) -Json ($state | ConvertTo-Json -Depth 12))) {
         Write-BridgeLog 'Could not write the urgent board run state.' 'WARN'
@@ -241,7 +242,7 @@ function Start-UrgentBoardRun {
         the audit trail are all on the path, and this screen does not get to
         skip them because it has an engine behind it.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [switch]$Force)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [switch]$Force, $ReviewedPlan, [string]$ExpectedLayerStamp = '', [switch]$Quiet)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-UrgentBoardAvailable)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.boardOffOrNoTemplate')
@@ -251,12 +252,15 @@ function Start-UrgentBoardRun {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.alreadyRunning')
         return $false
     }
-    $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
-    if (-not $planResult.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.didNotStart' $([string]$planResult.Error)) -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
-        return $false
+    $plan = $ReviewedPlan
+    if (-not $plan) {
+        $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
+        if (-not $planResult.Success) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.didNotStart' $([string]$planResult.Error)) -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
+            return $false
+        }
+        $plan = $planResult.Value
     }
-    $plan = $planResult.Value
     $steps = @($plan.Steps)
     $template = Get-UrgentTemplate
 
@@ -277,7 +281,7 @@ function Start-UrgentBoardRun {
     $script:UrgentBoardStarting = $true
     try {
         $result = Invoke-ShowTemplateResult -Key $script:MojazUrgentKey `
-            -Variables (Get-UrgentItemVariables -Item $steps[0]) -ChatId $ChatId -UserId $UserId
+            -Variables (Get-UrgentItemVariables -Item $steps[0]) -ChatId $ChatId -UserId $UserId -ExpectedLayerStamp $ExpectedLayerStamp
     }
     finally { $script:UrgentBoardStarting = $false }
     if (-not $result -or -not $result.Success) {
@@ -289,6 +293,7 @@ function Start-UrgentBoardRun {
     $summary = Get-UrgentPlanSummary -Plan $plan
     $script:UrgentBoardRun = @{
         Step = 0
+        Layer = Get-JsonProp $template 'Layer'
         ChatId = $ChatId
         UserId = $UserId
         Clock = [System.Diagnostics.Stopwatch]::StartNew()
@@ -315,7 +320,7 @@ function Start-UrgentBoardRun {
     # over it and says the sequence is up and with which story.
     $first = [string](Get-JsonProp $steps[0] 'Text')
     if ($first.Length -gt 80) { $first = $first.Substring(0, 79) + '…' }
-    Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice (T 'urg.runStartedNotice' $($steps.Count) $first)
+    if (-not $Quiet) { Show-UrgentBoardScreen -ChatId $ChatId -UserId $UserId -Notice (T 'urg.runStartedNotice' $($steps.Count) $first) }
     return $true
 }
 
@@ -792,6 +797,7 @@ function Restore-UrgentBoardRun {
         ExitAtSeconds = $exitAt
         BoardRevision = [int](Get-JsonProp $state 'BoardRevision')
         Scope = [string](Get-JsonProp $state 'Scope')
+        Layer = Get-JsonProp $state 'Layer'
         StartedAt = $startedAt.ToString('o')
         Summary = [string](Get-JsonProp $state 'Summary')
         OperationId = [string](Get-JsonProp $state 'OperationId')

@@ -17,7 +17,13 @@ const status: Record<string, { label: string; color: string }> = {
   ready: { label: 'جاهز', color: 'teal' },
 }
 
-export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (added: boolean) => Promise<void> }) {
+export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
+  board: ContentPage
+  selected: string[]
+  onToggle: (id: string) => void
+  onClear: () => void
+  onSaved: (added: boolean) => Promise<void>
+}) {
   const [edit, setEdit] = useState<Edit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -73,6 +79,7 @@ export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (
   function editorRow(row: Edit) {
     return (
       <Table.Tr key={row.id ?? 'new'} className={classes.editRow}>
+        <Table.Td />
         <Table.Td>{row.id ? '—' : 'جديد'}</Table.Td>
         {fields.map((field, index) => (
           <Table.Td key={field.name} className={classes.urgentCell}>
@@ -110,7 +117,10 @@ export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (
     <Stack gap="sm">
       <Group justify="space-between">
         <Text size="sm" c="dimmed">الأعمدة من قالب العواجل. تُستخدم التعديلات في التشغيل التالي.</Text>
-        <Button leftSection={<IconPlus size={17} />} disabled={!!edit || busy} onClick={() => startEdit()}>إضافة عاجل</Button>
+        <Group gap="xs">
+          {!!selected.length && <Button variant="subtle" size="sm" onClick={onClear}>إلغاء التحديد</Button>}
+          <Button leftSection={<IconPlus size={17} />} disabled={!!edit || busy} onClick={() => startEdit()}>إضافة عاجل</Button>
+        </Group>
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
       {error && <Alert color="red" role="alert">{error}</Alert>}
@@ -128,6 +138,7 @@ export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (
             <Table verticalSpacing="sm" horizontalSpacing="sm" captionSide="top">
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th scope="col" w={70}>تحديد</Table.Th>
                   <Table.Th scope="col" w={55}>الترتيب</Table.Th>
                   {fields.map((field) => (
                     <Table.Th key={field.name} scope="col">
@@ -146,6 +157,14 @@ export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (
                   const state = status[item.state]
                   return (
                     <Table.Tr key={item.id ?? rank}>
+                      <Table.Td>
+                        {item.id && <Checkbox
+                          aria-label={`تحديد العاجل ${rank}`}
+                          checked={selected.includes(item.id)}
+                          disabled={!item.enabled && !selected.includes(item.id)}
+                          onChange={() => { if (item.id) onToggle(item.id) }}
+                        />}
+                      </Table.Td>
                       <Table.Td className="cgb-mono">{rank}</Table.Td>
                       {fields.map((field) => (
                         <Table.Td key={field.name} className={classes.urgentCell}>
@@ -165,7 +184,7 @@ export function UrgentTable({ board, onSaved }: { board: ContentPage; onSaved: (
                   )
                 })}
                 {!board.items.length && !edit && (
-                  <Table.Tr><Table.Td colSpan={fields.length + 3}><Text c="dimmed" ta="center" py="sm">الجدول فارغ. أضف أول عاجل.</Text></Table.Td></Table.Tr>
+                  <Table.Tr><Table.Td colSpan={fields.length + 4}><Text c="dimmed" ta="center" py="sm">الجدول فارغ. أضف أول عاجل.</Text></Table.Td></Table.Tr>
                 )}
               </Table.Tbody>
             </Table>

@@ -25,6 +25,18 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        var playback = app.MapGroup("/api/content/urgent/playback").WithTags("Content").RequireAuthorization();
+        playback.MapGet("", (IBridgeChannel bridge, HttpContext http) => UrgentPlayback(new("status"), bridge, http))
+            .Produces<UrgentPlaybackResponse>()
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        playback.MapPost("", UrgentPlayback)
+            .Produces<UrgentPlaybackResponse>()
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<IResult> List(string view, int? page, IBridgeChannel bridge, HttpContext http)
@@ -61,6 +73,29 @@ public static class ContentEndpoints
             "urgent_invalid" => ApiErrors.Of(400, reply.Error),
             "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
             "urgent_save_failed" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
+
+    private static async Task<IResult> UrgentPlayback(UrgentPlaybackRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("urgent.playback", new
+        {
+            actor = http.User.UserId(), request.Action, request.SelectedIds, request.Review, request.RunId, request.Step
+        }, http.RequestAborted);
+        if (reply.Ok)
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return TypedResults.Ok(reply.Data.Deserialize<UrgentPlaybackResponse>(JsonDefaults.Options));
+        }
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "urgent_stale" or "urgent_air_busy" or "urgent_stop_unconfirmed" => ApiErrors.Of(409, reply.Error),
+            "urgent_invalid" => ApiErrors.Of(400, reply.Error),
+            "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
+            "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
     }

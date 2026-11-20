@@ -654,6 +654,17 @@ function Send-PreShowValues {
     elseif (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
 }
 
+function Get-CinegyLayerReviewStamp {
+    param($Status)
+    if (-not (Get-JsonProp $Status 'Success')) { return '' }
+    $onAir = Get-JsonProp $Status 'IsOnAir'
+    if ($null -eq $onAir) { return '' }
+    if (-not $onAir) { return 'empty' }
+    $id = ([string](Get-JsonProp $Status 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
+    if ($id) { return "active:$id" }
+    return ''
+}
+
 function Invoke-ShowTemplateResult {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -661,7 +672,8 @@ function Invoke-ShowTemplateResult {
         [Parameter(Mandatory)][long]$ChatId,
         [long]$UserId = 0,
         [int]$AutoHideSeconds = 0,
-        [switch]$RequireEmptyLayer
+        [switch]$RequireEmptyLayer,
+        [string]$ExpectedLayerStamp = ''
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
@@ -709,6 +721,10 @@ function Invoke-ShowTemplateResult {
         return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
+    if ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $layerStatus) -cne $ExpectedLayerStamp) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText 'reviewed scene changed'
+        return [pscustomobject]@{ Success = $false; Error = (T 'tick.sceneChanged') }
+    }
     if ($RequireEmptyLayer -and ($null -eq (Get-JsonProp $layerStatus 'IsOnAir') -or [bool](Get-JsonProp $layerStatus 'IsOnAir'))) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText 'recovery layer is occupied'
         return [pscustomobject]@{ Success = $false; Error = 'recovery layer is occupied' }

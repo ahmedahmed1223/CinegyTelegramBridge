@@ -10,6 +10,11 @@ public sealed record ContentItem(string Title, string State, int? Rows, string? 
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
 public sealed record UrgentRowInput(Dictionary<string, string> Values, bool Enabled);
 public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null);
+public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null);
+public sealed record UrgentRunStatus(string Id, string State, int Step, int StepCount, string Current, string Next);
+public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);
+public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps);
+public sealed record UrgentPlaybackResponse(UrgentRunStatus? Run, UrgentRunPreview? Preview);
 
 public sealed record CurrentUser(long Id, string Name, string Role, string Method, bool WebOnly);
 

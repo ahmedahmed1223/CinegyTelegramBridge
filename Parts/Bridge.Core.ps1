@@ -183,10 +183,14 @@ function Save-Config {
         elseif ($script:SecretReferences.ContainsKey('BotToken')) {
             $target.BotToken = [string]$config.BotToken
         }
-        $target | ConvertTo-Json -Depth 20 | Set-Content -Path $tempPath -Encoding utf8 -ErrorAction Stop
+        # The same-directory rename carries the staged file's security.
+        # Complete every ACL operation before the new config becomes visible.
+        New-Item -ItemType File -Path $tempPath -Force -ErrorAction Stop | Out-Null
+        Protect-BridgePathAcl -Path @($tempPath)
+        $target | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tempPath -Encoding utf8 -ErrorAction Stop
         if (Test-Path $Path) { Copy-Item -Path $Path -Destination $backupPath -Force -ErrorAction SilentlyContinue }
-        Move-Item -Path $tempPath -Destination $Path -Force -ErrorAction Stop
         Protect-BridgeConfigurationAcl -ConfigPath $Path
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
         $script:LastConfigSaveFailed = $false
     }
     catch {

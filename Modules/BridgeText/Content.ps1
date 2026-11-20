@@ -197,6 +197,7 @@ function Add-BridgeTextContent {
     $catalogue['urgent.deleteExpired'] = @{ ar = '⚠️ انتهت صلاحية تأكيد الحذف. حدّد العواجل وأكّد من جديد.'; en = '⚠️ The delete confirmation has expired. Select the items and confirm again.' }
     $catalogue['urgent.pickNumberButton'] = @{ ar = 'اختر قيمة رقمية صحيحة من الأزرار.'; en = 'Choose a whole number from the buttons.' }
     $catalogue['urgent.settingSaveFailed'] = @{ ar = 'تعذّر حفظ الإعداد؛ بقيت القيمة السابقة.'; en = 'Could not save the setting; the previous value stands.' }
+    $catalogue['urgent.timingActive'] = @{ ar = 'توجد دورة عواجل نشطة. عدّل التوقيت بعد انتهائها.'; en = 'An urgent run is active. Change its timing after the run ends.' }
     $catalogue['urgent.num.itemInterval'] = @{ ar = 'مدة الإخفاء التلقائي لهذا العاجل (ثانية)'; en = 'This story''s auto-hide time (seconds)' }
     $catalogue['urgent.num.inherited'] = @{ ar = 'من الجدول'; en = 'from the board' }
     $catalogue['urgent.num.itemRepeats'] = @{ ar = 'تكرار هذا العاجل'; en = 'This items repeats' }

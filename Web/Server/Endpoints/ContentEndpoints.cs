@@ -37,6 +37,12 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        var timing = app.MapGroup("/api/content/urgent/timing").WithTags("Content").RequireAuthorization();
+        timing.MapGet("", (IBridgeChannel bridge, HttpContext http) => UrgentTiming(new("status"), bridge, http))
+            .Produces<UrgentTimingState>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
+        timing.MapPost("", UrgentTiming)
+            .Produces<UrgentTimingState>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
         var ticker = app.MapGroup("/api/content/ticker/draft").WithTags("Content").RequireAuthorization();
         ticker.MapGet("", (int? pausedPage, IBridgeChannel bridge, HttpContext http) =>
                 TickerEditor(new("status", PausedPage: pausedPage), bridge, http))
@@ -276,6 +282,25 @@ public static class ContentEndpoints
             "ticker_stale" or "ticker_locked" or "ticker_conflict" or "ticker_lock_pending" => ApiErrors.Of(409, reply.Error),
             "ticker_invalid" or "ticker_full" or "ticker_schedule_invalid" or "ticker_paste_invalid" or "ticker_paste_separator" => ApiErrors.Of(400, reply.Error),
             "content_unreadable" or "ticker_start_failed" or "ticker_publish_failed" or "ticker_lock_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
+
+    private static async Task<IResult> UrgentTiming(UrgentTimingRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("urgent.timing", new
+        {
+            actor = http.User.UserId(), request.Action, request.Revision, request.Field, request.Number, request.Option
+        }, http.RequestAborted);
+        if (reply.Ok) return Results.Ok(reply.Data.Deserialize<UrgentTimingState>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "urgent_timing_invalid" => ApiErrors.Of(400, reply.Error),
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "content_disabled" => ApiErrors.Of(404, reply.Error),
+            "urgent_stale" or "urgent_timing_active" => ApiErrors.Of(409, reply.Error),
+            "urgent_timing_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
     }

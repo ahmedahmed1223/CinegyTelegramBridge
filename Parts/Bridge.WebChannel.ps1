@@ -344,6 +344,7 @@ function Invoke-WebChannelOperation {
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
         'content.list' { return Get-WebContentPage -Arguments $arguments }
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
+        'urgent.timing' { return Invoke-WebUrgentTiming -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'ticker.txt' { return Start-WebTickerTxtRequest -Entry $Entry }
@@ -1189,6 +1190,57 @@ function Get-WebUrgentFields {
         $field
         $isFirst = $false
     }
+}
+
+function Get-WebUrgentTimingState {
+    $defaults = Get-UrgentBoardDefaults
+    $state = [ordered]@{
+        intervalSeconds = $defaults.IntervalSeconds; repeats = $defaults.Repeats; totalSeconds = $defaults.TotalSeconds
+        exitGapSeconds = Get-SettingInt 'UrgentExitGapSeconds' 0; mode = $defaults.Mode; repeatMode = $defaults.RepeatMode
+    }
+    $snapshot = ConvertTo-Json -Compress -InputObject $state
+    $state['revision'] = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($snapshot)))
+    $state['floorSeconds'] = Get-UrgentFloorSeconds
+    $state['canEdit'] = -not [bool]$script:UrgentBoardRun
+    $state['bounds'] = @{}
+    foreach ($kind in 'interval', 'repeats', 'total', 'gap') {
+        $spec = Get-UrgentNumberSpec -Kind "d$kind"
+        $state.bounds[$kind] = @{ minimum = $spec.Minimum; maximum = $spec.Maximum }
+    }
+    return $state
+}
+
+function Invoke-WebUrgentTiming {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $state = Get-WebUrgentTimingState
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'status') { return @{ ok = $true; data = $state } }
+    if ($action -ne 'save') { return @{ ok = $false; error = 'urgent_timing_invalid' } }
+    if (-not $state.canEdit) { return @{ ok = $false; error = 'urgent_timing_active' } }
+    if ([string](Get-JsonProp $Arguments 'revision') -cne $state.revision) { return @{ ok = $false; error = 'urgent_stale' } }
+
+    $field = [string](Get-JsonProp $Arguments 'field')
+    $value = Get-JsonProp $Arguments 'option'
+    if ($state.bounds.ContainsKey($field)) {
+        $spec = Get-UrgentNumberSpec -Kind "d$($field.ToLowerInvariant())"
+        $name = $spec.Setting
+        $value = Get-JsonProp $Arguments 'number'
+        if (($value -isnot [int] -and $value -isnot [long]) -or $value -lt $spec.Minimum -or $value -gt $spec.Maximum) {
+            return @{ ok = $false; error = 'urgent_timing_invalid' }
+        }
+    }
+    elseif ($field -eq 'mode' -and $value -is [string] -and (Test-UrgentMode -Mode $value)) { $name = 'UrgentBoardMode' }
+    elseif ($field -eq 'order' -and $value -is [string] -and (Test-UrgentRepeatMode -RepeatMode $value)) { $name = 'UrgentBoardRepeatMode' }
+    else { return @{ ok = $false; error = 'urgent_timing_invalid' } }
+
+    if (-not (Set-UrgentBoardSetting -ChatId $actor -Name $name -Value $value -Quiet)) {
+        return @{ ok = $false; error = 'urgent_timing_save_failed' }
+    }
+    Add-AuditEntry "Web urgent timing $name updated by $(Format-UserAuditActor -UserId $actor)"
+    return @{ ok = $true; data = Get-WebUrgentTimingState }
 }
 
 function Invoke-WebUrgentWrite {

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.93.0'; Items = @('Open Timing settings on the web urgent board to adjust the duration, repeat order, display mode and exit gap for upcoming runs. The screen also displays the minimum duration for the scene.') },
                 @{ Version = '8.92.0'; Items = @('Import a UTF-8 TXT file through the web ticker draft options. Compare the file with the existing draft, then confirm the replacement. Replacing the draft cancels its scheduled publication.') },
                 @{ Version = '8.91.0'; Items = @('Request the ticker draft from the web and answer incoming requests from its editor. A web handover keeps the headlines and cancels any scheduled publication. Administrators can release a draft for another editor without deleting its headlines.') },
                 @{ Version = '8.90.0'; Items = @('Paste several headlines into the web ticker draft and review the order and skipped lines before adding them. Draft options now include clear and discard with a downloadable text copy.') },
@@ -333,6 +334,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.93.0'; Items = @('افتح إعدادات التوقيت في جدول العواجل على الويب لتعديل مدة العرض والتكرار ونمط العرض وفاصل الخروج للدورات التالية، والاطّلاع على أقصر مدة يسمح بها المشهد.') },
                 @{ Version = '8.92.0'; Items = @('استورد ملف TXT بترميز UTF-8 من خيارات مسودة الشريط في الويب. قارن أخبار الملف بالمسودة قبل تأكيد الاستبدال. عند الاستبدال يُلغى موعد نشر المسودة.') },
                 @{ Version = '8.91.0'; Items = @('اطلب تسلّم مسودة الشريط من الويب، وأجب عن الطلب الوارد من شاشة تحريرها. يبقي التسليم أخبار المسودة ويلغي موعد نشرها. يمكن للمشرف تحرير قفل المسودة مع إبقاء أخبارها.') },
                 @{ Version = '8.90.0'; Items = @('ألصق عدة أخبار في مسودة الشريط على الويب وراجع ترتيبها وما استُبعد منها قبل الإضافة. تتضمن خيارات المسودة التفريغ والإلغاء مع تنزيل النص قبل التأكيد.') },

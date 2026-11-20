@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.93.0
+
+The web urgent board exposes the shared timing defaults for duration, repeats, repeat order, run ceiling, display mode and exit gap. It shows the scene's minimum duration and rejects stale changes or edits during an active urgent run. Configured intervals below eight seconds now read back correctly in both clients; the planner still applies the scene's effective floor.
+
+The Telegram timing screen also blocks changes during an active run. The bridge secures the staged configuration and backups before committing a save, so an access-permission failure leaves the prior file in place.
+
 ## Version 8.92.0
 
 Web ticker editors can upload a UTF-8 TXT file, compare its parsed headlines with the current draft, and confirm the replacement. The bridge applies the configured upload and headline limits, verifies the reviewed file and draft revision, and cancels a scheduled publication when replacing the draft. An empty file is rejected. The existing clear command handles deliberate emptying under its own permission rules.

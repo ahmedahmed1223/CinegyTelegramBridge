@@ -142,6 +142,17 @@ Describe 'Configuration backups' {
 
     AfterEach { $script:ConfigPath = $script:OriginalConfigPathForTest }
 
+    It 'keeps the prior configuration on disk when preparing access permissions fails' {
+        $before = (Get-FileHash -LiteralPath $script:ConfigPath).Hash
+        Mock Protect-BridgeConfigurationAcl { throw 'simulated access permission failure' }
+
+        Save-Config -Path $script:ConfigPath
+
+        $script:LastConfigSaveFailed | Should -BeTrue
+        (Get-FileHash -LiteralPath $script:ConfigPath).Hash | Should -Be $before
+        Test-Path -LiteralPath "$($script:ConfigPath).tmp" | Should -BeFalse
+    }
+
     It 'creates a timestamped recoverable copy before saving configuration changes' {
         Save-Config -Path $script:ConfigPath
 
@@ -617,8 +628,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.92.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.92.0'
+        $script:BridgeVersion | Should -Be '8.93.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.93.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

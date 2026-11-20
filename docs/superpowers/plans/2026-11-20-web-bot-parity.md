@@ -7,7 +7,7 @@
 | Workflow | In the web interface | Remaining work |
 |---|---|---|
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
-| Breaking news | Default editable table, row selection, automatic run preview and playback, pause, resume, advance and stop retry | Timing settings, rehearsal, single-story and timed manual playback |
+| Breaking news | Default editable table, row selection, shared board timing defaults, automatic run preview and playback, pause, resume, advance and stop retry | Per-story timing, rehearsal, single-story and timed manual playback |
 | Bulletins | Shared library and paginated design-field table, create and copy, revision-checked row editing and batch paste, built-in timing, on-air indicator | Attachments, design switching, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
 | Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |
 | Program content | | Board, fields and media, draft control, publish and live editing |
@@ -26,7 +26,8 @@
 - [x] Add reviewed ticker TXT import using the shared UTF-8 parser and configured upload and headline limits.
 - [x] Use the template fields as urgent table columns. Save inline edits with the board revision and stable item IDs, and keep extra fields in playback.
 - [x] Use the existing urgent planner and playback engine for review, start and sequence controls. Test revoked access, a changed board between review and confirm, and a failed stop on a simulated scene.
-- [ ] Expose urgent timing settings, rehearsal and individual show actions through their existing bridge policies.
+- [x] Expose shared urgent board timing defaults with the bot's bounds and revision-checked edits.
+- [ ] Expose per-story timing, rehearsal and individual show actions through the existing bridge policies.
 - [x] Connect the bulletin library and editor to `Parts/Bridge.Mojaz.ps1` and the shared library module. Test stale revisions, preserving existing media, and rejecting file paths in text edits.
 - [x] Review bulletin paste against the selected design's columns and save the approved rows atomically. Expose the built-in design's shared frame timing.
 - [ ] Complete bulletin attachments and scheduling using the existing bot rules. Route a run through its selected scene and test recovery and the existing urgent conflict rules before adding web playback.

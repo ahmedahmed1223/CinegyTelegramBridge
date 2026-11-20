@@ -133,9 +133,13 @@ function Get-UrgentBoardDefaults {
     if (-not (Test-UrgentMode -Mode $mode)) { $mode = 'text' }
     $repeatMode = [string](Get-Setting 'UrgentBoardRepeatMode')
     if (-not (Test-UrgentRepeatMode -RepeatMode $repeatMode)) { $repeatMode = 'cycle' }
+    $interval = 0
+    if (-not [int]::TryParse([string](Get-Setting 'UrgentBoardIntervalSeconds'), [ref]$interval) -or $interval -lt 1) {
+        $interval = [int]$script:DefaultSettings['UrgentBoardIntervalSeconds']
+    }
     return [pscustomobject]@{
         Mode = $mode
-        IntervalSeconds = Get-SettingInt 'UrgentBoardIntervalSeconds' 8
+        IntervalSeconds = $interval
         TotalSeconds = Get-SettingInt 'UrgentBoardTotalSeconds' 0
         Repeats = Get-SettingInt 'UrgentBoardRepeats' 1
         RepeatMode = $repeatMode
@@ -1485,11 +1489,12 @@ function Set-UrgentBoardSetting {
         door - which is where the range check lives, and refuses rather than
         clamps. A second validator here would be a second rule to keep in step.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Name, $Value)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Name, $Value, [switch]$Quiet)
     try {
+        if ($script:UrgentBoardRun) { throw (T 'urgent.timingActive') }
         # Set-Setting checks bounds only when TryParse succeeds. Never persist
         # numeric text it cannot parse: Get-SettingInt would silently read 8.
-        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds')) {
+        if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds', 'UrgentExitGapSeconds')) {
             $number = 0
             if (-not [int]::TryParse([string]$Value, [ref]$number)) { throw (T 'urgent.pickNumberButton') }
             $Value = $number
@@ -1508,7 +1513,7 @@ function Set-UrgentBoardSetting {
         # Redacted on the way out, like every other exception this bridge shows
         # a chat: a chat is the widest audience it has, and redaction costs
         # nothing on a message that carries no credential.
-        Send-TelegramMessage -ChatId $ChatId -Text "⚠️ $(Protect-SensitiveText $_.Exception.Message)"
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "⚠️ $(Protect-SensitiveText $_.Exception.Message)" }
         return $false
     }
     return $true

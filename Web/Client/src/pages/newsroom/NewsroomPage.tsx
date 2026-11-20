@@ -6,6 +6,7 @@ import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { PageHeader } from '../../components/PageHeader'
 import { UrgentPlayback } from './UrgentPlayback'
+import { UrgentTiming } from './UrgentTiming'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
 import { BulletinEditor, BulletinNameForm } from './BulletinEditor'
@@ -126,6 +127,7 @@ export function NewsroomPage() {
             ) : result && view === 'urgent' ? (
               <>
                 <UrgentPlayback selected={selected} />
+                <UrgentTiming />
                 <UrgentTable
                   key={result.page}
                   board={result}

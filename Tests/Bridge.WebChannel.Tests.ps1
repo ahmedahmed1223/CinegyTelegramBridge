@@ -141,6 +141,57 @@ Describe 'Web channel: the pipe' {
     }
     AfterAll { Stop-WebChannel }
 
+    It 'uses shared urgent timing rules and refuses stale changes without calling air' {
+        $oldSettings = Get-JsonProp $config 'Settings'
+        $oldRun = $script:UrgentBoardRun
+        $script:UrgentBoardRun = $null
+        $fixtureSettings = [pscustomobject]@{ UrgentBoardIntervalSeconds = 8; UrgentBoardMode = 'text' }
+        Set-JsonProp $config 'Settings' $fixtureSettings
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Get-UrgentFloorSeconds { 4.5 }
+        Mock Save-Config {}
+        Mock Invoke-ShowTemplateResult {}
+        $command = {
+            param($arguments)
+            $line = @{ op = 'urgent.timing'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $command @{ actor = 4322; action = 'status' }).error | Should -Be 'forbidden'
+            $status = (& $command @{ actor = 4321; action = 'status' }).data
+            $status.floorSeconds | Should -Be 4.5
+            $change = @{ actor = 4321; action = 'save'; revision = $status.revision; field = 'interval'; number = 0 }
+            (& $command $change).error | Should -Be 'urgent_timing_invalid'
+            $change.number = 3
+            $saved = (& $command $change).data
+            $saved.intervalSeconds | Should -Be 3
+            (Get-UrgentBoardDefaults).IntervalSeconds | Should -Be 3
+            (& $command $change).error | Should -Be 'urgent_stale'
+            Set-UrgentBoardSetting -ChatId 4321 -Name UrgentBoardMode -Value 'exit' | Should -BeTrue
+            $change.revision = $saved.revision
+            (& $command $change).error | Should -Be 'urgent_stale'
+            $fresh = (& $command @{ actor = 4321; action = 'status' }).data
+            $change.revision = $fresh.revision
+            $change.number = 12
+            $script:UrgentBoardRun = @{ Id = 'fixture-active' }
+            (& $command $change).error | Should -Be 'urgent_timing_active'
+            Set-UrgentBoardSetting -ChatId 4321 -Name UrgentExitGapSeconds -Value 20 -Quiet | Should -BeFalse
+            $script:UrgentBoardRun = $null
+            Mock Save-Config { $script:LastConfigSaveFailed = $true }
+            (& $command $change).error | Should -Be 'urgent_timing_save_failed'
+            (Get-UrgentBoardDefaults).IntervalSeconds | Should -Be 3
+            Set-JsonProp (Get-JsonProp $config 'Settings') 'UrgentBoardIntervalSeconds' 'invalid'
+            (Get-UrgentBoardDefaults).IntervalSeconds | Should -Be 8
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        }
+        finally {
+            $script:UrgentBoardRun = $oldRun
+            $script:LastConfigSaveFailed = $false
+            Set-JsonProp $config 'Settings' $oldSettings
+        }
+    }
+
     It 'answers status from the published snapshot without the bridge thread' {
         $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"status"}' -PumpSeconds 0
         $parsed = $reply | ConvertFrom-Json

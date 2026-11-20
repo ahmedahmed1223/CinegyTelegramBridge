@@ -2808,6 +2808,9 @@
               "type": "string"
             },
             "nullable": true
+          },
+          "timing": {
+            "$ref": "#/components/schemas/UrgentItemTiming"
           }
         }
       },
@@ -3955,6 +3958,55 @@
           }
         }
       },
+      "UrgentItemTiming": {
+        "required": [
+          "intervalSeconds",
+          "repeats",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "intervalSeconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repeats": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
+      "UrgentItemTimingInput": {
+        "required": [
+          "intervalSeconds",
+          "repeats",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "intervalSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "repeats": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "mode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
       "UrgentPlaybackRequest": {
         "required": [
           "action"
@@ -4259,6 +4311,9 @@
           },
           "row": {
             "$ref": "#/components/schemas/UrgentRowInput"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/UrgentItemTimingInput"
           }
         }
       },

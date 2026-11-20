@@ -146,7 +146,7 @@ public static class ContentEndpoints
     {
         var reply = await bridge.SendAsync("urgent.write", new
         {
-            actor = http.User.UserId(), request.Action, request.Revision, request.Id, request.Row
+            actor = http.User.UserId(), request.Action, request.Revision, request.Id, request.Row, request.Timing
         }, http.RequestAborted);
         if (reply.Ok) return TypedResults.NoContent();
         return reply.Error switch

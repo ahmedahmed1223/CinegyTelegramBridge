@@ -2709,6 +2709,7 @@ export interface components {
             values: {
                 [key: string]: string;
             } | null;
+            timing?: components["schemas"]["UrgentItemTiming"];
         };
         ContentPage: {
             items: components["schemas"]["ContentItem"][];
@@ -3050,6 +3051,22 @@ export interface components {
             identical: boolean;
             cancelsSchedule: boolean;
         };
+        /** @default null */
+        UrgentItemTiming: {
+            /** Format: int32 */
+            intervalSeconds: number;
+            /** Format: int32 */
+            repeats: number;
+            mode: string;
+        } | null;
+        /** @default null */
+        UrgentItemTimingInput: {
+            /** Format: int32 */
+            intervalSeconds: number | null;
+            /** Format: int32 */
+            repeats: number | null;
+            mode: string | null;
+        } | null;
         UrgentPlaybackRequest: {
             action: string;
             /** @default null */
@@ -3153,6 +3170,7 @@ export interface components {
             /** @default null */
             id: string | null;
             row?: components["schemas"]["UrgentRowInput"];
+            timing?: components["schemas"]["UrgentItemTimingInput"];
         };
         WebAccountResponse: {
             username: string;

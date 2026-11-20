@@ -1,9 +1,10 @@
 import { Alert, Button, Group, NativeSelect, Paper, Stack, Table, Text } from '@mantine/core'
-import { IconAdjustmentsHorizontal, IconMinus, IconPlus } from '@tabler/icons-react'
+import { IconAdjustmentsHorizontal } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { UrgentTimingStepper } from './UrgentTimingStepper'
 
 const timingKey = ['urgent-timing']
 const displayNumber = new Intl.NumberFormat('ar', { maximumFractionDigits: 2 })
@@ -94,18 +95,8 @@ export function UrgentTiming() {
             {edit && <Stack gap="xs" ref={editor} tabIndex={-1} aria-label={edit.row.label}>
               {bounds && typeof edit.value === 'number' ? <>
                 <Text size="sm" fw={600} aria-live="polite">{edit.row.label} · {display(edit.row, edit.value)}</Text>
-                <Group gap="xs" aria-label={edit.row.label}>
-                  {(bounds.maximum > 300 ? [1, 60, 300] : [1, 10]).map((step) => (
-                    <Group key={step} gap={4} wrap="nowrap">
-                      <Button variant="default" size="compact-sm" leftSection={<IconMinus size={13} aria-hidden />}
-                        aria-label={`إنقاص ${step}`} disabled={save.isPending || Number(edit.value) <= bounds.minimum}
-                        onClick={() => setEdit({ ...edit, value: Math.max(bounds.minimum, Number(edit.value) - step) })}>{step}</Button>
-                      <Button variant="default" size="compact-sm" leftSection={<IconPlus size={13} aria-hidden />}
-                        aria-label={`زيادة ${step}`} disabled={save.isPending || Number(edit.value) >= bounds.maximum}
-                        onClick={() => setEdit({ ...edit, value: Math.min(bounds.maximum, Number(edit.value) + step) })}>{step}</Button>
-                    </Group>
-                  ))}
-                </Group>
+                <UrgentTimingStepper label={edit.row.label} value={edit.value} minimum={bounds.minimum} maximum={bounds.maximum}
+                  disabled={save.isPending || !state.canEdit} onChange={(value) => setEdit({ ...edit, value })} />
               </> : (edit.row.field === 'mode' || edit.row.field === 'order') && (
                 <NativeSelect label={edit.row.label} data={options[edit.row.field]} value={edit.value}
                   disabled={save.isPending} onChange={(event) => setEdit({ ...edit, value: event.currentTarget.value })} />

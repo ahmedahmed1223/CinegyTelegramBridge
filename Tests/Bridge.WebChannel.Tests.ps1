@@ -1429,6 +1429,30 @@ Describe 'Web channel: the pipe' {
             $row.Text | Should -Be 'خبر جديد'
             $row.UpdatedBy | Should -Be 4321
 
+            $timing = @{
+                op = 'urgent.write'
+                args = @{ actor = 4321; action = 'timing'; revision = $script:UrgentBoard.Revision; id = $row.Id
+                    timing = @{ intervalSeconds = 17; repeats = 2; mode = 'exit' } }
+            }
+            $wire = $timing | ConvertTo-Json -Depth 6 -Compress
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $wire) | ConvertFrom-Json).ok | Should -BeTrue
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $wire) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            $custom = $script:UrgentBoard.Items[0]
+            $custom.IntervalSeconds | Should -Be 17
+            $custom.Repeats | Should -Be 2
+            $custom.Mode | Should -Be 'exit'
+            (Get-UrgentItemVariables -Item $custom)['location[1]'] | Should -Be 'الاستوديو'
+            $customPlan = New-UrgentRunPlan -Items @($custom) -Defaults (New-UrgentDefaults)
+            $customPlan.Value.Steps[0].HoldSeconds | Should -Be 17
+            $customPlan.Value.StepCount | Should -Be 2
+            $timing.args.revision = $script:UrgentBoard.Revision
+            $timing.args.timing.intervalSeconds = 18
+            $timing.args.timing.repeats = 100
+            $wire = $timing | ConvertTo-Json -Depth 6 -Compress
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $wire) | ConvertFrom-Json).error | Should -Be 'refused'
+            $script:UrgentBoard.Revision | Should -Be $timing.args.revision
+            $script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 17
+
             $stale = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $add) | ConvertFrom-Json
             $stale.error | Should -Be 'urgent_stale'
             $script:UrgentBoard.Items.Count | Should -Be 1
@@ -1442,6 +1466,7 @@ Describe 'Web channel: the pipe' {
             $list.data.fields[2].label | Should -Be 'الموقع'
             $list.data.items[0].values.kicker | Should -Be 'عنوان معدّل'
             $list.data.items[0].values.'location[1]' | Should -Be 'الميدان'
+            $list.data.items[0].timing.intervalSeconds | Should -Be 17
             $list.data.revision | Should -Be $script:UrgentBoard.Revision
 
             $invalid = $edit | ConvertFrom-Json -AsHashtable
@@ -1455,6 +1480,13 @@ Describe 'Web channel: the pipe' {
 
             Import-UrgentBoard
             (Get-UrgentItemVariables -Item $script:UrgentBoard.Items[0])['location[1]'] | Should -Be 'الميدان'
+            $timing.args.revision = $script:UrgentBoard.Revision
+            $timing.args.timing = @{ intervalSeconds = 0; repeats = 0; mode = '' }
+            $wire = $timing | ConvertTo-Json -Depth 6 -Compress
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $wire) | ConvertFrom-Json).ok | Should -BeTrue
+            $script:UrgentBoard.Items[0].IntervalSeconds | Should -Be 0
+            $script:UrgentBoard.Items[0].Repeats | Should -Be 0
+            $script:UrgentBoard.Items[0].Mode | Should -Be ''
 
             $plan = New-UrgentRunPlan -Items @($row) -Defaults (New-UrgentDefaults)
             $plan.Success | Should -BeTrue

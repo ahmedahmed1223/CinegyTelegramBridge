@@ -1,10 +1,11 @@
 import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { IconArrowDown, IconArrowUp, IconEdit, IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconClock, IconEdit, IconPlus, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import classes from './NewsroomPage.module.css'
+import { UrgentRowTiming } from './UrgentRowTiming'
 
 type ContentPage = Schemas['ContentPage']
 type ContentItem = Schemas['ContentItem']
@@ -25,6 +26,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
   onSaved: (added: boolean) => Promise<void>
 }) {
   const [edit, setEdit] = useState<Edit | null>(null)
+  const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fields = board.fields ?? []
@@ -51,6 +53,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
         return
       }
       setEdit(null)
+      setTimingEdit(null)
       await onSaved(body.action === 'add')
     } catch {
       setError('تعذّر الوصول إلى الجسر. حدّث الجدول للتحقق من حفظ التغيير.')
@@ -123,7 +126,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
         </Group>
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
-      {error && <Alert color="red" role="alert">{error}</Alert>}
+      {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -175,6 +178,9 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                       <Table.Td>
                         <Group wrap="nowrap" gap={4}>
                           <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
+                          <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
+                            aria-label={`توقيت العاجل ${rank}`} disabled={!item.id || !!edit || busy}
+                            onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconClock size={17} /></ActionIcon>
                           <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
                           <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === board.total || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
                           <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
@@ -191,6 +197,9 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
           </Table.ScrollContainer>
         </form>
       </Paper>
+      {timingEdit && <UrgentRowTiming title={timingEdit.item.title} timing={timingEdit.item.timing} busy={busy}
+        stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}
+        onSave={(timing) => void write({ action: 'timing', id: timingEdit.item.id, revision: timingEdit.revision, timing })} />}
     </Stack>
   )
 }

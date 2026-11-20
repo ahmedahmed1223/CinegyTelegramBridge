@@ -860,6 +860,11 @@ function Get-WebContentPage {
                         enabled = [bool](Get-UrgentProperty $entry 'Enabled' $true)
                         state = $state
                         values = Get-UrgentItemVariables -Item $entry
+                        timing = @{
+                            intervalSeconds = [int](Get-UrgentProperty $entry 'IntervalSeconds' 0)
+                            repeats = [int](Get-UrgentProperty $entry 'Repeats' 0)
+                            mode = [string](Get-UrgentProperty $entry 'Mode' '')
+                        }
                     }
                 }
                 'bulletins' {
@@ -1302,6 +1307,22 @@ function Invoke-WebUrgentWrite {
                 $board = $result.Value
             }
             Set-JsonProp (Get-UrgentItem -Board $board -ItemId $id) 'ExtraFields' $extra
+        }
+        'timing' {
+            $timing = Get-JsonProp $Arguments 'timing'
+            $interval = Get-JsonProp $timing 'intervalSeconds'
+            $repeat = Get-JsonProp $timing 'repeats'
+            $mode = Get-JsonProp $timing 'mode'
+            if (($interval -isnot [int] -and $interval -isnot [long]) -or
+                ($repeat -isnot [int] -and $repeat -isnot [long]) -or $mode -isnot [string]) {
+                return @{ ok = $false; error = 'urgent_invalid' }
+            }
+            $changes = [ordered]@{ IntervalSeconds = $interval; Repeats = $repeat; Mode = $mode }
+            foreach ($field in $changes.Keys) {
+                $result = Set-UrgentItem -Board $board -ItemId $id -Field $field -Value $changes[$field] -UserId $actor
+                if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
+                $board = $result.Value
+            }
         }
         'up' { $result = Move-UrgentItem -Board $board -ItemId $id -Delta -1 }
         'down' { $result = Move-UrgentItem -Board $board -ItemId $id -Delta 1 }

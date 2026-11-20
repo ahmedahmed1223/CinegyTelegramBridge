@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.94.0
+
+Each urgent-board row in the web editor can override its duration, repeats and display mode or inherit the board defaults. The bridge validates and saves the three options together against the current board revision. The row's editorial fields and on-air plan already in progress are retained.
+
 ## Version 8.93.0
 
 The web urgent board exposes the shared timing defaults for duration, repeats, repeat order, run ceiling, display mode and exit gap. It shows the scene's minimum duration and rejects stale changes or edits during an active urgent run. Configured intervals below eight seconds now read back correctly in both clients; the planner still applies the scene's effective floor.

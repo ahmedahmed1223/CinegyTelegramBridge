@@ -8,7 +8,7 @@ public sealed record ErrorResponse(string Error, string? Message = null);
 public sealed record CaptureCreateRequest(string Kind);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
-public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values);
+public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
 public sealed record BulletinField(string Name, string Label, string Kind);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped);
@@ -26,7 +26,9 @@ public sealed record BulletinPasteRequest(string Action, string Id, int Revision
 public sealed record BulletinPastePreview(string Review, BulletinField[] Fields, Dictionary<string, string>[] Rows, int[] SkippedLines);
 public sealed record BulletinPasteResult(BulletinPastePreview? Preview, int? SavedPage);
 public sealed record UrgentRowInput(Dictionary<string, string> Values, bool Enabled);
-public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null);
+public sealed record UrgentItemTiming(int IntervalSeconds, int Repeats, string Mode);
+public sealed record UrgentItemTimingInput(int? IntervalSeconds, int? Repeats, string? Mode);
+public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null, UrgentItemTimingInput? Timing = null);
 public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null);
 public sealed record UrgentRunStatus(string Id, string State, int Step, int StepCount, string Current, string Next);
 public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);

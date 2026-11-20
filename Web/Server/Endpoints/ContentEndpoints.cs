@@ -103,6 +103,14 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         BulletinPhotoEndpoints.Map(bulletin);
+        bulletin.MapGet("/playback", (string id, IBridgeChannel channel, HttpContext http) =>
+                ControlBulletinPlayback(new("status", id), channel, http))
+            .Produces<BulletinPlayback>()
+            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
+        bulletin.MapPost("/playback", ControlBulletinPlayback)
+            .Produces<BulletinPlayback>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
         bulletin.MapGet("/schedule", (string id, int? page, IBridgeChannel channel, HttpContext http) =>
                 ScheduleBulletin(new("list", id, Page: page), channel, http))
             .Produces<BulletinSchedulePage>()
@@ -182,6 +190,16 @@ public static class ContentEndpoints
         };
     }
 
+    private static async Task<IResult> ControlBulletinPlayback(BulletinPlaybackRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("bulletin.playback", new
+        {
+            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Stamp, request.Review, request.RunId
+        }, http.RequestAborted);
+        return reply.Ok ? TypedResults.Ok(reply.Data.Deserialize<BulletinPlayback>(JsonDefaults.Options)) : BulletinError(reply);
+    }
+
     private static async Task<IResult> ScheduleBulletin(BulletinScheduleRequest request, IBridgeChannel bridge, HttpContext http)
     {
         http.Response.Headers.CacheControl = "no-store";
@@ -237,8 +255,11 @@ public static class ContentEndpoints
         "not_found" or "content_disabled" => ApiErrors.Of(404, reply.Error),
         "bulletin_invalid" or "bulletin_paste_invalid" or "bulletin_image_invalid" or "bulletin_schedule_invalid" => ApiErrors.Of(400, reply.Error),
         "bulletin_refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
-        "bulletin_stale" or "bulletin_on_air" or "bulletin_design_collision" or "bulletin_schedule_stale" or "bulletin_schedule_unavailable" => ApiErrors.Of(409, reply.Error),
-        "bulletin_save_failed" or "bridge_outcome_unknown" or "bulletin_schedule_save_failed" or "bulletin_schedule_clock" => ApiErrors.Of(503, reply.Error),
+        "bulletin_stale" or "bulletin_on_air" or "bulletin_design_collision" or "bulletin_schedule_stale" or "bulletin_schedule_unavailable"
+            or "bulletin_playback_stale" or "bulletin_playback_unavailable" or "bulletin_playback_empty" or "bulletin_urgent_active"
+            or "bulletin_playback_refused" => ApiErrors.Of(409, reply.Error),
+        "bulletin_save_failed" or "bridge_outcome_unknown" or "bulletin_schedule_save_failed" or "bulletin_schedule_clock"
+            or "bulletin_layer_unknown" or "bulletin_stop_unconfirmed" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()
     };
 

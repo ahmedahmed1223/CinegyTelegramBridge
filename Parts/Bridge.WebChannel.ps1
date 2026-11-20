@@ -25,6 +25,7 @@ $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
 $script:WebBulletinPhotoRequest = $null
 $script:WebUrgentManualReviews = @{}
+$script:WebBulletinPlaybackReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
 $script:WebChannelListenerCount = 4
@@ -360,6 +361,7 @@ function Invoke-WebChannelOperation {
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.preview' { return Get-WebBulletinPreview -Arguments $arguments }
+        'bulletin.playback' { return Invoke-WebBulletinPlayback -Arguments $arguments }
         'bulletin.preview-image' { return Get-WebBulletinPreview -Arguments $arguments -Image }
         'bulletin.schedule' { return Invoke-WebBulletinSchedule -Arguments $arguments }
         'bulletin.photo' { return Start-WebBulletinPhotoRequest -Entry $Entry }
@@ -976,7 +978,7 @@ function Resolve-WebBulletinPreviewImage {
 }
 
 function Get-WebBulletinPreview {
-    param([System.Collections.IDictionary]$Arguments, [switch]$Image)
+    param([System.Collections.IDictionary]$Arguments, [switch]$Image, [switch]$PlanOnly)
     $actor = [long](Get-JsonProp $Arguments 'actor')
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
@@ -992,17 +994,21 @@ function Get-WebBulletinPreview {
     $supported = Test-MojazBulletinPlaybackDesign -Bulletin $bulletin
     $plan = if ($supported) { (Get-MojazResolvedRunSnapshot -Bulletin $bulletin).Value }
     $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
-    $scenePath = [string](Get-JsonProp (Get-JsonProp (Get-TemplateStore).Map $designKey) 'Path')
+    $design = Get-JsonProp (Get-TemplateStore).Map $designKey
+    $scenePath = [string](Get-JsonProp $design 'Path')
     $sceneRoot = if ([IO.Path]::IsPathFullyQualified($scenePath)) { Split-Path -Parent $scenePath } else { '' }
-    $templateImage = if ($imageField -and $sceneRoot) { Get-MojazTemplateImage -Path $scenePath } else { '' }
+    $templateImage = if (($imageField -or $supported) -and $sceneRoot) { Get-MojazTemplateImage -Path $scenePath } else { '' }
     $stampJson = ConvertTo-Json -Compress -Depth 8 -InputObject @(
         $designKey,
         @($fields | ForEach-Object { @($_.name, $_.kind, $_.label) }),
-        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds'), $sceneRoot, $templateImage
+        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds'), $scenePath, (Get-JsonProp $design 'Layer'), $templateImage
     )
     $stamp = [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData($script:WebBulletinPreviewKey, [Text.Encoding]::UTF8.GetBytes($stampJson)))
     $expectedStamp = [string](Get-JsonProp $Arguments 'stamp')
-    if (($expectedStamp -or $Image) -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
+    if (($expectedStamp -or $Image -or $PlanOnly) -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
+    if ($PlanOnly) {
+        return @{ ok = $true; data = @{ Snapshot = $plan; TemplateImage = $templateImage; ScenePath = $scenePath; Layer = Get-JsonProp $design 'Layer' } }
+    }
     $steps = @{}
     foreach ($step in @(Get-JsonProp $plan 'Plan')) {
         if ($step -and $step.RowId) { $steps[[string]$step.RowId] = $step }
@@ -1349,7 +1355,7 @@ function Invoke-WebBulletinEdit {
     return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $saved -Page $page }
 }
 
-function Test-WebBulletinScheduling {
+function Test-WebBulletinPlayoutAccess {
     param($Bulletin, [long]$Actor)
     if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin)) { return $false }
     $template = Get-MojazTemplate
@@ -1358,6 +1364,92 @@ function Test-WebBulletinScheduling {
     $layer = [int](Get-JsonProp $template 'Layer')
     return ((Test-TemplateAccess -Key $key -Layer $layer -ChatId $Actor -UserId $Actor).Allowed -and
         (Test-TemplateShowPolicy -Key $key -Layer $layer -IsAdmin:(Test-Admin -ChatId $Actor -UserId $Actor)).Allowed)
+}
+
+function Get-WebBulletinPlaybackState {
+    param([string]$Id, [bool]$CanStart)
+    $playback = $script:MojazPlayback
+    $run = $null
+    if ([string](Get-JsonProp $playback 'BulletinId') -ceq $Id -and (Get-JsonProp $playback 'OperationId')) {
+        $run = @{
+            id = [string](Get-JsonProp $playback 'OperationId')
+            state = if (-not (Get-MojazRunSceneStamp -Playback $playback)) { 'scene_unconfirmed' }
+                elseif (Get-JsonProp $playback 'StopFailed') { 'stop_unconfirmed' }
+                else { 'playing' }
+            row = [int](Get-JsonProp $playback 'Index') + 1
+            rowCount = @(Get-JsonProp $playback 'Rows').Count
+        }
+    }
+    return @{ run = $run; canStart = $CanStart; busy = [bool]$playback }
+}
+
+function Invoke-WebBulletinPlayback {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    if (-not $id) { return @{ ok = $false; error = 'not_found' } }
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $canStart = Test-WebBulletinPlayoutAccess -Bulletin $bulletin -Actor $actor
+    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart } }
+    if ($action -notin 'review', 'start', 'stop') { return @{ ok = $false; error = 'bulletin_invalid' } }
+    if ($action -eq 'start') {
+        $pending = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebBulletinPlaybackReviews
+        if (-not $pending) { return @{ ok = $false; error = 'bulletin_playback_stale' } }
+    }
+    if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
+    if ($action -eq 'stop') {
+        $run = $script:MojazPlayback
+        $runId = [string](Get-JsonProp $Arguments 'runId')
+        if (-not $runId -or $runId -cne [string](Get-JsonProp $run 'OperationId') -or $id -cne [string](Get-JsonProp $run 'BulletinId')) {
+            return @{ ok = $false; error = 'bulletin_playback_stale' }
+        }
+        $layer = Get-MojazRunLayer -Playback $run
+        if ($layer -le 0) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
+        if (-not (Test-TemplateAccess -Key $script:MojazTemplateKey -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+            return @{ ok = $false; error = 'forbidden' }
+        }
+        $expected = Get-MojazRunSceneStamp -Playback $run
+        $observed = Read-MojazLayerStamp -Layer $layer
+        if (-not $expected -or $expected -cne $observed) { return @{ ok = $false; error = 'bulletin_playback_stale' } }
+        if (-not (Stop-MojazPlayback -ChatId $actor -UserId $actor -ExpectedLayerStamp $expected -Quiet)) {
+            return @{ ok = $false; error = 'bulletin_stop_unconfirmed' }
+        }
+        Publish-WebChannelState -Force
+        return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart }
+    }
+    if (-not $canStart) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
+    $layer = Get-MojazRunLayer
+    if ($layer -le 0) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
+    if ($script:MojazPlayback) { return @{ ok = $false; error = 'bulletin_on_air' } }
+    if (Test-MojazUrgentOnAir) { return @{ ok = $false; error = 'bulletin_urgent_active' } }
+    $preview = Get-WebBulletinPreview -Arguments $Arguments -PlanOnly
+    if (-not $preview.ok) { return $preview }
+    $plan = $preview.data
+    if (-not $plan.Snapshot) { return @{ ok = $false; error = 'bulletin_playback_empty' } }
+    if ($null -ne $plan.Layer -and $plan.Layer -ne $layer) { return @{ ok = $false; error = 'bulletin_playback_stale' } }
+    $observed = Read-MojazLayerStamp -Layer $layer
+    if (-not $observed) { return @{ ok = $false; error = 'bulletin_layer_unknown' } }
+    $ticker = Get-MojazTickerReview
+    if ((Get-JsonProp $ticker 'Layer') -eq $layer) { $ticker = $null }
+    $fingerprint = "$id|$(Get-JsonProp $Arguments 'revision')|$(Get-JsonProp $Arguments 'stamp')|$layer|$observed|$(Get-JsonProp $ticker 'Layer')|$(Get-JsonProp $ticker 'Stamp')"
+    if ($action -eq 'review') {
+        $review = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebBulletinPlaybackReviews
+        return @{ ok = $true; data = @{ canStart = $true; busy = $false; review = $review; layer = $layer
+                replacing = $observed -ne 'empty'; pausesTicker = [bool]$ticker } }
+    }
+    if ($pending.Fingerprint -cne $fingerprint) { return @{ ok = $false; error = 'bulletin_playback_stale' } }
+    $plan.Layer = $layer
+    $plan.LayerStamp = $observed
+    $plan.Ticker = $ticker
+    if (-not (Start-MojazPlayback -ChatId $actor -UserId $actor -Bulletin $bulletin -ReviewedPlan $plan)) {
+        return @{ ok = $false; error = 'bulletin_playback_refused' }
+    }
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart }
 }
 
 function Get-WebBulletinSchedules {
@@ -1390,7 +1482,7 @@ function Invoke-WebBulletinSchedule {
     if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
     $action = [string](Get-JsonProp $Arguments 'action')
     $page = [int](Get-JsonProp $Arguments 'page')
-    $canSchedule = Test-WebBulletinScheduling -Bulletin $bulletin -Actor $actor
+    $canSchedule = Test-WebBulletinPlayoutAccess -Bulletin $bulletin -Actor $actor
     switch ($action) {
         'list' {}
         'add' {
@@ -2341,25 +2433,25 @@ function Get-WebUrgentManualLive {
     return @{ itemId = [string]$record.ItemId; layer = $layer; review = [string]$record.Token }
 }
 
-function New-WebUrgentManualReview {
-    param([long]$Actor, [string]$Fingerprint)
+function New-WebAirReview {
+    param([long]$Actor, [string]$Fingerprint, [hashtable]$Reviews = $script:WebUrgentManualReviews)
     $now = [datetimeoffset]::UtcNow
-    foreach ($entry in @($script:WebUrgentManualReviews.GetEnumerator())) {
-        if ($entry.Value.ExpiresAt -le $now) { $script:WebUrgentManualReviews.Remove($entry.Key) | Out-Null }
+    foreach ($entry in @($Reviews.GetEnumerator())) {
+        if ($entry.Value.ExpiresAt -le $now) { $Reviews.Remove($entry.Key) | Out-Null }
     }
     $token = [guid]::NewGuid().ToString('N')
-    $script:WebUrgentManualReviews[$Actor] = @{
+    $Reviews[$Actor] = @{
         Token = $token; Fingerprint = $Fingerprint
         ExpiresAt = $now.AddMinutes((Get-SettingInt 'PendingStateTimeoutMinutes' 1))
     }
     return $token
 }
 
-function Use-WebUrgentManualReview {
-    param([long]$Actor, [string]$Token)
-    $pending = $script:WebUrgentManualReviews[$Actor]
+function Use-WebAirReview {
+    param([long]$Actor, [string]$Token, [hashtable]$Reviews = $script:WebUrgentManualReviews)
+    $pending = $Reviews[$Actor]
     if (-not $pending -or $Token -cne $pending.Token) { return }
-    $script:WebUrgentManualReviews.Remove($Actor) | Out-Null
+    $Reviews.Remove($Actor) | Out-Null
     if ($pending.ExpiresAt -gt [datetimeoffset]::UtcNow) { return $pending }
 }
 
@@ -2381,7 +2473,7 @@ function Invoke-WebUrgentRehearsal {
     if (-not (Test-Admin -ChatId $Actor -UserId $Actor)) { return @{ ok = $false; error = 'forbidden' } }
     $preview = (Get-JsonProp $Arguments 'action') -eq 'rehearse-preview'
     if (-not $preview) {
-        $pending = Use-WebUrgentManualReview -Actor $Actor -Token ([string](Get-JsonProp $Arguments 'review'))
+        $pending = Use-WebAirReview -Actor $Actor -Token ([string](Get-JsonProp $Arguments 'review'))
         if (-not $pending) { return @{ ok = $false; error = 'urgent_stale' } }
     }
     if (-not (Test-UrgentBoardAvailable)) {
@@ -2415,7 +2507,7 @@ function Invoke-WebUrgentRehearsal {
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
     if ($preview) {
         return @{ ok = $true; data = @{ preview = @{
-            review = New-WebUrgentManualReview -Actor $Actor -Fingerprint $fingerprint
+            review = New-WebAirReview -Actor $Actor -Fingerprint $fingerprint
             layer = $layer; values = $variables; autoHideSeconds = $seconds; rehearsal = $true
             replacesGraphic = $false; stopsRun = $false; stopsBulletin = $false; graphicName = ''
         } } }
@@ -2481,7 +2573,7 @@ function Invoke-WebUrgentManual {
     if ($action -notin 'options', 'preview', 'show') { return @{ ok = $false; error = 'urgent_invalid' } }
     $pending = $null
     if ($action -eq 'show') {
-        $pending = Use-WebUrgentManualReview -Actor $actor -Token $review
+        $pending = Use-WebAirReview -Actor $actor -Token $review
         if (-not $pending) { return @{ ok = $false; error = 'urgent_stale' } }
     }
     if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
@@ -2518,7 +2610,7 @@ function Invoke-WebUrgentManual {
     )
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
     if ($action -eq 'preview') {
-        $token = New-WebUrgentManualReview -Actor $actor -Fingerprint $fingerprint
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint
         return @{ ok = $true; data = @{ preview = @{
             review = $token; layer = $layer; values = $variables; autoHideSeconds = $effective
             replacesGraphic = $stamp -ne 'empty'; stopsRun = [bool]$script:UrgentBoardRun

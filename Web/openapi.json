@@ -2309,6 +2309,142 @@
         }
       }
     },
+    "/api/content/bulletins/playback": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulletinPlayback"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulletinPlaybackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulletinPlayback"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/bulletins/schedule": {
       "get": {
         "tags": [
@@ -3213,6 +3349,81 @@
           }
         }
       },
+      "BulletinPlayback": {
+        "required": [
+          "canStart",
+          "busy"
+        ],
+        "type": "object",
+        "properties": {
+          "canStart": {
+            "type": "boolean"
+          },
+          "busy": {
+            "type": "boolean"
+          },
+          "run": {
+            "$ref": "#/components/schemas/BulletinRun"
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "replacing": {
+            "type": "boolean",
+            "default": null,
+            "nullable": true
+          },
+          "pausesTicker": {
+            "type": "boolean",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "BulletinPlaybackRequest": {
+        "required": [
+          "action",
+          "id"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "stamp": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "runId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
       "BulletinPreview": {
         "required": [
           "revision",
@@ -3364,6 +3575,33 @@
             "nullable": true
           }
         }
+      },
+      "BulletinRun": {
+        "required": [
+          "id",
+          "state",
+          "row",
+          "rowCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "row": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rowCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "default": null,
+        "nullable": true
       },
       "BulletinScheduleItem": {
         "required": [

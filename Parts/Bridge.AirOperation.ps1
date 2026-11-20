@@ -569,7 +569,8 @@ function Get-VerifiedCinegyShowIdentity {
         [Parameter(Mandatory)][int]$Layer,
         [AllowEmptyString()][string]$ExpectedPreviousActiveId = '',
         [AllowEmptyString()][string]$ExpectedActiveId = '',
-        [switch]$AllowAnonymousActiveId
+        [switch]$AllowAnonymousActiveId,
+        [switch]$RequireEventIdentity
     )
     $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
     $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
@@ -597,6 +598,12 @@ function Get-VerifiedCinegyShowIdentity {
 
     $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
     $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
+    if ($RequireEventIdentity) {
+        if ($expectedCurrentId -and $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id' }
+        }
+        return (& $failed (T 'air.noConfirmAfterShow'))
+    }
 
     # Prefer the filename parsed from Cinegy's active-item description. Falling
     # back to ActiveName is allowed only as an exact name, never a substring.
@@ -673,7 +680,10 @@ function Invoke-ShowTemplateResult {
         [long]$UserId = 0,
         [int]$AutoHideSeconds = 0,
         [switch]$RequireEmptyLayer,
-        [string]$ExpectedLayerStamp = ''
+        [string]$ExpectedLayerStamp = '',
+        [int]$ExpectedLayer = 0,
+        [string]$ExpectedTemplatePath = '',
+        [switch]$RequireEventIdentity
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
@@ -689,6 +699,11 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+    if (($ExpectedLayer -gt 0 -and $template.Layer -ne $ExpectedLayer) -or
+        ($ExpectedTemplatePath -and [string]$template.Path -cne $ExpectedTemplatePath)) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'reviewed template changed'
+        return [pscustomobject]@{ Success = $false; Error = (T 'tick.sceneChanged') }
+    }
     $attemptVariables = @{}
     foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
     $script:LastShowAttempts[[string]$UserId] = @{
@@ -861,7 +876,7 @@ function Invoke-ShowTemplateResult {
         # its engine id changed from the pre-SHOW item.
         $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
-            -AllowAnonymousActiveId
+            -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         if ($previousSnapshot) {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `

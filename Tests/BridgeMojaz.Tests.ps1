@@ -594,6 +594,7 @@ Describe 'A bulletin that carries one story' {
 
         $snapshot.ExitAtSeconds | Should -Be 20
         @($snapshot.Plan | Where-Object { [double]$_.AtSeconds -ge 20 }).Count | Should -Be 0
+        @($snapshot.Rows.Id) | Should -Be @('r_1')
     }
 
     It 'leaves the row timing in charge when no hold was set' {

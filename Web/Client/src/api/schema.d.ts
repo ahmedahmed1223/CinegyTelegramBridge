@@ -2543,6 +2543,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/bulletins/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    id: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulletinPlayback"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulletinPlaybackRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulletinPlayback"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/bulletins/schedule": {
         parameters: {
             query?: never;
@@ -3153,6 +3285,37 @@ export interface components {
             /** Format: int32 */
             savedPage: number | null;
         };
+        BulletinPlayback: {
+            canStart: boolean;
+            busy: boolean;
+            run?: components["schemas"]["BulletinRun"];
+            /** @default null */
+            review: string | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            layer: number | null;
+            /** @default null */
+            replacing: boolean | null;
+            /** @default null */
+            pausesTicker: boolean | null;
+        };
+        BulletinPlaybackRequest: {
+            action: string;
+            id: string;
+            /**
+             * Format: int32
+             * @default null
+             */
+            revision: number | null;
+            /** @default null */
+            stamp: string | null;
+            /** @default null */
+            review: string | null;
+            /** @default null */
+            runId: string | null;
+        };
         BulletinPreview: {
             /** Format: int32 */
             revision: number;
@@ -3197,6 +3360,15 @@ export interface components {
             /** @default null */
             imageMode: string | null;
         };
+        /** @default null */
+        BulletinRun: {
+            id: string;
+            state: string;
+            /** Format: int32 */
+            row: number;
+            /** Format: int32 */
+            rowCount: number;
+        } | null;
         BulletinScheduleItem: {
             id: string;
             /** Format: int64 */

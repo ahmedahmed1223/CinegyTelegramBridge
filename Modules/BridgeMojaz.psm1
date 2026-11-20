@@ -239,7 +239,11 @@ function New-MojazRunSnapshot {
     $exitAt = if ($holdOverride -gt 0) { $holdOverride } elseif ($loopPlan) { [double]$loopPlan.ExitOffset } else { $at }
     # The hold is the whole run, so a row may not be scheduled past it: a plan
     # that writes after the scene has been told to leave writes into nothing.
-    if ($holdOverride -gt 0) { $plan = @($plan | Where-Object { [double]$_.AtSeconds -lt $holdOverride }) }
+    if ($holdOverride -gt 0) {
+        $plan = @($plan | Where-Object { [double]$_.AtSeconds -lt $holdOverride })
+        # The tick uses the snapshot's row count to decide when to exit.
+        $rows = @(foreach ($step in $plan) { $rows[$step.Index] })
+    }
     $snapshot = [pscustomobject]@{
         Id = New-MojazId -Prefix run
         BulletinId = [string](Get-MojazProperty $Bulletin 'Id' '')

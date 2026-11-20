@@ -45,6 +45,12 @@ public sealed class FakeBridge : IBridgeChannel
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
             "ticker.txt" => TickerTxt(a),
             "media.capture" => Capture(a),
+            "bulletin.playback" => a.GetProperty("action").GetString() switch
+            {
+                "status" => Reply("""{"canStart":true,"busy":false}"""),
+                "review" => Reply("""{"canStart":true,"busy":false,"review":"ticket","layer":4,"replacing":false}"""),
+                _ => new BridgeReply(false, default, "bulletin_playback_stale")
+            },
             "bulletin.preview-image" => BulletinPreviewImage is { } picture
                 ? Reply(JsonSerializer.Serialize(new { root = picture.Root, path = picture.Path }))
                 : new BridgeReply(false, default, "not_found"),

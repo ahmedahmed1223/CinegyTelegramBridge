@@ -1478,6 +1478,40 @@ Describe 'The strip stands down for the bulletin and comes back after it' {
         $script:MojazTickerReturn | Should -Not -BeNullOrEmpty
     }
 
+    It 'leaves another graphic on the ticker layer alone' {
+        $previous = $script:OnAir[8]
+        try {
+            $script:OnAir[8] = @{ Key = 'different graphic'; ChatId = 100 }
+            Hide-MojazTicker -ChatId 100 -UserId 101 | Should -BeFalse
+            Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        }
+        finally { $script:OnAir[8] = $previous }
+    }
+
+    It 'returns a reviewed strip only over its own exited item or an empty layer' {
+        $previous = $script:MojazTickerReturn
+        $pending = @{ At = (Get-Date).AddSeconds(-2); ChatId = 100; UserId = 101; ReviewedLayer = 8; ReviewedStamp = 'active:ticker' }
+        try {
+            Mock Read-MojazLayerStamp { 'active:replacement' }
+            $script:MojazTickerReturn = $pending
+            Update-MojazTickerReturn
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            Mock Read-MojazLayerStamp { 'active:ticker' }
+            $script:MojazTickerReturn = $pending
+            Update-MojazTickerReturn
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $ExpectedLayer -eq 8 -and $ExpectedLayerStamp -eq 'active:ticker'
+            }
+            Mock Read-MojazLayerStamp { 'empty' }
+            $script:MojazTickerReturn = $pending
+            Update-MojazTickerReturn
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $ExpectedLayer -eq 8 -and $ExpectedLayerStamp -eq 'empty'
+            }
+        }
+        finally { $script:MojazTickerReturn = $previous }
+    }
+
     It 'puts it back after the bulletin, once the outro has run' {
         Start-MojazPlayback -ChatId 100 -UserId 101 -Force | Out-Null
         Stop-MojazPlayback -ChatId 100 -UserId 101 -Quiet | Out-Null

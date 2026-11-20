@@ -183,6 +183,30 @@ public sealed class SignInTests : IDisposable
     }
 
     [Fact]
+    public async Task Bulletin_playback_requires_the_session_and_uses_its_operator_for_review()
+    {
+        const string route = "/api/content/bulletins/playback";
+        var anonymous = await _app.BrowserAsync();
+        using var denied = await anonymous.Client.GetAsync(route + "?id=b_1");
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+
+        var desk = await _app.SignedInAsync("desk", WebApp.Operator);
+        using var reviewed = await desk.PostAsync(route, new { action = "review", id = "b_1", revision = 3, stamp = "preview", actor = WebApp.Admin });
+        reviewed.EnsureSuccessStatusCode();
+        Assert.True(reviewed.Headers.CacheControl!.NoStore);
+        var data = (await reviewed.Content.ReadFromJsonAsync<BulletinPlayback>())!;
+        Assert.Equal("ticket", data.Review);
+        Assert.Equal(4, data.Layer);
+        var call = _app.Bridge.Calls.Last(entry => entry.Op == "bulletin.playback");
+        using var arguments = System.Text.Json.JsonDocument.Parse(call.Args);
+        Assert.Equal(WebApp.Operator, arguments.RootElement.GetProperty("actor").GetInt64());
+
+        using var stale = await desk.PostAsync(route, new BulletinPlaybackRequest("start", "b_1", Review: "expired"));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("bulletin_playback_stale", (await stale.Content.ReadFromJsonAsync<ErrorResponse>())!.Error);
+    }
+
+    [Fact]
     public async Task A_post_without_the_anti_forgery_token_is_refused()
     {
         await _app.AddPasswordAccountAsync("desk", WebApp.Operator);

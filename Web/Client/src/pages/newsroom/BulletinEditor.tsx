@@ -11,8 +11,10 @@ import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './BulletinPaste'
 import { BulletinPhotoDialog } from './BulletinPhotoDialog'
 import { BulletinPreview } from './BulletinPreview'
+import { BulletinRunStatus } from './BulletinPlayback'
 import { BulletinSchedule } from './BulletinSchedule'
 import { BulletinTimingForm } from './BulletinTimingForm'
+import { useBulletinPlayback } from './bulletinPlaybackApi'
 import classes from './NewsroomPage.module.css'
 
 type Bulletin = Schemas['BulletinEditor']
@@ -127,6 +129,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   }
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
+  const playback = useBulletinPlayback(id, bulletin?.playbackSupported === true)
+  const onAir = playback.data ? Boolean(playback.data.run) : bulletin?.onAir === true
+  const sceneUnconfirmed = playback.data?.run?.state === 'scene_unconfirmed'
   const busy = edit.isPending || query.isFetching
   const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming || previewing || scheduling
   const fields = bulletin?.fields ?? []
@@ -209,14 +214,16 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             <div className={classes.bulletinTitle}>
               <Group gap="xs">
                 <Title order={3} dir="auto">{bulletin.name}</Title>
-                {bulletin.onAir && <Badge color="red" variant="light">على الهواء</Badge>}
+                {onAir && <Badge color={sceneUnconfirmed ? 'orange' : 'red'} variant="light">
+                  {sceneUnconfirmed ? 'بانتظار التحقق' : 'على الهواء'}
+                </Badge>}
               </Group>
               <Text size="sm" c="dimmed">{number.format(bulletin.total)} صف · النسخة {number.format(bulletin.revision)} · <bdi>{bulletin.design}</bdi></Text>
             </div>
             <Group gap="xs">
               <Button variant="default" disabled={busy || editing} onClick={() => setPreviewing(true)}>معاينة الموجز</Button>
               <Button variant="default" disabled={busy || editing} onClick={() => setScheduling(true)}>المواعيد</Button>
-              {availableDesigns.length > 0 && <Button variant="default" disabled={busy || editing || bulletin.onAir}
+              {availableDesigns.length > 0 && <Button variant="default" disabled={busy || editing || onAir}
                 onClick={() => { edit.reset(); setSavedNote(''); setDesignChange({ key: null, revision: bulletin.revision }) }}>
                 تغيير التصميم
               </Button>}
@@ -227,7 +234,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
-          {previewing && <BulletinPreview bulletin={bulletin} onClose={() => setPreviewing(false)} />}
+          {previewing && <BulletinPreview bulletin={bulletin} playback={playback.data} onClose={() => setPreviewing(false)} />}
           {scheduling && <BulletinSchedule bulletin={bulletin} onClose={() => setScheduling(false)} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
             onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
@@ -255,6 +262,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               onSave={(timing) => edit.mutate({ action: 'timing', id, revision: bulletin.revision, page: bulletin.page, timing })} />
           )}
           {!bulletin.playbackSupported && <Alert color="gray">التشغيل على الهواء غير متاح لهذا التصميم في هذا الإصدار.</Alert>}
+          {playback.error && <Alert color="orange" role="alert">{messageFor(playback.error.message)}</Alert>}
+          {bulletin.playbackSupported && <BulletinRunStatus id={id} playback={playback.data} />}
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
             <Group gap="xs">
@@ -271,7 +280,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             setPage(nextPage)
             onSaved(bulletin)
           }} />}
-          {bulletin.onAir && <Text size="sm" c="dimmed">تُستخدم النسخة المحفوظة عند بدء التشغيل التالي.</Text>}
+          {onAir && <Text size="sm" c="dimmed">تُستخدم النسخة المحفوظة عند بدء التشغيل التالي.</Text>}
           {savedNote && <Text size="sm" role="status">{savedNote}</Text>}
           {edit.error && !editingTiming && !designChange && <Alert color="red" role="alert">{edit.error.message}</Alert>}
           {!fields.length && <Alert color="gray">تعذّر قراءة حقول التصميم من الجسر.</Alert>}

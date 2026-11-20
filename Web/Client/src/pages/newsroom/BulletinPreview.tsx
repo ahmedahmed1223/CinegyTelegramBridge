@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import type { paths } from '../../api/schema'
+import { BulletinStartReview } from './BulletinPlayback'
 
 const number = new Intl.NumberFormat('ar', { maximumFractionDigits: 2 })
 
@@ -22,8 +23,9 @@ function PreviewImage({ parameters, label }: { parameters: URLSearchParams; labe
   return <Image src={`${path}?${parameters}`} alt={label} mah={260} fit="contain" radius="sm" onError={() => setFailed(true)} />
 }
 
-export function BulletinPreview({ bulletin, onClose }: {
+export function BulletinPreview({ bulletin, playback, onClose }: {
   bulletin: Schemas['BulletinEditor']
+  playback: Schemas['BulletinPlayback'] | undefined
   onClose: () => void
 }) {
   const [selection, setSelection] = useState<{ page: number; stamp?: string }>({ page: 0 })
@@ -94,6 +96,8 @@ export function BulletinPreview({ bulletin, onClose }: {
           {preview.pageCount > 1 && <Pagination total={preview.pageCount} value={preview.page + 1}
             onChange={(next) => { setImage(null); setSelection({ page: next - 1, stamp: preview.stamp }) }}
             getItemProps={(value) => ({ 'aria-label': `الصفحة ${number.format(value)}` })} />}
+          {!query.error && preview.playbackSupported && preview.plannedCount > 0 && <BulletinStartReview
+            key={`${preview.revision}:${preview.stamp}`} id={bulletin.id} revision={preview.revision} stamp={preview.stamp} playback={playback} onStarted={onClose} />}
         </>}
       </Stack>
     </Modal>

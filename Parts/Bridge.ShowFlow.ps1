@@ -679,7 +679,8 @@ function Invoke-HideLayer {
 }
 
 function Invoke-ExitLayer {
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$System)
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$System,
+        [string]$ExpectedLayerStamp = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
@@ -702,6 +703,15 @@ function Invoke-ExitLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
+    $preExitStatus = $null
+    if ($ExpectedLayerStamp) {
+        $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if ((Get-CinegyLayerReviewStamp -Status $preExitStatus) -cne $ExpectedLayerStamp) {
+            Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'reviewed scene changed'
+            return $false
+        }
+    }
     # A bulletin walking this layer has to stop with it, or it keeps writing
     # rows into a scene nobody can see. After the gate, for the same reason as
     # the hide above.
@@ -710,8 +720,10 @@ function Invoke-ExitLayer {
     Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
     $rollbackSnapshot = $null
     if (Get-Setting 'EnableSafeRollback') {
-        $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if (-not $preExitStatus) {
+            $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+                -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        }
         $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preExitStatus
     }
     Start-AirOperation -Operation $operation -Action EXIT -Layer $Layer -UserId $UserId

@@ -154,16 +154,23 @@ function Stop-RelayProcess {
 # The dev pipe uses real web dispatch and validation. Replacing the three
 # commands here confines their effects to the simulated on-air state.
 function Invoke-ShowTemplateResult {
-    param([string]$Key, [hashtable]$Variables, [long]$UserId, [int]$AutoHideSeconds)
+    param([string]$Key, [hashtable]$Variables, [long]$UserId, [int]$AutoHideSeconds, [string]$ExpectedLayerStamp,
+        [int]$ExpectedLayer, [string]$ExpectedTemplatePath)
     $template = (Get-TemplateStore).Map[$Key]
     $layer = [int]$template.Layer
+    if (($ExpectedLayer -gt 0 -and $layer -ne $ExpectedLayer) -or
+        ($ExpectedTemplatePath -and [string]$template.Path -cne $ExpectedTemplatePath) -or
+        ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status (Get-TitlerLayerStatus -Layer $layer)) -cne $ExpectedLayerStamp)) {
+        return @{ Success = $false }
+    }
     $shownAt = Get-Date
-    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; ActiveId = [guid]::NewGuid().ToString(); UserId = $UserId; Source = 'bridge'; Variables = $Variables }
+    $activeId = [guid]::NewGuid().ToString()
+    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; ActiveId = $activeId; UserId = $UserId; Source = 'bridge'; Variables = $Variables }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $layer })
     if ($AutoHideSeconds -gt 0) {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
     }
-    return @{ Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0 }
+    return @{ Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0; ActiveId = $activeId; ActiveIdConfirmed = $true }
 }
 
 function Show-TitlerTemplate {
@@ -193,8 +200,19 @@ function Invoke-HideLayer {
 }
 
 function Invoke-ExitLayer {
-    param([int]$Layer)
+    param([int]$Layer, [string]$ExpectedLayerStamp)
+    if ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status (Get-TitlerLayerStatus -Layer $Layer)) -cne $ExpectedLayerStamp) {
+        return $false
+    }
     return Invoke-HideLayer -Layer $Layer
+}
+
+function Send-PostboxValues {
+    param([hashtable]$Values)
+    $live = $script:OnAir[[int](Get-MojazTemplate).Layer]
+    if (-not $live) { return @{ Success = $false; Error = 'No running fixture scene.' } }
+    $live.Variables = $Values
+    return @{ Success = $true; Xml = '' }
 }
 
 function Get-TitlerLayerStatus {
@@ -248,6 +266,7 @@ try {
         Update-SnapshotJobs
         if ($script:RelayState.ShouldRun) { Update-RelayWatchdog }
         Update-UrgentBoardRun
+        Update-MojazPlayback
         Wait-WebChannelSignal -Milliseconds 250
     }
 }

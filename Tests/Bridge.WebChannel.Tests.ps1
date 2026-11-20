@@ -1887,6 +1887,139 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'reviews manual bulletin playback and stops only the confirmed live run through the pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazTemplate { @{ Layer = 4 } }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MaintenanceControl { $true }
+        Mock Send-TelegramMessage {}
+        Mock Test-MojazUrgentOnAir { $script:webBulletinUrgent }
+        Mock Get-WebBulletinFields { @{ name = 'title.Text'; label = 'العنوان'; kind = 'text' } }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazTemplateImage { '' }
+        Mock Get-MojazTickerReview {}
+        Mock Get-CinegyLayerStartedAtUtc {}
+        Mock Hide-MojazTicker {}
+        Mock Request-MojazTickerReturn {}
+        Mock Update-MojazPendingUrgent {}
+        Mock Save-MojazPlaybackState { $true }
+        Mock Clear-MojazPlaybackState {}
+        Mock Send-PostboxValues { throw 'The replacement must never receive our bulletin values.' }
+        Mock Invoke-ShowTemplateResult {
+            $script:webBulletinScene = 'run-item'
+            @{ Success = $true; ActiveId = '{run-item}'; ActiveIdConfirmed = $true }
+        }
+        Mock Get-TitlerLayerStatus {
+            @{ Success = $true; IsOnAir = [bool]$script:webBulletinScene; ActiveId = $script:webBulletinScene }
+        }
+        Mock Exit-TitlerScene { @{ Success = $script:webBulletinExit; Error = 'simulated failure' } }
+        $oldLibrary = $script:MojazLibrary
+        $oldPlayback = $script:MojazPlayback
+        try {
+            $script:MojazPlayback = $null
+            $script:webBulletinScene = ''
+            $script:webBulletinUrgent = $false
+            $script:webBulletinExit = $false
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز التشغيل').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'الخبر المراجع').Value
+            $request = @{ actor = 4321; id = $id; revision = $script:MojazLibrary.Bulletins[0].Revision }
+            Mock Get-TitlerLayerStatus { @{ Success = $true; IsOnAir = $true; ActiveId = 'another-id'; ActiveName = 'Mojaz' } } -ParameterFilter { $Layer -eq 9 }
+            (Get-VerifiedCinegyShowIdentity -Key 'Mojaz' -Layer 9 -ExpectedActiveId 'our-id' -RequireEventIdentity).Success | Should -BeFalse
+            (Get-VerifiedCinegyShowIdentity -Key 'Mojaz' -Layer 9 -ExpectedActiveId '{Another-ID}' -RequireEventIdentity).Success | Should -BeTrue
+            $callBulletin = {
+                param([string]$bulletinAction, [string]$op = 'bulletin.playback')
+                $request.action = $bulletinAction
+                $line = @{ op = $op; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $request.stamp = (& $callBulletin '' 'bulletin.preview').data.stamp
+            (& $callBulletin 'status').data.canStart | Should -BeTrue
+            (& $callBulletin 'start').error | Should -Be 'bulletin_playback_stale'
+            $review = & $callBulletin 'review'
+            $review.ok | Should -BeTrue
+            $review.data.layer | Should -Be 4
+            $review.data.replacing | Should -BeFalse
+            $request.review = $review.data.review
+            $request.actor = 4322
+            (& $callBulletin 'start').error | Should -Be 'bulletin_playback_stale'
+            $request.actor = 4323
+            (& $callBulletin 'start').error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $script:webBulletinScene = 'different-item'
+            (& $callBulletin 'start').error | Should -Be 'bulletin_playback_stale'
+            (& $callBulletin 'start').error | Should -Be 'bulletin_playback_stale'
+            $review = & $callBulletin 'review'
+            $review.data.replacing | Should -BeTrue
+            $request.review = $review.data.review
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'تعديل بعد المراجعة').Value
+            (& $callBulletin 'start').error | Should -Be 'bulletin_stale'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            $request.revision++
+            $request.Remove('stamp')
+            $request.stamp = (& $callBulletin '' 'bulletin.preview').data.stamp
+            $script:webBulletinUrgent = $true
+            (& $callBulletin 'review').error | Should -Be 'bulletin_urgent_active'
+            $script:webBulletinUrgent = $false
+            $request.review = (& $callBulletin 'review').data.review
+            $running = (& $callBulletin 'start').data.run
+            $running.id | Should -Match '^mojaz-'
+            $running.rowCount | Should -Be 2
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $ExpectedLayerStamp -eq 'active:different-item' -and $ExpectedLayer -eq 4 -and $RequireEventIdentity
+            }
+            $request.runId = 'older-run'
+            (& $callBulletin 'stop').error | Should -Be 'bulletin_playback_stale'
+            $request.runId = $running.id
+            $script:webBulletinScene = 'replacement'
+            (& $callBulletin 'stop').error | Should -Be 'bulletin_playback_stale'
+            Should -Invoke Exit-TitlerScene -Times 0 -Exactly
+            # The preflight is not the write guard. Cinegy can change even
+            # after the preflight, before Invoke-ExitLayer reads it again.
+            $script:webBulletinScene = 'replacement'
+            $script:webBulletinStatusReads = 0
+            Mock Get-TitlerLayerStatus {
+                $script:webBulletinStatusReads++
+                $scene = if ($script:webBulletinStatusReads -eq 1) { 'run-item' } else { $script:webBulletinScene }
+                @{ Success = $true; IsOnAir = $true; ActiveId = $scene }
+            }
+            (& $callBulletin 'stop').error | Should -Be 'bulletin_stop_unconfirmed'
+            Should -Invoke Exit-TitlerScene -Times 0 -Exactly
+            $script:webBulletinScene = 'run-item'
+            (& $callBulletin 'stop').error | Should -Be 'bulletin_stop_unconfirmed'
+            (& $callBulletin 'status').data.run.state | Should -Be 'stop_unconfirmed'
+            $script:webBulletinExit = $true
+            $stopped = & $callBulletin 'stop'
+            $stopped.ok | Should -BeTrue
+            $stopped.data.run | Should -BeNullOrEmpty
+            Should -Invoke Exit-TitlerScene -Times 2 -Exactly
+
+            $request.review = (& $callBulletin 'review').data.review
+            (& $callBulletin 'start').data.run.state | Should -Be 'playing'
+            $script:webBulletinScene = 'new-template-instance'
+            $script:MojazPlayback.ClockOffset = 1000
+            Update-MojazPlayback
+            $script:MojazPlayback | Should -BeNullOrEmpty
+            Should -Invoke Send-PostboxValues -Times 0 -Exactly
+            Should -Invoke Exit-TitlerScene -Times 2 -Exactly
+
+            $request.review = (& $callBulletin 'review').data.review
+            (& $callBulletin 'start').data.run.state | Should -Be 'playing'
+            $script:webBulletinScene = 'replacement-onto-outro'
+            $script:MojazPlayback.Index = 1
+            $script:MojazPlayback.ClockOffset = 1000
+            Update-MojazPlayback
+            $script:MojazPlayback | Should -BeNullOrEmpty
+            Should -Invoke Exit-TitlerScene -Times 2 -Exactly
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:MojazPlayback = $oldPlayback
+        }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

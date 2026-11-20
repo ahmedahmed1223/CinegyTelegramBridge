@@ -39,7 +39,8 @@ function Start-MojazPlayback {
         maintenance mode, the layer policy, the live Cinegy check or the audit
         trail - a bulletin is still a graphic going on air.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force, $Bulletin)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [string]$ScheduleId = '', [switch]$Force, $Bulletin,
+        [hashtable]$ReviewedPlan)
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($script:MojazPlayback) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.alreadyRunning')
@@ -68,18 +69,23 @@ function Start-MojazPlayback {
         return $false
     }
     $schedule = if ($ScheduleId) { [pscustomobject]@{ Id = $ScheduleId } } else { $null }
-    $snapshotResult = Get-MojazResolvedRunSnapshot -Bulletin $bulletin -Schedule $schedule
-    if (-not $snapshotResult.Success) {
+    $snapshot = if ($ReviewedPlan) { $ReviewedPlan.Snapshot } else { (Get-MojazResolvedRunSnapshot -Bulletin $bulletin -Schedule $schedule).Value }
+    if (-not $snapshot) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.boardEmpty') -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
         return $false
     }
-    $snapshot = $snapshotResult.Value
     $rows = @($snapshot.Rows)
     # The template's picture is part of the snapshot too: a row set to
     # "template" must show the picture the scene had when the run started,
     # not one edited into it half way through.
-    $templateImage = Get-MojazTemplateImage
-    $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) -ChatId $ChatId -UserId $UserId
+    $templateImage = if ($ReviewedPlan) { $ReviewedPlan.TemplateImage } else { Get-MojazTemplateImage }
+    $reviewedTarget = @{}
+    if ($ReviewedPlan) {
+        $reviewedTarget = @{ ExpectedLayerStamp = $ReviewedPlan.LayerStamp; ExpectedLayer = $ReviewedPlan.Layer
+            ExpectedTemplatePath = $ReviewedPlan.ScenePath; RequireEventIdentity = $true }
+    }
+    $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) `
+        -ChatId $ChatId -UserId $UserId @reviewedTarget
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'mjp.showFailed') }
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.didNotStart' $reason) -ReplyMarkup (Get-MojazKeyboard -Bulletin $bulletin)
@@ -128,10 +134,18 @@ function Start-MojazPlayback {
         TemplateImage = $templateImage
         ActiveId = [string](Get-JsonProp $result 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $result 'ActiveIdConfirmed')
+        ReviewedLayer = [int](Get-JsonProp $ReviewedPlan 'Layer')
     }
     # Now that the bulletin is really on air, the strip stands down: they
     # share the bottom of the screen, and it returns when this ends.
-    Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null
+    if ($ReviewedPlan) {
+        if (-not (Get-MojazRunSceneStamp -Playback $script:MojazPlayback)) {
+            $script:MojazPlayback.StopFailed = $true
+            $script:MojazPlayback.Clock.Stop()
+        }
+        elseif ($ReviewedPlan.Ticker) { Hide-MojazTicker -ChatId $ChatId -UserId $UserId -ReviewedTicker $ReviewedPlan.Ticker | Out-Null }
+    }
+    else { Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null }
     # The permanent trail. A bulletin reached air as a plain air_control SHOW
     # of the Mojaz scene, which says a graphic went up and nothing about which
     # bulletin it was, how many stories it carried, or whether a person or a
@@ -211,21 +225,26 @@ function Stop-MojazPlayback {
        Returns $false without settling the run when the exit is not confirmed -
        see Set-MojazPlaybackStopFailed. Callers that announce an ending must
        check the answer before announcing it. #>
-    param([long]$ChatId = 0, [long]$UserId = 0, [switch]$Quiet)
+    param([long]$ChatId = 0, [long]$UserId = 0, [switch]$Quiet, [string]$ExpectedLayerStamp = '')
     if (-not $script:MojazPlayback) { return $false }
     $playback = $script:MojazPlayback
+    $layer = Get-MojazRunLayer -Playback $playback
+    if ($ExpectedLayerStamp -and $layer -le 0) { return $false }
+    if ((Get-JsonProp $playback 'ReviewedLayer') -and -not $ExpectedLayerStamp) {
+        $ExpectedLayerStamp = Confirm-MojazReviewedRunScene -Playback $playback
+        if (-not $ExpectedLayerStamp) { return $false }
+    }
     # Detach only in memory, so the exit below cannot recurse back into here
     # through Stop-MojazForLayer. The durable snapshot stays on disk until the
     # exit has actually succeeded, which is what makes recovery possible.
     $script:MojazPlayback = $null
-    $template = Get-MojazTemplate
-    if ($template) {
+    if ($layer -gt 0) {
         $chat = if ($ChatId -gt 0) { $ChatId } else { [long]$playback.ChatId }
         $user = if ($UserId -gt 0) { $UserId } else { [long]$playback.UserId }
         $exited = $false
         try {
             # -System: bulletin teardown, not an operator asking to leave.
-            $exited = Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $chat -UserId $user -System
+            $exited = Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user -System -ExpectedLayerStamp $ExpectedLayerStamp
         }
         catch {
             Write-BridgeLog "Bulletin exit attempt failed: $($_.Exception.Message)" 'WARN'
@@ -243,6 +262,42 @@ function Stop-MojazPlayback {
     # An urgent that agreed to wait for this bulletin goes out now.
     Update-MojazPendingUrgent | Out-Null
     return $true
+}
+
+function Get-MojazRunLayer {
+    param($Playback)
+    $reviewedLayer = [int](Get-JsonProp $Playback 'ReviewedLayer')
+    if ($reviewedLayer -gt 0) { return $reviewedLayer }
+    return [int](Get-JsonProp (Get-MojazTemplate) 'Layer')
+}
+
+function Get-MojazRunSceneStamp {
+    param($Playback)
+    return Get-CinegyLayerReviewStamp -Status @{
+        Success = (Get-JsonProp $Playback 'ActiveIdConfirmed'); IsOnAir = $true; ActiveId = (Get-JsonProp $Playback 'ActiveId')
+    }
+}
+
+function Read-MojazLayerStamp {
+    param([int]$Layer)
+    $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    return Get-CinegyLayerReviewStamp -Status $live
+}
+
+function Confirm-MojazReviewedRunScene {
+    param($Playback)
+    $layer = [int](Get-JsonProp $Playback 'ReviewedLayer')
+    $expected = Get-MojazRunSceneStamp -Playback $Playback
+    $observed = if ($expected) { Read-MojazLayerStamp -Layer $layer }
+    if ($expected -and $expected -ceq $observed) { return $expected }
+    if ($observed) {
+        # The replacement is known. Close our run without even scheduling a
+        # ticker SHOW, which could replace another graphic on its own layer.
+        Stop-MojazForLayer -Layer $layer -SkipTickerReturn | Out-Null
+    }
+    else { Set-MojazPlaybackStopFailed -Playback $Playback | Out-Null }
+    return ''
 }
 
 function Get-CinegyLayerStartedAtUtc {
@@ -347,21 +402,35 @@ function Hide-MojazTicker {
         putting one on air that nobody had asked for would be this screen
         deciding what the channel looks like.
     #>
-    param([long]$ChatId = 0, [long]$UserId = 0)
+    param([long]$ChatId = 0, [long]$UserId = 0, [hashtable]$ReviewedTicker)
     $script:MojazTickerReturn = $null
     if (-not (Get-Setting 'MojazHidesTicker')) { return $false }
     $template = Get-MojazTickerTemplate
     if (-not $template) { return $false }
     $layer = [int]$template.Layer
-    if (-not $script:OnAir.ContainsKey($layer)) { return $false }
+    $onAir = $script:OnAir[$layer]
+    if ([string](Get-JsonProp $onAir 'Key') -ne $script:MojazTickerKey) { return $false }
+    if ($ReviewedTicker -and $layer -ne $ReviewedTicker.Layer) { return $false }
     $chat = if ($ChatId -gt 0) { $ChatId } else { [long](Get-JsonProp $script:OnAir[$layer] 'ChatId') }
     if ($chat -le 0) { return $false }
     Write-BridgeLog "Mojaz starting: standing the news strip down from layer $layer."
     # -System: standing the strip down to make room for the bulletin is the
     # bulletin engine's own move, not a hide the operator asked for.
-    if (-not (Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $UserId -System)) { return $false }
-    $script:MojazTickerReturn = @{ At = $null; ChatId = $chat; UserId = $UserId }
+    $stamp = [string](Get-JsonProp $ReviewedTicker 'Stamp')
+    if (-not (Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $UserId -System -ExpectedLayerStamp $stamp)) { return $false }
+    $script:MojazTickerReturn = @{ At = $null; ChatId = $chat; UserId = $UserId
+        ReviewedLayer = [int](Get-JsonProp $ReviewedTicker 'Layer'); ReviewedStamp = $stamp }
     return $true
+}
+
+function Get-MojazTickerReview {
+    if (-not (Get-Setting 'MojazHidesTicker')) { return }
+    $layer = [int](Get-JsonProp (Get-MojazTickerTemplate) 'Layer')
+    if ($layer -le 0) { return }
+    $ticker = $script:OnAir[$layer]
+    if ([string](Get-JsonProp $ticker 'Key') -ne $script:MojazTickerKey) { return }
+    $stamp = Get-MojazRunSceneStamp -Playback $ticker
+    if ($stamp -and $stamp -ceq (Read-MojazLayerStamp -Layer $layer)) { return @{ Layer = $layer; Stamp = $stamp } }
 }
 
 function Request-MojazTickerReturn {
@@ -390,8 +459,16 @@ function Update-MojazTickerReturn {
     $template = Get-MojazTickerTemplate
     if (-not $template) { return }
     Write-BridgeLog 'Mojaz finished: putting the news strip back.'
+    $options = @{}
+    if (Get-JsonProp $pending 'ReviewedLayer') {
+        $observed = Read-MojazLayerStamp -Layer ([int]$pending.ReviewedLayer)
+        # Cinegy may keep the exited ticker's playlist item active. It is
+        # safe to bring the strip back over its own item or an empty layer.
+        if (-not $observed -or ($observed -cne 'empty' -and $observed -cne (Get-JsonProp $pending 'ReviewedStamp'))) { return }
+        $options = @{ ExpectedLayer = [int]$pending.ReviewedLayer; ExpectedLayerStamp = $observed }
+    }
     Invoke-ShowTemplateResult -Key $script:MojazTickerKey -Variables @{} `
-        -ChatId ([long]$pending.ChatId) -UserId ([long]$pending.UserId) | Out-Null
+        -ChatId ([long]$pending.ChatId) -UserId ([long]$pending.UserId) @options | Out-Null
 }
 
 function Clear-MojazForUrgent {
@@ -527,10 +604,9 @@ function Stop-MojazForLayer {
         operator believed it was gone. The caller is already removing the
         layer, so this does not exit again - it only closes the run.
     #>
-    param([Parameter(Mandatory)][int]$Layer)
+    param([Parameter(Mandatory)][int]$Layer, [switch]$SkipTickerReturn)
     if (-not $script:MojazPlayback) { return $false }
-    $template = Get-MojazTemplate
-    if (-not $template -or [int]$template.Layer -ne $Layer) { return $false }
+    if ((Get-MojazRunLayer -Playback $script:MojazPlayback) -ne $Layer) { return $false }
     $playback = $script:MojazPlayback
     $script:MojazPlayback = $null
     Clear-MojazPlaybackState
@@ -539,7 +615,8 @@ function Stop-MojazForLayer {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
     Write-BridgeLog "Mojaz playback ended: layer $Layer was taken off air."
-    Request-MojazTickerReturn | Out-Null
+    if ($SkipTickerReturn) { $script:MojazTickerReturn = $null }
+    else { Request-MojazTickerReturn | Out-Null }
     return $true
 }
 
@@ -601,6 +678,7 @@ function Save-MojazPlaybackState {
             TemplateImage = [string](Get-JsonProp $playback 'TemplateImage')
             ActiveId = [string](Get-JsonProp $playback 'ActiveId')
             ActiveIdConfirmed = [bool](Get-JsonProp $playback 'ActiveIdConfirmed')
+            ReviewedLayer = [int](Get-JsonProp $playback 'ReviewedLayer')
             ChatId = [long]$playback.ChatId
             UserId = [long]$playback.UserId
             ExitAtSeconds = [double]$playback.ExitAtSeconds
@@ -618,6 +696,8 @@ function Save-MojazPlaybackState {
             # ended the bulletin cleanly and said so.
             TickerReturnChatId = [long]$(if ($script:MojazTickerReturn) { Get-JsonProp $script:MojazTickerReturn 'ChatId' } else { 0 })
             TickerReturnUserId = [long]$(if ($script:MojazTickerReturn) { Get-JsonProp $script:MojazTickerReturn 'UserId' } else { 0 })
+            TickerReturnLayer = [int](Get-JsonProp $script:MojazTickerReturn 'ReviewedLayer')
+            TickerReturnStamp = [string](Get-JsonProp $script:MojazTickerReturn 'ReviewedStamp')
             Rows = @($playback.Rows)
             Plan = @($playback.Plan)
         }
@@ -665,18 +745,20 @@ function Restore-MojazPlayback {
     if ($tickerChat -gt 0) {
         $script:MojazTickerReturn = @{
             At = $null; ChatId = $tickerChat; UserId = [long](Get-JsonProp $state 'TickerReturnUserId')
+            ReviewedLayer = [int](Get-JsonProp $state 'TickerReturnLayer')
+            ReviewedStamp = [string](Get-JsonProp $state 'TickerReturnStamp')
         }
     }
     $startedAt = [datetime]::MinValue
     if (-not [datetime]::TryParse([string](Get-JsonProp $state 'StartedAt'), [ref]$startedAt)) { return $false }
-    $template = Get-MojazTemplate
-    if (-not $template) { return $false }
-    $layer = [int]$template.Layer
+    $reviewedLayer = [int](Get-JsonProp $state 'ReviewedLayer')
+    $layer = Get-MojazRunLayer -Playback $state
+    if ($layer -le 0) { return $false }
     # Only if the bulletin's scene is still the thing on that layer. Anything
     # else means it has already been dealt with, and this must not touch a
     # layer that now belongs to something else.
-    if (-not $script:OnAir.ContainsKey($layer) -or
-        [string](Get-JsonProp $script:OnAir[$layer] 'Key') -ne [string]$script:MojazTemplateKey) {
+    if (-not $reviewedLayer -and (-not $script:OnAir.ContainsKey($layer) -or
+        [string](Get-JsonProp $script:OnAir[$layer] 'Key') -ne [string]$script:MojazTemplateKey)) {
         return $false
     }
     $elapsed = ($Now - $startedAt).TotalSeconds
@@ -701,12 +783,13 @@ function Restore-MojazPlayback {
     $liveId = ([string](Get-JsonProp $live 'ActiveId')).Trim().Trim('{', '}')
     if (-not [bool](Get-JsonProp $state 'ActiveIdConfirmed') -or
         -not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId -or
-        -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
+        -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase) -or
+        ($reviewedLayer -and (Get-MojazRunSceneStamp -Playback $state) -cne (Get-CinegyLayerReviewStamp -Status $live))) {
         Write-BridgeLog "Refused to restore bulletin '$name': live scene identity could not be matched." 'WARN'
         Send-AdminBroadcast -Text (T 'mjp.notResumed' $name) | Out-Null
         return $false
     }
-    if ($elapsed -ge $exitAt) {
+    if (-not $reviewedLayer -and $elapsed -ge $exitAt) {
         Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
         # -System: restart recovery, with no operator in the loop at all.
         Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user -System | Out-Null
@@ -736,10 +819,19 @@ function Restore-MojazPlayback {
         TemplateImage = [string](Get-JsonProp $state 'TemplateImage')
         ActiveId = [string](Get-JsonProp $state 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $state 'ActiveIdConfirmed')
+        ReviewedLayer = $reviewedLayer
         # Carried across the restart with the run it describes: a bulletin
         # frozen by an unconfirmed exit must not start writing rows again just
         # because the process came back.
         StopFailed = [bool](Get-JsonProp $state 'StopFailed')
+    }
+    if ($reviewedLayer) {
+        if ($script:MojazPlayback.StopFailed) {
+            $script:MojazPlayback.Clock.Stop()
+            Save-MojazPlaybackState | Out-Null
+            return $true
+        }
+        if ($elapsed -ge $exitAt) { return (Stop-MojazPlayback -Quiet) }
     }
     $currentValues = Get-MojazRowVariables -Row $script:MojazPlayback.Rows[$index] `
         -TemplateImage ([string]$script:MojazPlayback.TemplateImage)
@@ -805,6 +897,7 @@ function Update-MojazPlayback {
         }
         return
     }
+    if ((Get-JsonProp $script:MojazPlayback 'ReviewedLayer') -and -not (Confirm-MojazReviewedRunScene -Playback $script:MojazPlayback)) { return }
     $index++
     $values = Get-MojazRowVariables -Row $rows[$index] -TemplateImage ([string](Get-JsonProp $script:MojazPlayback 'TemplateImage'))
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `

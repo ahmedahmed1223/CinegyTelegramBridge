@@ -1650,6 +1650,29 @@ Describe 'Web channel: the pipe' {
             $preview.ok | Should -BeTrue
             $preview.data.rows[0].imageFields | Should -Contain 'studio.main'
             ($preview | ConvertTo-Json -Depth 8) | Should -Not -Match '\.png'
+
+            $photo.revision = $edited.data.revision
+            $photo.Remove('rowId')
+            (& $send).error | Should -Be 'not_found'
+            $photo.createRow = $true
+            $photo.field = 'studio.side'
+            $photo.upload = [guid]::NewGuid().ToString('N')
+            $newUpload = Join-Path $script:mojazWebUploadDirectory "web-$($photo.upload).image"
+            Set-Content -LiteralPath $newUpload 'not an image'
+            (& $send).error | Should -Be 'bulletin_photo_invalid'
+            (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id).Rows.Count | Should -Be 1
+            (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id).Revision | Should -Be $photo.revision
+            Copy-Item -LiteralPath $inputFile -Destination $newUpload -Force
+            $added = & $send
+            $added.ok | Should -BeTrue
+            $added.data.total | Should -Be 2
+            $added.data.rows[1].media | Should -Be @('studio.side')
+            $added.data.rows[1].values.'studio.title' | Should -BeNullOrEmpty
+            (& $send).error | Should -Be 'bulletin_stale'
+            Import-MojazLibrary
+            $saved = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+            $saved.Rows[0].Id | Should -Be $row.Id
+            Test-Path -LiteralPath $saved.Rows[1].MediaFields.'studio.side' | Should -BeTrue
         }
         finally {
             $script:MojazLibrary = $oldLibrary

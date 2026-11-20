@@ -118,14 +118,15 @@ internal static class BulletinPhotoEndpoints
         };
     }
 
-    private static async Task<IResult> Upload(string id, string rowId, int revision, string? field, IBridgeChannel bridge, HttpContext http)
+    private static async Task<IResult> Upload(string id, string? rowId, int revision, string? field, bool? createRow, IBridgeChannel bridge, HttpContext http)
     {
         http.Response.Headers.CacheControl = "no-store";
-        if (revision < 1 || id.Length is < 1 or > 64 || rowId.Length is < 1 or > 64 || field is { Length: > 256 })
+        if (revision < 1 || id.Length is < 1 or > 64 || rowId is { Length: < 1 or > 64 } ||
+            field is { Length: > 256 } || (createRow == true) == (rowId is not null))
             return Error("bulletin_photo_invalid");
         var actor = http.User.UserId();
         var cancellation = http.RequestAborted;
-        var prepare = await bridge.SendAsync("bulletin.photo", new { actor, action = "prepare", id, rowId, revision, field }, cancellation);
+        var prepare = await bridge.SendAsync("bulletin.photo", new { actor, action = "prepare", id, rowId, revision, field, createRow }, cancellation);
         if (!prepare.Ok) return Error(prepare.Error);
         var policy = prepare.Data.Deserialize<UploadPolicy>(JsonDefaults.Options);
         if (policy is null || string.IsNullOrEmpty(policy.Directory) ||
@@ -155,7 +156,7 @@ internal static class BulletinPhotoEndpoints
             }
             if (bytes == 0) return Error("bulletin_photo_invalid");
             await staged.FlushAsync(cancellation);
-            var reply = await bridge.SendAsync("bulletin.photo", new { actor, action = "apply", id, rowId, revision, field, upload }, cancellation);
+            var reply = await bridge.SendAsync("bulletin.photo", new { actor, action = "apply", id, rowId, revision, field, createRow, upload }, cancellation);
             return reply.Ok ? Results.Ok(reply.Data.Deserialize<BulletinEditor>(JsonDefaults.Options)) : Error(reply.Error);
         }
         catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)

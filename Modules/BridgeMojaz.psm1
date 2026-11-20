@@ -386,7 +386,7 @@ function New-MojazBulletinRowData {
     param([string]$Image = '', [string]$Title = '', [string]$Text = '',
         # The design's own fields, keyed by the scene's variable names. Absent
         # for the built-in design, whose three are named above and unchanged.
-        $Fields, [switch]$AllowImageOnly,
+        $Fields, [switch]$AllowImageOnly, [string]$MediaField, [string]$MediaPath,
         [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '')
     $rowTitle = ConvertTo-MojazRowText -Text $Title
     $rowText = ConvertTo-MojazRowText -Text $Text
@@ -395,8 +395,9 @@ function New-MojazBulletinRowData {
     # the news design's shape, and it would have refused a row on a
     # video-only design outright.
     $rowFields = if ($PSBoundParameters.ContainsKey('Fields')) { Get-MojazFieldValues -Fields $Fields } else { $null }
-    $imageSelected = $AllowImageOnly -and ($ImageMode -in 'inherit', 'template' -or
-        ($ImageMode -eq 'new' -and -not [string]::IsNullOrWhiteSpace($Image)))
+    $hasAttachment = $MediaField -and $MediaPath
+    $imageSelected = $hasAttachment -or ($AllowImageOnly -and ($ImageMode -in 'inherit', 'template' -or
+            ($ImageMode -eq 'new' -and -not [string]::IsNullOrWhiteSpace($Image))))
     if ($null -ne $rowFields) {
         # Not @($hashtable).Count - that wraps the table in a one-element
         # array and answers 1 however empty the table is.
@@ -420,6 +421,9 @@ function New-MojazBulletinRowData {
     if ($null -ne $rowFields) {
         # A different design can later be selected without losing hidden fields.
         $row | Add-Member -NotePropertyName Fields -NotePropertyValue ([pscustomobject]$rowFields)
+    }
+    if ($hasAttachment) {
+        $row | Add-Member -NotePropertyName MediaFields -NotePropertyValue ([pscustomobject]@{ $MediaField = $MediaPath })
     }
     return (New-MojazResult $true $row)
 }

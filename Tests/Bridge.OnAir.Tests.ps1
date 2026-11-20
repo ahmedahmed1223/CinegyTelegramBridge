@@ -398,7 +398,8 @@ Describe 'SHOW identity tracking' {
         $script:AutoHideQueue[0].Layer | Should -Be 4
         $script:AutoHideQueue[0].ActiveId | Should -Be '{ENGINE-GUID}'
         $script:AutoHideQueue[0].ActiveIdConfirmed | Should -BeTrue
-        [math]::Round(($script:AutoHideQueue[0].At - (Get-Date)).TotalSeconds) | Should -BeIn @(29, 30)
+        $shownAt = [datetimeoffset]::Parse([string](Get-JsonProp $script:OnAir[4] 'At'), [cultureinfo]::InvariantCulture)
+        $script:AutoHideQueue[0].At | Should -Be $shownAt.AddSeconds(30)
     }
 
     It 'does not arm a destructive timer without positive exact post-show identity' {

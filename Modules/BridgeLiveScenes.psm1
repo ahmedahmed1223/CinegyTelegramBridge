@@ -116,7 +116,11 @@ function Get-BridgeLiveScenesForLayer {
         [Parameter(Mandatory)]$State,
         [Parameter(Mandatory)][int]$Layer
     )
-    return @((Get-BridgeLiveSceneValue -Object $State -Name 'Scenes') | Where-Object { [int]$_.Layer -eq $Layer })
+    # The catalog can hold many unrelated layers. Loop over records directly
+    # so each lookup avoids a pipeline callback for every scene.
+    foreach ($scene in (Get-BridgeLiveSceneValue -Object $State -Name 'Scenes')) {
+        if ([int]$scene.Layer -eq $Layer) { $scene }
+    }
 }
 
 function Get-BridgeLiveScenes {

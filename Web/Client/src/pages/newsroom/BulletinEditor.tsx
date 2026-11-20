@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Button, Group, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
+  ActionIcon, Alert, Badge, Button, Group, Menu, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
   Table, Text, Textarea, TextInput, Title, Tooltip,
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
@@ -98,7 +98,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [editingTiming, setEditingTiming] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
-  const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; field: string; title: string } | null>(null)
+  const [photoRow, setPhotoRow] = useState<{ rowId: string | null; revision: number; field: string; title: string } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
@@ -136,6 +136,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming || previewing || scheduling
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
+  const photoFields = fields.filter((field) => bulletin?.photoFields?.includes(field.name) ??
+    (bulletin?.canUploadPhoto && field.name === bulletin.imageField))
+  const canEnterRow = textFields.length > 0 || Boolean(bulletin?.imageField)
   const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
 
   function startRow(row: Row | null, revision: number) {
@@ -237,7 +240,10 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           {previewing && <BulletinPreview bulletin={bulletin} playback={playback.data} onClose={() => setPreviewing(false)} />}
           {scheduling && <BulletinSchedule bulletin={bulletin} onClose={() => setScheduling(false)} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
-            onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
+            onSaved={(value) => {
+              acceptSaved(value)
+              setSavedNote(photoRow.rowId ? 'حُفظت صورة الصف.' : 'أُضيف الصف إلى الموجز.')
+            }} />}
           {designChange && <Paper withBorder p="md" radius="lg">
             <form onSubmit={(event) => {
               event.preventDefault()
@@ -267,10 +273,24 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
             <Group gap="xs">
-              <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={!textFields.length || busy || editing}
-                onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>
-              <Button leftSection={<IconPlus size={17} />} disabled={(!textFields.length && !bulletin.imageField) || busy || editing}
-                onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>
+              {textFields.length > 0 && <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={busy || editing}
+                onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>}
+              {photoFields.length > 0 && <Menu position="bottom-end">
+                <Menu.Target>
+                  <Button variant={canEnterRow ? 'default' : 'filled'} leftSection={<IconFileUpload size={17} />} disabled={busy || editing}>
+                    إضافة صف بصورة
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>اختر عمود الصورة</Menu.Label>
+                  {photoFields.map((field) => <Menu.Item key={field.name} onClick={() => {
+                    setSavedNote('')
+                    setPhotoRow({ rowId: null, field: field.name, title: `إضافة صف بصورة في عمود ${field.label}`, revision: bulletin.revision })
+                  }}>{field.label}</Menu.Item>)}
+                </Menu.Dropdown>
+              </Menu>}
+              {canEnterRow && <Button leftSection={<IconPlus size={17} />} disabled={busy || editing}
+                onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>}
             </Group>
           </Group>
           {pasting && <BulletinPaste bulletin={bulletin} onCancel={() => setPasting(false)} onSave={(nextPage) => {
@@ -284,7 +304,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           {savedNote && <Text size="sm" role="status">{savedNote}</Text>}
           {edit.error && !editingTiming && !designChange && <Alert color="red" role="alert">{edit.error.message}</Alert>}
           {!fields.length && <Alert color="gray">تعذّر قراءة حقول التصميم من الجسر.</Alert>}
-          {!bulletin.total && !rowEdit && !pasting && <Text c="dimmed">لا توجد صفوف في الموجز. أضف صفًا أو الصق عدة صفوف.</Text>}
+          {!bulletin.total && !rowEdit && !pasting && <Text c="dimmed">لا توجد صفوف في الموجز.</Text>}
           {(bulletin.total > 0 || rowEdit) && (
             <>
             <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا للوصول إلى بقية الحقول والإجراءات.</Text>
@@ -317,7 +337,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                             <Table.Td>{number.format(rank)}</Table.Td>
                             {fields.map((field) => {
                               const canonical = field.name === bulletin.imageField
-                              const canUpload = bulletin.photoFields?.includes(field.name) ?? (bulletin.canUploadPhoto && canonical)
+                              const canUpload = photoFields.includes(field)
                               const title = canonical ? `رفع صورة للصف ${number.format(rank)}`
                                 : `رفع صورة إلى ${field.label} للصف ${number.format(rank)}`
                               return (

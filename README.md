@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.108.0
+
+Use Add row with a photo in the web bulletin editor to start a row in a selected picture column, including in designs without text fields. The bridge validates and converts the image before committing the row, and rejects a stale revision without creating a duplicate.
+
 ## Version 8.107.0
 
 The web bulletin editor can upload a photo into an individual media column in a saved row, including custom columns in alternate designs. The bridge uses each field's declared dimensions when available and preserves referenced uploads during cleanup of registered designs' photo directories.

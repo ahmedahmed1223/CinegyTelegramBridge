@@ -2115,7 +2115,6 @@
           {
             "name": "rowId",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string"
             }
@@ -2134,6 +2133,13 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "createRow",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

@@ -82,6 +82,10 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
             @{ name = 'studio.thumbnail'; label = 'الصورة المصغّرة' }
         )
     }
+    PhotoBulletin = @{
+        path = Join-Path $runtime 'photo-bulletin.cintitle'; layer = 6; description = 'موجز الصور'; category = 'الأخبار'; bulletin = $true
+        fields = @(@{ name = 'photo.main'; label = 'الصورة الرئيسية' }, @{ name = 'photo.detail'; label = 'صورة التفاصيل' })
+    }
     Guest = @{
         path = Join-Path $runtime 'guest.cintitle'; layer = 5; description = 'اسم الضيف'; category = 'الأسماء'
         fields = @(@{ name = 'name'; label = 'اسم الضيف'; required = $true; maxLength = 40 }, @{ name = 'role'; label = 'الصفة' })
@@ -103,6 +107,12 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
   <Var Name="studio.thumbnail" Type="File" /><Plate File="${studio.thumbnail}" Size="160;90" />
 </Scene>
 '@ | Set-Content -LiteralPath (Join-Path $runtime 'studio-bulletin.cintitle')
+@'
+<Scene Fps="50" Duration="300" LoopStartFrame="50" LoopEndFrame="200">
+  <Var Name="photo.main" Type="File" /><Plate File="${photo.main}" Size="320;180" />
+  <Var Name="photo.detail" Type="File" /><Plate File="${photo.detail}" Size="160;90" />
+</Scene>
+'@ | Set-Content -LiteralPath (Join-Path $runtime 'photo-bulletin.cintitle')
 'نافذة على أبرز الأخبار اليوم|متابعة مباشرة في النشرة المسائية|برنامج خاص مساء الخميس' |
     Set-Content -LiteralPath $fixtureTicker
 $script:UrgentBoard = New-UrgentBoard
@@ -123,6 +133,7 @@ if ($CaptureFixtureDirectory) {
 }
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.' -Image $demoPicture).Value
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'تقرير اليوم' -Text 'متابعة من غرفة الأخبار.').Value
+$script:MojazLibrary = (Add-MojazBulletin -Library $script:MojazLibrary -Name 'موجز الصور' -TemplateKey 'PhotoBulletin').Value
 
 $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @($OwnerId) -Force
 $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($OwnerId, 1002) -Force

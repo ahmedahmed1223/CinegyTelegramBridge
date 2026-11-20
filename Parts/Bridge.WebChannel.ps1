@@ -1564,11 +1564,14 @@ function Get-WebBulletinPhotoAdmission {
     if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
     $id = [string](Get-JsonProp $Arguments 'id')
     $rowId = [string](Get-JsonProp $Arguments 'rowId')
-    if (-not $id -or -not $rowId) { return @{ ok = $false; error = 'not_found' } }
+    $newRow = Get-JsonProp $Arguments 'createRow'
+    $createRow = $newRow -is [bool] -and $newRow
+    if (-not $id -or (-not $rowId -and -not $createRow)) { return @{ ok = $false; error = 'not_found' } }
+    if ($createRow -and $rowId) { return @{ ok = $false; error = 'bulletin_photo_invalid' } }
     $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
     if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
     if ((Get-JsonProp $Arguments 'revision') -ne (Get-JsonProp $bulletin 'Revision')) { return @{ ok = $false; error = 'bulletin_stale' } }
-    if ($rowId -cnotin @(Get-JsonProp $bulletin 'Rows' | ForEach-Object { [string](Get-JsonProp $_ 'Id') })) {
+    if (-not $createRow -and $rowId -cnotin @(Get-JsonProp $bulletin 'Rows' | ForEach-Object { [string](Get-JsonProp $_ 'Id') })) {
         return @{ ok = $false; error = 'not_found' }
     }
     $fields = @(Get-WebBulletinFields -Bulletin $bulletin)
@@ -1588,7 +1591,7 @@ function Get-WebBulletinPhotoAdmission {
         }
     }
     return @{ ok = $true; Actor = $actor; BulletinId = $id; RowId = $rowId; Directory = $destination.Directory
-        Size = $size; Scene = $destination.Scene; Field = $field }
+        Size = $size; Scene = $destination.Scene; Field = $field; CreateRow = $createRow }
 }
 
 function Start-WebBulletinPhotoRequest {
@@ -1677,17 +1680,25 @@ function Complete-WebBulletinPhotoRequest {
         (Get-JsonProp $admission.Size 'Height') -ne (Get-JsonProp $Pending.Admission.Size 'Height')) {
         return @{ ok = $false; error = 'bulletin_stale' }
     }
-    $attachment = if ($admission.Field -ceq $script:MojazImageVariable) {
-        @{ ImageMode = 'new'; Image = ".\Mojaz\bot\$($Pending.Name)"; DesignFields = @{ $script:MojazImageVariable = '' } }
-    }
+    $canonical = $admission.Field -ceq $script:MojazImageVariable
+    $attachment = if ($canonical) { @{ ImageMode = 'new'; Image = ".\Mojaz\bot\$($Pending.Name)" } }
     else { @{ MediaField = $admission.Field; MediaPath = $Pending.Path } }
-    $result = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $admission.BulletinId -RowId $admission.RowId `
-        -UserId $admission.Actor @attachment
+    if ($admission.CreateRow) {
+        $result = Add-MojazBulletinRows -Library $script:MojazLibrary -BulletinId $admission.BulletinId -UserId $admission.Actor `
+            -Rows @($attachment + @{ AllowImageOnly = $true })
+    }
+    else {
+        if ($canonical) { $attachment.DesignFields = @{ $script:MojazImageVariable = '' } }
+        $result = Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $admission.BulletinId -RowId $admission.RowId `
+            -UserId $admission.Actor @attachment
+    }
     if (-not (Invoke-MojazEdit -Result $result -ChatId $admission.Actor -Quiet)) { return @{ ok = $false; error = 'bulletin_save_failed' } }
     $Pending.Saved = $true
     Add-AuditEntry "Web bulletin photo attached by $(Format-UserAuditActor -UserId $admission.Actor) ($($admission.BulletinId))"
     $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $admission.BulletinId
-    $page = Get-MojazRowPage -Rows @(Get-JsonProp $bulletin 'Rows') -RowId $admission.RowId -PageSize 20
+    $rows = @(Get-JsonProp $bulletin 'Rows')
+    $rowId = if ($admission.CreateRow) { [string](Get-JsonProp $rows[-1] 'Id') } else { $admission.RowId }
+    $page = Get-MojazRowPage -Rows $rows -RowId $rowId -PageSize 20
     return @{ ok = $true; data = Get-WebBulletinEditor -Bulletin $bulletin -Page $page }
 }
 

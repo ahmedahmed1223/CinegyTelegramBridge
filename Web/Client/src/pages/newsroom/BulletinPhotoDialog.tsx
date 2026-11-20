@@ -6,7 +6,7 @@ import { messageFor } from '../../api/messages'
 
 export function BulletinPhotoDialog({ id, rowId, revision, title, field, onClose, onSaved }: {
   id: string
-  rowId: string
+  rowId: string | null
   revision: number
   title: string
   field: string
@@ -42,12 +42,12 @@ export function BulletinPhotoDialog({ id, rowId, revision, title, field, onClose
           {preview && <Image src={preview} alt="معاينة الصورة المختارة" h={155} fit="contain" radius="sm" onError={() => setPreview('')} />}
           {upload.isPending && <Text size="sm" role="status">جارٍ رفع الصورة ومعالجتها…</Text>}
           {(tooLarge || upload.error) && <Alert color="red" role="alert">
-            {stale ? 'تغيّر الصف أثناء التحرير. أغلق النافذة وحدّث الموجز، ثم اختر الصورة من جديد.'
+            {stale ? 'تغيّر الموجز أثناء اختيار الصورة. أغلق النافذة وحدّث الموجز، ثم اختر الصورة من جديد.'
               : messageFor(tooLarge ? 'bulletin_photo_size' : upload.error?.message ?? 'unknown')}
           </Alert>}
           <Group justify="flex-end">
             <Button variant="default" disabled={upload.isPending} onClick={onClose}>إلغاء</Button>
-            <Button type="submit" loading={upload.isPending} disabled={!file || tooLarge || stale}>حفظ الصورة</Button>
+            <Button type="submit" loading={upload.isPending} disabled={!file || tooLarge || stale}>{rowId ? 'حفظ الصورة' : 'إضافة الصف'}</Button>
           </Group>
         </Stack>
       </form>

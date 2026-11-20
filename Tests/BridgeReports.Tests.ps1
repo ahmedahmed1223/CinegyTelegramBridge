@@ -61,6 +61,9 @@ BeforeAll {
             Target = $Target; UserId = $UserId; Values = $Values; Count = 0; Layer = $Layer
         }
     }
+    # Keep "today" and the fixture records on the same clock, including
+    # paired runs and the multi-user report when a full gate spans midnight.
+    Mock Get-Date { [datetime]::new(2026, 11, 20, 12, 0, 0, [DateTimeKind]::Local) }
 }
 
 Describe 'Banner session pairing' {
@@ -128,8 +131,7 @@ Describe 'News report' {
         # Two hours ago, but never before today began: the record has to fall
         # inside the "today" period even when the suite runs just after
         # midnight, which is where this used to fail once a night.
-        $moment = [datetime]::Now.AddHours(-2)
-        if ($moment -lt [datetime]::Now.Date) { $moment = [datetime]::Now.Date.AddMinutes(1) }
+        $moment = (Get-Date).AddHours(-2)
         $stamp = $moment.ToUniversalTime().ToString('o')
         Mock Read-AuditRecords {
             @(
@@ -493,16 +495,10 @@ Describe 'The banner copy is kept, below the table' {
 
 Describe 'The bulletin report' {
     BeforeAll {
-        # Anchored to now, never to a fixed hour of the day. Placing a
-        # record at "today at 10:00" puts it in the FUTURE when the suite runs
-        # in the morning, and the report window ends at now - so the record
-        # vanished and these tests passed at night and failed at 09:47.
+        # Use the same fixed clock the report sees for filtering.
         function global:Get-TestReportAnchor {
             param([int]$MinutesAgo = 180)
-            $at = (Get-Date).AddMinutes(-1 * $MinutesAgo)
-            $startOfDay = (Get-Date).Date.AddMinutes(1)
-            if ($at -lt $startOfDay) { return $startOfDay }
-            return $at
+            return (Get-Date).AddMinutes(-1 * $MinutesAgo)
         }
 
         function global:New-TestMojazAudit {

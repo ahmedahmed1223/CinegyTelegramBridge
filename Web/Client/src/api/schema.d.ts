@@ -2384,9 +2384,10 @@ export interface paths {
             parameters: {
                 query: {
                     id: string;
-                    rowId: string;
+                    rowId?: string;
                     revision: number;
                     field?: string;
+                    createRow?: boolean;
                 };
                 header?: never;
                 path?: never;

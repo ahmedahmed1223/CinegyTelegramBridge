@@ -51,6 +51,7 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        TickerTxtEndpoints.Map(ticker);
         var tickerSets = app.MapGroup("/api/content/ticker/sets").WithTags("Content").RequireAuthorization();
         tickerSets.MapGet("", (IBridgeChannel bridge, HttpContext http) => TickerSets(new("status"), bridge, http))
             .Produces<TickerSetsState>()

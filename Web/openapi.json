@@ -1474,6 +1474,123 @@
         }
       }
     },
+    "/api/content/ticker/draft/txt": {
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "$ref": "#/components/schemas/Stream"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerTxtPreview"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/ticker/sets": {
       "get": {
         "tags": [
@@ -3019,6 +3136,10 @@
           }
         }
       },
+      "Stream": {
+        "type": "string",
+        "format": "binary"
+      },
       "TelegramPollResponse": {
         "required": [
           "state"
@@ -3667,6 +3788,44 @@
             "type": "string",
             "default": null,
             "nullable": true
+          }
+        }
+      },
+      "TickerTxtPreview": {
+        "required": [
+          "review",
+          "items",
+          "currentItems",
+          "duplicates",
+          "identical",
+          "cancelsSchedule"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currentItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicates": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "identical": {
+            "type": "boolean"
+          },
+          "cancelsSchedule": {
+            "type": "boolean"
           }
         }
       },

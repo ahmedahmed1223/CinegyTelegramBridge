@@ -12,6 +12,7 @@ import { TickerBackups } from './TickerBackups'
 import { TickerPaste } from './TickerPaste'
 import { TickerSheet } from './TickerSheet'
 import { TickerSets } from './TickerSets'
+import { TickerTxt } from './TickerTxt'
 
 type Request = Schemas['TickerDraftRequest']
 type Draft = Schemas['TickerDraft']
@@ -55,6 +56,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const [showBackups, setShowBackups] = useState(false)
   const [showSheet, setShowSheet] = useState(false)
   const [showPaste, setShowPaste] = useState(false)
+  const [showTxt, setShowTxt] = useState(false)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -349,6 +351,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                 <Menu position="bottom-start">
                   <Menu.Target><Button variant="default" disabled={busy || !!edit}>خيارات المسودة</Button></Menu.Target>
                   <Menu.Dropdown>
+                    <Menu.Item onClick={() => setShowTxt(true)}>استيراد ملف TXT</Menu.Item>
                     <Menu.Item onClick={() => confirmHandover(draft)}>تسليم المسودة</Menu.Item>
                     {draft.canClear && items.length > 0 && <Menu.Item color="red" onClick={() => confirmDraftRemoval(draft, 'clear')}>تفريغ المسودة</Menu.Item>}
                     <Menu.Item color="red" onClick={() => confirmDraftRemoval(draft, 'discard')}>إلغاء المسودة</Menu.Item>
@@ -390,6 +393,8 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       </Stack>
       {draft && showPaste && <TickerPaste draft={draft} onClose={() => setShowPaste(false)}
         onCommand={(body) => tickerCommand({ ...body, pausedPage })}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
+      {draft && showTxt && <TickerTxt draft={draft} onClose={() => setShowTxt(false)}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
       <Modal opened={!!schedule} onClose={() => { if (!busy) { setSchedule(null); setError('') } }} title="جدولة نشر شريط الأخبار">
         {schedule && <form onSubmit={(event) => {

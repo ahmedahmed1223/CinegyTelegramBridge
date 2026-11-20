@@ -855,6 +855,72 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'imports reviewed UTF-8 bytes and replaces only the current ticker draft' {
+        $oldDraft = $script:NewsTickerDraft
+        $oldDraftPath = $script:newsDraftFile
+        $oldImportPath = $script:newsImportDirectory
+        $script:newsDraftFile = Join-Path $TestDrive 'web-txt-draft.json'
+        $script:newsImportDirectory = Join-Path $TestDrive 'web-txt-uploads'
+        New-Item -ItemType Directory -Path $script:newsImportDirectory | Out-Null
+        $script:NewsTickerDraft = @{ Id = 'web-txt'; OwnerUserId = 4321; Items = @('المسودة الحالية'); PublishAt = [datetimeoffset]::UtcNow.AddHours(1).ToString('o') }
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        $command = {
+            param($arguments)
+            $line = @{ op = 'ticker.txt'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $revision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft
+            $upload = [guid]::NewGuid().ToString('N')
+            $candidate = Join-Path $script:newsImportDirectory "web-$upload.txt"
+            (& $command @{ actor = 4322; action = 'prepare'; revision = $revision }).error | Should -Be 'ticker_locked'
+            (& $command @{ actor = 4321; action = 'prepare'; revision = $revision }).data.maximumBytes | Should -BeGreaterThan 65536
+            $preview = @{ actor = 4321; action = 'preview'; revision = $revision; upload = $upload }
+            (& $command ($preview + @{ review = 'unused' })).error | Should -Be 'ticker_txt_invalid'
+            [IO.File]::WriteAllBytes($candidate, [byte[]]@(0xff, 0xfe, 0))
+            (& $command $preview).error | Should -Be 'ticker_txt_invalid'
+            $news = 'أول خبر|ثاني خبر|أول خبر'
+            [IO.File]::WriteAllText($candidate, $news, [Text.UTF8Encoding]::new($true))
+            $entry = @{
+                Request = @{ args = $preview }
+                Deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 10 * [Diagnostics.Stopwatch]::Frequency
+                Reply = [System.Threading.Tasks.TaskCompletionSource[string]]::new()
+            }
+            Start-WebTickerTxtRequest -Entry $entry | Should -BeNullOrEmpty
+            $entry.Reply.Task.IsCompleted | Should -BeFalse
+            $script:NewsTickerDraft.Items = @('تحرير جديد')
+            while (-not $entry.Reply.Task.IsCompleted -and [Diagnostics.Stopwatch]::GetTimestamp() -lt $entry.Deadline) {
+                Update-WebTickerTxtRequest
+                Wait-WebChannelSignal -Milliseconds 20
+            }
+            $entry.Reply.Task.IsCompleted | Should -BeTrue
+            ($entry.Reply.Task.Result | ConvertFrom-Json).error | Should -Be 'ticker_stale'
+            $script:NewsTickerDraft.Items = @('المسودة الحالية')
+            $review = (& $command $preview).data
+            $review.items | Should -Be @('أول خبر', 'ثاني خبر')
+            $review.currentItems | Should -Be @('المسودة الحالية')
+            $review.duplicates | Should -Be 1
+            $review.cancelsSchedule | Should -BeTrue
+            $script:NewsTickerDraft.Items | Should -Be @('المسودة الحالية')
+            $apply = @{ actor = 4321; action = 'apply'; revision = $revision; upload = $upload; review = $review.review }
+            [IO.File]::WriteAllText($candidate, 'محتوى غير مراجع')
+            (& $command $apply).error | Should -Be 'ticker_stale'
+            [IO.File]::WriteAllText($candidate, $news, [Text.UTF8Encoding]::new($true))
+            (& $command $apply).ok | Should -BeTrue
+            $script:NewsTickerDraft.Items | Should -Be @('أول خبر', 'ثاني خبر')
+            (Get-JsonProp $script:NewsTickerDraft 'PublishAt') | Should -BeNullOrEmpty
+            (& $command $apply).error | Should -Be 'ticker_stale'
+        }
+        finally {
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldDraftPath
+            $script:newsImportDirectory = $oldImportPath
+        }
+    }
+
     It 'imports only reviewed sheet headlines while the operator owns the ticker draft' {
         $tickerPath = Join-Path $TestDrive 'sheet-import-ticker.txt'
         Set-Content -LiteralPath $tickerPath -Value 'الشريط المنشور'

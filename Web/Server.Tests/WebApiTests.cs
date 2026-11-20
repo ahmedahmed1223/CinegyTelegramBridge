@@ -1,10 +1,43 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CinegyBridge.Web.Endpoints;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CinegyBridge.Web.Tests;
+
+public sealed class TickerTxtTests : IDisposable
+{
+    private readonly WebApp _app = new();
+
+    public void Dispose() => _app.Dispose();
+
+    [Fact]
+    public async Task Streamed_file_is_bounded_and_removed_after_the_bridge_reads_its_exact_bytes()
+    {
+        var directory = Path.Combine(_app.Root, "uploads");
+        _app.Bridge.TickerTxtDirectory = directory;
+        var browser = await _app.SignedInAsync("ticker-editor", WebApp.Operator);
+        var path = $"/api/content/ticker/draft/txt?action=preview&revision={new string('A', 64)}";
+        using var tooLarge = new ByteArrayContent(new byte[70_001]);
+        tooLarge.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var refused = await browser.Client.PostAsync(path, tooLarge);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, refused.StatusCode);
+        Assert.False(Directory.Exists(directory));
+
+        var bytes = Enumerable.Range(0, 68_000).Select(i => (byte)i).ToArray();
+        using var payload = new ByteArrayContent(bytes);
+        payload.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var response = await browser.Client.PostAsync(path, payload);
+        var preview = await response.Content.ReadFromJsonAsync<TickerTxtPreview>();
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(preview);
+        Assert.Equal("خبر جديد", Assert.Single(preview.Items));
+        Assert.Equal(bytes, _app.Bridge.TickerTxtBytes);
+        Assert.Empty(Directory.EnumerateFiles(directory));
+    }
+}
 
 public sealed class SignInTests : IDisposable
 {

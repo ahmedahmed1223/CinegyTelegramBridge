@@ -22,6 +22,8 @@
 
 $script:WebChannel = $null
 $script:WebTickerSheetRequest = $null
+$script:WebTickerTxtRequest = $null
+$script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
 $script:WebChannelListenerCount = 4
 $script:WebChannelPublishedAt = [datetime]::MinValue
@@ -150,6 +152,12 @@ function Stop-WebChannel {
     $script:WebChannel = $null
     $channel.Shared.Stop = $true
     Stop-WebTickerSheetRequest -ErrorCode 'channel_closed'
+    if ($script:WebTickerTxtRequest) {
+        $worker = $script:WebTickerTxtRequest
+        $script:WebTickerTxtRequest = $null
+        [void]$worker.Entry.Reply.TrySetResult('{"ok":false,"error":"channel_closed"}')
+        $worker.Pipeline.Dispose()
+    }
     # Anyone still waiting gets an answer rather than a fifteen-second hang.
     $pending = $null
     while ($channel.Shared.Queue.TryDequeue([ref]$pending)) {
@@ -292,6 +300,7 @@ function Invoke-WebChannelRequests {
     param([int]$Limit = 25)
     if (-not (Test-WebChannelActive)) { return }
     Update-WebTickerSheetRequest
+    Update-WebTickerTxtRequest
     $queue = $script:WebChannel.Shared.Queue
     $item = $null
     for ($handled = 0; $handled -lt $Limit -and $queue.TryDequeue([ref]$item); $handled++) {
@@ -306,8 +315,9 @@ function Invoke-WebChannelRequests {
         $answer = $null
         try {
             $answer = Invoke-WebChannelOperation -Request $item.Request -Entry $item
-            if ($null -eq $answer -and $script:WebTickerSheetRequest -and
-                [object]::ReferenceEquals($script:WebTickerSheetRequest.Entry, $item)) { continue }
+            if ($null -eq $answer -and (
+                [object]::ReferenceEquals((Get-JsonProp $script:WebTickerSheetRequest 'Entry'), $item) -or
+                [object]::ReferenceEquals((Get-JsonProp $script:WebTickerTxtRequest 'Entry'), $item))) { continue }
         }
         catch {
             Write-BridgeLog "Web channel operation failed: $($_.Exception.Message)" 'ERROR'
@@ -336,6 +346,7 @@ function Invoke-WebChannelOperation {
         'urgent.write' { return Invoke-WebUrgentWrite -Arguments $arguments }
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
+        'ticker.txt' { return Start-WebTickerTxtRequest -Entry $Entry }
         'ticker.sets' { return Invoke-WebTickerSets -Arguments $arguments }
         'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
@@ -1546,6 +1557,121 @@ function Get-WebTickerEditorState {
     }
     elseif ($draft) { $data.state = 'open' }
     return $data
+}
+
+function Get-WebTickerTxtAdmission {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Get-Setting 'EnableNewsTickerManagement')) { return @{ ok = $false; error = 'content_disabled' } }
+    $draft = Get-NewsTickerDraft -UserId $actor
+    if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_locked' } }
+    $revision = Get-NewsTickerDraftRevision -Draft $draft
+    if ($revision -cne [string](Get-JsonProp $Arguments 'revision')) { return @{ ok = $false; error = 'ticker_stale' } }
+    return @{ ok = $true; actor = $actor; draft = $draft; revision = $revision }
+}
+
+function Get-WebTickerTxtLimits {
+    return @{
+        Separator = [string](Get-Setting 'NewsItemSeparator')
+        MaximumBytes = Get-SettingInt 'NewsImportMaxBytes' 1
+        MaxItemLength = Get-SettingInt 'NewsMaxItemLength' 1
+        MaxItems = Get-SettingInt 'NewsMaxItems' 1
+    }
+}
+
+function Start-WebTickerTxtRequest {
+    param([Parameter(Mandatory)][hashtable]$Entry)
+    $arguments = Get-JsonProp $Entry.Request 'args'
+    if ($arguments -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'ticker_txt_invalid' } }
+    $admission = Get-WebTickerTxtAdmission -Arguments $arguments
+    if (-not $admission.ok) { return $admission }
+    $action = [string](Get-JsonProp $arguments 'action')
+    $maximum = Get-SettingInt 'NewsImportMaxBytes' 1
+    if ($action -eq 'prepare') {
+        return @{ ok = $true; data = @{ directory = $script:newsImportDirectory; maximumBytes = $maximum } }
+    }
+    $upload = [string](Get-JsonProp $Arguments 'upload')
+    if ($action -notin 'preview', 'apply' -or $upload -cnotmatch '^[a-f0-9]{32}$') { return @{ ok = $false; error = 'ticker_txt_invalid' } }
+    if ($script:WebTickerTxtRequest) { return @{ ok = $false; error = 'ticker_txt_busy' } }
+    $path = Join-Path $script:newsImportDirectory "web-$upload.txt"
+    $file = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+    if (-not $file -or $file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        return @{ ok = $false; error = 'ticker_txt_invalid' }
+    }
+    if ($file.Length -gt $maximum) { return @{ ok = $false; error = 'ticker_txt_size' } }
+    $limits = Get-WebTickerTxtLimits
+    if (-not $limits.Separator) { return @{ ok = $false; error = 'ticker_txt_invalid' } }
+    # Decoding the upload can outlast a playout tick. The worker reads only
+    # the staged file and settings snapshot; the bridge still owns all writes.
+    $pipeline = [powershell]::Create()
+    try {
+        $pipeline.AddCommand('Import-Module').AddParameter('Name', $script:WebTickerTxtModule).AddParameter('ErrorAction', 'Stop').AddStatement().AddCommand('Get-NewsTickerSnapshot').AddParameters($limits).AddParameter('Path', $path).AddParameter('SharedUpload') | Out-Null
+        $invocation = $pipeline.BeginInvoke()
+        $script:WebTickerTxtRequest = @{ Entry = $Entry; Arguments = $arguments; Limits = $limits; Pipeline = $pipeline; Invocation = $invocation; Stopping = $false }
+    }
+    catch {
+        $pipeline.Dispose()
+        return @{ ok = $false; error = 'ticker_txt_save_failed' }
+    }
+}
+
+function Update-WebTickerTxtRequest {
+    $pending = $script:WebTickerTxtRequest
+    if (-not $pending) { return }
+    $expired = [Diagnostics.Stopwatch]::GetTimestamp() -ge $pending.Entry.Deadline
+    if ($expired -and -not $pending.Stopping) {
+        $pending.Stopping = $true
+        [void]$pending.Entry.Reply.TrySetResult('{"ok":false,"error":"ticker_txt_timeout"}')
+        if (-not $pending.Invocation.IsCompleted) {
+            try { [void]$pending.Pipeline.BeginStop($null, $null) }
+            catch { Write-BridgeLog 'The ticker TXT worker ended while cancellation was requested.' 'DEBUG' }
+        }
+    }
+    if (-not $pending.Invocation.IsCompleted) { return }
+    $script:WebTickerTxtRequest = $null
+    try {
+        if ($pending.Stopping) { return }
+        $result = @($pending.Pipeline.EndInvoke($pending.Invocation))
+        $answer = if ($result.Count -eq 1) { Complete-WebTickerTxtRequest -Pending $pending -Snapshot $result[0] }
+                  else { @{ ok = $false; error = 'ticker_txt_invalid' } }
+        [void]$pending.Entry.Reply.TrySetResult(($answer | ConvertTo-Json -Compress -Depth 6))
+    }
+    catch {
+        [void]$pending.Entry.Reply.TrySetResult('{"ok":false,"error":"ticker_txt_invalid"}')
+    }
+    finally { $pending.Pipeline.Dispose() }
+}
+
+function Complete-WebTickerTxtRequest {
+    param([hashtable]$Pending, $Snapshot)
+    $admission = Get-WebTickerTxtAdmission -Arguments $Pending.Arguments
+    if (-not $admission.ok) { return $admission }
+    $limits = Get-WebTickerTxtLimits
+    foreach ($key in $limits.Keys) {
+        if ($limits[$key] -cne $Pending.Limits[$key]) { return @{ ok = $false; error = 'ticker_stale' } }
+    }
+    $draft = $admission.draft
+    $actor = $admission.actor
+    $action = [string](Get-JsonProp $Pending.Arguments 'action')
+    if (-not $snapshot.Success -or -not $snapshot.Exists) { return @{ ok = $false; error = 'ticker_txt_invalid' } }
+    if (-not $snapshot.Items.Count) { return @{ ok = $false; error = 'ticker_txt_empty' } }
+    $items = ConvertTo-Json -Compress -InputObject @($snapshot.Items)
+    $identical = $items -ceq (ConvertTo-Json -Compress -InputObject @($draft.Items))
+    $token = Get-NewsTickerReviewToken (ConvertTo-Json -Compress -Depth 4 -InputObject @('ticker-txt', $actor, $admission.revision, $snapshot.Hash, $limits.Separator, $items))
+    if ($action -eq 'preview') {
+        return @{ ok = $true; data = @{
+                review = $token; items = @($snapshot.Items); currentItems = @($draft.Items); duplicates = $snapshot.DuplicateCount
+                identical = $identical; cancelsSchedule = -not $identical -and $null -ne (Get-NewsPublishAt -Draft $draft)
+            } }
+    }
+    if ($token -cne [string](Get-JsonProp $Pending.Arguments 'review')) { return @{ ok = $false; error = 'ticker_stale' } }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $Pending.Entry.Deadline) { return @{ ok = $false; error = 'ticker_txt_timeout' } }
+    if (-not $identical -and -not (Set-NewsTickerDraftItems -Draft $draft -Items $snapshot.Items -ClearSchedule)) {
+        return @{ ok = $false; error = 'ticker_txt_save_failed' }
+    }
+    if (-not $identical) { Add-AuditEntry "Web ticker TXT imported by $(Format-UserAuditActor -UserId $actor)" }
+    return @{ ok = $true }
 }
 
 function Invoke-WebTickerPaste {

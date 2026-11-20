@@ -1747,6 +1747,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/ticker/draft/txt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    action: string;
+                    revision: string;
+                    review?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/octet-stream": components["schemas"]["Stream"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TickerTxtPreview"];
+                    };
+                };
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/ticker/sets": {
         parameters: {
             query?: never;
@@ -2607,6 +2711,8 @@ export interface components {
             online: boolean;
             status: components["schemas"]["BridgeStatus"];
         };
+        /** Format: binary */
+        Stream: string;
         TelegramPollResponse: {
             state: string;
         };
@@ -2804,6 +2910,15 @@ export interface components {
             target: string;
             /** @default null */
             review: string | null;
+        };
+        TickerTxtPreview: {
+            review: string;
+            items: string[];
+            currentItems: string[];
+            /** Format: int32 */
+            duplicates: number;
+            identical: boolean;
+            cancelsSchedule: boolean;
         };
         UrgentPlaybackRequest: {
             action: string;

@@ -165,7 +165,8 @@ function Get-NewsTickerSnapshot {
         [int]$MaxItemLength = 0,
         [int]$MaxItems = 0,
         [switch]$RetainInvalidHash,
-        [long]$MaximumBytes = 0
+        [long]$MaximumBytes = 0,
+        [switch]$SharedUpload
     )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return [pscustomobject]@{Success=$true;Exists=$false;Items=@();Hash='';LastWriteTime=$null;Error='';EmptyCount=0;DuplicateCount=0}
@@ -173,7 +174,9 @@ function Get-NewsTickerSnapshot {
     $hash = ''
     try {
         if ($MaximumBytes -gt 0) {
-            $stream = [IO.File]::OpenRead($Path)
+            # The web server holds the file open for automatic deletion.
+            $share = if ($SharedUpload) { [IO.FileShare]'ReadWrite, Delete' } else { [IO.FileShare]::Read }
+            $stream = [IO.FileStream]::new($Path, 'Open', 'Read', $share)
             try {
                 if ($stream.Length -gt $MaximumBytes) { throw 'ملف الأخبار أكبر من الحد المسموح للمراجعة.' }
                 $bytes = [byte[]]::new($stream.Length)

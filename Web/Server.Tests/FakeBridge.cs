@@ -18,6 +18,8 @@ public sealed class FakeBridge : IBridgeChannel
     public string LastLoginCode { get; private set; } = "";
     public string? CapturePath { get; set; }
     public string CaptureId { get; } = Guid.NewGuid().ToString("N");
+    public string? TickerTxtDirectory { get; set; }
+    public byte[]? TickerTxtBytes { get; private set; }
 
     public Task<BridgeReply> SendAsync(string op, object? args = null, CancellationToken cancellationToken = default)
     {
@@ -40,6 +42,7 @@ public sealed class FakeBridge : IBridgeChannel
             "air.hide" => Reply("null"),
             "air.exit" => Reply("null"),
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
+            "ticker.txt" => TickerTxt(a),
             "media.capture" => Capture(a),
             "relay.control" => a.GetProperty("action").GetString() == "status"
                 ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
@@ -49,6 +52,21 @@ public sealed class FakeBridge : IBridgeChannel
                 : new BridgeReply(false, default, "urgent_stale"),
             _ => new BridgeReply(false, default, "unknown_op"),
         });
+    }
+
+    private BridgeReply TickerTxt(JsonElement args)
+    {
+        if (args.GetProperty("actor").GetInt64() != WebApp.Operator || TickerTxtDirectory is null)
+            return new BridgeReply(false, default, "ticker_locked");
+        if (args.GetProperty("action").GetString() == "prepare")
+            return Reply(JsonSerializer.Serialize(new { directory = TickerTxtDirectory, maximumBytes = 70_000 }));
+        var id = args.GetProperty("upload").GetString();
+        using var upload = new FileStream(Path.Combine(TickerTxtDirectory, $"web-{id}.txt"), FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var copy = new MemoryStream();
+        upload.CopyTo(copy);
+        TickerTxtBytes = copy.ToArray();
+        return Reply("""{"review":"review","items":["خبر جديد"],"currentItems":["المسودة"],"duplicates":0,"identical":false,"cancelsSchedule":true}""");
     }
 
     private BridgeReply Capture(JsonElement args)

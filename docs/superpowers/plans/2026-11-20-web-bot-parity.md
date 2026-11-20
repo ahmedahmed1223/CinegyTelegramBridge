@@ -9,7 +9,7 @@
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, automatic run preview and playback, pause, resume, advance and stop retry | Timing settings, rehearsal, single-story and timed manual playback |
 | Bulletins | Shared library and paginated design-field table, create and copy, revision-checked row editing and batch paste, built-in timing, on-air indicator | Attachments, design switching, preview, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
-| Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste, clearing and cancelling drafts | TXT import |
+| Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls, snapshots and clips | Template and material schedule, incident and operation history, notifications, reports and exports |
 | Administration | Web accounts and sessions | Bot access requests and roles, settings, health tools, audit and announcements |
@@ -23,7 +23,7 @@
 - [x] Add reviewed Google Sheets import into the draft and direct publication.
 - [x] Add reviewed bulk text entry, clearing and explicit discard.
 - [x] Add ticker lock requests and administrative release. Reuse the bridge's request window and reservation, bind responses to the individual request, and preserve the reviewed draft on web handover. Verify a stale response, competing editors, deadline settlement and administrator access through the local pipe.
-- [ ] Add reviewed ticker TXT import using the shared UTF-8 parser and configured upload and headline limits.
+- [x] Add reviewed ticker TXT import using the shared UTF-8 parser and configured upload and headline limits.
 - [x] Use the template fields as urgent table columns. Save inline edits with the board revision and stable item IDs, and keep extra fields in playback.
 - [x] Use the existing urgent planner and playback engine for review, start and sequence controls. Test revoked access, a changed board between review and confirm, and a failed stop on a simulated scene.
 - [ ] Expose urgent timing settings, rehearsal and individual show actions through their existing bridge policies.

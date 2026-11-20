@@ -38,6 +38,7 @@ $script:WebLoginRequests = @{}
 $script:WebLoginLifetimeMinutes = 5
 $script:WebLoginMaxPending = 50
 $script:WebRelayReviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+$script:WebBulletinPreviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 $script:WebCaptureRecords = @{}
 $script:WebBotUsername = ''
 
@@ -359,6 +360,7 @@ function Invoke-WebChannelOperation {
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
         'bulletin.preview' { return Get-WebBulletinPreview -Arguments $arguments }
+        'bulletin.preview-image' { return Get-WebBulletinPreview -Arguments $arguments -Image }
         'bulletin.photo' { return Start-WebBulletinPhotoRequest -Entry $Entry }
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
@@ -959,8 +961,21 @@ function Get-WebBulletinEditor {
     }
 }
 
+function Resolve-WebBulletinPreviewImage {
+    param([string]$SceneRoot, [string]$Reference)
+    if (-not $SceneRoot -or -not $Reference) { return }
+    try {
+        $path = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Reference.Trim()), $SceneRoot)
+        $relative = [IO.Path]::GetRelativePath($SceneRoot, $path)
+        if ([IO.Path]::IsPathRooted($relative) -or $relative -match '^\.\.(?:[\\/]|$)' -or $relative.Contains(':') -or
+            [IO.Path]::GetExtension($relative) -notin '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp') { return }
+        return @{ root = $SceneRoot; path = $path }
+    }
+    catch { return }
+}
+
 function Get-WebBulletinPreview {
-    param([System.Collections.IDictionary]$Arguments)
+    param([System.Collections.IDictionary]$Arguments, [switch]$Image)
     $actor = [long](Get-JsonProp $Arguments 'actor')
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
@@ -975,17 +990,39 @@ function Get-WebBulletinPreview {
     $window = Get-BridgePageWindow -ItemCount $rows.Count -Page ([int](Get-JsonProp $Arguments 'page'))
     $supported = Test-MojazBulletinPlaybackDesign -Bulletin $bulletin
     $plan = if ($supported) { (Get-MojazResolvedRunSnapshot -Bulletin $bulletin).Value }
+    $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
+    $scenePath = [string](Get-JsonProp (Get-JsonProp (Get-TemplateStore).Map $designKey) 'Path')
+    $sceneRoot = if ([IO.Path]::IsPathFullyQualified($scenePath)) { Split-Path -Parent $scenePath } else { '' }
+    $templateImage = if ($imageField -and $sceneRoot) { Get-MojazTemplateImage -Path $scenePath } else { '' }
     $stampJson = ConvertTo-Json -Compress -Depth 8 -InputObject @(
-        (Get-MojazBulletinDesignKey -Bulletin $bulletin),
+        $designKey,
         @($fields | ForEach-Object { @($_.name, $_.kind, $_.label) }),
-        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds')
+        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds'), $sceneRoot, $templateImage
     )
-    $stamp = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($stampJson)))
+    $stamp = [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData($script:WebBulletinPreviewKey, [Text.Encoding]::UTF8.GetBytes($stampJson)))
     $expectedStamp = [string](Get-JsonProp $Arguments 'stamp')
-    if ($expectedStamp -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
+    if (($expectedStamp -or $Image) -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
     $steps = @{}
     foreach ($step in @(Get-JsonProp $plan 'Plan')) {
         if ($step -and $step.RowId) { $steps[[string]$step.RowId] = $step }
+    }
+    $savedImages = @(if ($imageField) { Get-MojazEffectiveImages -Rows $rows -TemplateImage $templateImage })
+    $plannedImages = @(if ($imageField -and $plan) { Get-MojazEffectiveImages -Rows @($plan.Rows) -TemplateImage $templateImage })
+    if ($Image) {
+        $fieldName = [string](Get-JsonProp $Arguments 'field')
+        $rowId = [string](Get-JsonProp $Arguments 'rowId')
+        if (-not $rowId -or $fieldName -cnotin @($fields | Where-Object { $_.kind -eq 'media' } | ForEach-Object { $_.name })) {
+            return @{ ok = $false; error = 'not_found' }
+        }
+        $imageIndex = (Get-MojazRowNumber -Bulletin $bulletin -RowId $rowId) - 1
+        if ($imageIndex -lt 0) { return @{ ok = $false; error = 'not_found' } }
+        $step = $steps[$rowId]
+        $reference = if ($fieldName -cne $imageField) { Get-MojazRowFieldValue -Row $rows[$imageIndex] -FieldName $fieldName }
+            elseif ($step) { $plannedImages[$step.Index] }
+            else { $savedImages[$imageIndex] }
+        $file = Resolve-WebBulletinPreviewImage -SceneRoot $sceneRoot -Reference $reference
+        if (-not $file) { return @{ ok = $false; error = 'not_found' } }
+        return @{ ok = $true; data = $file }
     }
     $items = @(
         for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
@@ -1002,6 +1039,17 @@ function Get-WebBulletinPreview {
                 if ($view.imageMode -eq 'new' -and (Get-JsonProp $row 'Image')) { $view.media += $imageField }
                 if ($step.Index -eq 0 -and $view.imageMode -eq 'inherit') { $view.imageMode = 'template' }
             }
+            $view['imageFields'] = @(
+                if ($sceneRoot) {
+                    foreach ($mediaField in $view.media) {
+                        if ($mediaField -cne $imageField -and (Resolve-WebBulletinPreviewImage -SceneRoot $sceneRoot -Reference (Get-MojazRowFieldValue -Row $row -FieldName $mediaField))) { $mediaField }
+                    }
+                    if ($imageField) {
+                        $reference = if ($step) { $plannedImages[$step.Index] } else { $savedImages[$position] }
+                        if (Resolve-WebBulletinPreviewImage -SceneRoot $sceneRoot -Reference $reference) { $imageField }
+                    }
+                }
+            )
             $view
         }
     )

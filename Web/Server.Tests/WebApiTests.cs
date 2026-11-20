@@ -130,6 +130,48 @@ public sealed class SignInTests : IDisposable
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task Bulletin_image_requires_sign_in_and_a_matching_raster_file_within_the_scene()
+    {
+        var desk = await _app.SignedInAsync("desk", WebApp.Operator);
+        var anonymous = await _app.BrowserAsync();
+        var directory = Directory.CreateTempSubdirectory("cgb-bulletin-");
+        var scene = directory.CreateSubdirectory("scene");
+        var path = Path.Combine(scene.FullName, "photo.png");
+        var outside = Path.Combine(directory.FullName, "outside.png");
+        var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB8kAAAAASUVORK5CYII=");
+        var route = "/api/content/bulletins/preview-image?id=b_1&rowId=r_1&field=mojaz_img&revision=1&stamp=review";
+        try
+        {
+            await File.WriteAllBytesAsync(path, image);
+            await File.WriteAllBytesAsync(outside, image);
+            _app.Bridge.BulletinPreviewImage = (scene.FullName, path);
+            using var denied = await anonymous.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            using var allowed = await desk.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+            Assert.Equal("image/png", allowed.Content.Headers.ContentType!.MediaType);
+            Assert.True(allowed.Headers.CacheControl!.NoStore);
+            Assert.Equal(image, await allowed.Content.ReadAsByteArrayAsync());
+
+            _app.Bridge.BulletinPreviewImage = (scene.FullName, outside);
+            using var escaped = await desk.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.NotFound, escaped.StatusCode);
+            _app.Bridge.BulletinPreviewImage = (scene.FullName, path);
+            await File.WriteAllTextAsync(path, "<html>not a PNG</html>");
+            using var wrongFormat = await desk.Client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.NotFound, wrongFormat.StatusCode);
+        }
+        finally
+        {
+            _app.Bridge.BulletinPreviewImage = null;
+            File.Delete(path);
+            File.Delete(outside);
+            scene.Delete();
+            directory.Delete();
+        }
+    }
+
     [Theory]
     [InlineData("http://media.example.test/output/main.m3u8")]
     [InlineData("https://name:secret@media.example.test/output.m3u8")]

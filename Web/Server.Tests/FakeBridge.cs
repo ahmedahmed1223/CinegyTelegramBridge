@@ -17,6 +17,7 @@ public sealed class FakeBridge : IBridgeChannel
     public bool Online { get; set; } = true;
     public string LastLoginCode { get; private set; } = "";
     public string? CapturePath { get; set; }
+    public (string Root, string Path)? BulletinPreviewImage { get; set; }
     public string CaptureId { get; } = Guid.NewGuid().ToString("N");
     public string? TickerTxtDirectory { get; set; }
     public byte[]? TickerTxtBytes { get; private set; }
@@ -44,6 +45,9 @@ public sealed class FakeBridge : IBridgeChannel
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
             "ticker.txt" => TickerTxt(a),
             "media.capture" => Capture(a),
+            "bulletin.preview-image" => BulletinPreviewImage is { } picture
+                ? Reply(JsonSerializer.Serialize(new { root = picture.Root, path = picture.Path }))
+                : new BridgeReply(false, default, "not_found"),
             "relay.control" => a.GetProperty("action").GetString() == "status"
                 ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
                 : Reply("""{"state":"starting","revision":"next","enabled":true,"configured":true,"canStart":false,"canStop":true,"outcome":"starting"}"""),

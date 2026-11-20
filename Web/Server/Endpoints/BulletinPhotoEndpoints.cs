@@ -1,13 +1,17 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using CinegyBridge.Web.Auth;
 using CinegyBridge.Web.Bridge;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Win32.SafeHandles;
 
 namespace CinegyBridge.Web.Endpoints;
 
 internal static class BulletinPhotoEndpoints
 {
     private sealed record UploadPolicy(string Directory, int MaximumBytes);
+    private sealed record PreviewFile(string Root, string Path);
 
     public static void Map(RouteGroupBuilder bulletin)
     {
@@ -20,6 +24,98 @@ internal static class BulletinPhotoEndpoints
             .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(413)
             .Produces<ErrorResponse>(503);
+        bulletin.MapGet("/preview-image", Preview)
+            .Produces(200, contentType: "image/png", additionalContentTypes: ["image/jpeg", "image/bmp", "image/gif", "image/webp"])
+            .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
+    }
+
+    private static async Task<IResult> Preview(string id, string rowId, string field, int revision, string stamp, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("bulletin.preview-image", new { actor = http.User.UserId(), id, rowId, field, revision, stamp }, http.RequestAborted);
+        if (!reply.Ok) return Error(reply.Error);
+        var file = reply.Data.Deserialize<PreviewFile>(JsonDefaults.Options);
+        if (file is null || string.IsNullOrEmpty(file.Root) || string.IsNullOrEmpty(file.Path) ||
+            !Path.IsPathFullyQualified(file.Root) || !Path.IsPathFullyQualified(file.Path))
+            return Error("not_found");
+
+        FileStream? stream = null;
+        try
+        {
+            var relative = Path.GetRelativePath(file.Root, file.Path);
+            var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (Path.IsPathRooted(relative) || segments.Any(segment => segment is "" or "." or ".." || segment.Contains(':')))
+                return Error("not_found");
+            var candidate = Path.GetFullPath(Path.Combine(file.Root, relative));
+            if (HasReparsePoint(candidate)) return Error("not_found");
+            if ((File.GetAttributes(candidate) & FileAttributes.Directory) != 0) return Error("not_found");
+            stream = File.Open(candidate, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            // Check the opened handle as well: a component could have been
+            // redirected between inspecting the path and opening it.
+            if (!MatchesOpenedPath(stream.SafeFileHandle, candidate)) return Error("not_found");
+            if (stream.Length is < 12 or > 32 * 1024 * 1024) return Error("not_found");
+            var type = ReadImageType(stream, Path.GetExtension(candidate));
+            if (type is null) return Error("not_found");
+            stream.Position = 0;
+            var result = Results.File(stream, type);
+            stream = null;
+            return result;
+        }
+        catch (IOException) { return Error("not_found"); }
+        catch (UnauthorizedAccessException) { return Error("not_found"); }
+        finally { stream?.Dispose(); }
+    }
+
+    private static bool HasReparsePoint(string path)
+    {
+        var root = Path.GetPathRoot(path)!;
+        var candidate = root;
+        if ((File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0) return true;
+        foreach (var segment in Path.GetRelativePath(root, path).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        {
+            candidate = Path.Combine(candidate, segment);
+            if ((File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0) return true;
+        }
+        return false;
+    }
+
+    private static bool MatchesOpenedPath(SafeFileHandle handle, string expected)
+    {
+        var buffer = new StringBuilder(512);
+        var length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length is 0 or > 32767) return false;
+        if (length >= buffer.Capacity)
+        {
+            buffer.EnsureCapacity((int)length + 1);
+            length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        }
+        if (length == 0 || length >= buffer.Capacity) return false;
+        return string.Equals(WithoutExtendedPrefix(buffer.ToString()), WithoutExtendedPrefix(expected), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string WithoutExtendedPrefix(string path) =>
+        path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) ? @"\\" + path[8..]
+        : path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
+
+    private static string? ReadImageType(Stream stream, string extension)
+    {
+        Span<byte> header = stackalloc byte[12];
+        stream.ReadExactly(header);
+        return extension.ToLowerInvariant() switch
+        {
+            ".png" when header.StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) => "image/png",
+            ".jpg" or ".jpeg" when header[0] == 255 && header[1] == 216 && header[2] == 255 => "image/jpeg",
+            ".bmp" when header.StartsWith("BM"u8) => "image/bmp",
+            ".gif" when header.StartsWith("GIF87a"u8) || header.StartsWith("GIF89a"u8) => "image/gif",
+            ".webp" when header.StartsWith("RIFF"u8) && header[8..].SequenceEqual("WEBP"u8) => "image/webp",
+            _ => null,
+        };
     }
 
     private static async Task<IResult> Upload(string id, string rowId, int revision, IBridgeChannel bridge, HttpContext http)

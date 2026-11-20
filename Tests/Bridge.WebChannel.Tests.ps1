@@ -1750,6 +1750,57 @@ Describe 'Web channel: the pipe' {
         finally { $script:MojazLibrary = $oldLibrary }
     }
 
+    It 'resolves preview pictures through the saved rows and refuses paths outside the selected scene' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-MojazBulletinPlaybackDesign { $true }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-WebBulletinFields { @{ name = $script:MojazImageVariable; label = 'الصورة'; kind = 'media' } }
+        $sceneRoot = Join-Path $TestDrive 'preview-scene'
+        New-Item -ItemType Directory -Path $sceneRoot -Force | Out-Null
+        Mock Get-TemplateStore { @{ Map = @{ Mojaz = @{ Path = Join-Path $sceneRoot 'test.cintitle' } } } }
+        Mock Get-MojazTemplateImage { 'scene.png' }
+        $oldLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الصور').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRows -Library $script:MojazLibrary -BulletinId $id -Rows @(
+                    @{ Title = 'صورة من الصف'; Image = 'photo.png' },
+                    @{ Title = 'صورة موروثة' },
+                    @{ Title = 'صورة القالب'; ImageMode = 'template' },
+                    @{ Title = 'ملف خارج القالب'; Image = '../private.png' }
+                )).Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $sendImage = {
+                param($imageArgs)
+                $line = @{ op = 'bulletin.preview-image'; args = $imageArgs } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $request = @{ actor = 4321; id = $id; revision = $bulletin.Revision; field = $script:MojazImageVariable; rowId = $bulletin.Rows[1].Id }
+            $previewLine = @{ op = 'bulletin.preview'; args = $request } | ConvertTo-Json -Compress
+            $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $previewLine | ConvertFrom-Json
+            $preview.data.rows[1].imageFields | Should -Contain $script:MojazImageVariable
+            ($preview | ConvertTo-Json -Depth 8) | Should -Not -Match 'photo\.png|scene\.png|private\.png'
+            $request.stamp = $preview.data.stamp
+            (& $sendImage $request).data.path | Should -Be (Join-Path $sceneRoot 'photo.png')
+            $request.rowId = $bulletin.Rows[2].Id
+            (& $sendImage $request).data.path | Should -Be (Join-Path $sceneRoot 'scene.png')
+            Mock Get-MojazTemplateImage { '' }
+            (& $sendImage $request).error | Should -Be 'bulletin_stale'
+            $emptyTemplate = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $previewLine | ConvertFrom-Json
+            $request.stamp = $emptyTemplate.data.stamp
+            (& $sendImage $request).data.path | Should -Be (Join-Path $sceneRoot 'photo.png')
+            $request.rowId = $bulletin.Rows[3].Id
+            (& $sendImage $request).error | Should -Be 'not_found'
+            $request.actor = 999
+            (& $sendImage $request).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $request.revision--
+            (& $sendImage $request).error | Should -Be 'bulletin_stale'
+        }
+        finally { $script:MojazLibrary = $oldLibrary }
+    }
+
     It 'ignores a stale manual urgent display without rewriting its state when reading the board' {
         Mock Test-Authorized { $true }
         Mock Test-UrgentBoardAvailable { $true }

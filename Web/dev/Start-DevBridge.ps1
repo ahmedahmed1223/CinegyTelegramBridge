@@ -109,7 +109,14 @@ Set-JsonProp $script:UrgentBoard.Items[0] 'ExtraFields' @{ 'Ajel.location' = 'ا
 $script:UrgentBoard.Items[1].Enabled = $false
 $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الفترة المسائية').Value
 $demoBulletinId = $script:MojazLibrary.Bulletins[0].Id
-$demoPicture = if ($CaptureFixtureDirectory) { Join-Path $CaptureFixtureDirectory 'output.jpg' } else { '' }
+$demoPicture = ''
+if ($CaptureFixtureDirectory) {
+    $fixturePicture = Join-Path $CaptureFixtureDirectory 'output.jpg'
+    if (Test-Path -LiteralPath $fixturePicture -PathType Leaf) {
+        Copy-Item -LiteralPath $fixturePicture -Destination (Join-Path $runtime 'demo-picture.jpg') -Force
+        $demoPicture = '.\demo-picture.jpg'
+    }
+}
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.' -Image $demoPicture).Value
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'تقرير اليوم' -Text 'متابعة من غرفة الأخبار.').Value
 

@@ -328,15 +328,17 @@ function Get-MojazEffectiveImages {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyCollection()]$Rows, [string]$TemplateImage = '')
     $current = $TemplateImage
-    $effective = @()
+    $effective = [System.Collections.Generic.List[string]]::new()
     foreach ($row in @($Rows)) {
-        switch (Get-MojazRowImageMode -Row $row) {
-            'new' { $current = [string](Get-MojazProperty $row 'Image' '') }
-            'template' { $current = $TemplateImage }
+        $next = switch (Get-MojazRowImageMode -Row $row) {
+            'new' { [string](Get-MojazProperty $row 'Image' '') }
+            'template' { $TemplateImage }
         }
-        $effective += $current
+        # Playback omits an empty picture variable, leaving the scene as it was.
+        if (-not [string]::IsNullOrWhiteSpace($next)) { $current = $next }
+        $effective.Add($current)
     }
-    return $effective
+    return $effective.ToArray()
 }
 
 function Get-MojazUsedImages {

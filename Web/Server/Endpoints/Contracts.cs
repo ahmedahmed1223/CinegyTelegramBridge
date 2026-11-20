@@ -14,7 +14,7 @@ public sealed record BulletinField(string Name, string Label, string Kind);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
 public sealed record BulletinImageChoice(string RowId, int RowNumber);
 public sealed record BulletinPreviewRow(string Id, int Number, Dictionary<string, string> Values, string[] Media, bool Skipped,
-    string? ImageMode, double? StartSeconds);
+    string? ImageMode, double? StartSeconds, string[]? ImageFields = null);
 public sealed record BulletinPreview(int Revision, string Stamp, BulletinField[] Fields, BulletinPreviewRow[] Rows, int Page, int PageCount, int Total,
     bool PlaybackSupported, int PlannedCount, double? ExitSeconds, string? ImageField);
 public sealed record BulletinEditor(string Id, string Name, string Design, int Revision, bool OnAir, bool PlaybackSupported, bool HeadlinePaste,

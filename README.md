@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.101.0
+
+Bulletin previews can open attached, inherited and template images on demand. The bridge resolves media against the saved revision and selected scene. The server streams supported raster images within the configured scene directory to signed-in operators.
+
 ## Version 8.100.0
 
 The bulletin editor has a read-only, paginated preview with the selected design fields, full editorial text, attachment indicators and excluded rows. On supported designs it shares the playback planner for row start times and the exit cue. Paging requires the same saved revision and timing plan.

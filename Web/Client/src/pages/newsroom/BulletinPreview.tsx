@@ -1,8 +1,9 @@
-import { Alert, Badge, Box, Group, Modal, Pagination, Paper, Skeleton, Stack, Text } from '@mantine/core'
+import { Alert, Badge, Box, Button, Group, Image, Modal, Pagination, Paper, Skeleton, Stack, Text } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import type { paths } from '../../api/schema'
 
 const number = new Intl.NumberFormat('ar', { maximumFractionDigits: 2 })
 
@@ -14,11 +15,19 @@ function describeMedia(row: Schemas['BulletinPreviewRow'], field: string, imageF
   return 'بلا مرفق'
 }
 
+function PreviewImage({ parameters, label }: { parameters: URLSearchParams; label: string }) {
+  const [failed, setFailed] = useState(false)
+  const path = '/api/content/bulletins/preview-image' satisfies keyof paths
+  if (failed) return <Text size="sm" c="dimmed" role="status">تعذّر عرض الصورة. حدّث المعاينة إذا تغيّر الموجز.</Text>
+  return <Image src={`${path}?${parameters}`} alt={label} mah={260} fit="contain" radius="sm" onError={() => setFailed(true)} />
+}
+
 export function BulletinPreview({ bulletin, onClose }: {
   bulletin: Schemas['BulletinEditor']
   onClose: () => void
 }) {
   const [selection, setSelection] = useState<{ page: number; stamp?: string }>({ page: 0 })
+  const [image, setImage] = useState<{ rowId: string; field: string } | null>(null)
   const query = useQuery({
     queryKey: ['bulletin-preview', bulletin.id, bulletin.revision, selection],
     retry: false,
@@ -59,16 +68,31 @@ export function BulletinPreview({ bulletin, onClose }: {
                   : row.startSeconds != null ? <Text size="sm" c="dimmed">يبدأ عند {number.format(row.startSeconds)} ثانية</Text>
                     : preview.playbackSupported && <Badge variant="light" color="gray">خارج خطة التشغيل</Badge>}
               </Group>
-              {preview.fields.map((field) => <Box key={field.name}>
-                <Text size="xs" c="dimmed">{field.label}</Text>
-                <Text size="sm" dir={field.kind === 'text' ? 'auto' : undefined} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                  {field.kind === 'text' ? row.values[field.name] || '—' : describeMedia(row, field.name, preview.imageField)}
-                </Text>
-              </Box>)}
+              {preview.fields.map((field) => {
+                const showing = image?.rowId === row.id && image.field === field.name
+                return <Box key={field.name}>
+                  <Text size="xs" c="dimmed">{field.label}</Text>
+                  <Group gap="xs">
+                    <Text size="sm" dir={field.kind === 'text' ? 'auto' : undefined} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                      {field.kind === 'text' ? row.values[field.name] || '—' : describeMedia(row, field.name, preview.imageField)}
+                    </Text>
+                    {row.imageFields?.includes(field.name) && <Button variant="subtle" size="compact-xs" aria-expanded={showing}
+                      onClick={() => setImage(showing ? null : { rowId: row.id, field: field.name })}>
+                      {showing ? 'إخفاء الصورة' : 'عرض الصورة'}
+                    </Button>}
+                  </Group>
+                  {showing && <PreviewImage
+                    key={preview.stamp}
+                    label={`${field.label} للصف ${number.format(row.number)}`}
+                    parameters={new URLSearchParams({
+                      id: bulletin.id, revision: String(preview.revision), stamp: preview.stamp, rowId: row.id, field: field.name,
+                    })} />}
+                </Box>
+              })}
             </Stack>
           </Paper>)}
           {preview.pageCount > 1 && <Pagination total={preview.pageCount} value={preview.page + 1}
-            onChange={(next) => setSelection({ page: next - 1, stamp: preview.stamp })}
+            onChange={(next) => { setImage(null); setSelection({ page: next - 1, stamp: preview.stamp }) }}
             getItemProps={(value) => ({ 'aria-label': `الصفحة ${number.format(value)}` })} />}
         </>}
       </Stack>

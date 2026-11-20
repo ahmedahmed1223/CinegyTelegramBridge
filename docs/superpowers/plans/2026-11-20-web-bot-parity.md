@@ -8,7 +8,7 @@
 |---|---|---|
 | Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, shared timing defaults and per-story overrides, automatic run preview and playback, pause, resume, advance, stop retry, reviewed single-story and timed playback, isolated rehearsal | Cross-client acceptance checks |
-| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, shared picture choices and uploads, editorial preview and built-in run timing, on-air indicator | Media for arbitrary design fields, image previews, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
+| Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, shared picture choices and uploads, editorial and image previews, built-in run timing, on-air indicator | Uploads for arbitrary design fields, run control and schedules. Playback must use the selected design's scene and variables before enabling alternate designs on air. |
 | Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |
 | Program content | | Board, fields and media, draft control, publish and live editing |
 | Shift and monitoring | Air status, connectivity, live output player with picture-in-picture while editing, feed outage history, Telegram relay controls, snapshots and clips | Template and material schedule, incident and operation history, notifications, reports and exports |
@@ -36,6 +36,7 @@
 - [x] Expose existing picture choices in the bulletin table and resolve reused pictures through revision-checked row IDs.
 - [x] Upload a picture to a saved bulletin row using the bridge photo converter and the shared scene folder. Decode off the bridge thread and recheck the row before saving.
 - [x] Preview the saved fields, excluded rows and effective image choices. Use the same computed timing as playback on supported designs, and reject stale preview pages.
+- [x] Open supported raster images from the bulletin preview, using the effective picture for each row and keeping scene paths private.
 - [ ] Complete bulletin attachments and scheduling using the existing bot rules. Route a run through its selected scene and test recovery and the existing urgent conflict rules before adding web playback.
 - [ ] Extend the news views with program boards from `Parts/Bridge.Boards.ps1`. Test upload validation, shared ownership and role restrictions before exposing actions.
 

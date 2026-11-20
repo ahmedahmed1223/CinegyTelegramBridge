@@ -39,6 +39,7 @@
 - [x] Open supported raster images from the bulletin preview, using the effective picture for each row and keeping scene paths private.
 - [x] Book and cancel supported bulletin appointments from the web using the shared queue, and verify the creator's access again at execution.
 - [x] Start the built-in bulletin after reviewing content and the target layer, follow the shared run progress, and stop only its confirmed scene.
+- [x] Edit and preview the clock of alternate designs that declare their own frame rate, loop and outro.
 - [ ] Route alternate designs through their selected scene and variables for manual and scheduled playback, including recovery and urgent conflict rules. Complete attachments for arbitrary design fields.
 - [ ] Extend the news views with program boards from `Parts/Bridge.Boards.ps1`. Test upload validation, shared ownership and role restrictions before exposing actions.
 

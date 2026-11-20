@@ -956,7 +956,7 @@ function Get-WebBulletinEditor {
         id = [string](Get-JsonProp $Bulletin 'Id'); name = [string](Get-JsonProp $Bulletin 'Name')
         design = $designKey; playbackSupported = $canPlay
         headlinePaste = Test-WebBulletinHeadlineFormat -Fields $fields
-        timing = $(if ($canPlay) { Get-WebBulletinTiming -Bulletin $Bulletin })
+        timing = $(if ($canPlay -or (Get-MojazBulletinSceneTiming -Bulletin $Bulletin)) { Get-WebBulletinTiming -Bulletin $Bulletin })
         revision = [int](Get-JsonProp $Bulletin 'Revision'); onAir = Test-MojazOnAir -Bulletin $Bulletin
         fields = $fields; rows = $items; page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
         imageField = $imageField; imageChoices = $imageChoices
@@ -992,7 +992,10 @@ function Get-WebBulletinPreview {
     $rows = @(Get-JsonProp $bulletin 'Rows' | Where-Object { $null -ne $_ })
     $window = Get-BridgePageWindow -ItemCount $rows.Count -Page ([int](Get-JsonProp $Arguments 'page'))
     $supported = Test-MojazBulletinPlaybackDesign -Bulletin $bulletin
-    $plan = if ($supported) { (Get-MojazResolvedRunSnapshot -Bulletin $bulletin).Value }
+    $sceneTiming = Get-MojazBulletinSceneTiming -Bulletin $bulletin
+    $plan = if ($supported -or $sceneTiming) {
+        (Get-MojazResolvedRunSnapshot -Bulletin $bulletin).Value
+    }
     $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
     $design = Get-JsonProp (Get-TemplateStore).Map $designKey
     $scenePath = [string](Get-JsonProp $design 'Path')
@@ -1001,7 +1004,7 @@ function Get-WebBulletinPreview {
     $stampJson = ConvertTo-Json -Compress -Depth 8 -InputObject @(
         $designKey,
         @($fields | ForEach-Object { @($_.name, $_.kind, $_.label) }),
-        $supported, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds'), $scenePath, (Get-JsonProp $design 'Layer'), $templateImage
+        $supported, $sceneTiming, (Get-JsonProp $plan 'Plan'), (Get-JsonProp $plan 'ExitAtSeconds'), $scenePath, (Get-JsonProp $design 'Layer'), $templateImage
     )
     $stamp = [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData($script:WebBulletinPreviewKey, [Text.Encoding]::UTF8.GetBytes($stampJson)))
     $expectedStamp = [string](Get-JsonProp $Arguments 'stamp')
@@ -1069,8 +1072,8 @@ function Get-WebBulletinPreview {
 
 function Get-WebBulletinTiming {
     param([Parameter(Mandatory)]$Bulletin)
-    $scene = Get-MojazSceneTiming
-    $framesPerSecond = Get-MojazFps
+    $scene = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
+    $framesPerSecond = Get-MojazFps -Bulletin $Bulletin
     $intro = [int](Get-JsonProp $Bulletin 'IntroExtraFrames')
     if ($intro -le 0 -and [double](Get-JsonProp $Bulletin 'IntroExtraSeconds') -gt 0) {
         $intro = [int][math]::Round([double](Get-JsonProp $Bulletin 'IntroExtraSeconds') * $framesPerSecond)
@@ -1265,7 +1268,7 @@ function Invoke-WebBulletinEdit {
                 if ($result.ErrorCode -eq 'design_collision') { return @{ ok = $false; error = 'bulletin_design_collision' } }
             }
             'timing' {
-                if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) {
+                if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin) -and -not (Get-MojazBulletinSceneTiming -Bulletin $bulletin)) {
                     return @{ ok = $false; error = 'bulletin_invalid' }
                 }
                 $timing = Get-JsonProp $Arguments 'timing'

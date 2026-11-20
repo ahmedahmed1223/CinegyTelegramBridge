@@ -354,7 +354,7 @@ function Get-MojazSceneTiming {
         Cached on path plus write time, the way the template store is: this is
         read every time the screen is drawn.
     #>
-    param([string]$Path = '')
+    param([string]$Path = '', [switch]$AllowNonLooping)
     if (-not $Path) {
         $template = Get-MojazTemplate
         if (-not $template) { return $null }
@@ -362,7 +362,7 @@ function Get-MojazSceneTiming {
     }
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     $stamp = (Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue).LastWriteTimeUtc
-    $key = "$Path|$stamp"
+    $key = "$Path|$stamp|$AllowNonLooping"
     # Keyed by path, not a single slot. Two scenes are read now - the bulletin's
     # and the breaking-news board's - and a one-slot cache is not a cache when
     # two callers alternate: each call would evict the other's entry and re-read
@@ -370,13 +370,18 @@ function Get-MojazSceneTiming {
     if ($script:MojazSceneTimingCache.ContainsKey($key)) { return $script:MojazSceneTimingCache[$key] }
     $timing = $null
     try {
-        $scene = ([xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)).CinegyTitler.Scene
-        $fps = [double]$scene.Fps
-        $loopStart = [double]$scene.LoopStartFrame
-        $loopEnd = [double]$scene.LoopEndFrame
-        $duration = [double]$scene.Duration
-        # A scene with no loop, or a nonsense one, is not a timing source.
-        if ($fps -gt 0 -and $loopEnd -gt $loopStart -and $duration -ge $loopEnd) {
+        $document = [xml](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+        $scene = $document.SelectSingleNode('/*[local-name()="Scene"] | /*[local-name()="CinegyTitler"]/*[local-name()="Scene"]')
+        $fps = [double](Get-JsonProp $scene 'Fps')
+        $startMarker = Get-JsonProp $scene 'LoopStartFrame'
+        $endMarker = Get-JsonProp $scene 'LoopEndFrame'
+        $loopStart = [double]$startMarker
+        $loopEnd = [double]$endMarker
+        $duration = [double](Get-JsonProp $scene 'Duration')
+        $hasClock = $fps -gt 0 -and [double]::IsFinite($fps) -and $duration -gt 0 -and [double]::IsFinite($duration)
+        if ($hasClock -and -not [string]::IsNullOrWhiteSpace([string]$startMarker) -and
+            -not [string]::IsNullOrWhiteSpace([string]$endMarker) -and
+            $loopStart -ge 0 -and $loopEnd -gt $loopStart -and $duration -ge $loopEnd) {
             # Frames are what the scene is cut in and what the operator sets;
             # the seconds beside them are for reading, and for the clock.
             $timing = [pscustomobject]@{
@@ -389,6 +394,12 @@ function Get-MojazSceneTiming {
                 OutroSeconds = [math]::Round(($duration - $loopEnd) / $fps, 3)
             }
         }
+        elseif ($hasClock -and $AllowNonLooping) {
+            $timing = [pscustomobject]@{
+                Fps = $fps; IntroFrames = 0; LoopFrames = 0; OutroFrames = 0
+                IntroSeconds = 0.0; LoopSeconds = 0.0; OutroSeconds = 0.0
+            }
+        }
     }
     catch { Write-BridgeLog "Could not read the scene timing of '$Path': $($_.Exception.Message)" 'WARN' }
     # Bounded on purpose: this only ever holds one entry per scene file per
@@ -396,6 +407,16 @@ function Get-MojazSceneTiming {
     if ($script:MojazSceneTimingCache.Count -gt 16) { $script:MojazSceneTimingCache.Clear() }
     $script:MojazSceneTimingCache[$key] = $timing
     return $timing
+}
+
+function Get-MojazBulletinSceneTiming {
+    param($Bulletin)
+    $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    if ($key -eq $script:MojazTemplateKey) { return Get-MojazSceneTiming }
+    $template = (Get-TemplateStore).Map[$key]
+    if (-not $template -or -not (Test-MojazDesignTemplate -Key $key -Template $template)) { return $null }
+    $scenePath = [string](Get-JsonProp $template 'Path')
+    if ($scenePath) { return Get-MojazSceneTiming -Path $scenePath -AllowNonLooping }
 }
 
 function Get-MojazFps {
@@ -406,7 +427,8 @@ function Get-MojazFps {
         cannot be wrong about itself. The channel's configured rate only when
         the scene cannot be read, which is the case the setting exists for.
     #>
-    $timing = Get-MojazSceneTiming
+    param($Bulletin)
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if ($timing -and [double](Get-JsonProp $timing 'Fps') -gt 0) { return [double]$timing.Fps }
     $configured = 0.0
     if ([double]::TryParse([string](Get-Setting 'BroadcastFps'), [ref]$configured) -and $configured -gt 0) { return $configured }
@@ -423,11 +445,11 @@ function Get-MojazDelayFrames {
         if ($own -gt 0) { return $own }
         # Written before frames existed: its seconds still mean something.
         $legacy = [double](Get-JsonProp $Bulletin 'DelaySeconds')
-        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps -Bulletin $Bulletin)) }
     }
     $default = Get-SettingInt 'MojazRowFrames' 0
     if ($default -gt 0) { return $default }
-    return [int][math]::Round(8 * (Get-MojazFps))
+    return [int][math]::Round(8 * (Get-MojazFps -Bulletin $Bulletin))
 }
 
 function Get-MojazLoopFitNote {
@@ -467,7 +489,7 @@ function Get-MojazBulletinLoopFitNote {
     <# The note for one bulletin, with the scene timing looked up for it. #>
     param($Bulletin)
     if (Test-MojazSyncToLoop -Bulletin $Bulletin) { return '' }
-    $timing = Get-MojazSceneTiming
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if (-not $timing) { return '' }
     return (Get-MojazLoopFitNote -DelayFrames (Get-MojazDelayFrames -Bulletin $Bulletin) `
             -LoopFrames ([int](Get-JsonProp $timing 'LoopFrames')))
@@ -475,7 +497,7 @@ function Get-MojazBulletinLoopFitNote {
 
 function Get-MojazDelaySeconds {
     param($Bulletin)
-    return [math]::Round((Get-MojazDelayFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
+    return [math]::Round((Get-MojazDelayFrames -Bulletin $Bulletin) / (Get-MojazFps -Bulletin $Bulletin), 3)
 }
 
 function Get-MojazIntroFrames {
@@ -495,31 +517,31 @@ function Get-MojazIntroFrames {
         if ($own -gt 0) { return $own }
         # Written before frames existed: its seconds still mean something.
         $legacy = [double](Get-JsonProp $Bulletin 'IntroExtraSeconds')
-        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps -Bulletin $Bulletin)) }
     }
     $default = Get-SettingInt 'MojazIntroExtraFrames' 0
     if ($default -gt 0) { return $default }
-    return (Get-MojazSceneFrames -Which intro)
+    return (Get-MojazSceneFrames -Which intro -Bulletin $Bulletin)
 }
 
 function Get-MojazSceneFrames {
     <# The scene's own entrance or exit in frames. Derived from its seconds
        when the frames are not there, so a caller holding an older timing -
        or a test standing in for one - still gets an answer. #>
-    param([Parameter(Mandatory)][ValidateSet('intro', 'outro')][string]$Which)
-    $timing = Get-MojazSceneTiming
+    param([Parameter(Mandatory)][ValidateSet('intro', 'outro')][string]$Which, $Bulletin)
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if (-not $timing) { return 0 }
     $name = if ($Which -eq 'intro') { 'IntroFrames' } else { 'OutroFrames' }
     $frames = [int](Get-JsonProp $timing $name)
     if ($frames -gt 0) { return $frames }
     $seconds = [double](Get-JsonProp $timing $(if ($Which -eq 'intro') { 'IntroSeconds' } else { 'OutroSeconds' }))
     if ($seconds -le 0) { return 0 }
-    return [int][math]::Round($seconds * (Get-MojazFps))
+    return [int][math]::Round($seconds * (Get-MojazFps -Bulletin $Bulletin))
 }
 
 function Get-MojazIntroSeconds {
     param($Bulletin)
-    return [math]::Round((Get-MojazIntroFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
+    return [math]::Round((Get-MojazIntroFrames -Bulletin $Bulletin) / (Get-MojazFps -Bulletin $Bulletin), 3)
 }
 
 function Get-MojazLastRowFrames {
@@ -532,19 +554,19 @@ function Get-MojazLastRowFrames {
         $own = [int](Get-JsonProp $Bulletin 'LastRowFrames')
         if ($own -gt 0) { return $own }
         $legacy = [double](Get-JsonProp $Bulletin 'LastRowSeconds')
-        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps)) }
+        if ($legacy -gt 0) { return [int][math]::Round($legacy * (Get-MojazFps -Bulletin $Bulletin)) }
     }
     $default = Get-SettingInt 'MojazLastRowFrames' 0
     if ($default -gt 0) { return $default }
-    $sceneFrames = Get-MojazSceneFrames -Which outro
+    $sceneFrames = Get-MojazSceneFrames -Which outro -Bulletin $Bulletin
     if ($sceneFrames -gt 0) { return $sceneFrames }
     # Half the dwell, in frames, when the scene has no exit to copy.
-    return [int][math]::Max((Get-MojazFps), [math]::Floor((Get-MojazDelayFrames -Bulletin $Bulletin) / 2))
+    return [int][math]::Max((Get-MojazFps -Bulletin $Bulletin), [math]::Floor((Get-MojazDelayFrames -Bulletin $Bulletin) / 2))
 }
 
 function Get-MojazLastRowSeconds {
     param($Bulletin)
-    return [math]::Round((Get-MojazLastRowFrames -Bulletin $Bulletin) / (Get-MojazFps), 3)
+    return [math]::Round((Get-MojazLastRowFrames -Bulletin $Bulletin) / (Get-MojazFps -Bulletin $Bulletin), 3)
 }
 
 function Test-MojazSyncToLoop {
@@ -564,7 +586,7 @@ function Get-MojazSyncText {
         plainly rather than quietly running rows at a minute each.
     #>
     param($Bulletin)
-    $timing = Get-MojazSceneTiming
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if (-not (Test-MojazSyncToLoop -Bulletin $Bulletin)) {
         return (T 'mjd.syncOff')
     }
@@ -586,7 +608,7 @@ function Get-MojazPlanText {
     if (-not $Bulletin) { return '' }
     $rows = @(Get-JsonProp $Bulletin 'Rows')
     if ($rows.Count -eq 0) { return '' }
-    $timing = Get-MojazSceneTiming
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if ((Test-MojazSyncToLoop -Bulletin $Bulletin) -and $timing -and [double]$timing.LoopSeconds -gt 0) {
         # The loop owns the pace here, so quoting the dwell would be a lie.
         $plan = New-MojazLoopPlan -SceneTiming $timing -RowCount $rows.Count -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
@@ -598,9 +620,9 @@ function Get-MojazPlanText {
     $last = Get-MojazLastRowSeconds -Bulletin $Bulletin
     $total = ($delay * [math]::Max(0, $rows.Count - 1)) + $intro + $last
     $line = (T 'mjd.framesPerRow' $(Get-MojazDelayFrames -Bulletin $Bulletin) $delay $(Get-MojazIntroFrames -Bulletin $Bulletin) $(Get-MojazLastRowFrames -Bulletin $Bulletin) $(Format-DurationSeconds -Seconds ([int][math]::Ceiling($total))))
-    $timing = Get-MojazSceneTiming
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
     if ($timing) {
-        $line += (T 'mjd.fromTemplate' $(Get-MojazSceneFrames -Which intro) $([int](Get-JsonProp $timing 'LoopFrames')) $(Get-MojazSceneFrames -Which outro) $(Get-MojazFps))
+        $line += (T 'mjd.fromTemplate' $(Get-MojazSceneFrames -Which intro -Bulletin $Bulletin) $([int](Get-JsonProp $timing 'LoopFrames')) $(Get-MojazSceneFrames -Which outro -Bulletin $Bulletin) $(Get-MojazFps -Bulletin $Bulletin))
         # Directly under the two figures it compares, because that is where an
         # operator was left to do the arithmetic themselves.
         $fit = Get-MojazBulletinLoopFitNote -Bulletin $Bulletin

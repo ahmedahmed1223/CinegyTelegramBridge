@@ -93,7 +93,7 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
 </Scene></CinegyTitler>
 '@ | Set-Content -LiteralPath (Join-Path $runtime 'mojaz.cintitle')
 @'
-<Scene LoopStartFrame="25" LoopEndFrame="100">
+<Scene Fps="50" Duration="300" LoopStartFrame="50" LoopEndFrame="200">
   <Var Name="title.Text" Type="String" /><Title Text="${title.Text}" />
   <Var Name="Subject.Text" Type="String" /><Title Text="${Subject.Text}" />
   <Var Name="studio.location" Type="String" /><Title Text="${studio.location}" />

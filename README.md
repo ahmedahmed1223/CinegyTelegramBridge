@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.105.0
+
+The bulletin editor can save and preview timing for alternate designs that declare a scene clock. Timing uses the selected scene frame rate and any loop markers, and the shared planner preserves fractional row durations.
+
 ## Version 8.104.0
 
 Operators can start the standard bulletin from the web preview, follow its current row in the editor, and request the outro. The bridge verifies the reviewed bulletin revision and layer before starting, and matches the live scene identity before stopping.

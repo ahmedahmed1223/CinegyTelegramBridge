@@ -1704,6 +1704,71 @@ Describe 'Web channel: the pipe' {
         finally { $script:MojazLibrary = $previousLibrary }
     }
 
+    It 'edits and previews timing against the selected bulletin design through the pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'web-studio-timing.json' }
+        Mock Get-TemplateRegistryFilePath { Join-Path $TestDrive 'studio-timing-templates.json' }
+        Mock Invoke-ShowTemplateResult { throw 'A preview must never send an air command' }
+        $scene = Join-Path $TestDrive 'studio-clock.cintitle'
+        '<Scene Fps="50" LoopStartFrame="50" LoopEndFrame="200" Duration="300"><Var Name="title.Text" Type="String" /><Title Text="${title.Text}" /></Scene>' |
+            Set-Content -LiteralPath $scene
+        @{ StudioClock = @{ path = $scene; layer = 6; bulletin = $true } } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-TemplateRegistryFilePath)
+        $previousLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'توقيت الاستوديو' -TemplateKey 'StudioClock').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            foreach ($title in 'الأول', 'الثاني') {
+                $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title $title).Value
+            }
+            $revision = $script:MojazLibrary.Bulletins[0].Revision
+            $request = @{ actor = 4321; id = $id; revision = $revision; action = 'timing'; timing = @{ delayFrames = 125 } }
+            $line = @{ op = 'bulletin.edit'; args = $request } | ConvertTo-Json -Compress
+            $edited = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $edited.ok | Should -BeTrue
+            $edited.data.timing.fps | Should -Be 50
+            $edited.data.timing.delayFrames | Should -Be 125
+            $edited.data.playbackSupported | Should -BeFalse
+            $previewArgs = @{ actor = 4321; id = $id; revision = $edited.data.revision }
+            $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress
+            $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $preview.ok | Should -BeTrue
+            $preview.data.plannedCount | Should -Be 2
+            $preview.data.rows[1].startSeconds | Should -Be 3.5
+            $preview.data.exitSeconds | Should -Be 5.5
+            $request.revision = $edited.data.revision
+            $request.timing.delayFrames = 25
+            $line = @{ op = 'bulletin.edit'; args = $request } | ConvertTo-Json -Compress
+            $shorter = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $shorter.ok | Should -BeTrue
+            $previewArgs.revision = $shorter.data.revision
+            $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress
+            $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $preview.data.rows[1].startSeconds | Should -Be 1.5
+            $preview.data.exitSeconds | Should -Be 3.5
+            $previewArgs.stamp = $preview.data.stamp
+            $previousWrite = [IO.File]::GetLastWriteTimeUtc($scene)
+            $original = Get-Content -LiteralPath $scene -Raw
+            $original.Replace('Fps="50"', 'Fps="25"') | Set-Content -LiteralPath $scene
+            [IO.File]::SetLastWriteTimeUtc($scene, $previousWrite.AddSeconds(2))
+            $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json).error | Should -Be 'bulletin_stale'
+            $original.Replace(' LoopStartFrame="50"', '') | Set-Content -LiteralPath $scene
+            [IO.File]::SetLastWriteTimeUtc($scene, $previousWrite.AddSeconds(4))
+            $line = @{ op = 'bulletin.edit'; args = @{ actor = 4321; id = $id; action = 'read' } } | ConvertTo-Json -Compress
+            $oneShot = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $oneShot.data.timing.fps | Should -Be 50
+            $oneShot.data.timing.loopFrames | Should -Be 0
+            '<CinegyTitler><Scene><Fps>50</Fps><LoopStartFrame>0</LoopStartFrame><LoopEndFrame>200</LoopEndFrame><Duration>300</Duration></Scene></CinegyTitler>' |
+                Set-Content -LiteralPath $scene
+            [IO.File]::SetLastWriteTimeUtc($scene, $previousWrite.AddSeconds(6))
+            (Get-MojazSceneTiming -Path $scene).LoopFrames | Should -Be 200
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        }
+        finally { $script:MojazLibrary = $previousLibrary }
+    }
+
     It 'previews saved bulletin fields without writing to air and uses the shared playback plan' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-MojazAvailable { $true }

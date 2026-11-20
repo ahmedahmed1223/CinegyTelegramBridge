@@ -23,7 +23,7 @@ function Get-MojazResolvedRunSnapshot {
     Set-JsonProp $resolved 'DelaySeconds' (Get-MojazDelaySeconds -Bulletin $Bulletin)
     Set-JsonProp $resolved 'IntroExtraSeconds' (Get-MojazIntroSeconds -Bulletin $Bulletin)
     Set-JsonProp $resolved 'LastRowSeconds' (Get-MojazLastRowSeconds -Bulletin $Bulletin)
-    return New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazSceneTiming) -Schedule $Schedule `
+    return New-MojazRunSnapshot -Bulletin $resolved -SceneTiming (Get-MojazBulletinSceneTiming -Bulletin $Bulletin) -Schedule $Schedule `
         -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
 }
 

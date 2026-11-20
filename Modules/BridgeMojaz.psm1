@@ -202,7 +202,8 @@ function New-MojazRunSnapshot {
         [double]$OffsetSeconds = 0.4, [datetimeoffset]$Now = [datetimeoffset]::Now)
     $rows = @(Select-MojazPlayedRows -Rows @(Copy-MojazValue @(Get-MojazProperty $Bulletin 'Rows' @())))
     if ($rows.Count -eq 0) { return (New-MojazResult $false $null 'empty_bulletin' 'الموجز بلا صفوف.') }
-    $delay = [math]::Max(1, [int](Get-MojazProperty $Bulletin 'DelaySeconds' 8))
+    $delay = [double](Get-MojazProperty $Bulletin 'DelaySeconds' 8)
+    if ($delay -le 0 -or -not [double]::IsFinite($delay)) { $delay = 1.0 }
     # Doubles, not ints: these come from frame counts divided by a frame
     # rate, and rounding 1.2 seconds down to 1 was throwing away a fifth of
     # the entrance animation.

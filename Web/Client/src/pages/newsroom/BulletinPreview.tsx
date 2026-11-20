@@ -56,19 +56,21 @@ export function BulletinPreview({ bulletin, playback, onClose }: {
         {preview && <>
           {preview.total === 0 && <Text c="dimmed">لا توجد صفوف لمراجعتها.</Text>}
           {preview.total > 0 && !preview.fields.length && <Alert color="orange">تعذّر قراءة حقول التصميم.</Alert>}
-          {preview.total > 0 && !preview.playbackSupported && <Text size="sm" c="dimmed">مراجعة المحتوى متاحة. توقيت التشغيل غير متاح لهذا التصميم.</Text>}
-          {preview.playbackSupported && preview.exitSeconds != null && <Group gap="xs">
+          {preview.total > 0 && !preview.playbackSupported && <Text size="sm" c="dimmed">
+            {bulletin.timing ? 'توقيت المشهد متاح للمعاينة. العرض من الويب غير متاح لهذا التصميم.' : 'توقيت التشغيل غير متاح لهذا التصميم.'}
+          </Text>}
+          {preview.exitSeconds != null && <Group gap="xs">
             <Badge variant="light">{number.format(preview.plannedCount)} صف في خطة التشغيل</Badge>
             <Text size="sm" c="dimmed">إشارة الخروج عند {number.format(preview.exitSeconds)} ثانية</Text>
           </Group>}
-          {preview.playbackSupported && preview.total > 0 && preview.exitSeconds == null && <Text size="sm" c="dimmed">لا توجد صفوف مضمّنة في التشغيل.</Text>}
+          {bulletin.timing && preview.total > 0 && preview.exitSeconds == null && <Text size="sm" c="dimmed">لا توجد صفوف مضمّنة في التشغيل.</Text>}
           {preview.rows.map((row) => <Paper key={row.id} withBorder p="md" radius="md">
             <Stack gap="xs">
               <Group justify="space-between" gap="xs">
                 <Text fw={600}>الصف {number.format(row.number)}</Text>
                 {row.skipped ? <Badge variant="light" color="gray">مستبعد</Badge>
                   : row.startSeconds != null ? <Text size="sm" c="dimmed">يبدأ عند {number.format(row.startSeconds)} ثانية</Text>
-                    : preview.playbackSupported && <Badge variant="light" color="gray">خارج خطة التشغيل</Badge>}
+                    : preview.exitSeconds != null && <Badge variant="light" color="gray">خارج خطة التشغيل</Badge>}
               </Group>
               {preview.fields.map((field) => {
                 const showing = image?.rowId === row.id && image.field === field.name

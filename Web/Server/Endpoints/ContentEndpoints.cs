@@ -305,9 +305,9 @@ public static class ContentEndpoints
             "urgent_invalid" => ApiErrors.Of(400, reply.Error),
             "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
             "forbidden" => ApiErrors.Of(403, reply.Error),
-            "content_disabled" => ApiErrors.Of(404, reply.Error),
-            "urgent_stale" or "urgent_manual_hide_unconfirmed" => ApiErrors.Of(409, reply.Error),
-            "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            "content_disabled" or "urgent_rehearsal_unavailable" => ApiErrors.Of(404, reply.Error),
+            "urgent_stale" or "urgent_manual_hide_unconfirmed" or "urgent_rehearsal_busy" => ApiErrors.Of(409, reply.Error),
+            "bridge_outcome_unknown" or "urgent_rehearsal_failed" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable(),
         };
     }

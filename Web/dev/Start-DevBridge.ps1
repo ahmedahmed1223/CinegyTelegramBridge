@@ -36,6 +36,8 @@ $fixtureTicker = Join-Path $runtime 'ticker.txt'
 Set-JsonProp $config 'TemplateRegistryPath' $fixtureRegistry
 Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
+Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $true
+Set-JsonProp $config.Settings 'TemplateTestLayer' 9
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true
 if ($SheetFixturePath) {
@@ -153,6 +155,24 @@ function Invoke-ShowTemplateResult {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
     }
     return @{ Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0 }
+}
+
+function Show-TitlerTemplate {
+    param([int]$Layer, [string]$TemplatePath, [hashtable]$Variables)
+    if ($Layer -ne 9) { throw 'The development rehearsal accepts only the fixture layer.' }
+    $eventId = [guid]::NewGuid().ToString()
+    $script:OnAir[$Layer] = @{
+        Key = [IO.Path]::GetFileNameWithoutExtension($TemplatePath); At = Get-Date
+        ActiveId = $eventId; Variables = $Variables
+    }
+    return @{ Success = $true; EventId = $eventId }
+}
+
+function Set-AutoHideTimer {
+    param([int]$Layer, [int]$Seconds)
+    $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $Layer })
+    $script:AutoHideQueue += @{ Layer = $Layer; At = (Get-Date).AddSeconds($Seconds) }
+    return $true
 }
 
 function Invoke-HideLayer {

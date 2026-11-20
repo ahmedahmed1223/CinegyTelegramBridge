@@ -4186,6 +4186,10 @@
           },
           "graphicName": {
             "type": "string"
+          },
+          "rehearsal": {
+            "type": "boolean",
+            "default": false
           }
         },
         "default": null,
@@ -4237,6 +4241,14 @@
             "nullable": true
           },
           "autoHideFailed": {
+            "type": "boolean",
+            "default": false
+          },
+          "canRehearse": {
+            "type": "boolean",
+            "default": false
+          },
+          "rehearsalStarted": {
             "type": "boolean",
             "default": false
           }

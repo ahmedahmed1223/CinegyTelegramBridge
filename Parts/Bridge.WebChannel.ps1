@@ -1970,6 +1970,114 @@ function Get-WebUrgentManualLive {
     return @{ itemId = [string]$record.ItemId; layer = $layer; review = [string]$record.Token }
 }
 
+function New-WebUrgentManualReview {
+    param([long]$Actor, [string]$Fingerprint)
+    $now = [datetimeoffset]::UtcNow
+    foreach ($entry in @($script:WebUrgentManualReviews.GetEnumerator())) {
+        if ($entry.Value.ExpiresAt -le $now) { $script:WebUrgentManualReviews.Remove($entry.Key) | Out-Null }
+    }
+    $token = [guid]::NewGuid().ToString('N')
+    $script:WebUrgentManualReviews[$Actor] = @{
+        Token = $token; Fingerprint = $Fingerprint
+        ExpiresAt = $now.AddMinutes((Get-SettingInt 'PendingStateTimeoutMinutes' 1))
+    }
+    return $token
+}
+
+function Use-WebUrgentManualReview {
+    param([long]$Actor, [string]$Token)
+    $pending = $script:WebUrgentManualReviews[$Actor]
+    if (-not $pending -or $Token -cne $pending.Token) { return }
+    $script:WebUrgentManualReviews.Remove($Actor) | Out-Null
+    if ($pending.ExpiresAt -gt [datetimeoffset]::UtcNow) { return $pending }
+}
+
+function Get-WebUrgentRehearsalLayer {
+    param([long]$Actor, [string]$Key)
+    $layer = Get-SettingInt 'TemplateTestLayer' 0
+    if ($layer -le 0 -or -not (Test-Admin -ChatId $Actor -UserId $Actor) -or
+        -not (Get-Setting 'EnableFullTemplateManagement') -or
+        @(Get-KnownLayers) -contains $layer -or
+        (Test-PermanentGraphicAutoHideProtected -Layer $layer) -or
+        -not (Test-TemplateAccess -Key $Key -Layer $layer -ChatId $Actor -UserId $Actor).Allowed) {
+        return 0
+    }
+    return $layer
+}
+
+function Invoke-WebUrgentRehearsal {
+    param([long]$Actor, [System.Collections.IDictionary]$Arguments)
+    if (-not (Test-Admin -ChatId $Actor -UserId $Actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $preview = (Get-JsonProp $Arguments 'action') -eq 'rehearse-preview'
+    if (-not $preview) {
+        $pending = Use-WebUrgentManualReview -Actor $Actor -Token ([string](Get-JsonProp $Arguments 'review'))
+        if (-not $pending) { return @{ ok = $false; error = 'urgent_stale' } }
+    }
+    if (-not (Test-UrgentBoardAvailable)) {
+        return @{ ok = $false; error = 'urgent_rehearsal_unavailable' }
+    }
+    $itemId = [string](Get-JsonProp $Arguments 'itemId')
+    if (-not $itemId) { return @{ ok = $false; error = 'urgent_invalid' } }
+    $item = Get-UrgentItem -Board $script:UrgentBoard -ItemId $itemId
+    $template = Get-UrgentTemplate
+    if (-not $item -or -not $template -or -not (Get-UrgentProperty $item 'Enabled' $true)) {
+        return @{ ok = $false; error = 'urgent_stale' }
+    }
+    if (-not (Test-TemplateAccess -Key $template.Key -Layer ([int]$template.Layer) -ChatId $Actor -UserId $Actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $layer = Get-WebUrgentRehearsalLayer -Actor $Actor -Key $template.Key
+    if ($layer -le 0 -or $layer -eq [int]$template.Layer) {
+        return @{ ok = $false; error = 'urgent_rehearsal_unavailable' }
+    }
+    $stamp = Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $layer)
+    if (-not $stamp) { return @{ ok = $false; error = 'refused'; data = (T 'cfg.trialLayerUnsure' $layer) } }
+    if ($stamp -cne 'empty') { return @{ ok = $false; error = 'urgent_rehearsal_busy' } }
+
+    $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
+    $cap = Get-EffectiveAutoHideSeconds -Key $template.Key
+    if ($cap -gt 0) { $seconds = [math]::Min($seconds, $cap) }
+    $variables = Get-UrgentItemVariables -Item $item
+    $reviewed = ConvertTo-Json -Compress -Depth 12 -InputObject @(
+        'rehearsal', $Actor, $itemId, (Get-JsonProp $script:UrgentBoard 'Revision'), $template, $layer, $seconds, $variables
+    )
+    $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
+    if ($preview) {
+        return @{ ok = $true; data = @{ preview = @{
+            review = New-WebUrgentManualReview -Actor $Actor -Fingerprint $fingerprint
+            layer = $layer; values = $variables; autoHideSeconds = $seconds; rehearsal = $true
+            replacesGraphic = $false; stopsRun = $false; stopsBulletin = $false; graphicName = ''
+        } } }
+    }
+    if ($pending.Fingerprint -cne $fingerprint) { return @{ ok = $false; error = 'urgent_stale' } }
+    # Unlike a programme show, the isolated test must never write the shared
+    # postbox or invoke the sequence and bulletin takeover policies.
+    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $layer -TemplatePath ([string]$template.Path) -Variables $variables -Types (Get-TemplateFieldTypeOverrides -Template $template) `
+        -DefaultType ([string](Get-Setting 'AirVariableType')) -TimeoutSec (Get-AirTimeout)
+    if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'urgent_rehearsal_failed' } }
+    $requestedId = [string](Get-JsonProp $result 'EventId')
+    $identity = Get-VerifiedCinegyShowIdentity -Key $template.Key -TemplatePath ([string]$template.Path) -Layer $layer `
+        -ExpectedActiveId $requestedId -AllowAnonymousActiveId
+    $timerSaved = $false
+    # Another operator may have placed the same template after SHOW. A name
+    # match alone must not give this rehearsal ownership of that scene.
+    if ($identity.Success -and $requestedId -and
+        ([string]$identity.ActiveId).Trim().Trim('{', '}') -eq $requestedId.Trim().Trim('{', '}')) {
+        $key = "[TEST] $($template.Key)"
+        Set-OnAirShownRecord -Layer $layer -Record @{
+            Key = $key; At = Get-Date; UserId = $Actor; ActiveId = [string]$identity.ActiveId
+            ActiveIdConfirmed = $true; Source = 'BotTest'
+        }
+        Save-OnAirState
+        $timerSaved = Set-AutoHideTimer -Layer $layer -Seconds $seconds -ChatId $Actor -UserId $Actor `
+            -TemplateKey $key -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true
+    }
+    Add-AuditEntry (T 'cfg.templateTestAudit' $template.Key $layer $(Format-UserAuditActor -UserId $Actor))
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{ rehearsalStarted = $true; autoHideFailed = -not $timerSaved } }
+}
+
 function Invoke-WebUrgentManual {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -1978,6 +2086,7 @@ function Invoke-WebUrgentManual {
     $live = Get-WebUrgentManualLive -Actor $actor
     if ($action -eq 'status') { return @{ ok = $true; data = @{ live = $live } } }
     if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if ($action -in 'rehearse-preview', 'rehearse') { return Invoke-WebUrgentRehearsal -Actor $actor -Arguments $Arguments }
     $review = [string](Get-JsonProp $Arguments 'review')
     if ($action -eq 'hide') {
         if (-not $live -or $review -cne $live.review) { return @{ ok = $false; error = 'urgent_stale' } }
@@ -1999,13 +2108,10 @@ function Invoke-WebUrgentManual {
         return @{ ok = $true; data = @{} }
     }
     if ($action -notin 'options', 'preview', 'show') { return @{ ok = $false; error = 'urgent_invalid' } }
-    $now = [datetimeoffset]::UtcNow
     $pending = $null
     if ($action -eq 'show') {
-        $pending = $script:WebUrgentManualReviews[$actor]
-        if (-not $pending -or $review -cne $pending.Token) { return @{ ok = $false; error = 'urgent_stale' } }
-        $script:WebUrgentManualReviews.Remove($actor) | Out-Null
-        if ($pending.ExpiresAt -le $now) { return @{ ok = $false; error = 'urgent_stale' } }
+        $pending = Use-WebUrgentManualReview -Actor $actor -Token $review
+        if (-not $pending) { return @{ ok = $false; error = 'urgent_stale' } }
     }
     if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
     $itemId = [string](Get-JsonProp $Arguments 'itemId')
@@ -2015,13 +2121,16 @@ function Invoke-WebUrgentManual {
     $template = Get-UrgentTemplate
     $layer = [int]$template.Layer
     if (-not (Test-TemplateAccess -Key $template.Key -Layer $layer -ChatId $actor -UserId $actor).Allowed) { return @{ ok = $false; error = 'forbidden' } }
-    $policy = Test-TemplateShowPolicy -Key $template.Key -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)
-    if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
     if ($action -eq 'options') {
         $timing = Get-UrgentEffectiveTiming -Item $item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
         $choices = @(Get-AutoHideChoices) + @([int][math]::Ceiling($timing.HoldSeconds))
-        return @{ ok = $true; data = @{ durations = @($choices | Where-Object { $_ -gt 0 -and $_ -le 86400 } | Sort-Object -Unique) } }
+        return @{ ok = $true; data = @{
+            durations = @($choices | Where-Object { $_ -gt 0 -and $_ -le 86400 } | Sort-Object -Unique)
+            canRehearse = (Get-WebUrgentRehearsalLayer -Actor $actor -Key $template.Key) -gt 0
+        } }
     }
+    $policy = Test-TemplateShowPolicy -Key $template.Key -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)
+    if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
     $duration = Get-JsonProp $Arguments 'autoHideSeconds'
     if (($duration -isnot [int] -and $duration -isnot [long]) -or $duration -lt 0 -or $duration -gt 86400) {
         return @{ ok = $false; error = 'urgent_invalid' }
@@ -2032,20 +2141,13 @@ function Invoke-WebUrgentManual {
     $variables = Get-UrgentItemVariables -Item $item
     $effective = Get-EffectiveAutoHideSeconds -Key $template.Key -RequestedSeconds $duration
     $reviewed = ConvertTo-Json -Compress -Depth 12 -InputObject @(
-        $actor, $itemId, (Get-JsonProp $script:UrgentBoard 'Revision'), $template, $stamp, $duration, $effective, $variables,
+        'programme', $actor, $itemId, (Get-JsonProp $script:UrgentBoard 'Revision'), $template, $stamp, $duration, $effective, $variables,
         [bool]$script:UrgentBoardRun, (Get-JsonProp $script:UrgentBoardRun 'OperationId'),
         [bool]$script:MojazPlayback, (Get-JsonProp $script:MojazPlayback 'OperationId')
     )
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
     if ($action -eq 'preview') {
-        foreach ($entry in @($script:WebUrgentManualReviews.GetEnumerator())) {
-            if ($entry.Value.ExpiresAt -le $now) { $script:WebUrgentManualReviews.Remove($entry.Key) | Out-Null }
-        }
-        $token = [guid]::NewGuid().ToString('N')
-        $script:WebUrgentManualReviews[$actor] = @{
-            Token = $token; Fingerprint = $fingerprint
-            ExpiresAt = $now.AddMinutes((Get-SettingInt 'PendingStateTimeoutMinutes' 1))
-        }
+        $token = New-WebUrgentManualReview -Actor $actor -Fingerprint $fingerprint
         return @{ ok = $true; data = @{ preview = @{
             review = $token; layer = $layer; values = $variables; autoHideSeconds = $effective
             replacesGraphic = $stamp -ne 'empty'; stopsRun = [bool]$script:UrgentBoardRun

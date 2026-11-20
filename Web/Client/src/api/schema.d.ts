@@ -3209,6 +3209,8 @@ export interface components {
             stopsRun: boolean;
             stopsBulletin: boolean;
             graphicName: string;
+            /** @default false */
+            rehearsal: boolean;
         } | null;
         UrgentManualRequest: {
             action: string;
@@ -3229,6 +3231,10 @@ export interface components {
             durations: number[] | null;
             /** @default false */
             autoHideFailed: boolean;
+            /** @default false */
+            canRehearse: boolean;
+            /** @default false */
+            rehearsalStarted: boolean;
         };
         UrgentPlaybackRequest: {
             action: string;

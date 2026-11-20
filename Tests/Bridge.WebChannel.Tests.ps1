@@ -536,6 +536,90 @@ Describe 'Web channel: the pipe' {
         Should -Invoke Invoke-ExitLayer -Times 1
     }
 
+    It 'runs a reviewed urgent rehearsal only on an isolated empty test layer' {
+        $oldBoard = $script:UrgentBoard
+        $oldReviews = $script:WebUrgentManualReviews
+        $oldLayer = $script:OnAir[9]
+        $script:UrgentBoard = (Add-UrgentItem -Board (New-UrgentBoard) -Text 'خبر للبروفة').Value
+        $script:WebUrgentManualReviews = @{}
+        $script:webTrialLayer = 9
+        $script:webTrialLayerAllowed = $true
+        $script:webTrialStatus = @{ Success = $true; IsOnAir = $false }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Test-TemplateAccess { @{ Allowed = ($Layer -ne 9 -or $script:webTrialLayerAllowed) } }
+        Mock Get-UrgentTemplate { @{ Key = 'Urgent'; Layer = 5; Path = 'fixture.cintitle'; Fields = @('headline') } }
+        Mock Get-KnownLayers { 5 }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableFullTemplateManagement' }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
+        Mock Get-SettingInt { $script:webTrialLayer } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'TemplateTestAutoHideSeconds' }
+        Mock Get-WebUrgentLayerStatus { $script:webTrialStatus }
+        $script:webTrialActualId = 'trial-item'
+        Mock Show-TitlerTemplate {
+            $script:webTrialStatus = @{ Success = $true; IsOnAir = $true; ActiveName = 'Urgent'; ActiveId = $script:webTrialActualId }
+            @{ Success = $true; EventId = 'trial-item' }
+        }
+        Mock Get-TitlerLayerStatus { $script:webTrialStatus }
+        Mock Set-OnAirShownRecord { $script:OnAir[$Layer] = $Record }
+        Mock Save-OnAirState {}
+        Mock Set-AutoHideTimer { $true }
+        Mock Invoke-ShowTemplateResult {}
+        $call = {
+            param($arguments)
+            $line = @{ op = 'urgent.manual'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $request = @{ actor = 4321; action = 'rehearse-preview'; itemId = $script:UrgentBoard.Items[0].Id }
+            $request.actor = 4322
+            (& $call $request).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $script:webTrialLayer = 5
+            (& $call $request).error | Should -Be 'urgent_rehearsal_unavailable'
+            $script:webTrialLayer = 9
+            $script:webTrialLayerAllowed = $false
+            (& $call $request).error | Should -Be 'urgent_rehearsal_unavailable'
+            $script:webTrialLayerAllowed = $true
+            $review = (& $call $request).data.preview
+            $review.layer | Should -Be 9
+            $review.autoHideSeconds | Should -Be 10
+            $request.action = 'rehearse'
+            $request.review = $review.review
+            $script:webTrialStatus = @{ Success = $true; IsOnAir = $true; ActiveId = 'foreign' }
+            (& $call $request).error | Should -Be 'urgent_rehearsal_busy'
+            Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+            $script:webTrialStatus = @{ Success = $true; IsOnAir = $false }
+            (& $call $request).error | Should -Be 'urgent_stale'
+            $request.action = 'rehearse-preview'
+            $request.review = (& $call $request).data.preview.review
+            $request.action = 'rehearse'
+            (& $call $request).ok | Should -BeTrue
+            Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 9 -and $Variables['headline'] -eq 'خبر للبروفة' }
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            Should -Invoke Set-AutoHideTimer -Times 1 -Exactly -ParameterFilter {
+                $Layer -eq 9 -and $ActiveId -eq 'trial-item' -and $ActiveIdConfirmed
+            }
+            $script:webTrialStatus = @{ Success = $true; IsOnAir = $false }
+            $script:webTrialActualId = 'different-item-with-same-template'
+            $request.action = 'rehearse-preview'
+            $request.review = (& $call $request).data.preview.review
+            $request.action = 'rehearse'
+            $unconfirmed = & $call $request
+            $unconfirmed.ok | Should -BeTrue
+            $unconfirmed.data.autoHideFailed | Should -BeTrue
+            Should -Invoke Set-AutoHideTimer -Times 1 -Exactly
+        }
+        finally {
+            $script:UrgentBoard = $oldBoard
+            $script:WebUrgentManualReviews = $oldReviews
+            if ($oldLayer) { $script:OnAir[9] = $oldLayer } else { $script:OnAir.Remove(9) | Out-Null }
+        }
+    }
+
     It 'reviews a single urgent before showing it and hides only the same scene for its owner' {
         $oldBoard = $script:UrgentBoard
         $oldManual = $script:UrgentManualLive

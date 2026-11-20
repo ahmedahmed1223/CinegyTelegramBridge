@@ -11,9 +11,16 @@ public sealed record CinegyStatus(string Address, int Channel, string Health, lo
 
 public sealed record LayerStatus(int Layer, string Key, string Name, long At, long HideAt, string Source, string By);
 
-public sealed record BridgeStatus(string Version, long StartedAt, long PublishedAt, TelegramStatus Telegram, CinegyStatus Cinegy, IReadOnlyList<LayerStatus> Layers);
+public sealed record FeedOutage(string Kind, long StartedAt, long EndedAt);
+
+public sealed record FeedStatus(string State, string ActiveSource, bool BackupConfigured, int IntervalMinutes,
+    long LastCheckAt, int OutageCount, int OutageSeconds, IReadOnlyList<FeedOutage> Recent);
+
+public sealed record BridgeStatus(string Version, long StartedAt, long PublishedAt, TelegramStatus Telegram, CinegyStatus Cinegy,
+    IReadOnlyList<LayerStatus> Layers, FeedStatus? Feed);
 
 public sealed record StatusEnvelope(bool Online, BridgeStatus? Status);
+public sealed record LivePlayback(string? Url);
 
 public static class StatusEndpoints
 {
@@ -29,6 +36,15 @@ public static class StatusEndpoints
         // Server-sent events: one "status" event per change, the same
         // envelope as GET /api/status. EventSource reconnects by itself.
         api.MapGet("/stream", Stream).Produces(StatusCodes.Status200OK, contentType: "text/event-stream");
+
+        app.MapGet("/api/live", (HttpContext http, WebOptions options) =>
+            {
+                http.Response.Headers.CacheControl = "no-store";
+                return TypedResults.Ok(new LivePlayback(options.LivePlaybackUri?.AbsoluteUri));
+            })
+            .WithTags("Status")
+            .RequireAuthorization()
+            .Produces<LivePlayback>();
     }
 
     private static async Task Stream(HttpContext http, StatusFeed feed)

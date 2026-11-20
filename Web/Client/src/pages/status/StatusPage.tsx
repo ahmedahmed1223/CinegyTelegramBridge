@@ -1,6 +1,7 @@
-import { Alert, Badge, Group, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core'
-import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconPlugConnected, IconStack2 } from '@tabler/icons-react'
+import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router'
 import { useNow } from '../../hooks/useNow'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { cinegyLamp, telegramLamp } from '../../lib/lamps'
@@ -51,6 +52,9 @@ export function StatusPage() {
             ما على الهواء الآن كما يراه الجسر، يتحدّث كل ثانية.
           </Text>
         </div>
+        <Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>
+          البث المباشر
+        </Button>
       </Group>
 
       {!live.bridgeOnline && (

@@ -1,6 +1,5 @@
 .header {
-  backdrop-filter: saturate(1.4) blur(10px);
-  background: color-mix(in srgb, var(--mantine-color-body) 86%, transparent);
+  background: var(--mantine-color-body);
 }
 
 .navbar {
@@ -19,4 +18,16 @@
 
 .link {
   border-radius: var(--mantine-radius-md);
+  border: 1px solid transparent;
+  min-block-size: 3.375rem;
+  color: var(--mantine-color-text);
+}
+
+.link[data-active] {
+  border-color: light-dark(var(--mantine-color-signal-2), var(--mantine-color-signal-9));
+  font-weight: 600;
+}
+
+.link:focus-visible {
+  outline-offset: -2px;
 }

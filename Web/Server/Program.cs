@@ -89,9 +89,11 @@ app.Use(async (http, next) =>
     headers["Referrer-Policy"] = "no-referrer";
     // Mantine sets inline style attributes, hence 'unsafe-inline' for styles
     // only. No inline or remote script, ever.
+    var mediaOrigin = options.PlaybackOrigin.Length > 0 ? $" {options.PlaybackOrigin}" : "";
     headers["Content-Security-Policy"] =
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+        $"font-src 'self'; connect-src 'self'{mediaOrigin}; media-src 'self' blob:{mediaOrigin}; " +
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
     await next();
 });
 app.UseDefaultFiles();

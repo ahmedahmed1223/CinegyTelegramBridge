@@ -4,10 +4,12 @@ import {
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconArrowDown, IconArrowRight, IconArrowUp, IconCopy, IconEdit, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { BulletinPaste } from './BulletinPaste'
+import { BulletinTimingForm } from './BulletinTimingForm'
 import classes from './NewsroomPage.module.css'
 
 type Bulletin = Schemas['BulletinEditor']
@@ -20,7 +22,7 @@ const names = { create: 'إنشاء موجز', rename: 'إعادة تسمية', 
 
 async function applyEdit(request: EditRequest) {
   const { data, error, response } = await api.POST('/api/content/bulletins/editor', {
-    body: { id: null, revision: null, page: null, rowId: null, name: null, design: null, values: null, ...request },
+    body: { id: null, revision: null, page: null, rowId: null, name: null, design: null, values: null, timing: null, ...request },
   })
   if (!data) throw new Error(error?.message || messageFor(errorCode(error, response)))
   return data
@@ -84,6 +86,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [page, setPage] = useState(0)
   const [rowEdit, setRowEdit] = useState<EditRow | null>(null)
   const [nameMode, setNameMode] = useState<Exclude<NameAction, 'create'> | null>(null)
+  const [pasting, setPasting] = useState(false)
+  const [editingTiming, setEditingTiming] = useState(false)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
   const query = useQuery({
@@ -104,12 +108,14 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     }
     setRowEdit(null)
     setNameMode(null)
+    setPasting(false)
+    setEditingTiming(false)
     onSaved(value)
   }
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode
+  const editing = !!rowEdit || !!nameMode || pasting || editingTiming
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
 
@@ -180,22 +186,40 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <Text size="sm" c="dimmed">{number.format(bulletin.total)} صف · النسخة {number.format(bulletin.revision)} · <bdi>{bulletin.design}</bdi></Text>
             </div>
             <Group gap="xs">
+              {bulletin.timing && <Button variant="default" leftSection={<IconClock size={16} />} disabled={busy || editing}
+                onClick={() => { edit.reset(); setSavedNote(''); setEditingTiming(true) }}>التوقيت</Button>}
               <Button variant="default" leftSection={<IconEdit size={16} />} onClick={() => setNameMode('rename')} disabled={busy || editing}>إعادة تسمية</Button>
               <Button variant="default" leftSection={<IconCopy size={16} />} onClick={() => setNameMode('copy')} disabled={busy || editing}>نسخ</Button>
             </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
+          {editingTiming && bulletin.timing && (
+            <BulletinTimingForm timing={bulletin.timing} busy={edit.isPending} error={edit.error?.message ?? ''}
+              onCancel={() => { setEditingTiming(false); edit.reset() }}
+              onSave={(timing) => edit.mutate({ action: 'timing', id, revision: bulletin.revision, page: bulletin.page, timing })} />
+          )}
           {!bulletin.playbackSupported && <Alert color="gray">التشغيل على الهواء غير متاح لهذا التصميم في هذا الإصدار.</Alert>}
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
-            <Button leftSection={<IconPlus size={17} />} disabled={!textFields.length || busy || editing}
-              onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>
+            <Group gap="xs">
+              <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={!textFields.length || busy || editing}
+                onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>
+              <Button leftSection={<IconPlus size={17} />} disabled={!textFields.length || busy || editing}
+                onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>
+            </Group>
           </Group>
+          {pasting && <BulletinPaste bulletin={bulletin} onCancel={() => setPasting(false)} onSave={(nextPage) => {
+            setPasting(false)
+            setSavedNote('أُضيفت الصفوف إلى الموجز.')
+            void queryClient.invalidateQueries({ queryKey: ['bulletin-editor', id] })
+            setPage(nextPage)
+            onSaved(bulletin)
+          }} />}
           {bulletin.onAir && <Text size="sm" c="dimmed">تُستخدم النسخة المحفوظة عند بدء التشغيل التالي.</Text>}
           {savedNote && <Text size="sm" role="status">{savedNote}</Text>}
-          {edit.error && <Alert color="red" role="alert">{edit.error.message}</Alert>}
+          {edit.error && !editingTiming && <Alert color="red" role="alert">{edit.error.message}</Alert>}
           {!fields.length && <Alert color="gray">تعذّر قراءة حقول التصميم من الجسر.</Alert>}
-          {!bulletin.total && !rowEdit && <Text c="dimmed">لا توجد صفوف في الموجز. اختر «إضافة صف» لبدء الإدخال.</Text>}
+          {!bulletin.total && !rowEdit && !pasting && <Text c="dimmed">لا توجد صفوف في الموجز. أضف صفًا أو الصق عدة صفوف.</Text>}
           {(bulletin.total > 0 || rowEdit) && (
             <>
             <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا للوصول إلى بقية الحقول والإجراءات.</Text>

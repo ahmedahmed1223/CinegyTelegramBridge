@@ -362,25 +362,19 @@ function Get-MojazFieldValues {
     return $values
 }
 
-function Add-MojazBulletinRow {
+function New-MojazBulletinRowData {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
-        [string]$Image = '', [string]$Title = '', [string]$Text = '',
+    param([string]$Image = '', [string]$Title = '', [string]$Text = '',
         # The design's own fields, keyed by the scene's variable names. Absent
         # for the built-in design, whose three are named above and unchanged.
         $Fields,
-        [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
-        [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+        [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '')
     $rowTitle = ConvertTo-MojazRowText -Text $Title
     $rowText = ConvertTo-MojazRowText -Text $Text
     # A design carries whatever fields it declares, so emptiness is "nothing
     # in any of them" rather than "no title and no story". The old rule was
     # the news design's shape, and it would have refused a row on a
     # video-only design outright.
-    # Resolved out here and given a name of its own, because the -Change
-    # block below is invoked with & and is therefore dynamically scoped:
-    # $PSBoundParameters inside it is Update-MojazBulletinIn's, not this
-    # function's, so asking it there always answers no.
     $rowFields = if ($PSBoundParameters.ContainsKey('Fields')) { Get-MojazFieldValues -Fields $Fields } else { $null }
     if ($null -ne $rowFields) {
         # Not @($hashtable).Count - that wraps the table in a one-element
@@ -397,25 +391,44 @@ function Add-MojazBulletinRow {
     # 'inherit', which is what the caller is saying either way.
     $rowMode = if ($ImageMode) { $ImageMode } elseif ($rowImage) { 'new' } else { 'inherit' }
     if ($rowMode -ne 'new') { $rowImage = '' }
+    $row = [pscustomobject]@{
+        Id = New-MojazId -Prefix r
+        ImageMode = $rowMode
+        Image = $rowImage; Title = $rowTitle; Text = $rowText
+    }
+    if ($null -ne $rowFields) {
+        # A different design can later be selected without losing hidden fields.
+        $row | Add-Member -NotePropertyName Fields -NotePropertyValue ([pscustomobject]$rowFields)
+    }
+    return (New-MojazResult $true $row)
+}
+
+function Add-MojazBulletinRows {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
+        [Parameter(Mandatory)][hashtable[]]$Rows,
+        [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+    $createdRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($rowData in $Rows) {
+        $built = New-MojazBulletinRowData @rowData
+        if (-not $built.Success) { return $built }
+        $createdRows.Add($built.Value)
+    }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            $row = [pscustomobject]@{
-                Id = New-MojazId -Prefix r
-                ImageMode = $rowMode
-                Image = $rowImage; Title = $rowTitle; Text = $rowText
-            }
-            # Carried alongside the built-in three rather than instead of
-            # them: a bulletin moved from one design to another keeps what the
-            # new design has no field for, so moving it back loses nothing.
-            if ($null -ne $rowFields) {
-                $bag = [pscustomobject]@{}
-                foreach ($entry in $rowFields.GetEnumerator()) {
-                    $bag | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value -Force
-                }
-                $row | Add-Member -NotePropertyName Fields -NotePropertyValue $bag -Force
-            }
-            $bulletin.Rows = @(@(Get-MojazProperty $bulletin 'Rows' @()) + $row)
+            $bulletin.Rows = @(@(Get-MojazProperty $bulletin 'Rows' @()) + $createdRows.ToArray())
         })
+}
+
+function Add-MojazBulletinRow {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Library, [Parameter(Mandatory)][string]$BulletinId,
+        [string]$Image = '', [string]$Title = '', [string]$Text = '', $Fields,
+        [ValidateSet('', 'new', 'inherit', 'template')][string]$ImageMode = '',
+        [datetimeoffset]$Now = [datetimeoffset]::Now, [long]$UserId = 0)
+    $rowData = @{ Image = $Image; Title = $Title; Text = $Text; ImageMode = $ImageMode }
+    if ($PSBoundParameters.ContainsKey('Fields')) { $rowData.Fields = $Fields }
+    return (Add-MojazBulletinRows -Library $Library -BulletinId $BulletinId -Rows @($rowData) -Now $Now -UserId $UserId)
 }
 
 function Set-MojazBulletinRow {
@@ -575,13 +588,16 @@ function Set-MojazBulletinTiming {
     }
     return (Update-MojazBulletinIn -Library $Library -BulletinId $BulletinId -Now $Now -UserId $UserId -Change {
             param($bulletin)
-            foreach ($pair in @(@('DelayFrames', $DelayFrames), @('IntroExtraFrames', $IntroExtraFrames), @('LastRowFrames', $LastRowFrames), @('HoldFrames', $HoldFrames))) {
+            foreach ($pair in @(@('DelayFrames', $DelayFrames, 'DelaySeconds'), @('IntroExtraFrames', $IntroExtraFrames, 'IntroExtraSeconds'),
+                    @('LastRowFrames', $LastRowFrames, 'LastRowSeconds'), @('HoldFrames', $HoldFrames, ''))) {
                 if (-not $fields.ContainsKey($pair[0])) { continue }
                 # Bulletins written before frames existed carry neither field.
                 if ($bulletin.PSObject.Properties.Match($pair[0]).Count -eq 0) {
                     $bulletin | Add-Member -NotePropertyName $pair[0] -NotePropertyValue ([int]$pair[1])
                 }
                 else { $bulletin.$($pair[0]) = [int]$pair[1] }
+                # Otherwise a saved zero can revive the old seconds override.
+                if ($pair[2]) { $bulletin.PSObject.Properties.Remove($pair[2]) }
             }
             if ($fields.ContainsKey('SyncToLoop')) {
                 # Bulletins written before the loop mode existed have no such
@@ -731,5 +747,5 @@ function Get-BridgeSceneFields {
 Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBulletin,
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
-    Add-MojazBulletinRow, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip, ConvertFrom-MojazPasteText,
+    Add-MojazBulletinRow, Add-MojazBulletinRows, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip, ConvertFrom-MojazPasteText,
     Clear-MojazBulletinRows, Set-MojazBulletinTiming, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues

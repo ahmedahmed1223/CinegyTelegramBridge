@@ -17,6 +17,9 @@ public sealed class WebOptions
     /// are allowed by their domain without configuration.</summary>
     public string PublicHostname { get; init; } = "";
 
+    public Uri? LivePlaybackUri { get; init; }
+    public string PlaybackOrigin => LivePlaybackUri?.GetLeftPart(UriPartial.Authority) ?? "";
+
     public string StateDirectory => Path.Combine(BridgeRoot, "logs", "web");
 
     public static WebOptions FromConfiguration(IConfiguration configuration, IHostEnvironment environment)
@@ -37,7 +40,16 @@ public sealed class WebOptions
             Port = configuration.GetValue("Port", 8790),
             PipeName = configuration["PipeName"] is { Length: > 0 } pipe ? pipe : "CinegyTelegramBridge.Web",
             PublicHostname = configuration["PublicHostname"] ?? "",
+            LivePlaybackUri = ParsePlaybackUri(configuration["LivePlaybackUrl"]),
         };
+    }
+
+    public static Uri? ParsePlaybackUri(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host) ||
+            uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+            return null;
+        return uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback) ? uri : null;
     }
 
     public IReadOnlyList<string> AllowedHosts()

@@ -74,6 +74,11 @@
   padding: var(--mantine-spacing-sm);
 }
 
+.frameValue {
+  min-inline-size: 3ch;
+  font-variant-numeric: tabular-nums;
+}
+
 .tickerItems,
 .reviewItems {
   margin: 0;

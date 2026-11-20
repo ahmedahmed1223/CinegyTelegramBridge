@@ -211,7 +211,42 @@ function Get-WebStatusSnapshot {
             lastReadAt = ConvertTo-AirStatusWidgetEpoch $lastRead
             freshUntil = $freshUntil
         }
+        feed = Get-WebFeedStatus -Now $Now
         layers = @($layers)
+    }
+}
+
+function Get-WebFeedStatus {
+    param([datetime]$Now)
+    $settings = Get-JsonProp $config 'LiveStream'
+    $primary = [string](Get-JsonProp $settings 'SourceUrl')
+    $backup = [string](Get-JsonProp $settings 'BackupSourceUrl')
+    $usesBackup = $script:OutputMonitorFallbackActive -and $backup
+    $monitorMinutes = Get-SettingInt 'OutputMonitorMinutes' 0
+    $unreachable = Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind unreachable
+    $black = Get-BridgeOpenOutage -Ledger $script:StreamOutages -Kind black
+    $state = if ($unreachable) { 'unreachable' }
+    elseif ($black) { 'black' }
+    elseif (-not $primary) { 'unconfigured' }
+    elseif (-not $monitorMinutes) { 'off' }
+    elseif ($script:LastOutputMonitorAt -eq [datetime]::MinValue) { 'pending' }
+    elseif ($script:OutputMonitorFailureCount -gt 0) { 'degraded' }
+    else { 'receiving' }
+    $summary = Get-BridgeOutageSummary -Ledger $script:StreamOutages -WindowHours 24 -Now $Now
+    $recent = @(
+        foreach ($outage in @($script:StreamOutages.Outages | Select-Object -First 8)) {
+            @{
+                kind = [string]$outage.Kind
+                startedAt = ConvertTo-AirStatusWidgetEpoch $outage.StartedAt
+                endedAt = ConvertTo-AirStatusWidgetEpoch $outage.EndedAt
+            }
+        }
+    )
+    return @{
+        state = $state; activeSource = $(if ($usesBackup) { 'backup' } elseif ($primary) { 'primary' } else { 'none' })
+        backupConfigured = [bool]$backup; intervalMinutes = $monitorMinutes
+        lastCheckAt = ConvertTo-AirStatusWidgetEpoch $script:LastOutputMonitorAt
+        outageCount = $summary.Count; outageSeconds = $summary.TotalSeconds; recent = $recent
     }
 }
 
@@ -293,6 +328,7 @@ function Invoke-WebChannelOperation {
         'urgent.playback' { return Invoke-WebUrgentPlayback -Arguments $arguments }
         'ticker.edit' { return Invoke-WebTickerEdit -Arguments $arguments }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
+        'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
     }
     return @{ ok = $false; error = 'unknown_op' }
 }
@@ -728,12 +764,158 @@ function Get-WebBulletinEditor {
         }
     )
     $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    $canPlay = Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin
     return @{
         id = [string](Get-JsonProp $Bulletin 'Id'); name = [string](Get-JsonProp $Bulletin 'Name')
-        design = $designKey; playbackSupported = Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin
+        design = $designKey; playbackSupported = $canPlay
+        headlinePaste = Test-WebBulletinHeadlineFormat -Fields $fields
+        timing = $(if ($canPlay) { Get-WebBulletinTiming -Bulletin $Bulletin })
         revision = [int](Get-JsonProp $Bulletin 'Revision'); onAir = Test-MojazOnAir -Bulletin $Bulletin
         fields = $fields; rows = $items; page = $window.Page; pageCount = $window.PageCount; total = $rows.Count
     }
+}
+
+function Get-WebBulletinTiming {
+    param([Parameter(Mandatory)]$Bulletin)
+    $scene = Get-MojazSceneTiming
+    $framesPerSecond = Get-MojazFps
+    $intro = [int](Get-JsonProp $Bulletin 'IntroExtraFrames')
+    if ($intro -le 0 -and [double](Get-JsonProp $Bulletin 'IntroExtraSeconds') -gt 0) {
+        $intro = [int][math]::Round([double](Get-JsonProp $Bulletin 'IntroExtraSeconds') * $framesPerSecond)
+    }
+    $last = [int](Get-JsonProp $Bulletin 'LastRowFrames')
+    if ($last -le 0 -and [double](Get-JsonProp $Bulletin 'LastRowSeconds') -gt 0) {
+        $last = [int][math]::Round([double](Get-JsonProp $Bulletin 'LastRowSeconds') * $framesPerSecond)
+    }
+    return @{
+        delayFrames = Get-MojazDelayFrames -Bulletin $Bulletin
+        introExtraFrames = $intro; lastRowFrames = $last
+        syncToLoop = Test-MojazSyncToLoop -Bulletin $Bulletin
+        loopFrames = [int](Get-JsonProp $scene 'LoopFrames'); fps = $framesPerSecond
+        effectiveIntroFrames = Get-MojazIntroFrames -Bulletin $Bulletin
+        effectiveLastFrames = Get-MojazLastRowFrames -Bulletin $Bulletin
+        fitNote = Get-MojazBulletinLoopFitNote -Bulletin $Bulletin
+    }
+}
+
+function ConvertTo-WebBulletinRowArguments {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Cells)
+    $row = @{ Fields = @{} }
+    foreach ($key in $Cells.Keys) {
+        if ($key -eq $script:MojazTitleVariable) { $row.Title = $Cells[$key]; $row.Fields[$key] = '' }
+        elseif ($key -eq $script:MojazTextVariable) { $row.Text = $Cells[$key]; $row.Fields[$key] = '' }
+        else { $row.Fields[$key] = $Cells[$key] }
+    }
+    return $row
+}
+
+function Read-WebBulletinPaste {
+    param([string]$Text, [string]$Format, [object[]]$Fields)
+    if ($Format -eq 'headlines') {
+        foreach ($line in ($Text -split '\r?\n')) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $parsed = ConvertFrom-MojazPasteText -Text $line
+            $values = if ($parsed.Rows.Count -eq 1) {
+                @{ $script:MojazTitleVariable = $parsed.Rows[0].Title; $script:MojazTextVariable = $parsed.Rows[0].Text }
+            }
+            @{ values = $values }
+        }
+        return
+    }
+    $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new([IO.StringReader]::new($Text))
+    try {
+        $parser.SetDelimiters("`t")
+        $parser.TrimWhiteSpace = $false
+        while (-not $parser.EndOfData) {
+            $values = $null
+            try {
+                $cells = $parser.ReadFields()
+                if ($cells.Length -eq $Fields.Count) {
+                    $values = @{}
+                    for ($column = 0; $column -lt $Fields.Count; $column++) { $values[$Fields[$column].name] = $cells[$column] }
+                }
+            }
+            catch [Microsoft.VisualBasic.FileIO.MalformedLineException] { $values = $null }
+            @{ values = $values }
+        }
+    }
+    finally { $parser.Dispose() }
+}
+
+function Invoke-WebBulletinPaste {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-MojazAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
+    $revision = Get-JsonProp $Arguments 'revision'
+    if ($revision -ne $bulletin.Revision) { return @{ ok = $false; error = 'bulletin_stale' } }
+
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $format = [string](Get-JsonProp $Arguments 'format')
+    $pasteText = [string](Get-JsonProp $Arguments 'text')
+    if ($action -notin 'preview', 'commit' -or $format -notin 'table', 'headlines' -or
+        [string]::IsNullOrWhiteSpace($pasteText) -or $pasteText.Length -gt 8000) {
+        return @{ ok = $false; error = 'bulletin_paste_invalid' }
+    }
+    try { [void][System.Xml.XmlConvert]::VerifyXmlChars($pasteText) }
+    catch { return @{ ok = $false; error = 'bulletin_paste_invalid' } }
+
+    $fields = @(Get-WebBulletinFields -Bulletin $bulletin | Where-Object { $_.kind -eq 'text' })
+    if (-not $fields.Count -or ($format -eq 'headlines' -and -not (Test-WebBulletinHeadlineFormat -Fields $fields))) {
+        return @{ ok = $false; error = 'bulletin_invalid' }
+    }
+    $pasted = @(Read-WebBulletinPaste -Text $pasteText -Format $format -Fields $fields | Select-Object -First 41)
+    if ($pasted.Count -gt 40) { return @{ ok = $false; error = 'bulletin_paste_invalid' } }
+    $skipped = [System.Collections.Generic.List[int]]::new()
+    $rows = [System.Collections.Generic.List[object]]::new()
+    for ($record = 0; $record -lt $pasted.Count; $record++) {
+        $filled = Get-MojazFieldValues -Fields $pasted[$record].values
+        if ($filled.Count -eq 0 -or @($filled.Values | Where-Object { $_.Length -gt 4096 }).Count -gt 0) {
+            $skipped.Add($record + 1)
+            continue
+        }
+        $cells = [ordered]@{}
+        foreach ($field in $fields) { $cells[$field.name] = [string]$filled[$field.name] }
+        $rows.Add($cells)
+    }
+
+    $columns = @(foreach ($field in $fields) { , @($field.name, $field.label, $field.kind) })
+    $design = Get-MojazBulletinDesignKey -Bulletin $bulletin
+    $reviewed = ConvertTo-Json -Depth 6 -Compress -InputObject @(
+        $actor, $id, $revision, $format, $design, $columns, $rows.ToArray(), $skipped.ToArray()
+    )
+    $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
+    if ($action -eq 'preview') {
+        return @{ ok = $true; data = @{ preview = @{
+                    review = $review; fields = $fields; rows = $rows.ToArray(); skippedLines = $skipped.ToArray()
+                } } }
+    }
+    if ((Get-JsonProp $Arguments 'review') -cne $review) { return @{ ok = $false; error = 'bulletin_stale' } }
+    if (-not $rows.Count) { return @{ ok = $false; error = 'bulletin_paste_invalid' } }
+    $rowArguments = @(foreach ($cells in $rows) {
+            $rowArgs = ConvertTo-WebBulletinRowArguments -Cells $cells
+            $rowArgs.Fields = Get-MojazFieldValues -Fields $rowArgs.Fields
+            if (-not $rowArgs.Fields.Count) { $rowArgs.Remove('Fields') }
+            $rowArgs
+        })
+    $result = Add-MojazBulletinRows -Library $script:MojazLibrary -BulletinId $id -Rows $rowArguments -UserId $actor
+    if (-not $result.Success) { return @{ ok = $false; error = 'bulletin_refused'; data = [string]$result.Error } }
+    if (-not (Invoke-MojazEdit -Result $result -ChatId $actor -Quiet)) {
+        return @{ ok = $false; error = 'bulletin_save_failed' }
+    }
+    Add-AuditEntry "Web bulletin paste ($($rows.Count) rows) by $(Format-UserAuditActor -UserId $actor) ($id)"
+    $saved = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+    $window = Get-BridgePageWindow -ItemCount @($saved.Rows).Count -Page ([int]::MaxValue)
+    return @{ ok = $true; data = @{ savedPage = $window.Page } }
+}
+
+function Test-WebBulletinHeadlineFormat {
+    param([object[]]$Fields)
+    $names = @($Fields | Where-Object { $_.kind -eq 'text' } | ForEach-Object { $_.name })
+    return $names.Count -eq 2 -and $script:MojazTitleVariable -in $names -and $script:MojazTextVariable -in $names
 }
 
 function Invoke-WebBulletinEdit {
@@ -784,6 +966,28 @@ function Invoke-WebBulletinEdit {
         switch ($action) {
             'copy' { $result = Copy-MojazBulletin @editArgs -Name $name }
             'rename' { $result = Rename-MojazBulletin @editArgs -Name $name }
+            'timing' {
+                if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) {
+                    return @{ ok = $false; error = 'bulletin_invalid' }
+                }
+                $timing = Get-JsonProp $Arguments 'timing'
+                $sync = Get-JsonProp $timing 'syncToLoop'
+                $timingArgs = @{}
+                foreach ($setting in @('delayFrames', 'introExtraFrames', 'lastRowFrames')) {
+                    $frameCount = Get-JsonProp $timing $setting
+                    if ($null -eq $frameCount) { continue }
+                    if (($frameCount -isnot [int] -and $frameCount -isnot [long]) -or $frameCount -lt 0 -or $frameCount -gt [int]::MaxValue) {
+                        return @{ ok = $false; error = 'bulletin_invalid' }
+                    }
+                    $timingArgs[$setting] = [int]$frameCount
+                }
+                if ($null -ne $sync) {
+                    if ($sync -isnot [bool]) { return @{ ok = $false; error = 'bulletin_invalid' } }
+                    $timingArgs.SyncToLoop = $sync
+                }
+                if (-not $timingArgs.Count) { return @{ ok = $false; error = 'bulletin_invalid' } }
+                $result = Set-MojazBulletinTiming @editArgs @timingArgs
+            }
             'skip' { $result = Switch-MojazBulletinRowSkip @editArgs -RowId $rowId }
             'remove' { $result = Remove-MojazBulletinRow @editArgs -RowId $rowId }
             { $_ -in 'up', 'down' } { $result = Move-MojazBulletinRow @editArgs -RowId $rowId -Direction $action }
@@ -801,22 +1005,16 @@ function Invoke-WebBulletinEdit {
                     catch { return @{ ok = $false; error = 'bulletin_invalid' } }
                     $cells[$field.name] = $value
                 }
-                # The built-in columns have dedicated properties that the bot
-                # edits directly. Clear duplicate aliases left by older saves.
-                if ($cells.ContainsKey($script:MojazTitleVariable)) {
-                    $editArgs.Title = $cells[$script:MojazTitleVariable]
-                    $cells[$script:MojazTitleVariable] = ''
-                }
-                if ($cells.ContainsKey($script:MojazTextVariable)) {
-                    $editArgs.Text = $cells[$script:MojazTextVariable]
-                    $cells[$script:MojazTextVariable] = ''
-                }
+                $rowArgs = ConvertTo-WebBulletinRowArguments -Cells $cells
+                # Clear stale design aliases for the names the bot edits directly.
+                $designFields = $rowArgs.Fields
+                $rowArgs.Remove('Fields')
                 if ($action -eq 'add') {
-                    $filled = Get-MojazFieldValues -Fields $cells
-                    if ($filled.Count -gt 0) { $editArgs.Fields = $filled }
-                    $result = Add-MojazBulletinRow @editArgs
+                    $filled = Get-MojazFieldValues -Fields $designFields
+                    if ($filled.Count -gt 0) { $rowArgs.Fields = $filled }
+                    $result = Add-MojazBulletinRow @editArgs @rowArgs
                 }
-                else { $result = Set-MojazBulletinRow @editArgs -RowId $rowId -DesignFields $cells }
+                else { $result = Set-MojazBulletinRow @editArgs @rowArgs -RowId $rowId -DesignFields $designFields }
             }
             default { return @{ ok = $false; error = 'bulletin_invalid' } }
         }

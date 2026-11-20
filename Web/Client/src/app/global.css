@@ -12,11 +12,18 @@ body {
 }
 
 [data-mantine-color-scheme='light'] body {
-  background: #f5f7f9;
+  --mantine-color-dimmed: #596778;
+  background: #f4f6fa;
 }
 
 [data-mantine-color-scheme='dark'] body {
+  --mantine-color-dimmed: #a6b4c4;
   background: #0d1115;
+}
+
+::selection {
+  background: light-dark(#c8dfff, #25446d);
+  color: light-dark(#0a2d58, #f4f8ff);
 }
 
 /* Timecodes and counters: digits that do not jitter while they tick. */

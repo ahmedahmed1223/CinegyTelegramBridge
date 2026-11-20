@@ -148,6 +148,30 @@ Describe 'Web channel: the pipe' {
         $parsed.data.version | Should -Be $script:BridgeVersion
     }
 
+    It 'publishes feed health and recent outages without exposing their source or cause' {
+        $previousOutages = $script:StreamOutages
+        try {
+            $script:StreamOutages = New-BridgeOutageLedger
+            $now = [datetime]::Now
+            Open-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $now.AddMinutes(-5) -Cause 'private-diagnostics' | Out-Null
+            Close-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $now.AddMinutes(-4) | Out-Null
+            Open-BridgeOutage -Ledger $script:StreamOutages -Kind unreachable -At $now.AddMinutes(-1) -Source 'srt://internal.example/ingest-key' | Out-Null
+            Publish-WebChannelState -Force
+
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"status"}' -PumpSeconds 0
+            $feed = ($raw | ConvertFrom-Json).data.feed
+            $feed.state | Should -Be 'unreachable'
+            $feed.outageCount | Should -Be 2
+            $feed.recent[0].endedAt | Should -Be 0
+            $feed.recent[1].endedAt | Should -BeGreaterThan $feed.recent[1].startedAt
+            $raw | Should -Not -Match 'ingest-key|private-diagnostics|internal\.example'
+        }
+        finally {
+            $script:StreamOutages = $previousOutages
+            Publish-WebChannelState -Force
+        }
+    }
+
     It 'carries a queued request to the bridge thread and its answer back' {
         $parsed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}') | ConvertFrom-Json
         $parsed.ok | Should -BeTrue
@@ -191,6 +215,7 @@ Describe 'Web channel: the pipe' {
         # way it does on the station's slow link, until its own deadline.
         Mock Invoke-BridgeTick { }
         Mock Write-BridgeLivenessStamp { }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
         # The shortest margin the setting allows, so the hang costs seconds.
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'TelegramPollMarginSeconds' }
         $silent = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -212,9 +237,12 @@ Describe 'Web channel: the pipe' {
                 }).AddArgument($script:WebChannelPipeName) | Out-Null
             $handle = $client.BeginInvoke()
 
-            { Get-TelegramUpdates -Offset 0 -TimeoutSeconds 1 } | Should -Throw
+            $pollError = $null
+            try { Get-TelegramUpdates -Offset 0 -TimeoutSeconds 1 | Out-Null }
+            catch { $pollError = $_ }
+            $pollError | Should -Not -BeNullOrEmpty
 
-            $handle.IsCompleted | Should -BeTrue
+            $handle.IsCompleted | Should -BeTrue -Because "the poll ended with '$($pollError.Exception.Message)'"
             ((@($client.EndInvoke($handle))[-1]) | ConvertFrom-Json).ok | Should -BeTrue
             Should -Invoke Invoke-BridgeTick -Times 1 -Because 'the poll ran past its own timeout, and the engines on air must not wait for it'
         }
@@ -560,6 +588,116 @@ Describe 'Web channel: the pipe' {
             $unreadable.data.fields | Should -BeNullOrEmpty
             $edit.revision = $unreadable.data.revision
             (& $requestBulletin $edit).error | Should -Be 'bulletin_invalid'
+        }
+        finally { $script:MojazLibrary = $previousLibrary }
+    }
+
+    It 'reviews a batch against its mapped bulletin columns and appends it only once after confirmation' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        $script:WebPasteReviewLocationLabel = 'الموقع'
+        Mock Get-MojazRowFieldPrompts {
+            @(
+                @{ Name = 'title.Text'; Label = 'العنوان'; Kind = 'text' }
+                @{ Name = 'Subject.Text'; Label = 'التفاصيل'; Kind = 'text' }
+                @{ Name = 'location[1]'; Label = $script:WebPasteReviewLocationLabel; Kind = 'text' }
+                @{ Name = 'mojaz_img'; Label = 'الصورة'; Kind = 'media' }
+            )
+        }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'paste-bulletins.json' }
+        $previousLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز المحطة').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $pasteRequest = {
+                param($arguments)
+                $line = @{ op = 'bulletin.paste'; args = $arguments } | ConvertTo-Json -Compress
+                return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json -AsHashtable)
+            }
+            $request = @{ actor = 4321; action = 'preview'; id = $id; revision = 1; format = 'table'; text = "أول`t`"خبر أول`nسطر تابع`"`tالاستوديو`nغير مطابق`tناقص`n`tخبر ثانٍ`tالميدان" }
+            $preview = & $pasteRequest $request
+            $preview.ok | Should -BeTrue
+            $preview.data.preview.rows.Count | Should -Be 2
+            $preview.data.preview.rows[1]['location[1]'] | Should -Be 'الميدان'
+            $preview.data.preview.skippedLines | Should -Be @(2)
+            @($script:MojazLibrary.Bulletins[0].Rows).Count | Should -Be 0
+            Test-Path -LiteralPath (Get-MojazLibraryFile) | Should -BeFalse
+
+            $request.action = 'commit'
+            $request.review = $preview.data.preview.review
+            $paste = $request.text
+            $request.text = $paste.Replace('الميدان', 'موقع جديد')
+            (& $pasteRequest $request).error | Should -Be 'bulletin_stale'
+            $request.text = $paste
+            $script:WebPasteReviewLocationLabel = 'المصدر'
+            (& $pasteRequest $request).error | Should -Be 'bulletin_stale'
+            $script:WebPasteReviewLocationLabel = 'الموقع'
+
+            Mock Write-BridgeValidatedJson { $false }
+            (& $pasteRequest $request).error | Should -Be 'bulletin_save_failed'
+            @($script:MojazLibrary.Bulletins[0].Rows).Count | Should -Be 0
+            Mock Write-BridgeValidatedJson { $true }
+            $saved = & $pasteRequest $request
+            $saved.ok | Should -BeTrue
+            $saved.data.savedPage | Should -Be 0
+            $read = @{ op = 'bulletin.edit'; args = @{ actor = 4321; action = 'read'; id = $id; page = 0 } } | ConvertTo-Json -Compress
+            $board = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $read | ConvertFrom-Json -AsHashtable).data
+            $board.rows[0].values['title.Text'] | Should -Be 'أول'
+            $board.rows[1].values['location[1]'] | Should -Be 'الميدان'
+            $board.revision | Should -Be 2
+            $script:MojazLibrary.Bulletins[0].Rows[0].Text | Should -Be "خبر أول`nسطر تابع"
+            $script:MojazLibrary.Bulletins[0].Rows[0].ImageMode | Should -Be 'inherit'
+            (& $pasteRequest $request).error | Should -Be 'bulletin_stale'
+            @($script:MojazLibrary.Bulletins[0].Rows).Count | Should -Be 2
+        }
+        finally { $script:MojazLibrary = $previousLibrary }
+    }
+
+    It 'uses the bot timing rules and updates only the selected bulletin without an air operation' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazRowFieldPrompts { @() }
+        Mock Get-MojazSceneTiming { $null }
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'timed-bulletins.json' }
+        Mock Invoke-ShowTemplateResult { throw 'Editing timings must never air the bulletin' }
+        $previousLibrary = $script:MojazLibrary
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز التوقيت' -DelayFrames 200).Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            Set-JsonProp $script:MojazLibrary.Bulletins[0] 'IntroExtraSeconds' 6
+            $timingRequest = {
+                param($arguments)
+                $line = @{ op = 'bulletin.edit'; args = $arguments } | ConvertTo-Json -Depth 6 -Compress
+                return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json)
+            }
+            $read = & $timingRequest @{ actor = 4321; action = 'read'; id = $id }
+            $read.data.timing.delayFrames | Should -Be 200
+            $read.data.timing.introExtraFrames | Should -BeGreaterThan 0
+            $payload = @{ actor = 4321; action = 'timing'; id = $id; revision = 1; timing = @{
+                    delayFrames = 0; introExtraFrames = 0; lastRowFrames = 45; syncToLoop = $true
+                } }
+            (& $timingRequest $payload).error | Should -Be 'bulletin_refused'
+            $payload.timing.delayFrames = 225
+            $saved = & $timingRequest $payload
+            $saved.ok | Should -BeTrue
+            $saved.data.timing.delayFrames | Should -Be 225
+            $saved.data.timing.introExtraFrames | Should -Be 0
+            $saved.data.timing.lastRowFrames | Should -Be 45
+            $saved.data.timing.syncToLoop | Should -BeTrue
+            $stored = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+            (Get-JsonProp $stored 'IntroExtraSeconds') | Should -BeNullOrEmpty
+            Get-MojazDelayFrames -Bulletin $stored | Should -Be 225
+            Get-MojazLastRowFrames -Bulletin $stored | Should -Be 45
+            Test-MojazSyncToLoop -Bulletin $stored | Should -BeTrue
+            (& $timingRequest $payload).error | Should -Be 'bulletin_stale'
+
+            Remove-JsonProp $stored 'DelayFrames'
+            $syncOnly = & $timingRequest @{ actor = 4321; action = 'timing'; id = $id; revision = $stored.Revision; timing = @{ syncToLoop = $false } }
+            $syncOnly.ok | Should -BeTrue
+            $inherited = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $id
+            (Get-JsonProp $inherited 'DelayFrames') | Should -BeNullOrEmpty
+            (Get-MojazDelayFrames -Bulletin $inherited) | Should -Be (Get-MojazDelayFrames)
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
         }
         finally { $script:MojazLibrary = $previousLibrary }
     }

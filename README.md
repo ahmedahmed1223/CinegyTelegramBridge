@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.83.0
+
+The web control room has a Live Broadcast page with an output player, signal health, and recent outages. Set the web host's `LivePlaybackUrl` configuration value or launch argument `--LivePlaybackUrl` to a browser-facing HTTPS HLS or MP4 URL without credentials or query parameters. For HLS, serve the playlist and its resources from that origin and allow the web app's origin with CORS. The player contacts the media host directly. The bridge's ingest and relay destinations stay private.
+
+Newsroom now previews rows pasted from a spreadsheet or the bot's headline format before saving the batch. The built-in bulletin design also has frame-based timing controls that save to the shared library.
+
 ## Version 8.82.0
 
 Open a saved bulletin in Newsroom or create one from the bulletin library. The table follows the design's field order. Operators can edit its text, reorder rows, skip or remove a story, and rename or copy a bulletin. Edits save to the Telegram library and check its revision before writing. Existing media stays attached when editing text. Alternate designs can be prepared in the editor, and the bridge blocks on-air playback for them until their scene is supported.

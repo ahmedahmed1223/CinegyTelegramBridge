@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.83.0'; Items = @('Open Live Broadcast to watch the configured output and check the signal and recent outages.', 'Paste bulletin rows into Newsroom and review which cells and rows will be saved. Set row, entrance and last-row timing on the built-in design.') },
                 @{ Version = '8.82.0'; Items = @('Open or create a bulletin in Newsroom. Edit the text columns, reorder stories, and exclude a row from playback. Refresh the bulletin if another operator saved a newer version.') },
                 @{ Version = '8.81.0'; Items = @('Open a ticker draft in Newsroom, edit and reorder the headlines, or hand it to the next editor. Review the list before publishing. If another system changed the live ticker, review the current headlines and choose how to publish.') },
                 @{ Version = '8.80.1'; Items = @('The web interface uses IBM Plex for text, counters and timecodes.') },
@@ -323,6 +324,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.83.0'; Items = @('افتح البث المباشر من قائمة الويب لمشاهدة الخرج المهيّأ ومتابعة الإشارة وآخر الانقطاعات.', 'الصق صفوف الموجز في غرفة الأخبار وراجع الأعمدة قبل إضافتها. اضبط مدة الصف والدخول والصف الأخير في التصميم الافتراضي.') },
                 @{ Version = '8.82.0'; Items = @('افتح الموجز أو أنشئه في غرفة الأخبار. عدّل الأعمدة النصية ورتّب الأخبار أو استبعد صفًا من التشغيل. حدّث الموجز إذا سبقك مشغّل آخر إلى حفظ نسخة أحدث.') },
                 @{ Version = '8.81.0'; Items = @('افتح مسودة شريط الأخبار من غرفة الأخبار، وعدّل الأخبار ورتّبها أو سلّمها للمحرّر التالي. راجع القائمة قبل النشر. إذا غيّر مصدر آخر الشريط المنشور، راجع أخباره واختر طريقة النشر.') },
                 @{ Version = '8.80.1'; Items = @('تستخدم واجهة الويب خط IBM Plex في النصوص والعدادات والتوقيت.') },

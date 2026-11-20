@@ -69,6 +69,13 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+        bulletin.MapPost("/paste", PasteBulletin)
+            .Produces<BulletinPasteResult>()
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<IResult> List(string view, int? page, IBridgeChannel bridge, HttpContext http)
@@ -115,7 +122,7 @@ public static class ContentEndpoints
         var reply = await bridge.SendAsync("bulletin.edit", new
         {
             actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Page,
-            request.RowId, request.Name, request.Design, request.Values
+            request.RowId, request.Name, request.Design, request.Values, request.Timing
         }, http.RequestAborted);
         if (!reply.Ok) return BulletinError(reply);
         http.Response.Headers.CacheControl = "no-store";
@@ -130,11 +137,22 @@ public static class ContentEndpoints
         return TypedResults.Ok(reply.Data.Deserialize<BulletinDesignOptions>(JsonDefaults.Options));
     }
 
+    private static async Task<IResult> PasteBulletin(BulletinPasteRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("bulletin.paste", new
+        {
+            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Format, request.Text, request.Review
+        }, http.RequestAborted);
+        if (!reply.Ok) return BulletinError(reply);
+        http.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Ok(reply.Data.Deserialize<BulletinPasteResult>(JsonDefaults.Options));
+    }
+
     private static IResult BulletinError(BridgeReply reply) => reply.Error switch
     {
         "forbidden" => ApiErrors.Of(403, reply.Error),
         "not_found" or "content_disabled" => ApiErrors.Of(404, reply.Error),
-        "bulletin_invalid" => ApiErrors.Of(400, reply.Error),
+        "bulletin_invalid" or "bulletin_paste_invalid" => ApiErrors.Of(400, reply.Error),
         "bulletin_refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
         "bulletin_stale" => ApiErrors.Of(409, reply.Error),
         "bulletin_save_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),

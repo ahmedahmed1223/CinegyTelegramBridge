@@ -1,6 +1,6 @@
 import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBroadcast, IconDevices, IconLayoutGrid, IconNews, IconUsersGroup } from '@tabler/icons-react'
+import { IconBroadcast, IconDevices, IconDeviceTv, IconLayoutGrid, IconNews, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
 import { isAdmin, useSession } from '../api/session'
 import { useNow } from '../hooks/useNow'
@@ -14,6 +14,7 @@ import classes from './Shell.module.css'
 const navigation = [
   { to: '/newsroom', label: 'غرفة الأخبار', description: 'العواجل والموجز والشريط', icon: IconNews, admin: false },
   { to: '/air', label: 'لوحة الهواء', description: 'الطبقات وحالة المحرك', icon: IconBroadcast, admin: false },
+  { to: '/live', label: 'البث المباشر', description: 'مشاهدة الخرج ومراقبة الإشارة', icon: IconDeviceTv, admin: false },
   { to: '/templates', label: 'القوالب', description: 'عرض الرسوم على الهواء', icon: IconLayoutGrid, admin: false },
   { to: '/sessions', label: 'الجلسات', description: 'المتصفحات المسجّلة', icon: IconDevices, admin: false },
   { to: '/accounts', label: 'الحسابات', description: 'دخول الويب بكلمة مرور', icon: IconUsersGroup, admin: true },

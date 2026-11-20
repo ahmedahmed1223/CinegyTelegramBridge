@@ -5,6 +5,25 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/live": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePlayback"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me/password": {
       "put": {
         "tags": [
@@ -1256,6 +1275,85 @@
           }
         }
       }
+    },
+    "/api/content/bulletins/paste": {
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulletinPasteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulletinPasteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1288,7 +1386,8 @@
           "publishedAt",
           "telegram",
           "cinegy",
-          "layers"
+          "layers",
+          "feed"
         ],
         "type": "object",
         "properties": {
@@ -1314,6 +1413,9 @@
             "items": {
               "$ref": "#/components/schemas/LayerStatus"
             }
+          },
+          "feed": {
+            "$ref": "#/components/schemas/FeedStatus"
           }
         },
         "nullable": true
@@ -1384,11 +1486,13 @@
           "revision",
           "onAir",
           "playbackSupported",
+          "headlinePaste",
           "fields",
           "rows",
           "page",
           "pageCount",
-          "total"
+          "total",
+          "timing"
         ],
         "type": "object",
         "properties": {
@@ -1409,6 +1513,9 @@
             "type": "boolean"
           },
           "playbackSupported": {
+            "type": "boolean"
+          },
+          "headlinePaste": {
             "type": "boolean"
           },
           "fields": {
@@ -1434,6 +1541,9 @@
           "total": {
             "type": "integer",
             "format": "int32"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/BulletinTiming"
           }
         }
       },
@@ -1485,6 +1595,9 @@
             },
             "default": null,
             "nullable": true
+          },
+          "timing": {
+            "$ref": "#/components/schemas/BulletinTimingInput"
           }
         }
       },
@@ -1504,6 +1617,93 @@
           },
           "kind": {
             "type": "string"
+          }
+        }
+      },
+      "BulletinPastePreview": {
+        "required": [
+          "review",
+          "fields",
+          "rows",
+          "skippedLines"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulletinField"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "skippedLines": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "BulletinPasteRequest": {
+        "required": [
+          "action",
+          "id",
+          "revision",
+          "format",
+          "text"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "format": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "BulletinPasteResult": {
+        "required": [
+          "preview",
+          "savedPage"
+        ],
+        "type": "object",
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/BulletinPastePreview"
+          },
+          "savedPage": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         }
       },
@@ -1535,6 +1735,87 @@
             "type": "boolean"
           }
         }
+      },
+      "BulletinTiming": {
+        "required": [
+          "delayFrames",
+          "introExtraFrames",
+          "lastRowFrames",
+          "syncToLoop",
+          "loopFrames",
+          "fps",
+          "effectiveIntroFrames",
+          "effectiveLastFrames",
+          "fitNote"
+        ],
+        "type": "object",
+        "properties": {
+          "delayFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "introExtraFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastRowFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "syncToLoop": {
+            "type": "boolean"
+          },
+          "loopFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fps": {
+            "type": "number",
+            "format": "double"
+          },
+          "effectiveIntroFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "effectiveLastFrames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fitNote": {
+            "type": "string"
+          }
+        },
+        "nullable": true
+      },
+      "BulletinTimingInput": {
+        "type": "object",
+        "properties": {
+          "delayFrames": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "introExtraFrames": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "lastRowFrames": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "syncToLoop": {
+            "type": "boolean",
+            "default": null,
+            "nullable": true
+          }
+        },
+        "default": null,
+        "nullable": true
       },
       "ChangePasswordRequest": {
         "required": [
@@ -1743,6 +2024,74 @@
           }
         }
       },
+      "FeedOutage": {
+        "required": [
+          "kind",
+          "startedAt",
+          "endedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endedAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FeedStatus": {
+        "required": [
+          "state",
+          "activeSource",
+          "backupConfigured",
+          "intervalMinutes",
+          "lastCheckAt",
+          "outageCount",
+          "outageSeconds",
+          "recent"
+        ],
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "activeSource": {
+            "type": "string"
+          },
+          "backupConfigured": {
+            "type": "boolean"
+          },
+          "intervalMinutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastCheckAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "outageSeconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedOutage"
+            }
+          }
+        },
+        "nullable": true
+      },
       "LayerStatus": {
         "required": [
           "layer",
@@ -1778,6 +2127,18 @@
           },
           "by": {
             "type": "string"
+          }
+        }
+      },
+      "LivePlayback": {
+        "required": [
+          "url"
+        ],
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -2388,6 +2749,9 @@
   },
   "tags": [
     {
+      "name": "Status"
+    },
+    {
       "name": "Accounts"
     },
     {
@@ -2395,9 +2759,6 @@
     },
     {
       "name": "Auth"
-    },
-    {
-      "name": "Status"
     },
     {
       "name": "Sessions"

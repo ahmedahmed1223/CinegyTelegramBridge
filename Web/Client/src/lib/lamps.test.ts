@@ -9,6 +9,7 @@ const status = (overrides: Partial<BridgeStatus['cinegy']> = {}, telegram = 'con
   telegram: { state: telegram, failures: 3 },
   cinegy: { address: '10.0.0.5', channel: 0, health: 'healthy', lastReadAt: 900, freshUntil: 2_000, ...overrides },
   layers: [],
+  feed: null,
 })
 
 describe('bridgeLamp', () => {

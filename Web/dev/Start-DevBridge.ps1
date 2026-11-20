@@ -64,11 +64,11 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
     }
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureRegistry
 @'
-<Scene LoopStartFrame="25" LoopEndFrame="100">
+<CinegyTitler><Scene Fps="25" Duration="125" LoopStartFrame="25" LoopEndFrame="100">
   <Var Name="title.Text" Type="String" /><Title Text="${title.Text}" />
   <Var Name="Subject.Text" Type="String" /><Title Text="${Subject.Text}" />
   <Var Name="mojaz_img" Type="File" /><Plate File="${mojaz_img}" />
-</Scene>
+</Scene></CinegyTitler>
 '@ | Set-Content -LiteralPath (Join-Path $runtime 'mojaz.cintitle')
 @'
 <Scene LoopStartFrame="25" LoopEndFrame="100">
@@ -150,6 +150,11 @@ $script:WebChannelPipeName = $PipeName
 Start-WebChannel
 
 $started = Get-Date
+Set-JsonProp (Get-LiveStreamConfig) 'SourceUrl' 'https://example.invalid/simulated-output.m3u8'
+$script:LastOutputMonitorAt = $started.AddMinutes(-2)
+$script:StreamOutages = New-BridgeOutageLedger
+Open-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $started.AddMinutes(-47) | Out-Null
+Close-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $started.AddMinutes(-46) | Out-Null
 $script:RuntimeState.Monitoring.TelegramConnectionState = 'connected'
 $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
 $script:OnAir[1] = [pscustomobject]@{ Key = 'شعار القناة'; At = $started.AddMinutes(-47); UserId = $OwnerId; Source = 'bridge' }

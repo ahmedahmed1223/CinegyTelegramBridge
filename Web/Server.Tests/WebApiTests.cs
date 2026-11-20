@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using CinegyBridge.Web.Endpoints;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CinegyBridge.Web.Tests;
@@ -17,6 +18,34 @@ public sealed class SignInTests : IDisposable
         var browser = await _app.BrowserAsync();
         var response = await browser.Client.GetAsync("/api/status");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Only_a_signed_in_viewer_receives_the_configured_playback_url()
+    {
+        using var configured = _app.WithWebHostBuilder(host => host.UseSetting("LivePlaybackUrl", "https://media.example.test/output/main.m3u8"));
+        using var client = configured.CreateClient(new() { BaseAddress = new Uri("http://localhost") });
+        using var denied = await client.GetAsync("/api/live");
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        Assert.Contains("https://media.example.test", denied.Headers.GetValues("Content-Security-Policy").Single());
+
+        await _app.AddPasswordAccountAsync("desk", WebApp.Operator);
+        var browser = new Browser(client);
+        await browser.RefreshSessionAsync();
+        using var login = await browser.PostAsync("/api/auth/password", new PasswordSignInRequest("desk", "correct horse battery"));
+        login.EnsureSuccessStatusCode();
+        var playback = await client.GetFromJsonAsync<LivePlayback>("/api/live");
+        Assert.Equal("https://media.example.test/output/main.m3u8", playback!.Url);
+    }
+
+    [Theory]
+    [InlineData("http://media.example.test/output/main.m3u8")]
+    [InlineData("https://name:secret@media.example.test/output.m3u8")]
+    [InlineData("https://media.example.test/output.m3u8?key=secret")]
+    [InlineData("file:///C:/Station/source.m3u8")]
+    public void Playback_configuration_refuses_insecure_or_credentialed_sources(string url)
+    {
+        Assert.Null(WebOptions.ParsePlaybackUri(url));
     }
 
     [Fact]

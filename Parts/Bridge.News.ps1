@@ -93,6 +93,17 @@ function Test-NewsTickerDraftOpen {
 }
 
 function Remove-NewsTickerDraft {
+    param([switch]$RequireRemoved)
+    if ($RequireRemoved) {
+        try {
+            if (Test-Path -LiteralPath $script:newsDraftFile -ErrorAction Stop) {
+                Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction Stop
+            }
+        }
+        catch { return $false }
+        $script:NewsTickerDraft = $null
+        return $true
+    }
     $script:NewsTickerDraft = $null
     Remove-Item -LiteralPath $script:newsDraftFile -Force -ErrorAction SilentlyContinue
 }
@@ -263,12 +274,16 @@ function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[Valid
     return [pscustomobject]@{Success=$true;Count=$draft.Items.Count;Error=''}
 }
 
-function Clear-NewsTickerDraftItems { param([long]$ChatId,[long]$UserId)
-    if (-not (Get-NewsTickerDraft -UserId $UserId)) { return $false }
-    if (-not (Test-Admin -ChatId $ChatId -UserId $UserId) -and -not (Get-Setting 'AllowOperatorsClearAllNews')) { return $false }
-    $script:NewsTickerDraft.Items = @()
-    $script:NewsTickerDraft.UpdatedAt = (Get-Date).ToString('o')
-    return (Save-NewsTickerDraft)
+function Test-NewsTickerClearAccess {
+    param([long]$ChatId, [long]$UserId)
+    return (Test-Admin -ChatId $ChatId -UserId $UserId) -or [bool](Get-Setting 'AllowOperatorsClearAllNews')
+}
+
+function Clear-NewsTickerDraftItems {
+    param([long]$ChatId, [long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or -not (Test-NewsTickerClearAccess -ChatId $ChatId -UserId $UserId)) { return $false }
+    return (Set-NewsTickerDraftItems -Draft $draft -Items @() -ClearSchedule)
 }
 
 function Test-NewsSheetWriteConfigured {
@@ -477,6 +492,7 @@ function Import-NewsLockRequest {
         $script:NewsLockRequest = @{
             RequesterUserId = [long]$read['RequesterUserId']; RequesterChatId = [long](Get-JsonProp $read 'RequesterChatId')
             OwnerUserId = [long]$read['OwnerUserId']; OwnerChatId = [long](Get-JsonProp $read 'OwnerChatId')
+            DraftId = [string](Get-JsonProp $read 'DraftId')
             RequestedAt = $stamp
         }
         Write-BridgeLog "Restored a pending news lock request from $($read['RequesterUserId']) (requested $stamp)"
@@ -512,6 +528,11 @@ function Request-NewsLockRelease {
 
     $minutes = [math]::Max(1, (Get-SettingInt 'NewsLockRequestMinutes' 1))
     $existing = $script:NewsLockRequest
+    if ($existing -and -not (Test-NewsLockRequestDraft -Request $existing -Draft $draft)) {
+        $script:NewsLockRequest = $null
+        Save-NewsLockRequest | Out-Null
+        $existing = $null
+    }
     if ($existing) {
         if ([long]$existing.RequesterUserId -ne $UserId) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'news.unlockPending' $(Get-UserDisplayName -UserId ([long]$existing.RequesterUserId))) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
@@ -530,6 +551,7 @@ function Request-NewsLockRelease {
     $script:NewsLockRequest = @{
         RequesterUserId = $UserId; RequesterChatId = $ChatId
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
+        DraftId = [string](Get-JsonProp $draft 'Id')
         RequestedAt = (Get-Date)
     }
     # The auto-grant promise below only holds if the request survives a
@@ -549,6 +571,12 @@ function Request-NewsLockRelease {
     $persistNote = if ($requestPersisted) { '' } else { "`n$(T news.requestNotSaved)" }
     Send-TelegramMessage -ChatId $ChatId -Text (T 'news.requestSent' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes') $persistNote) -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId)
     return $true
+}
+
+function Test-NewsLockRequestDraft {
+    param($Request, $Draft)
+    return [long](Get-JsonProp $Request 'OwnerUserId') -eq [long](Get-JsonProp $Draft 'OwnerUserId') -and
+        [string](Get-JsonProp $Request 'DraftId') -ceq [string](Get-JsonProp $Draft 'Id')
 }
 
 function Complete-NewsLockRelease {
@@ -574,12 +602,9 @@ function Complete-NewsLockRelease {
 
     $draft = Get-NewsTickerDraft
     if ($draft -and (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $draft 'OwnerUserId')))) { return $false }
-    if ($draft -and [long]$draft.OwnerUserId -ne [long]$request.OwnerUserId) {
-        # The draft changed hands while the window was open - the owner
-        # published or cancelled, and somebody uninvolved started a fresh one.
-        # Granting here would delete a third party's work to settle an argument
-        # they were never part of, so the request dies instead.
-        Write-BridgeLog "News lock request from $($request.RequesterUserId) lapsed: the draft moved from $($request.OwnerUserId) to $($draft.OwnerUserId)" 'WARN'
+    if ($draft -and -not (Test-NewsLockRequestDraft -Request $request -Draft $draft)) {
+        # A fresh draft may belong to the same person who held the previous one.
+        Write-BridgeLog "News lock request from $($request.RequesterUserId) lapsed: the requested draft was replaced or changed owners" 'WARN'
         Send-TelegramMessage -ChatId ([long]$request.RequesterChatId) -Text (T 'news.ownerChanged') `
             -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId ([long]$request.RequesterChatId) -UserId ([long]$request.RequesterUserId))
         return $false
@@ -620,9 +645,9 @@ function Resolve-NewsLockRequestOnRelease {
         their favour and the slot is held for them exactly as a granted
         hand-over holds it.
     #>
-    param([Parameter(Mandatory)][long]$OwnerUserId, [Parameter(Mandatory)][string]$Text)
+    param($Draft, [Parameter(Mandatory)][string]$Text)
     $request = $script:NewsLockRequest
-    if (-not $request -or [long]$request.OwnerUserId -ne $OwnerUserId) { return 0 }
+    if (-not $request -or -not (Test-NewsLockRequestDraft -Request $request -Draft $Draft)) { return 0 }
     $script:NewsLockRequest = $null
     if (-not (Save-NewsLockRequest)) {
         Write-BridgeLog 'Settled news lock request could not be cleared from disk; it may be restored on the next start.' 'ERROR'
@@ -676,6 +701,7 @@ function Open-NewsTickerDraftToAll {
     if (-not $draft) { return $false }
     $owner = [long](Get-JsonProp $draft 'OwnerUserId')
     $ownerChat = [long](Get-JsonProp $draft 'OwnerChatId')
+    $ownedDraft = $draft
     $draft = Copy-NewsTickerDraft -Draft $draft
     $count = @($draft.Items).Count
     $draft['IsOpen'] = $true
@@ -697,7 +723,7 @@ function Open-NewsTickerDraftToAll {
     $script:NewsTickerDraft = $draft
     Write-BridgeLog "User $UserId opened the news draft ($count item(s)) to everyone"
     Add-AuditEntry (T 'news.draftOpenedAudit' $(Format-UserAuditActor -UserId $UserId) $(Get-ArabicCountNoun -Count $count -One 'خبر' -Two 'خبران' -Few 'أخبار' -Many 'خبرًا' -EnglishOne 'headline' -EnglishMany 'headlines'))
-    Resolve-NewsLockRequestOnRelease -OwnerUserId $owner `
+    Resolve-NewsLockRequestOnRelease -Draft $ownedDraft `
         -Text (T 'news.draftOpened' $(Get-UserDisplayName -UserId $owner)) | Out-Null
     return $true
 }
@@ -2251,7 +2277,8 @@ function Get-NewsPastePlan {
     $draft = Get-NewsTickerDraft -UserId $UserId
     $inDraft = [Collections.Generic.HashSet[string]]::new([string[]]@(if ($draft) { $draft.Items }), [StringComparer]::Ordinal)
     $new = @(@($Items) | Where-Object { -not $inDraft.Contains([string]$_) })
-    $room = [math]::Max(0, (Get-SettingInt 'NewsMaxItems' 1) - $inDraft.Count)
+    $draftCount = if ($draft) { @($draft.Items).Count } else { 0 }
+    $room = [math]::Max(0, (Get-SettingInt 'NewsMaxItems' 1) - $draftCount)
     return [pscustomobject]@{
         New = @($new | Select-Object -First $room)
         AlreadyInDraft = @($Items).Count - $new.Count

@@ -596,6 +596,7 @@ Describe 'Web channel: the pipe' {
         Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsDeleteNews' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsRestoreNews' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowOperatorsClearAllNews' }
         Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'NewsSheetCsvUrl' }
         Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'NewNewsItemAtTop' }
         Mock Test-Authorized { $UserId -in @(4321, 4322) }
@@ -692,6 +693,79 @@ Describe 'Web channel: the pipe' {
             $script:newsBackupDirectory = $previousBackup
             $script:NewsPaused = $previousShelf
             $script:newsPausedFile = $previousShelfFile
+        }
+    }
+
+    It 'reviews a pasted ticker block and applies only the reviewed order and permitted clear' {
+        $oldDraft = $script:NewsTickerDraft
+        $oldPath = $script:newsDraftFile
+        $oldRequest = $script:NewsLockRequest
+        $oldRequestPath = $script:newsLockRequestFile
+        $oldGrant = $script:NewsLockGrant
+        $script:NewsLockRequest = $null
+        $script:NewsLockGrant = $null
+        $script:newsLockRequestFile = Join-Path $TestDrive 'web-paste-lock-request.json'
+        $script:newsDraftFile = Join-Path $TestDrive 'web-paste-draft.json'
+        $script:NewsTickerDraft = @{ Id = 'web-paste'; OwnerUserId = 4321; Items = @('قديم') }
+        $script:webPasteAtTop = $true
+        $script:webPasteCanClear = $false
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $false }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableNewsTickerManagement' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -in 'AllowOperatorsDeleteNews', 'AllowOperatorsRestoreNews' }
+        Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'NewsSheetCsvUrl' }
+        Mock Get-Setting { $script:webPasteCanClear } -ParameterFilter { $Name -eq 'AllowOperatorsClearAllNews' }
+        Mock Get-Setting { $script:webPasteAtTop } -ParameterFilter { $Name -eq 'NewNewsItemAtTop' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
+        Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsLockGrantHoldSeconds' }
+        $requestPaste = {
+            param($arguments)
+            $line = @{ op = 'ticker.edit'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $revision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft
+            $inputText = "1. أول`n2. ثان`nقديم`nأول"
+            $request = @{ actor = 4321; action = 'preview_paste'; text = $inputText; revision = $revision }
+            $request.text = "أول | جزء`nثان"
+            (& $requestPaste $request).error | Should -Be 'ticker_paste_separator'
+            $request.text = $inputText
+            $review = (& $requestPaste $request).data.paste
+            $review.items | Should -Be @('أول', 'ثان')
+            $review.duplicates | Should -Be 2
+            $review.atTop | Should -BeTrue
+            $script:NewsTickerDraft.Items | Should -Be @('قديم')
+            $request.action = 'apply_paste'
+            $request.review = $review.review
+            $script:webPasteAtTop = $false
+            (& $requestPaste $request).error | Should -Be 'ticker_stale'
+            $script:webPasteAtTop = $true
+            $applied = & $requestPaste $request
+            $applied.data.draft.items | Should -Be @('أول', 'ثان', 'قديم')
+            $clear = @{ actor = 4321; action = 'clear'; revision = $applied.data.draft.revision }
+            (& $requestPaste $clear).error | Should -Be 'forbidden'
+            $script:webPasteCanClear = $true
+            $script:NewsTickerDraft.PublishAt = [datetimeoffset]::UtcNow.AddHours(1).ToString('o')
+            (& $requestPaste $clear).error | Should -Be 'ticker_stale'
+            $clear.revision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft
+            $cleared = & $requestPaste $clear
+            $cleared.data.draft.items | Should -BeNullOrEmpty
+            $cleared.data.draft.scheduledAt | Should -BeNullOrEmpty
+            $script:NewsLockRequest = @{ DraftId = 'web-paste'; OwnerUserId = 4321; RequesterUserId = 4322; RequesterChatId = 0 }
+            Save-NewsLockRequest | Should -BeTrue
+            $discarded = & $requestPaste @{ actor = 4321; action = 'discard'; revision = $cleared.data.draft.revision }
+            $discarded.data.state | Should -Be 'locked'
+            Test-Path -LiteralPath $script:newsDraftFile | Should -BeFalse
+            Test-Path -LiteralPath $script:newsLockRequestFile | Should -BeFalse
+            (Get-NewsLockReservation).UserId | Should -Be 4322
+        }
+        finally {
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldPath
+            $script:NewsLockRequest = $oldRequest
+            $script:newsLockRequestFile = $oldRequestPath
+            $script:NewsLockGrant = $oldGrant
         }
     }
 

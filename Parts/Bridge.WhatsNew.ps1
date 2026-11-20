@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.90.0'; Items = @('Paste several headlines into the web ticker draft and review the order and skipped lines before adding them. Draft options now include clear and discard with a downloadable text copy.') },
                 @{ Version = '8.89.0'; Items = @('Compare headlines from Google Sheets with the current draft or publication, then confirm the desired action in the web ticker editor.') },
                 @{ Version = '8.88.0'; Items = @('Open Ticker Backups on the web to compare a saved copy with the published headlines and confirm a restore. Restoring keeps editorial drafts available.') },
                 @{ Version = '8.87.0'; Items = @('Open Ticker Sets on the web to save a draft by name or load a shared set into the current draft. The set owner or an administrator can update or delete the set.') },
@@ -330,6 +331,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.90.0'; Items = @('ألصق عدة أخبار في مسودة الشريط على الويب وراجع ترتيبها وما استُبعد منها قبل الإضافة. تتضمن خيارات المسودة التفريغ والإلغاء مع تنزيل النص قبل التأكيد.') },
                 @{ Version = '8.89.0'; Items = @('قارن أخبار Google Sheets بالمسودة أو الشريط المنشور، ثم أكّد التحميل أو النشر من محرّر الشريط على الويب.') },
                 @{ Version = '8.88.0'; Items = @('افتح النسخ الاحتياطية للشريط على الويب لمقارنة النسخة بالشريط المنشور ثم تأكيد الاستعادة. تُحفظ مسودات المحرّرين عند الاستعادة.') },
                 @{ Version = '8.87.0'; Items = @('افتح مجموعات الشريط من الويب لتحفظ المسودة باسم أو تحمّل مجموعة مشتركة إلى المسودة. يمكن لمن حفظ المجموعة أو للمشرف تحديثها وحذفها.') },

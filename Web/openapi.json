@@ -3288,7 +3288,8 @@
           "scheduledAt",
           "canRemove",
           "maxItems",
-          "paused"
+          "paused",
+          "canClear"
         ],
         "type": "object",
         "properties": {
@@ -3315,6 +3316,9 @@
           },
           "paused": {
             "$ref": "#/components/schemas/TickerPausedPage"
+          },
+          "canClear": {
+            "type": "boolean"
           }
         },
         "nullable": true
@@ -3372,7 +3376,8 @@
           "conflict",
           "sheetFailed",
           "canRestore",
-          "canPullSheet"
+          "canPullSheet",
+          "paste"
         ],
         "type": "object",
         "properties": {
@@ -3400,8 +3405,49 @@
           },
           "canPullSheet": {
             "type": "boolean"
+          },
+          "paste": {
+            "$ref": "#/components/schemas/TickerPastePreview"
           }
         }
+      },
+      "TickerPastePreview": {
+        "required": [
+          "review",
+          "items",
+          "duplicates",
+          "tooLong",
+          "noRoom",
+          "atTop"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicates": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tooLong": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "noRoom": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "atTop": {
+            "type": "boolean"
+          }
+        },
+        "nullable": true
       },
       "TickerPausedPage": {
         "required": [

@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Button, Group, Modal, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { ActionIcon, Alert, Button, Group, Menu, Modal, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconHistory, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
@@ -9,6 +9,7 @@ import { messageFor } from '../../api/messages'
 import { formatDateTime } from '../../lib/time'
 import classes from './NewsroomPage.module.css'
 import { TickerBackups } from './TickerBackups'
+import { TickerPaste } from './TickerPaste'
 import { TickerSheet } from './TickerSheet'
 import { TickerSets } from './TickerSets'
 
@@ -53,6 +54,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const [showSets, setShowSets] = useState(false)
   const [showBackups, setShowBackups] = useState(false)
   const [showSheet, setShowSheet] = useState(false)
+  const [showPaste, setShowPaste] = useState(false)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -142,6 +144,29 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       ),
       labels: { confirm: 'تسليم المسودة', cancel: 'إلغاء' },
       onConfirm: () => void send({ action: 'handover', revision: current.revision }),
+    })
+  }
+
+  function confirmDraftRemoval(current: Draft, action: 'clear' | 'discard') {
+    const discard = action === 'discard'
+    const label = discard ? 'إلغاء المسودة' : 'تفريغ المسودة'
+    modals.openConfirmModal({
+      title: label,
+      children: <Stack gap="xs">
+        <Text size="sm">{discard ? 'سيُغلق التحرير وتُحذف المسودة.' : 'ستُحذف أخبار المسودة ويظل التحرير مفتوحًا.'}</Text>
+        {current.scheduledAt && <Text size="sm">سيُلغى موعد النشر المجدول.</Text>}
+        {current.items.length > 0 && <Button variant="subtle" size="compact-sm" onClick={() => {
+          const url = URL.createObjectURL(new Blob([current.items.join('\r\n')], { type: 'text/plain;charset=utf-8' }))
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'ticker-draft.txt'
+          link.click()
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+        }}>تنزيل نص المسودة</Button>}
+      </Stack>,
+      labels: { confirm: label, cancel: 'رجوع' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => void send({ action, revision: current.revision }),
     })
   }
 
@@ -283,7 +308,17 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
               </Group>
             )}
             <Group justify="space-between">
-              <Button variant="default" disabled={busy || !!edit} onClick={() => confirmHandover(draft)}>تسليم المسودة</Button>
+              <Group gap="xs">
+                <Button variant="default" disabled={busy || !!edit} onClick={() => setShowPaste(true)}>لصق أخبار</Button>
+                <Menu position="bottom-start">
+                  <Menu.Target><Button variant="default" disabled={busy || !!edit}>خيارات المسودة</Button></Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item onClick={() => confirmHandover(draft)}>تسليم المسودة</Menu.Item>
+                    {draft.canClear && items.length > 0 && <Menu.Item color="red" onClick={() => confirmDraftRemoval(draft, 'clear')}>تفريغ المسودة</Menu.Item>}
+                    <Menu.Item color="red" onClick={() => confirmDraftRemoval(draft, 'discard')}>إلغاء المسودة</Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+              </Group>
               <Group gap="xs">
                 <Button variant="default" leftSection={<IconCalendarTime size={17} />} disabled={busy || !!edit}
                   onClick={() => openSchedule(draft)}>{draft.scheduledAt ? 'تغيير الموعد' : 'جدولة النشر'}</Button>
@@ -317,6 +352,9 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
           </>
         )}
       </Stack>
+      {draft && showPaste && <TickerPaste draft={draft} onClose={() => setShowPaste(false)}
+        onCommand={(body) => tickerCommand({ ...body, pausedPage })}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
       <Modal opened={!!schedule} onClose={() => { if (!busy) { setSchedule(null); setError('') } }} title="جدولة نشر شريط الأخبار">
         {schedule && <form onSubmit={(event) => {
           event.preventDefault()

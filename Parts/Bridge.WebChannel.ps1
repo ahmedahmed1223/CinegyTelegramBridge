@@ -1510,6 +1510,7 @@ function Get-WebTickerEditorState {
                 items = @(Get-JsonProp $draft 'Items' | Where-Object { $null -ne $_ })
                 scheduledAt = Get-NewsPublishAt -Draft $draft
                 canRemove = Test-NewsTickerDeleteAccess -ChatId $Actor -UserId $Actor
+                canClear = Test-NewsTickerClearAccess -ChatId $Actor -UserId $Actor
                 maxItems = Get-SettingInt 'NewsMaxItems' 1
                 paused = @{ items = $pausedItems; page = $window.Page + 1; pageCount = $window.PageCount; total = $pausedTotal; offset = $window.StartIndex }
             }
@@ -1523,6 +1524,41 @@ function Get-WebTickerEditorState {
     }
     elseif ($draft) { $data.state = 'open' }
     return $data
+}
+
+function Invoke-WebTickerPaste {
+    param([long]$Actor, [System.Collections.IDictionary]$Draft, [System.Collections.IDictionary]$Arguments, [int]$PausedPage)
+    $copy = [string](Get-JsonProp $Arguments 'text')
+    if ([string]::IsNullOrWhiteSpace($copy) -or $copy.Length -gt 8000) { return @{ ok = $false; error = 'ticker_paste_invalid' } }
+    $separator = [string](Get-Setting 'NewsItemSeparator')
+    if (-not $separator -or $copy.Contains($separator, [StringComparison]::Ordinal)) {
+        return @{ ok = $false; error = 'ticker_paste_separator' }
+    }
+    $parsed = Get-NewsPasteParse -Text $copy
+    foreach ($item in $parsed.Items) {
+        if ($item.Contains($separator, [StringComparison]::Ordinal)) { return @{ ok = $false; error = 'ticker_paste_separator' } }
+    }
+    $plan = Get-NewsPastePlan -UserId $Actor -Items $parsed.Items
+    $atTop = [bool](Get-Setting 'NewNewsItemAtTop')
+    $duplicates = $parsed.DuplicateCount + $plan.AlreadyInDraft
+    $tooLong = @($parsed.TooLong).Count
+    $reviewed = ConvertTo-Json -Compress -Depth 4 -InputObject @(
+        'ticker-paste', $Actor, (Get-NewsTickerDraftRevision -Draft $Draft), $atTop, $plan.New, $duplicates, $tooLong, $plan.NoRoom
+    )
+    $token = Get-NewsTickerReviewToken $reviewed
+    if ((Get-JsonProp $Arguments 'action') -eq 'preview_paste') {
+        $state = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage
+        $state.paste = @{
+            review = $token; items = @($plan.New); duplicates = $duplicates; tooLong = $tooLong; noRoom = $plan.NoRoom; atTop = $atTop
+        }
+        return @{ ok = $true; data = $state }
+    }
+    if ($token -cne [string](Get-JsonProp $Arguments 'review')) { return @{ ok = $false; error = 'ticker_stale' } }
+    if (-not $plan.New.Count) { return @{ ok = $false; error = 'ticker_paste_invalid' } }
+    if ((Add-NewsTickerDraftItems -UserId $Actor -Items $plan.New) -ne $plan.New.Count) {
+        return @{ ok = $false; error = 'ticker_invalid' }
+    }
+    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage }
 }
 
 function Invoke-WebTickerEdit {
@@ -1545,6 +1581,9 @@ function Invoke-WebTickerEdit {
     if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_locked' } }
     if ((Get-NewsTickerDraftRevision -Draft $draft) -cne [string](Get-JsonProp $Arguments 'revision')) {
         return @{ ok = $false; error = 'ticker_stale' }
+    }
+    if ($action -in 'preview_paste', 'apply_paste') {
+        return Invoke-WebTickerPaste -Actor $actor -Draft $draft -Arguments $Arguments -PausedPage $pausedPage
     }
     if ($action -eq 'review_conflict') {
         $live = Get-NewsTickerConfiguredSnapshot
@@ -1582,6 +1621,18 @@ function Invoke-WebTickerEdit {
         'remove' {
             if (-not (Test-NewsTickerDeleteAccess -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
             $saved = Remove-NewsTickerDraftItem -ChatId $actor -UserId $actor -Index $index
+        }
+        'clear' {
+            if (-not (Test-NewsTickerClearAccess -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+            $saved = Clear-NewsTickerDraftItems -ChatId $actor -UserId $actor
+            if ($saved) { Add-AuditEntry "Web ticker draft cleared by $(Format-UserAuditActor -UserId $actor)" }
+        }
+        'discard' {
+            $saved = Remove-NewsTickerDraft -RequireRemoved
+            if ($saved) {
+                Resolve-NewsLockRequestOnRelease -Draft $draft -Text (T 'news.youMayEdit' '') | Out-Null
+                Add-AuditEntry "Web ticker draft discarded by $(Format-UserAuditActor -UserId $actor)"
+            }
         }
         'up' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta -1 }
         'down' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta 1 }

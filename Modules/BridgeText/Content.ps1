@@ -301,6 +301,7 @@ function Add-BridgeTextContent {
     $catalogue['news.preview'] = @{ ar = '👁 معاينة'; en = '👁 Preview' }
 
     $catalogue['news.clearAll'] = @{ ar = '🧹 مسح الكل'; en = '🧹 Clear everything' }
+    $catalogue['news.confirmClearScheduledDraft'] = @{ ar = '⚠️ سيُمسح محتوى المسودة ويُلغى موعد نشرها. هل تؤكد؟'; en = '⚠️ The draft will be emptied and its scheduled publication cancelled. Confirm?' }
 
     $catalogue['news.handOverDraft'] = @{ ar = '🤝 سلّم المسودة للتالي'; en = '🤝 Hand the draft to the next person' }
 

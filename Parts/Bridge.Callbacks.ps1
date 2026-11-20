@@ -558,14 +558,26 @@ function Invoke-CallbackQuery {
             break
         }
         'news:clear' {
+            $clearDraft = Get-NewsTickerDraft -UserId $userId
+            if (-not $clearDraft -or -not (Test-NewsTickerClearAccess -ChatId $chatId -UserId $userId)) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.notAllowed')
+                break
+            }
+            $clearToken = (Get-NewsTickerDraftRevision -Draft $clearDraft).Substring(0, 20)
             $clearConfirm = @{ inline_keyboard = @(, @(
-                        @{ text = (T 'reply.yesClearDraft'); callback_data = 'news:clearconfirm'; style = 'danger' }
+                        @{ text = (T 'reply.yesClearDraft'); callback_data = "news:clearconfirm:$clearToken"; style = 'danger' }
                         @{ text = (T 'reply.cancelWord'); callback_data = 'news:refresh' }
                     )) }
-            Send-TelegramMessage -ChatId $chatId -Text (T 'reply.confirmClearDraft') -ReplyMarkup $clearConfirm
+            $clearText = if (Get-JsonProp $clearDraft 'PublishAt') { T 'news.confirmClearScheduledDraft' } else { T 'reply.confirmClearDraft' }
+            Send-TelegramMessage -ChatId $chatId -Text $clearText -ReplyMarkup $clearConfirm
             break
         }
-        'news:clearconfirm' {
+        'news:clearconfirm*' {
+            if ($data -cnotmatch '^news:clearconfirm:([A-F0-9]{20})$' -or -not (Test-NewsTickerConfirmation -UserId $userId -Token $Matches[1])) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'news.draftChanged')
+                Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+                break
+            }
             $ok = Clear-NewsTickerDraftItems -ChatId $chatId -UserId $userId
             $clearedText = if ($ok) { (T 'reply.draftCleared') } else { (T 'reply.notAllowed') }
             Send-TelegramMessage -ChatId $chatId -Text $clearedText -ReplyMarkup (Get-NewsTickerManagementKeyboard -ChatId $chatId -UserId $userId)

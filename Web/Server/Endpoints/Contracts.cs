@@ -35,9 +35,10 @@ public sealed record UrgentPlaybackResponse(UrgentRunStatus? Run, UrgentRunPrevi
 public sealed record TickerDraftRequest(string Action, string? Revision = null, int? Index = null, string? Text = null, string? Review = null,
     long? PublishAtMs = null, int? PausedPage = null);
 public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, int Total, int Offset);
-public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused);
+public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused, bool CanClear);
 public sealed record TickerConflict(string Review, string[] Items);
-public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed, bool CanRestore, bool CanPullSheet);
+public sealed record TickerPastePreview(string Review, string[] Items, int Duplicates, int TooLong, int NoRoom, bool AtTop);
+public sealed record TickerEditorState(string State, string Owner, int MaxItemLength, TickerDraft? Draft, TickerConflict? Conflict, bool SheetFailed, bool CanRestore, bool CanPullSheet, TickerPastePreview? Paste);
 public sealed record TickerSheetRequest(string Action, string Target, string? Review = null);
 public sealed record TickerSheetPreview(string Review, string[] Items, string[] CurrentItems, bool Identical, bool CancelsSchedule);
 public sealed record TickerBackupRequest(string Action, string? Id = null, string? Review = null, int? Page = null);

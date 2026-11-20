@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.90.0
+
+The web ticker draft supports reviewed bulk paste, with duplicate and limit counts and the configured insertion order. Draft options include a permission-checked clear and an owner-confirmed discard. Editors can download a text copy before confirming. Clearing or discarding cancels the existing scheduled publication.
+
+Telegram clear confirmations now apply to the reviewed draft revision. A pending lock request belongs to the draft it was created for, protecting replacement drafts even when the editor is the same person.
+
 ## Version 8.89.0
 
 Operators who own the ticker draft and have sheet-pull access can compare the station's configured Google Sheets CSV with the draft or published headlines, then confirm the destination. The bridge rechecks the content and ownership before applying the review. A successful import cancels any existing draft publication time and direct publication preserves the editorial draft.

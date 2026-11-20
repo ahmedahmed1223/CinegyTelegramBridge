@@ -152,6 +152,32 @@ Describe 'News ticker management' {
         Clear-NewsTickerDraftItems -ChatId 101 -UserId 101 | Should -BeTrue
         (Get-NewsTickerDraft -UserId 101).Items.Count | Should -Be 0
     }
+
+    It 'clears only the reviewed revision and cancels its scheduled publication' {
+        Mock Confirm-TelegramCallback {}
+        Mock Test-Authorized { $true }
+        Mock Update-UserLastActivity {}
+        Mock Show-NewsTickerManagementScreen {}
+        $config.Settings.AllowOperatorsClearAllNews = $true
+        $draft = (Start-NewsTickerDraft -ChatId 101 -UserId 101).Draft
+        $callback = [pscustomobject]@{
+            id = 'clear-draft'; from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = "news:clearconfirm:$((Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20))"
+        }
+        $draft['PublishAt'] = [datetimeoffset]::UtcNow.AddHours(1).ToString('o')
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+        $callback.data = 'news:clearconfirm'
+        Invoke-CallbackQuery -CallbackQuery $callback
+        (Get-NewsTickerDraft -UserId 101).Items | Should -Be @('خبر أول', 'خبر ثان')
+        (Get-JsonProp (Get-NewsTickerDraft -UserId 101) 'PublishAt') | Should -Be $draft.PublishAt
+
+        $callback.data = "news:clearconfirm:$((Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20))"
+        Invoke-CallbackQuery -CallbackQuery $callback
+        (Get-NewsTickerDraft -UserId 101).Items | Should -BeNullOrEmpty
+        (Get-JsonProp (Get-NewsTickerDraft -UserId 101) 'PublishAt') | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'News reorder callback acknowledgement' {
@@ -506,6 +532,21 @@ Describe 'News lock hand-over' {
         Request-NewsLockRelease -ChatId 21 -UserId 21 | Out-Null
         Update-NewsLockRequest
         $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
+    }
+
+    It 'preserves a replacement draft created by the same owner after the request' {
+        $script:NewsTickerDraft.Id = 'original'
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $script:NewsLockRequest = $null
+        Import-NewsLockRequest
+        $script:NewsTickerDraft.Id = 'replacement'
+        $script:NewsLockRequest.RequestedAt = (Get-Date).AddMinutes(-10)
+
+        Update-NewsLockRequest
+
+        $script:NewsTickerDraft.Id | Should -Be 'replacement'
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsLockGrant | Should -BeNullOrEmpty
     }
 
     It 'survives a restart inside the window, then grants for the requester' {

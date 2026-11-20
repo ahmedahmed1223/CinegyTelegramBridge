@@ -2691,6 +2691,7 @@ export interface components {
             /** Format: int32 */
             maxItems: number;
             paused: components["schemas"]["TickerPausedPage"];
+            canClear: boolean;
         } | null;
         TickerDraftRequest: {
             action: string;
@@ -2726,7 +2727,19 @@ export interface components {
             sheetFailed: boolean;
             canRestore: boolean;
             canPullSheet: boolean;
+            paste: components["schemas"]["TickerPastePreview"];
         };
+        TickerPastePreview: {
+            review: string;
+            items: string[];
+            /** Format: int32 */
+            duplicates: number;
+            /** Format: int32 */
+            tooLong: number;
+            /** Format: int32 */
+            noRoom: number;
+            atTop: boolean;
+        } | null;
         TickerPausedPage: {
             items: string[];
             /** Format: int32 */

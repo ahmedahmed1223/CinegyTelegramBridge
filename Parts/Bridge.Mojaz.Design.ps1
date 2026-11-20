@@ -327,10 +327,39 @@ function Get-MojazBulletinDesignKey {
     return [string]$script:MojazTemplateKey
 }
 
+function Get-MojazPlaybackTemplate {
+    param($Bulletin)
+    $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    if ($key -eq $script:MojazTemplateKey) { return Get-MojazTemplate }
+    return (Get-TemplateStore).Map[$key]
+}
+
 function Test-MojazBulletinPlaybackDesign {
     param([Parameter(Mandatory)]$Bulletin)
     $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
-    if ($key -ne $script:MojazTemplateKey) { return $false }
+    if ($key -ne $script:MojazTemplateKey) {
+        if (-not (Get-Setting 'MojazMultiDesign')) { return $false }
+        $template = Get-MojazPlaybackTemplate -Bulletin $Bulletin
+        if (-not (Test-MojazDesignTemplate -Key $key -Template $template)) { return $false }
+        if ([int](Get-JsonProp $template 'Layer') -le 0) { return $false }
+        $timing = Get-MojazBulletinSceneTiming -Bulletin $Bulletin
+        $fields = @(Get-MojazRowFieldPrompts -TemplateKey $key)
+        if (-not $timing -or -not $fields.Count) { return $false }
+        $included = @(Get-JsonProp $Bulletin 'Rows' | Where-Object { $_ -and -not (Get-JsonProp $_ 'Skipped') })
+        # Canonical row images were stored relative to the built-in scene.
+        # Reusing them from a different root would open an unrelated file.
+        if ($fields | Where-Object { $_.Name -eq $script:MojazImageVariable -and $_.Kind -eq 'media' }) {
+            $relativeImage = @(Get-JsonProp $Bulletin 'Rows' | Where-Object {
+                    $reference = [string](Get-JsonProp $_ 'Image')
+                    $reference -and -not [IO.Path]::IsPathFullyQualified($reference)
+                }).Count -gt 0
+            if ($relativeImage) {
+                $builtInPath = [string](Get-JsonProp (Get-MojazTemplate) 'Path')
+                if (-not $builtInPath -or (Split-Path -Parent $builtInPath) -ne (Split-Path -Parent ([string]$template.Path))) { return $false }
+            }
+        }
+        return ([int]$timing.LoopFrames -gt 0 -or $included.Count -le 1)
+    }
     $supported = @($script:MojazTitleVariable, $script:MojazTextVariable, $script:MojazImageVariable)
     return @(Get-MojazRowFieldPrompts -TemplateKey $key | Where-Object { $_.Name -notin $supported }).Count -eq 0
 }

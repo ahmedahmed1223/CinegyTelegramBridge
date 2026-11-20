@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.106.0
+
+Alternate bulletin designs with a scene clock can run from the web preview or the shared schedule. The run uses the selected template fields and retains its scene identity through restart. An alternate appointment uses the latest saved rows and starts only when its booked target still matches and its layer is empty.
+
 ## Version 8.105.0
 
 The bulletin editor can save and preview timing for alternate designs that declare a scene clock. Timing uses the selected scene frame rate and any loop markers, and the shared planner preserves fractional row durations.

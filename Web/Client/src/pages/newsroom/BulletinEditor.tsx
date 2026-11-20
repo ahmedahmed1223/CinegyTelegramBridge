@@ -129,7 +129,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   }
   const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
-  const playback = useBulletinPlayback(id, bulletin?.playbackSupported === true)
+  const playback = useBulletinPlayback(id, Boolean(bulletin?.playbackSupported || bulletin?.onAir))
   const onAir = playback.data ? Boolean(playback.data.run) : bulletin?.onAir === true
   const sceneUnconfirmed = playback.data?.run?.state === 'scene_unconfirmed'
   const busy = edit.isPending || query.isFetching
@@ -263,7 +263,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           )}
           {!bulletin.playbackSupported && <Alert color="gray">التشغيل على الهواء غير متاح لهذا التصميم في هذا الإصدار.</Alert>}
           {playback.error && <Alert color="orange" role="alert">{messageFor(playback.error.message)}</Alert>}
-          {bulletin.playbackSupported && <BulletinRunStatus id={id} playback={playback.data} />}
+          {(bulletin.playbackSupported || onAir) && <BulletinRunStatus id={id} playback={playback.data} />}
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
             <Group gap="xs">

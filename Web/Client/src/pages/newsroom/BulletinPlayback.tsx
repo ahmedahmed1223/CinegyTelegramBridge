@@ -22,7 +22,8 @@ export function BulletinRunStatus({ id, playback }: { id: string; playback: Play
         {run && <Group justify="space-between" gap="xs">
           <Text size="sm" role="status">
             {sceneUnconfirmed ? 'تعذّر تأكيد المشهد بعد بدء العرض. راجع الطبقة من لوحة الهواء.' :
-              retry ? 'خروج الموجز غير مؤكّد' : `يعرض الصف ${number.format(run.row)} من ${number.format(run.rowCount)}`}
+              run.state === 'fields_blocked' ? 'توقّف تبديل الصفوف لحماية حقول رسم آخر على الهواء.' :
+                retry ? 'خروج الموجز غير مؤكّد' : `يعرض الصف ${number.format(run.row)} من ${number.format(run.rowCount)}`}
           </Text>
           {sceneUnconfirmed ? <Button component={Link} to="/air" size="compact-sm" variant="default">افتح لوحة الهواء</Button>
             : <Button size="compact-sm" color="red" variant="light" loading={command.isPending}

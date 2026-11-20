@@ -683,7 +683,9 @@ function Invoke-ShowTemplateResult {
         [string]$ExpectedLayerStamp = '',
         [int]$ExpectedLayer = 0,
         [string]$ExpectedTemplatePath = '',
-        [switch]$RequireEventIdentity
+        [switch]$RequireEventIdentity,
+        [hashtable]$VariableTypes = @{},
+        [switch]$SkipPostboxWrites
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
@@ -817,16 +819,21 @@ function Invoke-ShowTemplateResult {
     # Only pass through explicit per-field type overrides; everything else
     # takes the AirVariableType default.
     $types = Get-TemplateFieldTypeOverrides -Template $template
+    foreach ($name in $VariableTypes.Keys) { $types[$name] = $VariableTypes[$name] }
     $defaultType = [string](Get-Setting 'AirVariableType')
     if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
 
     if (-not $operationStarted) { Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId }
+    $sceneFile = if ((Get-Setting 'MojazMultiDesign') -and $template.Path) {
+        Get-Item -LiteralPath $template.Path -ErrorAction SilentlyContinue
+    }
+    $sceneWrite = if ($sceneFile) { $sceneFile.LastWriteTimeUtc.Ticks } else { 0 }
     # Primed before the scene comes up, not only written after it. A scene
     # that honours the postbox initialises from what the postbox holds -
     # the previous story - and the post-show write only reaches it a tick
     # later, so an operator watched the old headline for a second or two
     # on every new urgent. The write after SHOW stays as belt and braces.
-    Send-PreShowValues -Key $Key -Variables $Variables -Types $types
+    if (-not $SkipPostboxWrites) { Send-PreShowValues -Key $Key -Variables $Variables -Types $types }
     $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
@@ -906,6 +913,7 @@ function Invoke-ShowTemplateResult {
         $script:LastSuccessfulLayerShows[[int]$template.Layer] = @{
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
             ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
+            TemplatePath=[string]$template.Path; SceneWriteTicks=$sceneWrite
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
         $script:MissingGraphicState.Remove($Key) | Out-Null
@@ -936,7 +944,7 @@ function Invoke-ShowTemplateResult {
 
         # Belt and braces: also write the values through the postbox, which is
         # the channel this scene actually honours.
-        if ((Get-Setting 'SetValuesAfterShow') -and $Variables.Count -gt 0) {
+        if (-not $SkipPostboxWrites -and (Get-Setting 'SetValuesAfterShow') -and $Variables.Count -gt 0) {
             $delay = Get-SettingInt 'PostShowDelayMs' 0
             # Stamped with what is on the layer now, so the write can prove at
             # fire time that it is still addressing the same scene.

@@ -257,7 +257,7 @@ public static class ContentEndpoints
         "bulletin_refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
         "bulletin_stale" or "bulletin_on_air" or "bulletin_design_collision" or "bulletin_schedule_stale" or "bulletin_schedule_unavailable"
             or "bulletin_playback_stale" or "bulletin_playback_unavailable" or "bulletin_playback_empty" or "bulletin_urgent_active"
-            or "bulletin_playback_refused" => ApiErrors.Of(409, reply.Error),
+            or "bulletin_playback_refused" or "bulletin_fields_busy" => ApiErrors.Of(409, reply.Error),
         "bulletin_save_failed" or "bridge_outcome_unknown" or "bulletin_schedule_save_failed" or "bulletin_schedule_clock"
             or "bulletin_layer_unknown" or "bulletin_stop_unconfirmed" => ApiErrors.Of(503, reply.Error),
         _ => ApiErrors.BridgeUnavailable()

@@ -66,6 +66,7 @@ const messages: Record<string, string> = {
   bulletin_urgent_active: 'يوجد عاجل على الهواء. أعد المراجعة بعد انتهائه.',
   bulletin_layer_unknown: 'تعذّر التحقق مما يُعرض على الطبقة. أعد المراجعة بعد عودة الاتصال.',
   bulletin_playback_refused: 'تعذّر بدء عرض الموجز. راجع حالة الهواء قبل إعادة المحاولة.',
+  bulletin_fields_busy: 'تعذّر عزل حقول الموجز عن الرسومات المعروضة. راجع طبقات الهواء قبل بدء العرض.',
   bulletin_stop_unconfirmed: 'لم يؤكَّد خروج الموجز. يمكنك إعادة طلب الإيقاف بعد مراجعة الحالة.',
   bulletin_schedule_stale: 'تغيّرت حالة الموعد. حدّث القائمة قبل إعادة المحاولة.',
   bulletin_schedule_save_failed: 'تعذّر حفظ تغييرات المواعيد.',

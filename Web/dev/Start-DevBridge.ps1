@@ -73,7 +73,7 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
         fields = @(@{ name = 'title.Text'; label = 'العنوان'; required = $true }, @{ name = 'Subject.Text'; label = 'التفاصيل' })
     }
     StudioBulletin = @{
-        path = Join-Path $runtime 'studio-bulletin.cintitle'; layer = 4; description = 'موجز الاستوديو'; category = 'الأخبار'; bulletin = $true
+        path = Join-Path $runtime 'studio-bulletin.cintitle'; layer = 6; description = 'موجز الاستوديو'; category = 'الأخبار'; bulletin = $true
         fields = @(
             @{ name = 'title.Text'; label = 'العنوان' }
             @{ name = 'Subject.Text'; label = 'التفاصيل' }
@@ -209,7 +209,7 @@ function Invoke-ExitLayer {
 
 function Send-PostboxValues {
     param([hashtable]$Values)
-    $live = $script:OnAir[[int](Get-MojazTemplate).Layer]
+    $live = $script:OnAir[(Get-MojazRunLayer -Playback $script:MojazPlayback)]
     if (-not $live) { return @{ Success = $false; Error = 'No running fixture scene.' } }
     $live.Variables = $Values
     return @{ Success = $true; Xml = '' }

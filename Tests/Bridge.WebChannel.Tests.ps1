@@ -1706,6 +1706,8 @@ Describe 'Web channel: the pipe' {
 
     It 'edits and previews timing against the selected bulletin design through the pipe' {
         Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'MojazMultiDesign' }
         Mock Test-MojazAvailable { $true }
         Mock Get-MojazLibraryFile { Join-Path $TestDrive 'web-studio-timing.json' }
         Mock Get-TemplateRegistryFilePath { Join-Path $TestDrive 'studio-timing-templates.json' }
@@ -1729,7 +1731,7 @@ Describe 'Web channel: the pipe' {
             $edited.ok | Should -BeTrue
             $edited.data.timing.fps | Should -Be 50
             $edited.data.timing.delayFrames | Should -Be 125
-            $edited.data.playbackSupported | Should -BeFalse
+            $edited.data.playbackSupported | Should -BeTrue
             $previewArgs = @{ actor = 4321; id = $id; revision = $edited.data.revision }
             $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress
             $preview = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
@@ -2082,6 +2084,167 @@ Describe 'Web channel: the pipe' {
         finally {
             $script:MojazLibrary = $oldLibrary
             $script:MojazPlayback = $oldPlayback
+        }
+    }
+
+    It 'plays and schedules the actual alternate bulletin design and restores its frozen fields' {
+        Mock Test-Authorized { $UserId -eq 4321 -and $script:alternateWebAuthorized }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $script:alternateWebEnabled } -ParameterFilter { $Name -eq 'MojazMultiDesign' }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MaintenanceControl { $true }
+        Mock Get-MojazTickerReview {}
+        Mock Get-CinegyLayerStartedAtUtc {}
+        Mock Get-MojazPlaybackFile { Join-Path $TestDrive 'alternate-web-run.json' }
+        Mock Get-MojazSchedulesFile { Join-Path $TestDrive 'alternate-web-schedules.json' }
+        Mock Get-TemplateRegistryFilePath { Join-Path $TestDrive 'alternate-web-templates.json' }
+        Mock Send-TelegramMessage {}
+        Mock Send-AdminBroadcast {}
+        Mock Write-BridgeExecutionRecord {}
+        Mock Test-MojazUrgentOnAir { $script:alternateWebUrgent }
+        Mock Get-TitlerLayerStatus {
+            @{ Success = $true; IsOnAir = [bool]$script:alternateWebScene; ActiveId = $script:alternateWebScene }
+        }
+        Mock Get-TitlerLayerStatus {
+            @{ Success = $true; IsOnAir = $script:alternateWebOverlap; ActiveId = 'another-graphic' }
+        } -ParameterFilter { $Layer -eq 7 }
+        Mock Get-TitlerLayerStatus {
+            @{ Success = $true; IsOnAir = $true; ActiveId = $script:alternateWebIndependent }
+        } -ParameterFilter { $Layer -eq 8 }
+        Mock Invoke-ShowTemplateResult {
+            $script:alternateWebScene = 'studio-web-item'
+            @{ Success = $true; ActiveId = $script:alternateWebScene; ActiveIdConfirmed = $true }
+        }
+        Mock Send-PostboxValues { @{ Success = $true; Xml = '' } }
+        Mock Invoke-ExitLayer { $script:alternateWebScene = ''; $true }
+        $path = Join-Path $TestDrive 'alternate-web-scene.cintitle'
+        $picture = Join-Path $TestDrive 'studio.jpg'
+        $independentPath = Join-Path $TestDrive 'station-label.cintitle'
+        '<Scene><Var Name="station.label" Type="String" /><Title Text="${station.label}" /></Scene>' | Set-Content -LiteralPath $independentPath
+        '<Scene Fps="50" Duration="300" LoopStartFrame="50" LoopEndFrame="200"><Var Name="studio.place" Type="String" /><Title Text="${studio.place}" /><Var Name="studio.picture" Type="File" /><Plate File="${studio.picture}" /></Scene>' |
+            Set-Content -LiteralPath $path
+        @{
+            StudioBulletin = @{ path = $path; layer = 6; bulletin = $true }
+            Other = @{ path = $path; layer = 7 }
+            StationLabel = @{ path = $independentPath; layer = 8 }
+        } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-TemplateRegistryFilePath)
+        $oldLibrary = $script:MojazLibrary
+        $oldPlayback = $script:MojazPlayback
+        $oldSchedules = $script:MojazSchedules
+        $oldOnAir = $script:OnAir
+        $oldShows = $script:LastSuccessfulLayerShows
+        try {
+            $script:MojazPlayback = $null
+            $script:MojazSchedules = @()
+            $script:alternateWebScene = ''
+            $script:alternateWebUrgent = $false
+            $script:alternateWebOverlap = $true
+            $script:alternateWebEnabled = $true
+            $script:alternateWebAuthorized = $true
+            $script:OnAir = @{}
+            $script:alternateWebIndependent = 'station-label'
+            $script:LastSuccessfulLayerShows = @{
+                8 = @{ Key = 'StationLabel'; ActiveId = 'station-label'; ActiveIdConfirmed = $true; TemplatePath = $independentPath
+                    SceneWriteTicks = [IO.File]::GetLastWriteTimeUtc($independentPath).Ticks }
+            }
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الاستوديو' -TemplateKey 'StudioBulletin').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id `
+                    -Fields @{ 'studio.place' = 'غزة'; 'studio.picture' = $picture }).Value
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id `
+                    -Fields @{ 'studio.place' = 'القدس' }).Value
+            $request = @{ actor = 4321; id = $id; revision = $script:MojazLibrary.Bulletins[0].Revision }
+            $call = {
+                param([string]$op, [string]$action)
+                $request.action = $action
+                $line = @{ op = "bulletin.$op"; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $request.stamp = (& $call 'preview' '').data.stamp
+            (& $call 'playback' 'review').error | Should -Be 'bulletin_fields_busy'
+            $script:alternateWebOverlap = $false
+            $script:alternateWebIndependent = 'unknown-replacement'
+            (& $call 'playback' 'review').error | Should -Be 'bulletin_fields_busy'
+            $script:alternateWebIndependent = 'station-label'
+            $newWrite = [IO.File]::GetLastWriteTimeUtc($independentPath).AddSeconds(2)
+            [IO.File]::SetLastWriteTimeUtc($independentPath, $newWrite)
+            (& $call 'playback' 'review').error | Should -Be 'bulletin_fields_busy'
+            $script:LastSuccessfulLayerShows[8].SceneWriteTicks = $newWrite.Ticks
+            $script:alternateWebEnabled = $false
+            (& $call 'playback' 'review').error | Should -Be 'bulletin_playback_unavailable'
+            $script:alternateWebEnabled = $true
+            $review = & $call 'playback' 'review'
+            $review.ok | Should -BeTrue
+            $review.data.layer | Should -Be 6
+            $request.review = $review.data.review
+            $started = & $call 'playback' 'start'
+            $started.ok | Should -BeTrue
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $Key -eq 'StudioBulletin' -and $ExpectedLayer -eq 6 -and $RequireEventIdentity -and $SkipPostboxWrites -and
+                $Variables.Count -eq 2 -and $Variables['studio.place'] -eq 'غزة' -and
+                $VariableTypes['studio.picture'] -eq 'File' -and $Variables['studio.picture'] -eq $picture
+            }
+            $secondId = $script:MojazLibrary.Bulletins[0].Rows[1].Id
+            $script:MojazLibrary = (Set-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -RowId $secondId `
+                    -DesignFields @{ 'studio.place' = 'رام الله' }).Value
+            $restartTime = [datetime]$script:MojazPlayback.StartedAt
+            $script:MojazPlayback = $null
+            Restore-MojazPlayback -Now $restartTime | Should -BeTrue
+            Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter {
+                $Values['studio.place'] -eq 'غزة' -and $Types['studio.picture'] -eq 'File'
+            }
+            $script:MojazPlayback.ClockOffset = 1000
+            Update-MojazPlayback
+            Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter { $Values['studio.place'] -eq 'القدس' }
+            $request.runId = $started.data.run.id
+            (& $call 'playback' 'stop').ok | Should -BeTrue
+            Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 6 -and $ExpectedLayerStamp -eq 'active:studio-web-item' }
+            $when = [datetimeoffset]::Now.AddHours(1)
+            $request.revision = $script:MojazLibrary.Bulletins[0].Revision
+            $request.scheduledAtMs = $when.ToUnixTimeMilliseconds()
+            (& $call 'schedule' 'add').ok | Should -BeTrue
+            $request.scheduledAtMs = $when.AddMinutes(1).ToUnixTimeMilliseconds()
+            (& $call 'schedule' 'add').ok | Should -BeTrue
+            Add-MojazSchedule -BulletinId $id -ScheduledAt $when.AddMinutes(3) -ChatId 4321 -UserId 4321 | Should -BeTrue
+            $script:alternateWebUrgent = $true
+            Update-MojazScheduleQueue -Now $when.AddSeconds(1)
+            $script:MojazSchedules[0].Status | Should -Be 'queued'
+            $script:alternateWebUrgent = $false
+            Update-MojazScheduleQueue -Now $when.AddSeconds(2)
+            $script:MojazSchedules[0].Status | Should -Be 'running'
+            Should -Invoke Invoke-ShowTemplateResult -Times 2 -Exactly -ParameterFilter {
+                $Key -eq 'StudioBulletin' -and $ExpectedLayer -eq 6 -and $ExpectedLayerStamp -eq 'empty'
+            }
+            $script:alternateWebOverlap = $true
+            $script:MojazPlayback.ClockOffset = 1000
+            Update-MojazPlayback
+            (& $call 'playback' 'status').data.run.state | Should -Be 'fields_blocked'
+            Should -Invoke Send-PostboxValues -Times 2 -Exactly
+            $script:alternateWebOverlap = $false
+            Stop-MojazPlayback -Quiet | Should -BeTrue
+            $registry = Get-TemplateRegistryFilePath
+            $timestamp = [IO.File]::GetLastWriteTimeUtc($registry)
+            @{ StudioBulletin = @{ path = $path; layer = 9; bulletin = $true } } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $registry
+            [IO.File]::SetLastWriteTimeUtc($registry, $timestamp.AddSeconds(2))
+            Update-MojazScheduleQueue -Now $when.AddMinutes(2)
+            $script:MojazSchedules[1].Status | Should -Be 'failed'
+            $script:MojazSchedules[1].LastError | Should -Be 'playback_target_changed'
+            $script:alternateWebAuthorized = $false
+            Update-MojazScheduleQueue -Now $when.AddMinutes(4)
+            $script:MojazSchedules[2].Status | Should -Be 'failed'
+            $script:MojazSchedules[2].LastError | Should -Be 'not_authorized'
+            Should -Invoke Invoke-ShowTemplateResult -Times 2 -Exactly
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:MojazPlayback = $oldPlayback
+            $script:MojazSchedules = $oldSchedules
+            $script:OnAir = $oldOnAir
+            $script:LastSuccessfulLayerShows = $oldShows
         }
     }
 

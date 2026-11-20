@@ -1010,7 +1010,11 @@ function Get-WebBulletinPreview {
     $expectedStamp = [string](Get-JsonProp $Arguments 'stamp')
     if (($expectedStamp -or $Image -or $PlanOnly) -and $expectedStamp -cne $stamp) { return @{ ok = $false; error = 'bulletin_stale' } }
     if ($PlanOnly) {
-        return @{ ok = $true; data = @{ Snapshot = $plan; TemplateImage = $templateImage; ScenePath = $scenePath; Layer = Get-JsonProp $design 'Layer' } }
+        return @{ ok = $true; data = @{
+            Snapshot = $plan; TemplateImage = $templateImage; ScenePath = $scenePath; Layer = Get-JsonProp $design 'Layer'
+            DesignFields = @($fields | ForEach-Object { @{ Name = $_.name; Kind = $_.kind } })
+            OutroSeconds = Get-JsonProp $sceneTiming 'OutroSeconds'
+        } }
     }
     $steps = @{}
     foreach ($step in @(Get-JsonProp $plan 'Plan')) {
@@ -1361,7 +1365,7 @@ function Invoke-WebBulletinEdit {
 function Test-WebBulletinPlayoutAccess {
     param($Bulletin, [long]$Actor)
     if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin)) { return $false }
-    $template = Get-MojazTemplate
+    $template = Get-MojazPlaybackTemplate -Bulletin $Bulletin
     if (-not $template) { return $false }
     $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
     $layer = [int](Get-JsonProp $template 'Layer')
@@ -1377,6 +1381,7 @@ function Get-WebBulletinPlaybackState {
         $run = @{
             id = [string](Get-JsonProp $playback 'OperationId')
             state = if (-not (Get-MojazRunSceneStamp -Playback $playback)) { 'scene_unconfirmed' }
+                elseif (Get-JsonProp $playback 'FieldsBlocked') { 'fields_blocked' }
                 elseif (Get-JsonProp $playback 'StopFailed') { 'stop_unconfirmed' }
                 else { 'playing' }
             row = [int](Get-JsonProp $playback 'Index') + 1
@@ -1412,7 +1417,7 @@ function Invoke-WebBulletinPlayback {
         }
         $layer = Get-MojazRunLayer -Playback $run
         if ($layer -le 0) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
-        if (-not (Test-TemplateAccess -Key $script:MojazTemplateKey -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        if (-not (Test-TemplateAccess -Key (Get-MojazRunDesignKey -Playback $run) -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
             return @{ ok = $false; error = 'forbidden' }
         }
         $expected = Get-MojazRunSceneStamp -Playback $run
@@ -1425,7 +1430,7 @@ function Invoke-WebBulletinPlayback {
         return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart }
     }
     if (-not $canStart) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
-    $layer = Get-MojazRunLayer
+    $layer = [int](Get-JsonProp (Get-MojazPlaybackTemplate -Bulletin $bulletin) 'Layer')
     if ($layer -le 0) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
     if ($script:MojazPlayback) { return @{ ok = $false; error = 'bulletin_on_air' } }
     if (Test-MojazUrgentOnAir) { return @{ ok = $false; error = 'bulletin_urgent_active' } }
@@ -1434,6 +1439,10 @@ function Invoke-WebBulletinPlayback {
     $plan = $preview.data
     if (-not $plan.Snapshot) { return @{ ok = $false; error = 'bulletin_playback_empty' } }
     if ($null -ne $plan.Layer -and $plan.Layer -ne $layer) { return @{ ok = $false; error = 'bulletin_playback_stale' } }
+    if ((Get-MojazBulletinDesignKey -Bulletin $bulletin) -ne $script:MojazTemplateKey -and
+        -not (Test-MojazAlternateFieldIsolation -Layer $layer -Fields $plan.DesignFields)) {
+        return @{ ok = $false; error = 'bulletin_fields_busy' }
+    }
     $observed = Read-MojazLayerStamp -Layer $layer
     if (-not $observed) { return @{ ok = $false; error = 'bulletin_layer_unknown' } }
     $ticker = Get-MojazTickerReview
@@ -1463,8 +1472,9 @@ function Get-WebBulletinSchedules {
             $time = [datetimeoffset]::MinValue
             if (-not [datetimeoffset]::TryParse([string](Get-JsonProp $entry 'ScheduledAt'), [ref]$time)) { continue }
             $status = [string](Get-JsonProp $entry 'Status')
+            $reason = if ($status -eq 'failed') { Get-JsonProp $entry 'LastError' } else { Get-JsonProp $entry 'DelayReason' }
             @{ id = [string](Get-JsonProp $entry 'Id'); scheduledAtMs = $time.ToUnixTimeMilliseconds(); status = $status
-                canCancel = $status -in 'scheduled', 'queued'; reason = [string](Get-JsonProp $entry 'DelayReason') }
+                canCancel = $status -in 'scheduled', 'queued'; reason = [string]$reason }
         }
     )
     $ordered = @($entries | Sort-Object @{ Expression = { if ($_.canCancel) { 0 } else { 1 } } },

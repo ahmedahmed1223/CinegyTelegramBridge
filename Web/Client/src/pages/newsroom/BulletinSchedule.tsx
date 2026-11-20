@@ -16,6 +16,9 @@ const scheduleStates: Record<string, { label: string; color: string }> = {
 const waitingReasons: Record<string, string> = {
   active_bulletin: 'يوجد موجز آخر على الهواء.',
   urgent_on_air: 'يوجد عاجل على الهواء.',
+  playback_target_changed: 'تغيّر القالب أو طبقته بعد حجز الموعد.',
+  playback_start_failed: 'تعذّر بدء العرض. راجع حالة الطبقة قبل حجز موعد جديد.',
+  not_authorized: 'لم تعد صلاحية المشغّل تسمح بعرض الموجز.',
 }
 
 export function BulletinSchedule({ bulletin, onClose }: { bulletin: Schemas['BulletinEditor']; onClose: () => void }) {
@@ -90,7 +93,8 @@ export function BulletinSchedule({ bulletin, onClose }: { bulletin: Schemas['Bul
                   <Text size="sm" fw={600}>{formatDateTime(entry.scheduledAtMs)}</Text>
                   <Badge color={state.color} variant="light">{state.label}</Badge>
                 </Group>
-                {entry.status === 'queued' && waitingReasons[entry.reason] && <Text size="xs" c="dimmed">{waitingReasons[entry.reason]}</Text>}
+                {(entry.status === 'queued' || entry.status === 'failed') && waitingReasons[entry.reason] &&
+                  <Text size="xs" c="dimmed">{waitingReasons[entry.reason]}</Text>}
               </div>
               {entry.canCancel && <Button size="compact-sm" variant="subtle" color="red" disabled={command.isPending}
                 onClick={() => modals.openConfirmModal({

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.106.0'; Items = @('Start or schedule an alternate bulletin design from the web. A scheduled alternate uses the latest saved rows on its booked layer when the layer is free.') },
                 @{ Version = '8.105.0'; Items = @('The bulletin timing editor and preview use the frame rate of the selected design, including alternate designs with scene timing.') },
                 @{ Version = '8.104.0'; Items = @('Open the bulletin preview to review and start a supported bulletin from the web. The editor shows the current row and lets you request the scene outro.') },
                 @{ Version = '8.103.0'; Items = @('Choose Watch while editing to keep the monitor visible alongside your editing tools and Save button.') },
@@ -346,6 +347,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.106.0'; Items = @('يمكن تشغيل قالب الموجز البديل أو جدولته من الويب. يستخدم الموعد أحدث الصفوف المحفوظة عندما تكون طبقة القالب المحجوزة خالية.') },
                 @{ Version = '8.105.0'; Items = @('يستخدم محرّر توقيت الموجز ومعاينته معدل إطارات التصميم المختار، بما في ذلك القوالب البديلة التي تحدد توقيت المشهد.') },
                 @{ Version = '8.104.0'; Items = @('افتح معاينة الموجز لمراجعة العرض وبدئه من الويب للقالب المدعوم. يعرض المحرّر الصف الجاري ويتيح طلب إيقاف العرض مع حركة الخروج.') },
                 @{ Version = '8.103.0'; Items = @('اضغط «المشاهدة أثناء التحرير» لترى البث وتصل إلى الحقول وزر الحفظ في الشاشة نفسها.') },

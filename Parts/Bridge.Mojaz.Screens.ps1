@@ -973,7 +973,7 @@ function Set-MojazDelayToLoop {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $bulletin = Get-MojazSelected -ChatId $ChatId
     if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return }
-    $timing = Get-MojazSceneTiming
+    $timing = Get-MojazBulletinSceneTiming -Bulletin $bulletin
     $loopFrames = if ($timing) { [int](Get-JsonProp $timing 'LoopFrames') } else { 0 }
     if ($loopFrames -gt 0) {
         $result = Set-MojazBulletinTiming -Library $script:MojazLibrary -BulletinId ([string]$bulletin.Id) -DelayFrames $loopFrames -UserId $UserId
@@ -1016,7 +1016,16 @@ function Add-MojazSchedule {
         [long]$UserId = 0,
         [switch]$FromWeb
     )
-    if (-not (Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId)) { return $false }
+    $bulletin = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId $BulletinId
+    if (-not $bulletin) { return $false }
+    $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
+    $designTarget = $null
+    if ($designKey -ne $script:MojazTemplateKey) {
+        if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId)) { return $false }
+        if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) { return $false }
+        $designTarget = Get-MojazPlaybackTemplate -Bulletin $bulletin
+        if (-not $designTarget) { return $false }
+    }
     $schedule = [pscustomobject]@{
         Id = "ms_$([guid]::NewGuid().ToString('N').Substring(0,8))"
         BulletinId = $BulletinId
@@ -1025,6 +1034,9 @@ function Add-MojazSchedule {
         CreatedBy = $UserId
         ChatId = $ChatId
         Source = $(if ($FromWeb) { 'web' } else { 'telegram' })
+        DesignKey = $(if ($designTarget) { $designKey } else { '' })
+        DesignLayer = [int](Get-JsonProp $designTarget 'Layer')
+        DesignPath = [string](Get-JsonProp $designTarget 'Path')
         Status = 'scheduled'
         DueAt = $null
         StartedAt = $null
@@ -1185,7 +1197,7 @@ function Set-MojazScheduleStatus {
 
 function Test-MojazScheduleAccess {
     param($Entry)
-    if ((Get-JsonProp $Entry 'Source') -ne 'web') { return $true }
+    if ((Get-JsonProp $Entry 'Source') -ne 'web' -and -not (Get-JsonProp $Entry 'DesignKey')) { return $true }
     return Test-Authorized -ChatId ([long](Get-JsonProp $Entry 'ChatId')) -UserId ([long](Get-JsonProp $Entry 'CreatedBy'))
 }
 
@@ -1266,6 +1278,18 @@ function Update-MojazScheduleQueue {
     $scheduleId = [string]$next.Id
     $bulletinForLog = Get-MojazBulletin -Library $script:MojazLibrary -BulletinId ([string]$next.BulletinId)
     $bulletinName = if ($bulletinForLog) { [string]$bulletinForLog.Name } else { [string]$next.BulletinId }
+    $selectedDesign = Get-MojazBulletinDesignKey -Bulletin $bulletinForLog
+    $bookedDesign = [string](Get-JsonProp $next 'DesignKey')
+    if ($bookedDesign -or $selectedDesign -ne $script:MojazTemplateKey) {
+        $selectedTarget = Get-MojazPlaybackTemplate -Bulletin $bulletinForLog
+        if ($selectedDesign -cne $bookedDesign -or [int](Get-JsonProp $selectedTarget 'Layer') -ne [int](Get-JsonProp $next 'DesignLayer') -or
+            [string](Get-JsonProp $selectedTarget 'Path') -cne [string](Get-JsonProp $next 'DesignPath')) {
+            Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'failed' -Fields @{ LastError = 'playback_target_changed'; CompletedAt = $Now.ToString('o') } | Out-Null
+            Write-BridgeExecutionRecord -Kind 'mojaz' -Result 'failed' -EventId $scheduleId -Label $bulletinName `
+                -ScheduledAt ([string]$next.ScheduledAt) -ErrorText 'playback_target_changed' | Out-Null
+            return
+        }
+    }
     if (-not (Set-MojazScheduleStatus -ScheduleId $scheduleId -Status 'running' -Fields @{ StartedAt = $Now.ToString('o') })) { return }
     # -Force: the urgent check above has already been made, and nobody is
     # watching a scheduled start to answer a question.

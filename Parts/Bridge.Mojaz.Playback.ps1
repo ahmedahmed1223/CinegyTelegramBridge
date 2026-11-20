@@ -27,6 +27,54 @@ function Get-MojazResolvedRunSnapshot {
         -OffsetSeconds ((Get-SettingInt 'MojazSyncOffsetMs' 400) / 1000.0)
 }
 
+function Get-MojazRunRowVariables {
+    param($Row, $Playback)
+    $templateImage = [string](Get-JsonProp $Playback 'TemplateImage')
+    $fields = @(Get-JsonProp $Playback 'DesignFields' | Where-Object { $_ })
+    if (-not $fields.Count) { return Get-MojazRowVariables -Row $Row -TemplateImage $templateImage }
+    $values = @{}
+    foreach ($field in $fields) {
+        $name = [string](Get-JsonProp $field 'Name')
+        $kind = [string](Get-JsonProp $field 'Kind')
+        if ($name -eq $script:MojazImageVariable -and $kind -eq 'media') {
+            $image = (Get-MojazRowVariables -Row $Row -TemplateImage $templateImage)[$name]
+            if ($image) { $values[$name] = $image }
+        }
+        else {
+            $value = Get-MojazRowFieldValue -Row $Row -FieldName $name
+            if ($kind -eq 'text' -or $value) { $values[$name] = $value }
+        }
+    }
+    return $values
+}
+
+function Test-MojazAlternateFieldIsolation {
+    param([int]$Layer, [object[]]$Fields)
+    if (-not $Fields) { return $true }
+    $names = @($Fields | ForEach-Object { [string](Get-JsonProp $_ 'Name') })
+    $store = Get-TemplateStore
+    $layers = @(@(Get-KnownLayers) + @($script:OnAir.Keys) | Sort-Object -Unique)
+    foreach ($otherLayer in $layers) {
+        if ([int]$otherLayer -eq $Layer) { continue }
+        $observed = Read-MojazLayerStamp -Layer ([int]$otherLayer)
+        if ($observed -ceq 'empty') { continue }
+
+        # The postbox is channel-wide. An active layer can be exempt only
+        # when the live item and the scene file still match our own SHOW.
+        $shown = $script:LastSuccessfulLayerShows[[int]$otherLayer]
+        if (-not $observed -or $observed -cne (Get-MojazRunSceneStamp -Playback $shown)) { return $false }
+        $otherKey = [string](Get-JsonProp $shown 'Key')
+        if (-not $otherKey) { return $false }
+        $otherPath = [string](Get-JsonProp (Get-JsonProp $store.Map $otherKey) 'Path')
+        $expectedWrite = [long](Get-JsonProp $shown 'SceneWriteTicks')
+        if (-not $otherPath -or -not $expectedWrite -or $otherPath -cne [string](Get-JsonProp $shown 'TemplatePath')) { return $false }
+        $sceneFile = Get-Item -LiteralPath $otherPath -ErrorAction SilentlyContinue
+        if (-not $sceneFile -or $sceneFile.LastWriteTimeUtc.Ticks -ne $expectedWrite) { return $false }
+        if (Get-MojazDesignFields -TemplateKey $otherKey | Where-Object { $_.Consumed -and $_.Name -in $names }) { return $false }
+    }
+    return $true
+}
+
 function Start-MojazPlayback {
     <#
         Shows the first row, then leaves the rest to the tick.
@@ -52,8 +100,6 @@ function Start-MojazPlayback {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.notThere')
         return $false
     }
-    # The current run and restore paths address the built-in scene and its
-    # variables. A saved alternate design must never fall through to that SHOW.
     if (-not (Test-MojazBulletinPlaybackDesign -Bulletin $bulletin)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.designPlaybackUnavailable')
         return $false
@@ -75,16 +121,54 @@ function Start-MojazPlayback {
         return $false
     }
     $rows = @($snapshot.Rows)
+    $designKey = Get-MojazBulletinDesignKey -Bulletin $bulletin
+    $alternate = $designKey -ne $script:MojazTemplateKey
+    $template = Get-MojazPlaybackTemplate -Bulletin $bulletin
+    $layer = [int](Get-JsonProp $template 'Layer')
+    $scenePath = [string](Get-JsonProp $template 'Path')
+    if ($alternate -and ($layer -le 0 -or -not $scenePath)) { return $false }
+    $fields = @(if ($alternate) {
+            if ($ReviewedPlan) { Get-JsonProp $ReviewedPlan 'DesignFields' }
+            else { Get-MojazRowFieldPrompts -TemplateKey $designKey }
+        })
+    if ($alternate -and -not $fields.Count) { return $false }
+    if ($alternate -and -not (Test-MojazAlternateFieldIsolation -Layer $layer -Fields $fields)) { return $false }
+    $types = Get-TemplateFieldTypeOverrides -Template $template
+    foreach ($field in $fields) {
+        if ($field.Kind -eq 'media' -and -not $types.ContainsKey($field.Name)) { $types[$field.Name] = 'File' }
+    }
     # The template's picture is part of the snapshot too: a row set to
     # "template" must show the picture the scene had when the run started,
     # not one edited into it half way through.
-    $templateImage = if ($ReviewedPlan) { $ReviewedPlan.TemplateImage } else { Get-MojazTemplateImage }
+    $templateImage = if ($ReviewedPlan) { $ReviewedPlan.TemplateImage }
+        elseif ($alternate) { Get-MojazTemplateImage -Path $scenePath }
+        else { Get-MojazTemplateImage }
     $reviewedTarget = @{}
+    $guardedLayer = 0
+    $ticker = $null
     if ($ReviewedPlan) {
+        $guardedLayer = [int]$ReviewedPlan.Layer
+        $ticker = $ReviewedPlan.Ticker
         $reviewedTarget = @{ ExpectedLayerStamp = $ReviewedPlan.LayerStamp; ExpectedLayer = $ReviewedPlan.Layer
             ExpectedTemplatePath = $ReviewedPlan.ScenePath; RequireEventIdentity = $true }
     }
-    $result = Invoke-ShowTemplateResult -Key $script:MojazTemplateKey -Variables (Get-MojazRowVariables -Row $rows[0] -TemplateImage $templateImage) `
+    elseif ($alternate) {
+        $guardedLayer = $layer
+        $ticker = Get-MojazTickerReview
+        # Without an operator confirming a replacement, an alternate
+        # appointment may use only an independently verified empty layer.
+        $reviewedTarget = @{ ExpectedLayerStamp = 'empty'; ExpectedLayer = $layer
+            ExpectedTemplatePath = $scenePath; RequireEventIdentity = $true }
+    }
+    if ($alternate) {
+        $reviewedTarget.VariableTypes = $types
+        # The layer-specific SHOW already carries the first row. Only the
+        # guarded bulletin tick may send subsequent channel-wide writes.
+        $reviewedTarget.SkipPostboxWrites = $true
+    }
+    if ((Get-JsonProp $ticker 'Layer') -eq $guardedLayer) { $ticker = $null }
+    $runDesign = @{ DesignFields = $fields; TemplateImage = $templateImage }
+    $result = Invoke-ShowTemplateResult -Key $designKey -Variables (Get-MojazRunRowVariables -Row $rows[0] -Playback $runDesign) `
         -ChatId $ChatId -UserId $UserId @reviewedTarget
     if (-not $result -or -not $result.Success) {
         $reason = if ($result) { [string](Get-JsonProp $result 'Error') } else { (T 'mjp.showFailed') }
@@ -95,7 +179,7 @@ function Start-MojazPlayback {
     # path a bulletin takes to air, and asking twice would double both the
     # delay and the chance of it failing. $template is not in scope inside the
     # table below, which is why this is resolved out here and named.
-    $airStartedAt = if (Get-Setting 'MojazAnchorToAirClock') { Get-CinegyLayerStartedAtUtc -Layer ([int](Get-MojazTemplate).Layer) } else { $null }
+    $airStartedAt = if (Get-Setting 'MojazAnchorToAirClock') { Get-CinegyLayerStartedAtUtc -Layer $layer } else { $null }
     $airOffset = Get-MojazAirClockOffset -StartedAtUtc $airStartedAt
     # Refused by the rule above means refused here too: an anchor not good
     # enough to time this run is not good enough to resume it either.
@@ -105,7 +189,7 @@ function Start-MojazPlayback {
     # a refusal but never an acceptance, so "the anchor was used" and "the
     # engine said nothing and we fell back" look identical from the outside.
     if ($airStartedAt) {
-        Write-BridgeLog "Bulletin timed from Cinegy's own start: offset $([math]::Round($airOffset * 1000))ms (the SHOW round trip), fade window $([math]::Round((Get-MojazSceneFrames -Which intro) / (Get-MojazFps) * 1000))ms."
+        Write-BridgeLog "Bulletin timed from Cinegy's own start: offset $([math]::Round($airOffset * 1000))ms (the SHOW round trip), fade window $([math]::Round((Get-MojazSceneFrames -Which intro -Bulletin $bulletin) / (Get-MojazFps -Bulletin $bulletin) * 1000))ms."
     }
     elseif (Get-Setting 'MojazAnchorToAirClock') {
         Write-BridgeLog "Bulletin timed from the bridge's own clock: Cinegy gave no usable start moment for this SHOW." 'WARN'
@@ -134,16 +218,23 @@ function Start-MojazPlayback {
         TemplateImage = $templateImage
         ActiveId = [string](Get-JsonProp $result 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $result 'ActiveIdConfirmed')
-        ReviewedLayer = [int](Get-JsonProp $ReviewedPlan 'Layer')
+        ReviewedLayer = $guardedLayer
+        DesignKey = $designKey
+        DesignFields = $fields
+        VariableTypes = $(if ($alternate) { $types } else { @{} })
+        OutroSeconds = $(if ($alternate) {
+                if ($ReviewedPlan) { [double]$ReviewedPlan.OutroSeconds }
+                else { [double](Get-JsonProp (Get-MojazBulletinSceneTiming -Bulletin $bulletin) 'OutroSeconds') }
+            })
     }
     # Now that the bulletin is really on air, the strip stands down: they
     # share the bottom of the screen, and it returns when this ends.
-    if ($ReviewedPlan) {
+    if ($guardedLayer) {
         if (-not (Get-MojazRunSceneStamp -Playback $script:MojazPlayback)) {
             $script:MojazPlayback.StopFailed = $true
             $script:MojazPlayback.Clock.Stop()
         }
-        elseif ($ReviewedPlan.Ticker) { Hide-MojazTicker -ChatId $ChatId -UserId $UserId -ReviewedTicker $ReviewedPlan.Ticker | Out-Null }
+        elseif ($ticker) { Hide-MojazTicker -ChatId $ChatId -UserId $UserId -ReviewedTicker $ticker | Out-Null }
     }
     else { Hide-MojazTicker -ChatId $ChatId -UserId $UserId | Out-Null }
     # The permanent trail. A bulletin reached air as a plain air_control SHOW
@@ -153,7 +244,7 @@ function Start-MojazPlayback {
     $script:MojazPlayback.OperationId = "mojaz-$([guid]::NewGuid().ToString('N'))"
     Write-AuditRecord -OperationId ([string]$script:MojazPlayback.OperationId) -EventName mojaz_run -Result started `
         -UserId $UserId -UserName (Get-UserDisplayName -UserId $UserId) -ChatId $ChatId -Action START `
-        -Layer ([int](Get-MojazTemplate).Layer) -Target ([string]$snapshot.BulletinName) -Count ($rows.Count) `
+        -Layer $layer -Target ([string]$snapshot.BulletinName) -Count ($rows.Count) `
         -Values $(if ([string]$snapshot.ScheduleId) { 'scheduled' } else { 'manual' })
     Save-MojazPlaybackState | Out-Null
     Write-BridgeLog "Mojaz playback started by $UserId ($($rows.Count) rows, $(Get-MojazDelayFrames -Bulletin $bulletin) frames each)"
@@ -206,12 +297,14 @@ function Set-MojazPlaybackStopFailed {
         later the news strip came back on top of it - the overlap the whole
         stand-down exists to prevent.
     #>
-    param([Parameter(Mandatory)]$Playback, [long]$ChatId = 0)
+    param([Parameter(Mandatory)]$Playback, [long]$ChatId = 0, [switch]$FieldsBlocked)
     $Playback.StopFailed = $true
+    $Playback.FieldsBlocked = [bool]$FieldsBlocked
     if ($Playback.Clock) { $Playback.Clock.Stop() }
     $script:MojazPlayback = $Playback
     Save-MojazPlaybackState | Out-Null
-    Write-BridgeLog "Bulletin exit could not be confirmed; the run is frozen and still stoppable." 'WARN'
+    if ($FieldsBlocked) { Write-BridgeLog 'Bulletin field isolation could not be confirmed; no further row updates will be sent.' 'WARN' }
+    else { Write-BridgeLog "Bulletin exit could not be confirmed; the run is frozen and still stoppable." 'WARN' }
     if ($ChatId -gt 0) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.exitUnconfirmed')
     }
@@ -257,7 +350,7 @@ function Stop-MojazPlayback {
         Set-MojazScheduleStatus -ScheduleId ([string]$playback.ScheduleId) -Status 'completed' -Fields @{ CompletedAt = [datetimeoffset]::Now.ToString('o') } | Out-Null
     }
     # The bulletin is off, so the strip may come back - after the outro.
-    Request-MojazTickerReturn | Out-Null
+    Request-MojazTickerReturn -Playback $playback | Out-Null
     if (-not $Quiet -and $ChatId -gt 0) { Show-MojazScreen -ChatId $ChatId -UserId $UserId }
     # An urgent that agreed to wait for this bulletin goes out now.
     Update-MojazPendingUrgent | Out-Null
@@ -269,6 +362,13 @@ function Get-MojazRunLayer {
     $reviewedLayer = [int](Get-JsonProp $Playback 'ReviewedLayer')
     if ($reviewedLayer -gt 0) { return $reviewedLayer }
     return [int](Get-JsonProp (Get-MojazTemplate) 'Layer')
+}
+
+function Get-MojazRunDesignKey {
+    param($Playback)
+    $key = [string](Get-JsonProp $Playback 'DesignKey')
+    if ($key) { return $key }
+    return [string]$script:MojazTemplateKey
 }
 
 function Get-MojazRunSceneStamp {
@@ -443,9 +543,11 @@ function Request-MojazTickerReturn {
         the tick carries it out, which also keeps this off the stack of
         whatever ended the bulletin.
     #>
+    param($Playback)
     if (-not $script:MojazTickerReturn) { return $false }
-    $timing = Get-MojazSceneTiming
-    $after = if ($timing -and [double]$timing.OutroSeconds -gt 0) { [double]$timing.OutroSeconds } else { 1.0 }
+    $outro = Get-JsonProp $Playback 'OutroSeconds'
+    if ($null -eq $outro) { $outro = Get-JsonProp (Get-MojazSceneTiming) 'OutroSeconds' }
+    $after = if ([double]$outro -gt 0) { [double]$outro } else { 1.0 }
     $script:MojazTickerReturn.At = (Get-Date).AddSeconds($after)
     return $true
 }
@@ -484,7 +586,7 @@ function Clear-MojazForUrgent {
     param([long]$ChatId = 0, [long]$UserId = 0)
     if (-not $script:MojazPlayback) { return $false }
     $name = [string]$script:MojazPlayback.BulletinName
-    Stop-MojazPlayback -UserId $UserId -Quiet | Out-Null
+    if (-not (Stop-MojazPlayback -UserId $UserId -Quiet)) { return $false }
     Write-BridgeLog 'Mojaz pulled: the urgent template takes the air.'
     Add-AuditEntry (T 'mjp.pulledForUrgent' $name $(Format-UserAuditActor -UserId $UserId))
     if ($ChatId -gt 0) { Send-TelegramMessage -ChatId $ChatId -Text (T 'mjp.leftForUrgent' $name) }
@@ -588,9 +690,9 @@ function Confirm-MojazPendingUrgent {
 function Test-MojazOnAirLayer {
     <# Is the bulletin's layer occupied - by a run, or by a scene the bridge
        itself put there and has not taken down? #>
+    if ($script:MojazPlayback) { return $true }
     $template = Get-MojazTemplate
     if (-not $template) { return $false }
-    if ($script:MojazPlayback) { return $true }
     return $script:OnAir.ContainsKey([int]$template.Layer)
 }
 
@@ -616,7 +718,7 @@ function Stop-MojazForLayer {
     }
     Write-BridgeLog "Mojaz playback ended: layer $Layer was taken off air."
     if ($SkipTickerReturn) { $script:MojazTickerReturn = $null }
-    else { Request-MojazTickerReturn | Out-Null }
+    else { Request-MojazTickerReturn -Playback $playback | Out-Null }
     return $true
 }
 
@@ -632,7 +734,12 @@ function Hide-MojazOnAir {
     }
     if ($script:MojazPlayback) {
         # Stop-MojazPlayback exits the layer itself.
-        Stop-MojazPlayback -UserId $UserId -Quiet | Out-Null
+        $key = Get-MojazRunDesignKey -Playback $script:MojazPlayback
+        if ($key -ne $script:MojazTemplateKey) {
+            $layer = Get-MojazRunLayer -Playback $script:MojazPlayback
+            if (-not (Test-TemplateAccess -Key $key -Layer $layer -ChatId $ChatId -UserId $UserId).Allowed) { return $false }
+        }
+        if (-not (Stop-MojazPlayback -UserId $UserId -Quiet)) { return $false }
     }
     elseif ($script:OnAir.ContainsKey([int]$template.Layer)) {
         Invoke-ExitLayer -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId | Out-Null
@@ -679,6 +786,10 @@ function Save-MojazPlaybackState {
             ActiveId = [string](Get-JsonProp $playback 'ActiveId')
             ActiveIdConfirmed = [bool](Get-JsonProp $playback 'ActiveIdConfirmed')
             ReviewedLayer = [int](Get-JsonProp $playback 'ReviewedLayer')
+            DesignKey = [string](Get-JsonProp $playback 'DesignKey')
+            DesignFields = @(Get-JsonProp $playback 'DesignFields' | Where-Object { $_ })
+            VariableTypes = Get-JsonProp $playback 'VariableTypes'
+            OutroSeconds = Get-JsonProp $playback 'OutroSeconds'
             ChatId = [long]$playback.ChatId
             UserId = [long]$playback.UserId
             ExitAtSeconds = [double]$playback.ExitAtSeconds
@@ -688,6 +799,7 @@ function Save-MojazPlaybackState {
             # a restart would pick the bulletin back up and start writing rows
             # into a scene whose state nobody established.
             StopFailed = [bool](Get-JsonProp $playback 'StopFailed')
+            FieldsBlocked = [bool](Get-JsonProp $playback 'FieldsBlocked')
             # The promise to put the news strip back. It lived only in memory,
             # so a restart mid-bulletin lost it: the bulletin resumed correctly
             # and ended correctly, then Request-MojazTickerReturn found nothing
@@ -728,7 +840,7 @@ function Restore-MojazPlayback {
     param([datetime]$Now = (Get-Date))
     $path = Get-MojazPlaybackFile
     if (-not (Test-Path -LiteralPath $path)) { return $false }
-    try { $state = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+    try { $state = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable }
     catch {
         Write-BridgeLog "Could not read mojaz-playback.json: $($_.Exception.Message)" 'WARN'
         Clear-MojazPlaybackState
@@ -752,6 +864,10 @@ function Restore-MojazPlayback {
     $startedAt = [datetime]::MinValue
     if (-not [datetime]::TryParse([string](Get-JsonProp $state 'StartedAt'), [ref]$startedAt)) { return $false }
     $reviewedLayer = [int](Get-JsonProp $state 'ReviewedLayer')
+    $designKey = Get-MojazRunDesignKey -Playback $state
+    $designFields = @(Get-JsonProp $state 'DesignFields' | Where-Object { $_ })
+    if ($designKey -ne $script:MojazTemplateKey -and (-not $reviewedLayer -or -not $designFields.Count -or
+        @($designFields | Where-Object { -not (Get-JsonProp $_ 'Name') }).Count -gt 0)) { return $false }
     $layer = Get-MojazRunLayer -Playback $state
     if ($layer -le 0) { return $false }
     # Only if the bulletin's scene is still the thing on that layer. Anything
@@ -820,10 +936,15 @@ function Restore-MojazPlayback {
         ActiveId = [string](Get-JsonProp $state 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $state 'ActiveIdConfirmed')
         ReviewedLayer = $reviewedLayer
+        DesignKey = $designKey
+        DesignFields = $designFields
+        VariableTypes = Get-JsonProp $state 'VariableTypes'
+        OutroSeconds = Get-JsonProp $state 'OutroSeconds'
         # Carried across the restart with the run it describes: a bulletin
         # frozen by an unconfirmed exit must not start writing rows again just
         # because the process came back.
         StopFailed = [bool](Get-JsonProp $state 'StopFailed')
+        FieldsBlocked = [bool](Get-JsonProp $state 'FieldsBlocked')
     }
     if ($reviewedLayer) {
         if ($script:MojazPlayback.StopFailed) {
@@ -833,10 +954,14 @@ function Restore-MojazPlayback {
         }
         if ($elapsed -ge $exitAt) { return (Stop-MojazPlayback -Quiet) }
     }
-    $currentValues = Get-MojazRowVariables -Row $script:MojazPlayback.Rows[$index] `
-        -TemplateImage ([string]$script:MojazPlayback.TemplateImage)
+    if ($designFields.Count -and -not (Test-MojazAlternateFieldIsolation -Layer $layer -Fields $designFields)) {
+        Set-MojazPlaybackStopFailed -Playback $script:MojazPlayback -FieldsBlocked | Out-Null
+        return $true
+    }
+    $currentValues = Get-MojazRunRowVariables -Row $script:MojazPlayback.Rows[$index] -Playback $script:MojazPlayback
+    $types = Get-JsonProp $script:MojazPlayback 'VariableTypes'
     $resumeResult = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-        -Values $currentValues -TimeoutSec (Get-AirTimeout)
+        -Values $currentValues -Types ($types ?? @{}) -TimeoutSec (Get-AirTimeout)
     if (-not $resumeResult.Success) {
         Write-BridgeLog "Could not restore bulletin '$name' row $($index + 1): $($resumeResult.Error)" 'WARN'
         $script:MojazPlayback = $null
@@ -898,10 +1023,16 @@ function Update-MojazPlayback {
         return
     }
     if ((Get-JsonProp $script:MojazPlayback 'ReviewedLayer') -and -not (Confirm-MojazReviewedRunScene -Playback $script:MojazPlayback)) { return }
+    $fields = @(Get-JsonProp $script:MojazPlayback 'DesignFields' | Where-Object { $_ })
+    if ($fields.Count -and -not (Test-MojazAlternateFieldIsolation -Layer (Get-MojazRunLayer -Playback $script:MojazPlayback) -Fields $fields)) {
+        Set-MojazPlaybackStopFailed -Playback $script:MojazPlayback -FieldsBlocked | Out-Null
+        return
+    }
     $index++
-    $values = Get-MojazRowVariables -Row $rows[$index] -TemplateImage ([string](Get-JsonProp $script:MojazPlayback 'TemplateImage'))
+    $values = Get-MojazRunRowVariables -Row $rows[$index] -Playback $script:MojazPlayback
+    $types = Get-JsonProp $script:MojazPlayback 'VariableTypes'
     $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-        -Values $values -TimeoutSec (Get-AirTimeout)
+        -Values $values -Types ($types ?? @{}) -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Mojaz POSTBOX XML: $($result.Xml)" }
     if (-not $result.Success) {
         Write-BridgeLog "Mojaz row $($index + 1) failed: $($result.Error)" 'WARN'
